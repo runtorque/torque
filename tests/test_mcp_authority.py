@@ -7,11 +7,8 @@ except ModuleNotFoundError:
 
 install_aiohttp_stub()
 
-from torque.agent_profiles import CAPABILITIES
 from torque.capability_catalog import (
     CAPABILITY_CATALOG,
-    LEGACY_ATOM_TO_CAPABILITY,
-    canonical_capabilities_from_legacy_atoms,
     capability_catalog_for_base_kind,
     validate_capability_catalog,
 )
@@ -371,27 +368,7 @@ class MCPAuthorityPrimitiveTests(unittest.TestCase):
             all(report.ok for report in MCP_AUTHORITY_SURFACE_COVERAGE.values())
         )
 
-    def test_every_legacy_atom_translates_to_a_known_canonical_capability(self):
-        self.assertTrue(set(LEGACY_ATOM_TO_CAPABILITY.values()).issubset(
-            CAPABILITY_CATALOG
-        ))
-        self.assertTrue(set(CAPABILITIES).issubset(LEGACY_ATOM_TO_CAPABILITY))
 
-    def test_legacy_profile_expansion_preserves_split_surface_permissions(self):
-        expanded = canonical_capabilities_from_legacy_atoms({
-            "observe.self_context",
-            "profile.edit",
-            "agent.manage_engineer_roster",
-        })
-        self.assertTrue({
-            "self.read",
-            "help.read",
-            "tool.search",
-            "behavior_overlay.propose",
-            "behavior_overlay.admin",
-            "specialization.read",
-            "specialization.write",
-        }.issubset(expanded))
 
     def test_current_tool_surface_has_complete_canonical_requirements(self):
         self.assertTrue(all(

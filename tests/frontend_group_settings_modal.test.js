@@ -1266,7 +1266,7 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   assert.equal(sandbox.sendCalls[0].group, 'alpha');
   assert.equal(sandbox.sendCalls[0].settings.agent_directory, '/repo/agents');
   assert.equal(sandbox.sendCalls[0].settings.agent_shell, 'zsh');
-  assert.equal(Object.prototype.hasOwnProperty.call(sandbox.sendCalls[0].settings, 'agent_profile'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(sandbox.sendCalls[0].settings, 'agent_terminal_profile'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(sandbox.sendCalls[0].settings, 'agent_tab_color'), false);
   assert.equal(sandbox.sendCalls[0].settings.default_agent_template, 'careful-reviewer');
   assert.equal(sandbox.sendCalls[0].settings.agent_provider, 'codex');

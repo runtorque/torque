@@ -1,7 +1,7 @@
 """Generic MCP authority registry primitives.
 
-This module is intentionally independent from Agent Classes and Agent
-Profiles.  It provides the platform vocabulary used to describe capabilities,
+This module is intentionally independent from named Agent Classes. It provides
+the platform vocabulary used to describe capabilities,
 scopes, and MCP tool requirements without knowing any named class.
 """
 

@@ -116,8 +116,6 @@ class MCPCreativeArchitectTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_creative_class_projects_context_proposal_and_thinking_tools_only(self):
         self.assertEqual(self.architect.effective_agent_class_id, "creative-architect")
-        self.assertEqual(self.architect.effective_agent_profile_id, "")
-        self.assertEqual(self.architect.effective_agent_profile_snapshot, {})
         tool_names = await self._list_tools()
 
         for name in {

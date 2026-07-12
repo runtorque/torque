@@ -3612,68 +3612,6 @@ test('_engineerResetSessionMapMeta keeps the focused-agent panel rendered during
   assert.equal(vm.runInContext(`_engineerSessionMapMetaByGroup.alpha.loading`, context), false);
 });
 
-test('agent panel renders Agent Profile badge with draft warnings and pending assignment', () => {
-  const { context, classModalBody } = createHarness();
-
-  setFocusedAgent(context, {
-    id: 'arch-profile-1',
-    name: 'PM Preview',
-    kind: 'architect',
-    group: 'alpha',
-    cell_type: 'agent',
-    agent_profile_id: 'full-architect',
-    agent_profile_version: '1',
-    effective_agent_profile_id: 'product-manager-draft',
-    effective_agent_profile_version: '2',
-    effective_agent_profile_snapshot: {
-      id: 'product-manager-draft',
-      version: '2',
-      base_kind: 'architect',
-      status: 'draft',
-      warnings: [
-        'product-manager-draft is scratch-only in Wave 4B',
-        'Raw Architect tools are denied; use architect_product_* wrappers only',
-      ],
-      denied_high_risk_capabilities: ['agent.hire_engineer', 'task.dispatch'],
-    },
-  });
-
-  context.agentPanelToggleProfileAssignment(null, 'arch-profile-1');
-
-  assert.match(classModalBody.innerHTML, /agent-profile-badge/);
-  assert.match(classModalBody.innerHTML, /product-manager-draft@2 \(pending next launch\)/);
-  assert.match(classModalBody.innerHTML, /Raw Architect tools are denied/);
-});
-
-test('agent panel marks a cleared direct profile pending Agent Class authority next launch', () => {
-  const { context, classModalBody } = createHarness();
-
-  setFocusedAgent(context, {
-    id: 'arch-profile-clear',
-    name: 'PM Preview Clearing',
-    kind: 'architect',
-    group: 'alpha',
-    cell_type: 'agent',
-    agent_profile_id: '',
-    agent_profile_version: '',
-    effective_agent_profile_id: 'product-manager-draft',
-    effective_agent_profile_version: '2',
-    effective_agent_profile_snapshot: {
-      id: 'product-manager-draft',
-      version: '2',
-      base_kind: 'architect',
-      status: 'draft',
-      warnings: ['cleared assignment should relaunch as full architect'],
-      denied_high_risk_capabilities: ['agent.hire_engineer'],
-    },
-  });
-
-  context.agentPanelToggleProfileAssignment(null, 'arch-profile-clear');
-
-  assert.match(classModalBody.innerHTML, /product-manager-draft@2 \(pending next launch\)/);
-  assert.match(classModalBody.innerHTML, /Agent Class authority \(no direct profile\)/);
-});
-
 test('agent class manager assigns Product Manager as desired and renders effective class identity after relaunch', () => {
   const { context, panel, classModal, classModalBody, sendCalls } = createHarness();
   const defaultArchitectClass = {
@@ -3740,16 +3678,13 @@ test('agent class manager assigns Product Manager as desired and renders effecti
     effective_agent_class_id: 'default-architect',
     effective_agent_class_version: '1',
     effective_agent_class_snapshot: defaultArchitectClass,
-    effective_agent_profile_id: '',
-    effective_agent_profile_version: '',
-    effective_agent_profile_snapshot: {},
   });
 
   context._agentPanelLastSelectedTabByKind.architect = 'behavior';
   context.renderAgentPanel();
   assert.match(panel.innerHTML, /Agent Class/);
   assert.match(panel.innerHTML, /Change Class/);
-  assert.equal(sendCalls.some((call) => /^agent_class_/.test(call.cmd || '') || /^agent_profile_/.test(call.cmd || '')), false, 'compact Behavior summary does not fetch class/profile data until Change Class opens the modal');
+  assert.equal(sendCalls.some((call) => /^agent_class_/.test(call.cmd || '')), false, 'compact Behavior summary does not fetch class data until Change Class opens the modal');
   context.agentPanelToggleClassAssignment(null, 'blueprint');
   assert.equal(classModal.classList.contains('visible'), true);
   assert.deepEqual(JSON.parse(JSON.stringify(sendCalls.slice(-2))), [
@@ -3808,7 +3743,6 @@ test('agent class manager assigns Product Manager as desired and renders effecti
   assert.match(panel.innerHTML, /Desired Agent Class updated\. It will freeze on the next launch or relaunch\./);
   assert.match(panel.innerHTML, /Desired Agent Class next launch[\s\S]*Product Manager@2/);
   assert.match(panel.innerHTML, /Pending relaunch[\s\S]*next relaunch freezes Product Manager@2/);
-  assert.match(classModalBody.innerHTML, /Legacy direct Agent Profile assignment/);
 
   Object.assign(context.state.agents.blueprint, {
     status: 'running',
@@ -3859,11 +3793,11 @@ test('agent panel renders Product Manager dogfood state as compact capability AC
     },
     warnings: [
       'External connectors are not governed by Agent Classes/Profile policy in Wave 7; manage connector access separately.',
-      'External connector exposure is not governed or enforced by Agent Classes or Agent Profiles in Wave 7; manage connector access separately.',
+      'External connector exposure is not governed or enforced by Agent Classes in Wave 7; manage connector access separately.',
       'Raw Architect tools are denied; use architect_product_* wrappers only.',
       'Product Manager cannot dispatch, merge, deploy, administer, use raw tool picker authority, or message engineers/workers directly.',
     ],
-    external_connector_caveat: 'External connector exposure is not governed or enforced by Agent Classes or Agent Profiles in Wave 7; manage connector access separately.',
+    external_connector_caveat: 'External connector exposure is not governed or enforced by Agent Classes in Wave 7; manage connector access separately.',
     runtime_enforcement: 'launch_frozen_effective_authority',
   };
 
@@ -3880,9 +3814,6 @@ test('agent panel renders Product Manager dogfood state as compact capability AC
     effective_agent_class_id: 'product-manager',
     effective_agent_class_version: '2',
     effective_agent_class_snapshot: productManagerClass,
-    effective_agent_profile_id: '',
-    effective_agent_profile_version: '',
-    effective_agent_profile_snapshot: {},
   });
 
   context._agentPanelLastSelectedTabByKind.architect = 'behavior';
@@ -3940,9 +3871,6 @@ test('agent panel assigns and renders Creative as proposal-only Thinking class',
     launchable: true,
     builtin: true,
     metadata: { proposal_only: true },
-    agent_profile_ref: { id: 'class-policy-creative-architect', version: '1' },
-    agent_profile: { id: 'class-policy-creative-architect', version: '1', status: 'restricted', capability_count: 9 },
-    internal_policy: { mode: 'compile', profile_source: 'compiled_from_agent_class' },
     warnings: [
       'Creative Architect is proposal-only: ideas remain non-binding until accepted through normal Torque authority.',
       'Use architect_thinking_* wrappers for Scratchpad/Mind Map work and architect_product_* wrappers for product proposals.',
@@ -4204,7 +4132,7 @@ test('agent class manager assignment errors remain routed to active panel operat
   context.renderAgentPanel();
   assert.match(panel.innerHTML, /Agent Class/);
   assert.match(panel.innerHTML, /Change Class/);
-  assert.equal(sendCalls.some((call) => /^agent_class_/.test(call.cmd || '') || /^agent_profile_/.test(call.cmd || '')), false, 'compact Behavior summary does not fetch class/profile data until Change Class opens the modal');
+  assert.equal(sendCalls.some((call) => /^agent_class_/.test(call.cmd || '')), false, 'compact Behavior summary does not fetch class data until Change Class opens the modal');
   context.agentPanelToggleClassAssignment(null, 'blueprint');
   assert.equal(classModal.classList.contains('visible'), true);
   context.agentPanelReceiveAgentClasses({
@@ -4224,326 +4152,4 @@ test('agent class manager assignment errors remain routed to active panel operat
   assert.match(classModalBody.innerHTML, /Unknown Agent Class: product-manager/);
   assert.match(panel.innerHTML, /Unknown Agent Class: product-manager/);
   assert.doesNotMatch(classModalBody.innerHTML, /Saving…/);
-});
-
-test('agent profile manager lists compatible profiles, previews PM draft, assigns, and clears', () => {
-  const { context, panel, classModalBody, sendCalls } = createHarness();
-
-  setFocusedAgent(context, {
-    id: 'arch-profile-ui',
-    name: 'PM UI',
-    kind: 'architect',
-    group: 'alpha',
-    cell_type: 'agent',
-    status: 'stopped',
-    directory: '/repo',
-    agent_profile_id: '',
-    agent_profile_version: '',
-    effective_agent_profile_id: 'full-architect',
-    effective_agent_profile_version: '1',
-    effective_agent_profile_snapshot: {
-      id: 'full-architect',
-      version: '1',
-      base_kind: 'architect',
-      display_name: 'Full Architect',
-      lifecycle: 'stable',
-      status: 'full',
-      warnings: [],
-      denied_high_risk_capabilities: [],
-      communication_policy: { summary: 'full communication' },
-      spawn_policy: { summary: 'full spawn' },
-      scope_policy: { summary: 'full scope' },
-      audit_policy: { summary: 'full audit' },
-    },
-  });
-
-  context._agentPanelLastSelectedTabByKind.architect = 'behavior';
-  context.renderAgentPanel();
-  assert.match(panel.innerHTML, /Agent Class/);
-  assert.match(panel.innerHTML, /Primary identity now[\s\S]*Default Architect/);
-  assert.match(panel.innerHTML, /Desired Agent Class next launch[\s\S]*Default Architect/);
-  assert.doesNotMatch(panel.innerHTML, /Advanced\/Internal Agent Profile assignment/);
-  assert.match(panel.innerHTML, /Change Class/);
-  assert.equal(sendCalls.some((call) => /^agent_class_/.test(call.cmd || '') || /^agent_profile_/.test(call.cmd || '')), false, 'collapsed class/profile summaries do not fetch until the operator opens them');
-
-  context.agentPanelToggleProfileAssignment(null, 'arch-profile-ui');
-  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls.slice(-2))), [
-    { cmd: 'agent_profile_list', base_dir: '/repo' },
-    { cmd: 'agent_profile_preview', profile_id: 'full-architect', base_dir: '/repo' },
-  ]);
-
-  context.agentPanelReceiveAgentProfiles({
-    type: 'agent_profiles',
-    profiles: [
-      {
-        id: 'full-architect',
-        version: '1',
-        base_kind: 'architect',
-        display_name: 'Full Architect',
-        lifecycle: 'stable',
-        status: 'full',
-        warnings: [],
-        denied_high_risk_capabilities: [],
-      },
-      {
-        id: 'product-manager-draft',
-        version: '2',
-        base_kind: 'architect',
-        display_name: 'Product Manager (draft)',
-        lifecycle: 'draft',
-        status: 'draft',
-        warnings: ['scratch-only warning from list'],
-        denied_high_risk_capabilities: ['agent.hire_engineer'],
-      },
-      {
-        id: 'full-worker',
-        version: '1',
-        base_kind: 'worker',
-        display_name: 'Full Worker',
-        lifecycle: 'stable',
-        status: 'full',
-      },
-    ],
-    issues: [],
-  });
-  assert.match(classModalBody.innerHTML, /Product Manager \(draft\)@2 · draft/);
-  assert.doesNotMatch(classModalBody.innerHTML, /Full Worker/);
-  assert.match(classModalBody.innerHTML, /Relaunch to apply/);
-
-  context.agentPanelSelectProfile('arch-profile-ui', 'product-manager-draft');
-  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls[sendCalls.length - 1])), {
-    cmd: 'agent_profile_preview',
-    profile_id: 'product-manager-draft',
-    base_dir: '/repo',
-  });
-  assert.match(classModalBody.innerHTML, /Wait for preview before assigning\./);
-
-  context.agentPanelReceiveAgentProfilePreview({
-    type: 'agent_profile_preview',
-    profile: {
-      id: 'product-manager-draft',
-      version: '2',
-      base_kind: 'architect',
-      display_name: 'Product Manager (draft)',
-      description: 'Draft product manager profile',
-      lifecycle: 'draft',
-      status: 'draft',
-      warnings: [
-        'product-manager-draft is scratch-only in Wave 4B',
-        'Raw Architect tools are denied',
-      ],
-      denied_high_risk_capabilities: ['agent.hire_engineer', 'task.dispatch'],
-      communication_policy: { summary: 'coordinate through product wrappers' },
-      spawn_policy: { summary: 'dispatch denied' },
-      scope_policy: { summary: 'planning-safe reads/writes only' },
-      audit_policy: { summary: 'profile assignment audit rows' },
-    },
-  });
-  assert.match(classModalBody.innerHTML, /product-manager-draft is scratch-only in Wave 4B/);
-  assert.match(classModalBody.innerHTML, /Raw Architect tools are denied/);
-  assert.match(classModalBody.innerHTML, /agent\.hire_engineer/);
-  assert.match(classModalBody.innerHTML, /task\.dispatch/);
-  assert.match(classModalBody.innerHTML, /coordinate through product wrappers/);
-  assert.doesNotMatch(classModalBody.innerHTML, /Wait for preview before assigning\./);
-
-  context.agentPanelAssignSelectedProfile(null, 'arch-profile-ui');
-  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls[sendCalls.length - 1])), {
-    cmd: 'agent_profile_assign',
-    agent_id: 'arch-profile-ui',
-    profile_id: 'product-manager-draft',
-    actor_label: 'trusted-user-ui',
-  });
-
-  context.agentPanelReceiveAgentProfileAssignment({
-    type: 'agent_profile_assignment',
-    status: {
-      agent_id: 'arch-profile-ui',
-      assigned_profile_id: 'product-manager-draft',
-      assigned_profile_version: '2',
-      assigned_at: 1234,
-      assigned_by: 'trusted-user-ui',
-      pending_next_launch: true,
-    },
-  });
-  assert.equal(context.state.agents['arch-profile-ui'].agent_profile_id, 'product-manager-draft');
-  assert.match(classModalBody.innerHTML, /Desired profile updated\. It will apply on the next launch or relaunch\./);
-  assert.match(classModalBody.innerHTML, /Desired next launch[\s\S]*product-manager-draft@2/);
-  assert.match(classModalBody.innerHTML, /Pending[\s\S]*Yes — effective Full Architect@1 differs from desired product-manager-draft@2/);
-
-  context.agentPanelClearProfileAssignment(null, 'arch-profile-ui');
-  const clearCall = sendCalls.slice().reverse()
-    .find((call) => call.cmd === 'agent_profile_assign' && call.profile_id === '');
-  assert.deepEqual(JSON.parse(JSON.stringify(clearCall)), {
-    cmd: 'agent_profile_assign',
-    agent_id: 'arch-profile-ui',
-    profile_id: '',
-    actor_label: 'trusted-user-ui',
-  });
-});
-
-test('agent profile manager clears stale pending message after relaunch applies desired profile', () => {
-  const { context, classModalBody } = createHarness();
-
-  setFocusedAgent(context, {
-    id: 'arch-profile-relaunch',
-    name: 'PM Relaunch',
-    kind: 'architect',
-    group: 'alpha',
-    cell_type: 'agent',
-    status: 'stopped',
-    agent_profile_id: '',
-    agent_profile_version: '',
-    effective_agent_profile_id: 'full-architect',
-    effective_agent_profile_version: '1',
-    effective_agent_profile_snapshot: {
-      id: 'full-architect',
-      version: '1',
-      base_kind: 'architect',
-      display_name: 'Full Architect',
-      lifecycle: 'stable',
-      status: 'full',
-      warnings: [],
-      denied_high_risk_capabilities: [],
-    },
-  });
-
-  context.agentPanelToggleProfileAssignment(null, 'arch-profile-relaunch');
-  context.agentPanelReceiveAgentProfileAssignment({
-    type: 'agent_profile_assignment',
-    status: {
-      agent_id: 'arch-profile-relaunch',
-      assigned_profile_id: 'product-manager-draft',
-      assigned_profile_version: '2',
-      assigned_at: 100,
-      assigned_by: 'trusted-user-ui',
-      pending_next_launch: true,
-    },
-  });
-  assert.match(classModalBody.innerHTML, /Desired profile updated\. It will apply on the next launch or relaunch\./);
-  assert.match(classModalBody.innerHTML, /Pending[\s\S]*Yes/);
-
-  Object.assign(context.state.agents['arch-profile-relaunch'], {
-    status: 'running',
-    effective_agent_profile_id: 'product-manager-draft',
-    effective_agent_profile_version: '2',
-    effective_agent_profile_applied_at: 120,
-    effective_agent_profile_snapshot: {
-      id: 'product-manager-draft',
-      version: '2',
-      base_kind: 'architect',
-      display_name: 'Product Manager (draft)',
-      lifecycle: 'draft',
-      status: 'draft',
-      warnings: ['Raw Architect tools are denied; use architect_product_* wrappers only'],
-      denied_high_risk_capabilities: ['agent.hire_engineer'],
-    },
-  });
-  context.renderAgentPanel();
-
-  assert.doesNotMatch(classModalBody.innerHTML, /Desired profile updated\. It will apply on the next launch or relaunch\./);
-  assert.doesNotMatch(classModalBody.innerHTML, /product-manager-draft@2 \(pending next launch\)/);
-  assert.match(classModalBody.innerHTML, /Product Manager \(draft\)@2/);
-  assert.match(classModalBody.innerHTML, /Pending[\s\S]*No — effective profile matches desired/);
-});
-
-test('agent profile manager diagnoses launch snapshot that still does not match desired profile', () => {
-  const { context, classModalBody } = createHarness();
-
-  setFocusedAgent(context, {
-    id: 'arch-profile-nonapplied',
-    name: 'PM Nonapplied',
-    kind: 'architect',
-    group: 'alpha',
-    cell_type: 'agent',
-    status: 'running',
-    agent_profile_id: 'product-manager-draft',
-    agent_profile_version: '2',
-    agent_profile_assigned_at: 100,
-    agent_profile_assigned_by: 'trusted-user-ui',
-    effective_agent_profile_id: 'full-architect',
-    effective_agent_profile_version: '1',
-    effective_agent_profile_applied_at: 120,
-    effective_agent_profile_snapshot: {
-      id: 'full-architect',
-      version: '1',
-      base_kind: 'architect',
-      display_name: 'Full Architect',
-      lifecycle: 'stable',
-      status: 'full',
-      warnings: [],
-      denied_high_risk_capabilities: [],
-    },
-  });
-
-  context.agentPanelToggleProfileAssignment(null, 'arch-profile-nonapplied');
-
-  assert.match(classModalBody.innerHTML, /full-architect@1 \(pending next launch\)/);
-  assert.match(
-    classModalBody.innerHTML,
-    /Pending[\s\S]*Yes — last launch froze Full Architect@1, which does not match desired product-manager-draft@2/,
-  );
-});
-
-test('agent profile manager preserves selected preview state across routine rerenders', () => {
-  const { context, classModalBody, sendCalls, captureCalls, restoreCalls } = createHarness();
-
-  setFocusedAgent(context, {
-    id: 'arch-profile-preserve',
-    name: 'PM Preserve',
-    kind: 'architect',
-    group: 'alpha',
-    cell_type: 'agent',
-    status: 'running',
-    directory: '/repo',
-    agent_profile_id: '',
-    agent_profile_version: '',
-    effective_agent_profile_id: 'full-architect',
-    effective_agent_profile_version: '1',
-    effective_agent_profile_snapshot: {
-      id: 'full-architect',
-      version: '1',
-      base_kind: 'architect',
-      display_name: 'Full Architect',
-      lifecycle: 'stable',
-      status: 'full',
-    },
-  });
-
-  context.agentPanelToggleProfileAssignment(null, 'arch-profile-preserve');
-  context.agentPanelReceiveAgentProfiles({
-    type: 'agent_profiles',
-    profiles: [
-      { id: 'full-architect', version: '1', base_kind: 'architect', display_name: 'Full Architect', lifecycle: 'stable', status: 'full' },
-      { id: 'product-manager-draft', version: '2', base_kind: 'architect', display_name: 'Product Manager (draft)', lifecycle: 'draft', status: 'draft' },
-    ],
-    issues: [],
-  });
-  context.agentPanelReceiveAgentProfilePreview({
-    type: 'agent_profile_preview',
-    profile: {
-      id: 'product-manager-draft',
-      version: '2',
-      base_kind: 'architect',
-      display_name: 'Product Manager (draft)',
-      lifecycle: 'draft',
-      status: 'draft',
-      warnings: ['product-manager-draft is scratch-only in Wave 4B'],
-      denied_high_risk_capabilities: ['task.dispatch'],
-      scope_policy: { summary: 'planning scope' },
-    },
-  });
-  context.agentPanelSelectProfile('arch-profile-preserve', 'product-manager-draft');
-  const sendsAfterSelect = sendCalls.length;
-  const capturesAfterSelect = captureCalls.length;
-  const restoresAfterSelect = restoreCalls.length;
-
-  context.state.agents['arch-profile-preserve'].activity_detail = 'routine heartbeat delta';
-  context.renderAgentPanel();
-
-  assert.equal(sendCalls.length, sendsAfterSelect, 'routine rerender does not refetch list or preview');
-  assert.ok(captureCalls.length > capturesAfterSelect, 'rerender captures surface state');
-  assert.ok(restoreCalls.length > restoresAfterSelect, 'rerender restores surface state');
-  assert.match(classModalBody.innerHTML, /<option value="product-manager-draft" selected>/);
-  assert.match(classModalBody.innerHTML, /Product Manager \(draft\)@2/);
-  assert.match(classModalBody.innerHTML, /Agent is running; this UI will not stop or relaunch it/);
 });

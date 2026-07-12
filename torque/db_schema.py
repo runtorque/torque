@@ -588,14 +588,6 @@ CREATE TABLE IF NOT EXISTS agents (
     deleted_at            REAL NOT NULL DEFAULT 0,
     permanent_delete_after REAL NOT NULL DEFAULT 0,
     engineer_specializations TEXT NOT NULL DEFAULT '[]',
-    agent_profile_id TEXT NOT NULL DEFAULT '',
-    agent_profile_version TEXT NOT NULL DEFAULT '',
-    agent_profile_assigned_at REAL NOT NULL DEFAULT 0,
-    agent_profile_assigned_by TEXT NOT NULL DEFAULT '',
-    effective_agent_profile_id TEXT NOT NULL DEFAULT '',
-    effective_agent_profile_version TEXT NOT NULL DEFAULT '',
-    effective_agent_profile_snapshot TEXT NOT NULL DEFAULT '{}',
-    effective_agent_profile_applied_at REAL NOT NULL DEFAULT 0,
     agent_class_id TEXT NOT NULL DEFAULT '',
     agent_class_version TEXT NOT NULL DEFAULT '',
     agent_class_assigned_at REAL NOT NULL DEFAULT 0,
@@ -605,28 +597,6 @@ CREATE TABLE IF NOT EXISTS agents (
     effective_agent_class_snapshot TEXT NOT NULL DEFAULT '{}',
     effective_agent_class_applied_at REAL NOT NULL DEFAULT 0
 );
-
-CREATE TABLE IF NOT EXISTS agent_profile_audit (
-    id TEXT PRIMARY KEY,
-    agent_id TEXT NOT NULL DEFAULT '',
-    agent_name TEXT NOT NULL DEFAULT '',
-    event TEXT NOT NULL DEFAULT '',
-    actor_kind TEXT NOT NULL DEFAULT 'user',
-    actor_id TEXT NOT NULL DEFAULT '',
-    actor_label TEXT NOT NULL DEFAULT '',
-    previous_profile_id TEXT NOT NULL DEFAULT '',
-    previous_profile_version TEXT NOT NULL DEFAULT '',
-    assigned_profile_id TEXT NOT NULL DEFAULT '',
-    assigned_profile_version TEXT NOT NULL DEFAULT '',
-    effective_profile_id TEXT NOT NULL DEFAULT '',
-    effective_profile_version TEXT NOT NULL DEFAULT '',
-    snapshot_json TEXT NOT NULL DEFAULT '{}',
-    message TEXT NOT NULL DEFAULT '',
-    created_at REAL NOT NULL DEFAULT 0
-);
-
-CREATE INDEX IF NOT EXISTS idx_agent_profile_audit_agent_created
-ON agent_profile_audit(agent_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS agent_class_audit (
     id TEXT PRIMARY KEY,
@@ -642,10 +612,6 @@ CREATE TABLE IF NOT EXISTS agent_class_audit (
     assigned_class_version TEXT NOT NULL DEFAULT '',
     effective_class_id TEXT NOT NULL DEFAULT '',
     effective_class_version TEXT NOT NULL DEFAULT '',
-    assigned_profile_id TEXT NOT NULL DEFAULT '',
-    assigned_profile_version TEXT NOT NULL DEFAULT '',
-    effective_profile_id TEXT NOT NULL DEFAULT '',
-    effective_profile_version TEXT NOT NULL DEFAULT '',
     snapshot_hash TEXT NOT NULL DEFAULT '',
     snapshot_json TEXT NOT NULL DEFAULT '{}',
     message TEXT NOT NULL DEFAULT '',
@@ -682,7 +648,7 @@ CREATE TABLE IF NOT EXISTS group_settings (
     collapsed_default           INTEGER NOT NULL DEFAULT 0,
     filter_by_window            INTEGER NOT NULL DEFAULT 0,
     agent_directory             TEXT NOT NULL DEFAULT '',
-    agent_profile               TEXT NOT NULL DEFAULT '',
+    agent_terminal_profile      TEXT NOT NULL DEFAULT '',
     agent_shell                 TEXT NOT NULL DEFAULT '',
     agent_tab_color             TEXT NOT NULL DEFAULT '',
     agent_env_vars              TEXT NOT NULL DEFAULT '{}',
@@ -2505,6 +2471,14 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     # Migrate: add agent_provider column
     try:
         conn.execute(
+            "SELECT agent_terminal_profile FROM group_settings LIMIT 0")
+    except sqlite3.OperationalError:
+        conn.execute(
+            "ALTER TABLE group_settings ADD COLUMN "
+            "agent_terminal_profile TEXT NOT NULL DEFAULT ''")
+        conn.commit()
+    try:
+        conn.execute(
             "SELECT agent_provider FROM group_settings LIMIT 0")
     except sqlite3.OperationalError:
         conn.execute(
@@ -2787,14 +2761,6 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
         ("idle_timeout", "INTEGER", "0"),
         ("deleted_at", "REAL", "0"),
         ("permanent_delete_after", "REAL", "0"),
-        ("agent_profile_id", "TEXT", "''"),
-        ("agent_profile_version", "TEXT", "''"),
-        ("agent_profile_assigned_at", "REAL", "0"),
-        ("agent_profile_assigned_by", "TEXT", "''"),
-        ("effective_agent_profile_id", "TEXT", "''"),
-        ("effective_agent_profile_version", "TEXT", "''"),
-        ("effective_agent_profile_snapshot", "TEXT", "'{}'"),
-        ("effective_agent_profile_applied_at", "REAL", "0"),
         ("agent_class_id", "TEXT", "''"),
         ("agent_class_version", "TEXT", "''"),
         ("agent_class_assigned_at", "REAL", "0"),

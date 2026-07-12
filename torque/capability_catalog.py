@@ -441,9 +441,9 @@ CAPABILITY_CATALOG: dict[str, CapabilityDefinition] = {
             risk="critical",
         ),
         _unscoped(
-            "class_profile.admin",
-            "Administer classes and profiles",
-            "Assign or edit Agent Class/Profile authority definitions.",
+            "class.admin",
+            "Administer Agent Classes",
+            "Assign or edit Agent Class authority definitions.",
             base_kinds=_ARCHITECT,
             risk="critical",
         ),
@@ -519,125 +519,6 @@ CAPABILITY_CATALOG: dict[str, CapabilityDefinition] = {
         ),
     )
 }
-
-
-# Temporary compatibility bridge from direct legacy Agent Profile atom grants
-# to canonical schema-v5 capabilities. MCP tool registration no longer uses
-# this vocabulary; it remains only while direct Agent Profile assignment is a
-# supported migration surface.
-LEGACY_ATOM_TO_CAPABILITY: dict[str, str] = {
-    "observe.self_context": "self.read",
-    "observe.board_summary": "board.read",
-    "observe.task_detail": "task.read",
-    "observe.events": "event.read",
-    "observe.mcp_calls": "telemetry.read",
-    "observe.deploy_state": "deploy.read",
-    "observe.semantic_recall": "semantic_recall.read",
-    "planning.area_read": "planning.area.read",
-    "planning.area_write": "planning.area.write",
-    "planning.initiative_read": "planning.initiative.read",
-    "planning.initiative_write": "planning.initiative.write",
-    "task.create": "task.create",
-    "task.create_queued": "task.propose",
-    "task.update": "task.update",
-    "task.update_planning_fields": "task.propose",
-    "task.reassign": "task.reassign",
-    "task.move": "task.move",
-    "task.move_planning_safe": "task.propose",
-    "task.mark_covered": "task.mark_covered",
-    "task.dispatch": "task.dispatch",
-    "task.verify": "task.verify",
-    "task.complete": "task.report",
-    "task.upload_artifact": "task.artifact.write",
-    "task.board_sync_read": "task.board_sync.read",
-    "decision.list": "decision.read",
-    "decision.create": "decision.create",
-    "decision.create_proposed": "decision.propose",
-    "decision.update_proposed": "decision.propose",
-    "decision.accept": "decision.accept",
-    "decision.update": "decision.update",
-    "decision.link": "decision.link",
-    "agent.engineer_roster_read": "engineer.roster.read",
-    "agent.hire_engineer": "engineer.hire",
-    "agent.manage_engineer_roster": "engineer.manage",
-    "agent.dispatch_worker": "worker.manage",
-    "comm.user_ask": "message.user",
-    "comm.user_message": "message.user",
-    "comm.engineer_message": "message.engineer",
-    "comm.worker_message": "message.worker",
-    "comm.peer_architect_list": "message.architect_peer",
-    "comm.peer_architect_message": "message.architect_peer",
-    "comm.product_ack_request": "message.ack_required",
-    "journal.private": "journal.private",
-    "journal.read": "journal.read",
-    "journal.write": "journal.write",
-    "memory.read": "memory.read",
-    "memory.publish": "memory.write",
-    "memory.admin": "memory.admin",
-    "worktree.read": "worktree.read",
-    "worktree.merge": "worktree.merge",
-    "deploy.apply": "deploy.apply",
-    "admin.settings": "settings.admin",
-    "profile.assign": "class_profile.admin",
-    "profile.edit": "class_profile.admin",
-    "behavior_overlay.read": "behavior_overlay.read",
-    "behavior_overlay.propose_self": "behavior_overlay.propose",
-    "thinking.read": "thinking.read",
-    "thinking.write_own": "thinking.write",
-    "idea_brief.read": "idea_brief.read",
-    "idea_brief.write_own": "idea_brief.write",
-    "idea_brief.propose": "idea_brief.propose",
-}
-
-# Old atoms that implicitly covered several distinct MCP operations. This is
-# used only while legacy Agent Profile snapshots still feed projection.
-LEGACY_ATOM_GRANT_EXPANSIONS: dict[str, frozenset[str]] = {
-    "observe.self_context": frozenset({"self.read", "help.read", "tool.search"}),
-    "profile.edit": frozenset({
-        "class_profile.admin",
-        "behavior_overlay.propose",
-        "behavior_overlay.admin",
-    }),
-    "agent.manage_engineer_roster": frozenset({
-        "engineer.manage",
-        "specialization.read",
-        "specialization.write",
-    }),
-}
-
-
-def canonical_capabilities_from_legacy_atoms(
-    legacy_atoms: Iterable[str],
-) -> frozenset[str]:
-    """Expand a legacy profile grant/deny set into canonical capabilities."""
-
-    canonical: set[str] = set()
-    for raw_atom in legacy_atoms or ():
-        atom = str(raw_atom or "").strip()
-        mapped = LEGACY_ATOM_TO_CAPABILITY.get(atom)
-        if mapped:
-            canonical.add(mapped)
-        canonical.update(LEGACY_ATOM_GRANT_EXPANSIONS.get(atom, ()))
-    return frozenset(canonical)
-
-
-def legacy_atoms_for_canonical_capabilities(
-    canonical_capabilities: Iterable[str],
-) -> frozenset[str]:
-    """Approximate old profile atoms for transitional frozen diagnostics."""
-
-    selected = {
-        str(capability or "").strip()
-        for capability in (canonical_capabilities or ())
-        if str(capability or "").strip()
-    }
-    legacy: set[str] = set()
-    for atom, primary in LEGACY_ATOM_TO_CAPABILITY.items():
-        represented = {primary}
-        represented.update(LEGACY_ATOM_GRANT_EXPANSIONS.get(atom, ()))
-        if represented & selected:
-            legacy.add(atom)
-    return frozenset(legacy)
 
 
 def validate_capability_catalog(

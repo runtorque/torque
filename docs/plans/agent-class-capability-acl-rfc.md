@@ -36,8 +36,13 @@ Implemented in the current working change:
 - fail-closed registration validation requiring every scoped requirement to
   declare target, result, scope-argument, or explicit handler enforcement;
 - product-peer, acknowledgement, and behavior-overlay wrapper refinements now
-  consult frozen canonical Agent Class authority before the temporary direct
-  Agent Profile fallback.
+  consult frozen canonical Agent Class authority;
+- removal of direct Agent Profile assignment, policy evaluation, persistence,
+  audit, doctor, server, WebSocket, UI, built-in definition, and test surfaces;
+- removal of Agent Profile fields from `AgentCell`, fresh database schemas, and
+  Agent Class audit records;
+- rename of the remaining authority capability from `class_profile.admin` to
+  `class.admin`.
 
 Still required before this RFC is complete:
 
@@ -45,8 +50,6 @@ Still required before this RFC is complete:
   for Planning objects, mixed-purpose messaging threads, event/semantic
   recall rows, and remaining aggregate/read models;
 - remove or rename historical class-oriented wrapper tools where practical;
-- remove direct Agent Profile authority assignment after the migration is
-  complete.
 Date: 2026-07-11  
 Supersedes: `docs/plans/agent-classes-generic-authority-plan.md`
 
@@ -508,9 +511,8 @@ Schema v5 and the new runtime do not use:
 - class-specific prompt branches;
 - class-specific MCP projection exceptions.
 
-Legacy readers may exist only during an explicit, time-bounded migration. They
-must normalize old definitions into schema v5 rules before validation and must
-not remain as a second runtime authority path.
+Obsolete authority fields are rejected as unknown/legacy schema input. They are
+not normalized into a second runtime authority path.
 
 ## Migration plan
 
@@ -522,8 +524,7 @@ not remain as a second runtime authority path.
   currently enforced behavior.
 - Move all current MCP tool mappings beside tool registration.
 - Add a fail-closed coverage audit for all registered tools.
-- Keep current Agent Profile projection active while comparing registry output
-  in tests only.
+- Compare registry output against captured pre-migration fixtures in tests only.
 
 ### Phase 2: ACL evaluator and snapshots
 
@@ -562,7 +563,7 @@ not remain as a second runtime authority path.
 - Remove Agent Class policy/profile compilation.
 - Remove capability and restriction buckets.
 - Remove separate action aliases and central tool mappings.
-- Remove old Agent Profile authority assignment after migration.
+- Remove old Agent Profile authority assignment, storage, and UI.
 - Remove class-specific wrapper names and historical fixtures where practical.
 
 ## Validation and doctor checks

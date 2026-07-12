@@ -25,7 +25,7 @@ _AUTHORITY_CANNOT = [
     "create, move, assign, dispatch, or complete tasks",
     "hire, dismiss, message, or control Engineers/Workers",
     "merge/rebase/checkpoint worktrees or create PRs",
-    "edit Agent Classes, Profiles, roles, or specializations",
+    "edit Agent Classes, roles, or specializations",
     "accept decisions or replace Blueprint/Product Manager, Torqly, or Catalyst authority",
 ]
 

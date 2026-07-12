@@ -72,11 +72,11 @@ The only authority fields are `acl.mode` and `acl.rules`.
 - Validation rejects a capability unavailable to the base kind or a scope wider
   than the capability's implemented ceiling.
 
-There is no Agent Class `policy`, generated Agent Profile, capability bucket,
+There is no Agent Class `policy`, generated policy profile, capability bucket,
 restriction bucket, exact-tool grant, tool-family glob, or raw grant/deny atom.
-Legacy fields such as `agent_profile_ref`, `policy`, `capabilities`,
-`capability_buckets`, and `restriction_buckets` are rejected rather than
-normalized into a second authority path.
+Obsolete fields such as `policy`, `capabilities`, `capability_buckets`, and
+`restriction_buckets` are rejected rather than normalized into a second
+authority path.
 
 Prompt `tool_guidance` selectors use canonical capability IDs. Guidance is
 included only when that capability exists in the frozen effective authority.
@@ -107,14 +107,9 @@ snapshot contains the normalized ACL, compiled `effective_authority`, registry
 hashes, prompt data, class identity, lifecycle, warnings, and snapshot hash.
 It is the Agent Class MCP enforcement source.
 
-Class-launched sessions do not generate or freeze `class-policy-*` Agent
-Profiles. Their `effective_agent_profile_*` fields are empty. Direct Agent
-Profile assignment remains only as a temporary legacy migration path for an
-agent with no desired Agent Class; it is not part of Agent Class authority and
-must not be shown as a class policy.
-
-Passing both an Agent Class and a direct Agent Profile in one launch request is
-rejected as ambiguous.
+There is no separate authority profile assignment or policy snapshot. Agent
+Class assignment and the frozen `effective_agent_class_snapshot` are the only
+class-authority path.
 
 ## Built-ins
 
@@ -159,5 +154,4 @@ invalid lifecycle/draft metadata, raw MCP tool fields, legacy authority fields,
 invalid prompt sections, unknown capability selectors, and invalid ACL rules.
 
 `torque doctor` reports Agent Class validation, assignment/audit state, frozen
-snapshot state, capability registry coverage, and legacy direct Agent Profile
-assignments that still need migration.
+snapshot state, and capability registry coverage.

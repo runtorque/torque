@@ -27,8 +27,8 @@ def is_architect_execution_target(cell: object | None) -> bool:
     Engineers may coordinate with Architects through explicit messaging and
     notification tools, but must not route executable task prompts to
     Architect cells or Architect-base Agent Classes.  Prefer the concrete
-    runtime ``kind``; the effective class/profile snapshots cover stale or
-    partially migrated class metadata.
+    runtime ``kind``; the effective class snapshot covers launched class
+    metadata.
     """
     if cell is None:
         return False
@@ -36,12 +36,10 @@ def is_architect_execution_target(cell: object | None) -> bool:
         return False
     if str(getattr(cell, "kind", "") or "").strip() == "architect":
         return True
-    for attr in (
-        "effective_agent_class_snapshot",
-        "effective_agent_profile_snapshot",
-    ):
-        if _snapshot_base_kind(getattr(cell, attr, None)) == "architect":
-            return True
+    if _snapshot_base_kind(
+        getattr(cell, "effective_agent_class_snapshot", None)
+    ) == "architect":
+        return True
     return False
 
 

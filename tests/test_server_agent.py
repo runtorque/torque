@@ -40,7 +40,7 @@ class _FakeState:
             worker_reasoning_effort=worker_reasoning_effort,
             agent_tab_color=agent_tab_color,
             tab_color=tab_color,
-            agent_profile="",
+            agent_terminal_profile="",
             profile="Default",
             agent_shell="",
             shell="",

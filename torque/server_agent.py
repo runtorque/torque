@@ -366,7 +366,7 @@ class AgentLaunchService:
         )
         profile = (
             resolved.get("profile", "")
-            or gs.agent_profile
+            or gs.agent_terminal_profile
             or gs.profile
             or "Default"
         )
@@ -713,11 +713,6 @@ class AgentLaunchService:
         if launch_cfg.get("agent_type"):
             cell.agent_type = launch_cfg["agent_type"]
         cell.runner_backend = runner_backend
-        if launch_cfg.get("agent_profile_id"):
-            cell.agent_profile_id = str(launch_cfg.get("agent_profile_id") or "").strip()
-            cell.agent_profile_version = str(launch_cfg.get("agent_profile_version") or "").strip()
-            cell.agent_profile_assigned_at = time.time()
-            cell.agent_profile_assigned_by = "trusted-user-launch"
         if launch_cfg.get("agent_class_id"):
             cell.agent_class_id = str(launch_cfg.get("agent_class_id") or "").strip()
             cell.agent_class_version = str(launch_cfg.get("agent_class_version") or "").strip()
@@ -730,7 +725,7 @@ class AgentLaunchService:
             )
         except Exception:
             log.exception(
-                "Failed to apply Agent Class/Profile launch snapshot for cell=%s",
+                "Failed to apply Agent Class launch snapshot for cell=%s",
                 getattr(cell, "id", ""),
             )
             raise

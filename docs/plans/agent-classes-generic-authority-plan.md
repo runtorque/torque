@@ -357,7 +357,7 @@ acl:
   deny:
     - action: deploy.apply
     - action: worktree.merge
-    - action: class_profile.admin
+    - action: class.admin
 ```
 
 Interpretation:
@@ -419,7 +419,7 @@ Example:
 | `deploy.read` | deploy state | Sensitive read. |
 | `deploy.apply` | deploy/restart/admin runtime changes | Critical. |
 | `settings.admin` | global/team/runtime settings | Critical. |
-| `class_profile.admin` | class/profile assign/edit tools | Critical. |
+| `class.admin` | Agent Class assign/edit tools | Critical. |
 | `behavior_overlay.read` | overlay read/diff/version/proposal list | Scope required. |
 | `behavior_overlay.propose` | propose own overlay | Usually self-only. |
 | `behavior_overlay.admin` | approve/reject/rollback/propose for others | Critical. |

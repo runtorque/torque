@@ -15,10 +15,6 @@ from .server_prompts import (
     build_owner_user_message_guidance,
     build_shared_memory_guidance,
 )
-from .agent_profiles import (
-    BASE_KIND_CEILINGS,
-    TOOL_CATEGORY_REQUIREMENTS,
-)
 from .state import (
     normalize_architect_autonomy_mode,
     normalize_architect_journal_checkpoint_frequency,
@@ -353,81 +349,21 @@ def _safe_dict(value) -> dict:
     return dict(value or {}) if isinstance(value, dict) else {}
 
 
-def _metadata_from_context(class_snapshot: dict, profile_snapshot: dict) -> dict:
-    metadata = _safe_dict(class_snapshot.get("metadata"))
-    profile_metadata = _safe_dict(profile_snapshot.get("metadata"))
-    for key, value in profile_metadata.items():
-        metadata.setdefault(key, value)
-    generated_by = _safe_dict(profile_metadata.get("generated_by_agent_class"))
-    if generated_by:
-        metadata.setdefault("generated_by_agent_class", generated_by)
-    return metadata
-
-
-def _profile_capability_atoms(profile_snapshot: dict) -> set[str]:
-    grants = profile_snapshot.get("grants")
-    if isinstance(grants, list):
-        return {
-            str(atom or "").strip()
-            for atom in grants
-            if str(atom or "").strip()
-        }
-    atoms: set[str] = set()
-    capabilities = profile_snapshot.get("capabilities")
-    if isinstance(capabilities, list):
-        for item in capabilities:
-            if isinstance(item, dict):
-                atom = str(item.get("atom", "") or "").strip()
-            else:
-                atom = str(item or "").strip()
-            if atom:
-                atoms.add(atom)
-    return atoms
-
-
 def _architect_prompt_authority_context(
         *,
         architect_cell=None,
-        agent_class_snapshot: dict | None = None,
-        agent_profile_snapshot: dict | None = None) -> dict:
-    """Return normalized capability/authority facts for prompt shaping.
-
-    Missing context intentionally means "legacy/full Architect" so existing
-    callers that do not launch through Agent Classes preserve byte-for-byte
-    full Architect guidance.
-    """
+        agent_class_snapshot: dict | None = None) -> dict:
+    """Return normalized canonical Agent Class authority for prompt shaping."""
 
     class_snapshot = _safe_dict(agent_class_snapshot)
-    profile_snapshot = _safe_dict(agent_profile_snapshot)
-    if architect_cell is not None:
-        if not class_snapshot:
-            class_snapshot = _safe_dict(
-                getattr(architect_cell, "effective_agent_class_snapshot", {})
-            )
-        if not profile_snapshot:
-            profile_snapshot = _safe_dict(
-                getattr(architect_cell, "effective_agent_profile_snapshot", {})
-            )
-    if not profile_snapshot:
-        nested = class_snapshot.get("agent_profile")
-        if isinstance(nested, dict):
-            profile_snapshot = _safe_dict(nested)
+    if architect_cell is not None and not class_snapshot:
+        class_snapshot = _safe_dict(
+            getattr(architect_cell, "effective_agent_class_snapshot", {})
+        )
 
     class_id = str(class_snapshot.get("id", "") or "").strip()
-    profile_id = str(profile_snapshot.get("id", "") or "").strip()
-    profile_base_kind = str(
-        profile_snapshot.get("base_kind", class_snapshot.get("base_kind", ""))
-        or ""
-    ).strip()
-    status = str(
-        class_snapshot.get("status", profile_snapshot.get("status", ""))
-        or ""
-    ).strip().lower()
-    lifecycle = str(
-        class_snapshot.get("lifecycle", profile_snapshot.get("lifecycle", ""))
-        or ""
-    ).strip().lower()
-    grants = _profile_capability_atoms(profile_snapshot)
+    status = str(class_snapshot.get("status", "") or "").strip().lower()
+    lifecycle = str(class_snapshot.get("lifecycle", "") or "").strip().lower()
     effective = _safe_dict(class_snapshot.get("effective_authority"))
     effective_capabilities = effective.get("capabilities")
     canonical_capabilities = (
@@ -436,11 +372,7 @@ def _architect_prompt_authority_context(
         else set()
     )
 
-    # No effective profile/class context is the historical full Architect path.
-    no_context = not class_snapshot and not profile_snapshot
-    architect_ceiling = BASE_KIND_CEILINGS.get("architect", frozenset())
-    full_by_grants = bool(grants) and grants == set(architect_ceiling)
-    full_by_status = status == "full" and lifecycle in {"", "stable"}
+    no_context = not class_snapshot
     canonical_full: bool | None = None
     if isinstance(effective_capabilities, dict):
         from .capability_catalog import CAPABILITY_CATALOG
@@ -454,38 +386,26 @@ def _architect_prompt_authority_context(
             if definition.available_to("architect")
         }
         canonical_full = dict(effective_capabilities) == expected
-    is_full = no_context or (
-        profile_base_kind == "architect"
-        and (
-            canonical_full
-            if canonical_full is not None
-            else (full_by_grants or (full_by_status and not grants))
-        )
-    )
+    is_full = no_context or bool(canonical_full)
 
     label = str(
         class_snapshot.get(
             "primary_identity_label",
             class_snapshot.get("display_name", ""),
         )
-        or profile_snapshot.get("display_name", "")
         or class_id
         or "Restricted Architect"
     ).strip()
-
-    acl = {}
-    if isinstance(class_snapshot.get("acl"), dict):
-        acl = dict(class_snapshot.get("acl") or {})
-    elif isinstance(profile_snapshot.get("acl"), dict):
-        acl = dict(profile_snapshot.get("acl") or {})
-
+    acl = (
+        dict(class_snapshot.get("acl") or {})
+        if isinstance(class_snapshot.get("acl"), dict)
+        else {}
+    )
     return {
         "class_id": class_id,
-        "profile_id": profile_id,
         "label": label,
         "status": status or ("full" if is_full else "restricted"),
         "lifecycle": lifecycle,
-        "grants": grants,
         "canonical_capabilities": canonical_capabilities,
         "is_full": is_full,
         "acl": acl,
@@ -494,15 +414,13 @@ def _architect_prompt_authority_context(
 
 def _has_capability(authority: dict, atom: str) -> bool:
     return atom in (
-        set(authority.get("grants") or set())
-        | set(authority.get("canonical_capabilities") or set())
+        set(authority.get("canonical_capabilities") or set())
     )
 
 
 def _has_capabilities(authority: dict, *atoms: str) -> bool:
     grants = (
-        set(authority.get("grants") or set())
-        | set(authority.get("canonical_capabilities") or set())
+        set(authority.get("canonical_capabilities") or set())
     )
     return set(atoms).issubset(grants)
 
@@ -708,15 +626,13 @@ def _build_policy_section(architect_settings=None, group_settings=None,
 
 def build_architect_torque_preamble(*,
                                     architect_cell=None,
-                                    agent_class_snapshot: dict | None = None,
-                                    agent_profile_snapshot: dict | None = None
+                                    agent_class_snapshot: dict | None = None
                                     ) -> str:
     """Return the Torque preamble appropriate for this Architect authority."""
 
     authority = _architect_prompt_authority_context(
         architect_cell=architect_cell,
         agent_class_snapshot=agent_class_snapshot,
-        agent_profile_snapshot=agent_profile_snapshot,
     )
     if not authority.get("class_id"):
         return build_torque_system_prompt(
@@ -731,8 +647,7 @@ def build_architect_system_prompt(group: str,
                                   group_settings=None,
                                   behavior_overlay_block: str = "",
                                   architect_cell=None,
-                                  agent_class_snapshot: dict | None = None,
-                                  agent_profile_snapshot: dict | None = None
+                                  agent_class_snapshot: dict | None = None
                                   ) -> str:
     """Assemble the architect boot prompt.
 
@@ -742,7 +657,6 @@ def build_architect_system_prompt(group: str,
     authority = _architect_prompt_authority_context(
         architect_cell=architect_cell,
         agent_class_snapshot=agent_class_snapshot,
-        agent_profile_snapshot=agent_profile_snapshot,
     )
     if not authority.get("class_id"):
         parts = [

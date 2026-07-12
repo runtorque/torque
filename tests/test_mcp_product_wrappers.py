@@ -61,9 +61,6 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
             self.architect,
             base_dir=self.tmp.name,
         )
-        self.state.agent_profile_overrides = {
-            self.peer.id: "product-manager-draft",
-        }
 
     def _add_agent(self, agent_id, name, *, kind="architect", group="g", **kwargs):
         cell = self.state_mod.AgentCell(
@@ -140,8 +137,6 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_pm_class_projects_every_tool_with_matching_capabilities(self):
         self.assertEqual(self.architect.effective_agent_class_id, "product-manager")
-        self.assertEqual(self.architect.effective_agent_profile_id, "")
-        self.assertEqual(self.architect.effective_agent_profile_snapshot, {})
         tool_names = await self._list_tools()
 
         for name in {

@@ -546,7 +546,7 @@ class RoleManager:
 
         group_overrides = {
             "directory": getattr(group_settings, "agent_directory", ""),
-            "profile": getattr(group_settings, "agent_profile", ""),
+            "profile": getattr(group_settings, "agent_terminal_profile", ""),
             "shell": getattr(group_settings, "agent_shell", ""),
             "tab_color": getattr(group_settings, "agent_tab_color", ""),
             "env_vars": getattr(group_settings, "agent_env_vars", {}),

@@ -10,7 +10,6 @@ populates it from ``${TORQUE_CELL_ID}`` in ``.mcp.json``; Codex uses
 """
 
 import asyncio
-import fnmatch
 import json
 import logging
 import time
@@ -20,15 +19,8 @@ from datetime import datetime, timezone
 from aiohttp import web
 
 from . import __version__
-from .agent_profiles import (
-    AgentProfileDefinition,
-    AgentProfilePolicy,
-    profile_policy_by_id,
-    profile_policy_from_definition,
-)
 from .capability_catalog import (
     CAPABILITY_CATALOG,
-    canonical_capabilities_from_legacy_atoms,
 )
 from .mcp_authority import (
     EffectiveAuthority,
@@ -918,107 +910,6 @@ def mcp_tool_capability_requirements(tool_name: str) -> frozenset[str] | None:
     return _MCP_TOOL_CAPABILITIES.get(str(tool_name or "").strip())
 
 
-def _matches_any_tool_pattern(
-    tool_name: str,
-    *,
-    exact: frozenset[str],
-    families: frozenset[str],
-) -> bool:
-    if tool_name in exact:
-        return True
-    return any(fnmatch.fnmatchcase(tool_name, pattern) for pattern in families)
-
-
-def mcp_tool_allowed_by_policy(
-    tool_name: str,
-    policy: AgentProfilePolicy | None,
-) -> bool:
-    """Compatibility projection for legacy Agent Profile policies.
-
-    Tool authority metadata is now owned by each MCP surface. This evaluator
-    remains only until Agent Class schema-v5 snapshots replace profile policy
-    projection.
-    """
-
-    if policy is None or policy.is_full_base_kind_profile:
-        return True
-    normalized_name = str(tool_name or "").strip()
-    if _matches_any_tool_pattern(
-        normalized_name,
-        exact=policy.denied_tools,
-        families=policy.denied_families,
-    ):
-        return False
-    if _matches_any_tool_pattern(
-        normalized_name,
-        exact=policy.allowed_tools,
-        families=policy.allowed_families,
-    ):
-        return True
-    if policy.acl_mode == "allow" and (
-        policy.allowed_tools or policy.allowed_families
-    ):
-        return False
-    requirements = _MCP_TOOL_CAPABILITIES.get(normalized_name)
-    if not requirements:
-        # Missing metadata is always denied for a restricted profile. Import-
-        # time coverage validation should make this unreachable in production.
-        return False
-    canonical_grants = canonical_capabilities_from_legacy_atoms(policy.grants)
-    canonical_denies = canonical_capabilities_from_legacy_atoms(policy.denies)
-    if set(requirements) & set(canonical_denies):
-        return False
-    return set(requirements).issubset(canonical_grants)
-
-
-def _coerce_effective_profile_policy(raw_profile, *, base_dir: str = ""):
-    if not raw_profile:
-        return None
-    if isinstance(raw_profile, AgentProfilePolicy):
-        return raw_profile
-    if isinstance(raw_profile, AgentProfileDefinition):
-        return profile_policy_from_definition(raw_profile)
-    if isinstance(raw_profile, dict):
-        return profile_policy_from_definition(raw_profile)
-    return profile_policy_by_id(str(raw_profile or "").strip(), base_dir=base_dir)
-
-
-def _effective_profile_policy_for_cell(state, cell):
-    """Return explicit effective profile policy for a caller, if any.
-
-    Desired assignment (``agent_profile_id``) is intentionally ignored here:
-    only the frozen launch/session snapshot (or Wave 2 test override hook) can
-    affect MCP visibility/denial. When nothing is supplied, policy is ``None``
-    and MCP behavior remains exactly as it was before profile enforcement.
-    """
-
-    if not state or not cell:
-        return None
-    getter = getattr(state, "effective_agent_profile_for_cell", None)
-    if callable(getter):
-        raw_profile = getter(cell)
-        if raw_profile:
-            return _coerce_effective_profile_policy(
-                raw_profile,
-                base_dir=str(getattr(state, "project_base_dir", "") or ""),
-            )
-    overrides = getattr(state, "agent_profile_overrides", None)
-    if isinstance(overrides, dict):
-        raw_profile = overrides.get(getattr(cell, "id", ""))
-        if raw_profile:
-            return _coerce_effective_profile_policy(
-                raw_profile,
-                base_dir=str(getattr(state, "project_base_dir", "") or ""),
-            )
-    raw_profile = getattr(cell, "effective_agent_profile_id", "")
-    if raw_profile:
-        return _coerce_effective_profile_policy(
-            raw_profile,
-            base_dir=str(getattr(state, "project_base_dir", "") or ""),
-        )
-    return None
-
-
 def mcp_tool_allowed_by_authority(
     tool_name: str,
     authority: EffectiveAuthority,
@@ -1060,8 +951,8 @@ def _effective_class_authority_for_cell(cell) -> EffectiveAuthority | None:
             capabilities=CAPABILITY_CATALOG,
         )
     except AuthorityValidationError:
-        # Frozen authority corruption fails closed rather than silently falling
-        # back to a broader legacy Agent Profile.
+        # Frozen authority corruption fails closed rather than broadening the
+        # caller's projected authority.
         return EffectiveAuthority(
             base_kind=str(getattr(cell, "kind", "") or ""),
             mode="allow",
@@ -1069,23 +960,17 @@ def _effective_class_authority_for_cell(cell) -> EffectiveAuthority | None:
         )
 
 
-def _profile_project_tools(
+def _authority_project_tools(
     tools: list[dict],
-    policy,
     authority: EffectiveAuthority | None = None,
 ) -> list[dict]:
+    if authority is None:
+        return list(tools)
     return [
         tool for tool in tools
-        if (
-            mcp_tool_allowed_by_authority(
-                str(tool.get("name", "") or ""),
-                authority,
-            )
-            if authority is not None
-            else mcp_tool_allowed_by_policy(
-                str(tool.get("name", "") or ""),
-                policy,
-            )
+        if mcp_tool_allowed_by_authority(
+            str(tool.get("name", "") or ""),
+            authority,
         )
     ]
 
@@ -1096,20 +981,17 @@ def _visible_tools(state, cell_id: str):
     cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
     if cell and state.agent_is_tombstoned(cell):
         return []
-    policy = _effective_profile_policy_for_cell(state, cell)
     authority = _effective_class_authority_for_cell(cell)
-    tools = _profile_project_tools(tools, policy, authority)
+    tools = _authority_project_tools(tools, authority)
     caller_kind = str(getattr(cell, "kind", "") or "").strip() if cell else ""
     if caller_kind == "engineer":
-        tools.extend(eager_tool_specs(_profile_project_tools(
+        tools.extend(eager_tool_specs(_authority_project_tools(
             engineer_tools_for_cell(cell, state),
-            policy,
             authority,
         )))
     elif caller_kind == "architect":
-        tools.extend(eager_tool_specs(_profile_project_tools(
+        tools.extend(eager_tool_specs(_authority_project_tools(
             ARCHITECT_TOOLS,
-            policy,
             authority,
         )))
     return [public_tool_spec(tool) for tool in tools]
@@ -1120,19 +1002,16 @@ def _deferred_tools_for_caller(state, cell_id: str):
     cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
     if cell and state.agent_is_tombstoned(cell):
         return []
-    policy = _effective_profile_policy_for_cell(state, cell)
     authority = _effective_class_authority_for_cell(cell)
     caller_kind = str(getattr(cell, "kind", "") or "").strip() if cell else ""
     if caller_kind == "engineer":
-        return deferred_tool_specs(_profile_project_tools(
+        return deferred_tool_specs(_authority_project_tools(
             engineer_tools_for_cell(cell, state),
-            policy,
             authority,
         ))
     if caller_kind == "architect":
-        return deferred_tool_specs(_profile_project_tools(
+        return deferred_tool_specs(_authority_project_tools(
             ARCHITECT_TOOLS,
-            policy,
             authority,
         ))
     return []
@@ -1148,12 +1027,12 @@ def _tool_hidden_for_caller(tool_name: str, caller_kind: str, caller_cell) -> bo
     return False
 
 
-def _tool_denied_by_effective_profile(state, tool_name: str, caller_cell) -> bool:
+def _tool_denied_by_effective_authority(tool_name: str, caller_cell) -> bool:
     authority = _effective_class_authority_for_cell(caller_cell)
-    if authority is not None:
-        return not mcp_tool_allowed_by_authority(tool_name, authority)
-    policy = _effective_profile_policy_for_cell(state, caller_cell)
-    return not mcp_tool_allowed_by_policy(tool_name, policy)
+    return bool(
+        authority is not None
+        and not mcp_tool_allowed_by_authority(tool_name, authority)
+    )
 
 
 def _agent_target_scope(caller_cell, target_cell) -> str:
@@ -1952,7 +1831,7 @@ async def dispatch_mcp_rpc_body(
         )
         if (
             _tool_hidden_for_caller(tool_name, caller_kind, caller_cell)
-            or _tool_denied_by_effective_profile(state, tool_name, caller_cell)
+            or _tool_denied_by_effective_authority(tool_name, caller_cell)
             or _tool_argument_scope_denied(
                 state,
                 tool_name,
@@ -2069,12 +1948,8 @@ async def dispatch_mcp_rpc_body(
                     "content": [{
                         "type": "text",
                         "text": tool_search_response(
-                            _profile_project_tools(
+                            _authority_project_tools(
                                 engineer_tools_for_cell(caller_cell, state),
-                                _effective_profile_policy_for_cell(
-                                    state,
-                                    caller_cell,
-                                ),
                                 _effective_class_authority_for_cell(caller_cell),
                             ),
                             arguments,
@@ -2125,12 +2000,8 @@ async def dispatch_mcp_rpc_body(
                     "content": [{
                         "type": "text",
                         "text": tool_search_response(
-                            _profile_project_tools(
+                            _authority_project_tools(
                                 ARCHITECT_TOOLS,
-                                _effective_profile_policy_for_cell(
-                                    state,
-                                    caller_cell,
-                                ),
                                 _effective_class_authority_for_cell(caller_cell),
                             ),
                             arguments,

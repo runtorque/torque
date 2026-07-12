@@ -59,7 +59,7 @@ class MCPHelpDocsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(payload["status"], {"ok", "no_answer"})
         self.assertEqual(calls, [])
 
-    async def test_product_manager_profile_can_query_help_but_not_hidden_state_tools(self):
+    async def test_product_manager_class_can_query_help_but_not_hidden_state_tools(self):
         state = self.state_mod.MatrixState()
         architect = self.state_mod.AgentCell(
             id="architect-1",
@@ -70,7 +70,12 @@ class MCPHelpDocsTests(unittest.IsolatedAsyncioTestCase):
         )
         state.agents[architect.id] = architect
         state.groups["g"] = [architect.id]
-        state.agent_profile_overrides = {architect.id: "product-manager-draft"}
+        state.assign_agent_class(
+            architect.id,
+            "product-manager",
+            actor_kind="user",
+        )
+        state.apply_effective_agent_class_for_launch(architect)
 
         async def fake_handle_command(payload):
             self.fail(f"Help MCP should not call server command handler: {payload}")

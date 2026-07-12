@@ -60,10 +60,6 @@ var _agentPanelMcpCallsRequestedKeyByAgent = {};
 var _agentPanelMcpCallsVisibleLimitByAgent = {};
 var _agentPanelMcpCallExpandedByAgent = {};
 var _agentPanelMcpFiltersByAgent = {};
-var _agentPanelProfileManagerByAgent = {};
-var _agentPanelProfileListByKey = {};
-var _agentPanelProfilePreviewById = {};
-var _agentPanelProfileLastRequestedListKey = '';
 var _agentPanelClassManagerByAgent = {};
 var _agentPanelClassListByKey = {};
 var _agentPanelClassPreviewById = {};
@@ -1415,7 +1411,6 @@ function _agentPanelClassNoticeKey(value) {
     .toLowerCase()
     .replace(/&amp;/g, '&')
     .replace(/\bagent classes?\b/g, 'agent class')
-    .replace(/\bagent profiles?\b/g, 'agent profile')
     .replace(/[^\w]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -1608,13 +1603,11 @@ function _agentPanelClassState(agent) {
     || status.assigned_class_version
     || ''
   ).trim();
-  var directProfileId = !assignedId ? String(agent.agent_profile_id || '').trim() : '';
-  var directProfileVersion = !assignedId ? String(agent.agent_profile_version || '').trim() : '';
   var effectiveId = String(
     agent.effective_agent_class_id
     || snapshot.id
     || status.effective_class_id
-    || (!directProfileId ? defaultId : '')
+    || defaultId
     || ''
   ).trim();
   var effectiveVersion = String(
@@ -1637,7 +1630,7 @@ function _agentPanelClassState(agent) {
   if (effectivePreview && effectivePreview.id) {
     _agentPanelClassPreviewById[String(effectivePreview.id || '')] = effectivePreview;
   }
-  var desiredId = directProfileId ? '' : (assignedId || defaultId);
+  var desiredId = assignedId || defaultId;
   var desiredVersion = assignedId ? assignedVersion : '';
   var desiredPreview = assignedId
     ? (assignedPreview || _agentPanelClassPreviewFor(agent, assignedId))
@@ -1661,35 +1654,28 @@ function _agentPanelClassState(agent) {
   }
   if (!effectiveLabel && effectiveId === defaultId) effectiveLabel = 'Default ' + _agentPanelKindDisplayLabel(kind);
   if (!effectiveLabel) effectiveLabel = effectiveId || _agentPanelKindDisplayLabel(kind);
-  var desiredLabel = '';
-  if (directProfileId) {
-    desiredLabel = 'No Agent Class — Advanced/Internal direct assignment '
-      + directProfileId
-      + _agentPanelClassVersionSuffix(directProfileVersion);
-  } else {
-    var desiredPreviewLabel = _agentPanelClassDisplayName(desiredPreview, '');
-    var desiredStatusLabel = String(
-      status.next_launch_primary_identity_label
-      || status.assigned_primary_identity_label
-      || desiredId
-      || ''
-    ).trim();
-    desiredLabel = _agentPanelClassDisplayName(
-      Object.assign({}, desiredPreview || {}, {
-        id: desiredId || (desiredPreview && desiredPreview.id) || '',
-        primary_identity_label: desiredPreviewLabel || desiredStatusLabel,
-      }),
-      desiredStatusLabel || desiredId || ''
-    );
-    if (!assignedId && desiredId === defaultId
-        && (!desiredPreview || !desiredPreview.id || desiredLabel === desiredId)) {
-      desiredLabel = 'Default ' + _agentPanelKindDisplayLabel(kind);
-    } else if (!assignedId && desiredId === defaultId) {
-      desiredLabel = desiredLabel || ('Default ' + _agentPanelKindDisplayLabel(kind));
-    }
+  var desiredPreviewLabel = _agentPanelClassDisplayName(desiredPreview, '');
+  var desiredStatusLabel = String(
+    status.next_launch_primary_identity_label
+    || status.assigned_primary_identity_label
+    || desiredId
+    || ''
+  ).trim();
+  var desiredLabel = _agentPanelClassDisplayName(
+    Object.assign({}, desiredPreview || {}, {
+      id: desiredId || (desiredPreview && desiredPreview.id) || '',
+      primary_identity_label: desiredPreviewLabel || desiredStatusLabel,
+    }),
+    desiredStatusLabel || desiredId || ''
+  );
+  if (!assignedId && desiredId === defaultId
+      && (!desiredPreview || !desiredPreview.id || desiredLabel === desiredId)) {
+    desiredLabel = 'Default ' + _agentPanelKindDisplayLabel(kind);
+  } else if (!assignedId && desiredId === defaultId) {
+    desiredLabel = desiredLabel || ('Default ' + _agentPanelKindDisplayLabel(kind));
   }
   var secondaryLabel = _agentPanelClassSecondaryLabel(effectivePreview || {}, kind);
-  var computedPending = directProfileId ? true : !!(
+  var computedPending = !!(
     desiredId
     && (
       desiredId !== effectiveId
@@ -1710,8 +1696,6 @@ function _agentPanelClassState(agent) {
     desiredId: desiredId,
     desiredVersion: desiredVersion,
     desiredLabel: desiredLabel,
-    directProfileId: directProfileId,
-    directProfileVersion: directProfileVersion,
     effectiveId: effectiveId,
     effectiveVersion: effectiveVersion,
     effectiveLabel: effectiveLabel,
@@ -1761,530 +1745,6 @@ function _agentPanelClassBadgeHtml(agent) {
     + '</span>';
 }
 
-function _agentPanelProfileBadgeHtml(agent) {
-  if (!agent || String(agent.cell_type || 'agent') !== 'agent') return '';
-  var profileState = _agentPanelProfileState(agent);
-  var displayId = profileState.effectiveId || profileState.desiredId || profileState.assignedId;
-  var kind = profileState.kind;
-  if (!displayId) return '';
-  var snapshot = (agent.effective_agent_profile_snapshot && typeof agent.effective_agent_profile_snapshot === 'object')
-    ? agent.effective_agent_profile_snapshot
-    : {};
-  var status = String(snapshot.status || '').trim();
-  if (!status) {
-    status = /^full-/.test(displayId) ? 'full' : 'restricted';
-  }
-  var assignedVersion = String(agent.agent_profile_version || '').trim();
-  var effectiveVersion = profileState.effectiveVersion;
-  var pending = profileState.pending;
-  var warnings = Array.isArray(snapshot.warnings) ? snapshot.warnings : [];
-  var denied = Array.isArray(snapshot.denied_high_risk_capabilities)
-    ? snapshot.denied_high_risk_capabilities
-    : [];
-  var classes = 'agent-profile-badge agent-profile-badge-' + _agentPanelEsc(status || 'full');
-  if (pending) classes += ' agent-profile-badge-pending';
-  if (status === 'draft' || status === 'restricted' || denied.length) classes += ' agent-profile-badge-warning';
-  var label = displayId + (effectiveVersion ? ('@' + effectiveVersion) : '');
-  if (pending) label += ' (pending next launch)';
-  var titleParts = [
-    'Agent Profile: ' + label,
-    'base kind: ' + (kind || '—'),
-    'status: ' + (status || 'full'),
-  ];
-  if (profileState.assignedId) {
-    titleParts.push('desired assignment: ' + profileState.assignedId + (assignedVersion ? ('@' + assignedVersion) : ''));
-  } else if (profileState.desiredId) {
-    titleParts.push('desired assignment: default ' + profileState.desiredId);
-  }
-  if (denied.length) titleParts.push('powerful actions denied: ' + denied.slice(0, 8).join(', '));
-  for (var i = 0; i < warnings.length && i < 3; i++) titleParts.push(String(warnings[i] || ''));
-  return '<span class="' + classes + '" title="' + _agentPanelEsc(titleParts.join('\n')) + '">'
-    + _agentPanelEsc(label)
-    + '</span>';
-}
-
-function _agentPanelProfileDefaultIdForKind(kind) {
-  kind = String(kind || '').trim();
-  if (kind === 'architect' || kind === 'engineer' || kind === 'worker') {
-    return 'full-' + kind;
-  }
-  return '';
-}
-
-function _agentPanelProfileState(agent) {
-  var kind = String((agent && agent.kind) || '').trim();
-  var defaultId = _agentPanelProfileDefaultIdForKind(kind);
-  var status = (agent && agent.agent_profile_status && typeof agent.agent_profile_status === 'object')
-    ? agent.agent_profile_status
-    : {};
-  var snapshot = (agent && agent.effective_agent_profile_snapshot
-      && typeof agent.effective_agent_profile_snapshot === 'object')
-    ? agent.effective_agent_profile_snapshot
-    : {};
-  var assignedId = String(
-    (agent && agent.agent_profile_id)
-    || status.assigned_profile_id
-    || ''
-  ).trim();
-  var assignedVersion = String(
-    (agent && agent.agent_profile_version)
-    || status.assigned_profile_version
-    || ''
-  ).trim();
-  var classState = !assignedId ? _agentPanelClassState(agent) : {};
-  var classControlsAuthority = !!(
-    !assignedId && (classState.desiredId || classState.effectiveId)
-  );
-  var effectiveId = String(
-    (agent && agent.effective_agent_profile_id)
-    || snapshot.id
-    || status.effective_profile_id
-    || (classControlsAuthority ? '' : defaultId)
-    || assignedId
-    || ''
-  ).trim();
-  var effectiveVersion = String(
-    (agent && agent.effective_agent_profile_version)
-    || snapshot.version
-    || status.effective_profile_version
-    || ''
-  ).trim();
-  var desiredId = assignedId
-    || String(status.next_launch_profile_id || '').trim()
-    || (classControlsAuthority ? '' : defaultId);
-  var desiredVersion = assignedId
-    ? assignedVersion
-    : (String(status.next_launch_profile_version || '').trim() || '');
-  var computedPending = classControlsAuthority
-    ? !!effectiveId
-    : !!(
-      desiredId
-      && (
-        desiredId !== effectiveId
-        || (desiredVersion && desiredVersion !== effectiveVersion)
-      )
-    );
-  var pending = typeof status.pending_next_launch === 'boolean'
-    ? !!(status.pending_next_launch && computedPending)
-    : computedPending;
-  return {
-    kind: kind,
-    defaultId: defaultId,
-    assignedId: assignedId,
-    assignedVersion: assignedVersion,
-    desiredId: desiredId,
-    desiredVersion: desiredVersion,
-    effectiveId: effectiveId,
-    effectiveVersion: effectiveVersion,
-    pending: pending,
-    classControlsAuthority: classControlsAuthority,
-    managedByClass: false,
-    managedByClassId: '',
-    managedByClassVersion: '',
-    managedByClassLabel: '',
-    statusObject: status,
-  };
-}
-
-function _agentPanelProfileDisplayName(profile, fallback) {
-  profile = profile || {};
-  return String(profile.display_name || profile.name || profile.id || fallback || '').trim();
-}
-
-function _agentPanelProfileStatusLabel(profile) {
-  profile = profile || {};
-  return String(profile.status || profile.lifecycle || '').trim() || 'full';
-}
-
-function _agentPanelProfileVersionSuffix(version) {
-  version = String(version || '').trim();
-  return version ? ('@' + version) : '';
-}
-
-function _agentPanelProfileBaseDir(agent) {
-  return String(
-    (agent && (agent.worktree_repo_root || agent.directory || agent.current_path)) || ''
-  ).trim();
-}
-
-function _agentPanelProfileListKey(agent) {
-  return _agentPanelProfileBaseDir(agent) || '__default__';
-}
-
-function _agentPanelProfileListCache(agent) {
-  var key = _agentPanelProfileListKey(agent);
-  if (!_agentPanelProfileListByKey[key]) {
-    _agentPanelProfileListByKey[key] = {
-      key: key,
-      baseDir: _agentPanelProfileBaseDir(agent),
-      profiles: [],
-      issues: [],
-      requested: false,
-      loading: false,
-      error: '',
-    };
-  }
-  return _agentPanelProfileListByKey[key];
-}
-
-function _agentPanelProfileAssignmentSignature(agent) {
-  if (!agent) return '';
-  return [
-    agent.kind || '',
-    agent.agent_profile_id || '',
-    agent.agent_profile_version || '',
-    agent.effective_agent_profile_id || '',
-    agent.effective_agent_profile_version || '',
-    agent.status || '',
-  ].join('|');
-}
-
-function _agentPanelProfileUi(agent) {
-  var agentId = String((agent && agent.id) || '').trim();
-  if (!agentId) return {
-    open: false,
-    selectedProfileId: '',
-    dirty: false,
-    saving: false,
-    error: '',
-  };
-  var ui = _agentPanelProfileManagerByAgent[agentId];
-  if (!ui) {
-    ui = {
-      open: false,
-      selectedProfileId: undefined,
-      dirty: false,
-      saving: false,
-      previewLoadingProfileId: '',
-      error: '',
-      message: '',
-      boundSignature: '',
-    };
-    _agentPanelProfileManagerByAgent[agentId] = ui;
-  }
-  var signature = _agentPanelProfileAssignmentSignature(agent);
-  if (ui.selectedProfileId === undefined
-      || (ui.boundSignature !== signature && !ui.dirty && !ui.saving)) {
-    var signatureChanged = ui.boundSignature !== signature;
-    ui.selectedProfileId = String(agent.agent_profile_id || '').trim();
-    ui.boundSignature = signature;
-    ui.error = '';
-    if (signatureChanged && ui.message && !_agentPanelProfileState(agent).pending) {
-      ui.message = '';
-    }
-  }
-  return ui;
-}
-
-function _agentPanelProfilePreviewTargetId(agent, selectedProfileId) {
-  selectedProfileId = String(selectedProfileId || '').trim();
-  if (selectedProfileId) return selectedProfileId;
-  return _agentPanelProfileDefaultIdForKind(_agentPanelKind(agent));
-}
-
-function _agentPanelProfileFromList(agent, profileId) {
-  profileId = String(profileId || '').trim();
-  if (!profileId) return null;
-  var cache = _agentPanelProfileListCache(agent);
-  var profiles = Array.isArray(cache.profiles) ? cache.profiles : [];
-  for (var i = 0; i < profiles.length; i++) {
-    var profile = profiles[i] || {};
-    if (String(profile.id || '') === profileId) return profile;
-  }
-  return null;
-}
-
-function _agentPanelProfilePreviewFor(agent, profileId) {
-  profileId = String(profileId || '').trim();
-  if (!profileId) return null;
-  return _agentPanelProfilePreviewById[profileId] || _agentPanelProfileFromList(agent, profileId);
-}
-
-function _agentPanelProfileCompatibleProfiles(agent) {
-  var kind = _agentPanelKind(agent);
-  var defaultId = _agentPanelProfileDefaultIdForKind(kind);
-  var cache = _agentPanelProfileListCache(agent);
-  var profiles = Array.isArray(cache.profiles) ? cache.profiles : [];
-  var compatible = [];
-  for (var i = 0; i < profiles.length; i++) {
-    var profile = profiles[i] || {};
-    if (String(profile.base_kind || '') !== kind) continue;
-    if (String(profile.id || '') === defaultId) continue;
-    compatible.push(profile);
-  }
-  compatible.sort(function(a, b) {
-    return _agentPanelProfileDisplayName(a, a && a.id)
-      .localeCompare(_agentPanelProfileDisplayName(b, b && b.id));
-  });
-  return compatible;
-}
-
-function _agentPanelRefreshProfileManagerRender() {
-  _agentPanelRenderClassModal();
-  if (typeof _agentPanelRefreshCurrentTab === 'function'
-      && _agentPanelRefreshCurrentTab()) return;
-  if (typeof renderAgentPanel === 'function') renderAgentPanel();
-}
-
-function _agentPanelEnsureClassModalForProfileManager(agent) {
-  if (!agent || String(agent.cell_type || 'agent') !== 'agent') return;
-  var agentId = String(agent.id || '');
-  if (!agentId) return;
-  if (_agentPanelClassModalAgentId !== agentId) {
-    _agentPanelOpenClassAssignmentModal(agent);
-  } else {
-    var classUi = _agentPanelClassUi(agent);
-    classUi.open = true;
-  }
-}
-
-function _agentPanelRequestProfileList(agent, force) {
-  if (!agent || String(agent.cell_type || 'agent') !== 'agent') return;
-  var cache = _agentPanelProfileListCache(agent);
-  if (!force && (cache.loading || cache.requested)) return;
-  cache.loading = true;
-  cache.requested = true;
-  cache.error = '';
-  cache.baseDir = _agentPanelProfileBaseDir(agent);
-  _agentPanelProfileLastRequestedListKey = cache.key;
-  if (typeof send === 'function') {
-    send({
-      cmd: 'agent_profile_list',
-      base_dir: cache.baseDir,
-    });
-  }
-}
-
-function _agentPanelRequestProfilePreview(agent, profileId, force) {
-  profileId = String(profileId || '').trim();
-  if (!agent || !profileId) return;
-  var ui = _agentPanelProfileUi(agent);
-  if (!force && (_agentPanelProfilePreviewById[profileId] || ui.previewLoadingProfileId === profileId)) {
-    return;
-  }
-  ui.previewLoadingProfileId = profileId;
-  ui.error = '';
-  if (typeof send === 'function') {
-    send({
-      cmd: 'agent_profile_preview',
-      profile_id: profileId,
-      base_dir: _agentPanelProfileBaseDir(agent),
-    });
-  }
-}
-
-function _agentPanelEnsureOpenProfileManagerData(agent) {
-  if (!agent || String(agent.cell_type || 'agent') !== 'agent') return;
-  var ui = _agentPanelProfileUi(agent);
-  if (!ui.open) return;
-  _agentPanelRequestProfileList(agent, false);
-  var targetId = _agentPanelProfilePreviewTargetId(agent, ui.selectedProfileId);
-  if (targetId) _agentPanelRequestProfilePreview(agent, targetId, false);
-}
-
-function agentPanelToggleProfileAssignment(evt, agentId) {
-  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
-  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
-  var agent = _agentPanelAgentForId(agentId) || _resolveFocusedAgent();
-  if (!agent || String(agent.cell_type || 'agent') !== 'agent') return false;
-  var classUi = _agentPanelClassUi(agent);
-  classUi.profileAdvancedOpen = true;
-  _agentPanelEnsureClassModalForProfileManager(agent);
-  var ui = _agentPanelProfileUi(agent);
-  ui.open = !ui.open;
-  ui.error = '';
-  if (ui.open) _agentPanelEnsureOpenProfileManagerData(agent);
-  _agentPanelRefreshProfileManagerRender();
-  return false;
-}
-
-function agentPanelRefreshProfiles(evt, agentId) {
-  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
-  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
-  var agent = _agentPanelAgentForId(agentId) || _resolveFocusedAgent();
-  if (!agent) return false;
-  _agentPanelClassUi(agent).profileAdvancedOpen = true;
-  _agentPanelEnsureClassModalForProfileManager(agent);
-  var ui = _agentPanelProfileUi(agent);
-  ui.open = true;
-  ui.error = '';
-  _agentPanelRequestProfileList(agent, true);
-  var targetId = _agentPanelProfilePreviewTargetId(agent, ui.selectedProfileId);
-  if (targetId) _agentPanelRequestProfilePreview(agent, targetId, true);
-  _agentPanelRefreshProfileManagerRender();
-  return false;
-}
-
-function agentPanelSelectProfile(agentId, profileId) {
-  var agent = _agentPanelAgentForId(agentId) || _resolveFocusedAgent();
-  if (!agent) return false;
-  _agentPanelClassUi(agent).profileAdvancedOpen = true;
-  _agentPanelEnsureClassModalForProfileManager(agent);
-  var ui = _agentPanelProfileUi(agent);
-  ui.open = true;
-  ui.selectedProfileId = String(profileId || '').trim();
-  ui.dirty = true;
-  ui.error = '';
-  ui.message = '';
-  var targetId = _agentPanelProfilePreviewTargetId(agent, ui.selectedProfileId);
-  if (targetId) _agentPanelRequestProfilePreview(agent, targetId, false);
-  _agentPanelRefreshProfileManagerRender();
-  return false;
-}
-
-function agentPanelAssignSelectedProfile(evt, agentId) {
-  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
-  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
-  var agent = _agentPanelAgentForId(agentId) || _resolveFocusedAgent();
-  if (!agent) return false;
-  _agentPanelClassUi(agent).profileAdvancedOpen = true;
-  _agentPanelEnsureClassModalForProfileManager(agent);
-  var ui = _agentPanelProfileUi(agent);
-  var selected = String(ui.selectedProfileId || '').trim();
-  var targetId = _agentPanelProfilePreviewTargetId(agent, selected);
-  if (selected && !_agentPanelProfilePreviewById[selected]) {
-    ui.error = 'Wait for the profile preview before assigning.';
-    _agentPanelRequestProfilePreview(agent, selected, false);
-    _agentPanelRefreshProfileManagerRender();
-    return false;
-  }
-  ui.open = true;
-  ui.saving = true;
-  ui.error = '';
-  ui.message = '';
-  if (typeof send === 'function') {
-    send({
-      cmd: 'agent_profile_assign',
-      agent_id: String(agent.id || ''),
-      profile_id: selected,
-      actor_label: 'trusted-user-ui',
-    });
-  }
-  // Keep the preview target warm while the assignment request is in flight.
-  if (targetId) _agentPanelRequestProfilePreview(agent, targetId, false);
-  _agentPanelRefreshProfileManagerRender();
-  return false;
-}
-
-function agentPanelClearProfileAssignment(evt, agentId) {
-  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
-  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
-  var agent = _agentPanelAgentForId(agentId) || _resolveFocusedAgent();
-  if (!agent) return false;
-  var ui = _agentPanelProfileUi(agent);
-  ui.selectedProfileId = '';
-  ui.dirty = true;
-  return agentPanelAssignSelectedProfile(evt, agentId);
-}
-
-function agentPanelReceiveAgentProfiles(msg) {
-  msg = msg || {};
-  var profiles = Array.isArray(msg.profiles) ? msg.profiles : [];
-  var issues = Array.isArray(msg.issues) ? msg.issues : [];
-  var updated = false;
-  for (var key in _agentPanelProfileListByKey) {
-    if (!Object.prototype.hasOwnProperty.call(_agentPanelProfileListByKey, key)) continue;
-    var cache = _agentPanelProfileListByKey[key];
-    if (!cache || (!cache.loading && key !== _agentPanelProfileLastRequestedListKey)) continue;
-    cache.profiles = profiles.slice();
-    cache.issues = issues.slice();
-    cache.loading = false;
-    cache.requested = true;
-    cache.error = '';
-    updated = true;
-  }
-  if (!updated) {
-    var fallbackKey = _agentPanelProfileLastRequestedListKey || '__default__';
-    var fallback = _agentPanelProfileListByKey[fallbackKey] || {
-      key: fallbackKey,
-      baseDir: '',
-      profiles: [],
-      issues: [],
-      requested: false,
-      loading: false,
-      error: '',
-    };
-    fallback.profiles = profiles.slice();
-    fallback.issues = issues.slice();
-    fallback.loading = false;
-    fallback.requested = true;
-    fallback.error = '';
-    _agentPanelProfileListByKey[fallbackKey] = fallback;
-  }
-  var focused = _resolveFocusedAgent();
-  if (focused) _agentPanelEnsureOpenProfileManagerData(focused);
-  _agentPanelRefreshProfileManagerRender();
-}
-
-function agentPanelReceiveAgentProfilePreview(msg) {
-  msg = msg || {};
-  var profile = msg.profile && typeof msg.profile === 'object' ? msg.profile : null;
-  if (!profile || !profile.id) return;
-  var profileId = String(profile.id || '').trim();
-  if (!profileId) return;
-  _agentPanelProfilePreviewById[profileId] = profile;
-  for (var agentId in _agentPanelProfileManagerByAgent) {
-    if (!Object.prototype.hasOwnProperty.call(_agentPanelProfileManagerByAgent, agentId)) continue;
-    var ui = _agentPanelProfileManagerByAgent[agentId];
-    if (ui && ui.previewLoadingProfileId === profileId) ui.previewLoadingProfileId = '';
-  }
-  _agentPanelRefreshProfileManagerRender();
-}
-
-function agentPanelReceiveAgentProfileAssignment(msg) {
-  msg = msg || {};
-  var status = msg.status && typeof msg.status === 'object' ? msg.status : {};
-  var agentId = String(status.agent_id || status.id || '').trim();
-  var agent = agentId ? _agentPanelAgentForId(agentId) : _resolveFocusedAgent();
-  if (agent) {
-    agent.agent_profile_id = String(status.assigned_profile_id || '').trim();
-    agent.agent_profile_version = String(status.assigned_profile_version || '').trim();
-    agent.agent_profile_assigned_at = Number(status.assigned_at || agent.agent_profile_assigned_at || 0) || 0;
-    agent.agent_profile_assigned_by = String(status.assigned_by || agent.agent_profile_assigned_by || '').trim();
-  }
-  var ui = _agentPanelProfileUi(agent);
-  ui.saving = false;
-  ui.dirty = false;
-  ui.error = '';
-  ui.message = status.pending_next_launch
-    ? 'Desired profile updated. It will apply on the next launch or relaunch.'
-    : 'Desired profile updated.';
-  ui.selectedProfileId = String(status.assigned_profile_id || '').trim();
-  ui.boundSignature = agent ? _agentPanelProfileAssignmentSignature(agent) : ui.boundSignature;
-  if (typeof _showToast === 'function') _showToast(ui.message, 'success');
-  _agentPanelRefreshProfileManagerRender();
-}
-
-function agentPanelHandleAgentProfileError(msg) {
-  var message = String((msg && (msg.message || msg.error)) || '').trim();
-  if (!message) return false;
-  var handled = false;
-  for (var agentId in _agentPanelProfileManagerByAgent) {
-    if (!Object.prototype.hasOwnProperty.call(_agentPanelProfileManagerByAgent, agentId)) continue;
-    var ui = _agentPanelProfileManagerByAgent[agentId];
-    if (!ui) continue;
-    if (ui.saving || ui.previewLoadingProfileId) {
-      ui.saving = false;
-      ui.previewLoadingProfileId = '';
-      ui.error = message;
-      handled = true;
-    }
-  }
-  for (var key in _agentPanelProfileListByKey) {
-    if (!Object.prototype.hasOwnProperty.call(_agentPanelProfileListByKey, key)) continue;
-    var cache = _agentPanelProfileListByKey[key];
-    if (cache && cache.loading) {
-      cache.loading = false;
-      cache.error = message;
-      handled = true;
-    }
-  }
-  if (!handled) return false;
-  if (typeof _showToast === 'function') _showToast(message, 'error');
-  _agentPanelRefreshProfileManagerRender();
-  return true;
-}
-
 function _agentPanelClassAssignmentSignature(agent) {
   if (!agent) return '';
   var status = agent.agent_class_status && typeof agent.agent_class_status === 'object'
@@ -2296,8 +1756,6 @@ function _agentPanelClassAssignmentSignature(agent) {
     agent.agent_class_version || '',
     agent.effective_agent_class_id || '',
     agent.effective_agent_class_version || '',
-    agent.agent_profile_id || '',
-    agent.agent_profile_version || '',
     status.assigned_class_id || '',
     status.effective_class_id || '',
     status.pending_next_launch === true ? 'pending' : '',
@@ -2314,7 +1772,6 @@ function _agentPanelClassUi(agent) {
     saving: false,
     error: '',
     message: '',
-    profileAdvancedOpen: false,
   };
   var ui = _agentPanelClassManagerByAgent[agentId];
   if (!ui) {
@@ -2328,7 +1785,6 @@ function _agentPanelClassUi(agent) {
       error: '',
       message: '',
       boundSignature: '',
-      profileAdvancedOpen: false,
     };
     _agentPanelClassManagerByAgent[agentId] = ui;
   }
@@ -2513,14 +1969,6 @@ function agentPanelSelectClass(agentId, classId) {
   ui.error = '';
   ui.message = '';
   _agentPanelRefreshClassManagerRender();
-  return false;
-}
-
-function agentPanelSetClassAdvancedOpen(agentId, open) {
-  var agent = _agentPanelAgentForId(agentId) || _resolveFocusedAgent();
-  if (!agent) return false;
-  var ui = _agentPanelClassUi(agent);
-  ui.profileAdvancedOpen = !!open;
   return false;
 }
 
@@ -2766,403 +2214,14 @@ function agentPanelHandleAgentClassError(msg) {
   return true;
 }
 
-function _agentPanelHeaderProfileControlsHtml(agent) {
-  return '';
-}
 
-function _agentPanelProfileMetaLine(label, value, extraClass) {
+function _agentPanelClassMetaLine(label, value, extraClass) {
   value = String(value || '').trim();
   if (!value) value = '—';
   return '<div class="agent-profile-meta-line' + (extraClass ? ' ' + _agentPanelAttr(extraClass) : '') + '">'
     + '<span class="agent-profile-meta-label">' + _agentPanelEsc(label) + '</span>'
     + '<span class="agent-profile-meta-value">' + _agentPanelEsc(value) + '</span>'
     + '</div>';
-}
-
-function _agentPanelProfilePolicySummary(policy) {
-  if (!policy || typeof policy !== 'object') return '';
-  var summary = String(policy.summary || '').trim();
-  if (summary) return summary;
-  var parts = [];
-  for (var key in policy) {
-    if (!Object.prototype.hasOwnProperty.call(policy, key)) continue;
-    var value = policy[key];
-    if (value == null || value === '') continue;
-    if (typeof value === 'object') continue;
-    parts.push(key.replace(/_/g, ' ') + ': ' + String(value));
-    if (parts.length >= 2) break;
-  }
-  return parts.join('; ');
-}
-
-function _agentPanelProfilePolicyHtml(profile) {
-  if (!profile || typeof profile !== 'object') return '';
-  var policies = [
-    ['Scope', profile.scope_policy],
-    ['Communication', profile.communication_policy],
-    ['Spawn', profile.spawn_policy],
-    ['Audit', profile.audit_policy],
-  ];
-  var rows = '';
-  for (var i = 0; i < policies.length; i++) {
-    var summary = _agentPanelProfilePolicySummary(policies[i][1]);
-    if (!summary) continue;
-    rows += '<div class="agent-profile-policy-row">'
-      + '<span class="agent-profile-policy-label">' + _agentPanelEsc(policies[i][0]) + '</span>'
-      + '<span class="agent-profile-policy-copy">' + _agentPanelEsc(summary) + '</span>'
-      + '</div>';
-  }
-  if (!rows) return '';
-  return '<div class="agent-profile-policy-summary">' + rows + '</div>';
-}
-
-function _agentPanelProfileWarningsHtml(profile) {
-  if (!profile || typeof profile !== 'object') return '';
-  var warnings = Array.isArray(profile.warnings) ? profile.warnings : [];
-  var html = '';
-  if (warnings.length) {
-    html += '<ul class="agent-profile-warning-list">';
-    for (var i = 0; i < warnings.length; i++) {
-      html += '<li>' + _agentPanelEsc(warnings[i]) + '</li>';
-    }
-    html += '</ul>';
-  }
-  return html;
-}
-
-function _agentPanelProfileDeniedHtml(profile) {
-  if (!profile || typeof profile !== 'object') return '';
-  var denied = Array.isArray(profile.denied_high_risk_capabilities)
-    ? profile.denied_high_risk_capabilities
-    : [];
-  if (!denied.length) {
-    return '<div class="agent-profile-denied-empty">No powerful-action denies reported for this profile.</div>';
-  }
-  var limit = 12;
-  var html = '<div class="agent-profile-denied">';
-  html += '<div class="agent-profile-denied-title">Powerful actions denied</div>';
-  html += '<div class="agent-profile-denied-chips">';
-  for (var i = 0; i < Math.min(limit, denied.length); i++) {
-    html += '<span class="agent-profile-denied-chip">' + _agentPanelEsc(denied[i]) + '</span>';
-  }
-  if (denied.length > limit) {
-    html += '<span class="agent-profile-denied-more">+' + (denied.length - limit) + ' more</span>';
-  }
-  html += '</div></div>';
-  return html;
-}
-
-function _agentPanelProfilePreviewHtml(agent, ui) {
-  var selected = String((ui && ui.selectedProfileId) || '').trim();
-  var targetId = _agentPanelProfilePreviewTargetId(agent, selected);
-  var preview = _agentPanelProfilePreviewFor(agent, targetId);
-  var exactPreview = !!(targetId && _agentPanelProfilePreviewById[targetId]);
-  if (!targetId) {
-    return '<div class="agent-profile-preview agent-profile-preview-empty">'
-      + 'No compatible base-kind profile is available for preview.'
-      + '</div>';
-  }
-  var loading = ui && ui.previewLoadingProfileId === targetId;
-  if (!preview && loading) {
-    return '<div class="agent-profile-preview agent-profile-preview-loading">Loading profile preview…</div>';
-  }
-  if (!preview) {
-    return '<div class="agent-profile-preview agent-profile-preview-empty">'
-      + 'Select a profile to load its preview before assignment.'
-      + '</div>';
-  }
-  var displayName = _agentPanelProfileDisplayName(preview, targetId);
-  var version = String(preview.version || '').trim();
-  var lifecycle = String(preview.lifecycle || '').trim() || 'stable';
-  var status = _agentPanelProfileStatusLabel(preview);
-  var statusClass = status.replace(/[^a-z0-9_-]/gi, '-').toLowerCase() || 'full';
-  var html = '<div class="agent-profile-preview agent-profile-preview-' + _agentPanelAttr(statusClass) + '">';
-  html += '<div class="agent-profile-preview-head">';
-  html += '<div class="agent-profile-preview-title">'
-    + _agentPanelEsc(displayName || targetId)
-    + _agentPanelEsc(_agentPanelProfileVersionSuffix(version))
-    + '</div>';
-  html += '<div class="agent-profile-preview-chips">';
-  html += '<span class="agent-profile-chip">' + _agentPanelEsc(String(preview.base_kind || _agentPanelKind(agent))) + '</span>';
-  html += '<span class="agent-profile-chip agent-profile-chip-' + _agentPanelAttr(statusClass) + '">' + _agentPanelEsc(status) + '</span>';
-  html += '<span class="agent-profile-chip">' + _agentPanelEsc('lifecycle ' + lifecycle) + '</span>';
-  if (!exactPreview && selected) {
-    html += '<span class="agent-profile-chip agent-profile-chip-pending">preview request pending</span>';
-  }
-  html += '</div></div>';
-  if (preview.description) {
-    html += '<div class="agent-profile-preview-description">'
-      + _agentPanelEsc(preview.description) + '</div>';
-  }
-  html += _agentPanelProfileWarningsHtml(preview);
-  html += _agentPanelProfileDeniedHtml(preview);
-  html += _agentPanelProfilePolicyHtml(preview);
-  html += '<div class="agent-profile-next-launch-note">'
-    + 'Assignment changes update the desired profile only; the effective MCP policy changes on next launch or relaunch.'
-    + '</div>';
-  if (loading) {
-    html += '<div class="agent-profile-preview-loading-inline">Refreshing latest preview…</div>';
-  }
-  html += '</div>';
-  return html;
-}
-
-function _agentPanelProfileOptionsHtml(agent, ui) {
-  var kind = _agentPanelKind(agent);
-  var defaultId = _agentPanelProfileDefaultIdForKind(kind);
-  var selected = String((ui && ui.selectedProfileId) || '').trim();
-  var html = '<option value=""' + (!selected ? ' selected' : '') + '>'
-    + 'Default full ' + _agentPanelEsc(kind || 'agent')
-    + (defaultId ? (' (' + _agentPanelEsc(defaultId) + ')') : '')
-    + '</option>';
-  var profiles = _agentPanelProfileCompatibleProfiles(agent);
-  for (var i = 0; i < profiles.length; i++) {
-    var profile = profiles[i] || {};
-    var profileId = String(profile.id || '').trim();
-    if (!profileId) continue;
-    var label = _agentPanelProfileDisplayName(profile, profileId)
-      + _agentPanelProfileVersionSuffix(profile.version)
-      + ' · ' + _agentPanelProfileStatusLabel(profile);
-    html += '<option value="' + _agentPanelAttr(profileId) + '"'
-      + (selected === profileId ? ' selected' : '') + '>'
-      + _agentPanelEsc(label)
-      + '</option>';
-  }
-  return html;
-}
-
-function _agentPanelProfileAssignmentDisabledReason(agent, ui) {
-  ui = ui || {};
-  var selected = String(ui.selectedProfileId || '').trim();
-  var assigned = String((agent && agent.agent_profile_id) || '').trim();
-  var assignedVersion = String((agent && agent.agent_profile_version) || '').trim();
-  if (ui.saving) return 'Saving assignment…';
-  if (selected) {
-    var preview = _agentPanelProfilePreviewById[selected] || null;
-    if (!preview) return 'Wait for preview before assigning.';
-    if (String(preview.base_kind || '') !== _agentPanelKind(agent)) {
-      return 'Selected profile is incompatible with this base kind.';
-    }
-    var previewVersion = String(preview.version || '').trim();
-    if (selected === assigned && (!previewVersion || !assignedVersion || previewVersion === assignedVersion)) {
-      return 'Desired profile is already set.';
-    }
-    return '';
-  }
-  if (!assigned) return 'Default full profile is already desired.';
-  return '';
-}
-
-function _agentPanelProfileAssignmentStatusHtml(agent) {
-  var profileState = _agentPanelProfileState(agent);
-  var kind = profileState.kind;
-  var defaultId = profileState.defaultId;
-  var snapshot = (agent && agent.effective_agent_profile_snapshot
-      && typeof agent.effective_agent_profile_snapshot === 'object')
-    ? agent.effective_agent_profile_snapshot
-    : {};
-  var effectiveId = profileState.effectiveId;
-  var effectiveVersion = profileState.effectiveVersion;
-  var effectiveName = _agentPanelProfileDisplayName(snapshot, effectiveId);
-  var assignedId = profileState.assignedId;
-  var assignedVersion = profileState.assignedVersion;
-  var pending = profileState.pending;
-  var desiredLabel = '';
-  if (assignedId) {
-    desiredLabel = assignedId + _agentPanelProfileVersionSuffix(assignedVersion);
-  } else if (profileState.classControlsAuthority) {
-    desiredLabel = 'Agent Class authority (no direct profile)';
-  } else {
-    desiredLabel = 'default ' + (defaultId || ('full-' + kind));
-  }
-  var effectiveLabel = (effectiveName || effectiveId || '—')
-    + _agentPanelProfileVersionSuffix(effectiveVersion);
-  if (profileState.managedByClass && !pending) {
-    effectiveLabel = 'Managed by Agent Class: '
-      + (profileState.managedByClassLabel || profileState.managedByClassId || '—');
-  }
-  var pendingMetaLabel = (!pending && profileState.managedByClass)
-    ? 'Access source'
-    : 'Pending';
-  var html = '<div class="agent-profile-status-grid">';
-  html += _agentPanelProfileMetaLine('Effective now', effectiveLabel);
-  html += _agentPanelProfileMetaLine('Desired next launch', desiredLabel);
-  html += _agentPanelProfileMetaLine('Lifecycle/status', _agentPanelProfileStatusLabel(snapshot));
-  html += _agentPanelProfileMetaLine(
-    pendingMetaLabel,
-    _agentPanelProfilePendingLabel(profileState, effectiveLabel, desiredLabel, agent),
-    pending ? 'agent-profile-meta-pending' : ''
-  );
-  if (agent && agent.agent_profile_assigned_by) {
-    html += _agentPanelProfileMetaLine('Assigned by', agent.agent_profile_assigned_by);
-  }
-  if (agent && agent.agent_profile_assigned_at) {
-    html += _agentPanelProfileMetaLine('Assigned at', _agentPanelTimestamp(agent.agent_profile_assigned_at));
-  }
-  if (agent && agent.effective_agent_profile_applied_at) {
-    html += _agentPanelProfileMetaLine('Effective frozen', _agentPanelTimestamp(agent.effective_agent_profile_applied_at));
-  }
-  html += '</div>';
-  return html;
-}
-
-function _agentPanelProfilePendingLabel(profileState, effectiveLabel, desiredLabel, agent) {
-  profileState = profileState || {};
-  if (!profileState.pending) {
-    if (profileState.managedByClass) {
-      return 'Managed by Agent Class: '
-        + (profileState.managedByClassLabel || profileState.managedByClassId || '—');
-    }
-    return 'No — effective profile matches desired';
-  }
-  var assignedAt = Number((agent && agent.agent_profile_assigned_at) || 0) || 0;
-  var appliedAt = Number((agent && agent.effective_agent_profile_applied_at) || 0) || 0;
-  var effective = String(effectiveLabel || profileState.effectiveId || '—').trim() || '—';
-  var desired = String(desiredLabel || profileState.desiredId || '—').trim() || '—';
-  if (assignedAt > 0 && appliedAt >= assignedAt) {
-    return 'Yes — last launch froze ' + effective + ', which does not match desired ' + desired;
-  }
-  if (profileState.desiredId && profileState.effectiveId && profileState.desiredId !== profileState.effectiveId) {
-    return 'Yes — effective ' + effective + ' differs from desired ' + desired;
-  }
-  if (profileState.desiredVersion) {
-    return 'Yes — effective version '
-      + (profileState.effectiveVersion || 'unknown')
-      + ' differs from desired version '
-      + profileState.desiredVersion;
-  }
-  return 'Yes — applies on next launch/relaunch';
-}
-
-function _agentPanelProfileLaunchGuidanceHtml(agent) {
-  if (!agent || String(agent.cell_type || 'agent') !== 'agent') return '';
-  var status = String(agent.status || '').trim();
-  var agentId = String(agent.id || '');
-  if (status === 'stopped') {
-    return '<div class="agent-profile-launch-guidance agent-profile-launch-guidance-stopped">'
-      + '<span>Agent is stopped; relaunch when you are ready to apply the desired profile.</span>'
-      + '<button type="button" class="agent-profile-secondary-btn"'
-      + ' onclick="' + _agentPanelEventAttr('event.stopPropagation();relaunchAgent('
-        + _agentPanelJsString(agentId) + ')') + '">Relaunch to apply</button>'
-      + '</div>';
-  }
-  return '<div class="agent-profile-launch-guidance">'
-    + 'Agent is running; this UI will not stop or relaunch it. The desired profile applies on the next natural launch/relaunch.'
-    + '</div>';
-}
-
-function _agentPanelProfileManagerHtml(agent, options) {
-  options = options || {};
-  if (!agent || String(agent.cell_type || 'agent') !== 'agent') return '';
-  var kind = _agentPanelKind(agent);
-  if (kind !== 'architect' && kind !== 'engineer' && kind !== 'worker') return '';
-  var ui = _agentPanelProfileUi(agent);
-  _agentPanelEnsureOpenProfileManagerData(agent);
-  var agentId = String(agent.id || '');
-  var safeId = _agentPanelDomIdToken(agentId);
-  var cache = _agentPanelProfileListCache(agent);
-  var selected = String(ui.selectedProfileId || '').trim();
-  var disabledReason = _agentPanelProfileAssignmentDisabledReason(agent, ui);
-  var primaryLabel = selected ? 'Assign desired profile' : 'Clear desired assignment';
-  var extraClass = options.advanced ? ' agent-profile-manager-internal' : '';
-  var html = '<section class="agent-profile-manager' + extraClass + (ui.open ? ' open' : ' collapsed') + '"'
-    + ' data-agent-profile-manager="' + _agentPanelAttr(agentId) + '">';
-  html += '<div class="agent-profile-manager-head">';
-  html += '<div>';
-  html += '<div class="agent-profile-manager-title">'
-    + _agentPanelEsc(options.title || 'Agent Profile assignment')
-    + '</div>';
-  html += '<div class="agent-profile-manager-subtitle">'
-    + _agentPanelEsc(options.subtitle || 'Trusted-operator desired profile; effective policy stays frozen until launch.')
-    + '</div>';
-  html += '</div>';
-  html += '<button type="button" class="agent-profile-secondary-btn"'
-    + ' onclick="' + _agentPanelEventAttr('return agentPanelToggleProfileAssignment(event,'
-      + _agentPanelJsString(agentId) + ')') + '">'
-    + _agentPanelEsc(ui.open ? 'Hide' : (options.manageLabel || 'Manage'))
-    + '</button>';
-  html += '</div>';
-  if (options.advanced) {
-    html += '<div class="agent-profile-internal-note">'
-      + 'Advanced/backcompat only: Agent Classes are the normal operator-facing assignment. '
-      + 'Direct Agent Profile assignment exposes the internal MCP/capability enforcement snapshot for troubleshooting.'
-      + '</div>';
-    html += '<div class="agent-profile-internal-badges">'
-      + _agentPanelProfileBadgeHtml(agent)
-      + '</div>';
-  }
-  html += _agentPanelProfileAssignmentStatusHtml(agent);
-  if (ui.message) {
-    html += '<div class="agent-profile-message">' + _agentPanelEsc(ui.message) + '</div>';
-  }
-  if (ui.error) {
-    html += '<div class="agent-profile-error">' + _agentPanelEsc(ui.error) + '</div>';
-  }
-  if (!ui.open) {
-    html += '</section>';
-    return html;
-  }
-  html += _agentPanelProfileLaunchGuidanceHtml(agent);
-  if (cache.error) {
-    html += '<div class="agent-profile-error">' + _agentPanelEsc(cache.error) + '</div>';
-  }
-  html += '<div class="agent-profile-controls">';
-  html += '<label for="agent-profile-select-' + _agentPanelAttr(safeId) + '">Desired profile</label>';
-  html += '<select id="agent-profile-select-' + _agentPanelAttr(safeId) + '"'
-    + ' class="agent-profile-select"'
-    + ' onchange="' + _agentPanelEventAttr('agentPanelSelectProfile('
-      + _agentPanelJsString(agentId) + ', this.value)') + '"'
-    + (cache.loading ? ' disabled' : '') + '>';
-  html += _agentPanelProfileOptionsHtml(agent, ui);
-  html += '</select>';
-  if (cache.loading) {
-    html += '<span class="agent-profile-loading">Loading compatible profiles…</span>';
-  } else if (cache.requested && !_agentPanelProfileCompatibleProfiles(agent).length) {
-    html += '<span class="agent-profile-loading">No non-default compatible profiles found for base kind '
-      + _agentPanelEsc(kind) + '.</span>';
-  }
-  html += '</div>';
-  if (Array.isArray(cache.issues) && cache.issues.length) {
-    html += '<div class="agent-profile-issues">';
-    for (var issueIndex = 0; issueIndex < Math.min(cache.issues.length, 4); issueIndex++) {
-      var issue = cache.issues[issueIndex] || {};
-      html += '<div class="agent-profile-issue">'
-        + _agentPanelEsc(String(issue.severity || 'issue') + ': '
-          + (issue.message || issue.code || 'profile validation issue'))
-        + '</div>';
-    }
-    if (cache.issues.length > 4) {
-      html += '<div class="agent-profile-issue">+' + (cache.issues.length - 4) + ' more validation issues</div>';
-    }
-    html += '</div>';
-  }
-  html += _agentPanelProfilePreviewHtml(agent, ui);
-  html += '<div class="agent-profile-actions">';
-  html += '<button type="button" class="agent-profile-primary-btn"'
-    + (disabledReason ? ' disabled title="' + _agentPanelAttr(disabledReason) + '"' : '')
-    + ' onclick="' + _agentPanelEventAttr('return agentPanelAssignSelectedProfile(event,'
-      + _agentPanelJsString(agentId) + ')') + '">'
-    + _agentPanelEsc(ui.saving ? 'Saving…' : primaryLabel)
-    + '</button>';
-  if (String(agent.agent_profile_id || '').trim()) {
-    html += '<button type="button" class="agent-profile-secondary-btn"'
-      + (ui.saving ? ' disabled' : '')
-      + ' onclick="' + _agentPanelEventAttr('return agentPanelClearProfileAssignment(event,'
-        + _agentPanelJsString(agentId) + ')') + '">Clear to default</button>';
-  }
-  html += '<button type="button" class="agent-profile-secondary-btn"'
-    + ' onclick="' + _agentPanelEventAttr('return agentPanelRefreshProfiles(event,'
-      + _agentPanelJsString(agentId) + ')') + '">Refresh profiles</button>';
-  if (disabledReason) {
-    html += '<span class="agent-profile-disabled-reason">' + _agentPanelEsc(disabledReason) + '</span>';
-  }
-  html += '</div>';
-  html += '</section>';
-  return html;
-}
-
-function _agentPanelClassMetaLine(label, value, extraClass) {
-  return _agentPanelProfileMetaLine(label, value, extraClass);
 }
 
 function _agentPanelClassDesiredLabelWithVersion(state) {
@@ -3190,9 +2249,6 @@ function _agentPanelClassEffectiveLabelWithVersion(state) {
 function _agentPanelClassPendingLabel(state, effectiveLabel, desiredLabel, agent) {
   state = state || {};
   if (!state.pending) return 'No — running session already matches desired Agent Class';
-  if (state.directProfileId) {
-    return 'Yes — advanced direct Agent Profile assignment bypasses Agent Class selection; choose an Agent Class above for the next relaunch.';
-  }
   var assignedAt = Number((agent && agent.agent_class_assigned_at) || 0) || 0;
   var appliedAt = Number((agent && agent.effective_agent_class_applied_at) || 0) || 0;
   var effective = String(effectiveLabel || state.effectiveLabel || state.effectiveId || '—').trim() || '—';
@@ -3352,8 +2408,6 @@ function _agentPanelClassBucketLabel(bucket, fallback) {
   var id = String(bucket.id || '').trim();
   if (id === 'deny_raw_tool_picker') return 'No arbitrary tool selection';
   if (id === 'deny_high_risk_operations') return 'No powerful actions beyond this class';
-  if (id === 'deny_class_profile_admin') return 'No permission administration';
-  if (id === 'class_profile_admin') return 'Permission administration';
   return _agentPanelClassPlainPermissionCopy(bucket.label || bucket.display_name || bucket.name || id || fallback || '');
 }
 
@@ -3362,7 +2416,6 @@ function _agentPanelClassBucketSummary(bucket) {
   var id = String(bucket.id || '').trim();
   if (id === 'deny_raw_tool_picker') return 'Keeps arbitrary tool selection outside this class.';
   if (id === 'deny_high_risk_operations') return 'Blocks powerful or critical actions that are not explicitly allowed here.';
-  if (id === 'deny_class_profile_admin') return 'Prevents changing Agent Class permissions from this class.';
   return _agentPanelClassPlainPermissionCopy(bucket.summary || bucket.description || '');
 }
 
@@ -3384,10 +2437,7 @@ function _agentPanelClassPlainPermissionCopy(text) {
     .replace(/\bMCP call telemetry\b/gi, 'tool activity history')
     .replace(/\bMCP calls?\b/gi, 'tool activity')
     .replace(/\bMCP\b/gi, 'tool')
-    .replace(/\bgenerated profiles?\b/gi, 'internal enforcement records')
     .replace(/\braw atoms?\b/gi, 'low-level permissions')
-    .replace(/\bdefault profiles?\b/gi, 'built-in access settings')
-    .replace(/\bprofile pairing\b/gi, 'internal troubleshooting link')
     .replace(/\bcompiler\b/gi, 'internal validation')
     .replace(/\bcompile\b/gi, 'validate');
 }
@@ -3616,24 +2666,12 @@ function _agentPanelClassModalBodyHtml(agent) {
     html += '<span class="agent-profile-disabled-reason">' + _agentPanelEsc(disabledReason) + '</span>';
   }
   html += '</div>';
-  html += '<details class="agent-profile-advanced-details agent-class-advanced-details"'
-    + (ui.profileAdvancedOpen ? ' open' : '')
-    + ' ontoggle="' + _agentPanelEventAttr('agentPanelSetClassAdvancedOpen('
-      + _agentPanelJsString(agentId) + ', this.open)') + '">';
-  html += '<summary>Legacy direct Agent Profile assignment</summary>';
-  html += _agentPanelProfileManagerHtml(agent, {
-    advanced: true,
-    title: 'Legacy direct Agent Profile assignment',
-    subtitle: 'Temporary migration surface for sessions that still launch without an Agent Class.',
-    manageLabel: 'Manage legacy profile',
-  });
-  html += '</details>';
   html += '</section>';
   return html;
 }
 
 
-function _agentPanelBodyWithProfileManager(agent, bodyHtml, includeClassManager) {
+function _agentPanelBodyWithClassManager(agent, bodyHtml, includeClassManager) {
   return (includeClassManager ? _agentPanelClassManagerHtml(agent) : '') + (bodyHtml || '');
 }
 
@@ -5783,7 +4821,7 @@ function _agentPanelTabRenderParts(agent, kind, activeTab) {
 function _renderEngineerPanel(agent) {
   var activeTab = _agentPanelActiveTab('engineer');
   var parts = _agentPanelTabRenderParts(agent, 'engineer', activeTab);
-  var bodyHtml = _agentPanelBodyWithProfileManager(
+  var bodyHtml = _agentPanelBodyWithClassManager(
     agent,
     _agentPanelEngineerSpecializationsEditorHtml(agent) + (parts.bodyHtml || ''),
     activeTab === 'behavior'
@@ -5794,7 +4832,7 @@ function _renderEngineerPanel(agent) {
     'engineer',
     activeTab,
     bodyHtml,
-    (parts.headerRightHtml || '') + _agentPanelHeaderProfileControlsHtml(agent),
+    (parts.headerRightHtml || ''),
     (agent && agent.id) || '',
     _agentPanelUpwardBreadcrumbHtml(agent)
   );
@@ -5963,8 +5001,8 @@ function _renderWorkerPanel(agent) {
     'Per-worker event stream and task history.',
     'worker',
     activeTab,
-    _agentPanelBodyWithProfileManager(agent, parts.bodyHtml, activeTab === 'behavior'),
-    (parts.headerRightHtml || '') + _agentPanelHeaderProfileControlsHtml(agent),
+    _agentPanelBodyWithClassManager(agent, parts.bodyHtml, activeTab === 'behavior'),
+    (parts.headerRightHtml || ''),
     (agent && agent.id) || '',
     _agentPanelUpwardBreadcrumbHtml(agent)
   );
@@ -6260,8 +5298,8 @@ function _renderArchitectPanel(agent) {
     'Journal, decisions, hired engineers, architect messages, and digest queue.',
     'architect',
     activeTab,
-    _agentPanelBodyWithProfileManager(agent, parts.bodyHtml, activeTab === 'behavior'),
-    (parts.headerRightHtml || '') + _agentPanelHeaderProfileControlsHtml(agent),
+    _agentPanelBodyWithClassManager(agent, parts.bodyHtml, activeTab === 'behavior'),
+    (parts.headerRightHtml || ''),
     (agent && agent.id) || '',
     _agentPanelUpwardBreadcrumbHtml(agent)
   );
@@ -6462,7 +5500,7 @@ function _agentPanelRenderFocusedTabInPlace(agent, kind, previousTab, activeTab)
     parts.bodyHtml = _agentPanelEngineerSpecializationsEditorHtml(agent)
       + (parts.bodyHtml || '');
   }
-  parts.bodyHtml = _agentPanelBodyWithProfileManager(agent, parts.bodyHtml || '', activeTab === 'behavior');
+  parts.bodyHtml = _agentPanelBodyWithClassManager(agent, parts.bodyHtml || '', activeTab === 'behavior');
   _agentPanelSetShellTab(shell, activeTab);
   _agentPanelSetActiveTabChrome(el, activeTab);
   // TORQUE:264 follow-up: byte-equality memoize the innerHTML clobber. Under
@@ -6471,7 +5509,7 @@ function _agentPanelRenderFocusedTabInPlace(agent, kind, previousTab, activeTab)
   // destroys + recreates every child node, killing :hover state on tooltip
   // pseudo-elements and resetting textarea caret. Same `_torqueLastHtml`
   // pattern as `dom.topbar` / `dom.tabs` from `06611b8`.
-  var newHeaderHtml = (parts.headerRightHtml || '') + _agentPanelHeaderProfileControlsHtml(agent);
+  var newHeaderHtml = (parts.headerRightHtml || '');
   var newBodyHtml = parts.bodyHtml || '';
   var headerChanged = headerRight._torqueLastHtml !== newHeaderHtml;
   var bodyChanged = content._torqueLastHtml !== newBodyHtml;

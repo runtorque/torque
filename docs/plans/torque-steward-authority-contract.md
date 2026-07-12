@@ -55,7 +55,7 @@ Wave A defines and implements only a safe foundation:
 | Profile/Class/role/specialization mutation | Deny | Deny | Prompt/config-admin wave with validation, preview diff, review approval, rollback |
 | Deploy/release/admin settings | Deny | Deny | Release/admin wave; never silent; requires operator smoke/deploy evidence |
 | Accepted decisions/product authority | Deny | Deny | Steward can recommend decisions; acceptance remains authorized product/architecture authority |
-| External connectors | Not governed by Agent Class/Profile | Not governed by Agent Class/Profile | Connector governance must be designed separately before relying on class restrictions |
+| External connectors | Not governed by Agent Class ACL | Not governed by Agent Class ACL | Connector governance must be designed separately before relying on class restrictions |
 
 ## 3. Representation contract
 
@@ -105,7 +105,7 @@ Explicit restrictions:
 - `deny_engineer_worker_messages`
 - `deny_worktree_merge`
 - `deny_deploy_admin`
-- `deny_class_profile_admin`
+- no `class.admin` capability
 - `deny_decision_acceptance`
 - `deny_raw_tool_picker`
 - `deny_high_risk_operations`
@@ -227,7 +227,7 @@ Why this is non-mutating/safe:
 - The compiled Steward class grants only read-capability atoms.
 - User messaging/asks, peer messaging, task proposal writes, journal writes, memory publication, Thinking writes, and Idea Brief writes are intentionally not granted.
 - The class is lifecycle `draft` and `draft.scratch_only: true` with explicit warnings.
-- Existing Agent Class/Profile enforcement remains the mechanism; this wave only adds a narrow class and prompt/status scaffolding.
+- Existing Agent Class ACL enforcement remains the mechanism; this wave only adds a narrow class and prompt/status scaffolding.
 
 ## 9. Non-goals held
 
@@ -240,7 +240,7 @@ This wave did **not** implement:
 - task create/update/move/assign/dispatch;
 - Engineer hiring/roster changes or Engineer/Worker messaging/control;
 - worktree checkpoint/merge/rebase/PR operations;
-- Agent Class/Profile/role/specialization mutation powers;
+- Agent Class ACL/role/specialization mutation powers;
 - accepted-decision authority;
 - external connector governance;
 - replacing Blueprint/Product Manager, Torqly, or Creative/Catalyst.
@@ -251,7 +251,7 @@ This wave did **not** implement:
 2. Should the first user-visible Steward message be terminal-only, a user message, or a persisted recommendation artifact?
 3. Which health heuristics are product-approved vs too noisy for autonomous suggestions?
 4. What is the minimum durable audit schema for future user-directed powerful actions?
-5. How should external connector access be governed for Steward-like roles, since Agent Classes/Profiles do not enforce connectors today?
+5. How should external connector access be governed for Steward-like roles, since Agent Classes do not enforce connectors today?
 6. Which actor owns acceptance of Steward-generated recommendations: user, Blueprint/Product Manager, Torqly, or group Architect?
 7. Can any low-risk user-message power be granted before the notification/rate-limit design exists, or should all writes remain denied until Wave D?
 
@@ -279,7 +279,7 @@ operating-brief helper for Steward-style sessions:
   agents/workstreams, unhealthy tasks, and visible branch-boundary/merge gates.
 - It does **not** route, dispatch, message, create/update/move/assign tasks,
   hire/dismiss, accept decisions, merge/rebase/checkpoint worktrees, deploy,
-  restart, schedule, notify, edit classes/profiles, or otherwise mutate state.
+  restart, schedule, notify, edit Agent Classes, or otherwise mutate state.
 - The prompt now tells Steward sessions to prefer the helper when visible and to
   keep user-facing output structured as observed facts vs inferred risks vs
   suggested next steps.
@@ -289,11 +289,10 @@ Wave B implementation evidence:
 - `torque/steward_brief.py` — pure read-only brief/anomaly builder.
 - `torque/mcp_architect.py` / `torque/mcp_tools_shared.py` — Architect MCP spec
   and dispatch for `architect_steward_operating_brief`.
-- `torque/agent_profiles.py` — projection mapping requiring only the Steward's
-  existing read atoms; Product Manager and other narrower profiles do not get
-  the helper unless they carry the full read set.
+- `torque/capability_catalog.py` and colocated MCP authority descriptors —
+  projection requires the Steward's canonical read capabilities and scopes.
 - `torque/architect.py` and `torque/builtin_agent_classes/torque-steward.yaml`
   — prompt guidance for structured brief use without broadening authority.
 - Tests: `tests/test_mcp_steward.py`, plus projection/prompt assertions in
-  `tests/test_agent_profiles.py`, `tests/test_agent_classes.py`, and
+  `tests/test_mcp_class_authority.py`, `tests/test_agent_classes.py`, and
   `tests/test_architect_prompt.py`.

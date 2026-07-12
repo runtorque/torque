@@ -262,15 +262,6 @@ function sampleRestrictionCatalog() {
       available: true,
     },
     {
-      id: 'deny_class_profile_admin',
-      label: 'Deny Class/Profile admin',
-      summary: 'Explicitly deny Agent Profile assignment/edit authority.',
-      category: 'admin',
-      risk: 'critical',
-      base_kinds: ['architect', 'engineer', 'worker'],
-      available: true,
-    },
-    {
       id: 'deny_decision_acceptance',
       label: 'Deny accepted-decision authority',
       summary: 'Explicitly deny accepting decisions or creating accepted decisions.',
@@ -429,7 +420,7 @@ test('Agent Class manager renders class list, PM operator access summary, archiv
   const creativePreviewStart = creativeHtml.indexOf('<div class="agent-class-preview');
   const creativeDiagnosticsStart = creativeHtml.indexOf('<details class="agent-class-normalized', creativePreviewStart);
   const creativeNormalPreviewHtml = creativeHtml.slice(creativePreviewStart, creativeDiagnosticsStart);
-  assert.doesNotMatch(creativeNormalPreviewHtml, /class-policy-creative-architect|Agent Profile|generated profile|compiler|raw atom|default profile|capability bucket/i);
+  assert.doesNotMatch(creativeNormalPreviewHtml, /class-policy-creative-architect|generated profile|compiler|raw atom|default profile|capability bucket/i);
   document.getElementById('agent-class-launch-name').value = 'Spark Partner';
   document.getElementById('agent-class-launch-group').value = 'alpha';
   run(context, `agentClassManagerLaunchSelected()`);
@@ -448,7 +439,7 @@ test('Agent Class manager renders class list, PM operator access summary, archiv
   assert.match(stewardHtml, /Torque Steward@1/);
   assert.match(stewardHtml, /What this class can do/);
   assert.match(stewardHtml, /Read own context|Read board summaries/);
-  assert.doesNotMatch(stewardHtml, /Additional restrictions[\s\S]*Agent Profile-compatible internal policy/);
+  assert.doesNotMatch(stewardHtml, /Additional restrictions[\s\S]*internal policy/);
   document.getElementById('agent-class-launch-name').value = 'Torque Steward';
   document.getElementById('agent-class-launch-group').value = 'alpha';
   run(context, `agentClassManagerLaunchSelected()`);
@@ -475,7 +466,7 @@ test('Agent Class manager renders class list, PM operator access summary, archiv
   const previewStart = reviewHtml.indexOf('<div class="agent-class-preview');
   const diagnosticsStart = reviewHtml.indexOf('<details class="agent-class-normalized', previewStart);
   const normalPreviewHtml = reviewHtml.slice(previewStart, diagnosticsStart);
-  assert.doesNotMatch(normalPreviewHtml, /class-policy-review-worker|Agent Profile|generated profile|compiler|raw atom|default profile|capability bucket|Allowed buckets|Restriction buckets/i);
+  assert.doesNotMatch(normalPreviewHtml, /class-policy-review-worker|generated profile|compiler|raw atom|default profile|capability bucket|Allowed buckets|Restriction buckets/i);
   document.getElementById('agent-class-launch-name').value = 'Patch Reviewer';
   document.getElementById('agent-class-launch-group').value = 'alpha';
   run(context, `agentClassManagerLaunchSelected()`);
@@ -499,11 +490,11 @@ test('Agent Class manager presents approved Product Manager dogfood state with c
     scratch_only: false,
     draft: { scratch_only: false, approved_for_live_dogfood: true },
     warnings: [
-      'External connectors are not governed by Agent Classes/Profile policy in Wave 7; manage connector access separately.',
-      'External connector exposure is not governed or enforced by Agent Classes or Agent Profiles in Wave 7; manage connector access separately.',
+      'External connectors are not governed by Agent Classes in Wave 7; manage connector access separately.',
+      'External connector exposure is not governed or enforced by Agent Classes in Wave 7; manage connector access separately.',
       'Product Manager cannot dispatch, merge, deploy, administer, use raw tool picker authority, or message engineers/workers directly.',
     ],
-    external_connector_caveat: 'External connector exposure is not governed or enforced by Agent Classes or Agent Profiles in Wave 7; manage connector access separately.',
+    external_connector_caveat: 'External connector exposure is not governed or enforced by Agent Classes in Wave 7; manage connector access separately.',
     restrictions: [
       'Cannot dispatch workers.',
       'Cannot deploy.',
@@ -571,7 +562,6 @@ test('Agent Class authoring validates before save, shows validation issues, and 
   const saveRules = sendCalls.at(-1).agent_class.acl.rules.map((entry) => entry.capability);
   assert.equal(saveRules.includes('self.read'), true);
   assert.equal(saveRules.includes('help.read'), true);
-  assert.equal(Object.prototype.hasOwnProperty.call(sendCalls.at(-1).agent_class, 'agent_profile_ref'), false);
 
   run(context, `agentClassManagerReceiveMutation({ type: 'agent_class_save', ok: true, operation: 'created', agent_class: { id: 'qa-worker', version: '1', base_kind: 'worker', display_name: 'QA Worker', custom: true, source: 'project', lifecycle: 'stable', status: 'restricted', launchable: true, acl: { mode: 'allow', rules: [{ capability: 'self.read', scope: 'self' }, { capability: 'help.read' }] } }, classes: ${JSON.stringify(sampleClasses())} })`);
   run(context, `agentClassManagerArchive()`);
@@ -671,7 +661,7 @@ test('Agent Class pickers filter by base kind and preserve no-class default add 
   const { context, document, sendCalls } = createHarness({ loadModals: true });
   registerAddWorkerDom(document);
   registerEngineerArchitectDom(document);
-  run(context, `agentClassManagerReceiveList(${JSON.stringify(sampleAgentClassListMessage(sampleClasses().concat([{ id: 'team-engineer', version: '1', base_kind: 'engineer', display_name: 'Team Engineer', custom: true, source: 'project', lifecycle: 'stable', status: 'full', launchable: true, agent_profile_ref: { id: 'full-engineer', version: '1' } }])))})`);
+  run(context, `agentClassManagerReceiveList(${JSON.stringify(sampleAgentClassListMessage(sampleClasses().concat([{ id: 'team-engineer', version: '1', base_kind: 'engineer', display_name: 'Team Engineer', custom: true, source: 'project', lifecycle: 'stable', status: 'full', launchable: true }])))})`);
 
   run(context, `agentClassPickerPrepare('worker', 'alpha', '/repo', 'add-worker')`);
   assert.match(document.getElementById('add-agent-class-select').innerHTML, /Review Worker/);
@@ -765,7 +755,7 @@ test('Engineer launch modal uses explicit launch-from-class only when a class is
     'engineer-launch-specializations-selected', 'engineer-launch-specializations-available', 'engineer-launch-specializations-reset',
     'engineer-launch-agent-class-row', 'engineer-launch-agent-class-select', 'engineer-launch-agent-class-hint'
   ].forEach((id) => document.register(id));
-  run(context, `agentClassManagerReceiveList(${JSON.stringify(sampleAgentClassListMessage(sampleClasses().concat([{ id: 'team-engineer', version: '1', base_kind: 'engineer', display_name: 'Team Engineer', custom: true, source: 'project', lifecycle: 'stable', status: 'full', launchable: true, agent_profile_ref: { id: 'full-engineer', version: '1' } }])))})`);
+  run(context, `agentClassManagerReceiveList(${JSON.stringify(sampleAgentClassListMessage(sampleClasses().concat([{ id: 'team-engineer', version: '1', base_kind: 'engineer', display_name: 'Team Engineer', custom: true, source: 'project', lifecycle: 'stable', status: 'full', launchable: true }])))})`);
   run(context, `openEngineerLaunchDialog('alpha', '')`);
   run(context, `submitEngineerLaunchDialog()`);
   assert.equal(sendCalls.at(-1).cmd, 'add_agent');
@@ -789,11 +779,11 @@ test('Engineer launch picker blocks stale incompatible selections instead of def
     'engineer-launch-specializations-selected', 'engineer-launch-specializations-available', 'engineer-launch-specializations-reset',
     'engineer-launch-agent-class-row', 'engineer-launch-agent-class-select', 'engineer-launch-agent-class-hint'
   ].forEach((id) => document.register(id));
-  const validEngineer = { id: 'team-engineer', version: '1', base_kind: 'engineer', display_name: 'Team Engineer', custom: true, source: 'project', lifecycle: 'stable', status: 'full', launchable: true, agent_profile_ref: { id: 'full-engineer', version: '1' } };
+  const validEngineer = { id: 'team-engineer', version: '1', base_kind: 'engineer', display_name: 'Team Engineer', custom: true, source: 'project', lifecycle: 'stable', status: 'full', launchable: true };
   run(context, `agentClassManagerReceiveList(${JSON.stringify(sampleAgentClassListMessage(sampleClasses().concat([validEngineer])))})`);
   run(context, `openEngineerLaunchDialog('alpha', ''); agentClassPickerSelect('engineer-launch', 'team-engineer');`);
 
-  const incompatibleEngineer = { ...validEngineer, base_kind: 'worker', agent_profile_ref: { id: 'full-worker', version: '1' } };
+  const incompatibleEngineer = { ...validEngineer, base_kind: 'worker' };
   run(context, `agentClassManagerReceiveList(${JSON.stringify(sampleAgentClassListMessage(sampleClasses().concat([incompatibleEngineer])))})`);
   const staleState = json(context, `agentClassPickerSelectionState('engineer-launch')`);
   assert.equal(staleState.ok, false);

@@ -21,8 +21,8 @@ from typing import Any
 
 import yaml
 
-from .agent_profiles import BASE_KINDS, ValidationIssue
 from .capability_catalog import (
+    BASE_KINDS,
     CAPABILITY_CATALOG,
     capability_catalog_for_base_kind,
 )
@@ -33,6 +33,27 @@ from .mcp_authority import (
 )
 
 BUILTIN_CLASS_DIR = Path(__file__).resolve().parent / "builtin_agent_classes"
+
+
+@dataclass(frozen=True)
+class ValidationIssue:
+    severity: str
+    code: str
+    message: str
+    path: str = ""
+    class_id: str = ""
+
+    def as_dict(self) -> dict[str, str]:
+        data = {
+            "severity": self.severity,
+            "code": self.code,
+            "message": self.message,
+        }
+        if self.path:
+            data["path"] = self.path
+        if self.class_id:
+            data["class_id"] = self.class_id
+        return data
 PROJECT_CLASS_LEAF = "agent_classes"
 
 CLASS_ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
@@ -72,7 +93,6 @@ KNOWN_CLASS_KEYS = {
     "lifecycle",
     "identity",
     "runtime",
-    "agent_profile_ref",
     "prompt",
     "policy",
     "acl",
@@ -86,14 +106,9 @@ KNOWN_CLASS_KEYS = {
     "draft",
 }
 
-# These names either collide with AgentCell.profile terminology or would create
-# class-local raw capability/tool semantics. Wave 6B deliberately forbids them.
-AMBIGUOUS_CLASS_PROFILE_KEYS = {
+# These names collide with AgentCell terminal-profile terminology.
+AMBIGUOUS_CLASS_RUNTIME_PROFILE_KEYS = {
     "profile",
-    "profile_id",
-    "agent_profile",
-    "agent_profile_id",
-    "agent_profile_version",
     "runtime_profile",
     "agent_cell_profile",
 }
@@ -244,14 +259,14 @@ def _issue(
     message: str,
     *,
     path: str = "",
-    profile_id: str = "",
+    class_id: str = "",
 ) -> ValidationIssue:
     return ValidationIssue(
         severity=severity,
         code=code,
         message=message,
         path=path,
-        profile_id=profile_id,
+        class_id=class_id,
     )
 
 
@@ -704,7 +719,7 @@ def _validate_string_list_field(value: Any, field_path: str, issues: list[Valida
             "string_list_not_list",
             f"{field_path} must be a list of strings",
             path=source,
-            profile_id=class_id,
+            class_id=class_id,
         ))
         return []
     out: list[str] = []
@@ -716,7 +731,7 @@ def _validate_string_list_field(value: Any, field_path: str, issues: list[Valida
                 "string_list_item_empty",
                 f"{field_path}[{index}] must be a non-empty string",
                 path=source,
-                profile_id=class_id,
+                class_id=class_id,
             ))
             continue
         out.append(text)
@@ -744,12 +759,12 @@ def validate_class_data(
             "invalid_agent_class_schema_version",
             f"agent_class_schema_version must be {AGENT_CLASS_SCHEMA_VERSION}",
             path=source,
-            profile_id=class_id,
+            class_id=class_id,
         ))
 
     unknown_keys = sorted(set(raw_data) - KNOWN_CLASS_KEYS)
-    ambiguous = sorted(set(raw_data) & AMBIGUOUS_CLASS_PROFILE_KEYS)
-    nested_ambiguous = sorted(set(_nested_forbidden_key_paths(raw_data, AMBIGUOUS_CLASS_PROFILE_KEYS)))
+    ambiguous = sorted(set(raw_data) & AMBIGUOUS_CLASS_RUNTIME_PROFILE_KEYS)
+    nested_ambiguous = sorted(set(_nested_forbidden_key_paths(raw_data, AMBIGUOUS_CLASS_RUNTIME_PROFILE_KEYS)))
     nested_raw_tool_fields = sorted(set(_nested_forbidden_key_paths(
         raw_data,
         RAW_TOOL_OR_CAPABILITY_FIELDS,
@@ -766,7 +781,7 @@ def validate_class_data(
             "Agent Class definitions must use base_kind plus acl.mode/acl.rules, not AgentCell/profile fields: "
             + ", ".join(ambiguous),
             path=source,
-            profile_id=class_id,
+            class_id=class_id,
         ))
     extra_ambiguous = [path for path in nested_ambiguous if path not in ambiguous]
     if extra_ambiguous:
@@ -776,7 +791,7 @@ def validate_class_data(
             "Agent Class definitions must not contain AgentCell/profile-like fields: "
             + ", ".join(extra_ambiguous),
             path=source,
-            profile_id=class_id,
+            class_id=class_id,
         ))
     if raw_tool_fields:
         issues.append(ValidationIssue(
@@ -785,7 +800,7 @@ def validate_class_data(
             "Agent Class definitions must not contain raw MCP/tool fields or top-level grants/denies: "
             + ", ".join(raw_tool_fields),
             path=source,
-            profile_id=class_id,
+            class_id=class_id,
         ))
     extra_raw_tool_fields = [path for path in nested_raw_tool_fields if path not in raw_tool_fields]
     if extra_raw_tool_fields:
@@ -795,11 +810,11 @@ def validate_class_data(
             "Agent Class definitions must not contain raw MCP/tool fields or raw grants/denies; use acl.mode + acl.rules instead: "
             + ", ".join(extra_raw_tool_fields),
             path=source,
-            profile_id=class_id,
+            class_id=class_id,
         ))
     non_confusing_unknown = [
         key for key in unknown_keys
-        if key not in AMBIGUOUS_CLASS_PROFILE_KEYS and key not in RAW_TOOL_OR_CAPABILITY_FIELDS
+        if key not in AMBIGUOUS_CLASS_RUNTIME_PROFILE_KEYS and key not in RAW_TOOL_OR_CAPABILITY_FIELDS
     ]
     if non_confusing_unknown:
         issues.append(ValidationIssue(
@@ -807,7 +822,7 @@ def validate_class_data(
             "unknown_class_fields",
             "unknown Agent Class fields: " + ", ".join(non_confusing_unknown),
             path=source,
-            profile_id=class_id,
+            class_id=class_id,
         ))
 
     if not class_id:
@@ -818,12 +833,12 @@ def validate_class_data(
             "invalid_class_id",
             "Agent Class id must be lowercase kebab-case alphanumerics",
             path=source,
-            profile_id=class_id,
+            class_id=class_id,
         ))
     version = str(normalized.get("version", "") or "").strip()
     if not version:
         issues.append(ValidationIssue(
-            "error", "missing_class_version", "Agent Class version is required", path=source, profile_id=class_id
+            "error", "missing_class_version", "Agent Class version is required", path=source, class_id=class_id
         ))
     elif not CLASS_VERSION_RE.match(version):
         issues.append(ValidationIssue(
@@ -831,7 +846,7 @@ def validate_class_data(
             "invalid_class_version",
             "Agent Class version must be a safe non-empty token",
             path=source,
-            profile_id=class_id,
+            class_id=class_id,
         ))
     display_name = normalized.get("display_name", "")
     if not isinstance(display_name, str):
@@ -840,7 +855,7 @@ def validate_class_data(
             "display_name_not_string",
             "display_name must be a string",
             path=source,
-            profile_id=class_id,
+            class_id=class_id,
         ))
     else:
         display_name_text = display_name.strip()
@@ -850,7 +865,7 @@ def validate_class_data(
                 "missing_display_name",
                 "Agent Class display_name is required",
                 path=source,
-                profile_id=class_id,
+                class_id=class_id,
             ))
         elif len(display_name_text) > MAX_DISPLAY_NAME_LEN or "\n" in display_name_text or "\r" in display_name_text:
             issues.append(ValidationIssue(
@@ -858,13 +873,13 @@ def validate_class_data(
                 "invalid_display_name",
                 f"display_name must be one line and at most {MAX_DISPLAY_NAME_LEN} characters",
                 path=source,
-                profile_id=class_id,
+                class_id=class_id,
             ))
     if "description" in normalized:
         description = normalized.get("description", "")
         if not isinstance(description, str):
             issues.append(ValidationIssue(
-                "error", "description_not_string", "description must be a string", path=source, profile_id=class_id
+                "error", "description_not_string", "description must be a string", path=source, class_id=class_id
             ))
         elif len(description) > MAX_DESCRIPTION_LEN:
             issues.append(ValidationIssue(
@@ -872,7 +887,7 @@ def validate_class_data(
                 "description_too_long",
                 f"description must be at most {MAX_DESCRIPTION_LEN} characters",
                 path=source,
-                profile_id=class_id,
+                class_id=class_id,
             ))
     base_kind = str(normalized.get("base_kind", "") or "").strip()
     runtime_data = raw_data.get("runtime") if isinstance(raw_data.get("runtime"), dict) else {}
@@ -883,7 +898,7 @@ def validate_class_data(
             "runtime_base_kind_mismatch",
             f"runtime.base_kind={runtime_base_kind} does not match base_kind={raw_data.get('base_kind')}",
             path=source,
-            profile_id=class_id,
+            class_id=class_id,
         ))
     if base_kind not in BASE_KINDS:
         issues.append(ValidationIssue(
@@ -891,7 +906,7 @@ def validate_class_data(
             "invalid_base_kind",
             f"base_kind/runtime.base_kind must be one of {', '.join(sorted(BASE_KINDS))}",
             path=source,
-            profile_id=class_id,
+            class_id=class_id,
         ))
     lifecycle = str(normalized.get("lifecycle", "stable") or "stable").strip()
     if lifecycle not in ALLOWED_LIFECYCLES:
@@ -900,7 +915,7 @@ def validate_class_data(
             "invalid_lifecycle",
             "Agent Class lifecycle must be stable or draft",
             path=source,
-            profile_id=class_id,
+            class_id=class_id,
         ))
 
     for mapping_key in ("identity", "runtime", "metadata", "draft", "acl", "operator_summary"):
@@ -910,7 +925,7 @@ def validate_class_data(
                 f"{mapping_key}_not_mapping",
                 f"{mapping_key} must be a mapping",
                 path=source,
-                profile_id=class_id,
+                class_id=class_id,
             ))
 
     legacy_authority_fields = sorted(
@@ -919,7 +934,6 @@ def validate_class_data(
             "capabilities",
             "capability_buckets",
             "restriction_buckets",
-            "agent_profile_ref",
         )
         if key in raw_data
     )
@@ -930,7 +944,7 @@ def validate_class_data(
             "schema v5 uses only acl.mode + acl.rules for authority; remove: "
             + ", ".join(legacy_authority_fields),
             path=source,
-            profile_id=class_id,
+            class_id=class_id,
         ))
     if "warnings" in raw_data and not isinstance(raw_data.get("warnings"), list):
         issues.append(ValidationIssue(
@@ -938,7 +952,7 @@ def validate_class_data(
             "warnings_not_list",
             "warnings must be a list of strings",
             path=source,
-            profile_id=class_id,
+            class_id=class_id,
         ))
     _validate_string_list_field(raw_data.get("warnings"), "warnings", issues, source=source, class_id=class_id)
 
@@ -950,7 +964,7 @@ def validate_class_data(
                 "metadata_too_large",
                 f"metadata must serialize to at most {MAX_METADATA_JSON_BYTES} bytes",
                 path=source,
-                profile_id=class_id,
+                class_id=class_id,
             ))
         for bool_key in (CUSTOM_CLASS_ARCHIVED_KEY, "disabled"):
             if bool_key in metadata and not isinstance(metadata.get(bool_key), bool):
@@ -959,13 +973,13 @@ def validate_class_data(
                     "metadata_lifecycle_flag_not_bool",
                     f"metadata.{bool_key} must be a boolean when present",
                     path=source,
-                    profile_id=class_id,
+                    class_id=class_id,
                 ))
 
     prompt_value = raw_data.get("prompt", {})
     if "prompt" in raw_data and not isinstance(prompt_value, dict):
         issues.append(ValidationIssue(
-            "error", "prompt_not_mapping", "prompt must be a mapping with identity, job, boot_checklist, operating_guidelines, and/or tool_guidance", path=source, profile_id=class_id
+            "error", "prompt_not_mapping", "prompt must be a mapping with identity, job, boot_checklist, operating_guidelines, and/or tool_guidance", path=source, class_id=class_id
         ))
     if isinstance(prompt_value, dict):
         unknown_prompt_keys = sorted(set(prompt_value) - PROMPT_ALLOWED_KEYS)
@@ -975,7 +989,7 @@ def validate_class_data(
                 "unknown_prompt_fields",
                 "unknown prompt fields: " + ", ".join(unknown_prompt_keys),
                 path=source,
-                profile_id=class_id,
+                class_id=class_id,
             ))
         for key in PROMPT_TEXT_KEYS:
             if key in prompt_value and not isinstance(prompt_value.get(key), str):
@@ -984,7 +998,7 @@ def validate_class_data(
                     "prompt_text_field_not_string",
                     f"prompt.{key} must be a string",
                     path=source,
-                    profile_id=class_id,
+                    class_id=class_id,
                 ))
         for key in PROMPT_LIST_KEYS:
             if key in prompt_value and not isinstance(prompt_value.get(key), list):
@@ -993,7 +1007,7 @@ def validate_class_data(
                     "prompt_list_field_not_list",
                     f"prompt.{key} must be a list of strings",
                     path=source,
-                    profile_id=class_id,
+                    class_id=class_id,
                 ))
             _validate_string_list_field(prompt_value.get(key), f"prompt.{key}", issues, source=source, class_id=class_id)
         if PROMPT_TOOL_GUIDANCE_KEY in prompt_value and not isinstance(prompt_value.get(PROMPT_TOOL_GUIDANCE_KEY), list):
@@ -1002,7 +1016,7 @@ def validate_class_data(
                 "prompt_tool_guidance_not_list",
                 "prompt.tool_guidance must be a list of mappings",
                 path=source,
-                profile_id=class_id,
+                class_id=class_id,
             ))
         elif isinstance(prompt_value.get(PROMPT_TOOL_GUIDANCE_KEY), list):
             for idx, item in enumerate(prompt_value.get(PROMPT_TOOL_GUIDANCE_KEY) or []):
@@ -1012,7 +1026,7 @@ def validate_class_data(
                         "prompt_tool_guidance_item_not_mapping",
                         f"prompt.tool_guidance[{idx}] must be a mapping",
                         path=source,
-                        profile_id=class_id,
+                        class_id=class_id,
                     ))
                     continue
                 unknown = sorted(set(item) - {"when_capability", "text"})
@@ -1022,7 +1036,7 @@ def validate_class_data(
                         "unknown_prompt_tool_guidance_fields",
                         f"unknown prompt.tool_guidance[{idx}] fields: " + ", ".join(unknown),
                         path=source,
-                        profile_id=class_id,
+                        class_id=class_id,
                     ))
                 if not isinstance(item.get("text", ""), str) or not str(item.get("text", "") or "").strip():
                     issues.append(ValidationIssue(
@@ -1030,7 +1044,7 @@ def validate_class_data(
                         "prompt_tool_guidance_missing_text",
                         f"prompt.tool_guidance[{idx}].text must be a non-empty string",
                         path=source,
-                        profile_id=class_id,
+                        class_id=class_id,
                     ))
                 selector = item.get("when_capability")
                 if not isinstance(selector, str) or not str(selector or "").strip():
@@ -1039,7 +1053,7 @@ def validate_class_data(
                         "prompt_tool_guidance_capability_required",
                         f"prompt.tool_guidance[{idx}].when_capability must be a non-empty string",
                         path=source,
-                        profile_id=class_id,
+                        class_id=class_id,
                     ))
                 elif str(selector).strip() not in CAPABILITY_CATALOG:
                     issues.append(ValidationIssue(
@@ -1047,7 +1061,7 @@ def validate_class_data(
                         "unknown_prompt_tool_guidance_capability",
                         f"prompt.tool_guidance[{idx}] references unknown capability {str(selector).strip()}",
                         path=source,
-                        profile_id=class_id,
+                        class_id=class_id,
                     ))
     prompt_text = _prompt_plain_text(normalized.get("prompt", {}))
     if len(prompt_text) > MAX_PROMPT_LEN:
@@ -1056,7 +1070,7 @@ def validate_class_data(
             "prompt_too_long",
             f"prompt text must be at most {MAX_PROMPT_LEN} characters",
             path=source,
-            profile_id=class_id,
+            class_id=class_id,
         ))
 
     acl_data = raw_data.get("acl")
@@ -1072,7 +1086,7 @@ def validate_class_data(
             "invalid_capability_acl",
             str(exc),
             path=source,
-            profile_id=class_id,
+            class_id=class_id,
         ))
 
     expected_kind = BUILTIN_CLASS_BASE_KIND.get(class_id)
@@ -1082,7 +1096,7 @@ def validate_class_data(
             "class_base_kind_mismatch",
             f"Agent Class {class_id} must use base_kind={expected_kind}, got {base_kind}",
             path=source,
-            profile_id=class_id,
+            class_id=class_id,
         ))
     draft_data = normalized.get("draft") if isinstance(normalized.get("draft"), dict) else {}
     if lifecycle == "draft":
@@ -1092,7 +1106,7 @@ def validate_class_data(
                 "invalid_draft_metadata",
                 "draft Agent Classes must set draft.scratch_only: true",
                 path=source,
-                profile_id=class_id,
+                class_id=class_id,
             ))
         if draft_data.get("approved_for_live_dogfood", False) is not False:
             issues.append(ValidationIssue(
@@ -1100,7 +1114,7 @@ def validate_class_data(
                 "invalid_draft_metadata",
                 "draft Agent Classes must not claim live dogfood approval in Wave 7",
                 path=source,
-                profile_id=class_id,
+                class_id=class_id,
             ))
     elif draft_data:
         issues.append(ValidationIssue(
@@ -1108,7 +1122,7 @@ def validate_class_data(
             "invalid_draft_metadata",
             "stable Agent Classes must not carry draft metadata",
             path=source,
-            profile_id=class_id,
+            class_id=class_id,
         ))
 
     definition = AgentClassDefinition.from_dict(normalized, source=source, builtin=builtin)
@@ -1143,7 +1157,7 @@ def load_agent_classes(base_dir: str = "") -> tuple[list[AgentClassDefinition], 
                     "duplicate_class_id",
                     f"duplicate Agent Class id {definition.id}; first defined at {seen[definition.id].source}",
                     path=str(path),
-                    profile_id=definition.id,
+                    class_id=definition.id,
                 ))
                 continue
             classes.append(definition)
@@ -1452,15 +1466,13 @@ def append_agent_class_prompt_block(base_prompt: str, cell: Any) -> str:
 def agent_class_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
     kind = str(getattr(cell, "kind", "") or "").strip()
     assigned_id = str(getattr(cell, "agent_class_id", "") or "").strip()
-    direct_profile_id = str(getattr(cell, "agent_profile_id", "") or "").strip()
-    direct_profile_without_class = bool(direct_profile_id and not assigned_id)
     effective_id = str(getattr(cell, "effective_agent_class_id", "") or "").strip()
     snapshot = getattr(cell, "effective_agent_class_snapshot", {}) or {}
     if not isinstance(snapshot, dict):
         snapshot = {}
 
     effective_preview = dict(snapshot) if snapshot.get("id") else {}
-    if not effective_preview and not direct_profile_without_class:
+    if not effective_preview:
         default_id = default_agent_class_id_for_kind(kind)
         default_class = agent_class_definition_by_id(default_id, base_dir=base_dir) if default_id else None
         if default_class:
@@ -1481,15 +1493,10 @@ def agent_class_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
         if assigned_class:
             assigned_preview = enriched_agent_class_preview(assigned_class, base_dir=base_dir)
 
-    next_launch_class_id = "" if direct_profile_without_class else assigned_id or default_agent_class_id_for_kind(kind)
+    next_launch_class_id = assigned_id or default_agent_class_id_for_kind(kind)
     assigned_version = str(getattr(cell, "agent_class_version", "") or "")
     next_launch_class_version = assigned_version if assigned_id else ""
-    next_launch_profile_id = ""
-    next_launch_profile_version = ""
-    if direct_profile_without_class:
-        next_launch_profile_id = direct_profile_id
-        next_launch_profile_version = str(getattr(cell, "agent_profile_version", "") or "")
-    elif next_launch_class_id:
+    if next_launch_class_id:
         next_class = agent_class_definition_by_id(
             next_launch_class_id,
             base_dir=base_dir,
@@ -1505,30 +1512,14 @@ def agent_class_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
         or effective_preview.get("version", "")
         or ""
     )
-    effective_profile_id = str(getattr(cell, "effective_agent_profile_id", "") or "")
-    effective_profile_version = str(getattr(cell, "effective_agent_profile_version", "") or "")
-    if direct_profile_without_class:
-        pending_next_launch = bool(
-            effective_id
-            or (next_launch_profile_id and next_launch_profile_id != effective_profile_id)
-            or (next_launch_profile_version and next_launch_profile_version != effective_profile_version)
-        )
-    else:
-        pending_next_launch = bool(
-            next_launch_class_id
-            and (
+    pending_next_launch = bool(
+        next_launch_class_id
+        and (
             next_launch_class_id != effective_id
             or (next_launch_class_version and next_launch_class_version != effective_version)
-            )
         )
+    )
     warnings = list(effective_preview.get("warnings", []) or [])
-    legacy_direct_profile_warning = ""
-    if direct_profile_without_class:
-        legacy_direct_profile_warning = (
-            "Legacy direct Agent Profile assignment is active; set a desired Agent Class "
-            "for class-first next relaunch. No silent migration is performed."
-        )
-        warnings.append(legacy_direct_profile_warning)
     deduped_warnings: list[str] = []
     seen_warnings: set[str] = set()
     for warning in warnings:
@@ -1537,9 +1528,7 @@ def agent_class_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
             deduped_warnings.append(text)
             seen_warnings.add(text)
     next_launch_label = ""
-    if direct_profile_without_class:
-        next_launch_label = "Internal policy: " + next_launch_profile_id if next_launch_profile_id else ""
-    elif next_launch_class_id:
+    if next_launch_class_id:
         if assigned_preview and assigned_preview.get("id") == next_launch_class_id:
             next_launch_label = primary_identity_label_for_class(assigned_preview)
         elif effective_preview and effective_preview.get("id") == next_launch_class_id:
@@ -1575,13 +1564,8 @@ def agent_class_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
         "assigned_class": assigned_preview,
         "next_launch_class_id": next_launch_class_id,
         "next_launch_class_version": next_launch_class_version,
-        "next_launch_profile_id": next_launch_profile_id,
-        "next_launch_profile_version": next_launch_profile_version,
         "pending_next_launch": pending_next_launch,
         "status": str(effective_preview.get("status", "") or "full"),
-        "direct_agent_profile_assignment": direct_profile_without_class,
-        "legacy_direct_profile": bool(legacy_direct_profile_warning),
-        "legacy_direct_profile_warning": legacy_direct_profile_warning,
         "next_launch_class_disabled": bool(agent_class_is_archived(assigned_preview)) if assigned_preview else False,
         "apply_state": {
             "pending_next_launch": pending_next_launch,
@@ -1590,7 +1574,6 @@ def agent_class_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
             "applies_at": "next_launch_or_relaunch",
             "effective_class_id": effective_id,
             "next_launch_class_id": next_launch_class_id,
-            "direct_agent_profile_assignment": direct_profile_without_class,
         },
         "warnings": deduped_warnings,
         "external_connector_caveat": EXTERNAL_CONNECTOR_CAVEAT,
@@ -1810,7 +1793,7 @@ def save_custom_agent_class(
             "error",
             "builtin_class_id_reserved",
             f"{class_id} is a built-in Agent Class id and cannot be overwritten by custom YAML",
-            profile_id=class_id,
+            class_id=class_id,
         ).as_dict()
         return {
             "type": "agent_class_save",
@@ -1837,7 +1820,7 @@ def save_custom_agent_class(
             "custom_class_already_exists",
             f"Custom Agent Class already exists: {class_id}",
             path=str(existing_path or canonical_path),
-            profile_id=class_id,
+            class_id=class_id,
         ).as_dict()
         return {
             "type": "agent_class_save",
@@ -1857,7 +1840,7 @@ def save_custom_agent_class(
             "custom_class_not_found",
             f"Custom Agent Class not found for update: {class_id}",
             path=str(canonical_path),
-            profile_id=class_id,
+            class_id=class_id,
         ).as_dict()
         return {
             "type": "agent_class_save",
@@ -1908,7 +1891,7 @@ def archive_custom_agent_class(class_id: str, *, base_dir: str = "") -> dict[str
             "error",
             "builtin_class_read_only",
             f"{class_id} is built-in and cannot be archived from project config",
-            profile_id=class_id,
+            class_id=class_id,
         ).as_dict()
         return {
             "type": "agent_class_archive",
@@ -1924,7 +1907,7 @@ def archive_custom_agent_class(class_id: str, *, base_dir: str = "") -> dict[str
             "custom_class_not_found",
             f"Custom Agent Class not found: {class_id}",
             path=str(path or ""),
-            profile_id=class_id,
+            class_id=class_id,
         ).as_dict()
         return {
             "type": "agent_class_archive",
@@ -1941,7 +1924,7 @@ def archive_custom_agent_class(class_id: str, *, base_dir: str = "") -> dict[str
             "class_not_mapping",
             "Agent Class YAML must be a mapping",
             path=str(path),
-            profile_id=class_id,
+            class_id=class_id,
         ).as_dict())
         return {
             "type": "agent_class_archive",
@@ -1974,7 +1957,7 @@ def delete_custom_agent_class(class_id: str, *, base_dir: str = "") -> dict[str,
             "error",
             "builtin_class_read_only",
             f"{class_id} is built-in and cannot be deleted from project config",
-            profile_id=class_id,
+            class_id=class_id,
         ).as_dict()
         return {
             "type": "agent_class_delete",
@@ -1989,7 +1972,7 @@ def delete_custom_agent_class(class_id: str, *, base_dir: str = "") -> dict[str,
             "custom_class_not_found",
             f"Custom Agent Class not found: {class_id}",
             path=str(path or ""),
-            profile_id=class_id,
+            class_id=class_id,
         ).as_dict()
         return {
             "type": "agent_class_delete",

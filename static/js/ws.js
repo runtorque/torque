@@ -535,7 +535,7 @@ function connect() {
         && behaviorOverlayReceiveMessage(msg)) {
       return;
     }
-    if (!msg.type && msg.agent_class_status && msg.agent_profile_status) {
+    if (!msg.type && msg.agent_class_status) {
       if (typeof agentClassManagerReceiveLaunchResult === 'function') {
         agentClassManagerReceiveLaunchResult(msg);
       }
@@ -718,21 +718,6 @@ function connect() {
           || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'templates'))
           && typeof specializationLibraryReceiveDetail === 'function') {
         specializationLibraryReceiveDetail(msg);
-      }
-    } else if (msg.type === 'agent_profiles') {
-      if (typeof agentPanelReceiveAgentProfiles === 'function') {
-        agentPanelReceiveAgentProfiles(msg);
-      }
-      if (typeof agentClassManagerReceiveProfiles === 'function') {
-        agentClassManagerReceiveProfiles(msg);
-      }
-    } else if (msg.type === 'agent_profile_preview') {
-      if (typeof agentPanelReceiveAgentProfilePreview === 'function') {
-        agentPanelReceiveAgentProfilePreview(msg);
-      }
-    } else if (msg.type === 'agent_profile_assignment') {
-      if (typeof agentPanelReceiveAgentProfileAssignment === 'function') {
-        agentPanelReceiveAgentProfileAssignment(msg);
       }
     } else if (msg.type === 'agent_classes') {
       state.agent_classes = Array.isArray(msg.classes) ? msg.classes : [];
@@ -957,27 +942,19 @@ function connect() {
           && typeof agentPanelHandleEngineerSpecializationsError === 'function') {
         specializationEditorErrorHandled = agentPanelHandleEngineerSpecializationsError(msg);
       }
-      var agentProfileErrorHandled = false;
-      if (!systemPromptErrorHandled
-          && !specializationEditorErrorHandled
-          && typeof agentPanelHandleAgentProfileError === 'function') {
-        agentProfileErrorHandled = agentPanelHandleAgentProfileError(msg);
-      }
       var agentClassErrorHandled = false;
       if (!systemPromptErrorHandled
           && !specializationEditorErrorHandled
-          && !agentProfileErrorHandled
           && typeof agentPanelHandleAgentClassError === 'function') {
         agentClassErrorHandled = agentPanelHandleAgentClassError(msg);
       }
       if (!systemPromptErrorHandled
           && !specializationEditorErrorHandled
-          && !agentProfileErrorHandled
           && !agentClassErrorHandled
           && typeof agentClassManagerHandleError === 'function') {
         agentClassErrorHandled = agentClassManagerHandleError(msg);
       }
-      if (!systemPromptErrorHandled && !specializationEditorErrorHandled && !agentProfileErrorHandled && !agentClassErrorHandled) {
+      if (!systemPromptErrorHandled && !specializationEditorErrorHandled && !agentClassErrorHandled) {
         if (typeof aiSettingsHandleError === 'function' && aiSettingsHandleError(msg)) return;
         if (typeof thinkingHandleError === 'function' && thinkingHandleError(msg)) return;
         if (typeof handleContextError === 'function') handleContextError(msg);

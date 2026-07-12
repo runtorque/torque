@@ -1214,10 +1214,7 @@ function _agentClassPlainPermissionCopy(text) {
     .replace(/\bMCP call telemetry\b/gi, 'tool activity history')
     .replace(/\bMCP calls?\b/gi, 'tool activity')
     .replace(/\bMCP\b/gi, 'tool')
-    .replace(/\bgenerated profiles?\b/gi, 'internal enforcement records')
     .replace(/\braw atoms?\b/gi, 'low-level permissions')
-    .replace(/\bdefault profiles?\b/gi, 'built-in access settings')
-    .replace(/\bprofile pairing\b/gi, 'internal troubleshooting link')
     .replace(/\bcompiler\b/gi, 'internal validation')
     .replace(/\bcompile\b/gi, 'validate');
 }
@@ -1235,8 +1232,6 @@ function _agentClassBucketLabel(bucket, fallback) {
   var id = String(bucket.id || '').trim();
   if (id === 'deny_raw_tool_picker') return 'No arbitrary tool selection';
   if (id === 'deny_high_risk_operations') return 'No powerful actions beyond this class';
-  if (id === 'deny_class_profile_admin') return 'No permission administration';
-  if (id === 'class_profile_admin') return 'Permission administration';
   return _agentClassPlainPermissionCopy(bucket.label || bucket.display_name || bucket.name || id || fallback || '');
 }
 
@@ -1245,7 +1240,6 @@ function _agentClassBucketSummary(bucket) {
   var id = String(bucket.id || '').trim();
   if (id === 'deny_raw_tool_picker') return 'Keeps arbitrary tool selection outside this class.';
   if (id === 'deny_high_risk_operations') return 'Blocks powerful or critical actions that are not explicitly allowed here.';
-  if (id === 'deny_class_profile_admin') return 'Prevents changing Agent Class permissions from this class.';
   return _agentClassPlainPermissionCopy(bucket.summary || bucket.description || '');
 }
 
@@ -1952,7 +1946,7 @@ function _agentClassFilteredOperatorRestrictions(preview) {
   for (var i = 0; i < restrictions.length; i++) {
     var text = String(restrictions[i] || '').trim();
     if (!text) continue;
-    if (/agent profile|generated profile|mcp|raw mcp|compiler|internal policy/i.test(text)) continue;
+    if (/mcp|raw mcp|compiler|internal policy/i.test(text)) continue;
     out.push(text);
   }
   return out;
@@ -2036,7 +2030,6 @@ function _agentClassNoticeKey(value) {
     .toLowerCase()
     .replace(/&amp;/g, '&')
     .replace(/\bagent classes?\b/g, 'agent class')
-    .replace(/\bagent profiles?\b/g, 'agent profile')
     .replace(/[^\w]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();

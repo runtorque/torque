@@ -27,11 +27,6 @@ from .ai_summaries import AISummaryService
 from . import cloud_hooks
 from . import config as torque_config
 from . import profiling
-from .agent_profiles import (
-    enriched_profile_preview,
-    load_agent_profiles,
-    profile_definition_by_id,
-)
 from .agent_classes import (
     AGENT_CLASS_SCHEMA_VERSION,
     append_agent_class_prompt_block,
@@ -12183,8 +12178,7 @@ def _architect_persistent_prompt_text(group: str = "",
                                       action_system_prompt: str = "",
                                       state: MatrixState = None,
                                       architect_id: str = "",
-                                      agent_class_snapshot: dict | None = None,
-                                      agent_profile_snapshot: dict | None = None
+                                      agent_class_snapshot: dict | None = None
                                       ) -> str:
     """Build the persistent prompt for user-created architect agents."""
     from .architect import (
@@ -12211,12 +12205,6 @@ def _architect_persistent_prompt_text(group: str = "",
                     "effective_agent_class_snapshot",
                     {},
                 )
-            if not agent_profile_snapshot:
-                agent_profile_snapshot = getattr(
-                    architect_cell,
-                    "effective_agent_profile_snapshot",
-                    {},
-                )
 
     architect_body = build_architect_system_prompt(
         group or "default",
@@ -12225,7 +12213,6 @@ def _architect_persistent_prompt_text(group: str = "",
         group_settings=group_settings,
         architect_cell=architect_cell,
         agent_class_snapshot=agent_class_snapshot,
-        agent_profile_snapshot=agent_profile_snapshot,
         behavior_overlay_block=_behavior_overlay_prompt_block_for_cell(
             state,
             agent_id=architect_id,
@@ -12236,7 +12223,6 @@ def _architect_persistent_prompt_text(group: str = "",
     torque_preamble = build_architect_torque_preamble(
         architect_cell=architect_cell,
         agent_class_snapshot=agent_class_snapshot,
-        agent_profile_snapshot=agent_profile_snapshot,
     ).rstrip()
     assembled = torque_preamble + "\n\n" + architect_body + "\n"
     if isinstance(agent_class_snapshot, dict) and agent_class_snapshot.get("id"):
@@ -12456,18 +12442,6 @@ def _apply_agent_class_launch_selection(
     class_id = _requested_agent_class_id(data)
     if not class_id:
         return {"ok": True, "agent_class": None}
-    if str(data.get("agent_profile_id", "") or "").strip() or str(data.get("profile_id", "") or "").strip():
-        return {
-            "ok": False,
-            "error": {
-                "type": "error",
-                "code": "ambiguous_agent_class_profile_launch",
-                "message": (
-                    "Launch from Agent Class cannot also specify direct "
-                    "Agent Profile assignment fields"
-                ),
-            },
-        }
     definition = agent_class_definition_by_id(class_id, base_dir=base_dir)
     if not definition:
         archived = agent_class_definition_by_id(
@@ -12635,10 +12609,6 @@ async def _handle_add_engineer_command(
             cell,
             base_dir=base_dir,
         ),
-        "agent_profile_status": state.agent_profile_status_for_cell(
-            cell,
-            base_dir=base_dir,
-        ),
         "specializations": list(
             getattr(cell, "engineer_specializations", []) or []
         ),
@@ -12705,11 +12675,6 @@ async def _handle_add_architect_command(
         action_system_prompt=launch_cfg.get("system_prompt", ""),
         state=state,
         agent_class_snapshot=class_prompt_context,
-        agent_profile_snapshot=(
-            class_prompt_context.get("agent_profile", {})
-            if isinstance(class_prompt_context, dict)
-            else {}
-        ),
     )
     startup_prompt = _startup_prompt_for_new_agent(
         agent_type=launch_cfg.get("agent_type", ""),
@@ -12758,10 +12723,6 @@ async def _handle_add_architect_command(
         "kind": "architect",
         "agent_class": class_launch.get("agent_class"),
         "agent_class_status": state.agent_class_status_for_cell(
-            cell,
-            base_dir=base_dir,
-        ),
-        "agent_profile_status": state.agent_profile_status_for_cell(
             cell,
             base_dir=base_dir,
         ),
@@ -12860,10 +12821,6 @@ async def _handle_add_worker_command(
         "kind": "worker",
         "agent_class": class_launch.get("agent_class"),
         "agent_class_status": state.agent_class_status_for_cell(
-            cell,
-            base_dir=base_dir,
-        ),
-        "agent_profile_status": state.agent_profile_status_for_cell(
             cell,
             base_dir=base_dir,
         ),
@@ -18448,55 +18405,6 @@ async def main(connection=None):
             from .help_docs import handle_help_command
 
             return handle_help_command(data)
-
-        if cmd == "agent_profile_list":
-            base_dir = str(data.get("base_dir", "") or os.getcwd())
-            profiles, issues = load_agent_profiles(base_dir=base_dir)
-            return {
-                "type": "agent_profiles",
-                "profiles": [enriched_profile_preview(profile) for profile in profiles],
-                "issues": [issue.as_dict() for issue in issues],
-            }
-
-        if cmd == "agent_profile_preview":
-            profile_id = str(data.get("profile_id", "") or "").strip()
-            base_dir = str(data.get("base_dir", "") or os.getcwd())
-            profile = profile_definition_by_id(profile_id, base_dir=base_dir)
-            if not profile:
-                return {"type": "error", "message": f"Unknown Agent Profile: {profile_id}"}
-            return {"type": "agent_profile_preview", "profile": enriched_profile_preview(profile)}
-
-        if cmd == "agent_profile_assign":
-            try:
-                agent_id = str(data.get("agent_id", data.get("id", "")) or "").strip()
-                cell = state.agents.get(agent_id)
-                base_dir = str(data.get("base_dir", "") or "")
-                if not base_dir and cell:
-                    base_dir = cell.worktree_repo_root or cell.directory or await _resolve_base_dir(cell.group)
-                status = state.assign_agent_profile(
-                    agent_id,
-                    str(data.get("profile_id", "") or ""),
-                    actor_kind="user",
-                    actor_id=str(data.get("actor_id", "") or ""),
-                    actor_label=str(data.get("actor_label", "trusted-user") or "trusted-user"),
-                    base_dir=base_dir,
-                )
-                return {"type": "agent_profile_assignment", "status": status}
-            except PermissionError as exc:
-                return {"type": "error", "message": str(exc), "code": "trusted_user_required"}
-            except ValueError as exc:
-                return {"type": "error", "message": str(exc)}
-
-        if cmd == "agent_profile_audit":
-            if not db:
-                return {"type": "agent_profile_audit", "events": []}
-            return {
-                "type": "agent_profile_audit",
-                "events": db.list_agent_profile_audit(
-                    agent_id=str(data.get("agent_id", "") or ""),
-                    limit=int(data.get("limit", 50) or 50),
-                ),
-            }
 
         agent_class_response = await _handle_agent_class_command(
             data,

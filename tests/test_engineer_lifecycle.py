@@ -1633,9 +1633,9 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             architect.directory = temp_dir
-            assigned_status = state.assign_agent_profile(
+            assigned_status = state.assign_agent_class(
                 architect.id,
-                "product-manager-draft",
+                "product-manager",
                 actor_kind="user",
                 base_dir=temp_dir,
             )
@@ -1654,15 +1654,15 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 is_designated_engineer=lambda cell: False,
             )
 
-            applied_status = state.agent_profile_status_for_cell(
+            applied_status = state.agent_class_status_for_cell(
                 architect,
                 base_dir=temp_dir,
             )
 
         self.assertIsNone(result)
         self.assertEqual(architect.kind, "architect")
-        self.assertEqual(architect.effective_agent_profile_id, "product-manager-draft")
-        self.assertEqual(architect.effective_agent_profile_version, "2")
+        self.assertEqual(architect.effective_agent_class_id, "product-manager")
+        self.assertEqual(architect.effective_agent_class_version, "3")
         self.assertFalse(applied_status["pending_next_launch"])
         self.assertEqual(len(bridge.create_session_calls), 1)
         call = bridge.create_session_calls[0]["kwargs"]
