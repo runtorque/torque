@@ -1304,6 +1304,15 @@ def _tool_argument_scope_denied(
     if not tool_authority:
         return True
     for requirement in tool_authority.requirements:
+        if requirement.scope_argument:
+            requested_scope = str(
+                arguments.get(requirement.scope_argument, "") or ""
+            ).strip().lower()
+            if requested_scope and not authority.allows(
+                requirement.capability,
+                scope=requested_scope,
+            ):
+                return True
         if not requirement.target_argument:
             continue
         raw_target = arguments.get(requirement.target_argument, "")

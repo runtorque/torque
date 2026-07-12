@@ -666,7 +666,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_task_mark_covered", "authority": {"requirements": [{"capability": "task.mark_covered","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
+        "name": "engineer_task_mark_covered", "authority": {"requirements": [{"capability": "task.mark_covered","minimum_scope": "self","target_argument": "task","target_kind": "task"},{"capability": "task.mark_covered","minimum_scope": "self","target_argument": "covering_task_id","target_kind": "task"}]},
         "description": (
             "Mark an assigned/created task as covered by another visible "
             "task or PR. Records durable completion evidence and an activity "
@@ -1190,7 +1190,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_journal_read", "authority": {"requirements": [{"capability": "journal.read","minimum_scope": "self"}]},
+        "name": "engineer_journal_read", "authority": {"requirements": [{"capability": "journal.read","minimum_scope": "self","scope_argument": "scope"}]},
         "description": (
             "Read recent journal entries. Use after context cleanup "
             "or startup to recover the engineer's decision history "

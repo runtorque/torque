@@ -29,7 +29,10 @@ Implemented in the current working change:
   targets, plus fail-closed result filtering for self-scoped task lists;
 - descriptor-driven scope resolution for Thinking notes, Mind Maps, Idea
   Briefs, MCP telemetry rows, and reply-message counterparties, including
-  self-scoped collection filtering and cross-scope target concealment.
+  self-scoped collection filtering and cross-scope target concealment;
+- descriptor-enforced scope-valued arguments, multi-target task operations,
+  child-roster filtering, and group-only minima for role-wide behavior-overlay
+  administration.
 
 Still required before this RFC is complete:
 

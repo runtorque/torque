@@ -158,6 +158,7 @@ class CapabilityRequirement:
     minimum_scope: str = ""
     target_argument: str = ""
     target_kind: str = ""
+    scope_argument: str = ""
     result_kind: str = ""
     result_paths: tuple[str, ...] = ()
     conditional: bool = False
@@ -233,6 +234,7 @@ def authority_definition_from_tool_spec(
                 "minimum_scope",
                 "target_argument",
                 "target_kind",
+                "scope_argument",
                 "result_kind",
                 "result_paths",
                 "conditional",
@@ -264,6 +266,9 @@ def authority_definition_from_tool_spec(
             raw_requirement.get("target_argument", "") or ""
         ).strip()
         target_kind = str(raw_requirement.get("target_kind", "") or "").strip()
+        scope_argument = str(
+            raw_requirement.get("scope_argument", "") or ""
+        ).strip()
         result_kind = str(raw_requirement.get("result_kind", "") or "").strip()
         raw_result_paths = raw_requirement.get("result_paths", [])
         if not isinstance(raw_result_paths, list) or any(
@@ -316,6 +321,15 @@ def authority_definition_from_tool_spec(
             raise AuthorityValidationError(
                 f"MCP tool {name} target_kind requires target_argument"
             )
+        if scope_argument:
+            if scope_argument not in properties:
+                raise AuthorityValidationError(
+                    f"MCP tool {name} scope argument {scope_argument} is not in its schema"
+                )
+            if not definition.scoped:
+                raise AuthorityValidationError(
+                    f"MCP tool {name} cannot use scope_argument for unscoped {capability}"
+                )
         if result_paths and not definition.scoped:
             raise AuthorityValidationError(
                 f"MCP tool {name} cannot filter results for unscoped {capability}"
@@ -339,6 +353,7 @@ def authority_definition_from_tool_spec(
             minimum_scope=minimum_scope,
             target_argument=target_argument,
             target_kind=target_kind,
+            scope_argument=scope_argument,
             result_kind=result_kind,
             result_paths=result_paths,
             conditional=conditional,

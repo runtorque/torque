@@ -598,6 +598,45 @@ class MCPProfilePolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("error", denied.payload)
         self.assertIn("Unknown tool", denied.payload["error"]["message"])
 
+    async def test_class_journal_self_scope_denies_group_scope_argument(self):
+        state = self.state_mod.MatrixState()
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+        )
+        state.agents[engineer.id] = engineer
+        state.groups["g"] = [engineer.id]
+        engineer.effective_agent_class_snapshot = {
+            "effective_authority": {
+                "schema_version": 1,
+                "base_kind": "engineer",
+                "acl_mode": "allow",
+                "capabilities": {"journal.read": "self"},
+            },
+        }
+
+        async def unexpected(payload):
+            self.fail(f"Unexpected command: {payload}")
+
+        handler = self.mcp_mod.create_mcp_handler(unexpected, state)
+        denied = await handler(FakeRequest(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "engineer_journal_read",
+                    "arguments": {"scope": "group"},
+                },
+            },
+            headers={"X-Torque-Cell-Id": engineer.id},
+        ))
+        self.assertIn("error", denied.payload)
+        self.assertIn("Unknown tool", denied.payload["error"]["message"])
+
     async def test_product_manager_profile_cannot_use_peer_tools_for_engineer_threads(self):
         state, architect = self._state_with_architect()
         engineer = self.state_mod.AgentCell(

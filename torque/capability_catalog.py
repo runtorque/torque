@@ -170,7 +170,7 @@ CAPABILITY_CATALOG: dict[str, CapabilityDefinition] = {
             "Reassign tasks",
             "Change task ownership within the caller's routing ceiling.",
             scopes=("children", "group"),
-            ceilings={"engineer": "children", "architect": "children"},
+            ceilings={"engineer": "group", "architect": "children"},
             risk="high",
         ),
         _scoped(

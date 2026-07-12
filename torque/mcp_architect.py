@@ -245,7 +245,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_mcp_calls", "authority": {"requirements": [{"capability": "telemetry.read","minimum_scope": "self","result_kind": "agent","result_paths": ["calls"]}]},
+        "name": "architect_mcp_calls", "authority": {"requirements": [{"capability": "telemetry.read","minimum_scope": "self","result_kind": "agent","result_paths": ["calls"]},{"capability": "telemetry.read","minimum_scope": "self","target_argument": "agent_id","target_kind": "agent"},{"capability": "telemetry.read","minimum_scope": "self","target_argument": "cell_id","target_kind": "agent"}]},
         "deferred": True,
         "description": (
             "Return recent MCP call history for this architect's group. "
@@ -590,7 +590,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_task_reassign", "authority": {"requirements": [{"capability": "task.reassign","minimum_scope": "children","target_argument": "task","target_kind": "task"}]},
+        "name": "architect_task_reassign", "authority": {"requirements": [{"capability": "task.reassign","minimum_scope": "children","target_argument": "task","target_kind": "task"},{"capability": "task.reassign","minimum_scope": "children","target_argument": "new_engineer_id","target_kind": "agent"}]},
         "description": (
             "Reassign a task created by this architect to another visible engineer."
         ),
@@ -629,7 +629,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_task_mark_covered", "authority": {"requirements": [{"capability": "task.mark_covered","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
+        "name": "architect_task_mark_covered", "authority": {"requirements": [{"capability": "task.mark_covered","minimum_scope": "self","target_argument": "task","target_kind": "task"},{"capability": "task.mark_covered","minimum_scope": "self","target_argument": "covering_task_id","target_kind": "task"}]},
         "description": (
             "Mark a user-created task or a task created by this architect as "
             "covered by another visible task or PR. Also allows a PM-created "
@@ -798,7 +798,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_engineer_list", "authority": {"requirements": [{"capability": "engineer.roster.read","minimum_scope": "children"}]},
+        "name": "architect_engineer_list", "authority": {"requirements": [{"capability": "engineer.roster.read","minimum_scope": "children","result_kind": "agent","result_paths": ["engineers"]}]},
         "description": (
             "List engineers visible to this architect, marking each as hired "
             "or visible and including dismissed_at for paused engineers."
@@ -1073,7 +1073,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_behavior_overlay_propose_for_role", "authority": {"requirements": [{"capability": "behavior_overlay.admin","minimum_scope": "children"}]},
+        "name": "architect_behavior_overlay_propose_for_role", "authority": {"requirements": [{"capability": "behavior_overlay.admin","minimum_scope": "group"}]},
         "description": (
             "Propose a group-scoped role Dynamic Behavior overlay. "
             "Role overlays are architect-authored and always user-approved."
@@ -1094,7 +1094,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_behavior_overlay_approve", "authority": {"requirements": [{"capability": "behavior_overlay.admin","minimum_scope": "children"}]},
+        "name": "architect_behavior_overlay_approve", "authority": {"requirements": [{"capability": "behavior_overlay.admin","minimum_scope": "group"}]},
         "description": "Approve a hired engineer behavior overlay proposal.",
         "inputSchema": {
             "type": "object",
@@ -1107,7 +1107,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_behavior_overlay_reject", "authority": {"requirements": [{"capability": "behavior_overlay.admin","minimum_scope": "children"}]},
+        "name": "architect_behavior_overlay_reject", "authority": {"requirements": [{"capability": "behavior_overlay.admin","minimum_scope": "group"}]},
         "description": "Reject a visible behavior overlay proposal.",
         "inputSchema": {
             "type": "object",
@@ -1134,7 +1134,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_behavior_overlay_rollback_role", "authority": {"requirements": [{"capability": "behavior_overlay.admin","minimum_scope": "children"}]},
+        "name": "architect_behavior_overlay_rollback_role", "authority": {"requirements": [{"capability": "behavior_overlay.admin","minimum_scope": "group"}]},
         "description": "Propose rollback for a group-scoped role overlay; routes to user approval.",
         "inputSchema": {
             "type": "object",

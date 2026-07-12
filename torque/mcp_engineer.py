@@ -240,7 +240,7 @@ ENGINEER_TOOLS.extend([
         },
     },
     {
-        "name": "engineer_mcp_calls", "authority": {"requirements": [{"capability": "telemetry.read","minimum_scope": "self","result_kind": "agent","result_paths": ["calls"]}]},
+        "name": "engineer_mcp_calls", "authority": {"requirements": [{"capability": "telemetry.read","minimum_scope": "self","result_kind": "agent","result_paths": ["calls"]},{"capability": "telemetry.read","minimum_scope": "self","target_argument": "agent_id","target_kind": "agent"},{"capability": "telemetry.read","minimum_scope": "self","target_argument": "cell_id","target_kind": "agent"}]},
         "deferred": True,
         "description": (
             "Return recent MCP call history for this engineer and owned "
@@ -286,7 +286,7 @@ ENGINEER_TOOLS.extend([
         },
     },
     {
-        "name": "engineer_task_reassign", "authority": {"requirements": [{"capability": "task.reassign","minimum_scope": "children","target_argument": "task","target_kind": "task"}]},
+        "name": "engineer_task_reassign", "authority": {"requirements": [{"capability": "task.reassign","minimum_scope": "children","target_argument": "task","target_kind": "task"},{"capability": "task.reassign","minimum_scope": "children","target_argument": "new_engineer_id","target_kind": "agent"}]},
         "deferred": True,
         "description": (
             "Reassign a task you currently own or originally created to "
