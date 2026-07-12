@@ -8,7 +8,12 @@ from unittest import mock
 
 from torque.db import TorqueDB, _create_sqlite_backup
 from torque.db_schema import (
+    AGENT_CLASS_AUDIT_COLUMNS,
+    AGENT_LIFECYCLE_COLUMNS,
+    AGENT_MESSAGE_LOOP_RUNTIME_COLUMNS,
     BOARD_TASK_ROUTING_COLUMNS,
+    DECISION_COLUMNS,
+    PENDING_HIRE_LIFECYCLE_COLUMNS,
     SCHEMA_MIGRATIONS,
     SCHEMA_VERSION,
     SchemaMigration,
@@ -157,7 +162,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
             conn = sqlite3.connect(path)
             for column in BOARD_TASK_ROUTING_COLUMNS:
                 conn.execute(f"ALTER TABLE board_tasks DROP COLUMN {column}")
-            conn.execute("DELETE FROM schema_migrations WHERE version=3")
+            conn.execute("DELETE FROM schema_migrations WHERE version>=3")
             conn.execute(
                 "UPDATE meta SET value='2' WHERE key='schema_version'"
             )
@@ -177,7 +182,9 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
             ledger = upgraded._conn.execute(
                 "SELECT version, name FROM schema_migrations ORDER BY version"
             ).fetchall()
-            backup_path = path.with_name("torque.db.pre-schema-v3.bak")
+            backup_path = path.with_name(
+                f"torque.db.pre-schema-v{SCHEMA_VERSION}.bak"
+            )
             backup_mtime = backup_path.stat().st_mtime_ns
 
             backup = sqlite3.connect(backup_path)
@@ -199,15 +206,112 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
             rerun_backup_mtime = backup_path.stat().st_mtime_ns
 
         self.assertTrue(set(BOARD_TASK_ROUTING_COLUMNS) <= columns)
-        self.assertEqual(ledger[-1], (3, "board_task_routing_contract"))
+        self.assertIn((3, "board_task_routing_contract"), ledger)
+        self.assertEqual(ledger[-1], (4, "agent_lifecycle_contract"))
         self.assertFalse(set(BOARD_TASK_ROUTING_COLUMNS) & backup_columns)
         self.assertEqual(backup_version, (2,))
         self.assertEqual(rerun_backup_mtime, backup_mtime)
 
+    def test_version_four_owns_agent_lifecycle_and_class_schema(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "torque.db"
+            current = TorqueDB(path)
+            current.init()
+            current.close()
+
+            conn = sqlite3.connect(path)
+            for column in AGENT_LIFECYCLE_COLUMNS:
+                conn.execute(f"ALTER TABLE agents DROP COLUMN {column}")
+            for column in AGENT_MESSAGE_LOOP_RUNTIME_COLUMNS:
+                conn.execute(
+                    f"ALTER TABLE agent_message_loops DROP COLUMN {column}"
+                )
+            for column in PENDING_HIRE_LIFECYCLE_COLUMNS:
+                conn.execute(f"ALTER TABLE pending_hires DROP COLUMN {column}")
+            conn.execute("DROP TABLE agent_class_audit")
+            conn.execute("DROP TABLE decisions")
+            conn.execute("DELETE FROM schema_migrations WHERE version=4")
+            conn.execute(
+                "UPDATE meta SET value='3' WHERE key='schema_version'"
+            )
+            conn.commit()
+            conn.close()
+
+            upgraded = TorqueDB(path)
+            self.addCleanup(upgraded.close)
+            upgraded.init()
+
+            agent_columns = {
+                row[1]
+                for row in upgraded._conn.execute(
+                    "PRAGMA table_info(agents)"
+                ).fetchall()
+            }
+            loop_columns = {
+                row[1]
+                for row in upgraded._conn.execute(
+                    "PRAGMA table_info(agent_message_loops)"
+                ).fetchall()
+            }
+            hire_columns = {
+                row[1]
+                for row in upgraded._conn.execute(
+                    "PRAGMA table_info(pending_hires)"
+                ).fetchall()
+            }
+            audit_columns = {
+                row[1]
+                for row in upgraded._conn.execute(
+                    "PRAGMA table_info(agent_class_audit)"
+                ).fetchall()
+            }
+            decision_columns = {
+                row[1]
+                for row in upgraded._conn.execute(
+                    "PRAGMA table_info(decisions)"
+                ).fetchall()
+            }
+            ledger_tail = upgraded._conn.execute(
+                "SELECT version, name FROM schema_migrations "
+                "ORDER BY version DESC LIMIT 1"
+            ).fetchone()
+
+            backup_path = path.with_name(
+                f"torque.db.pre-schema-v{SCHEMA_VERSION}.bak"
+            )
+            backup = sqlite3.connect(backup_path)
+            backup_agent_columns = {
+                row[1]
+                for row in backup.execute("PRAGMA table_info(agents)")
+            }
+            backup_tables = {
+                row[0]
+                for row in backup.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+            backup_version = backup.execute(
+                "SELECT MAX(version) FROM schema_migrations"
+            ).fetchone()
+            backup.close()
+
+        self.assertTrue(set(AGENT_LIFECYCLE_COLUMNS) <= agent_columns)
+        self.assertTrue(
+            set(AGENT_MESSAGE_LOOP_RUNTIME_COLUMNS) <= loop_columns
+        )
+        self.assertTrue(set(PENDING_HIRE_LIFECYCLE_COLUMNS) <= hire_columns)
+        self.assertTrue(set(AGENT_CLASS_AUDIT_COLUMNS) <= audit_columns)
+        self.assertTrue(set(DECISION_COLUMNS) <= decision_columns)
+        self.assertEqual(ledger_tail, (4, "agent_lifecycle_contract"))
+        self.assertFalse(set(AGENT_LIFECYCLE_COLUMNS) & backup_agent_columns)
+        self.assertNotIn("agent_class_audit", backup_tables)
+        self.assertNotIn("decisions", backup_tables)
+        self.assertEqual(backup_version, (3,))
+
     def test_atomic_backup_failure_leaves_source_and_destination_untouched(self):
         with tempfile.TemporaryDirectory() as tmp:
             source_path = Path(tmp) / "source.db"
-            backup_path = Path(tmp) / "source.db.pre-schema-v3.bak"
+            backup_path = Path(tmp) / "source.db.pre-schema-test.bak"
             conn = sqlite3.connect(source_path)
             conn.execute("CREATE TABLE marker (value TEXT NOT NULL)")
             conn.execute("INSERT INTO marker(value) VALUES ('kept')")

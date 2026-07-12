@@ -15,7 +15,7 @@ import json
 import sqlite3
 from typing import Callable, Iterable
 
-SCHEMA_VERSION = "3"
+SCHEMA_VERSION = "4"
 
 
 @dataclass(frozen=True)
@@ -168,6 +168,18 @@ def _ensure_columns(
         )
 
 
+def _ensure_table(
+    conn: sqlite3.Connection,
+    table: str,
+    columns: dict[str, str],
+) -> None:
+    definitions = ", ".join(
+        f"{name} {definition}" for name, definition in columns.items()
+    )
+    conn.execute(f"CREATE TABLE IF NOT EXISTS {table} ({definitions})")
+    _ensure_columns(conn, table, columns)
+
+
 def _ensure_ai_index_schema(conn: sqlite3.Connection) -> None:
     """Keep AI index tables additive/idempotent across partial migrations."""
 
@@ -234,6 +246,66 @@ BOARD_TASK_ROUTING_COLUMNS = {
     "created_by_engineer_id": "TEXT NOT NULL DEFAULT ''",
     "suggested_action": "TEXT NOT NULL DEFAULT ''",
     "suggested_specialization": "TEXT NOT NULL DEFAULT ''",
+}
+
+AGENT_LIFECYCLE_COLUMNS = {
+    "queue_empty_emitted": "INTEGER NOT NULL DEFAULT 1",
+    "dismissed_at": "INTEGER NOT NULL DEFAULT 0",
+    "deleted_at": "REAL NOT NULL DEFAULT 0",
+    "permanent_delete_after": "REAL NOT NULL DEFAULT 0",
+    "engineer_specializations": "TEXT NOT NULL DEFAULT '[]'",
+    "agent_class_id": "TEXT NOT NULL DEFAULT ''",
+    "agent_class_version": "TEXT NOT NULL DEFAULT ''",
+    "agent_class_assigned_at": "REAL NOT NULL DEFAULT 0",
+    "agent_class_assigned_by": "TEXT NOT NULL DEFAULT ''",
+    "effective_agent_class_id": "TEXT NOT NULL DEFAULT ''",
+    "effective_agent_class_version": "TEXT NOT NULL DEFAULT ''",
+    "effective_agent_class_snapshot": "TEXT NOT NULL DEFAULT '{}'",
+    "effective_agent_class_applied_at": "REAL NOT NULL DEFAULT 0",
+}
+
+AGENT_MESSAGE_LOOP_RUNTIME_COLUMNS = {
+    "deferred_at": "REAL NOT NULL DEFAULT 0",
+    "deferred_reason": "TEXT NOT NULL DEFAULT ''",
+}
+
+AGENT_CLASS_AUDIT_COLUMNS = {
+    "id": "TEXT PRIMARY KEY",
+    "agent_id": "TEXT NOT NULL DEFAULT ''",
+    "agent_name": "TEXT NOT NULL DEFAULT ''",
+    "event": "TEXT NOT NULL DEFAULT ''",
+    "actor_kind": "TEXT NOT NULL DEFAULT 'user'",
+    "actor_id": "TEXT NOT NULL DEFAULT ''",
+    "actor_label": "TEXT NOT NULL DEFAULT ''",
+    "previous_class_id": "TEXT NOT NULL DEFAULT ''",
+    "previous_class_version": "TEXT NOT NULL DEFAULT ''",
+    "assigned_class_id": "TEXT NOT NULL DEFAULT ''",
+    "assigned_class_version": "TEXT NOT NULL DEFAULT ''",
+    "effective_class_id": "TEXT NOT NULL DEFAULT ''",
+    "effective_class_version": "TEXT NOT NULL DEFAULT ''",
+    "snapshot_hash": "TEXT NOT NULL DEFAULT ''",
+    "snapshot_json": "TEXT NOT NULL DEFAULT '{}'",
+    "message": "TEXT NOT NULL DEFAULT ''",
+    "created_at": "REAL NOT NULL DEFAULT 0",
+}
+
+DECISION_COLUMNS = {
+    "id": "TEXT PRIMARY KEY",
+    "architect_id": "TEXT NOT NULL DEFAULT ''",
+    "title": "TEXT NOT NULL DEFAULT ''",
+    "rationale": "TEXT NOT NULL DEFAULT ''",
+    "status": "TEXT NOT NULL DEFAULT 'proposed'",
+    "supersedes": "TEXT DEFAULT NULL",
+    "linked_task_ids": "TEXT NOT NULL DEFAULT '[]'",
+    "linked_engineer_ids": "TEXT NOT NULL DEFAULT '[]'",
+    "archived": "INTEGER NOT NULL DEFAULT 0",
+    "created_at": "INTEGER NOT NULL DEFAULT 0",
+    "updated_at": "INTEGER NOT NULL DEFAULT 0",
+    "metadata_json": "TEXT NOT NULL DEFAULT '{}'",
+}
+
+PENDING_HIRE_LIFECYCLE_COLUMNS = {
+    "requested_specializations": "TEXT NOT NULL DEFAULT '[]'",
 }
 
 
@@ -620,44 +692,8 @@ CREATE TABLE IF NOT EXISTS agents (
     last_activity_at      REAL NOT NULL DEFAULT 0,
     session_resume        INTEGER NOT NULL DEFAULT 1,
     idle_timeout          INTEGER NOT NULL DEFAULT 0,
-    tasks_dispatched      INTEGER NOT NULL DEFAULT 0,
-    queue_empty_emitted   INTEGER NOT NULL DEFAULT 1,
-    dismissed_at          INTEGER NOT NULL DEFAULT 0,
-    deleted_at            REAL NOT NULL DEFAULT 0,
-    permanent_delete_after REAL NOT NULL DEFAULT 0,
-    engineer_specializations TEXT NOT NULL DEFAULT '[]',
-    agent_class_id TEXT NOT NULL DEFAULT '',
-    agent_class_version TEXT NOT NULL DEFAULT '',
-    agent_class_assigned_at REAL NOT NULL DEFAULT 0,
-    agent_class_assigned_by TEXT NOT NULL DEFAULT '',
-    effective_agent_class_id TEXT NOT NULL DEFAULT '',
-    effective_agent_class_version TEXT NOT NULL DEFAULT '',
-    effective_agent_class_snapshot TEXT NOT NULL DEFAULT '{}',
-    effective_agent_class_applied_at REAL NOT NULL DEFAULT 0
+    tasks_dispatched      INTEGER NOT NULL DEFAULT 0
 );
-
-CREATE TABLE IF NOT EXISTS agent_class_audit (
-    id TEXT PRIMARY KEY,
-    agent_id TEXT NOT NULL DEFAULT '',
-    agent_name TEXT NOT NULL DEFAULT '',
-    event TEXT NOT NULL DEFAULT '',
-    actor_kind TEXT NOT NULL DEFAULT 'user',
-    actor_id TEXT NOT NULL DEFAULT '',
-    actor_label TEXT NOT NULL DEFAULT '',
-    previous_class_id TEXT NOT NULL DEFAULT '',
-    previous_class_version TEXT NOT NULL DEFAULT '',
-    assigned_class_id TEXT NOT NULL DEFAULT '',
-    assigned_class_version TEXT NOT NULL DEFAULT '',
-    effective_class_id TEXT NOT NULL DEFAULT '',
-    effective_class_version TEXT NOT NULL DEFAULT '',
-    snapshot_hash TEXT NOT NULL DEFAULT '',
-    snapshot_json TEXT NOT NULL DEFAULT '{}',
-    message TEXT NOT NULL DEFAULT '',
-    created_at REAL NOT NULL DEFAULT 0
-);
-
-CREATE INDEX IF NOT EXISTS idx_agent_class_audit_agent_created
-ON agent_class_audit(agent_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS groups (
     name     TEXT PRIMARY KEY,
@@ -854,9 +890,7 @@ CREATE TABLE IF NOT EXISTS agent_message_loops (
     next_run_at      REAL NOT NULL DEFAULT 0,
     last_run_at      REAL NOT NULL DEFAULT 0,
     run_count        INTEGER NOT NULL DEFAULT 0,
-    last_message_id  TEXT NOT NULL DEFAULT '',
-    deferred_at      REAL NOT NULL DEFAULT 0,
-    deferred_reason  TEXT NOT NULL DEFAULT ''
+    last_message_id  TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_agent_message_loops_agent_status
     ON agent_message_loops(agent_id, status, updated_at DESC);
@@ -1617,7 +1651,6 @@ CREATE TABLE IF NOT EXISTS pending_hires (
     requested_command TEXT NOT NULL DEFAULT '',
     requested_provider TEXT NOT NULL DEFAULT '',
     requested_directory TEXT NOT NULL DEFAULT '',
-    requested_specializations TEXT NOT NULL DEFAULT '[]',
     status TEXT NOT NULL DEFAULT 'pending',
     resolution_note TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL DEFAULT 0,
@@ -2788,7 +2821,6 @@ def _reconcile_legacy_schema(conn: sqlite3.Connection, backfill_agent_history):
     # Migrate: add tasks_dispatched column to agents
     for col, col_type, default in [
         ("tasks_dispatched", "INTEGER", "0"),
-        ("queue_empty_emitted", "INTEGER", "1"),
         ("runner_backend", "TEXT", "'pty'"),
         ("worktree_base_dir", "TEXT", "'.torque/worktrees'"),
         ("worktree_auto_checkpoint", "INTEGER", "0"),
@@ -2796,16 +2828,6 @@ def _reconcile_legacy_schema(conn: sqlite3.Connection, backfill_agent_history):
         ("worktree_merge_squash", "INTEGER", "1"),
         ("session_resume", "INTEGER", "1"),
         ("idle_timeout", "INTEGER", "0"),
-        ("deleted_at", "REAL", "0"),
-        ("permanent_delete_after", "REAL", "0"),
-        ("agent_class_id", "TEXT", "''"),
-        ("agent_class_version", "TEXT", "''"),
-        ("agent_class_assigned_at", "REAL", "0"),
-        ("agent_class_assigned_by", "TEXT", "''"),
-        ("effective_agent_class_id", "TEXT", "''"),
-        ("effective_agent_class_version", "TEXT", "''"),
-        ("effective_agent_class_snapshot", "TEXT", "'{}'"),
-        ("effective_agent_class_applied_at", "REAL", "0"),
     ]:
         try:
             conn.execute(f"SELECT {col} FROM agents LIMIT 0")
@@ -2949,15 +2971,6 @@ def _reconcile_legacy_schema(conn: sqlite3.Connection, backfill_agent_history):
         conn.execute(
             "ALTER TABLE group_settings ADD COLUMN "
             "default_engineer_specializations TEXT NOT NULL DEFAULT '[]'")
-        conn.commit()
-    # Migrate: add requested_specializations column to pending_hires
-    try:
-        conn.execute(
-            "SELECT requested_specializations FROM pending_hires LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE pending_hires ADD COLUMN "
-            "requested_specializations TEXT NOT NULL DEFAULT '[]'")
         conn.commit()
     # Migrate: add architect settings columns to group_settings.
     for col, col_type, default in (
@@ -3313,6 +3326,35 @@ def _migration_0003_board_task_routing_contract(
     _ensure_columns(conn, "board_tasks", BOARD_TASK_ROUTING_COLUMNS)
 
 
+def _migration_0004_agent_lifecycle_contract(
+    conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Own agent lifecycle, class-audit, and deferred-loop schema."""
+
+    _ensure_columns(conn, "agents", AGENT_LIFECYCLE_COLUMNS)
+    _ensure_columns(
+        conn,
+        "agent_message_loops",
+        AGENT_MESSAGE_LOOP_RUNTIME_COLUMNS,
+    )
+    _ensure_table(conn, "agent_class_audit", AGENT_CLASS_AUDIT_COLUMNS)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_class_audit_agent_created "
+        "ON agent_class_audit(agent_id, created_at DESC)"
+    )
+    _ensure_table(conn, "decisions", DECISION_COLUMNS)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_decisions_architect "
+        "ON decisions(architect_id)"
+    )
+    _ensure_columns(
+        conn,
+        "pending_hires",
+        PENDING_HIRE_LIFECYCLE_COLUMNS,
+    )
+
+
 SCHEMA_MIGRATIONS = (
     SchemaMigration(
         1,
@@ -3331,6 +3373,12 @@ SCHEMA_MIGRATIONS = (
         "board_task_routing_contract",
         "board-task-routing-columns-v1",
         _migration_0003_board_task_routing_contract,
+    ),
+    SchemaMigration(
+        4,
+        "agent_lifecycle_contract",
+        "agent-lifecycle-class-audit-v1",
+        _migration_0004_agent_lifecycle_contract,
     ),
 )
 

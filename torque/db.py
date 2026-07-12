@@ -1606,142 +1606,15 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._conn = sqlite3.connect(str(self.db_path))
         initialize_database(self._conn, self.backfill_agent_history)
         self._ensure_agent_peer_messages_schema()
-        self._ensure_agent_queue_empty_emitted_column()
-        self._ensure_agent_message_loop_deferred_columns()
         self._migrate_agent_activity_timestamps_if_needed()
         self._refuse_unmigrated_legacy_rows_if_needed()
         self._migrate_kinds_schema_if_needed()
-        self._ensure_agent_dismissed_at_column()
-        self._ensure_agent_tombstone_columns()
-        self._ensure_agent_engineer_specializations_column()
-        self._ensure_agent_class_columns()
-        self._ensure_agent_class_audit_schema()
-        self._ensure_decision_metadata_column()
-        self._ensure_pending_hire_requested_specializations_column()
         self._backfill_kinds_if_needed()
         self._fixup_kinds_task_assignments_if_needed()
         self._cleanup_kinds_legacy_columns_if_needed()
         self._backfill_empty_worker_kinds_if_needed()
         self._migrate_agent_digest_settings_from_legacy_engineer_settings()
         self.migrate_task_ids_if_needed()
-
-    def _ensure_agent_message_loop_deferred_columns(self):
-        for col, col_type, default in [
-            ("deferred_at", "REAL", "0"),
-            ("deferred_reason", "TEXT", "''"),
-        ]:
-            try:
-                self._conn.execute(
-                    f"SELECT {col} FROM agent_message_loops LIMIT 0")
-            except sqlite3.OperationalError:
-                self._conn.execute(
-                    f"ALTER TABLE agent_message_loops ADD COLUMN {col} "
-                    f"{col_type} NOT NULL DEFAULT {default}"
-                )
-                self._conn.commit()
-
-    def _ensure_agent_dismissed_at_column(self):
-        try:
-            self._conn.execute("SELECT dismissed_at FROM agents LIMIT 0")
-        except sqlite3.OperationalError:
-            self._conn.execute(
-                "ALTER TABLE agents ADD COLUMN dismissed_at "
-                "INTEGER NOT NULL DEFAULT 0"
-            )
-            self._conn.commit()
-
-    def _ensure_agent_tombstone_columns(self):
-        for col in ("deleted_at", "permanent_delete_after"):
-            try:
-                self._conn.execute(f"SELECT {col} FROM agents LIMIT 0")
-            except sqlite3.OperationalError:
-                self._conn.execute(
-                    f"ALTER TABLE agents ADD COLUMN {col} "
-                    "REAL NOT NULL DEFAULT 0"
-                )
-                self._conn.commit()
-
-    def _ensure_agent_engineer_specializations_column(self):
-        try:
-            self._conn.execute(
-                "SELECT engineer_specializations FROM agents LIMIT 0")
-        except sqlite3.OperationalError:
-            self._conn.execute(
-                "ALTER TABLE agents ADD COLUMN engineer_specializations "
-                "TEXT NOT NULL DEFAULT '[]'"
-            )
-            self._conn.commit()
-
-    def _ensure_agent_class_columns(self):
-        for col, col_type, default in [
-            ("agent_class_id", "TEXT", "''"),
-            ("agent_class_version", "TEXT", "''"),
-            ("agent_class_assigned_at", "REAL", "0"),
-            ("agent_class_assigned_by", "TEXT", "''"),
-            ("effective_agent_class_id", "TEXT", "''"),
-            ("effective_agent_class_version", "TEXT", "''"),
-            ("effective_agent_class_snapshot", "TEXT", "'{}'"),
-            ("effective_agent_class_applied_at", "REAL", "0"),
-        ]:
-            try:
-                self._conn.execute(f"SELECT {col} FROM agents LIMIT 0")
-            except sqlite3.OperationalError:
-                self._conn.execute(
-                    f"ALTER TABLE agents ADD COLUMN {col} "
-                    f"{col_type} NOT NULL DEFAULT {default}"
-                )
-                self._conn.commit()
-
-    def _ensure_agent_class_audit_schema(self):
-        self._conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS agent_class_audit (
-                id TEXT PRIMARY KEY,
-                agent_id TEXT NOT NULL DEFAULT '',
-                agent_name TEXT NOT NULL DEFAULT '',
-                event TEXT NOT NULL DEFAULT '',
-                actor_kind TEXT NOT NULL DEFAULT 'user',
-                actor_id TEXT NOT NULL DEFAULT '',
-                actor_label TEXT NOT NULL DEFAULT '',
-                previous_class_id TEXT NOT NULL DEFAULT '',
-                previous_class_version TEXT NOT NULL DEFAULT '',
-                assigned_class_id TEXT NOT NULL DEFAULT '',
-                assigned_class_version TEXT NOT NULL DEFAULT '',
-                effective_class_id TEXT NOT NULL DEFAULT '',
-                effective_class_version TEXT NOT NULL DEFAULT '',
-                snapshot_hash TEXT NOT NULL DEFAULT '',
-                snapshot_json TEXT NOT NULL DEFAULT '{}',
-                message TEXT NOT NULL DEFAULT '',
-                created_at REAL NOT NULL DEFAULT 0
-            )
-            """
-        )
-        self._conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_agent_class_audit_agent_created "
-            "ON agent_class_audit(agent_id, created_at DESC)"
-        )
-        self._conn.commit()
-
-    def _ensure_decision_metadata_column(self):
-        try:
-            self._conn.execute("SELECT metadata_json FROM decisions LIMIT 0")
-        except sqlite3.OperationalError:
-            self._conn.execute(
-                "ALTER TABLE decisions ADD COLUMN metadata_json "
-                "TEXT NOT NULL DEFAULT '{}'"
-            )
-            self._conn.commit()
-
-    def _ensure_pending_hire_requested_specializations_column(self):
-        try:
-            self._conn.execute(
-                "SELECT requested_specializations FROM pending_hires LIMIT 0")
-        except sqlite3.OperationalError:
-            self._conn.execute(
-                "ALTER TABLE pending_hires ADD COLUMN "
-                "requested_specializations TEXT NOT NULL DEFAULT '[]'"
-            )
-            self._conn.commit()
 
     def _ensure_agent_peer_messages_schema(self):
         self._conn.execute(
@@ -10529,16 +10402,6 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 )
                 self._conn.commit()
 
-    def _ensure_agent_queue_empty_emitted_column(self) -> None:
-        try:
-            self._conn.execute("SELECT queue_empty_emitted FROM agents LIMIT 0")
-        except sqlite3.OperationalError:
-            self._conn.execute(
-                "ALTER TABLE agents ADD COLUMN queue_empty_emitted "
-                "INTEGER NOT NULL DEFAULT 1"
-            )
-            self._conn.commit()
-
     def _migrate_agent_activity_timestamps_if_needed(self) -> None:
         """Backfill split progress/heartbeat clocks from legacy activity."""
         self._ensure_agent_activity_timestamp_columns()
@@ -10622,7 +10485,6 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             ("role", "TEXT", "''"),
             ("owner_engineer_id", "TEXT", "''"),
             ("hired_by_architect_id", "TEXT", "''"),
-            ("dismissed_at", "INTEGER", "0"),
             ("persistent", "INTEGER", "0"),
         ]:
             try:
@@ -10633,27 +10495,6 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                     f"{col_type} NOT NULL DEFAULT {default}"
                 )
                 self._conn.commit()
-
-        self._conn.execute("""
-            CREATE TABLE IF NOT EXISTS decisions (
-                id TEXT PRIMARY KEY,
-                architect_id TEXT NOT NULL DEFAULT '',
-                title TEXT NOT NULL DEFAULT '',
-                rationale TEXT NOT NULL DEFAULT '',
-                status TEXT NOT NULL DEFAULT 'proposed',
-                supersedes TEXT DEFAULT NULL,
-                linked_task_ids TEXT NOT NULL DEFAULT '[]',
-                linked_engineer_ids TEXT NOT NULL DEFAULT '[]',
-                archived INTEGER NOT NULL DEFAULT 0,
-                created_at INTEGER NOT NULL DEFAULT 0,
-                updated_at INTEGER NOT NULL DEFAULT 0,
-                metadata_json TEXT NOT NULL DEFAULT '{}'
-            )
-        """)
-        self._conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_decisions_architect "
-            "ON decisions(architect_id)"
-        )
 
         migrated_at = datetime.now(timezone.utc).isoformat()
         self._conn.execute(

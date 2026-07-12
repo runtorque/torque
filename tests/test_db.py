@@ -1374,16 +1374,14 @@ class TorqueDBTests(unittest.TestCase):
             ["ui-ux", "security-focus"],
         )
 
-    def test_engineer_specializations_migration_is_idempotent(self):
-        # Column already exists after init(); calling ensure again is a no-op.
-        self.db._ensure_agent_engineer_specializations_column()
+    def test_engineer_specializations_column_is_owned_by_schema_migration(self):
         columns = {
             row[1]
             for row in self.db._conn.execute("PRAGMA table_info(agents)")
         }
         self.assertIn("engineer_specializations", columns)
 
-    def test_agent_tombstone_fields_round_trip_and_migration_is_idempotent(self):
+    def test_agent_tombstone_fields_round_trip(self):
         cell = AgentCell(
             id="engineer-1",
             name="Engineer",
@@ -1403,7 +1401,6 @@ class TorqueDBTests(unittest.TestCase):
             loaded["agents"]["engineer-1"]["permanent_delete_after"],
             456.5,
         )
-        self.db._ensure_agent_tombstone_columns()
         columns = {
             row[1]
             for row in self.db._conn.execute("PRAGMA table_info(agents)")
