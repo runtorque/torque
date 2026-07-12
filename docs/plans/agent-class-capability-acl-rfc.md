@@ -26,13 +26,16 @@ Implemented in the current working change:
 - removal of the three legacy surface capability maps and the centralized
   capability-to-target-argument heuristic;
 - descriptor-driven call-time checks for scalar and list-valued Agent/Task
-  targets, plus fail-closed result filtering for self-scoped task lists.
+  targets, plus fail-closed result filtering for self-scoped task lists;
+- descriptor-driven scope resolution for Thinking notes, Mind Maps, Idea
+  Briefs, MCP telemetry rows, and reply-message counterparties, including
+  self-scoped collection filtering and cross-scope target concealment.
 
 Still required before this RFC is complete:
 
 - finish family-by-family list filtering and concrete resource scope checks
-  for Decisions, Planning, messaging threads, telemetry rows, and artifact
-  collections that do not yet expose direct Agent/Task targets;
+  for Planning objects, mixed-purpose messaging threads, event/semantic
+  recall rows, and remaining aggregate/read models;
 - remove or rename historical class-oriented wrapper tools where practical;
 - remove direct Agent Profile authority assignment after the migration is
   complete.

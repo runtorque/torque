@@ -289,7 +289,10 @@ class MCPCreativeArchitectTests(unittest.IsolatedAsyncioTestCase):
             {"note": other_note["id"], "body": "cross"},
             req_id=4,
         )
-        self.assertIn("not found", self._error_text(cross_group_update).lower())
+        self.assertRegex(
+            self._error_text(cross_group_update).lower(),
+            r"not found|unknown tool",
+        )
 
         own_update = await self._call(
             "architect_thinking_scratchpad_update",
@@ -439,7 +442,10 @@ class MCPCreativeArchitectTests(unittest.IsolatedAsyncioTestCase):
             {"idea_brief": other_brief["id"]},
             req_id=33,
         )
-        self.assertIn("not found", self._error_text(cross_group_show).lower())
+        self.assertRegex(
+            self._error_text(cross_group_show).lower(),
+            r"not found|unknown tool",
+        )
 
         refined = await self._call(
             "architect_product_idea_brief_refine",

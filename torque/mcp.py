@@ -1211,6 +1211,79 @@ def _task_target_scope(state, caller_cell, task) -> str:
     return "global"
 
 
+def _record_target_scope(caller_cell, record: dict | None) -> str:
+    """Return scope for a persisted planning/artifact record."""
+
+    if not caller_cell or not isinstance(record, dict):
+        return "global"
+    caller_id = str(getattr(caller_cell, "id", "") or "").strip()
+    owner_ids = {
+        str(record.get(field, "") or "").strip()
+        for field in (
+            "architect_id",
+            "created_by_architect_id",
+            "created_by_id",
+            "owner_id",
+        )
+    }
+    owner_ids.discard("")
+    if caller_id in owner_ids:
+        return "self"
+    caller_group = str(getattr(caller_cell, "group", "") or "").strip()
+    record_group = str(
+        record.get("group_name", record.get("group", "")) or ""
+    ).strip()
+    if caller_group and caller_group == record_group:
+        return "group"
+    return "global"
+
+
+def _resolve_scoped_resource(state, caller_cell, resource_kind: str, reference):
+    """Resolve one descriptor-declared resource without widening visibility."""
+
+    reference = str(reference or "").strip()
+    if not reference:
+        return None
+    if resource_kind == "task":
+        task_id = resolve_mcp_task(state, reference)
+        return state.board_tasks.get(task_id) if task_id else None
+    if resource_kind == "agent":
+        agent_id = resolve_mcp_agent(state, reference)
+        return state.agents.get(agent_id) if agent_id else None
+    group = str(getattr(caller_cell, "group", "") or "").strip()
+    if resource_kind == "scratchpad_note":
+        note_id = state.resolve_scratchpad_note_id(reference, group=group)
+        return state.load_scratchpad_note(note_id) if note_id else None
+    if resource_kind == "mind_map":
+        map_id = state.resolve_mind_map_id(reference, group=group)
+        return state.load_mind_map(map_id, include_counts=True) if map_id else None
+    if resource_kind == "idea_brief":
+        brief_id = state.resolve_idea_brief_id(reference, group=group)
+        return state.load_idea_brief(brief_id) if brief_id else None
+    if resource_kind == "decision":
+        return state.load_decision(reference)
+    if resource_kind == "message_peer":
+        db = getattr(state, "db", None)
+        loader = getattr(db, "load_agent_peer_message", None)
+        message = loader(reference) if callable(loader) else None
+        if not isinstance(message, dict):
+            return None
+        caller_id = str(getattr(caller_cell, "id", "") or "").strip()
+        sender_id = str(message.get("sender_id", "") or "").strip()
+        recipient_id = str(message.get("recipient_id", "") or "").strip()
+        peer_id = recipient_id if sender_id == caller_id else sender_id
+        return state.agents.get(peer_id)
+    return None
+
+
+def _scoped_resource_relationship(state, caller_cell, resource_kind: str, resource):
+    if resource_kind == "task":
+        return _task_target_scope(state, caller_cell, resource)
+    if resource_kind in {"agent", "message_peer"}:
+        return _agent_target_scope(caller_cell, resource)
+    return _record_target_scope(caller_cell, resource)
+
+
 def _tool_argument_scope_denied(
     state,
     tool_name: str,
@@ -1239,22 +1312,22 @@ def _tool_argument_scope_denied(
             target_ref = str(raw_ref or "").strip()
             if not target_ref:
                 continue
-            if requirement.target_kind == "task":
-                task_id = resolve_mcp_task(state, target_ref)
-                target = state.board_tasks.get(task_id) if task_id else None
-                target_scope = (
-                    _task_target_scope(state, caller_cell, target)
-                    if target
-                    else ""
+            target = _resolve_scoped_resource(
+                state,
+                caller_cell,
+                requirement.target_kind,
+                target_ref,
+            )
+            target_scope = (
+                _scoped_resource_relationship(
+                    state,
+                    caller_cell,
+                    requirement.target_kind,
+                    target,
                 )
-            else:
-                target_id = resolve_mcp_agent(state, target_ref)
-                target = state.agents.get(target_id) if target_id else None
-                target_scope = (
-                    _agent_target_scope(caller_cell, target)
-                    if target
-                    else ""
-                )
+                if target is not None
+                else ""
+            )
             # Unknown targets remain the handler's responsibility. Once a
             # concrete target resolves, the class ACL is enforced first.
             if target_scope and not authority.allows(
@@ -1282,21 +1355,29 @@ def _result_collection_at_path(payload, path: str):
     return parent, key, parent[key]
 
 
-def _scoped_result_resource(state, result_kind: str, item):
+def _scoped_result_resource(state, caller_cell, result_kind: str, item):
     """Resolve a declared result item to the resource used for ACL scope."""
 
     if isinstance(item, dict):
-        reference = item.get("id") or item.get(f"{result_kind}_id")
+        if result_kind == "agent":
+            reference = (
+                item.get("agent_id")
+                or item.get("cell_id")
+                or item.get("id")
+            )
+        else:
+            reference = item.get("id") or item.get(f"{result_kind}_id")
     else:
         reference = item
     reference = str(reference or "").strip()
     if not reference:
         return None
-    if result_kind == "task":
-        task_id = resolve_mcp_task(state, reference)
-        return state.board_tasks.get(task_id) if task_id else None
-    agent_id = resolve_mcp_agent(state, reference)
-    return state.agents.get(agent_id) if agent_id else None
+    return _resolve_scoped_resource(
+        state,
+        caller_cell,
+        result_kind,
+        reference,
+    )
 
 
 def _apply_tool_result_scope_filters(
@@ -1343,15 +1424,17 @@ def _apply_tool_result_scope_filters(
                 for item in collection:
                     resource = _scoped_result_resource(
                         state,
+                        caller_cell,
                         requirement.result_kind,
                         item,
                     )
                     if resource is None:
                         continue
-                    target_scope = (
-                        _task_target_scope(state, caller_cell, resource)
-                        if requirement.result_kind == "task"
-                        else _agent_target_scope(caller_cell, resource)
+                    target_scope = _scoped_resource_relationship(
+                        state,
+                        caller_cell,
+                        requirement.result_kind,
+                        resource,
                     )
                     if authority.allows(
                         requirement.capability,

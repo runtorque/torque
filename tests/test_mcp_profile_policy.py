@@ -480,6 +480,124 @@ class MCPProfilePolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("error", denied.payload)
         self.assertIn("Unknown tool", denied.payload["error"]["message"])
 
+    async def test_class_telemetry_self_scope_filters_unbounded_call_rows(self):
+        state, architect = self._state_with_architect()
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+            hired_by_architect_id=architect.id,
+        )
+        state.agents[engineer.id] = engineer
+        state.groups["g"].append(engineer.id)
+        architect.effective_agent_class_snapshot = {
+            "effective_authority": {
+                "schema_version": 1,
+                "base_kind": "architect",
+                "acl_mode": "allow",
+                "capabilities": {"telemetry.read": "self"},
+            },
+        }
+
+        async def fake_handle_command(payload):
+            self.assertEqual(payload["cmd"], "architect_mcp_calls")
+            return {
+                "type": "mcp_calls",
+                "calls": [
+                    {"id": "call-1", "cell_id": architect.id},
+                    {"id": "call-2", "cell_id": engineer.id},
+                ],
+            }
+
+        handler = self.mcp_mod.create_mcp_handler(fake_handle_command, state)
+        response = await handler(FakeRequest(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "architect_mcp_calls",
+                    "arguments": {},
+                },
+            },
+            headers={"X-Torque-Cell-Id": architect.id},
+        ))
+        payload = json.loads(response.payload["result"]["content"][0]["text"])
+        self.assertEqual(
+            [item["cell_id"] for item in payload["calls"]],
+            [architect.id],
+        )
+
+    async def test_class_thinking_self_scope_filters_lists_and_denies_peer_artifact(self):
+        state, architect = self._state_with_architect()
+        own_note = {
+            "id": "note-own",
+            "group_name": "g",
+            "created_by_kind": "architect",
+            "created_by_id": architect.id,
+            "title": "Own note",
+        }
+        peer_note = {
+            "id": "note-peer",
+            "group_name": "g",
+            "created_by_kind": "architect",
+            "created_by_id": "architect-2",
+            "title": "Peer note",
+        }
+        notes = {own_note["id"]: own_note, peer_note["id"]: peer_note}
+        state.list_scratchpad_notes = lambda **kwargs: list(notes.values())
+        state.resolve_scratchpad_note_id = (
+            lambda identifier, **kwargs: identifier if identifier in notes else ""
+        )
+        state.load_scratchpad_note = lambda note_id: notes.get(note_id)
+        architect.effective_agent_class_snapshot = {
+            "effective_authority": {
+                "schema_version": 1,
+                "base_kind": "architect",
+                "acl_mode": "allow",
+                "capabilities": {"thinking.read": "self"},
+            },
+        }
+
+        async def unexpected(payload):
+            self.fail(f"Unexpected command: {payload}")
+
+        handler = self.mcp_mod.create_mcp_handler(unexpected, state)
+        response = await handler(FakeRequest(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "architect_thinking_scratchpad_list",
+                    "arguments": {},
+                },
+            },
+            headers={"X-Torque-Cell-Id": architect.id},
+        ))
+        payload = json.loads(response.payload["result"]["content"][0]["text"])
+        self.assertEqual(
+            [item["id"] for item in payload["notes"]],
+            [own_note["id"]],
+        )
+
+        denied = await handler(FakeRequest(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "architect_thinking_scratchpad_show",
+                    "arguments": {"note_id": peer_note["id"]},
+                },
+            },
+            headers={"X-Torque-Cell-Id": architect.id},
+        ))
+        self.assertIn("error", denied.payload)
+        self.assertIn("Unknown tool", denied.payload["error"]["message"])
+
     async def test_product_manager_profile_cannot_use_peer_tools_for_engineer_threads(self):
         state, architect = self._state_with_architect()
         engineer = self.state_mod.AgentCell(

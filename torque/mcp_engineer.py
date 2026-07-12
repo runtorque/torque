@@ -240,7 +240,7 @@ ENGINEER_TOOLS.extend([
         },
     },
     {
-        "name": "engineer_mcp_calls", "authority": {"requirements": [{"capability": "telemetry.read","minimum_scope": "self","target_argument": "agent_id","target_kind": "agent"}]},
+        "name": "engineer_mcp_calls", "authority": {"requirements": [{"capability": "telemetry.read","minimum_scope": "self","result_kind": "agent","result_paths": ["calls"]}]},
         "deferred": True,
         "description": (
             "Return recent MCP call history for this engineer and owned "
@@ -338,7 +338,7 @@ ENGINEER_TOOLS.extend([
         },
     },
     {
-        "name": "engineer_reply", "authority": {"requirements": [{"capability": "message.engineer","minimum_scope": "children"}]},
+        "name": "engineer_reply", "authority": {"requirements": [{"capability": "message.engineer","minimum_scope": "children","target_argument": "message_id","target_kind": "message_peer"}]},
         "description": "Reply to an existing architect↔engineer message thread.",
         "inputSchema": {
             "type": "object",

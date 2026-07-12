@@ -52,7 +52,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_steward_operating_brief", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group"},{"capability": "decision.read","minimum_scope": "group"},{"capability": "event.read","minimum_scope": "group"},{"capability": "planning.area.read","minimum_scope": "group"},{"capability": "planning.initiative.read","minimum_scope": "group"},{"capability": "task.read","minimum_scope": "group"},{"capability": "telemetry.read","minimum_scope": "group"}]},
+        "name": "architect_steward_operating_brief", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group"},{"capability": "decision.read","minimum_scope": "self"},{"capability": "event.read","minimum_scope": "group"},{"capability": "planning.area.read","minimum_scope": "group"},{"capability": "planning.initiative.read","minimum_scope": "group"},{"capability": "task.read","minimum_scope": "group"},{"capability": "telemetry.read","minimum_scope": "group"}]},
         "description": (
             "Return a read-only Torque Steward onboarding/operating brief for "
             "this Architect's group. The payload separates observed facts, "
@@ -107,7 +107,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_wave_summary", "authority": {"requirements": [{"capability": "decision.read","minimum_scope": "group"},{"capability": "task.read","minimum_scope": "group","target_argument": "task_ids","target_kind": "task"}]},
+        "name": "architect_wave_summary", "authority": {"requirements": [{"capability": "decision.read","minimum_scope": "self"},{"capability": "task.read","minimum_scope": "group","target_argument": "task_ids","target_kind": "task"}]},
         "description": (
             "Generate a compact bounded wave-summary drafting aid from either "
             "one caller-owned decision id or an explicit task-id list. The "
@@ -144,7 +144,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_completion_audit", "authority": {"requirements": [{"capability": "decision.read","minimum_scope": "group"},{"capability": "task.read","minimum_scope": "group","target_argument": "task_ids","target_kind": "task"}]},
+        "name": "architect_completion_audit", "authority": {"requirements": [{"capability": "decision.read","minimum_scope": "self"},{"capability": "task.read","minimum_scope": "group","target_argument": "task_ids","target_kind": "task"}]},
         "description": (
             "Run a compact conservative completion audit before marking a "
             "decision/task wave complete. Given one caller-owned decision id "
@@ -245,7 +245,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_mcp_calls", "authority": {"requirements": [{"capability": "telemetry.read","minimum_scope": "self","target_argument": "agent_id","target_kind": "agent"}]},
+        "name": "architect_mcp_calls", "authority": {"requirements": [{"capability": "telemetry.read","minimum_scope": "self","result_kind": "agent","result_paths": ["calls"]}]},
         "deferred": True,
         "description": (
             "Return recent MCP call history for this architect's group. "
@@ -1689,7 +1689,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_decision_list", "authority": {"requirements": [{"capability": "decision.read","minimum_scope": "group"}]},
+        "name": "architect_decision_list", "authority": {"requirements": [{"capability": "decision.read","minimum_scope": "self"}]},
         "description": "List this architect's persisted decisions.",
         "inputSchema": {
             "type": "object",
@@ -1789,7 +1789,7 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
         "inputSchema": {"type": "object", "properties": {"initiative": {"type": "string"}, "initiative_id": {"type": "string"}}},
     },
     {
-        "name": "architect_product_decision_list", "authority": {"requirements": [{"capability": "decision.read","minimum_scope": "group"}]},
+        "name": "architect_product_decision_list", "authority": {"requirements": [{"capability": "decision.read","minimum_scope": "self"}]},
         "description": "List PM-owned proposed product decisions only.",
         "inputSchema": {"type": "object", "properties": {"include_archived": {"type": "boolean"}}},
     },
@@ -1809,12 +1809,12 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
         "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "task_id": {"type": "string"}, "engineer_id": {"type": "string"}}, "required": ["id", "task_id"]},
     },
     {
-        "name": "architect_product_idea_brief_list", "authority": {"requirements": [{"capability": "idea_brief.read","minimum_scope": "self"}]},
+        "name": "architect_product_idea_brief_list", "authority": {"requirements": [{"capability": "idea_brief.read","minimum_scope": "self","result_kind": "idea_brief","result_paths": ["idea_briefs"]}]},
         "description": "List same-group Idea Brief proposal artifacts visible to this product/ideation wrapper; includes caller_owned for safe update decisions.",
         "inputSchema": {"type": "object", "properties": {"group": {"type": "string"}, "status": {"type": "string", "enum": ["draft", "proposed", "parked", "archived"]}, "include_archived": {"type": "boolean"}, "limit": {"type": "integer"}}},
     },
     {
-        "name": "architect_product_idea_brief_show", "authority": {"requirements": [{"capability": "idea_brief.read","minimum_scope": "self"}]},
+        "name": "architect_product_idea_brief_show", "authority": {"requirements": [{"capability": "idea_brief.read","minimum_scope": "self","target_argument": "idea_brief","target_kind": "idea_brief"},{"capability": "idea_brief.read","minimum_scope": "self","target_argument": "brief_id","target_kind": "idea_brief"},{"capability": "idea_brief.read","minimum_scope": "self","target_argument": "id","target_kind": "idea_brief"}]},
         "description": "Show one same-group Idea Brief by id or slug without granting execution authority.",
         "inputSchema": {"type": "object", "properties": {"idea_brief": {"type": "string"}, "brief_id": {"type": "string"}, "id": {"type": "string"}, "group": {"type": "string"}, "include_archived": {"type": "boolean"}}},
     },
@@ -1824,27 +1824,27 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
         "inputSchema": {"type": "object", "properties": {"group": {"type": "string"}, "title": {"type": "string"}, "problem_opportunity": {"type": "string"}, "why_it_matters": {"type": "string"}, "proposed_shape": {"type": "string"}, "smallest_useful_version": {"type": "string"}, "risks_tradeoffs": {"type": "string"}, "open_questions": {"type": "string"}, "thinking_links": {"type": "array", "items": {"type": "object"}}, "source_context": {"type": "object"}}, "required": ["problem_opportunity"]},
     },
     {
-        "name": "architect_product_idea_brief_update", "authority": {"requirements": [{"capability": "idea_brief.read","minimum_scope": "self"},{"capability": "idea_brief.write","minimum_scope": "self"}]},
+        "name": "architect_product_idea_brief_update", "authority": {"requirements": [{"capability": "idea_brief.read","minimum_scope": "self","target_argument": "idea_brief","target_kind": "idea_brief"},{"capability": "idea_brief.read","minimum_scope": "self","target_argument": "brief_id","target_kind": "idea_brief"},{"capability": "idea_brief.read","minimum_scope": "self","target_argument": "id","target_kind": "idea_brief"},{"capability": "idea_brief.write","minimum_scope": "self"}]},
         "description": "Update a caller-owned Idea Brief only; status may remain draft/proposed/parked but archive uses the explicit archive tool.",
         "inputSchema": {"type": "object", "properties": {"idea_brief": {"type": "string"}, "brief_id": {"type": "string"}, "id": {"type": "string"}, "title": {"type": "string"}, "problem_opportunity": {"type": "string"}, "why_it_matters": {"type": "string"}, "proposed_shape": {"type": "string"}, "smallest_useful_version": {"type": "string"}, "risks_tradeoffs": {"type": "string"}, "open_questions": {"type": "string"}, "status": {"type": "string", "enum": ["draft", "parked"]}, "thinking_links": {"type": "array", "items": {"type": "object"}}, "source_context": {"type": "object"}, "group": {"type": "string"}}},
     },
     {
-        "name": "architect_product_idea_brief_refine", "authority": {"requirements": [{"capability": "idea_brief.read","minimum_scope": "self"},{"capability": "idea_brief.write","minimum_scope": "self"}]},
+        "name": "architect_product_idea_brief_refine", "authority": {"requirements": [{"capability": "idea_brief.read","minimum_scope": "self","target_argument": "idea_brief","target_kind": "idea_brief"},{"capability": "idea_brief.read","minimum_scope": "self","target_argument": "brief_id","target_kind": "idea_brief"},{"capability": "idea_brief.read","minimum_scope": "self","target_argument": "id","target_kind": "idea_brief"},{"capability": "idea_brief.write","minimum_scope": "self"}]},
         "description": "Refine a caller-owned Idea Brief with field patches and an optional refinement note; no execution side effects.",
         "inputSchema": {"type": "object", "properties": {"idea_brief": {"type": "string"}, "brief_id": {"type": "string"}, "id": {"type": "string"}, "refinement_note": {"type": "string"}, "title": {"type": "string"}, "problem_opportunity": {"type": "string"}, "why_it_matters": {"type": "string"}, "proposed_shape": {"type": "string"}, "smallest_useful_version": {"type": "string"}, "risks_tradeoffs": {"type": "string"}, "open_questions": {"type": "string"}, "thinking_links": {"type": "array", "items": {"type": "object"}}, "source_context": {"type": "object"}, "group": {"type": "string"}}},
     },
     {
-        "name": "architect_product_idea_brief_park", "authority": {"requirements": [{"capability": "idea_brief.read","minimum_scope": "self"},{"capability": "idea_brief.write","minimum_scope": "self"}]},
+        "name": "architect_product_idea_brief_park", "authority": {"requirements": [{"capability": "idea_brief.read","minimum_scope": "self","target_argument": "idea_brief","target_kind": "idea_brief"},{"capability": "idea_brief.read","minimum_scope": "self","target_argument": "brief_id","target_kind": "idea_brief"},{"capability": "idea_brief.read","minimum_scope": "self","target_argument": "id","target_kind": "idea_brief"},{"capability": "idea_brief.write","minimum_scope": "self"}]},
         "description": "Park a caller-owned Idea Brief for later; keeps it durable and does not create tasks or decisions.",
         "inputSchema": {"type": "object", "properties": {"idea_brief": {"type": "string"}, "brief_id": {"type": "string"}, "id": {"type": "string"}, "reason": {"type": "string"}, "group": {"type": "string"}}},
     },
     {
-        "name": "architect_product_idea_brief_archive", "authority": {"requirements": [{"capability": "idea_brief.read","minimum_scope": "self"},{"capability": "idea_brief.write","minimum_scope": "self"}]},
+        "name": "architect_product_idea_brief_archive", "authority": {"requirements": [{"capability": "idea_brief.read","minimum_scope": "self","target_argument": "idea_brief","target_kind": "idea_brief"},{"capability": "idea_brief.read","minimum_scope": "self","target_argument": "brief_id","target_kind": "idea_brief"},{"capability": "idea_brief.read","minimum_scope": "self","target_argument": "id","target_kind": "idea_brief"},{"capability": "idea_brief.write","minimum_scope": "self"}]},
         "description": "Archive a caller-owned Idea Brief; this is a terminal visibility change, not an execution action.",
         "inputSchema": {"type": "object", "properties": {"idea_brief": {"type": "string"}, "brief_id": {"type": "string"}, "id": {"type": "string"}, "reason": {"type": "string"}, "group": {"type": "string"}}},
     },
     {
-        "name": "architect_product_idea_brief_propose", "authority": {"requirements": [{"capability": "idea_brief.propose","minimum_scope": "self"},{"capability": "idea_brief.read","minimum_scope": "self"},{"capability": "idea_brief.write","minimum_scope": "self"}]},
+        "name": "architect_product_idea_brief_propose", "authority": {"requirements": [{"capability": "idea_brief.propose","minimum_scope": "self"},{"capability": "idea_brief.read","minimum_scope": "self","target_argument": "idea_brief","target_kind": "idea_brief"},{"capability": "idea_brief.read","minimum_scope": "self","target_argument": "brief_id","target_kind": "idea_brief"},{"capability": "idea_brief.read","minimum_scope": "self","target_argument": "id","target_kind": "idea_brief"},{"capability": "idea_brief.write","minimum_scope": "self"}]},
         "description": "Explicitly mark a caller-owned Idea Brief proposed for product-safe review. It creates no task, assignment, dispatch, accepted decision, merge, or deploy action.",
         "inputSchema": {"type": "object", "properties": {"idea_brief": {"type": "string"}, "brief_id": {"type": "string"}, "id": {"type": "string"}, "note": {"type": "string"}, "proposal_note": {"type": "string"}, "review_target": {"type": "string"}, "group": {"type": "string"}}},
     },
@@ -1864,7 +1864,7 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
         "inputSchema": {"type": "object", "properties": {"peer_architect_id": {"type": "string"}, "thread_id": {"type": "string"}, "requires_reply": {"type": "boolean"}, "since": {"type": "number"}, "limit": {"type": "integer"}}},
     },
     {
-        "name": "architect_product_peer_reply", "authority": {"requirements": [{"capability": "message.architect_peer","minimum_scope": "group"}]},
+        "name": "architect_product_peer_reply", "authority": {"requirements": [{"capability": "message.architect_peer","minimum_scope": "group","target_argument": "message_id","target_kind": "message_peer"}]},
         "description": "Reply inside a product-peer marked thread only. ack_required requires a product-scope anchor.",
         "inputSchema": {"type": "object", "properties": {"message_id": {"type": "string"}, "message": {"type": "string"}, "ack_required": {"type": "boolean"}, "context_task_ids": {"type": "array", "items": {"type": "string"}}, "context_decision_ids": {"type": "array", "items": {"type": "string"}}, "context_area_ids": {"type": "array", "items": {"type": "string"}}, "context_initiative_ids": {"type": "array", "items": {"type": "string"}}, "context_idea_brief_ids": {"type": "array", "items": {"type": "string"}}, "context_summary": {"type": "string"}}, "required": ["message_id", "message"]},
     },
@@ -1893,12 +1893,12 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
 
 _ARCHITECT_THINKING_TOOL_SPECS = [
     {
-        "name": "architect_thinking_scratchpad_list", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self"}]},
+        "name": "architect_thinking_scratchpad_list", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self","result_kind": "scratchpad_note","result_paths": ["notes"]}]},
         "description": "List same-group Scratchpad notes visible to this Architect; includes caller_owned for safe update decisions.",
         "inputSchema": {"type": "object", "properties": {"group": {"type": "string"}, "include_archived": {"type": "boolean"}, "limit": {"type": "integer"}}},
     },
     {
-        "name": "architect_thinking_scratchpad_show", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self"}]},
+        "name": "architect_thinking_scratchpad_show", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self","target_argument": "note","target_kind": "scratchpad_note"},{"capability": "thinking.read","minimum_scope": "self","target_argument": "note_id","target_kind": "scratchpad_note"},{"capability": "thinking.read","minimum_scope": "self","target_argument": "id","target_kind": "scratchpad_note"}]},
         "description": "Show one same-group Scratchpad note by id or slug.",
         "inputSchema": {"type": "object", "properties": {"note": {"type": "string"}, "note_id": {"type": "string"}, "id": {"type": "string"}, "group": {"type": "string"}, "include_archived": {"type": "boolean"}}},
     },
@@ -1908,17 +1908,17 @@ _ARCHITECT_THINKING_TOOL_SPECS = [
         "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "body": {"type": "string"}, "context": {"type": "object"}, "links": {"type": "array", "items": {"type": "object"}}, "group": {"type": "string"}}, "required": ["title"]},
     },
     {
-        "name": "architect_thinking_scratchpad_update", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self"},{"capability": "thinking.write","minimum_scope": "self"}]},
+        "name": "architect_thinking_scratchpad_update", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self","target_argument": "note","target_kind": "scratchpad_note"},{"capability": "thinking.read","minimum_scope": "self","target_argument": "note_id","target_kind": "scratchpad_note"},{"capability": "thinking.read","minimum_scope": "self","target_argument": "id","target_kind": "scratchpad_note"},{"capability": "thinking.write","minimum_scope": "self"}]},
         "description": "Update a caller-owned Scratchpad note only; same-group notes owned by others are read-only.",
         "inputSchema": {"type": "object", "properties": {"note": {"type": "string"}, "note_id": {"type": "string"}, "id": {"type": "string"}, "title": {"type": "string"}, "body": {"type": "string"}, "context": {"type": "object"}, "links": {"type": "array", "items": {"type": "object"}}, "group": {"type": "string"}}},
     },
     {
-        "name": "architect_thinking_mind_map_list", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self"}]},
+        "name": "architect_thinking_mind_map_list", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self","result_kind": "mind_map","result_paths": ["mind_maps"]}]},
         "description": "List same-group Mind Maps visible to this Architect; includes caller_owned for safe update decisions.",
         "inputSchema": {"type": "object", "properties": {"group": {"type": "string"}, "include_archived": {"type": "boolean"}, "limit": {"type": "integer"}}},
     },
     {
-        "name": "architect_thinking_mind_map_show", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self"}]},
+        "name": "architect_thinking_mind_map_show", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self","target_argument": "mind_map","target_kind": "mind_map"},{"capability": "thinking.read","minimum_scope": "self","target_argument": "map_id","target_kind": "mind_map"}]},
         "description": "Show one same-group Mind Map with nodes and links.",
         "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "id": {"type": "string"}, "group": {"type": "string"}, "include_archived": {"type": "boolean"}}},
     },
@@ -1928,32 +1928,32 @@ _ARCHITECT_THINKING_TOOL_SPECS = [
         "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "description": {"type": "string"}, "metadata": {"type": "object"}, "group": {"type": "string"}}, "required": ["title"]},
     },
     {
-        "name": "architect_thinking_mind_map_update", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self"},{"capability": "thinking.write","minimum_scope": "self"}]},
+        "name": "architect_thinking_mind_map_update", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self","target_argument": "mind_map","target_kind": "mind_map"},{"capability": "thinking.read","minimum_scope": "self","target_argument": "map_id","target_kind": "mind_map"},{"capability": "thinking.write","minimum_scope": "self"}]},
         "description": "Update a caller-owned Mind Map only.",
         "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "id": {"type": "string"}, "title": {"type": "string"}, "description": {"type": "string"}, "metadata": {"type": "object"}, "group": {"type": "string"}}},
     },
     {
-        "name": "architect_thinking_mind_map_node_create", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self"},{"capability": "thinking.write","minimum_scope": "self"}]},
+        "name": "architect_thinking_mind_map_node_create", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self","target_argument": "mind_map","target_kind": "mind_map"},{"capability": "thinking.read","minimum_scope": "self","target_argument": "map_id","target_kind": "mind_map"},{"capability": "thinking.write","minimum_scope": "self"}]},
         "description": "Create a node in a caller-owned Mind Map.",
         "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "label": {"type": "string"}, "title": {"type": "string"}, "notes": {"type": "string"}, "node_type": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}, "color": {"type": "string"}, "position": {"type": "object"}, "x": {"type": "number"}, "y": {"type": "number"}, "sort_order": {"type": "integer"}, "group": {"type": "string"}}, "required": ["label"]},
     },
     {
-        "name": "architect_thinking_mind_map_node_update", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self"},{"capability": "thinking.write","minimum_scope": "self"}]},
+        "name": "architect_thinking_mind_map_node_update", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self","target_argument": "mind_map","target_kind": "mind_map"},{"capability": "thinking.read","minimum_scope": "self","target_argument": "map_id","target_kind": "mind_map"},{"capability": "thinking.write","minimum_scope": "self"}]},
         "description": "Update a node in a caller-owned Mind Map only.",
         "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "node": {"type": "string"}, "node_id": {"type": "string"}, "id": {"type": "string"}, "label": {"type": "string"}, "title": {"type": "string"}, "notes": {"type": "string"}, "node_type": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}, "color": {"type": "string"}, "position": {"type": "object"}, "x": {"type": "number"}, "y": {"type": "number"}, "sort_order": {"type": "integer"}, "group": {"type": "string"}}},
     },
     {
-        "name": "architect_thinking_mind_map_node_position", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self"},{"capability": "thinking.write","minimum_scope": "self"}]},
+        "name": "architect_thinking_mind_map_node_position", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self","target_argument": "mind_map","target_kind": "mind_map"},{"capability": "thinking.read","minimum_scope": "self","target_argument": "map_id","target_kind": "mind_map"},{"capability": "thinking.write","minimum_scope": "self"}]},
         "description": "Move a node in a caller-owned Mind Map only.",
         "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "node": {"type": "string"}, "node_id": {"type": "string"}, "id": {"type": "string"}, "position": {"type": "object"}, "x": {"type": "number"}, "y": {"type": "number"}, "group": {"type": "string"}}},
     },
     {
-        "name": "architect_thinking_mind_map_link_create", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self"},{"capability": "thinking.write","minimum_scope": "self"}]},
+        "name": "architect_thinking_mind_map_link_create", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self","target_argument": "mind_map","target_kind": "mind_map"},{"capability": "thinking.read","minimum_scope": "self","target_argument": "map_id","target_kind": "mind_map"},{"capability": "thinking.write","minimum_scope": "self"}]},
         "description": "Create a link between nodes in a caller-owned Mind Map.",
         "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "source_node_id": {"type": "string"}, "source": {"type": "string"}, "target_node_id": {"type": "string"}, "target": {"type": "string"}, "label": {"type": "string"}, "link_type": {"type": "string"}, "sort_order": {"type": "integer"}, "group": {"type": "string"}}},
     },
     {
-        "name": "architect_thinking_mind_map_link_update", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self"},{"capability": "thinking.write","minimum_scope": "self"}]},
+        "name": "architect_thinking_mind_map_link_update", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self","target_argument": "mind_map","target_kind": "mind_map"},{"capability": "thinking.read","minimum_scope": "self","target_argument": "map_id","target_kind": "mind_map"},{"capability": "thinking.write","minimum_scope": "self"}]},
         "description": "Update a link in a caller-owned Mind Map only.",
         "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "link": {"type": "string"}, "link_id": {"type": "string"}, "id": {"type": "string"}, "label": {"type": "string"}, "link_type": {"type": "string"}, "source_node_id": {"type": "string"}, "source": {"type": "string"}, "target_node_id": {"type": "string"}, "target": {"type": "string"}, "sort_order": {"type": "integer"}, "group": {"type": "string"}}},
     },

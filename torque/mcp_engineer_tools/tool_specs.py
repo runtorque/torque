@@ -436,7 +436,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_peer_reply", "authority": {"requirements": [{"capability": "message.engineer","minimum_scope": "group"}]},
+        "name": "engineer_peer_reply", "authority": {"requirements": [{"capability": "message.engineer","minimum_scope": "group","target_argument": "message_id","target_kind": "message_peer"}]},
         "description": "Reply to an existing Engineer↔Engineer peer notification thread.",
         "inputSchema": {
             "type": "object",

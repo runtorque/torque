@@ -17,6 +17,15 @@ AUTHORITY_SCHEMA_VERSION = 1
 SCOPE_ORDER = ("self", "children", "group", "global")
 SCOPE_RANK = {scope: index for index, scope in enumerate(SCOPE_ORDER)}
 RISK_LEVELS = frozenset({"normal", "high", "critical"})
+RESOURCE_KINDS = frozenset({
+    "agent",
+    "decision",
+    "idea_brief",
+    "message_peer",
+    "mind_map",
+    "scratchpad_note",
+    "task",
+})
 
 
 @dataclass(frozen=True)
@@ -295,7 +304,7 @@ def authority_definition_from_tool_spec(
                 raise AuthorityValidationError(
                     f"MCP tool {name} target argument {target_argument} is not in its schema"
                 )
-            if target_kind not in {"agent", "task"}:
+            if target_kind not in RESOURCE_KINDS:
                 raise AuthorityValidationError(
                     f"MCP tool {name} target {target_argument} requires target_kind"
                 )
@@ -311,7 +320,7 @@ def authority_definition_from_tool_spec(
             raise AuthorityValidationError(
                 f"MCP tool {name} cannot filter results for unscoped {capability}"
             )
-        if result_paths and result_kind not in {"agent", "task"}:
+        if result_paths and result_kind not in RESOURCE_KINDS:
             raise AuthorityValidationError(
                 f"MCP tool {name} result_paths require result_kind"
             )
