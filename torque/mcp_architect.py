@@ -182,7 +182,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_boot_summary", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group","handler_scoped": True}]},
+        "name": "architect_boot_summary", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Return this Architect's cached AI boot-recovery summary. "
             "Read-only: never performs a live provider call. If the status is "
@@ -306,7 +306,7 @@ _ARCHITECT_TOOL_SPECS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "architect_digest_filter", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group","handler_scoped": True}]},
+        "name": "architect_digest_filter", "authority": {"requirements": [{"capability": "event.manage","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Read or update this architect's per-architect digest event "
             "filter. The mandatory floor (ask_created, "

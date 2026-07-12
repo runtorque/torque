@@ -20,7 +20,7 @@ ENGINEER_TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "engineer_boot_summary", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group","handler_scoped": True}]},
+        "name": "engineer_boot_summary", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Return this Engineer's cached AI boot-recovery summary. "
             "Read-only: never performs a live provider call. If the status is "
@@ -1077,7 +1077,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_notifications", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group","handler_scoped": True}]},
+        "name": "engineer_notifications", "authority": {"requirements": [{"capability": "event.manage","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Set digest preset or overrides. Mandatory events "
             "(task_completed, agent_error, agent_reply, agent_blocked, "
@@ -1141,7 +1141,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_resume", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group","handler_scoped": True}]},
+        "name": "engineer_resume", "authority": {"requirements": [{"capability": "event.manage","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Resume event delivery after a engineer_ask. Call this "
             "after the human has responded (via the panel or "

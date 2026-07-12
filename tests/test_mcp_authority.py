@@ -453,6 +453,40 @@ class MCPAuthorityPrimitiveTests(unittest.TestCase):
             mcp_tool_allowed_by_authority("engineer_peer_notify", group)
         )
 
+    def test_event_reads_do_not_grant_event_delivery_mutations(self):
+        event_reader = compile_agent_class_acl(
+            base_kind="engineer",
+            acl={
+                "mode": "allow",
+                "rules": [{"capability": "event.read", "scope": "group"}],
+            },
+            capabilities=CAPABILITY_CATALOG,
+        )
+        event_manager = compile_agent_class_acl(
+            base_kind="engineer",
+            acl={
+                "mode": "allow",
+                "rules": [{"capability": "event.manage", "scope": "self"}],
+            },
+            capabilities=CAPABILITY_CATALOG,
+        )
+
+        self.assertTrue(
+            mcp_tool_allowed_by_authority("engineer_boot_summary", event_reader)
+        )
+        self.assertFalse(
+            mcp_tool_allowed_by_authority("engineer_notifications", event_reader)
+        )
+        self.assertFalse(
+            mcp_tool_allowed_by_authority("engineer_resume", event_reader)
+        )
+        self.assertTrue(
+            mcp_tool_allowed_by_authority("engineer_notifications", event_manager)
+        )
+        self.assertTrue(
+            mcp_tool_allowed_by_authority("engineer_resume", event_manager)
+        )
+
     def test_canonical_requirements_fit_each_registered_base_kind_surface(self):
         from torque.mcp import (
             ARCHITECT_TOOL_AUTHORITY_DEFINITIONS,

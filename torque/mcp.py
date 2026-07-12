@@ -1437,11 +1437,10 @@ def _apply_tool_result_scope_filters(
                         filtered.append(item)
                 parent[key] = filtered
                 # Collection summaries must not retain pre-filter counts.
-                for count_key in ("count", "total", "tasks_total"):
-                    if count_key in parent:
-                        parent[count_key] = len(filtered)
-                if "truncated" in parent:
-                    parent["truncated"] = False
+                if len(filtered) != len(collection):
+                    for count_key in ("count", "total", "tasks_total"):
+                        if count_key in parent:
+                            parent[count_key] = len(filtered)
         block["text"] = json.dumps(payload, separators=(",", ":"))
         return result
     except (StopIteration, TypeError, ValueError, json.JSONDecodeError):

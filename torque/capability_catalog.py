@@ -104,6 +104,14 @@ CAPABILITY_CATALOG: dict[str, CapabilityDefinition] = {
             ceilings={"engineer": "group", "architect": "group"},
         ),
         _scoped(
+            "event.manage",
+            "Manage event delivery",
+            "Change the caller's digest preferences or resume event delivery.",
+            scopes=("self",),
+            ceilings={"engineer": "self", "architect": "self"},
+            risk="high",
+        ),
+        _scoped(
             "telemetry.read",
             "Read MCP telemetry",
             "Read MCP calls and related operational telemetry.",

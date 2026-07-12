@@ -72,6 +72,9 @@ Implemented in the current working change:
   results using internal owner/participant anchors that are stripped before
   MCP output, while retaining the existing handler visibility checks as the
   platform ceiling.
+- separation of read-only event access from event-delivery mutation through
+  a dedicated `event.manage: self` capability; notification, resume, and
+  digest-filter writes no longer project from `event.read` alone.
 
 Still required before this RFC is complete:
 

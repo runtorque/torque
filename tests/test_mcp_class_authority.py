@@ -30,6 +30,55 @@ class MCPClassAuthorityTests(unittest.IsolatedAsyncioTestCase):
         state.board_lanes = ["Backlog", "To Do", "In Progress", "Done"]
         return state, architect
 
+    def test_result_filter_preserves_handler_truncation_signal(self):
+        state, architect = self._state_with_architect()
+        own = self.state_mod.BoardTask(
+            id="task-own",
+            task="Own",
+            group="g",
+            lane="Backlog",
+            created_by_architect_id=architect.id,
+        )
+        peer = self.state_mod.BoardTask(
+            id="task-peer",
+            task="Peer",
+            group="g",
+            lane="Backlog",
+            created_by_architect_id="architect-2",
+        )
+        state.board_tasks[own.id] = own
+        state.board_tasks[peer.id] = peer
+        architect.effective_agent_class_snapshot = {
+            "effective_authority": {
+                "schema_version": 1,
+                "base_kind": "architect",
+                "acl_mode": "allow",
+                "capabilities": {"task.read": "self"},
+            },
+        }
+        result = {
+            "content": [{
+                "type": "text",
+                "text": json.dumps({
+                    "tasks": [{"id": own.id}, {"id": peer.id}],
+                    "total": 2,
+                    "truncated": True,
+                }),
+            }],
+            "isError": False,
+        }
+
+        filtered = self.mcp_mod._apply_tool_result_scope_filters(
+            state,
+            "architect_task_list",
+            result,
+            architect,
+        )
+        payload = json.loads(filtered["content"][0]["text"])
+        self.assertEqual(payload["tasks"], [{"id": own.id}])
+        self.assertEqual(payload["total"], 1)
+        self.assertTrue(payload["truncated"])
+
     async def test_torque_steward_class_hides_tool_search_and_lists_read_observation_tools(self):
         state, architect = self._state_with_architect()
         state.assign_agent_class(
