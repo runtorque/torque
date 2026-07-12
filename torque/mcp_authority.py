@@ -161,6 +161,7 @@ class CapabilityRequirement:
     scope_argument: str = ""
     result_kind: str = ""
     result_paths: tuple[str, ...] = ()
+    handler_scoped: bool = False
     conditional: bool = False
 
 
@@ -237,6 +238,7 @@ def authority_definition_from_tool_spec(
                 "scope_argument",
                 "result_kind",
                 "result_paths",
+                "handler_scoped",
                 "conditional",
             }
         )
@@ -280,6 +282,7 @@ def authority_definition_from_tool_spec(
         result_paths = tuple(
             str(path or "").strip() for path in raw_result_paths
         )
+        handler_scoped = bool(raw_requirement.get("handler_scoped", False))
         conditional = bool(raw_requirement.get("conditional", False))
         if definition.scoped:
             if not minimum_scope or minimum_scope not in definition.scopes:
@@ -342,6 +345,20 @@ def authority_definition_from_tool_spec(
             raise AuthorityValidationError(
                 f"MCP tool {name} result_kind requires result_paths"
             )
+        if definition.scoped and not any((
+            target_argument,
+            scope_argument,
+            result_paths,
+            handler_scoped,
+        )):
+            raise AuthorityValidationError(
+                f"MCP tool {name} scoped capability {capability} requires "
+                "target, result, scope-argument, or handler enforcement"
+            )
+        if handler_scoped and not definition.scoped:
+            raise AuthorityValidationError(
+                f"MCP tool {name} cannot mark unscoped {capability} handler_scoped"
+            )
         identity = (capability, target_argument)
         if identity in seen:
             raise AuthorityValidationError(
@@ -356,6 +373,7 @@ def authority_definition_from_tool_spec(
             scope_argument=scope_argument,
             result_kind=result_kind,
             result_paths=result_paths,
+            handler_scoped=handler_scoped,
             conditional=conditional,
         ))
 

@@ -32,7 +32,9 @@ Implemented in the current working change:
   self-scoped collection filtering and cross-scope target concealment;
 - descriptor-enforced scope-valued arguments, multi-target task operations,
   child-roster filtering, and group-only minima for role-wide behavior-overlay
-  administration.
+  administration;
+- fail-closed registration validation requiring every scoped requirement to
+  declare target, result, scope-argument, or explicit handler enforcement.
 
 Still required before this RFC is complete:
 

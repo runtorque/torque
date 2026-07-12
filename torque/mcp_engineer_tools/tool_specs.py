@@ -4,7 +4,7 @@
 ENGINEER_TOOLS = [
     # -- Read tools ---------------------------------------------------------
     {
-        "name": "engineer_board_summary", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group"}]},
+        "name": "engineer_board_summary", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group","handler_scoped": True}]},
         "description": (
             "Return a compact board overview for the engineer's group. "
             "Includes lane counts, active agent status, pending asks, "
@@ -20,7 +20,7 @@ ENGINEER_TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "engineer_boot_summary", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group"}]},
+        "name": "engineer_boot_summary", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group","handler_scoped": True}]},
         "description": (
             "Return this Engineer's cached AI boot-recovery summary. "
             "Read-only: never performs a live provider call. If the status is "
@@ -31,7 +31,7 @@ ENGINEER_TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "engineer_session_map", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group"}]},
+        "name": "engineer_session_map", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group","handler_scoped": True}]},
         "description": (
             "Return a deterministic structured Session Map for the "
             "engineer's group. This is the current orchestration snapshot "
@@ -46,7 +46,7 @@ ENGINEER_TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "engineer_hint_snooze", "authority": {"requirements": [{"capability": "task.update","minimum_scope": "self"}]},
+        "name": "engineer_hint_snooze", "authority": {"requirements": [{"capability": "task.update","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Snooze or clear a deterministic Engineer hint by fingerprint. "
             "Use this to acknowledge expected low-noise hints, such as "
@@ -79,7 +79,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_semantic_recall", "authority": {"requirements": [{"capability": "semantic_recall.read","minimum_scope": "group"}]},
+        "name": "engineer_semantic_recall", "authority": {"requirements": [{"capability": "semantic_recall.read","minimum_scope": "group","handler_scoped": True}]},
         "description": (
             "Search the local AI semantic index for snippets visible to this "
             "Engineer. Results are over-fetched then filtered through the "
@@ -102,7 +102,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_streams_list", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group"}]},
+        "name": "engineer_streams_list", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group","handler_scoped": True}]},
         "description": (
             "List computed branch/worktree streams for the engineer's group. "
             "Returns compact stream objects including identity, ownership, "
@@ -151,7 +151,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_stream_show", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group"}]},
+        "name": "engineer_stream_show", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group","handler_scoped": True}]},
         "description": (
             "Show one computed stream by stream id, branch identity, or a "
             "related task id. Returns the full compact stream payload with "
@@ -191,7 +191,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_peer_list", "authority": {"requirements": [{"capability": "message.engineer","minimum_scope": "group"}]},
+        "name": "engineer_peer_list", "authority": {"requirements": [{"capability": "message.engineer","minimum_scope": "group","handler_scoped": True}]},
         "description": (
             "List same-group Engineer peers hired by the same Architect. "
             "This discovery is only for the explicit peer notify surface and "
@@ -240,7 +240,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_peer_inspect", "authority": {"requirements": [{"capability": "message.engineer","minimum_scope": "group"}]},
+        "name": "engineer_peer_inspect", "authority": {"requirements": [{"capability": "message.engineer","minimum_scope": "group","handler_scoped": True}]},
         "description": (
             "Inspect the read-only task/stream context granted by one "
             "Engineer↔Engineer peer notification thread. Requires this "
@@ -259,7 +259,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_board_list", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group"}]},
+        "name": "engineer_board_list", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group","handler_scoped": True}]},
         "description": (
             "List all tasks on the board grouped by lane. "
             "Supports optional filters by lane, label, task health, or "
@@ -318,7 +318,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_agents_list", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group"}]},
+        "name": "engineer_agents_list", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group","handler_scoped": True}]},
         "description": (
             "List all active agents with their name, slug, status, "
             "group, current task, and activity detail. When owned-agent "
@@ -328,7 +328,7 @@ ENGINEER_TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "engineer_agent_show", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group"}]},
+        "name": "engineer_agent_show", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group","handler_scoped": True}]},
         "description": (
             "Show detailed information about a specific agent. "
             "Returns agent metadata, worktree state (path, branch, "
@@ -349,7 +349,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_actions_list", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group"}]},
+        "name": "engineer_actions_list", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group","handler_scoped": True}]},
         "description": (
             "List available actions (project and user scope) with "
             "name, description, variables, and scope. Use this to "
@@ -368,7 +368,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_action_show", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group"}]},
+        "name": "engineer_action_show", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group","handler_scoped": True}]},
         "description": (
             "Show full details of an action including its YAML contents, "
             "prompt template, transitions, and discovered variables."
@@ -455,7 +455,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_task_create", "authority": {"requirements": [{"capability": "task.create","minimum_scope": "self"}]},
+        "name": "engineer_task_create", "authority": {"requirements": [{"capability": "task.create","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Create a board task. Required: title. Optional: group, lane, "
             "action/action_vars, labels, verification fields, deliverable."
@@ -821,7 +821,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_task_dispatch", "authority": {"requirements": [{"capability": "task.dispatch","minimum_scope": "children","target_argument": "task","target_kind": "task"},{"capability": "worker.manage","minimum_scope": "children"}]},
+        "name": "engineer_task_dispatch", "authority": {"requirements": [{"capability": "task.dispatch","minimum_scope": "children","target_argument": "task","target_kind": "task"},{"capability": "worker.manage","minimum_scope": "children","handler_scoped": True}]},
         "description": (
             "Dispatch task; create an agent unless `agent` is set. Moves "
             "task to In Progress and sends rendered prompt. Existing-agent "
@@ -909,7 +909,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_batch_dispatch", "authority": {"requirements": [{"capability": "task.dispatch","minimum_scope": "children","target_argument": "tasks","target_kind": "task"},{"capability": "worker.manage","minimum_scope": "children"}]},
+        "name": "engineer_batch_dispatch", "authority": {"requirements": [{"capability": "task.dispatch","minimum_scope": "children","target_argument": "tasks","target_kind": "task"},{"capability": "worker.manage","minimum_scope": "children","handler_scoped": True}]},
         "description": (
             "Boot N workers simultaneously for independent tasks. Use when "
             "tasks have no inter-dependencies and parallel velocity > "
@@ -1008,7 +1008,7 @@ ENGINEER_TOOLS = [
     },
     # -- Event tools --------------------------------------------------------
     {
-        "name": "engineer_events", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group"}]},
+        "name": "engineer_events", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group","handler_scoped": True}]},
         "description": (
             "Poll for recent events. Use after context cleanup to "
             "catch up on what happened. Returns panel events filtered "
@@ -1041,7 +1041,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_launch_settings", "authority": {"requirements": [{"capability": "worker.manage","minimum_scope": "children"}]},
+        "name": "engineer_launch_settings", "authority": {"requirements": [{"capability": "worker.manage","minimum_scope": "children","handler_scoped": True}]},
         "description": (
             "Update the designated engineer's persisted launch settings. "
             "These settings are used the next time the designated engineer is created "
@@ -1077,7 +1077,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_notifications", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group"}]},
+        "name": "engineer_notifications", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group","handler_scoped": True}]},
         "description": (
             "Set digest preset or overrides. Mandatory events "
             "(task_completed, agent_error, agent_reply, agent_blocked, "
@@ -1141,7 +1141,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_resume", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group"}]},
+        "name": "engineer_resume", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group","handler_scoped": True}]},
         "description": (
             "Resume event delivery after a engineer_ask. Call this "
             "after the human has responded (via the panel or "
@@ -1151,7 +1151,7 @@ ENGINEER_TOOLS = [
     },
     # -- Context tools ------------------------------------------------------
     {
-        "name": "engineer_journal", "authority": {"requirements": [{"capability": "journal.write","minimum_scope": "self"}]},
+        "name": "engineer_journal", "authority": {"requirements": [{"capability": "journal.write","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Append an entry to the engineer's persistent decision "
             "journal. Use this to record decisions, observations, and "
@@ -1279,7 +1279,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_ask", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self"}]},
+        "name": "engineer_ask", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Ask the human a question. The question is displayed in "
             "the Agent panel and event pushes are automatically "
@@ -1305,7 +1305,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_message_user", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self"}]},
+        "name": "engineer_message_user", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Send a non-blocking durable direct message to the user-facing "
             "conversation panel. Use this for user-visible conversation or "
@@ -1348,7 +1348,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_note", "authority": {"requirements": [{"capability": "journal.write","minimum_scope": "self"}]},
+        "name": "engineer_note", "authority": {"requirements": [{"capability": "journal.write","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Post a non-blocking note or soft question for the human, "
             "including next-wave proposals or status/context that "

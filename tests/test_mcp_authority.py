@@ -333,6 +333,33 @@ class MCPAuthorityPrimitiveTests(unittest.TestCase):
                 capabilities=CAPABILITY_CATALOG,
             )
 
+    def test_scoped_tool_authority_requires_explicit_enforcement_contract(self):
+        implicit = {
+            "name": "task_reader",
+            "authority": {
+                "requirements": [{
+                    "capability": "task.read",
+                    "minimum_scope": "self",
+                }],
+            },
+            "inputSchema": {"type": "object", "properties": {}},
+        }
+        with self.assertRaisesRegex(
+            AuthorityValidationError, "requires target, result"
+        ):
+            authority_definition_from_tool_spec(
+                implicit,
+                base_kinds={"architect"},
+                capabilities=CAPABILITY_CATALOG,
+            )
+        implicit["authority"]["requirements"][0]["handler_scoped"] = True
+        definition = authority_definition_from_tool_spec(
+            implicit,
+            base_kinds={"architect"},
+            capabilities=CAPABILITY_CATALOG,
+        )
+        self.assertTrue(definition.requirements[0].handler_scoped)
+
     def test_surface_authority_registries_are_individually_exact(self):
         from torque.mcp import MCP_AUTHORITY_SURFACE_COVERAGE
 
@@ -371,6 +398,23 @@ class MCPAuthorityPrimitiveTests(unittest.TestCase):
             definition.requirements
             for definition in MCP_TOOL_AUTHORITY_DEFINITIONS.values()
         ))
+
+    def test_every_scoped_tool_requirement_declares_enforcement(self):
+        for tool_name, definition in MCP_TOOL_AUTHORITY_DEFINITIONS.items():
+            for requirement in definition.requirements:
+                capability = CAPABILITY_CATALOG[requirement.capability]
+                if not capability.scoped:
+                    continue
+                with self.subTest(
+                    tool=tool_name,
+                    capability=requirement.capability,
+                ):
+                    self.assertTrue(any((
+                        requirement.target_argument,
+                        requirement.scope_argument,
+                        requirement.result_paths,
+                        requirement.handler_scoped,
+                    )))
 
     def test_projection_uses_each_tool_descriptor_minimum_scope(self):
         self_only = compile_agent_class_acl(

@@ -254,7 +254,7 @@ def _claim_session_wake(cell_id: str, mcp_session_id: str) -> bool:
 
 TOOLS = [
     {
-        "name": "torque_context", "authority": {"requirements": [{"capability": "self.read","minimum_scope": "self"}]},
+        "name": "torque_context", "authority": {"requirements": [{"capability": "self.read","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Get current agent identity, status, and linked tasks. "
             "Returns the agent's name, group, directory, worktree info, "
@@ -264,7 +264,7 @@ TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "torque_area_list", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "group"}]},
+        "name": "torque_area_list", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "group","handler_scoped": True}]},
         "description": "Read-only list of Planning Areas in this worker's group. Decision links are counted but hidden.",
         "inputSchema": {
             "type": "object",
@@ -277,7 +277,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_area_show", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "group"}]},
+        "name": "torque_area_show", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "group","handler_scoped": True}]},
         "description": "Read-only show for one same-group Planning Area with worker-visible task links and decision counts only.",
         "inputSchema": {
             "type": "object",
@@ -291,7 +291,7 @@ TOOLS = [
     },
     *help_tool_specs("torque_"),
     {
-        "name": "torque_task_upload_artifact", "authority": {"requirements": [{"capability": "task.artifact.write","minimum_scope": "self"}]},
+        "name": "torque_task_upload_artifact", "authority": {"requirements": [{"capability": "task.artifact.write","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Upload and attach an image or other artifact to the agent's "
             "current task. Provide a local_path or inline content, and Torque "
@@ -350,7 +350,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_done", "authority": {"requirements": [{"capability": "task.report","minimum_scope": "self"}]},
+        "name": "torque_done", "authority": {"requirements": [{"capability": "task.report","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Mark the current task as complete and move it to Done. "
             "Triggers cascade completion — if all sibling tasks of "
@@ -367,7 +367,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_blocked", "authority": {"requirements": [{"capability": "task.report","minimum_scope": "self"}]},
+        "name": "torque_blocked", "authority": {"requirements": [{"capability": "task.report","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Signal that this agent is blocked and needs human attention. "
             "Sets needs_attention flag and adds a 'blocked' label."
@@ -384,7 +384,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_error", "authority": {"requirements": [{"capability": "task.report","minimum_scope": "self"}]},
+        "name": "torque_error", "authority": {"requirements": [{"capability": "task.report","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Report an unrecoverable error on the current task. "
             "Sets error state and adds an 'error' label."
@@ -401,7 +401,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_progress", "authority": {"requirements": [{"capability": "task.report","minimum_scope": "self"}]},
+        "name": "torque_progress", "authority": {"requirements": [{"capability": "task.report","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Report current progress on the task. "
             "Updates the agent's activity detail shown in the Torque UI."
@@ -418,7 +418,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_verify", "authority": {"requirements": [{"capability": "task.verify","minimum_scope": "self"}]},
+        "name": "torque_verify", "authority": {"requirements": [{"capability": "task.verify","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Record manual verification metadata for the current task, "
             "such as deploy/restart checkpoint state, tests run, "
@@ -498,7 +498,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_ready", "authority": {"requirements": [{"capability": "task.report","minimum_scope": "self"}]},
+        "name": "torque_ready", "authority": {"requirements": [{"capability": "task.report","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Signal that this agent is done and ready for the next task. "
             "Moves the task to Done, unlinks the agent, and cascades "
@@ -507,7 +507,7 @@ TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "torque_name", "authority": {"requirements": [{"capability": "task.report","minimum_scope": "self"}]},
+        "name": "torque_name", "authority": {"requirements": [{"capability": "task.report","minimum_scope": "self","handler_scoped": True}]},
         "description": "Rename this agent to reflect the current task objective.",
         "inputSchema": {
             "type": "object",
@@ -524,7 +524,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_derive", "authority": {"requirements": [{"capability": "task.report","minimum_scope": "self"}]},
+        "name": "torque_derive", "authority": {"requirements": [{"capability": "task.report","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Derive a subtask and dispatch it. The parent task stays "
             "In Progress with a status badge while the derived task "
@@ -566,7 +566,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_ask", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self"}]},
+        "name": "torque_ask", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Pause for human input only when the current task cannot "
             "proceed safely without a blocking human decision or "
@@ -596,7 +596,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_message_user", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self"}]},
+        "name": "torque_message_user", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Send a non-blocking durable direct message to the user-facing "
             "conversation panel. Use this to answer a `## Message from the "
@@ -630,7 +630,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_stop_user_message_loop", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self"}]},
+        "name": "torque_stop_user_message_loop", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Stop the active user-scheduled /loop for this agent. This only "
             "affects the caller's own direct-message loop and adds a visible "
@@ -647,7 +647,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_reply", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self"}]},
+        "name": "torque_reply", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Reply to a message from the engineer (orchestrator agent). "
             "The reply is delivered to the engineer in its next event "
@@ -674,7 +674,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_memory_publish", "authority": {"requirements": [{"capability": "memory.write","minimum_scope": "group"}]},
+        "name": "torque_memory_publish", "authority": {"requirements": [{"capability": "memory.write","minimum_scope": "group","handler_scoped": True}]},
         "description": (
             "Publish an explicit shared memory entry for the current "
             "task, pipeline, group, or project. Durable decisions/warnings "
@@ -725,7 +725,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_memory_list", "authority": {"requirements": [{"capability": "memory.read","minimum_scope": "group"}]},
+        "name": "torque_memory_list", "authority": {"requirements": [{"capability": "memory.read","minimum_scope": "group","handler_scoped": True}]},
         "description": (
             "List shared memory entries with deterministic filtering by "
             "scope, type, pin, and simple text search."
@@ -776,7 +776,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_memory_read", "authority": {"requirements": [{"capability": "memory.read","minimum_scope": "group"}]},
+        "name": "torque_memory_read", "authority": {"requirements": [{"capability": "memory.read","minimum_scope": "group","handler_scoped": True}]},
         "description": "Read one shared memory entry, including its links.",
         "inputSchema": {
             "type": "object",
@@ -790,7 +790,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_memory_pin", "authority": {"requirements": [{"capability": "memory.admin","minimum_scope": "group"}]},
+        "name": "torque_memory_pin", "authority": {"requirements": [{"capability": "memory.admin","minimum_scope": "group","handler_scoped": True}]},
         "description": "Pin a shared memory entry so it stays high-signal.",
         "inputSchema": {
             "type": "object",
@@ -804,7 +804,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_memory_link", "authority": {"requirements": [{"capability": "memory.admin","minimum_scope": "group"}]},
+        "name": "torque_memory_link", "authority": {"requirements": [{"capability": "memory.admin","minimum_scope": "group","handler_scoped": True}]},
         "description": (
             "Link a memory entry to a task, agent, or pipeline so it is "
             "discoverable outside its primary scope."
@@ -830,7 +830,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_memory_unpin", "authority": {"requirements": [{"capability": "memory.admin","minimum_scope": "group"}]},
+        "name": "torque_memory_unpin", "authority": {"requirements": [{"capability": "memory.admin","minimum_scope": "group","handler_scoped": True}]},
         "description": "Remove the pin from a shared memory entry.",
         "inputSchema": {
             "type": "object",

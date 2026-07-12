@@ -101,7 +101,7 @@ for _tool in ENGINEER_TOOLS:
         _tool["deferred"] = True
 ENGINEER_TOOLS.extend([
     {
-        "name": "engineer_area_list", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "group"}]},
+        "name": "engineer_area_list", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "group","handler_scoped": True}]},
         "description": "Read-only list of Planning Areas in this engineer's group. Decision links are counted but decision details are hidden.",
         "inputSchema": {
             "type": "object",
@@ -114,7 +114,7 @@ ENGINEER_TOOLS.extend([
         },
     },
     {
-        "name": "engineer_area_show", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "group"}]},
+        "name": "engineer_area_show", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "group","handler_scoped": True}]},
         "description": "Read-only show for one same-group Planning Area with links filtered to engineer-visible tasks and decision counts only.",
         "inputSchema": {
             "type": "object",
@@ -127,7 +127,7 @@ ENGINEER_TOOLS.extend([
         },
     },
     {
-        "name": "engineer_initiative_list", "authority": {"requirements": [{"capability": "planning.initiative.read","minimum_scope": "group"}]},
+        "name": "engineer_initiative_list", "authority": {"requirements": [{"capability": "planning.initiative.read","minimum_scope": "group","handler_scoped": True}]},
         "description": "Read-only list of first-class product Initiatives in this engineer's group. Board remains execution source of truth.",
         "inputSchema": {
             "type": "object",
@@ -138,7 +138,7 @@ ENGINEER_TOOLS.extend([
         },
     },
     {
-        "name": "engineer_initiative_show", "authority": {"requirements": [{"capability": "planning.initiative.read","minimum_scope": "group"}]},
+        "name": "engineer_initiative_show", "authority": {"requirements": [{"capability": "planning.initiative.read","minimum_scope": "group","handler_scoped": True}]},
         "description": "Read-only show for one same-group Initiative with typed links and Board-derived linked task summary filtered to engineer-visible tasks.",
         "inputSchema": {
             "type": "object",
@@ -152,7 +152,7 @@ ENGINEER_TOOLS.extend([
     *help_tool_specs("engineer_"),
     make_tool_search_spec("engineer_tool_search", "engineer"),
     {
-        "name": "engineer_behavior_overlay_read", "authority": {"requirements": [{"capability": "behavior_overlay.read","minimum_scope": "self"}]},
+        "name": "engineer_behavior_overlay_read", "authority": {"requirements": [{"capability": "behavior_overlay.read","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Read this engineer's active Dynamic Behavior overlay. "
             "Use scope_kind=role for the inherited group Engineer-role "
@@ -169,7 +169,7 @@ ENGINEER_TOOLS.extend([
         },
     },
     {
-        "name": "engineer_behavior_overlay_versions", "authority": {"requirements": [{"capability": "behavior_overlay.read","minimum_scope": "self"}]},
+        "name": "engineer_behavior_overlay_versions", "authority": {"requirements": [{"capability": "behavior_overlay.read","minimum_scope": "self","handler_scoped": True}]},
         "description": "List this engineer's Dynamic Behavior overlay versions.",
         "inputSchema": {
             "type": "object",
@@ -183,7 +183,7 @@ ENGINEER_TOOLS.extend([
         },
     },
     {
-        "name": "engineer_behavior_overlay_diff", "authority": {"requirements": [{"capability": "behavior_overlay.read","minimum_scope": "self"}]},
+        "name": "engineer_behavior_overlay_diff", "authority": {"requirements": [{"capability": "behavior_overlay.read","minimum_scope": "self","handler_scoped": True}]},
         "description": "Diff this engineer's overlay versions or a proposal.",
         "inputSchema": {
             "type": "object",
@@ -199,7 +199,7 @@ ENGINEER_TOOLS.extend([
         },
     },
     {
-        "name": "engineer_behavior_overlay_propose", "authority": {"requirements": [{"capability": "behavior_overlay.propose","minimum_scope": "self"}]},
+        "name": "engineer_behavior_overlay_propose", "authority": {"requirements": [{"capability": "behavior_overlay.propose","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Propose a change to this engineer's own Dynamic Behavior "
             "overlay for architect governance."
@@ -221,7 +221,7 @@ ENGINEER_TOOLS.extend([
         },
     },
     {
-        "name": "engineer_behavior_overlay_request_rollback", "authority": {"requirements": [{"capability": "behavior_overlay.propose","minimum_scope": "self"}]},
+        "name": "engineer_behavior_overlay_request_rollback", "authority": {"requirements": [{"capability": "behavior_overlay.propose","minimum_scope": "self","handler_scoped": True}]},
         "description": "Request rollback of this engineer's overlay to an earlier version.",
         "inputSchema": {
             "type": "object",
