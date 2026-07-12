@@ -1477,12 +1477,12 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_area_list", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "group","handler_scoped": True}]},
+        "name": "architect_area_list", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "self","result_kind": "area","result_paths": ["areas"]}]},
         "description": "List Planning Areas in this architect's group with compact optional link/note summaries.",
         "inputSchema": {"type": "object", "properties": {"include_archived": {"type": "boolean"}, "include_links": {"type": "boolean"}, "include_notes": {"type": "boolean"}, "limit": {"type": "integer"}}},
     },
     {
-        "name": "architect_area_show", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "group","handler_scoped": True}]},
+        "name": "architect_area_show", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "self","target_argument": "area","target_kind": "area"},{"capability": "planning.area.read","minimum_scope": "self","target_argument": "area_id","target_kind": "area"}]},
         "description": "Show one same-group Planning Area with links and typed notes. Decision links include only decisions visible to this architect.",
         "inputSchema": {"type": "object", "properties": {"area": {"type": "string", "description": "Area id (for example TORQUE-A:1) or slug."}, "area_id": {"type": "string"}, "note_limit": {"type": "integer"}}, "required": ["area"]},
     },
@@ -1492,24 +1492,24 @@ _ARCHITECT_TOOL_SPECS = [
         "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "area_type": {"type": "string"}, "lifecycle": {"type": "string", "enum": ["planned", "experimental", "active_investment", "stable", "maintenance", "deprecated", "retired"]}, "summary": {"type": "string"}, "user_purpose": {"type": "string"}, "system_purpose": {"type": "string"}, "in_scope": {"type": "string"}, "out_of_scope": {"type": "string"}}, "required": ["title"]},
     },
     {
-        "name": "architect_area_update", "authority": {"requirements": [{"capability": "planning.area.write","minimum_scope": "self","handler_scoped": True}]},
+        "name": "architect_area_update", "authority": {"requirements":[{"capability": "planning.area.write","minimum_scope": "self","target_argument": "area","target_kind": "area"},{"capability": "planning.area.write","minimum_scope": "self","target_argument": "area_id","target_kind": "area"}]},
         "description": "Update an Area owned or created by this architect. Owner transfer is not allowed via MCP.",
         "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "title": {"type": "string"}, "area_type": {"type": "string"}, "lifecycle": {"type": "string", "enum": ["planned", "experimental", "active_investment", "stable", "maintenance", "deprecated", "retired"]}, "summary": {"type": "string"}, "user_purpose": {"type": "string"}, "system_purpose": {"type": "string"}, "in_scope": {"type": "string"}, "out_of_scope": {"type": "string"}}, "required": ["area"]},
     },
-    {"name": "architect_area_archive", "authority": {"requirements": [{"capability": "planning.area.write","minimum_scope": "self","handler_scoped": True}]}, "description": "Archive an Area owned or created by this architect.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}}, "required": ["area"]}},
-    {"name": "architect_area_link_task", "authority": {"requirements": [{"capability": "planning.area.write","minimum_scope": "self","handler_scoped": True}]}, "description": "Link a visible same-group Board task to an Area without mutating the task.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "task": {"type": "string"}, "task_id": {"type": "string"}}, "required": ["area", "task"]}},
-    {"name": "architect_area_unlink_task", "authority": {"requirements": [{"capability": "planning.area.write","minimum_scope": "self","handler_scoped": True}]}, "description": "Remove an Area↔task link row only.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "task": {"type": "string"}, "task_id": {"type": "string"}}, "required": ["area", "task"]}},
-    {"name": "architect_area_link_decision", "authority": {"requirements": [{"capability": "decision.link","minimum_scope": "self","handler_scoped": True},{"capability": "planning.area.write","minimum_scope": "self","handler_scoped": True}]}, "description": "Link one caller-owned architect decision to an Area without mutating the decision.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "decision": {"type": "string"}, "decision_id": {"type": "string"}}, "required": ["area", "decision"]}},
-    {"name": "architect_area_unlink_decision", "authority": {"requirements": [{"capability": "decision.link","minimum_scope": "self","handler_scoped": True},{"capability": "planning.area.write","minimum_scope": "self","handler_scoped": True}]}, "description": "Remove an Area↔decision link row only.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "decision": {"type": "string"}, "decision_id": {"type": "string"}}, "required": ["area", "decision"]}},
-    {"name": "architect_area_link_initiative", "authority": {"requirements": [{"capability": "planning.area.write","minimum_scope": "self","handler_scoped": True}]}, "description": "Link a same-group Initiative to an Area without mutating the Initiative.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "initiative": {"type": "string"}, "initiative_id": {"type": "string"}}, "required": ["area", "initiative"]}},
-    {"name": "architect_area_unlink_initiative", "authority": {"requirements": [{"capability": "planning.area.write","minimum_scope": "self","handler_scoped": True}]}, "description": "Remove an Area↔Initiative link row only.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "initiative": {"type": "string"}, "initiative_id": {"type": "string"}}, "required": ["area", "initiative"]}},
-    {"name": "architect_area_link_area", "authority": {"requirements": [{"capability": "planning.area.write","minimum_scope": "self","handler_scoped": True}]}, "description": "Link one same-group Area to another with a pure label (related, depends_on, or supports). No graph semantics are inferred.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "target_area": {"type": "string"}, "target_area_id": {"type": "string"}, "relation": {"type": "string", "enum": ["related", "depends_on", "supports"]}}, "required": ["area", "target_area"]}},
-    {"name": "architect_area_unlink_area", "authority": {"requirements": [{"capability": "planning.area.write","minimum_scope": "self","handler_scoped": True}]}, "description": "Remove one Area↔Area labeled link row only.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "target_area": {"type": "string"}, "target_area_id": {"type": "string"}, "relation": {"type": "string", "enum": ["related", "depends_on", "supports"]}}, "required": ["area", "target_area"]}},
-    {"name": "architect_area_note_create", "authority": {"requirements": [{"capability": "planning.area.write","minimum_scope": "self","handler_scoped": True}]}, "description": "Create a flat typed Area note (caveat, tech_debt, open_question, follow_up, invariant).", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "note_type": {"type": "string", "enum": ["caveat", "tech_debt", "open_question", "follow_up", "invariant"]}, "title": {"type": "string"}, "body": {"type": "string"}, "target_type": {"type": "string", "enum": ["task", "decision", "initiative", "area"]}, "target_id": {"type": "string"}}, "required": ["area", "note_type", "title"]}},
-    {"name": "architect_area_note_update", "authority": {"requirements": [{"capability": "planning.area.write","minimum_scope": "self","handler_scoped": True}]}, "description": "Update a flat typed Area note owned by an Area this architect can write.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "note": {"type": "string"}, "note_id": {"type": "string"}, "note_type": {"type": "string", "enum": ["caveat", "tech_debt", "open_question", "follow_up", "invariant"]}, "title": {"type": "string"}, "body": {"type": "string"}, "target_type": {"type": "string", "enum": ["task", "decision", "initiative", "area"]}, "target_id": {"type": "string"}}, "required": ["area", "note"]}},
-    {"name": "architect_area_note_archive", "authority": {"requirements": [{"capability": "planning.area.write","minimum_scope": "self","handler_scoped": True}]}, "description": "Archive a flat typed Area note.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "note": {"type": "string"}, "note_id": {"type": "string"}}, "required": ["area", "note"]}},
+    {"name": "architect_area_archive", "authority": {"requirements":[{"capability": "planning.area.write","minimum_scope": "self","target_argument": "area","target_kind": "area"},{"capability": "planning.area.write","minimum_scope": "self","target_argument": "area_id","target_kind": "area"}]}, "description": "Archive an Area owned or created by this architect.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}}, "required": ["area"]}},
+    {"name": "architect_area_link_task", "authority": {"requirements":[{"capability": "planning.area.write","minimum_scope": "self","target_argument": "area","target_kind": "area"},{"capability": "planning.area.write","minimum_scope": "self","target_argument": "area_id","target_kind": "area"}]}, "description": "Link a visible same-group Board task to an Area without mutating the task.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "task": {"type": "string"}, "task_id": {"type": "string"}}, "required": ["area", "task"]}},
+    {"name": "architect_area_unlink_task", "authority": {"requirements":[{"capability": "planning.area.write","minimum_scope": "self","target_argument": "area","target_kind": "area"},{"capability": "planning.area.write","minimum_scope": "self","target_argument": "area_id","target_kind": "area"}]}, "description": "Remove an Area↔task link row only.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "task": {"type": "string"}, "task_id": {"type": "string"}}, "required": ["area", "task"]}},
+    {"name": "architect_area_link_decision", "authority": {"requirements":[{"capability": "decision.link","minimum_scope": "self","target_argument": "decision","target_kind": "decision"},{"capability": "decision.link","minimum_scope": "self","target_argument": "decision_id","target_kind": "decision"},{"capability": "planning.area.write","minimum_scope": "self","target_argument": "area","target_kind": "area"},{"capability": "planning.area.write","minimum_scope": "self","target_argument": "area_id","target_kind": "area"}]}, "description": "Link one caller-owned architect decision to an Area without mutating the decision.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "decision": {"type": "string"}, "decision_id": {"type": "string"}}, "required": ["area", "decision"]}},
+    {"name": "architect_area_unlink_decision", "authority": {"requirements":[{"capability": "decision.link","minimum_scope": "self","target_argument": "decision","target_kind": "decision"},{"capability": "decision.link","minimum_scope": "self","target_argument": "decision_id","target_kind": "decision"},{"capability": "planning.area.write","minimum_scope": "self","target_argument": "area","target_kind": "area"},{"capability": "planning.area.write","minimum_scope": "self","target_argument": "area_id","target_kind": "area"}]}, "description": "Remove an Area↔decision link row only.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "decision": {"type": "string"}, "decision_id": {"type": "string"}}, "required": ["area", "decision"]}},
+    {"name": "architect_area_link_initiative", "authority": {"requirements":[{"capability": "planning.area.write","minimum_scope": "self","target_argument": "area","target_kind": "area"},{"capability": "planning.area.write","minimum_scope": "self","target_argument": "area_id","target_kind": "area"}]}, "description": "Link a same-group Initiative to an Area without mutating the Initiative.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "initiative": {"type": "string"}, "initiative_id": {"type": "string"}}, "required": ["area", "initiative"]}},
+    {"name": "architect_area_unlink_initiative", "authority": {"requirements":[{"capability": "planning.area.write","minimum_scope": "self","target_argument": "area","target_kind": "area"},{"capability": "planning.area.write","minimum_scope": "self","target_argument": "area_id","target_kind": "area"}]}, "description": "Remove an Area↔Initiative link row only.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "initiative": {"type": "string"}, "initiative_id": {"type": "string"}}, "required": ["area", "initiative"]}},
+    {"name": "architect_area_link_area", "authority": {"requirements":[{"capability": "planning.area.write","minimum_scope": "self","target_argument": "area","target_kind": "area"},{"capability": "planning.area.write","minimum_scope": "self","target_argument": "area_id","target_kind": "area"}]}, "description": "Link one same-group Area to another with a pure label (related, depends_on, or supports). No graph semantics are inferred.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "target_area": {"type": "string"}, "target_area_id": {"type": "string"}, "relation": {"type": "string", "enum": ["related", "depends_on", "supports"]}}, "required": ["area", "target_area"]}},
+    {"name": "architect_area_unlink_area", "authority": {"requirements":[{"capability": "planning.area.write","minimum_scope": "self","target_argument": "area","target_kind": "area"},{"capability": "planning.area.write","minimum_scope": "self","target_argument": "area_id","target_kind": "area"}]}, "description": "Remove one Area↔Area labeled link row only.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "target_area": {"type": "string"}, "target_area_id": {"type": "string"}, "relation": {"type": "string", "enum": ["related", "depends_on", "supports"]}}, "required": ["area", "target_area"]}},
+    {"name": "architect_area_note_create", "authority": {"requirements":[{"capability": "planning.area.write","minimum_scope": "self","target_argument": "area","target_kind": "area"},{"capability": "planning.area.write","minimum_scope": "self","target_argument": "area_id","target_kind": "area"}]}, "description": "Create a flat typed Area note (caveat, tech_debt, open_question, follow_up, invariant).", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "note_type": {"type": "string", "enum": ["caveat", "tech_debt", "open_question", "follow_up", "invariant"]}, "title": {"type": "string"}, "body": {"type": "string"}, "target_type": {"type": "string", "enum": ["task", "decision", "initiative", "area"]}, "target_id": {"type": "string"}}, "required": ["area", "note_type", "title"]}},
+    {"name": "architect_area_note_update", "authority": {"requirements":[{"capability": "planning.area.write","minimum_scope": "self","target_argument": "area","target_kind": "area"},{"capability": "planning.area.write","minimum_scope": "self","target_argument": "area_id","target_kind": "area"}]}, "description": "Update a flat typed Area note owned by an Area this architect can write.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "note": {"type": "string"}, "note_id": {"type": "string"}, "note_type": {"type": "string", "enum": ["caveat", "tech_debt", "open_question", "follow_up", "invariant"]}, "title": {"type": "string"}, "body": {"type": "string"}, "target_type": {"type": "string", "enum": ["task", "decision", "initiative", "area"]}, "target_id": {"type": "string"}}, "required": ["area", "note"]}},
+    {"name": "architect_area_note_archive", "authority": {"requirements":[{"capability": "planning.area.write","minimum_scope": "self","target_argument": "area","target_kind": "area"},{"capability": "planning.area.write","minimum_scope": "self","target_argument": "area_id","target_kind": "area"}]}, "description": "Archive a flat typed Area note.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "note": {"type": "string"}, "note_id": {"type": "string"}}, "required": ["area", "note"]}},
     {
-        "name": "architect_initiative_list", "authority": {"requirements": [{"capability": "planning.initiative.read","minimum_scope": "group","handler_scoped": True}]},
+        "name": "architect_initiative_list", "authority": {"requirements": [{"capability": "planning.initiative.read","minimum_scope": "self","result_kind": "initiative","result_paths": ["initiatives"]}]},
         "description": "List first-class product Initiatives in this architect's group. Read-only; Board remains execution source of truth.",
         "inputSchema": {
             "type": "object",
@@ -1520,7 +1520,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_initiative_show", "authority": {"requirements": [{"capability": "planning.initiative.read","minimum_scope": "group","handler_scoped": True}]},
+        "name": "architect_initiative_show", "authority": {"requirements": [{"capability": "planning.initiative.read","minimum_scope": "self","target_argument": "initiative","target_kind": "initiative"},{"capability": "planning.initiative.read","minimum_scope": "self","target_argument": "initiative_id","target_kind": "initiative"}]},
         "description": "Show one same-group Initiative with typed links and Board-derived linked task summary.",
         "inputSchema": {
             "type": "object",
@@ -1531,7 +1531,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_initiative_create", "authority": {"requirements": [{"capability": "planning.initiative.write","minimum_scope": "group","handler_scoped": True}]},
+        "name": "architect_initiative_create", "authority": {"requirements": [{"capability": "planning.initiative.write","minimum_scope": "self","handler_scoped": True}]},
         "description": "Create an architect-owned Initiative in this architect's group.",
         "inputSchema": {
             "type": "object",
@@ -1549,7 +1549,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_initiative_update", "authority": {"requirements": [{"capability": "planning.initiative.write","minimum_scope": "group","handler_scoped": True}]},
+        "name": "architect_initiative_update", "authority": {"requirements": [{"capability": "planning.initiative.write","minimum_scope": "self","target_argument": "initiative","target_kind": "initiative"},{"capability": "planning.initiative.write","minimum_scope": "self","target_argument": "initiative_id","target_kind": "initiative"}]},
         "description": "Update an Initiative owned or created by this architect. User-created initiatives not owned/created by this architect are not writable via MCP.",
         "inputSchema": {
             "type": "object",
@@ -1569,27 +1569,27 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_initiative_archive", "authority": {"requirements": [{"capability": "planning.initiative.write","minimum_scope": "group","handler_scoped": True}]},
+        "name": "architect_initiative_archive", "authority": {"requirements": [{"capability": "planning.initiative.write","minimum_scope": "self","target_argument": "initiative","target_kind": "initiative"},{"capability": "planning.initiative.write","minimum_scope": "self","target_argument": "initiative_id","target_kind": "initiative"}]},
         "description": "Archive an Initiative owned or created by this architect.",
         "inputSchema": {"type": "object", "properties": {"initiative": {"type": "string"}, "initiative_id": {"type": "string"}}, "required": ["initiative"]},
     },
     {
-        "name": "architect_initiative_link_task", "authority": {"requirements": [{"capability": "planning.initiative.write","minimum_scope": "group","handler_scoped": True}]},
+        "name": "architect_initiative_link_task", "authority": {"requirements": [{"capability": "planning.initiative.write","minimum_scope": "self","target_argument": "initiative","target_kind": "initiative"},{"capability": "planning.initiative.write","minimum_scope": "self","target_argument": "initiative_id","target_kind": "initiative"}]},
         "description": "Link a visible same-group Board task to an Initiative through a typed link row; does not mutate the task.",
         "inputSchema": {"type": "object", "properties": {"initiative": {"type": "string"}, "initiative_id": {"type": "string"}, "task": {"type": "string"}, "task_id": {"type": "string"}}, "required": ["initiative", "task"]},
     },
     {
-        "name": "architect_initiative_unlink_task", "authority": {"requirements": [{"capability": "planning.initiative.write","minimum_scope": "group","handler_scoped": True}]},
+        "name": "architect_initiative_unlink_task", "authority": {"requirements": [{"capability": "planning.initiative.write","minimum_scope": "self","target_argument": "initiative","target_kind": "initiative"},{"capability": "planning.initiative.write","minimum_scope": "self","target_argument": "initiative_id","target_kind": "initiative"}]},
         "description": "Remove an Initiative↔task typed link row only; does not mutate the task.",
         "inputSchema": {"type": "object", "properties": {"initiative": {"type": "string"}, "initiative_id": {"type": "string"}, "task": {"type": "string"}, "task_id": {"type": "string"}}, "required": ["initiative", "task"]},
     },
     {
-        "name": "architect_initiative_link_decision", "authority": {"requirements": [{"capability": "decision.link","minimum_scope": "self","handler_scoped": True},{"capability": "planning.initiative.write","minimum_scope": "group","handler_scoped": True}]},
+        "name": "architect_initiative_link_decision", "authority": {"requirements":[{"capability":"decision.link","minimum_scope":"self","target_argument":"decision","target_kind":"decision"},{"capability":"decision.link","minimum_scope":"self","target_argument":"decision_id","target_kind":"decision"},{"capability":"planning.initiative.write","minimum_scope":"self","target_argument":"initiative","target_kind":"initiative"},{"capability":"planning.initiative.write","minimum_scope":"self","target_argument":"initiative_id","target_kind":"initiative"}]},
         "description": "Link one caller-owned architect decision to an Initiative through a typed link row; does not mutate the decision.",
         "inputSchema": {"type": "object", "properties": {"initiative": {"type": "string"}, "initiative_id": {"type": "string"}, "decision": {"type": "string"}, "decision_id": {"type": "string"}}, "required": ["initiative", "decision"]},
     },
     {
-        "name": "architect_initiative_unlink_decision", "authority": {"requirements": [{"capability": "decision.link","minimum_scope": "self","handler_scoped": True},{"capability": "planning.initiative.write","minimum_scope": "group","handler_scoped": True}]},
+        "name": "architect_initiative_unlink_decision", "authority": {"requirements":[{"capability":"decision.link","minimum_scope":"self","target_argument":"decision","target_kind":"decision"},{"capability":"decision.link","minimum_scope":"self","target_argument":"decision_id","target_kind":"decision"},{"capability":"planning.initiative.write","minimum_scope":"self","target_argument":"initiative","target_kind":"initiative"},{"capability":"planning.initiative.write","minimum_scope":"self","target_argument":"initiative_id","target_kind":"initiative"}]},
         "description": "Remove an Initiative↔decision typed link row only; does not mutate the decision.",
         "inputSchema": {"type": "object", "properties": {"initiative": {"type": "string"}, "initiative_id": {"type": "string"}, "decision": {"type": "string"}, "decision_id": {"type": "string"}}, "required": ["initiative", "decision"]},
     },
@@ -1628,7 +1628,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_decision_update", "authority": {"requirements": [{"capability": "decision.update","minimum_scope": "self","handler_scoped": True}]},
+        "name": "architect_decision_update", "authority": {"requirements":[{"capability":"decision.update","minimum_scope":"self","target_argument":"id","target_kind":"decision"}]},
         "description": "Update an existing decision owned by this architect.",
         "inputSchema": {
             "type": "object",
@@ -1689,7 +1689,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_decision_list", "authority": {"requirements": [{"capability": "decision.read","minimum_scope": "self","handler_scoped": True}]},
+        "name": "architect_decision_list", "authority": {"requirements":[{"capability":"decision.read","minimum_scope":"self","result_kind":"decision","result_paths":["decisions"]}]},
         "description": "List this architect's persisted decisions.",
         "inputSchema": {
             "type": "object",
@@ -1769,27 +1769,27 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
         "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "group": {"type": "string"}, "description": {"type": "string"}, "lane": {"type": "string"}, "labels": {"type": "array", "items": {"type": "string"}}, "suggested_action": {"type": "string"}, "suggested_specialization": {"type": "string"}}, "required": ["title"]},
     },
     {
-        "name": "architect_proposal_area_list", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "group","handler_scoped": True}]},
+        "name": "architect_proposal_area_list", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "self","result_kind": "area","result_paths": ["areas"]}]},
         "description": "Product-safe wrapper for same-group Area reads.",
         "inputSchema": {"type": "object", "properties": {"include_archived": {"type": "boolean"}, "include_links": {"type": "boolean"}, "include_notes": {"type": "boolean"}, "limit": {"type": "integer"}}},
     },
     {
-        "name": "architect_proposal_area_show", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "group","handler_scoped": True}]},
+        "name": "architect_proposal_area_show", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "self","target_argument": "area","target_kind": "area"},{"capability": "planning.area.read","minimum_scope": "self","target_argument": "area_id","target_kind": "area"}]},
         "description": "Product-safe wrapper for one same-group Area read.",
         "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "note_limit": {"type": "integer"}}},
     },
     {
-        "name": "architect_proposal_initiative_list", "authority": {"requirements": [{"capability": "planning.initiative.read","minimum_scope": "group","handler_scoped": True}]},
+        "name": "architect_proposal_initiative_list", "authority": {"requirements": [{"capability": "planning.initiative.read","minimum_scope": "self","result_kind": "initiative","result_paths": ["initiatives"]}]},
         "description": "Product-safe wrapper for same-group Initiative reads.",
         "inputSchema": {"type": "object", "properties": {"include_archived": {"type": "boolean"}, "include_links": {"type": "boolean"}}},
     },
     {
-        "name": "architect_proposal_initiative_show", "authority": {"requirements": [{"capability": "planning.initiative.read","minimum_scope": "group","handler_scoped": True}]},
+        "name": "architect_proposal_initiative_show", "authority": {"requirements": [{"capability": "planning.initiative.read","minimum_scope": "self","target_argument": "initiative","target_kind": "initiative"},{"capability": "planning.initiative.read","minimum_scope": "self","target_argument": "initiative_id","target_kind": "initiative"}]},
         "description": "Product-safe wrapper for one same-group Initiative read.",
         "inputSchema": {"type": "object", "properties": {"initiative": {"type": "string"}, "initiative_id": {"type": "string"}}},
     },
     {
-        "name": "architect_decision_proposal_list", "authority": {"requirements": [{"capability": "decision.read","minimum_scope": "self","handler_scoped": True}]},
+        "name": "architect_decision_proposal_list", "authority": {"requirements":[{"capability":"decision.read","minimum_scope":"self","result_kind":"decision","result_paths":["decisions"]}]},
         "description": "List caller-owned proposed product decisions only.",
         "inputSchema": {"type": "object", "properties": {"include_archived": {"type": "boolean"}}},
     },
@@ -1799,12 +1799,12 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
         "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "rationale": {"type": "string"}, "status": {"type": "string", "enum": ["proposed"]}, "supersedes": {"type": "string"}, "linked_task_ids": {"type": "array", "items": {"type": "string"}}, "linked_engineer_ids": {"type": "array", "items": {"type": "string"}}}, "required": ["title", "rationale"]},
     },
     {
-        "name": "architect_decision_proposal_update", "authority": {"requirements": [{"capability": "decision.propose","minimum_scope": "self","handler_scoped": True}]},
+        "name": "architect_decision_proposal_update", "authority": {"requirements":[{"capability":"decision.propose","minimum_scope":"self","target_argument":"id","target_kind":"decision"}]},
         "description": "Update a caller-owned proposed product decision only. Status must remain proposed and engineer links are rejected.",
         "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "title": {"type": "string"}, "rationale": {"type": "string"}, "status": {"type": "string", "enum": ["proposed"]}, "supersedes": {"type": "string"}, "linked_task_ids": {"type": "array", "items": {"type": "string"}}, "linked_engineer_ids": {"type": "array", "items": {"type": "string"}}, "archived": {"type": "boolean"}}, "required": ["id"]},
     },
     {
-        "name": "architect_decision_proposal_link", "authority": {"requirements": [{"capability": "decision.link","minimum_scope": "self","target_argument": "engineer_id","target_kind": "agent"},{"capability": "decision.link","minimum_scope": "self","target_argument": "task_id","target_kind": "task"},{"capability": "decision.propose","minimum_scope": "self","handler_scoped": True}]},
+        "name": "architect_decision_proposal_link", "authority": {"requirements":[{"capability":"decision.propose","minimum_scope":"self","target_argument":"id","target_kind":"decision"},{"capability":"decision.link","minimum_scope":"self","target_argument":"engineer_id","target_kind":"agent"},{"capability":"decision.link","minimum_scope":"self","target_argument":"task_id","target_kind":"task"}]},
         "description": "Append a product-proposal task link to a caller-owned proposed product decision; engineer links are not supported.",
         "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "task_id": {"type": "string"}, "engineer_id": {"type": "string"}}, "required": ["id", "task_id"]},
     },

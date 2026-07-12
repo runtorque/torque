@@ -101,7 +101,7 @@ for _tool in ENGINEER_TOOLS:
         _tool["deferred"] = True
 ENGINEER_TOOLS.extend([
     {
-        "name": "engineer_area_list", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "group","handler_scoped": True}]},
+        "name": "engineer_area_list", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "self","result_kind": "area","result_paths": ["areas"]}]},
         "description": "Read-only list of Planning Areas in this engineer's group. Decision links are counted but decision details are hidden.",
         "inputSchema": {
             "type": "object",
@@ -114,7 +114,7 @@ ENGINEER_TOOLS.extend([
         },
     },
     {
-        "name": "engineer_area_show", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "group","handler_scoped": True}]},
+        "name": "engineer_area_show", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "self","target_argument": "area","target_kind": "area"},{"capability": "planning.area.read","minimum_scope": "self","target_argument": "area_id","target_kind": "area"}]},
         "description": "Read-only show for one same-group Planning Area with links filtered to engineer-visible tasks and decision counts only.",
         "inputSchema": {
             "type": "object",
@@ -127,7 +127,7 @@ ENGINEER_TOOLS.extend([
         },
     },
     {
-        "name": "engineer_initiative_list", "authority": {"requirements": [{"capability": "planning.initiative.read","minimum_scope": "group","handler_scoped": True}]},
+        "name": "engineer_initiative_list", "authority": {"requirements": [{"capability": "planning.initiative.read","minimum_scope": "self","result_kind": "initiative","result_paths": ["initiatives"]}]},
         "description": "Read-only list of first-class product Initiatives in this engineer's group. Board remains execution source of truth.",
         "inputSchema": {
             "type": "object",
@@ -138,7 +138,7 @@ ENGINEER_TOOLS.extend([
         },
     },
     {
-        "name": "engineer_initiative_show", "authority": {"requirements": [{"capability": "planning.initiative.read","minimum_scope": "group","handler_scoped": True}]},
+        "name": "engineer_initiative_show", "authority": {"requirements": [{"capability": "planning.initiative.read","minimum_scope": "self","target_argument": "initiative","target_kind": "initiative"},{"capability": "planning.initiative.read","minimum_scope": "self","target_argument": "initiative_id","target_kind": "initiative"}]},
         "description": "Read-only show for one same-group Initiative with typed links and Board-derived linked task summary filtered to engineer-visible tasks.",
         "inputSchema": {
             "type": "object",

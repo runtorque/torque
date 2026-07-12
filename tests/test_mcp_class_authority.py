@@ -319,6 +319,181 @@ class MCPClassAuthorityTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("error", denied.payload)
         self.assertIn("Unknown tool", denied.payload["error"]["message"])
 
+    async def test_class_planning_self_scope_filters_lists_and_denies_peer_records(self):
+        state, architect = self._state_with_architect()
+        peer = self.state_mod.AgentCell(
+            id="architect-2",
+            name="Peer",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        state.agents[peer.id] = peer
+        state.groups["g"].append(peer.id)
+        areas = {
+            "area-own": {
+                "id": "area-own",
+                "group_name": "g",
+                "owner_kind": "architect",
+                "owner_id": architect.id,
+                "created_by_kind": "architect",
+                "created_by_id": architect.id,
+            },
+            "area-peer": {
+                "id": "area-peer",
+                "group_name": "g",
+                "owner_kind": "architect",
+                "owner_id": peer.id,
+                "created_by_kind": "architect",
+                "created_by_id": peer.id,
+            },
+        }
+        initiatives = {
+            "initiative-own": {
+                "id": "initiative-own",
+                "group_name": "g",
+                "owner_kind": "architect",
+                "owner_id": architect.id,
+                "created_by_kind": "architect",
+                "created_by_id": architect.id,
+            },
+            "initiative-peer": {
+                "id": "initiative-peer",
+                "group_name": "g",
+                "owner_kind": "architect",
+                "owner_id": peer.id,
+                "created_by_kind": "architect",
+                "created_by_id": peer.id,
+            },
+        }
+        state.list_areas = lambda **kwargs: list(areas.values())
+        state.resolve_area_id = (
+            lambda identifier, **kwargs: identifier if identifier in areas else ""
+        )
+        state.load_area = lambda area_id: areas.get(area_id)
+        state.area_payload = lambda area_id, **kwargs: dict(areas[area_id])
+        state.list_initiatives = lambda **kwargs: list(initiatives.values())
+        state.resolve_initiative_id = (
+            lambda identifier, **kwargs: (
+                identifier if identifier in initiatives else ""
+            )
+        )
+        state.load_initiative = (
+            lambda initiative_id: initiatives.get(initiative_id)
+        )
+        state.initiative_payload = (
+            lambda initiative_id, **kwargs: dict(initiatives[initiative_id])
+        )
+        architect.effective_agent_class_snapshot = {
+            "effective_authority": {
+                "schema_version": 1,
+                "base_kind": "architect",
+                "acl_mode": "allow",
+                "capabilities": {
+                    "planning.area.read": "self",
+                    "planning.area.write": "self",
+                    "planning.initiative.read": "self",
+                    "planning.initiative.write": "self",
+                    "decision.propose": "self",
+                },
+            },
+        }
+        decisions = {
+            "decision-peer": {
+                "id": "decision-peer",
+                "architect_id": peer.id,
+                "status": "proposed",
+            },
+        }
+        state.load_decision = lambda decision_id: decisions.get(decision_id)
+
+        async def unexpected(payload):
+            self.fail(f"Unexpected command: {payload}")
+
+        handler = self.mcp_mod.create_mcp_handler(unexpected, state)
+        for tool_name, result_key, own_id, peer_id, argument in (
+            (
+                "architect_proposal_area_list",
+                "areas",
+                "area-own",
+                "area-peer",
+                "area",
+            ),
+            (
+                "architect_proposal_initiative_list",
+                "initiatives",
+                "initiative-own",
+                "initiative-peer",
+                "initiative",
+            ),
+        ):
+            with self.subTest(tool=tool_name):
+                response = await handler(FakeRequest(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": tool_name,
+                        "method": "tools/call",
+                        "params": {"name": tool_name, "arguments": {}},
+                    },
+                    headers={"X-Torque-Cell-Id": architect.id},
+                ))
+                payload = json.loads(
+                    response.payload["result"]["content"][0]["text"]
+                )
+                self.assertEqual(
+                    [item["id"] for item in payload[result_key]],
+                    [own_id],
+                )
+
+                show_name = tool_name.replace("_list", "_show")
+                denied = await handler(FakeRequest(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": show_name,
+                        "method": "tools/call",
+                        "params": {
+                            "name": show_name,
+                            "arguments": {argument: peer_id},
+                        },
+                    },
+                    headers={"X-Torque-Cell-Id": architect.id},
+                ))
+                self.assertIn("error", denied.payload)
+                self.assertIn(
+                    "Unknown tool",
+                    denied.payload["error"]["message"],
+                )
+
+        for tool_name, arguments in (
+            ("architect_area_update", {"area": "area-peer"}),
+            (
+                "architect_initiative_update",
+                {"initiative": "initiative-peer"},
+            ),
+            (
+                "architect_decision_proposal_update",
+                {"id": "decision-peer"},
+            ),
+        ):
+            with self.subTest(tool=tool_name):
+                denied = await handler(FakeRequest(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": tool_name,
+                        "method": "tools/call",
+                        "params": {
+                            "name": tool_name,
+                            "arguments": arguments,
+                        },
+                    },
+                    headers={"X-Torque-Cell-Id": architect.id},
+                ))
+                self.assertIn("error", denied.payload)
+                self.assertIn(
+                    "Unknown tool",
+                    denied.payload["error"]["message"],
+                )
+
     async def test_class_journal_self_scope_denies_group_scope_argument(self):
         state = self.state_mod.MatrixState()
         engineer = self.state_mod.AgentCell(

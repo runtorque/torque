@@ -25,6 +25,7 @@ from .capability_catalog import (
 from .mcp_authority import (
     EffectiveAuthority,
     AuthorityValidationError,
+    SCOPE_RANK,
     authority_definition_map,
     authority_definitions_from_tool_specs,
     audit_tool_authority_coverage,
@@ -256,7 +257,7 @@ TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "torque_area_list", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "group","handler_scoped": True}]},
+        "name": "torque_area_list", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "self","result_kind": "area","result_paths": ["areas"]}]},
         "description": "Read-only list of Planning Areas in this worker's group. Decision links are counted but hidden.",
         "inputSchema": {
             "type": "object",
@@ -269,7 +270,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_area_show", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "group","handler_scoped": True}]},
+        "name": "torque_area_show", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "self","target_argument": "area","target_kind": "area"},{"capability": "planning.area.read","minimum_scope": "self","target_argument": "area_id","target_kind": "area"}]},
         "description": "Read-only show for one same-group Planning Area with worker-visible task links and decision counts only.",
         "inputSchema": {
             "type": "object",
@@ -1090,7 +1091,7 @@ def _task_target_scope(state, caller_cell, task) -> str:
     return "global"
 
 
-def _record_target_scope(caller_cell, record: dict | None) -> str:
+def _record_target_scope(state, caller_cell, record: dict | None) -> str:
     """Return scope for a persisted planning/artifact record."""
 
     if not caller_cell or not isinstance(record, dict):
@@ -1108,6 +1109,13 @@ def _record_target_scope(caller_cell, record: dict | None) -> str:
     owner_ids.discard("")
     if caller_id in owner_ids:
         return "self"
+    owner_scopes = []
+    for owner_id in owner_ids:
+        owner = state.agents.get(owner_id)
+        if owner is not None:
+            owner_scopes.append(_agent_target_scope(caller_cell, owner))
+    if owner_scopes:
+        return min(owner_scopes, key=lambda scope: SCOPE_RANK[scope])
     caller_group = str(getattr(caller_cell, "group", "") or "").strip()
     record_group = str(
         record.get("group_name", record.get("group", "")) or ""
@@ -1139,6 +1147,12 @@ def _resolve_scoped_resource(state, caller_cell, resource_kind: str, reference):
     if resource_kind == "idea_brief":
         brief_id = state.resolve_idea_brief_id(reference, group=group)
         return state.load_idea_brief(brief_id) if brief_id else None
+    if resource_kind == "area":
+        area_id = state.resolve_area_id(reference, group=group)
+        return state.load_area(area_id) if area_id else None
+    if resource_kind == "initiative":
+        initiative_id = state.resolve_initiative_id(reference, group=group)
+        return state.load_initiative(initiative_id) if initiative_id else None
     if resource_kind == "decision":
         return state.load_decision(reference)
     if resource_kind == "message_peer":
@@ -1160,7 +1174,7 @@ def _scoped_resource_relationship(state, caller_cell, resource_kind: str, resour
         return _task_target_scope(state, caller_cell, resource)
     if resource_kind in {"agent", "message_peer"}:
         return _agent_target_scope(caller_cell, resource)
-    return _record_target_scope(caller_cell, resource)
+    return _record_target_scope(state, caller_cell, resource)
 
 
 def _tool_argument_scope_denied(

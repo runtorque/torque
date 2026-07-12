@@ -50,12 +50,22 @@ Implemented in the current working change:
   semantics;
 - replacement of the `architect_product_*` wrapper namespace with semantic
   proposal, task-proposal, decision-proposal, Idea Brief, and peer-tool names.
+- descriptor-driven `self`/`group` filtering and concrete-target checks for
+  Planning Areas and Initiatives across Worker, Engineer, Architect, and
+  proposal read surfaces;
+- concrete ownership checks for Area and Initiative mutations and proposed
+  decision updates, with create operations retaining explicit handler
+  enforcement because no target exists before creation;
+- alignment of Initiative write authority with the handler's actual
+  caller-owned (`self`) platform ceiling instead of advertising unsupported
+  group-wide mutation authority.
 
 Still required before this RFC is complete:
 
 - finish family-by-family list filtering and concrete resource scope checks
-  for Planning objects, mixed-purpose messaging threads, event/semantic
-  recall rows, and remaining aggregate/read models;
+  for mixed-purpose messaging threads, event/semantic recall rows, linked
+  Planning context embedded in aggregates, and remaining aggregate/read
+  models;
 Date: 2026-07-11  
 Supersedes: `docs/plans/agent-classes-generic-authority-plan.md`
 

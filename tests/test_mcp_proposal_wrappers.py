@@ -451,7 +451,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             {"id": "decision-other", "title": "steal"},
             req_id=6,
         )
-        self.assertIn("Decision not found", self._error_text(update_other))
+        self.assertIn("Unknown tool", self._error_text(update_other))
 
     async def test_proposal_area_show_hides_non_product_task_and_raw_decision_links(self):
         hidden_task = self.state.board_add_task(

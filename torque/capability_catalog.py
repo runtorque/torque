@@ -229,7 +229,7 @@ CAPABILITY_CATALOG: dict[str, CapabilityDefinition] = {
             "planning.area.read",
             "Read Areas",
             "Read Planning Areas and filtered Area-linked context.",
-            scopes=("group",),
+            scopes=("self", "group"),
             ceilings={kind: "group" for kind in _ALL},
         ),
         _scoped(
@@ -244,15 +244,15 @@ CAPABILITY_CATALOG: dict[str, CapabilityDefinition] = {
             "planning.initiative.read",
             "Read Initiatives",
             "Read same-group product Initiatives.",
-            scopes=("group",),
+            scopes=("self", "group"),
             ceilings={"engineer": "group", "architect": "group"},
         ),
         _scoped(
             "planning.initiative.write",
             "Write Initiatives",
             "Create, update, archive, and link Initiatives.",
-            scopes=("group",),
-            ceilings={"architect": "group"},
+            scopes=("self",),
+            ceilings={"architect": "self"},
             risk="high",
         ),
         _scoped(

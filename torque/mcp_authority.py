@@ -19,8 +19,10 @@ SCOPE_RANK = {scope: index for index, scope in enumerate(SCOPE_ORDER)}
 RISK_LEVELS = frozenset({"normal", "high", "critical"})
 RESOURCE_KINDS = frozenset({
     "agent",
+    "area",
     "decision",
     "idea_brief",
+    "initiative",
     "message_peer",
     "mind_map",
     "scratchpad_note",
