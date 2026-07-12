@@ -52,9 +52,9 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_steward_operating_brief", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group","handler_scoped": True},{"capability": "decision.read","minimum_scope": "self","handler_scoped": True},{"capability": "event.read","minimum_scope": "group","handler_scoped": True},{"capability": "planning.area.read","minimum_scope": "group","handler_scoped": True},{"capability": "planning.initiative.read","minimum_scope": "group","handler_scoped": True},{"capability": "task.read","minimum_scope": "group","handler_scoped": True},{"capability": "telemetry.read","minimum_scope": "group","handler_scoped": True}]},
+        "name": "architect_group_health_brief", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group","handler_scoped": True},{"capability": "decision.read","minimum_scope": "self","handler_scoped": True},{"capability": "event.read","minimum_scope": "group","handler_scoped": True},{"capability": "planning.area.read","minimum_scope": "group","handler_scoped": True},{"capability": "planning.initiative.read","minimum_scope": "group","handler_scoped": True},{"capability": "task.read","minimum_scope": "group","handler_scoped": True},{"capability": "telemetry.read","minimum_scope": "group","handler_scoped": True}]},
         "description": (
-            "Return a read-only Torque Steward onboarding/operating brief for "
+            "Return a read-only onboarding and health brief for "
             "this Architect's group. The payload separates observed facts, "
             "inferred risks, suggested next steps, and responsible-actor "
             "recommendations; it never routes, dispatches, messages, creates "
@@ -432,7 +432,7 @@ _ARCHITECT_TOOL_SPECS = [
     {
         "name": "architect_task_pickup", "authority": {"requirements": [{"capability": "task.update","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
         "description": (
-            "Claim a routed PM-created product task in this architect's group "
+            "Claim a routed product-proposal product task in this architect's group "
             "without creating a covering duplicate. Requires durable inbound "
             "product-peer route evidence from the product proposal creator, "
             "sets assigned_architect_id on the original task, and records "
@@ -443,7 +443,7 @@ _ARCHITECT_TOOL_SPECS = [
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "PM-created product task ID or alias to claim.",
+                    "description": "product-proposal product task ID or alias to claim.",
                 },
                 "reason": {
                     "type": "string",
@@ -632,12 +632,12 @@ _ARCHITECT_TOOL_SPECS = [
         "name": "architect_task_mark_covered", "authority": {"requirements": [{"capability": "task.mark_covered","minimum_scope": "self","target_argument": "task","target_kind": "task"},{"capability": "task.mark_covered","minimum_scope": "self","target_argument": "covering_task_id","target_kind": "task"}]},
         "description": (
             "Mark a user-created task or a task created by this architect as "
-            "covered by another visible task or PR. Also allows a PM-created "
+            "covered by another visible task or PR. Also allows a product-proposal "
             "product root created by another architect only when it has "
             "explicit route/coverage evidence (for example a caller-created "
             "covers:<task> covering task or inbound product-peer route). "
-            "When accepting a PM-created proposal into a covering task, use "
-            "this to link and advance the PM root with an audit trail rather "
+            "When accepting a product proposal into a covering task, use "
+            "this to link and advance the proposal root with an audit trail rather "
             "than leaving a duplicate. Records durable completion evidence "
             "and an activity message; set move_to_done=true to close the "
             "covered card."
@@ -680,9 +680,9 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_pm_root_backlog_hygiene", "authority": {"requirements": [{"capability": "task.mark_covered","minimum_scope": "self","target_argument": "task_ids","target_kind": "task"}]},
+        "name": "architect_proposal_root_backlog_hygiene", "authority": {"requirements": [{"capability": "task.mark_covered","minimum_scope": "self","target_argument": "task_ids","target_kind": "task"}]},
         "description": (
-            "Inventory already-covered PM-created product roots in this "
+            "Inventory already-covered product proposal roots in this "
             "Architect's group and optionally finalize only eligible routed "
             "roots whose durable covered_by evidence points at this "
             "Architect's covering task. Dry-run by default; set apply=true "
@@ -1760,12 +1760,12 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
     },
     {
         "name": "architect_product_task_show", "authority": {"requirements": [{"capability": "task.read","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
-        "description": "Show one PM-linked/product-labeled task; hidden/non-product tasks return the normal not-found style error.",
+        "description": "Show one proposal-linked/product-labeled task; hidden/non-product tasks return the normal not-found style error.",
         "inputSchema": {"type": "object", "properties": {"task": {"type": "string"}}, "required": ["task"]},
     },
     {
         "name": "architect_product_task_propose", "authority": {"requirements": [{"capability": "task.propose","minimum_scope": "self","handler_scoped": True}]},
-        "description": "Create an unassigned queued product task proposal with product-proposal/pm-created labels and non-binding suggested_action/suggested_specialization hints only.",
+        "description": "Create an unassigned queued product task proposal with product-proposal/proposal-only labels and non-binding suggested_action/suggested_specialization hints only.",
         "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "group": {"type": "string"}, "description": {"type": "string"}, "lane": {"type": "string"}, "labels": {"type": "array", "items": {"type": "string"}}, "suggested_action": {"type": "string"}, "suggested_specialization": {"type": "string"}}, "required": ["title"]},
     },
     {
@@ -1790,22 +1790,22 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
     },
     {
         "name": "architect_product_decision_list", "authority": {"requirements": [{"capability": "decision.read","minimum_scope": "self","handler_scoped": True}]},
-        "description": "List PM-owned proposed product decisions only.",
+        "description": "List caller-owned proposed product decisions only.",
         "inputSchema": {"type": "object", "properties": {"include_archived": {"type": "boolean"}}},
     },
     {
         "name": "architect_product_decision_create", "authority": {"requirements": [{"capability": "decision.propose","minimum_scope": "self","handler_scoped": True}]},
-        "description": "Create a PM-owned proposed product decision. accepted/revised/rejected and engineer links are rejected.",
+        "description": "Create a caller-owned proposed product decision. accepted/revised/rejected and engineer links are rejected.",
         "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "rationale": {"type": "string"}, "status": {"type": "string", "enum": ["proposed"]}, "supersedes": {"type": "string"}, "linked_task_ids": {"type": "array", "items": {"type": "string"}}, "linked_engineer_ids": {"type": "array", "items": {"type": "string"}}}, "required": ["title", "rationale"]},
     },
     {
         "name": "architect_product_decision_update", "authority": {"requirements": [{"capability": "decision.propose","minimum_scope": "self","handler_scoped": True}]},
-        "description": "Update a PM-owned proposed product decision only. Status must remain proposed and engineer links are rejected.",
+        "description": "Update a caller-owned proposed product decision only. Status must remain proposed and engineer links are rejected.",
         "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "title": {"type": "string"}, "rationale": {"type": "string"}, "status": {"type": "string", "enum": ["proposed"]}, "supersedes": {"type": "string"}, "linked_task_ids": {"type": "array", "items": {"type": "string"}}, "linked_engineer_ids": {"type": "array", "items": {"type": "string"}}, "archived": {"type": "boolean"}}, "required": ["id"]},
     },
     {
         "name": "architect_product_decision_link", "authority": {"requirements": [{"capability": "decision.link","minimum_scope": "self","target_argument": "engineer_id","target_kind": "agent"},{"capability": "decision.link","minimum_scope": "self","target_argument": "task_id","target_kind": "task"},{"capability": "decision.propose","minimum_scope": "self","handler_scoped": True}]},
-        "description": "Append a PM-visible product task link to a PM-owned proposed product decision; engineer links are not supported.",
+        "description": "Append a product-proposal task link to a caller-owned proposed product decision; engineer links are not supported.",
         "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "task_id": {"type": "string"}, "engineer_id": {"type": "string"}}, "required": ["id", "task_id"]},
     },
     {
@@ -1870,22 +1870,22 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
     },
     {
         "name": "architect_product_message_user", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self","handler_scoped": True}]},
-        "description": "Send a PM-safe direct user message after validating product-scoped context attachments. If reply_to_id is omitted, Torque infers it only when this architect has exactly one pending direct user message.",
+        "description": "Send a product-scoped direct user message after validating product-scoped context attachments. If reply_to_id is omitted, Torque infers it only when this architect has exactly one pending direct user message.",
         "inputSchema": {"type": "object", "properties": {"message": {"type": "string"}, "reply_to_id": {"type": "string", "description": "Optional direct user-message id; omit only when exactly one pending direct user message is unambiguous."}, "thread_id": {"type": "string"}, "context_task_ids": {"type": "array", "items": {"type": "string"}}, "context_decision_ids": {"type": "array", "items": {"type": "string"}}, "context_area_ids": {"type": "array", "items": {"type": "string"}}, "context_initiative_ids": {"type": "array", "items": {"type": "string"}}, "context_idea_brief_ids": {"type": "array", "items": {"type": "string"}}, "context_summary": {"type": "string"}}, "required": ["message"]},
     },
     {
         "name": "architect_product_ask_user", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self","handler_scoped": True}]},
-        "description": "Create a blocking PM-safe user ask after validating product-scoped context attachments.",
+        "description": "Create a blocking product-scoped user ask after validating product-scoped context attachments.",
         "inputSchema": {"type": "object", "properties": {"question": {"type": "string"}, "description": {"type": "string"}, "context_task_ids": {"type": "array", "items": {"type": "string"}}, "context_decision_ids": {"type": "array", "items": {"type": "string"}}, "context_area_ids": {"type": "array", "items": {"type": "string"}}, "context_initiative_ids": {"type": "array", "items": {"type": "string"}}, "context_idea_brief_ids": {"type": "array", "items": {"type": "string"}}, "context_summary": {"type": "string"}}, "required": ["question"]},
     },
     {
         "name": "architect_product_journal", "authority": {"requirements": [{"capability": "journal.private","minimum_scope": "self","handler_scoped": True}]},
-        "description": "Append a private PM recovery journal entry. decision journal entries are intentionally unsupported in Wave 4B.",
+        "description": "Append a private product-planning recovery journal entry. decision journal entries are intentionally unsupported in Wave 4B.",
         "inputSchema": {"type": "object", "properties": {"type": {"type": "string", "enum": ["observation", "checkpoint", "plan"]}, "entry": {"type": "string"}}, "required": ["type", "entry"]},
     },
     {
         "name": "architect_product_journal_read", "authority": {"requirements": [{"capability": "journal.private","minimum_scope": "self","handler_scoped": True}]},
-        "description": "Read recent private PM recovery journal entries, excluding decision-type journal rows.",
+        "description": "Read recent private product-planning recovery journal entries, excluding decision-type journal rows.",
         "inputSchema": {"type": "object", "properties": {"since": {"type": "number"}, "limit": {"type": "integer"}}},
     },
 ]

@@ -42,7 +42,12 @@ Implemented in the current working change:
 - removal of Agent Profile fields from `AgentCell`, fresh database schemas, and
   Agent Class audit records;
 - rename of the remaining authority capability from `class_profile.admin` to
-  `class.admin`.
+  `class.admin`;
+- rename of the class-named Steward brief module/tool to the generic
+  `group_health_brief` / `architect_group_health_brief` surface;
+- replacement of Product-Manager-specific task labels, decision metadata,
+  route scopes, and proposal-root cleanup names with product-proposal
+  semantics.
 
 Still required before this RFC is complete:
 
@@ -488,7 +493,7 @@ MCP tools may implement domain-specific safe operations, but must not be named
 or gated by an Agent Class identity. Existing surfaces should migrate toward
 semantic operation names, for example:
 
-- `architect_steward_operating_brief` -> `architect_group_health_brief`
+- Steward operating brief -> `architect_group_health_brief` (complete)
 - product task proposal wrappers -> `architect_task_propose`
 - product proposed-decision wrappers -> `architect_decision_propose`
 

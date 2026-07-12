@@ -55,7 +55,7 @@ from .mcp_engineer_tools.shared import (
 )
 from .server_artifacts import serialize_task_for_mcp
 from .server_prompts import build_engineer_deliverable_awareness
-from .steward_brief import build_steward_operating_brief
+from .group_health_brief import build_group_health_brief
 from .identity import prepend_agent_identity_anchor
 from .state import (
     ARCHITECT_MANDATORY_EVENTS,
@@ -130,8 +130,8 @@ _ARCHITECT_PEER_SUMMARY_LOAD_LIMIT = 1000
 _PRODUCT_PEER_MARKER = "torque.product_peer.v1"
 _PRODUCT_DECISION_MARKER = "torque.product_decision.v1"
 _PRODUCT_CONTEXT_MARKER = "torque.product_context.v1"
-_PRODUCT_TASK_LABELS = frozenset({"product-proposal", "pm-created"})
-_PRODUCT_TASK_DEFAULT_LABELS = ("product-proposal", "pm-created")
+_PRODUCT_TASK_LABELS = frozenset({"product-proposal", "proposal-only"})
+_PRODUCT_TASK_DEFAULT_LABELS = ("product-proposal", "proposal-only")
 _PRODUCT_TASK_UNSAFE_LANES = frozenset({
     "To Do",
     "In Progress",
@@ -2567,7 +2567,7 @@ _ARCHITECT_READ_TOOL_NAMES = frozenset({
     "session_map",
     "specialization_show",
     "specializations_list",
-    "steward_operating_brief",
+    "group_health_brief",
     "stream_show",
     "streams_list",
     "task_chain",
@@ -4560,7 +4560,7 @@ def _decision_has_product_marker(decision: dict | None) -> bool:
     metadata = (decision or {}).get("metadata", {})
     if not isinstance(metadata, dict):
         return False
-    product = metadata.get("product_manager", {})
+    product = metadata.get("product_proposal", {})
     return (
         isinstance(product, dict)
         and str(product.get("marker", "") or "").strip() == _PRODUCT_DECISION_MARKER
@@ -4569,7 +4569,7 @@ def _decision_has_product_marker(decision: dict | None) -> bool:
 
 def _product_decision_metadata(caller_id: str) -> dict:
     return {
-        "product_manager": {
+        "product_proposal": {
             "marker": _PRODUCT_DECISION_MARKER,
             "owner_architect_id": str(caller_id or "").strip(),
             "proposed_only": True,
@@ -4655,7 +4655,7 @@ def _product_peer_route_message_for_task(
 
     Product/ideation wrappers persist product-peer markers
     plus product-scoped task context in ``agent_peer_messages``.  Treat only
-    inbound architect→architect product-peer rows, anchored to the PM-created
+    inbound architect→architect product-peer rows, anchored to the product-proposal
     root, as route/management evidence for cross-architect coverage closure.
     If a caller-created covering task is supplied, prefer rows sent before the
     covering task was created, but do not require timestamp parsing when older
@@ -4710,7 +4710,7 @@ def _routed_product_root_coverage_authorization(
         caller_id: str,
         task,
         covering_task_id: str) -> tuple[dict, str]:
-    """Authorize a non-owner architect to close a routed PM-created root.
+    """Authorize a non-owner architect to close a routed product-proposal root.
 
     This deliberately grants only the ``task_mark_covered``/Done transition
     path.  Broader task edits, reassignments, deletion, or dispatch remain
@@ -4732,7 +4732,7 @@ def _routed_product_root_coverage_authorization(
         return {}, "Task was not created by this architect"
     if not covering_task_id:
         return {}, (
-            "Routed PM-created product roots require a covering_task created "
+            "Routed product proposal roots require a covering_task created "
             "by this architect"
         )
     covering_task = state.board_tasks.get(str(covering_task_id or "").strip())
@@ -4742,7 +4742,7 @@ def _routed_product_root_coverage_authorization(
         return {}, "covering_task not found in scope"
     if str(getattr(covering_task, "created_by_architect_id", "") or "").strip() != caller_id:
         return {}, (
-            "Routed PM-created product roots require a covering_task created "
+            "Routed product proposal roots require a covering_task created "
             "by this architect"
         )
 
@@ -4755,7 +4755,7 @@ def _routed_product_root_coverage_authorization(
     )
     if not has_cover_label and not route_row:
         return {}, (
-            "Routed PM-created product roots require covers:<task> label "
+            "Routed product proposal roots require covers:<task> label "
             "or inbound product-peer route evidence"
         )
 
@@ -4765,7 +4765,7 @@ def _routed_product_root_coverage_authorization(
         if str(label or "").strip() in _PRODUCT_TASK_LABELS
     ]
     authorization = {
-        "scope": "routed_pm_product_root",
+        "scope": "routed_product_proposal_root",
         "source": (
             "covering_task_label_and_product_peer"
             if has_cover_label and route_row else
@@ -4785,17 +4785,17 @@ def _routed_product_root_coverage_authorization(
     return authorization, ""
 
 
-def _routed_pm_product_root_pickup_authorization(
+def _routed_product_proposal_root_pickup_authorization(
         state,
         caller_id: str,
         task) -> tuple[dict, str]:
-    """Authorize direct Architect pickup of a PM-created product root.
+    """Authorize direct Architect pickup of a product proposal root.
 
     This is intentionally narrower than general task ownership.  A task is
     claimable only when it is a same-group, product-labeled task created by a
     Product-authority Architect, unclaimed (or already claimed by the
     caller), and there is durable inbound product-peer route evidence from the
-    PM creator to the claiming Architect.
+    proposal creator to the claiming Architect.
     """
     caller_id = str(caller_id or "").strip()
     task_id = str(getattr(task, "id", "") or "").strip()
@@ -4811,12 +4811,12 @@ def _routed_pm_product_root_pickup_authorization(
     if board_task_is_closed(task):
         return {}, "Task is already closed"
     if not _task_has_product_label(task):
-        return {}, "Task is not a PM-created product proposal"
+        return {}, "Task is not a product-proposal product proposal"
     if not creator_id:
-        return {}, "Task is not a PM-created product proposal"
+        return {}, "Task is not a product-proposal product proposal"
     creator = state.agents.get(creator_id)
     if not creator or str(getattr(creator, "group", "") or "").strip() != caller_group:
-        return {}, "Task is not a same-group PM-created product proposal"
+        return {}, "Task is not a same-group product-proposal product proposal"
     if not _cell_has_product_peer_authority(state, creator):
         return {}, "Task creator does not have product proposal authority"
     if creator_id == caller_id:
@@ -4834,7 +4834,7 @@ def _routed_pm_product_root_pickup_authorization(
     )
     if not route_row:
         return {}, (
-            "PM-created product task pickup requires inbound product-peer "
+            "product-proposal product task pickup requires inbound product-peer "
             "route evidence from the product proposal creator"
         )
 
@@ -4844,7 +4844,7 @@ def _routed_pm_product_root_pickup_authorization(
         if str(label or "").strip() in _PRODUCT_TASK_LABELS
     ]
     authorization = {
-        "scope": "routed_pm_product_root_pickup",
+        "scope": "routed_product_proposal_root_pickup",
         "source": "product_peer_route",
         "task_id": task_id,
         "root_creator_architect_id": creator_id,
@@ -5236,7 +5236,7 @@ def _normalize_product_context(
                 "area_ids": area_ids,
                 "initiative_ids": initiative_ids,
                 "idea_brief_ids": idea_brief_ids,
-                "scope": "product_manager_wave_4b",
+                "scope": "product_proposal_v1",
             },
             "tasks": task_snapshots,
             "engineers": [],
@@ -5378,7 +5378,7 @@ def _add_product_peer_marker(context: dict, *, source: str,
         "marker": _PRODUCT_PEER_MARKER,
         "source": source,
         "caller_id": str(caller_id or "").strip(),
-        "scope": "product_manager_wave_4b",
+        "scope": "product_proposal_v1",
     }
     enriched["context_snapshot"] = snapshot
     return enriched
@@ -9753,7 +9753,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 continue
             return (
                 f"{forbidden} is not accepted by architect_product_task_propose; "
-                "PM task proposals are always queued, unassigned, and non-dispatched",
+                "product task proposals are always queued, unassigned, and non-dispatched",
                 True,
             )
         title = str(args.get("title", "") or "").strip()
@@ -9768,7 +9768,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 return "lane must already exist", True
             if lane in _PRODUCT_TASK_UNSAFE_LANES:
                 return (
-                    "PM task proposals must stay in a planning-safe lane; "
+                    "product task proposals must stay in a planning-safe lane; "
                     "To Do, In Progress, Done, and Archived are rejected",
                     True,
                 )
@@ -9778,7 +9778,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             else:
                 lane = next((candidate for candidate in real_state.board_lanes if candidate not in _PRODUCT_TASK_UNSAFE_LANES), "")
             if not lane:
-                return "No planning-safe lane is available for PM task proposals", True
+                return "No planning-safe lane is available for product task proposals", True
         labels = _dedupe_strings(args.get("labels", []))
         for default_label in _PRODUCT_TASK_DEFAULT_LABELS:
             if default_label not in labels:
@@ -9801,7 +9801,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             suggested_specialization=str(args.get("suggested_specialization", "") or "").strip(),
         )
         if not task:
-            return "Failed to create PM task proposal", True
+            return "Failed to create product task proposal", True
         persisted = real_state.board_tasks.get(task.id)
         if (
                 not persisted
@@ -9812,14 +9812,14 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 or str(getattr(persisted, "scheduled_at", "") or "")
                 or str(getattr(persisted, "action_name", "") or "")):
             real_state.board_remove_task(task.id)
-            return "PM task proposal invariant failed; task was not persisted queued/unassigned", True
+            return "product task proposal invariant failed; task was not persisted queued/unassigned", True
         response = serialize_task_for_mcp(persisted, tasks_by_id=real_state.board_tasks)
         response["type"] = "product_task_proposal_created"
         response["title"] = persisted.task
         response["labels"] = list(persisted.labels or [])
         response["caveat"] = (
             "Created as a normal queued Board task with product labels. "
-            "The PM wrapper did not add board-sync authority; existing Board "
+            "The product proposal wrapper did not add board-sync authority; existing Board "
             "sync settings may still process normal Board tasks."
         )
         return _compact_json(response), False
@@ -10073,7 +10073,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             _engineer_group,
             lane=lane,
             description=description,
-            labels=["torque:human", "architect-ask", "product-ask", "pm-created"],
+            labels=["torque:human", "architect-ask", "product-ask", "proposal-only"],
             created_by_architect_id=str(caller_id or "").strip(),
             reply_agent_id=str(caller_id or "").strip(),
             assigned_engineer_id="",
@@ -10117,8 +10117,8 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             args,
         )
 
-    if tool_name == "steward_operating_brief" and caller_kind == "architect":
-        return _compact_json(build_steward_operating_brief(
+    if tool_name == "group_health_brief" and caller_kind == "architect":
+        return _compact_json(build_group_health_brief(
             state,
             caller_id,
             _engineer_group,
@@ -12044,7 +12044,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if not task:
             return "Task not found", True
         caller_id_str = str(caller_id or "").strip()
-        authorization, auth_error = _routed_pm_product_root_pickup_authorization(
+        authorization, auth_error = _routed_product_proposal_root_pickup_authorization(
             real_state,
             caller_id_str,
             task,
@@ -12220,7 +12220,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "to": engineer_id,
         }), False
 
-    if tool_name == "pm_root_backlog_hygiene" and caller_kind == "architect":
+    if tool_name == "proposal_root_backlog_hygiene" and caller_kind == "architect":
         apply, apply_error = _optional_bool_arg(args, "apply", False)
         if apply_error:
             return apply_error, True
@@ -12246,7 +12246,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if limit < 0:
             return "limit must be non-negative", True
         result = await handle_command({
-            "cmd": "architect_pm_root_backlog_hygiene",
+            "cmd": "architect_proposal_root_backlog_hygiene",
             "architect_id": str(caller_id or "").strip(),
             "apply": apply,
             "task_ids": task_ids,
@@ -12378,7 +12378,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                     for key in ("pr_url", "sha", "tests_run", "evidence", "notes")
                 )):
             return (
-                "Routed PM-created product root coverage requires PR/SHA/tests "
+                "Routed product proposal root coverage requires PR/SHA/tests "
                 "or notes evidence"
             ), True
 

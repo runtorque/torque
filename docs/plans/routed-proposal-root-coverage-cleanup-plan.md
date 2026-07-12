@@ -7,10 +7,10 @@ This is a **reviewable plan only**. Do not perform any cleanup before the TORQUE
 ## Safety rules
 
 - Actor: Torqly (`a5a7fc9e`) should run cleanup from an Architect context after the authorization fix is deployed/relaunched.
-- Operation: use only `architect_task_mark_covered` with `move_to_done=true` against one PM-created root at a time.
+- Operation: use only `architect_task_mark_covered` with `move_to_done=true` against one product-proposal root at a time.
 - Required target predicate before every call:
   - root task is visible in the Torque group;
-  - root is labeled `product-proposal` and `pm-created`;
+  - root is labeled `product-proposal` and `proposal-only`;
   - root has durable routing/coverage evidence from Blueprint/PM to Torqly, or a Torqly-created covering task with a `covers:<ROOT>` label;
   - covering evidence includes covering task, PR URL, merge SHA, tests/review evidence, and notes.
 - Never bulk-close roots silently.
@@ -22,7 +22,7 @@ This is a **reviewable plan only**. Do not perform any cleanup before the TORQUE
 
 ## Cleanup order
 
-1. Verify each root still exists and still has `product-proposal` / `pm-created` labels.
+1. Verify each root still exists and still has `product-proposal` / `proposal-only` labels.
 2. Process roots with merged implementation evidence first: TORQUE:999, TORQUE:1007, TORQUE:1015.
 3. Process repeat/superseded roots only after confirming the later covering task intentionally covers the earlier root: TORQUE:991, TORQUE:997, TORQUE:1001, TORQUE:1009.
 4. Record one `architect_task_mark_covered` call per root. Include the root-specific evidence below in the `notes`/`tests` fields.
@@ -34,7 +34,7 @@ This is a **reviewable plan only**. Do not perform any cleanup before the TORQUE
 | --- | --- | --- | --- |
 | `TORQUE:991` — Ask Help still no-op after Help regression fix | Early PM Help post-smoke root. Later Help Ask roots showed PR #797/#806 were insufficient until the right-rail visibility fix. | Primary covering stream: `TORQUE:1008` (`covers:TORQUE:1007`) / manual review `TORQUE:1014` / PR #816 `https://github.com/runtorque/torque/pull/816`, reviewed head `c78a00814bbeaf1190af924f52844a9bc3795e86`, squash `fcc588542c7c692a698d9f82648b923ee10c14e7`. Supporting earlier attempts: PR #797 `25afd7035db79a4fcba5d1fe6b22e3be62f0b231` and PR #806 `4e3bf52ba81f6e210ef85365794da08611a9efc2` are historical but not sufficient alone. | Eligible only if Torqly confirms the final right-rail Help fix supersedes the earlier Ask no-op root. Cleanup note should say the root was superseded by the repeat-failure fix in `TORQUE:1008` / PR #816 and not by the failed intermediate fixes alone. |
 | `TORQUE:997` — Ask Help still broken after PR #797 smoke | Repeat PM Help root after PR #797. | Same final covering stream as above: `TORQUE:1008` / `TORQUE:1014` / PR #816 `https://github.com/runtorque/torque/pull/816`, reviewed head `c78a00814bbeaf1190af924f52844a9bc3795e86`, squash `fcc588542c7c692a698d9f82648b923ee10c14e7`. Supporting failed intermediate: PR #806 `4e3bf52ba81f6e210ef85365794da08611a9efc2`. | Eligible if Torqly confirms PR #816's root cause (“PR #806 proved DOM/API but live right rail cropped Ask result states”) covers this repeat root. Use one covered call with `covering_task=TORQUE:1008`, PR #816 URL/SHA, Help tests and review evidence from TORQUE:1008. |
-| `TORQUE:999` — Deep DM composer / terminal coupling investigation | PM root explicitly routed into the deep DM composer stream. | Covering stream: `TORQUE:1000` (`covers:TORQUE:999`) / manual review `TORQUE:1006` / PR #809 `https://github.com/runtorque/torque/pull/809`, reviewed clean tip `1dc3af9c92edf57caafa074ede7ce1fcd2ac519e`, squash `157f15baf115e8239e7b5e7305b0850d4574bee3`. Tests: `node --test tests/frontend_state_regression.test.js` (626 passed), focused Python frontend tests, review Ship/no blockers. | Eligible. Use `covering_task=TORQUE:1000`, move to Done, notes: terminal/DM composer coupling fixed; PR #770/#781/#782/#792 semantics preserved; no backend/PTY changes. |
+| `TORQUE:999` — Deep DM composer / terminal coupling investigation | proposal root explicitly routed into the deep DM composer stream. | Covering stream: `TORQUE:1000` (`covers:TORQUE:999`) / manual review `TORQUE:1006` / PR #809 `https://github.com/runtorque/torque/pull/809`, reviewed clean tip `1dc3af9c92edf57caafa074ede7ce1fcd2ac519e`, squash `157f15baf115e8239e7b5e7305b0850d4574bee3`. Tests: `node --test tests/frontend_state_regression.test.js` (626 passed), focused Python frontend tests, review Ship/no blockers. | Eligible. Use `covering_task=TORQUE:1000`, move to Done, notes: terminal/DM composer coupling fixed; PR #770/#781/#782/#792 semantics preserved; no backend/PTY changes. |
 > Note: TORQUE:1115 removed the Codex SDK runner/prototype; the Codex SDK rows below are historical closure evidence only and must not be treated as an available runtime or smoke recipe.
 
 | `TORQUE:1001` — Codex SDK smoke add_agent runner_backend argument | Initial PM SDK smoke root; later repeat root `TORQUE:1009` proved live failure after PR #807. | Covering implementation for the code path: PR #807 `https://github.com/runtorque/torque/pull/807`, reviewed head `6d6d125c8bf6f62a9cbd31ff12fd76c19e84bfc4`, squash `07c53f80dd1c5e8219e1fc75bde21f00f26320e0`, plus `TORQUE:1012` manual review (`covers:TORQUE:1009`) confirming clean origin/current-source was not the remaining bug and the live failure was dirty/staged root + stale installed app source. | Conditional. Only mark covered if Torqly explicitly treats PR #807 + TORQUE:1012 as sufficient for the original root. If cleanup wants stricter coverage, leave `TORQUE:1001` open until a visible covering task is labeled `covers:TORQUE:1001` or a post-deploy smoke confirms the exact original command no longer fails. |
@@ -54,7 +54,7 @@ architect_task_mark_covered(
   pr_url="https://github.com/runtorque/torque/pull/<pr>",
   sha="<merge-sha-or-reviewed-sha>",
   tests="<focused/full/review evidence from covering stream>",
-  notes="Post-merge cleanup for Blueprint/PM-created product root. Covered by <covering task/PR>; no bulk mutation; labels/history preserved; no dispatch/destructive edit. <operator caveat if any>."
+  notes="Post-merge cleanup for Blueprint/product proposal root. Covered by <covering task/PR>; no bulk mutation; labels/history preserved; no dispatch/destructive edit. <operator caveat if any>."
 )
 ```
 

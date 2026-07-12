@@ -183,12 +183,12 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                 )
             except ValueError as exc:
                 return {"type": "error", "message": str(exc)}
-        if payload["cmd"] == "architect_pm_root_backlog_hygiene":
+        if payload["cmd"] == "architect_proposal_root_backlog_hygiene":
             architect_id = str(payload.get("architect_id", "") or "").strip()
             architect = self.state.agents.get(architect_id)
             if not architect or getattr(architect, "kind", "") != "architect":
                 return {"type": "error", "message": "architect not found"}
-            return self.server_mod._finalize_already_covered_pm_roots(
+            return self.server_mod._finalize_already_covered_proposal_roots(
                 self.state,
                 apply=bool(payload.get("apply", False)),
                 task_ids=payload.get("task_ids", []) or [],
@@ -3512,15 +3512,15 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.state.board_tasks[task.id].completion_evidence, {})
         self.assertEqual(self.state.board_tasks[task.id].lane, "Backlog")
 
-    async def test_architect_task_mark_covered_allows_routed_pm_root(self):
+    async def test_architect_task_mark_covered_allows_routed_proposal_root(self):
         pm = self._add_architect("pm-1", "Blueprint")
         torqly = self._add_architect("arch-1", "Torqly")
         root = self._add_task(
             "TORQUE:991",
-            "PM product root",
+            "product proposal root",
             lane="In Progress",
             status="Covered elsewhere",
-            labels=["product-proposal", "pm-created"],
+            labels=["product-proposal", "proposal-only"],
             created_by_architect_id=pm.id,
         )
         self.db.save_agent_peer_message({
@@ -3574,14 +3574,14 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(evidence["recorded_by_id"], torqly.id)
         self.assertEqual(evidence["recorded_by_kind"], "architect")
         authorization = evidence["authorization"]
-        self.assertEqual(authorization["scope"], "routed_pm_product_root")
+        self.assertEqual(authorization["scope"], "routed_product_proposal_root")
         self.assertEqual(
             authorization["source"],
             "covering_task_label_and_product_peer",
         )
         self.assertEqual(authorization["root_creator_architect_id"], pm.id)
         self.assertEqual(authorization["route_message_id"], "route-msg-991")
-        self.assertIn("pm-created", authorization["product_labels"])
+        self.assertIn("proposal-only", authorization["product_labels"])
         self.assertEqual(refreshed.messages[-1]["action"], "covered_by")
 
     async def test_architect_task_mark_covered_live_handler_accepts_covering_task(self):
@@ -3589,10 +3589,10 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         torqly = self._add_architect("arch-live", "Torqly")
         root = self._add_task(
             "TORQUE:1036",
-            "PM-created product root",
+            "product proposal root",
             lane="Backlog",
             status="queued",
-            labels=["product-proposal", "pm-created"],
+            labels=["product-proposal", "proposal-only"],
             created_by_architect_id=pm.id,
         )
         self.db.save_agent_peer_message({
@@ -3603,7 +3603,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "sender_kind": "architect",
             "recipient_id": torqly.id,
             "recipient_kind": "architect",
-            "message": "Torqly, please accept and route this PM product root.",
+            "message": "Torqly, please accept and route this product proposal root.",
             "created_at": 1.0,
             "context_task_ids": [root.id],
             "context_summary": "Explicit PM route request for TORQUE:1036.",
@@ -3640,7 +3640,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(refreshed.lane, "Backlog")
         evidence = refreshed.completion_evidence["covered_by"]
         self.assertEqual(evidence["task_id"], covering.id)
-        self.assertEqual(evidence["authorization"]["scope"], "routed_pm_product_root")
+        self.assertEqual(evidence["authorization"]["scope"], "routed_product_proposal_root")
         self.assertEqual(evidence["authorization"]["route_message_id"], "route-msg-1036")
 
     async def test_architect_task_mark_covered_live_handler_accepts_covering_task_id_alias(self):
@@ -3648,8 +3648,8 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         torqly = self._add_architect("arch-alias", "Torqly")
         root = self._add_task(
             "TORQUE:1046",
-            "PM-created alias product root",
-            labels=["product-proposal", "pm-created"],
+            "product-proposal alias product root",
+            labels=["product-proposal", "proposal-only"],
             created_by_architect_id=pm.id,
         )
         covering = self._add_task(
@@ -3678,13 +3678,13 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "covering_task_label",
         )
 
-    async def test_architect_task_mark_covered_rejects_routed_pm_root_without_completion_evidence(self):
+    async def test_architect_task_mark_covered_rejects_routed_proposal_root_without_completion_evidence(self):
         pm = self._add_architect("pm-no-evidence", "Blueprint")
         torqly = self._add_architect("arch-no-evidence", "Torqly")
         root = self._add_task(
             "TORQUE:1048",
-            "PM-created product root without completion evidence",
-            labels=["product-proposal", "pm-created"],
+            "product proposal root without completion evidence",
+            labels=["product-proposal", "proposal-only"],
             created_by_architect_id=pm.id,
         )
         covering = self._add_task(
@@ -3704,14 +3704,14 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("requires PR/SHA/tests or notes evidence", text)
         self.assertEqual(self.state.board_tasks[root.id].completion_evidence, {})
 
-    async def test_architect_task_mark_covered_rejects_pm_root_with_non_caller_covering_task(self):
+    async def test_architect_task_mark_covered_rejects_proposal_root_with_non_caller_covering_task(self):
         pm = self._add_architect("pm-non-caller", "Blueprint")
         torqly = self._add_architect("arch-non-caller", "Torqly")
         other_architect = self._add_architect("arch-cover-owner", "Other Architect")
         root = self._add_task(
             "TORQUE:1050",
-            "PM-created product root with other covering owner",
-            labels=["product-proposal", "pm-created"],
+            "product proposal root with other covering owner",
+            labels=["product-proposal", "proposal-only"],
             created_by_architect_id=pm.id,
         )
         covering = self._add_task(
@@ -3734,18 +3734,18 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(is_error)
         self.assertEqual(
             text,
-            "Routed PM-created product roots require a covering_task created "
+            "Routed product proposal roots require a covering_task created "
             "by this architect",
         )
         self.assertEqual(self.state.board_tasks[root.id].completion_evidence, {})
 
-    async def test_architect_task_mark_covered_rejects_pm_root_without_route_evidence(self):
+    async def test_architect_task_mark_covered_rejects_proposal_root_without_route_evidence(self):
         pm = self._add_architect("pm-1", "Blueprint")
         torqly = self._add_architect("arch-1", "Torqly")
         root = self._add_task(
             "TORQUE:997",
-            "Unrouted PM product root",
-            labels=["product-proposal", "pm-created"],
+            "Unrouted product proposal root",
+            labels=["product-proposal", "proposal-only"],
             created_by_architect_id=pm.id,
         )
         covering = self._add_task(
@@ -3769,12 +3769,12 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.state.board_tasks[root.id].completion_evidence, {})
         self.assertEqual(self.state.board_tasks[root.id].lane, "Backlog")
 
-    async def test_architect_task_mark_covered_rejects_non_pm_root_even_with_cover_label(self):
+    async def test_architect_task_mark_covered_rejects_non_proposal_root_even_with_cover_label(self):
         other_architect = self._add_architect("arch-other", "Other Architect")
         torqly = self._add_architect("arch-1", "Torqly")
         root = self._add_task(
             "TORQUE:999",
-            "Non-PM root",
+            "Non-proposal root",
             created_by_architect_id=other_architect.id,
         )
         covering = self._add_task(
@@ -3820,15 +3820,15 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         }
         self.state._db_save_task(covering)
 
-    async def test_auto_resolves_routed_pm_root_after_covering_task_ships(self):
+    async def test_auto_resolves_routed_proposal_root_after_covering_task_ships(self):
         pm = self._add_architect("pm-auto", "Blueprint")
         torqly = self._add_architect("arch-auto", "Torqly")
         root = self._add_task(
             "TORQUE:1087",
-            "PM-created product root",
+            "product proposal root",
             lane="In Progress",
             status="Covered by Torqly stream",
-            labels=["product-proposal", "pm-created"],
+            labels=["product-proposal", "proposal-only"],
             created_by_architect_id=pm.id,
         )
         covering = self._add_task(
@@ -3840,7 +3840,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         )
         self._set_final_covering_evidence(covering)
 
-        result = self.server_mod._auto_resolve_pm_product_roots_for_covering_task(
+        result = self.server_mod._auto_resolve_product_proposal_roots_for_covering_task(
             self.state,
             covering,
         )
@@ -3859,7 +3859,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(covered_by["recorded_by_id"], torqly.id)
         self.assertEqual(covered_by["recorded_by_kind"], "system")
         authorization = covered_by["authorization"]
-        self.assertEqual(authorization["scope"], "routed_pm_product_root")
+        self.assertEqual(authorization["scope"], "routed_product_proposal_root")
         self.assertEqual(authorization["source"], "covering_task_label")
         self.assertTrue(authorization["auto_resolved"])
         self.assertEqual(
@@ -3879,10 +3879,10 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         torqly = self._add_architect("arch-order", "Torqly")
         root = self._add_task(
             "TORQUE:2087",
-            "PM-created product root with pre-attached evidence",
+            "product proposal root with pre-attached evidence",
             lane="In Progress",
             status="Covered by Torqly stream",
-            labels=["product-proposal", "pm-created"],
+            labels=["product-proposal", "proposal-only"],
             created_by_architect_id=pm.id,
         )
         covering = self._add_task(
@@ -3924,7 +3924,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(board_sync_manager.calls, [])
 
         self.state.board_move_task(covering.id, "Done")
-        resolved = self.server_mod._auto_resolve_pm_product_roots_and_enqueue(
+        resolved = self.server_mod._auto_resolve_product_proposal_roots_and_enqueue(
             self.state,
             covering,
             board_sync_manager=board_sync_manager,
@@ -3945,7 +3945,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             board_sync_manager.calls,
             [(
                 root.id,
-                "auto_pm_root_covered",
+                "auto_proposal_root_covered",
                 ("completion_evidence", "messages", "lane"),
             )],
         )
@@ -3965,9 +3965,9 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(suffix=suffix):
                 root = self._add_task(
                     f"TORQUE:{2000 + len(self.state.board_tasks)}",
-                    f"PM root {suffix}",
+                    f"proposal root {suffix}",
                     lane="In Progress",
-                    labels=["product-proposal", "pm-created"],
+                    labels=["product-proposal", "proposal-only"],
                     created_by_architect_id=pm.id,
                 )
                 covering = self._add_task(
@@ -3979,7 +3979,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self._set_final_covering_evidence(covering, **evidence_kwargs)
 
-                result = self.server_mod._auto_resolve_pm_product_roots_for_covering_task(
+                result = self.server_mod._auto_resolve_product_proposal_roots_for_covering_task(
                     self.state,
                     covering,
                 )
@@ -3996,25 +3996,25 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.state._db_save_groups()
         covered = self._add_task(
             "TORQUE:2100",
-            "Covered PM root",
+            "Covered proposal root",
             lane="In Progress",
-            labels=["product-proposal", "pm-created"],
+            labels=["product-proposal", "proposal-only"],
             created_by_architect_id=pm.id,
         )
         unlabeled = self._add_task(
             "TORQUE:2101",
-            "Unlabeled PM root",
+            "Unlabeled proposal root",
             lane="In Progress",
-            labels=["product-proposal", "pm-created"],
+            labels=["product-proposal", "proposal-only"],
             created_by_architect_id=pm.id,
         )
         cross_scope_pm = self._add_architect("pm-other", "Other PM", group="other")
         cross_scope = self._add_task(
             "TORQUE:2102",
-            "Other-group PM root",
+            "Other-group proposal root",
             group="other",
             lane="In Progress",
-            labels=["product-proposal", "pm-created"],
+            labels=["product-proposal", "proposal-only"],
             created_by_architect_id=cross_scope_pm.id,
         )
         covering = self._add_task(
@@ -4026,7 +4026,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         )
         self._set_final_covering_evidence(covering)
 
-        result = self.server_mod._auto_resolve_pm_product_roots_for_covering_task(
+        result = self.server_mod._auto_resolve_product_proposal_roots_for_covering_task(
             self.state,
             covering,
         )
@@ -4042,9 +4042,9 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         pm = self._add_architect("pm-mismatch", "Blueprint")
         root = self._add_task(
             "TORQUE:2200",
-            "PM root with invalid covering owner",
+            "proposal root with invalid covering owner",
             lane="In Progress",
-            labels=["product-proposal", "pm-created"],
+            labels=["product-proposal", "proposal-only"],
             created_by_architect_id=pm.id,
         )
         covering = self._add_task(
@@ -4056,7 +4056,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         )
         self._set_final_covering_evidence(covering)
 
-        result = self.server_mod._auto_resolve_pm_product_roots_for_covering_task(
+        result = self.server_mod._auto_resolve_product_proposal_roots_for_covering_task(
             self.state,
             covering,
         )
@@ -4065,15 +4065,15 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.state.board_tasks[root.id].lane, "In Progress")
         self.assertEqual(self.state.board_tasks[root.id].completion_evidence, {})
 
-    async def test_pm_root_backlog_hygiene_dry_run_and_apply_preserves_evidence(self):
+    async def test_proposal_root_backlog_hygiene_dry_run_and_apply_preserves_evidence(self):
         pm = self._add_architect("pm-hygiene", "Blueprint")
         torqly = self._add_architect("arch-hygiene", "Torqly")
         eligible_root = self._add_task(
             "TORQUE:3001",
-            "Already-covered PM root",
+            "Already-covered proposal root",
             lane="Backlog",
             status="Covered by Torqly stream",
-            labels=["product-proposal", "pm-created"],
+            labels=["product-proposal", "proposal-only"],
             created_by_architect_id=pm.id,
         )
         eligible_covering = self._add_task(
@@ -4084,12 +4084,12 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             created_by_architect_id=torqly.id,
         )
         auth = {
-            "scope": "routed_pm_product_root",
+            "scope": "routed_product_proposal_root",
             "source": "covering_task_label_and_product_peer",
             "covered_task_id": eligible_root.id,
             "root_creator_architect_id": pm.id,
             "covering_task_id": eligible_covering.id,
-            "product_labels": ["product-proposal", "pm-created"],
+            "product_labels": ["product-proposal", "proposal-only"],
             "route_message_id": "msg-route",
             "route_thread_id": "msg-route",
             "route_sender_id": pm.id,
@@ -4116,7 +4116,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "TORQUE:963",
             "Help popup remains separately audited",
             lane="Backlog",
-            labels=["product-proposal", "pm-created"],
+            labels=["product-proposal", "proposal-only"],
             created_by_architect_id=pm.id,
         )
         pending_covering = self._add_task(
@@ -4134,17 +4134,17 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             actor_id=torqly.id,
             actor_kind="architect",
             authorization={
-                "scope": "routed_pm_product_root",
+                "scope": "routed_product_proposal_root",
                 "source": "covering_task_label_and_product_peer",
                 "covered_task_id": pending_root.id,
                 "root_creator_architect_id": pm.id,
                 "covering_task_id": pending_covering.id,
-                "product_labels": ["product-proposal", "pm-created"],
+                "product_labels": ["product-proposal", "proposal-only"],
             },
             move_to_done=False,
         )
 
-        dry_run = self.server_mod._finalize_already_covered_pm_roots(
+        dry_run = self.server_mod._finalize_already_covered_proposal_roots(
             self.state,
             apply=False,
         )
@@ -4170,7 +4170,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                 self.calls.append((task_id, reason, tuple(fields)))
 
         sync = FakeBoardSyncManager()
-        applied = self.server_mod._finalize_already_covered_pm_roots(
+        applied = self.server_mod._finalize_already_covered_proposal_roots(
             self.state,
             apply=True,
             board_sync_manager=sync,
@@ -4194,12 +4194,12 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             sync.calls,
             [(
                 eligible_root.id,
-                "pm_root_backlog_hygiene_finalized",
+                "proposal_root_backlog_hygiene_finalized",
                 ("completion_evidence", "messages", "lane"),
             )],
         )
 
-    async def test_architect_pm_root_backlog_hygiene_scopes_to_caller_covering_task(self):
+    async def test_architect_proposal_root_backlog_hygiene_scopes_to_caller_covering_task(self):
         pm = self._add_architect("pm-hygiene-scope", "Blueprint")
         torqly = self._add_architect("arch-hygiene-scope", "Torqly")
         other_architect = self._add_architect("arch-other-scope", "Other")
@@ -4207,7 +4207,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "TORQUE:3301",
             "Already-covered root for Torqly",
             lane="Backlog",
-            labels=["product-proposal", "pm-created"],
+            labels=["product-proposal", "proposal-only"],
             created_by_architect_id=pm.id,
         )
         owned_covering = self._add_task(
@@ -4221,7 +4221,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "TORQUE:3311",
             "Already-covered root for another architect",
             lane="Backlog",
-            labels=["product-proposal", "pm-created"],
+            labels=["product-proposal", "proposal-only"],
             created_by_architect_id=pm.id,
         )
         other_covering = self._add_task(
@@ -4246,18 +4246,18 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                 actor_id=architect.id,
                 actor_kind="architect",
                 authorization={
-                    "scope": "routed_pm_product_root",
+                    "scope": "routed_product_proposal_root",
                     "source": "covering_task_label_and_product_peer",
                     "covered_task_id": root.id,
                     "root_creator_architect_id": pm.id,
                     "covering_task_id": covering.id,
-                    "product_labels": ["product-proposal", "pm-created"],
+                    "product_labels": ["product-proposal", "proposal-only"],
                 },
                 move_to_done=False,
             )
 
         text, is_error = await self._call(
-            "architect_pm_root_backlog_hygiene",
+            "architect_proposal_root_backlog_hygiene",
             {"apply": False},
             torqly.id,
         )
@@ -4276,7 +4276,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         )
 
         text, is_error = await self._call(
-            "architect_pm_root_backlog_hygiene",
+            "architect_proposal_root_backlog_hygiene",
             {"apply": True},
             torqly.id,
         )
@@ -4292,7 +4292,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             torqly.id,
         )
 
-    async def test_pm_root_backlog_hygiene_server_rejects_non_architect_actor(self):
+    async def test_proposal_root_backlog_hygiene_server_rejects_non_architect_actor(self):
         worker = self.state_mod.AgentCell(
             id="worker-hygiene",
             name="Worker",
@@ -4305,7 +4305,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.state.groups["torque"].append(worker.id)
 
         result = await self._extract_server_handle_command()({
-            "cmd": "architect_pm_root_backlog_hygiene",
+            "cmd": "architect_proposal_root_backlog_hygiene",
             "architect_id": worker.id,
             "apply": True,
         })
@@ -4313,7 +4313,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["type"], "error")
         self.assertEqual(result["message"], "architect not found")
 
-    async def test_architect_routed_pm_root_does_not_allow_reassign(self):
+    async def test_architect_routed_proposal_root_does_not_allow_reassign(self):
         pm = self._add_architect("pm-1", "Blueprint")
         torqly = self._add_architect("arch-1", "Torqly")
         engineer = self._add_engineer(
@@ -4323,8 +4323,8 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         )
         root = self._add_task(
             "TORQUE:1001",
-            "PM product root",
-            labels=["product-proposal", "pm-created"],
+            "product proposal root",
+            labels=["product-proposal", "proposal-only"],
             created_by_architect_id=pm.id,
         )
 

@@ -136,7 +136,7 @@ class MCPStewardBriefTests(unittest.IsolatedAsyncioTestCase):
     async def test_steward_projection_exposes_operating_brief_and_communication_but_no_mutations(self):
         tools = await self._list_tools()
 
-        self.assertIn("architect_steward_operating_brief", tools)
+        self.assertIn("architect_group_health_brief", tools)
         self.assertIn("architect_help_query", tools)
         self.assertIn("architect_events_recent", tools)
         self.assertIn("architect_ask", tools)
@@ -347,12 +347,12 @@ class MCPStewardBriefTests(unittest.IsolatedAsyncioTestCase):
         unused.tasks_dispatched = 0
 
         response = await self._call(
-            "architect_steward_operating_brief",
+            "architect_group_health_brief",
             {"mode": "onboarding", "now_ts": now_ts, "limit_per_section": 3, "stale_after_hours": 24, "silent_after_hours": 2},
         )
         payload = self._payload(response)
 
-        self.assertEqual("steward_operating_brief", payload["type"])
+        self.assertEqual("group_health_brief", payload["type"])
         self.assertEqual("onboarding", payload["mode"])
         self.assertTrue(payload["authority_contract"]["mutation_performed"] is False)
         self.assertIn("observed_facts", payload)

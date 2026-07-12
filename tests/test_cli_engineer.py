@@ -36,25 +36,6 @@ class CliEngineerTests(unittest.TestCase):
         self.assertEqual(args.task_cmd, "edit")
         self.assertEqual(args.engineer, "alice")
 
-    def test_parser_rejects_finalize_covered_pm_roots_command(self):
-        parser = self.cli.build_parser()
-        with contextlib.redirect_stderr(io.StringIO()), \
-                self.assertRaises(SystemExit):
-            parser.parse_args(["task", "finalize-covered-pm-roots"])
-        command_action = next(
-            action for action in parser._actions
-            if getattr(action, "dest", "") == "command"
-        )
-        task_parser = command_action.choices["task"]
-        task_cmd_action = next(
-            action for action in task_parser._actions
-            if getattr(action, "dest", "") == "task_cmd"
-        )
-        self.assertNotIn("finalize-covered-pm-roots", task_cmd_action.choices)
-        self.assertFalse(
-            hasattr(self.cli, "cmd_task_finalize_covered_pm_roots"),
-        )
-
     def test_parser_accepts_engineer_list_json_flag(self):
         parser = self.cli.build_parser()
         args = parser.parse_args(["engineer", "list", "--json"])

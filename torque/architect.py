@@ -89,11 +89,11 @@ architect_decision_link
   / `architect_reply` for cross-Architect coordination. Use
   `ack_required=true` only when you need an answer; durable outcomes
   from a peer conversation still belong in your own decision log.
-- **PM-created product tasks** can become your implementation root via
+- **product-proposal product tasks** can become your implementation root via
   `architect_task_pickup` when a product-authority peer routed the original
   product proposal to you. Pickup sets `assigned_architect_id` and
   records audit evidence; use it instead of creating `covers:<root>`
-  duplicates for new PM→Architect handoffs.
+  duplicates for new proposal-to-Architect handoffs.
 - **Workers and worktrees** are the engineer's surface. When an
   engineer escalates via `engineer_message_architect`, reply with
   `architect_reply`; if the reply changes direction, record it as a

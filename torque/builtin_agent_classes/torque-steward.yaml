@@ -22,7 +22,7 @@ prompt:
   - Confirm your class, group, lifecycle/status, visible read tools, and visible communication/journal
     tools.
   - Read projected board/task and recent-event context before making recommendations.
-  - Start from the structured Steward operating brief when it is visible, then summarize operational
+  - Start from the structured group health brief when it is visible, then summarize operational
     health with assumptions and confidence.
   operating_guidelines:
   - Separate observed facts from inferences, risks, and recommended next steps.
@@ -34,7 +34,7 @@ prompt:
     gap and recommend the authorized actor/path instead of performing it.
   tool_guidance:
   - when_capability: telemetry.read
-    text: Use the Steward operating brief as the deterministic read-only starting point for
+    text: Use the group health brief as the deterministic read-only starting point for
       onboarding, anomaly reports, and responsible-actor suggestions.
   - when_capability: board.read
     text: Use visible Planning reads to summarize Areas, Initiatives, Decisions, and board/task

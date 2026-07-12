@@ -165,7 +165,7 @@ class MetricsCollector:
         self._add_inline_overhead(started)
 
     def record_frontend_render(self, payload: dict | None = None) -> None:
-        """Best-effort ingest for Panelsmith's frontend render reporter.
+        """Best-effort ingest for the frontend render reporter.
 
         The published v1 tick/history schema does not surface these samples
         yet; keeping them in memory lets the command be accepted without

@@ -3753,10 +3753,10 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
     def test_board_pickup_architect_task_records_assignment_and_audit(self):
         state = self._make_state()
         task = state.board_add_task(
-            "PM-created root",
+            "product-proposal root",
             "g",
             id="TORQUE:1130",
-            labels=["product-proposal", "pm-created"],
+            labels=["product-proposal", "proposal-only"],
             created_by_architect_id="pm-1",
         )
 
@@ -3767,7 +3767,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             reason="Accepted PM handoff as implementation root.",
             source="product-peer route msg-123",
             authorization={
-                "scope": "routed_pm_product_root_pickup",
+                "scope": "routed_product_proposal_root_pickup",
                 "source": "product_peer_route",
                 "route_message_id": "msg-123",
             },
@@ -3815,7 +3815,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             actor_id="arch-1",
             actor_kind="architect",
             authorization={
-                "scope": "routed_pm_product_root",
+                "scope": "routed_product_proposal_root",
                 "source": "covering_task_label",
                 "covered_task_id": covered.id,
                 "covering_task_id": covering.id,

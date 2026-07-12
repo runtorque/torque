@@ -48,7 +48,6 @@ metadata:
   permanence_state: dogfood_permanent
   approval_decision_id: decision-16bd0bf619cf
   trusted_assignment: user_only_v1
-  migration_from_profile: product-manager-draft@2
   external_connector_governance: not_enforced_wave_7
 acl:
   mode: allow

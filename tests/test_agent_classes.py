@@ -602,7 +602,7 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
 
         for allowed in (
             "architect_board_summary",
-            "architect_steward_operating_brief",
+            "architect_group_health_brief",
             "architect_events_recent",
             "architect_task_show",
             "architect_area_list",

@@ -11011,7 +11011,7 @@ def _task_tests_run_completion_evidence(task) -> str:
 def _covering_task_final_ship_evidence(task) -> tuple[dict, str]:
     """Return PR/SHA/test evidence only for final shipped covering tasks.
 
-    Auto-resolving a routed PM root is intentionally stricter than normal
+    Auto-resolving a routed proposal root is intentionally stricter than normal
     completion surfacing: the covering task must already be closed, have an
     origin-verified merge/PR SHA, and carry explicit tests/checks evidence.
     """
@@ -11054,7 +11054,7 @@ def _covering_task_final_ship_evidence(task) -> tuple[dict, str]:
         "tests_run": tests_run,
         "evidence": "final shipped covering task evidence",
         "notes": (
-            "Auto-resolved PM-created product root after covering task "
+            "Auto-resolved product proposal root after covering task "
             "shipped with final PR/SHA/test evidence."
         ),
     }
@@ -11063,16 +11063,16 @@ def _covering_task_final_ship_evidence(task) -> tuple[dict, str]:
     return shipped, ""
 
 
-def _auto_resolve_pm_product_roots_for_covering_task(
+def _auto_resolve_product_proposal_roots_for_covering_task(
         state: MatrixState,
         covering_task,
 ) -> list[dict]:
-    """Close routed PM-created roots explicitly covered by a shipped task.
+    """Close routed product-proposal roots explicitly covered by a shipped task.
 
     This is deliberately a narrow follow-through path, not a generic cleanup
     sweep: it only considers roots in the same group with product labels, a
     different creator, an exact ``covers:<root>`` label on this covering task,
-    the existing routed-PM authorization predicate, and final PR/SHA/tests
+    the existing routed product-proposal authorization predicate, and final PR/SHA/tests
     evidence on the shipped covering task.
     """
     if not state or not covering_task:
@@ -11096,7 +11096,7 @@ def _auto_resolve_pm_product_roots_for_covering_task(
             _task_has_covers_label,
         )
     except Exception:
-        log.exception("Failed to load routed PM coverage authorization helpers")
+        log.exception("Failed to load routed product-proposal coverage authorization helpers")
         return []
 
     resolved = []
@@ -11118,7 +11118,7 @@ def _auto_resolve_pm_product_roots_for_covering_task(
             for label in (getattr(root, "labels", []) or [])
         }
         # Auto-resolution is stricter than manual visibility: require both
-        # PM/product labels so arbitrary cross-architect cards are not swept.
+        # product proposal labels so arbitrary cross-architect cards are not swept.
         if not set(_PRODUCT_TASK_LABELS).issubset(root_labels):
             continue
         # Avoid arbitrary/bulk cleanup: this shipped task must name this root.
@@ -11170,7 +11170,7 @@ def _auto_resolve_pm_product_roots_for_covering_task(
             )
         except ValueError:
             log.exception(
-                "Failed to auto-resolve PM product root %s covered by %s",
+                "Failed to auto-resolve product proposal root %s covered by %s",
                 root_id,
                 covering_task_id,
             )
@@ -11179,13 +11179,13 @@ def _auto_resolve_pm_product_roots_for_covering_task(
     return resolved
 
 
-def _auto_resolve_pm_product_roots_and_enqueue(
+def _auto_resolve_product_proposal_roots_and_enqueue(
         state: MatrixState,
         covering_task,
         *,
         board_sync_manager=None,
 ) -> list[dict]:
-    auto_resolved = _auto_resolve_pm_product_roots_for_covering_task(
+    auto_resolved = _auto_resolve_product_proposal_roots_for_covering_task(
         state,
         covering_task,
     )
@@ -11193,14 +11193,14 @@ def _auto_resolve_pm_product_roots_and_enqueue(
         for resolved in auto_resolved:
             board_sync_manager.enqueue_for_local_change(
                 resolved.get("task_id", ""),
-                reason="auto_pm_root_covered",
+                reason="auto_proposal_root_covered",
                 fields=("completion_evidence", "messages", "lane"),
             )
     return auto_resolved
 
 
-_PM_ROOT_BACKLOG_HYGIENE_REASON = (
-    "Backlog hygiene finalization for PM-created product root with existing "
+_PROPOSAL_ROOT_BACKLOG_HYGIENE_REASON = (
+    "Backlog hygiene finalization for product proposal root with existing "
     "final covered_by PR/SHA/test evidence."
 )
 
@@ -11212,8 +11212,8 @@ def _task_text_field(task, field: str, limit: int = 500) -> str:
     )
 
 
-def _pm_root_backlog_hygiene_item(state: MatrixState, root) -> dict:
-    """Classify one Backlog PM/product root for covered-by finalization."""
+def _proposal_root_backlog_hygiene_item(state: MatrixState, root) -> dict:
+    """Classify one Backlog product proposal root for covered-by finalization."""
     root_id = _task_text_field(root, "id", 120)
     labels = [
         str(label or "").strip()
@@ -11247,12 +11247,12 @@ def _pm_root_backlog_hygiene_item(state: MatrixState, root) -> dict:
     try:
         from .mcp_tools_shared import _PRODUCT_TASK_LABELS
     except Exception:
-        log.exception("Failed to load PM product label constants")
+        log.exception("Failed to load product proposal label constants")
         item["reason"] = "product_label_helper_unavailable"
         return item
     required_labels = set(_PRODUCT_TASK_LABELS)
     if not required_labels.issubset(label_set):
-        item["reason"] = "not_pm_product_root"
+        item["reason"] = "not_product_proposal_root"
         item["missing_labels"] = sorted(required_labels - label_set)
         return item
 
@@ -11299,7 +11299,7 @@ def _pm_root_backlog_hygiene_item(state: MatrixState, root) -> dict:
         authorization.get("source", ""),
         limit=200,
     )
-    if item["authorization_scope"] != "routed_pm_product_root":
+    if item["authorization_scope"] != "routed_product_proposal_root":
         item["reason"] = "route_authorization_scope_mismatch"
         return item
     auth_covered_task_id = _completion_evidence_text(
@@ -11347,12 +11347,12 @@ def _pm_root_backlog_hygiene_item(state: MatrixState, root) -> dict:
     return item
 
 
-def _pm_root_backlog_hygiene_inventory(
+def _proposal_root_backlog_hygiene_inventory(
         state: MatrixState,
         *,
         group: str = "",
 ) -> list[dict]:
-    """Inventory Backlog PM/product roots with eligibility reasons."""
+    """Inventory Backlog product proposal roots with eligibility reasons."""
     group = _completion_evidence_text(group, limit=200)
     items = []
     for root in sorted(
@@ -11365,15 +11365,15 @@ def _pm_root_backlog_hygiene_inventory(
             str(label or "").strip()
             for label in (getattr(root, "labels", []) or [])
         }
-        if not {"pm-created", "product-proposal"}.issubset(labels):
+        if not {"proposal-only", "product-proposal"}.issubset(labels):
             continue
         if str(getattr(root, "lane", "") or "").strip() != "Backlog":
             continue
-        items.append(_pm_root_backlog_hygiene_item(state, root))
+        items.append(_proposal_root_backlog_hygiene_item(state, root))
     return items
 
 
-def _pm_root_backlog_hygiene_authorized_for_architect(
+def _proposal_root_backlog_hygiene_authorized_for_architect(
         state: MatrixState,
         item: dict,
         architect_id: str,
@@ -11382,9 +11382,9 @@ def _pm_root_backlog_hygiene_authorized_for_architect(
     """Return whether an architect may finalize this inventory item.
 
     Backlog hygiene is intentionally narrower than generic task ownership:
-    a caller may only finalize an eligible routed PM root in their own group
+    a caller may only finalize an eligible routed proposal root in their own group
     when the durable ``covered_by`` record points at a covering task that was
-    created by that same Architect/Torqly caller.
+    created by that same Architect caller.
     """
     architect_id = _completion_evidence_text(architect_id, limit=120)
     group = _completion_evidence_text(group, limit=200)
@@ -11400,7 +11400,7 @@ def _pm_root_backlog_hygiene_authorized_for_architect(
         getattr(root, "created_by_architect_id", "") or ""
     ).strip()
     if root_architect_id == architect_id:
-        return False, "not_cross_architect_pm_root"
+        return False, "not_cross_architect_proposal_root"
     if not item.get("eligible"):
         return False, str(item.get("reason", "") or "not_eligible")
 
@@ -11422,7 +11422,7 @@ def _pm_root_backlog_hygiene_authorized_for_architect(
     return True, ""
 
 
-def _finalize_already_covered_pm_roots(
+def _finalize_already_covered_proposal_roots(
         state: MatrixState,
         *,
         apply: bool = False,
@@ -11432,13 +11432,13 @@ def _finalize_already_covered_pm_roots(
         architect_id: str = "",
         group: str = "",
 ) -> dict:
-    """Dry-run or apply backlog hygiene for already-covered PM roots."""
+    """Dry-run or apply backlog hygiene for already-covered proposal roots."""
     requested = {
         state.resolve_task_alias(str(task_id or "").strip())
         for task_id in (task_ids or [])
         if str(task_id or "").strip()
     }
-    inventory = _pm_root_backlog_hygiene_inventory(state, group=group)
+    inventory = _proposal_root_backlog_hygiene_inventory(state, group=group)
     if requested:
         inventory = [
             item for item in inventory
@@ -11448,7 +11448,7 @@ def _finalize_already_covered_pm_roots(
         scoped_inventory = []
         for item in inventory:
             authorized, reason = (
-                _pm_root_backlog_hygiene_authorized_for_architect(
+                _proposal_root_backlog_hygiene_authorized_for_architect(
                     state,
                     item,
                     architect_id,
@@ -11486,7 +11486,7 @@ def _finalize_already_covered_pm_roots(
                     actor_name="Torque",
                     actor_id=actor_id,
                     actor_kind="system",
-                    reason=_PM_ROOT_BACKLOG_HYGIENE_REASON,
+                    reason=_PROPOSAL_ROOT_BACKLOG_HYGIENE_REASON,
                 )
             except ValueError as exc:
                 errors.append({
@@ -11498,12 +11498,12 @@ def _finalize_already_covered_pm_roots(
             if board_sync_manager:
                 board_sync_manager.enqueue_for_local_change(
                     task_id,
-                    reason="pm_root_backlog_hygiene_finalized",
+                    reason="proposal_root_backlog_hygiene_finalized",
                     fields=("completion_evidence", "messages", "lane"),
                 )
 
     return {
-        "type": "pm_root_backlog_hygiene",
+        "type": "proposal_root_backlog_hygiene",
         "scope": "architect" if architect_id else "internal",
         "architect_id": _completion_evidence_text(architect_id, limit=120),
         "group": _completion_evidence_text(group, limit=200),
@@ -11572,7 +11572,7 @@ def _record_task_completion_evidence_snapshot(
         update,
     )
     _save_completion_evidence_task(state, task)
-    _auto_resolve_pm_product_roots_and_enqueue(
+    _auto_resolve_product_proposal_roots_and_enqueue(
         state,
         task,
         board_sync_manager=board_sync_manager,
@@ -11748,7 +11748,7 @@ def _record_merge_completion_evidence(
             update,
         )
         _save_completion_evidence_task(state, task)
-        _auto_resolve_pm_product_roots_and_enqueue(
+        _auto_resolve_product_proposal_roots_and_enqueue(
             state,
             task,
             board_sync_manager=board_sync_manager,
@@ -21520,7 +21520,7 @@ async def main(connection=None):
                             group=_pickup_task.group,
                         )
 
-            elif cmd == "architect_pm_root_backlog_hygiene":
+            elif cmd == "architect_proposal_root_backlog_hygiene":
                 architect_id = str(data.get("architect_id", "") or "").strip()
                 architect = state.agents.get(architect_id)
                 architect_group = str(
@@ -21557,7 +21557,7 @@ async def main(connection=None):
                         limit = int(data.get("limit", 0) or 0)
                     except (TypeError, ValueError):
                         limit = 0
-                    result = _finalize_already_covered_pm_roots(
+                    result = _finalize_already_covered_proposal_roots(
                         state,
                         apply=bool(data.get("apply", False)),
                         task_ids=task_ids,
@@ -24058,7 +24058,7 @@ async def main(connection=None):
                                         " '%s'", cell.name)
                         if task and not task_counts_as_done(task):
                             state.board_move_task(task.id, "Done")
-                            _auto_resolve_pm_product_roots_and_enqueue(
+                            _auto_resolve_product_proposal_roots_and_enqueue(
                                 state,
                                 task,
                                 board_sync_manager=board_sync_manager,
@@ -24317,7 +24317,7 @@ async def main(connection=None):
                                 if not task_counts_as_done(task):
                                     state.board_move_task(
                                         task.id, "Done")
-                                    _auto_resolve_pm_product_roots_and_enqueue(
+                                    _auto_resolve_product_proposal_roots_and_enqueue(
                                         state,
                                         task,
                                         board_sync_manager=board_sync_manager,

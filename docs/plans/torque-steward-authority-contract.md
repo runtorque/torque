@@ -1,7 +1,7 @@
 # Historical note
 
 This document is superseded by `docs/plans/agent-classes-generic-authority-plan.md`.
-Torque Steward is now just bundled Agent Class YAML rendered through the same generic ACL/prompt machinery as any custom class. Torque no longer emits a Steward-specific preview/status contract or prompt branch. The remaining Steward-specific surface is the optional `architect_steward_operating_brief` MCP tool, which is a normal selectable tool in ACL YAML.
+Torque Steward is now just bundled Agent Class YAML rendered through the same generic ACL/prompt machinery as any custom class. Torque no longer emits a Steward-specific preview/status contract, prompt branch, or MCP tool. The optional `architect_group_health_brief` is a generic capability-selected read surface available to any compatible Architect-derived class.
 
 ---
 
@@ -267,8 +267,8 @@ Anchor: TORQUE:958 / TORQUE:964
 Wave B keeps the Wave A authority ceiling and adds a deterministic read-only
 operating-brief helper for Steward-style sessions:
 
-- `architect_steward_operating_brief` is projected only when the effective
-  policy grants the same read atoms already allowed to `torque-steward@1`:
+- `architect_group_health_brief` is projected only when the effective
+  ACL grants the required canonical read capabilities:
   board/task summaries and detail, events, MCP-call telemetry, Areas,
   Initiatives, and Decisions.
 - The helper returns structured `observed_facts`, `inferred_risks`,
@@ -286,9 +286,9 @@ operating-brief helper for Steward-style sessions:
 
 Wave B implementation evidence:
 
-- `torque/steward_brief.py` — pure read-only brief/anomaly builder.
+- `torque/group_health_brief.py` — generic pure read-only brief/anomaly builder.
 - `torque/mcp_architect.py` / `torque/mcp_tools_shared.py` — Architect MCP spec
-  and dispatch for `architect_steward_operating_brief`.
+  and dispatch for `architect_group_health_brief`.
 - `torque/capability_catalog.py` and colocated MCP authority descriptors —
   projection requires the Steward's canonical read capabilities and scopes.
 - `torque/architect.py` and `torque/builtin_agent_classes/torque-steward.yaml`

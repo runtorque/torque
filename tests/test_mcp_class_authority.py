@@ -56,7 +56,7 @@ class MCPClassAuthorityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(architect.effective_agent_class_id, "torque-steward")
         for tool_name in {
             "torque_context",
-            "architect_steward_operating_brief",
+            "architect_group_health_brief",
             "architect_events_recent",
             "architect_events_recent",
             "architect_ask",
@@ -86,7 +86,7 @@ class MCPClassAuthorityTests(unittest.IsolatedAsyncioTestCase):
             "architect_task_reassign",
             "architect_task_move",
             "architect_task_mark_covered",
-            "architect_pm_root_backlog_hygiene",
+            "architect_proposal_root_backlog_hygiene",
             "architect_area_create",
             "architect_initiative_create",
             "architect_decision_create",

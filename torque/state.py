@@ -12584,7 +12584,7 @@ class MatrixState:
             reason: str = "",
             source: str = "",
             authorization: dict | None = None) -> dict:
-        """Claim a routed PM-created task for an Architect with audit evidence."""
+        """Claim a routed product-proposal task for an Architect with audit evidence."""
         tid = self.resolve_task_alias(tid)
         task = self.board_tasks.get(tid)
         if not task:

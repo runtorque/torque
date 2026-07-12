@@ -1,8 +1,7 @@
-"""Read-only Torque Steward operating brief helpers.
+"""Generic read-only group health brief helpers.
 
-Wave B keeps Steward behavior conservative: these helpers build structured
-summaries from already-visible in-memory state and never mutate Torque state,
-dispatch work, send messages, create artifacts, or approve decisions.
+These helpers build structured summaries from already-visible in-memory state
+and never mutate Torque state.
 """
 
 from __future__ import annotations
@@ -13,20 +12,17 @@ from typing import Any
 
 from .state import ARCHIVED_LANE, board_task_is_closed, task_counts_as_done
 
-STEWARD_BRIEF_SCHEMA_VERSION = 1
+GROUP_HEALTH_BRIEF_SCHEMA_VERSION = 1
 _DEFAULT_LIMIT = 5
 _MAX_LIMIT = 20
 _DEFAULT_STALE_AFTER_HOURS = 24.0
 _DEFAULT_SILENT_AFTER_HOURS = 2.0
 
-_AUTHORITY_CANNOT = [
-    "restart/compact/deploy/administer Torque",
-    "schedule notifications or background monitoring",
-    "create, move, assign, dispatch, or complete tasks",
-    "hire, dismiss, message, or control Engineers/Workers",
-    "merge/rebase/checkpoint worktrees or create PRs",
-    "edit Agent Classes, roles, or specializations",
-    "accept decisions or replace Blueprint/Product Manager, Torqly, or Catalyst authority",
+_TOOL_NON_GOALS = [
+    "mutate Torque state",
+    "dispatch work or manage agents",
+    "send messages or create artifacts",
+    "accept decisions, merge worktrees, or deploy",
 ]
 
 _HELP_REFS = [
@@ -36,9 +32,9 @@ _HELP_REFS = [
         "use": "Use architect_help_query/show for deterministic Torque concept explanations.",
     },
     {
-        "title": "Agent Classes / Torque Steward class",
-        "source_path": "docs/reference/agent-classes.md#torque-steward-class",
-        "use": "Explains the Steward class, draft/read-only status, and authority ceiling.",
+        "title": "Agent Classes",
+        "source_path": "docs/reference/agent-classes.md",
+        "use": "Explains class prompts, capability ACLs, and authority ceilings.",
     },
     {
         "title": "Agent operating rules",
@@ -135,18 +131,18 @@ def _responsible_for_task(state: Any, task: Any, category: str) -> str:
         if owner:
             return _agent_label(getattr(state, "agents", {}).get(owner), f"Engineer {owner}")
     if specialization in {"ui-ux", "frontend"} or "ui" in labels:
-        return "Panelsmith"
+        return "frontend owner"
     if specialization in {"release", "runtime-maintenance"} or labels & {"release", "deploy", "worktree", "merge"}:
-        return "Forge"
+        return "release owner"
     if specialization in {"prompts-config", "orchestration-core"}:
-        return "Torqly"
-    if labels & {"product", "product-proposal", "pm-created", "planning"}:
-        return "Blueprint/Product Manager"
+        return "orchestration owner"
+    if labels & {"product", "product-proposal", "proposal-only", "planning"}:
+        return "product planning owner"
     if labels & {"creative", "ideation", "exploration"}:
-        return "Catalyst"
+        return "ideation owner"
     if labels & {"comms", "handoff", "notification"}:
-        return "Courier"
-    return "Torqly or the owning Architect"
+        return "communications owner"
+    return "orchestration owner or the owning Architect"
 
 
 def _actor_snapshot(state: Any, group: str, caller_id: str) -> dict[str, Any]:
@@ -210,9 +206,9 @@ def _append_suggestion(suggestions: list[dict[str, Any]], *, category: str,
     })
 
 
-def build_steward_operating_brief(state: Any, architect_id: str, group: str,
-                                  args: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Return a structured read-only Steward onboarding/operating brief."""
+def build_group_health_brief(state: Any, architect_id: str, group: str,
+                             args: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return a structured read-only group onboarding/health brief."""
 
     args = dict(args or {})
     mode = str(args.get("mode", "operating") or "operating").strip().lower()
@@ -344,7 +340,7 @@ def build_steward_operating_brief(state: Any, architect_id: str, group: str,
                 "agent_id": cell.id,
                 "agent": _agent_label(cell, cell.id),
                 "status": status,
-                "responsible_actor": _agent_label(getattr(state, "agents", {}).get(str(getattr(cell, "owner_engineer_id", "") or "")), "owning Engineer or Torqly"),
+                "responsible_actor": _agent_label(getattr(state, "agents", {}).get(str(getattr(cell, "owner_engineer_id", "") or "")), "owning Engineer or Architect"),
                 "evidence": ["worker has no visible current task and tasks_dispatched=0"],
             })
         last_progress = float(getattr(cell, "last_progress_at", 0.0) or 0.0)
@@ -383,7 +379,7 @@ def build_steward_operating_brief(state: Any, architect_id: str, group: str,
         {"kind": "group", "text": f"Group {group!r} has {len(tasks)} visible non-archived tasks and {len(open_tasks)} open tasks."},
         {"kind": "lanes", "counts": dict(sorted(lane_counts.items()))},
         {"kind": "health", "counts": dict(sorted(health_counts.items()))},
-        {"kind": "authority", "text": "Steward Wave B output is read-only: observations, inferred risks, and suggested next steps only."},
+        {"kind": "authority", "text": "This brief is read-only: it reports observations, inferred risks, and suggested next steps."},
     ]
 
     risks = []
@@ -407,16 +403,16 @@ def build_steward_operating_brief(state: Any, architect_id: str, group: str,
             category=category,
             actor=str(first.get("responsible_actor") or "authorized owner"),
             recommendation=(
-                "Review the cited evidence and take the smallest authorized next step; "
-                "the Steward should not perform the action."
+                "Review the cited evidence and use a separately authorized tool "
+                "for the smallest appropriate next step."
             ),
             evidence=list(first.get("evidence", []))[:3],
             risk="high" if category in {"blocked_asks", "branch_boundary_merge_gates"} else "medium",
         )
 
     return {
-        "type": "steward_operating_brief",
-        "schema_version": STEWARD_BRIEF_SCHEMA_VERSION,
+        "type": "group_health_brief",
+        "schema_version": GROUP_HEALTH_BRIEF_SCHEMA_VERSION,
         "mode": mode,
         "group": group,
         "generated_at": datetime.fromtimestamp(now_ts, tz=timezone.utc).isoformat(),
@@ -428,13 +424,13 @@ def build_steward_operating_brief(state: Any, architect_id: str, group: str,
                 "infer risks with evidence and confidence",
                 "suggest responsible actors and safe next steps",
             ],
-            "cannot": list(_AUTHORITY_CANNOT),
+            "tool_non_goals": list(_TOOL_NON_GOALS),
             "mutation_performed": False,
             "structured_output": ["observed_facts", "inferred_risks", "suggested_next_steps"],
         },
         "onboarding": {
-            "purpose": "Torque Steward is a conservative group operating entrypoint for onboarding, health summaries, anomaly detection, and responsible-actor suggestions.",
-            "concepts": ["groups", "Architects/classes", "Engineers", "Workers", "board tasks", "decisions", "actions", "worktrees", "review gates"],
+            "purpose": "Provide group onboarding, health summaries, anomaly detection, and responsible-actor suggestions.",
+            "concepts": ["groups", "Architects", "Agent Classes", "Engineers", "Workers", "board tasks", "decisions", "actions", "worktrees", "review gates"],
             "help_refs": list(_HELP_REFS),
             "visible_actors": _actor_snapshot(state, group, architect_id),
         },
@@ -460,6 +456,6 @@ def build_steward_operating_brief(state: Any, architect_id: str, group: str,
             "stale_after_hours": stale_after_hours,
             "silent_after_hours": silent_after_hours,
             "limit_per_section": limit,
-            "denied_actions": list(_AUTHORITY_CANNOT),
+            "tool_non_goals": list(_TOOL_NON_GOALS),
         },
     }

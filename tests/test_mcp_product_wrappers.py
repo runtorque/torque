@@ -199,7 +199,7 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Unknown tool", self._error_text(response), tool_name)
         self.assertEqual([], self.calls)
 
-    async def test_routed_pm_product_task_can_be_picked_up_by_same_group_architect(self):
+    async def test_routed_product_proposal_task_can_be_picked_up_by_same_group_architect(self):
         proposal = await self._call(
             "architect_product_task_propose",
             {
@@ -218,7 +218,7 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
             "architect_product_peer_message",
             {
                 "architect_id": self.torqly.id,
-                "message": "Please pick up this PM-created root directly.",
+                "message": "Please pick up this product-proposal root directly.",
                 "context_task_ids": [task_id],
                 "context_summary": "Direct Architect pickup request.",
             },
@@ -250,7 +250,7 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
             pickup_evidence["previous_assignment"]["assigned_architect_id"],
         )
         self.assertEqual(
-            "routed_pm_product_root_pickup",
+            "routed_product_proposal_root_pickup",
             pickup_evidence["authorization"]["scope"],
         )
         self.assertEqual(route_id, pickup_evidence["authorization"]["route_message_id"])
@@ -281,9 +281,9 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_architect_task_pickup_denies_unrouted_non_pm_or_already_claimed_tasks(self):
         unrouted = self.state.board_add_task(
-            "Unrouted PM task",
+            "Unrouted product task",
             "g",
-            labels=["product-proposal", "pm-created"],
+            labels=["product-proposal", "proposal-only"],
             created_by_architect_id=self.architect.id,
         )
         no_route = await self._call(
@@ -298,7 +298,7 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
         normal_architect_task = self.state.board_add_task(
             "Normal architect task",
             "g",
-            labels=["product-proposal", "pm-created"],
+            labels=["product-proposal", "proposal-only"],
             created_by_architect_id=self.torqly.id,
         )
         normal = await self._call(
@@ -311,7 +311,7 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
 
         proposal = await self._call(
             "architect_product_task_propose",
-            {"title": "Already claimed PM root"},
+            {"title": "Already claimed proposal root"},
             req_id=22,
         )
         claimed_id = self._result_payload(proposal)["id"]
@@ -373,7 +373,7 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("feature/implement", task.suggested_action)
         self.assertEqual("prompts-config", task.suggested_specialization)
         self.assertIn("product-proposal", task.labels)
-        self.assertIn("pm-created", task.labels)
+        self.assertIn("proposal-only", task.labels)
         self.assertIn("normal queued Board task", payload["caveat"])
         self.assertEqual([], self.calls)
 
@@ -413,7 +413,7 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([], decision["linked_engineer_ids"])
         self.assertEqual(
             "torque.product_decision.v1",
-            decision["metadata"]["product_manager"]["marker"],
+            decision["metadata"]["product_proposal"]["marker"],
         )
 
         accepted = await self._call(
@@ -443,7 +443,7 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
             "title": "Other",
             "rationale": "Other architect",
             "status": "proposed",
-            "metadata": {"product_manager": {"marker": "torque.product_decision.v1"}},
+            "metadata": {"product_proposal": {"marker": "torque.product_decision.v1"}},
         })
         self.assertIsNotNone(other)
         update_other = await self._call(
@@ -464,7 +464,7 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
             "Product task",
             "g",
             lane="Backlog",
-            labels=["product-proposal", "pm-created"],
+            labels=["product-proposal", "proposal-only"],
         )
         raw_decision = self.state.save_decision({
             "id": "decision-raw",
@@ -553,7 +553,7 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
             "Product initiative task",
             "g",
             lane="Backlog",
-            labels=["product-proposal", "pm-created"],
+            labels=["product-proposal", "proposal-only"],
         )
         raw_decision = self.state.save_decision({
             "id": "decision-raw-initiative",
@@ -634,7 +634,7 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
             "g",
             lane="Backlog",
             id="TORQUE:909",
-            labels=["product-proposal", "pm-created"],
+            labels=["product-proposal", "proposal-only"],
             created_by_architect_id=self.architect.id,
         )
         self.assertIsNotNone(product_task)
@@ -646,7 +646,7 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
             "status": "proposed",
             "linked_task_ids": ["TORQUE:909"],
             "metadata": {
-                "product_manager": {
+                "product_proposal": {
                     "marker": "torque.product_decision.v1",
                     "owner_architect_id": self.architect.id,
                     "proposed_only": True,
@@ -671,10 +671,10 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
             "architect_product_peer_message",
             {
                 "architect_id": "a5a7fc9e",
-                "message": "Torqly, please review the PM permanence proposal.",
+                "message": "Torqly, please review the product-planning permanence proposal.",
                 "context_task_ids": ["TORQUE:909"],
                 "context_decision_ids": ["decision-54e82d9a220f"],
-                "context_summary": "Product-scoped PM permanence/TORQUE:909 handoff.",
+                "context_summary": "Product-scoped product-planning permanence/TORQUE:909 handoff.",
             },
             req_id=3,
         )
@@ -723,7 +723,7 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
             "PM anchor",
             "g",
             lane="Backlog",
-            labels=["product-proposal", "pm-created"],
+            labels=["product-proposal", "proposal-only"],
             created_by_architect_id=self.architect.id,
         )
         self.assertIsNotNone(product_task)
@@ -907,11 +907,11 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
 
         good_journal = await self._call(
             "architect_product_journal",
-            {"type": "observation", "entry": "Scratch PM recovery note."},
+            {"type": "observation", "entry": "Scratch product-planning recovery note."},
             req_id=3,
         )
         self._result_payload(good_journal)
         read = await self._call("architect_product_journal_read", {}, req_id=4)
         entries = self._result_payload(read)["entries"]
         self.assertIn("observation", [entry["type"] for entry in entries])
-        self.assertTrue(any("Scratch PM recovery note" in entry.get("entry", "") for entry in entries))
+        self.assertTrue(any("Scratch product-planning recovery note" in entry.get("entry", "") for entry in entries))
