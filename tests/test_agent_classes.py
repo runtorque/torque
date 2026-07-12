@@ -19,7 +19,9 @@ from torque.agent_classes import (
     archive_custom_agent_class,
     delete_custom_agent_class,
     enriched_agent_class_preview,
+    freeze_agent_class_snapshot,
     load_agent_classes,
+    render_agent_class_prompt,
     save_custom_agent_class,
     validate_class_data,
     validate_agent_class_draft,
@@ -31,6 +33,78 @@ from torque.mcp import (
 from torque.mcp_authority import effective_authority_from_snapshot
 from torque.db import TorqueDB
 from torque.state import AgentCell, MatrixState
+
+
+class AgentClassRuntimeGenericityTests(unittest.TestCase):
+    def test_production_python_does_not_recognize_builtin_class_identities(self):
+        root = Path(__file__).resolve().parents[1] / "torque"
+        forbidden = (
+            "creative-architect",
+            "product-manager",
+            "torque-steward",
+            "is_creative",
+            "is_product",
+            "is_steward",
+            "architect_product_",
+            "class-policy-",
+        )
+        matches = []
+        for path in sorted(root.rglob("*.py")):
+            text = path.read_text(encoding="utf-8")
+            for token in forbidden:
+                if token in text:
+                    matches.append(f"{path.relative_to(root)}: {token}")
+        self.assertEqual(matches, [])
+
+    def test_different_class_ids_compile_identical_prompt_and_authority(self):
+        common = {
+            "agent_class_schema_version": 5,
+            "version": "1",
+            "base_kind": "architect",
+            "lifecycle": "stable",
+            "prompt": {
+                "identity": "You are a generic planning partner.",
+                "job": "Produce bounded proposals.",
+                "tool_guidance": [{
+                    "when_capability": "task.read",
+                    "text": "Read visible tasks before proposing changes.",
+                }],
+            },
+            "acl": {
+                "mode": "allow",
+                "rules": [
+                    {"capability": "self.read", "scope": "self"},
+                    {"capability": "task.read", "scope": "group"},
+                ],
+            },
+        }
+        definitions = []
+        for class_id in ("planning-alpha", "planning-beta"):
+            definition, issues = validate_class_data({
+                **common,
+                "id": class_id,
+                "display_name": class_id.replace("-", " ").title(),
+            })
+            self.assertEqual(issues, [])
+            definitions.append(definition)
+
+        snapshots = [
+            freeze_agent_class_snapshot(
+                item,
+                assignment_source="test",
+                frozen_at=1.0,
+            )
+            for item in definitions
+        ]
+        self.assertEqual(
+            snapshots[0]["effective_authority"],
+            snapshots[1]["effective_authority"],
+        )
+        rendered = [
+            render_agent_class_prompt(item.prompt, snapshot=snapshot)
+            for item, snapshot in zip(definitions, snapshots)
+        ]
+        self.assertEqual(rendered[0], rendered[1])
 
 
 class AgentClassRegistryTests(unittest.TestCase):

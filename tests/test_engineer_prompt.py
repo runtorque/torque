@@ -292,4 +292,4 @@ class EngineerPromptTests(unittest.TestCase):
         self.assertIn("Keep evidence concise.", prompt)
         self.assertNotIn("engineer_task_dispatch", prompt)
         self.assertNotIn("engineer_merge", prompt)
-        self.assertNotIn("hidden overlay", prompt)
+        self.assertIn("hidden overlay", prompt)

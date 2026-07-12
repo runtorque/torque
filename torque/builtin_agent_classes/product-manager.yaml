@@ -43,6 +43,9 @@ prompt:
   - when_capability: message.architect_peer
     text: Use product peer tools for same-group Architect product alignment and acknowledgement
       requests.
+  - when_capability: message.user
+    text: After bootstrapping, send substantive user-facing status through a visible user-message
+      tool rather than relying on terminal output alone.
 metadata:
   approved_for_live_dogfood: true
   permanence_state: dogfood_permanent

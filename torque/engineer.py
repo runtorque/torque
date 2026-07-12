@@ -821,21 +821,7 @@ def build_engineer_system_prompt(group: str, engineer_settings=None,
             + build_owner_user_message_guidance("engineer_message_user")
             + "\n"
         )
-    effective = class_snapshot.get("effective_authority", {})
-    effective_capabilities = (
-        effective.get("capabilities", {})
-        if isinstance(effective, dict)
-        else {}
-    )
-    overlay_allowed = (
-        not class_snapshot
-        or "behavior_overlay.read" in effective_capabilities
-    )
-    overlay = (
-        str(behavior_overlay_block or "").strip()
-        if overlay_allowed
-        else ""
-    )
+    overlay = str(behavior_overlay_block or "").strip()
     if overlay:
         result = result.rstrip() + "\n\n" + overlay + "\n"
     return result

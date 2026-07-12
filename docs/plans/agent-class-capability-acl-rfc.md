@@ -1,6 +1,6 @@
 # RFC: Generic Agent Class capability ACLs and prompt assembly
 
-Status: Accepted for implementation  
+Status: Implemented
 
 ## Implementation checkpoint (2026-07-11)
 
@@ -21,7 +21,7 @@ Implemented in the current working change:
   preview, validation, launch, status, audit, and UI paths;
 - removal of the legacy bucket/profile compiler and generated-profile
   compatibility fields from the Agent Class implementation;
-- canonical authority descriptors colocated on all 227 registered MCP tool
+- canonical authority descriptors colocated on all 228 registered MCP tool
   specs, including explicit projection minima and concrete target metadata;
 - removal of the three legacy surface capability maps and the centralized
   capability-to-target-argument heuristic;
@@ -49,7 +49,7 @@ Implemented in the current working change:
   route scopes, and proposal-root cleanup names with product-proposal
   semantics;
 - replacement of the `architect_product_*` wrapper namespace with semantic
-  proposal, task-proposal, decision-proposal, Idea Brief, and peer-tool names.
+  proposal, task-proposal, decision-proposal, Idea Brief, and peer-tool names;
 - descriptor-driven `self`/`group` filtering and concrete-target checks for
   Planning Areas and Initiatives across Worker, Engineer, Architect, and
   proposal read surfaces;
@@ -58,29 +58,48 @@ Implemented in the current working change:
   enforcement because no target exists before creation;
 - alignment of Initiative write authority with the handler's actual
   caller-owned (`self`) platform ceiling instead of advertising unsupported
-  group-wide mutation authority.
+  group-wide mutation authority;
 - split of the mixed-purpose `architect_reply` surface into
   `architect_engineer_reply` and `architect_peer_reply`, so each projected
   tool maps to exactly one message capability;
 - strict Architect-only row filtering for `architect_peer_inbox`, removing
   its former dependency on `message.engineer` and preventing Engineer threads
-  from leaking through a peer-Architect read surface.
+  from leaking through a peer-Architect read surface;
 - descriptor-driven `self`/`children`/`group` filtering for recent event rows,
   using task and attributed-agent relationships rather than treating the
-  entire event feed as an indivisible group-wide aggregate.
+  entire event feed as an indivisible group-wide aggregate;
 - descriptor-driven `self`/`children`/`group` filtering for semantic recall
   results using internal owner/participant anchors that are stripped before
   MCP output, while retaining the existing handler visibility checks as the
-  platform ceiling.
+  platform ceiling;
 - separation of read-only event access from event-delivery mutation through
   a dedicated `event.manage: self` capability; notification, resume, and
-  digest-filter writes no longer project from `event.read` alone.
+  digest-filter writes no longer project from `event.read` alone;
+- removal of capability-specific prompt assembly branches for shared-memory
+  guidance, user messaging, and behavior overlays; capability-conditioned
+  behavioral guidance now comes only from generic YAML `tool_guidance`, while
+  overlays remain prompt configuration subordinate to the frozen ACL;
+- source-shape regression coverage that fails if production Python recognizes
+  a built-in class id, recreates named-class helper flags, or restores the old
+  class-specific wrapper namespace.
 
-Still required before this RFC is complete:
+### Aggregate/read-model disposition
 
-- finish family-by-family list filtering and concrete resource scope checks
-  for linked Planning context embedded in aggregates and remaining
-  aggregate/read models;
+- Collection tools with meaningful narrower scopes declare result filters or
+  concrete targets. Their handlers' existing visibility checks remain an
+  intersected platform ceiling.
+- Indivisible group rollups such as board summaries, group health, Engineer
+  session maps, and stream aggregates keep an explicit `group` projection
+  minimum. A narrower ACL therefore hides the whole tool instead of returning
+  a misleading partial aggregate.
+- Area and Initiative linked context is part of the corresponding Planning
+  read capability contract and remains constrained by the Planning record's
+  scope plus existing same-group/task/decision visibility filtering.
+- Create operations and caller-owned settings without a pre-existing target
+  retain explicit handler enforcement. Role-wide administration retains a
+  group minimum.
+
+No implementation items remain for this RFC.
 Date: 2026-07-11  
 Supersedes: `docs/plans/agent-classes-generic-authority-plan.md`
 

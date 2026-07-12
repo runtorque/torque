@@ -412,28 +412,6 @@ def _architect_prompt_authority_context(
     }
 
 
-def _has_capability(authority: dict, atom: str) -> bool:
-    return atom in (
-        set(authority.get("canonical_capabilities") or set())
-    )
-
-
-def _has_capabilities(authority: dict, *atoms: str) -> bool:
-    grants = (
-        set(authority.get("canonical_capabilities") or set())
-    )
-    return set(atoms).issubset(grants)
-
-
-def _allows_behavior_overlay_prompt(authority: dict) -> bool:
-    """Whether an approved overlay may refine this class prompt."""
-
-    return authority.get("is_full") or _has_capability(
-        authority,
-        "behavior_overlay.read",
-    )
-
-
 # ---------------------------------------------------------------------------
 # Policy section
 # ---------------------------------------------------------------------------
@@ -669,21 +647,6 @@ def build_architect_system_prompt(group: str,
         ]
     else:
         parts = [_AGENT_CLASS_ARCHITECT_BASE_PROMPT.format(group=group)]
-        if _has_capabilities(
-                authority,
-                "memory.read",
-                "memory.write",
-                "memory.admin",
-        ):
-            parts.append(build_shared_memory_guidance())
-        if _has_capability(authority, "message.user"):
-            parts.append(
-                "## After bootstrap: message the user\n\n"
-                "You are owned by the user. Once you finish bootstrapping and orient yourself, "
-                "send your first substantive status or intro through a visible user-message tool "
-                "rather than only emitting it to the terminal. Keep using visible user-message tools "
-                "for user-facing updates so they land in the user's conversation panel."
-            )
 
     if action_system_prompt:
         parts.append(str(action_system_prompt).rstrip())
@@ -709,11 +672,7 @@ def build_architect_system_prompt(group: str,
     if custom:
         parts.append("## Custom Instructions\n" + custom)
 
-    overlay = (
-        str(behavior_overlay_block or "").strip()
-        if _allows_behavior_overlay_prompt(authority)
-        else ""
-    )
+    overlay = str(behavior_overlay_block or "").strip()
     if overlay:
         parts.append(overlay)
 

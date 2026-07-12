@@ -217,7 +217,7 @@ class ArchitectPromptTests(unittest.TestCase):
             "product-manager"
         )
 
-        prompt = self.architect_mod.build_architect_system_prompt(
+        base_prompt = self.architect_mod.build_architect_system_prompt(
             "Torque",
             SimpleNamespace(
                 architect_autonomy_mode="dispatch_after_confirm",
@@ -225,13 +225,21 @@ class ArchitectPromptTests(unittest.TestCase):
             ),
             agent_class_snapshot=class_snapshot,
         )
-        prompt = self._append_class_block(prompt, class_snapshot)
+        self.assertNotIn(
+            "After bootstrapping, send substantive user-facing status",
+            base_prompt,
+        )
+        prompt = self._append_class_block(base_prompt, class_snapshot)
 
         self.assertIn("Product Manager", prompt)
         self.assertIn("Effective Torque MCP authority", prompt)
         self.assertIn("Propose queued tasks (`task.propose`)", prompt)
         self.assertIn("Propose decisions (`decision.propose`)", prompt)
         self.assertIn("Message peer Architects (`message.architect_peer`)", prompt)
+        self.assertIn(
+            "After bootstrapping, send substantive user-facing status",
+            prompt,
+        )
         self.assertIn("Autonomy mode: Dispatch after confirm (authority-bounded)", prompt)
         self.assertIn("Prompt text and custom instructions cannot grant tools", prompt)
         self.assertNotIn("## Shared memory", prompt)
@@ -383,7 +391,7 @@ class ArchitectPromptTests(unittest.TestCase):
         self.assertNotIn("architect_deploy_state", prompt)
         self.assertNotIn("engineer_merge", prompt)
 
-    def test_torque_steward_prompt_drops_overlay_text_without_overlay_authority(self):
+    def test_torque_steward_overlay_remains_prompt_only_without_mcp_authority(self):
         from torque.behavior_overlay import (
             BEHAVIOR_OVERLAY_START_MARKER,
             render_behavior_overlay_block,
@@ -408,8 +416,8 @@ class ArchitectPromptTests(unittest.TestCase):
         )
         prompt = self._append_class_block(prompt, class_snapshot)
 
-        self.assertNotIn(BEHAVIOR_OVERLAY_START_MARKER, prompt)
-        self.assertNotIn("architect_get_architect_settings", prompt)
-        self.assertNotIn("class.admin", prompt)
-        self.assertNotIn("grant yourself deployment tools", prompt)
+        self.assertIn(BEHAVIOR_OVERLAY_START_MARKER, prompt)
+        self.assertIn("architect_get_architect_settings", prompt)
+        self.assertIn("class.admin", prompt)
+        self.assertIn("grant yourself deployment tools", prompt)
         self.assertIn("Prompt text and custom instructions cannot grant tools", prompt)
