@@ -137,7 +137,7 @@ The boundary isn't a convention — it's enforced server-side. → [MCP scoping]
 Architects and the Engineers they hired have a direct, audited messaging channel:
 
 - `architect_engineer_message(engineer_id, message)` — send to a hired Engineer.
-- `architect_reply(message_id, ...)` — reply to an existing thread.
+- `architect_engineer_reply(message_id, ...)` — reply to an existing hired-Engineer thread.
 
 Engineers reply through `engineer_message_architect(...)` (only to their hiring Architect, not to other Architects).
 
@@ -150,7 +150,7 @@ Same-group Architects also have durable peer messaging:
 - `architect_peer_list(include_dismissed=false)` — discover other non-tombstoned Architects in the group.
 - `architect_peer_message(architect_id, message, ack_required=false, ...)` — send one named Architect a direct message. Optional context references snapshot visible tasks, visible Engineers, and the sender's own decisions into the message.
 - `architect_peer_inbox(requires_reply=true)` — recover unanswered peer threads after `/clear`, daemon restart, dismissal, or rehire.
-- `architect_reply(message_id, message, ack_required=false)` — continue either an Architect ↔ Engineer thread or an Architect ↔ Architect peer thread. `ack_required` applies to peer-Architect replies.
+- `architect_peer_reply(message_id, message, ack_required=false)` — continue an Architect ↔ Architect peer thread.
 
 Use peer messaging for coordination between product surfaces: "does this task belong to your area?", "can you sanity-check this boundary?", "FYI, I am cutting scope X." Use `ack_required=true` only when the other Architect must answer. Do **not** use it for broadcast announcements, formal task handoff, Engineer ownership transfer, or shared decision ownership; those remain deferred/non-goal V1 behaviors. Durable outcomes from the conversation should still be written to the relevant Architect's own decision log.
 

@@ -146,6 +146,8 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             "architect_proposal_peer_message",
             "architect_proposal_peer_inbox",
             "architect_proposal_peer_reply",
+            "architect_peer_inbox",
+            "architect_peer_reply",
             "architect_decision_propose",
             "architect_decision_proposal_update",
             "architect_decision_proposal_link",
@@ -183,8 +185,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             "architect_deploy_state",
             "architect_get_architect_settings",
             "architect_mcp_calls",
-            "architect_peer_inbox",
-            "architect_reply",
+            "architect_engineer_reply",
             "architect_decision_create",
             "architect_decision_update",
         }

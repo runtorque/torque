@@ -6354,6 +6354,13 @@ def _architect_peer_inbox_json(
         peer_id=peer_id,
         thread_id=thread_id,
     )
+    rows = [
+        row for row in rows
+        if {
+            str(row.get("sender_kind", "") or "").strip(),
+            str(row.get("recipient_kind", "") or "").strip(),
+        } == {"architect"}
+    ]
     grouped: dict[str, list[dict]] = {}
     for row in rows:
         grouped.setdefault(str(row.get("thread_id", "") or ""), []).append(row)
@@ -14024,7 +14031,10 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "delivery": delivery,
         }), False
 
-    if tool_name == "reply" and caller_kind in {"architect", "engineer"}:
+    if (
+            caller_kind == "architect"
+            and tool_name in {"engineer_reply", "peer_reply"}
+    ) or (caller_kind == "engineer" and tool_name == "reply"):
         caller = real_state.agents.get(str(caller_id or "").strip())
         entry, message_error = _load_message_entry(
             caller, args.get("message_id", "")
@@ -14035,7 +14045,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         peer = real_state.agents.get(peer_id)
         if caller_kind == "architect":
             peer_kind = str(entry.get("peer_kind", "") or "").strip()
-            if peer_kind == "architect":
+            if tool_name == "peer_reply" and peer_kind == "architect":
                 peer, peer_error = _resolve_architect_peer(
                     real_state,
                     caller_id,
@@ -14044,7 +14054,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 if not peer:
                     return peer_error, True
                 action = "architect_peer_reply"
-            elif peer_kind in {"", "engineer"}:
+            elif tool_name == "engineer_reply" and peer_kind in {"", "engineer"}:
                 engineer_id, engineer_error = _resolve_architect_hired_engineer(
                     real_state, caller_id, peer_id
                 )
@@ -14053,7 +14063,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 peer = real_state.agents.get(engineer_id)
                 action = "architect_reply"
             else:
-                return "Message peer kind is not replyable", True
+                return "Message thread not found in scope", True
         else:
             architect, architect_error = _resolve_architect_for_engineer(
                 real_state, caller_id, peer_id

@@ -321,7 +321,8 @@ slugs are rejected with the valid set listed in the error.
 | `architect_peer_inbox` | Read durable Architect peer message threads, including reply-required filters. |
 | `architect_engineer_peer_threads` | List Engineer↔Engineer notify-and-inspect threads where both Engineers were hired by this Architect. |
 | `architect_engineer_peer_inspect` | Inspect a full Engineer↔Engineer thread and its referenced read-only task/stream context. |
-| `architect_reply` | Reply to an existing Architect ↔ Engineer or Architect ↔ Architect thread. |
+| `architect_engineer_reply` | Reply to an existing Architect ↔ Engineer thread. |
+| `architect_peer_reply` | Reply to an existing Architect ↔ Architect thread. |
 | `architect_message_user` | Non-blocking durable direct message to the user-facing conversation panel. |
 | `architect_ask` | Blocking question to the human. Creates a Backlog task with `human` label. |
 
@@ -440,7 +441,7 @@ participants in the thread to have `hired_by_architect_id` equal to the caller
 Architect. These tools are not gated by digest notification settings, preserving
 Architect visibility even when coarse notifications are muted.
 
-**`architect_reply(message_id: string, message: string, ack_required?: boolean = false)`**
+**`architect_peer_reply(message_id: string, message: string, ack_required?: boolean = false)`**
 
 ```json
 {
@@ -452,7 +453,10 @@ Architect visibility even when coarse notifications are muted.
 
 Returns `{ "type": "ok", "message_id": "...", "thread_id": "..." }`.
 
-For Architect ↔ Engineer threads, `architect_reply` preserves the existing hired-Engineer scope checks. For Architect ↔ Architect threads, it preserves the original peer thread and `ack_required` can request another answer.
+`architect_peer_reply` preserves the original peer thread, and
+`ack_required` can request another answer. Architect ↔ Engineer threads use
+`architect_engineer_reply(message_id, message)` instead. The split keeps each
+tool controlled by exactly one message capability.
 
 ### Decisions
 

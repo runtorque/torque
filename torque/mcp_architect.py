@@ -1292,7 +1292,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_peer_inbox", "authority": {"requirements": [{"capability": "message.architect_peer","minimum_scope": "group","target_argument": "peer_architect_id","target_kind": "agent"},{"capability": "message.engineer","minimum_scope": "children","handler_scoped": True}]},
+        "name": "architect_peer_inbox", "authority": {"requirements": [{"capability": "message.architect_peer","minimum_scope": "group","target_argument": "peer_architect_id","target_kind": "agent"}]},
         "description": (
             "Read durable same-group Architect peer message threads involving "
             "this Architect."
@@ -1449,10 +1449,9 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_reply", "authority": {"requirements": [{"capability": "message.architect_peer","minimum_scope": "group","handler_scoped": True},{"capability": "message.engineer","minimum_scope": "children","handler_scoped": True}]},
+        "name": "architect_engineer_reply", "authority": {"requirements": [{"capability": "message.engineer","minimum_scope": "children","target_argument": "message_id","target_kind": "message_peer"}]},
         "description": (
-            "Reply to an existing Architect↔Engineer or Architect↔Architect "
-            "message thread."
+            "Reply to an existing Architect↔Engineer message thread."
         ),
         "inputSchema": {
             "type": "object",
@@ -1471,6 +1470,31 @@ _ARCHITECT_TOOL_SPECS = [
                         "For Architect peer replies, whether this follow-up "
                         "requires a reply."
                     ),
+                },
+            },
+            "required": ["message_id", "message"],
+        },
+    },
+    {
+        "name": "architect_peer_reply", "authority": {"requirements": [{"capability": "message.architect_peer","minimum_scope": "group","target_argument": "message_id","target_kind": "message_peer"}]},
+        "description": (
+            "Reply to an existing same-group Architect↔Architect message "
+            "thread."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "message_id": {
+                    "type": "string",
+                    "description": "Existing peer message id.",
+                },
+                "message": {
+                    "type": "string",
+                    "description": "Reply content.",
+                },
+                "ack_required": {
+                    "type": "boolean",
+                    "description": "Whether this follow-up requires a reply.",
                 },
             },
             "required": ["message_id", "message"],

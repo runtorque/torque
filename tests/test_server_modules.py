@@ -4586,7 +4586,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('## Message from Architect A (architect)', sent[0][1])
         self.assertIn('Ack required. Reply with:', sent[0][1])
         self.assertIn(
-            'mcp__torque__architect_reply(message_id="msg-peer-buffered"',
+            'mcp__torque__architect_peer_reply(message_id="msg-peer-buffered"',
             sent[0][1],
         )
         persisted = self.db.load_agent_peer_message('msg-peer-buffered')

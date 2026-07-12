@@ -4515,7 +4515,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(architect.mcp_messages[0]["thread_id"], thread["thread_id"])
 
         architect_reply_text, architect_reply_error = await self._call(
-            "architect_reply",
+            "architect_engineer_reply",
             {
                 "message_id": reply["message_id"],
                 "message": "Approved. Continue on the safer path.",
@@ -4620,6 +4620,19 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "ack_required": True,
             "delivery_state": "buffered",
         })
+        self.db.save_agent_peer_message({
+            "id": "engineer-thread-hidden-from-peer-inbox",
+            "thread_id": "engineer-thread-hidden-from-peer-inbox",
+            "group_name": peer.group,
+            "sender_id": hired.id,
+            "sender_kind": "engineer",
+            "recipient_id": peer.id,
+            "recipient_kind": "architect",
+            "message": "Engineer threads require message.engineer authority.",
+            "created_at": 998.0,
+            "ack_required": True,
+            "delivery_state": "buffered",
+        })
         inbox_text, inbox_error = await self._call(
             "architect_peer_inbox",
             {"requires_reply": True},
@@ -4637,7 +4650,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         )
 
         reply_text, reply_error = await self._call(
-            "architect_reply",
+            "architect_peer_reply",
             {
                 "message_id": sent["message_id"],
                 "message": "Looks good; please confirm after review.",

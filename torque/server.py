@@ -7326,13 +7326,18 @@ def _format_injected_mcp_message_prompt(
         sender_kind_key == "engineer"
         and recipient_kind_key == "engineer"
     )
-    reply_tool = (
-        "mcp__torque__engineer_peer_reply"
-        if engineer_peer_message
-        else f"mcp__torque__{recipient_kind_key}_reply"
-        if recipient_kind_key in {"architect", "engineer"}
-        else "mcp__torque__torque_reply"
-    )
+    if engineer_peer_message:
+        reply_tool = "mcp__torque__engineer_peer_reply"
+    elif recipient_kind_key == "architect":
+        reply_tool = (
+            "mcp__torque__architect_peer_reply"
+            if sender_kind_key == "architect"
+            else "mcp__torque__architect_engineer_reply"
+        )
+    elif recipient_kind_key == "engineer":
+        reply_tool = "mcp__torque__engineer_reply"
+    else:
+        reply_tool = "mcp__torque__torque_reply"
     blocks = []
     anchor = str(recipient_anchor or "").strip()
     if anchor:

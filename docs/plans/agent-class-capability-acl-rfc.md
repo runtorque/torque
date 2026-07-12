@@ -59,13 +59,18 @@ Implemented in the current working change:
 - alignment of Initiative write authority with the handler's actual
   caller-owned (`self`) platform ceiling instead of advertising unsupported
   group-wide mutation authority.
+- split of the mixed-purpose `architect_reply` surface into
+  `architect_engineer_reply` and `architect_peer_reply`, so each projected
+  tool maps to exactly one message capability;
+- strict Architect-only row filtering for `architect_peer_inbox`, removing
+  its former dependency on `message.engineer` and preventing Engineer threads
+  from leaking through a peer-Architect read surface.
 
 Still required before this RFC is complete:
 
 - finish family-by-family list filtering and concrete resource scope checks
-  for mixed-purpose messaging threads, event/semantic recall rows, linked
-  Planning context embedded in aggregates, and remaining aggregate/read
-  models;
+  for event/semantic recall rows, linked Planning context embedded in
+  aggregates, and remaining aggregate/read models;
 Date: 2026-07-11  
 Supersedes: `docs/plans/agent-classes-generic-authority-plan.md`
 

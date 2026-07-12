@@ -533,6 +533,49 @@ class MCPClassAuthorityTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("error", denied.payload)
         self.assertIn("Unknown tool", denied.payload["error"]["message"])
 
+    async def test_architect_reply_tools_project_one_message_capability_each(self):
+        state, architect = self._state_with_architect()
+        handler = self.mcp_mod.create_mcp_handler(
+            lambda payload: self.fail(f"Unexpected command: {payload}"),
+            state,
+        )
+
+        async def listed_names():
+            response = await handler(FakeRequest(
+                {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                headers={"X-Torque-Cell-Id": architect.id},
+            ))
+            return {
+                tool["name"]
+                for tool in response.payload["result"]["tools"]
+            }
+
+        architect.effective_agent_class_snapshot = {
+            "effective_authority": {
+                "schema_version": 1,
+                "base_kind": "architect",
+                "acl_mode": "allow",
+                "capabilities": {"message.architect_peer": "group"},
+            },
+        }
+        peer_names = await listed_names()
+        self.assertIn("architect_peer_inbox", peer_names)
+        self.assertIn("architect_peer_reply", peer_names)
+        self.assertNotIn("architect_engineer_reply", peer_names)
+
+        architect.effective_agent_class_snapshot = {
+            "effective_authority": {
+                "schema_version": 1,
+                "base_kind": "architect",
+                "acl_mode": "allow",
+                "capabilities": {"message.engineer": "children"},
+            },
+        }
+        engineer_names = await listed_names()
+        self.assertIn("architect_engineer_reply", engineer_names)
+        self.assertNotIn("architect_peer_inbox", engineer_names)
+        self.assertNotIn("architect_peer_reply", engineer_names)
+
 
 
 if __name__ == "__main__":
