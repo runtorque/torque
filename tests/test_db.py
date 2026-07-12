@@ -605,9 +605,8 @@ class TorqueDBTests(unittest.TestCase):
             "delivered_at",
             "read_at",
             "archived_at",
-            # Additive (TORQUE:602): the base table is created by
-            # initialize_database(); _ensure_agent_peer_messages_schema()'s
-            # column-add loop appends idempotency_key last on both fresh + upgrade.
+            # Additive (TORQUE:602): migration 5 owns the idempotency column
+            # on both fresh databases and upgrades.
             "idempotency_key",
         ])
         indexes = {
@@ -631,6 +630,8 @@ class TorqueDBTests(unittest.TestCase):
 
         conn = sqlite3.connect(str(legacy_path))
         conn.execute("DROP TABLE agent_peer_messages")
+        conn.execute("DELETE FROM schema_migrations WHERE version=5")
+        conn.execute("UPDATE meta SET value='4' WHERE key='schema_version'")
         conn.commit()
         conn.close()
 

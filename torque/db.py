@@ -45,6 +45,7 @@ from torque.db_board import (
 )
 from torque.db_memory import MemoryPersistenceMixin
 from torque.db_schema import (
+    AGENT_PEER_MESSAGE_COLUMNS,
     SCHEMA_VERSION,
     create_ai_embedding_vec_table,
     drop_ai_embedding_vec_table,
@@ -616,35 +617,9 @@ _GS_BOOL_FIELDS = {
     "engineer_behavior_requires_user_approval",
 }
 
-_AGENT_PEER_MESSAGE_COLUMNS = [
-    "id",
-    "thread_id",
-    "reply_to_id",
-    "idempotency_key",
-    "group_name",
-    "sender_id",
-    "sender_kind",
-    "sender_name",
-    "recipient_id",
-    "recipient_kind",
-    "recipient_name",
-    "message",
-    "message_type",
-    "created_at",
-    "ack_required",
-    "blocking",
-    "source_task_id",
-    "context_task_ids",
-    "context_engineer_ids",
-    "context_decision_ids",
-    "context_summary",
-    "context_snapshot",
-    "delivery_state",
-    "delivery_reason",
-    "delivered_at",
-    "read_at",
-    "archived_at",
-]
+_AGENT_PEER_MESSAGE_COLUMNS = list(AGENT_PEER_MESSAGE_COLUMNS)
+_AGENT_PEER_MESSAGE_COLUMNS.remove("idempotency_key")
+_AGENT_PEER_MESSAGE_COLUMNS.insert(3, "idempotency_key")
 _AGENT_PEER_MESSAGE_JSON_LIST_FIELDS = (
     "context_task_ids",
     "context_engineer_ids",
@@ -1605,7 +1580,6 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._maybe_backup_pre_kinds_db()
         self._conn = sqlite3.connect(str(self.db_path))
         initialize_database(self._conn, self.backfill_agent_history)
-        self._ensure_agent_peer_messages_schema()
         self._migrate_agent_activity_timestamps_if_needed()
         self._refuse_unmigrated_legacy_rows_if_needed()
         self._migrate_kinds_schema_if_needed()
@@ -1615,97 +1589,6 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._backfill_empty_worker_kinds_if_needed()
         self._migrate_agent_digest_settings_from_legacy_engineer_settings()
         self.migrate_task_ids_if_needed()
-
-    def _ensure_agent_peer_messages_schema(self):
-        self._conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS agent_peer_messages (
-                id                   TEXT PRIMARY KEY,
-                thread_id            TEXT NOT NULL,
-                reply_to_id          TEXT NOT NULL DEFAULT '',
-                group_name           TEXT NOT NULL DEFAULT '',
-                sender_id            TEXT NOT NULL,
-                sender_kind          TEXT NOT NULL,
-                sender_name          TEXT NOT NULL DEFAULT '',
-                recipient_id         TEXT NOT NULL,
-                recipient_kind       TEXT NOT NULL,
-                recipient_name       TEXT NOT NULL DEFAULT '',
-                message              TEXT NOT NULL,
-                message_type         TEXT NOT NULL DEFAULT 'message',
-                created_at           REAL NOT NULL,
-                ack_required         INTEGER NOT NULL DEFAULT 0,
-                blocking             INTEGER NOT NULL DEFAULT 0,
-                source_task_id       TEXT NOT NULL DEFAULT '',
-                context_task_ids     TEXT NOT NULL DEFAULT '[]',
-                context_engineer_ids TEXT NOT NULL DEFAULT '[]',
-                context_decision_ids TEXT NOT NULL DEFAULT '[]',
-                context_summary      TEXT NOT NULL DEFAULT '',
-                context_snapshot     TEXT NOT NULL DEFAULT '{}',
-                delivery_state       TEXT NOT NULL DEFAULT 'buffered',
-                delivery_reason      TEXT NOT NULL DEFAULT '',
-                delivered_at         REAL NOT NULL DEFAULT 0,
-                read_at              REAL NOT NULL DEFAULT 0,
-                archived_at          REAL NOT NULL DEFAULT 0,
-                idempotency_key      TEXT NOT NULL DEFAULT ''
-            )
-            """
-        )
-        existing = {
-            row[1]
-            for row in self._conn.execute(
-                "PRAGMA table_info(agent_peer_messages)"
-            ).fetchall()
-        }
-        column_defs = {
-            "thread_id": "TEXT NOT NULL DEFAULT ''",
-            "reply_to_id": "TEXT NOT NULL DEFAULT ''",
-            "idempotency_key": "TEXT NOT NULL DEFAULT ''",
-            "group_name": "TEXT NOT NULL DEFAULT ''",
-            "sender_id": "TEXT NOT NULL DEFAULT ''",
-            "sender_kind": "TEXT NOT NULL DEFAULT 'architect'",
-            "sender_name": "TEXT NOT NULL DEFAULT ''",
-            "recipient_id": "TEXT NOT NULL DEFAULT ''",
-            "recipient_kind": "TEXT NOT NULL DEFAULT 'architect'",
-            "recipient_name": "TEXT NOT NULL DEFAULT ''",
-            "message": "TEXT NOT NULL DEFAULT ''",
-            "message_type": "TEXT NOT NULL DEFAULT 'message'",
-            "created_at": "REAL NOT NULL DEFAULT 0",
-            "ack_required": "INTEGER NOT NULL DEFAULT 0",
-            "blocking": "INTEGER NOT NULL DEFAULT 0",
-            "source_task_id": "TEXT NOT NULL DEFAULT ''",
-            "context_task_ids": "TEXT NOT NULL DEFAULT '[]'",
-            "context_engineer_ids": "TEXT NOT NULL DEFAULT '[]'",
-            "context_decision_ids": "TEXT NOT NULL DEFAULT '[]'",
-            "context_summary": "TEXT NOT NULL DEFAULT ''",
-            "context_snapshot": "TEXT NOT NULL DEFAULT '{}'",
-            "delivery_state": "TEXT NOT NULL DEFAULT 'buffered'",
-            "delivery_reason": "TEXT NOT NULL DEFAULT ''",
-            "delivered_at": "REAL NOT NULL DEFAULT 0",
-            "read_at": "REAL NOT NULL DEFAULT 0",
-            "archived_at": "REAL NOT NULL DEFAULT 0",
-        }
-        for column in _AGENT_PEER_MESSAGE_COLUMNS:
-            if column == "id" or column in existing:
-                continue
-            self._conn.execute(
-                "ALTER TABLE agent_peer_messages ADD COLUMN "
-                f"{column} {column_defs[column]}"
-            )
-        for sql in (
-            "CREATE INDEX IF NOT EXISTS "
-            "idx_agent_peer_messages_recipient_recent "
-            "ON agent_peer_messages(recipient_id, created_at DESC, id DESC)",
-            "CREATE INDEX IF NOT EXISTS "
-            "idx_agent_peer_messages_sender_recent "
-            "ON agent_peer_messages(sender_id, created_at DESC, id DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_agent_peer_messages_thread "
-            "ON agent_peer_messages(thread_id, created_at ASC, id ASC)",
-            "CREATE INDEX IF NOT EXISTS "
-            "idx_agent_peer_messages_group_recent "
-            "ON agent_peer_messages(group_name, created_at DESC, id DESC)",
-        ):
-            self._conn.execute(sql)
-        self._conn.commit()
 
     def close(self):
         if self._conn:

@@ -15,7 +15,7 @@ import json
 import sqlite3
 from typing import Callable, Iterable
 
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "5"
 
 
 @dataclass(frozen=True)
@@ -306,6 +306,36 @@ DECISION_COLUMNS = {
 
 PENDING_HIRE_LIFECYCLE_COLUMNS = {
     "requested_specializations": "TEXT NOT NULL DEFAULT '[]'",
+}
+
+AGENT_PEER_MESSAGE_COLUMNS = {
+    "id": "TEXT PRIMARY KEY",
+    "thread_id": "TEXT NOT NULL DEFAULT ''",
+    "reply_to_id": "TEXT NOT NULL DEFAULT ''",
+    "group_name": "TEXT NOT NULL DEFAULT ''",
+    "sender_id": "TEXT NOT NULL DEFAULT ''",
+    "sender_kind": "TEXT NOT NULL DEFAULT 'architect'",
+    "sender_name": "TEXT NOT NULL DEFAULT ''",
+    "recipient_id": "TEXT NOT NULL DEFAULT ''",
+    "recipient_kind": "TEXT NOT NULL DEFAULT 'architect'",
+    "recipient_name": "TEXT NOT NULL DEFAULT ''",
+    "message": "TEXT NOT NULL DEFAULT ''",
+    "message_type": "TEXT NOT NULL DEFAULT 'message'",
+    "created_at": "REAL NOT NULL DEFAULT 0",
+    "ack_required": "INTEGER NOT NULL DEFAULT 0",
+    "blocking": "INTEGER NOT NULL DEFAULT 0",
+    "source_task_id": "TEXT NOT NULL DEFAULT ''",
+    "context_task_ids": "TEXT NOT NULL DEFAULT '[]'",
+    "context_engineer_ids": "TEXT NOT NULL DEFAULT '[]'",
+    "context_decision_ids": "TEXT NOT NULL DEFAULT '[]'",
+    "context_summary": "TEXT NOT NULL DEFAULT ''",
+    "context_snapshot": "TEXT NOT NULL DEFAULT '{}'",
+    "delivery_state": "TEXT NOT NULL DEFAULT 'buffered'",
+    "delivery_reason": "TEXT NOT NULL DEFAULT ''",
+    "delivered_at": "REAL NOT NULL DEFAULT 0",
+    "read_at": "REAL NOT NULL DEFAULT 0",
+    "archived_at": "REAL NOT NULL DEFAULT 0",
+    "idempotency_key": "TEXT NOT NULL DEFAULT ''",
 }
 
 
@@ -1099,43 +1129,6 @@ CREATE TABLE IF NOT EXISTS agent_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_messages_agent ON agent_messages (agent_id);
 CREATE INDEX IF NOT EXISTS idx_agent_messages_task ON agent_messages (task_id);
-
-CREATE TABLE IF NOT EXISTS agent_peer_messages (
-    id                   TEXT PRIMARY KEY,
-    thread_id            TEXT NOT NULL,
-    reply_to_id          TEXT NOT NULL DEFAULT '',
-    group_name           TEXT NOT NULL DEFAULT '',
-    sender_id            TEXT NOT NULL,
-    sender_kind          TEXT NOT NULL,
-    sender_name          TEXT NOT NULL DEFAULT '',
-    recipient_id         TEXT NOT NULL,
-    recipient_kind       TEXT NOT NULL,
-    recipient_name       TEXT NOT NULL DEFAULT '',
-    message              TEXT NOT NULL,
-    message_type         TEXT NOT NULL DEFAULT 'message',
-    created_at           REAL NOT NULL,
-    ack_required         INTEGER NOT NULL DEFAULT 0,
-    blocking             INTEGER NOT NULL DEFAULT 0,
-    source_task_id       TEXT NOT NULL DEFAULT '',
-    context_task_ids     TEXT NOT NULL DEFAULT '[]',
-    context_engineer_ids TEXT NOT NULL DEFAULT '[]',
-    context_decision_ids TEXT NOT NULL DEFAULT '[]',
-    context_summary      TEXT NOT NULL DEFAULT '',
-    context_snapshot     TEXT NOT NULL DEFAULT '{}',
-    delivery_state       TEXT NOT NULL DEFAULT 'buffered',
-    delivery_reason      TEXT NOT NULL DEFAULT '',
-    delivered_at         REAL NOT NULL DEFAULT 0,
-    read_at              REAL NOT NULL DEFAULT 0,
-    archived_at          REAL NOT NULL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_agent_peer_messages_recipient_recent
-    ON agent_peer_messages(recipient_id, created_at DESC, id DESC);
-CREATE INDEX IF NOT EXISTS idx_agent_peer_messages_sender_recent
-    ON agent_peer_messages(sender_id, created_at DESC, id DESC);
-CREATE INDEX IF NOT EXISTS idx_agent_peer_messages_thread
-    ON agent_peer_messages(thread_id, created_at ASC, id ASC);
-CREATE INDEX IF NOT EXISTS idx_agent_peer_messages_group_recent
-    ON agent_peer_messages(group_name, created_at DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS agent_message_history (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3355,6 +3348,27 @@ def _migration_0004_agent_lifecycle_contract(
     )
 
 
+def _migration_0005_agent_peer_messages(
+    conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Own durable user, Engineer, and Architect peer-message storage."""
+
+    _ensure_table(conn, "agent_peer_messages", AGENT_PEER_MESSAGE_COLUMNS)
+    for sql in (
+        "CREATE INDEX IF NOT EXISTS "
+        "idx_agent_peer_messages_recipient_recent "
+        "ON agent_peer_messages(recipient_id, created_at DESC, id DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_peer_messages_sender_recent "
+        "ON agent_peer_messages(sender_id, created_at DESC, id DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_peer_messages_thread "
+        "ON agent_peer_messages(thread_id, created_at ASC, id ASC)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_peer_messages_group_recent "
+        "ON agent_peer_messages(group_name, created_at DESC, id DESC)",
+    ):
+        conn.execute(sql)
+
+
 SCHEMA_MIGRATIONS = (
     SchemaMigration(
         1,
@@ -3379,6 +3393,12 @@ SCHEMA_MIGRATIONS = (
         "agent_lifecycle_contract",
         "agent-lifecycle-class-audit-v1",
         _migration_0004_agent_lifecycle_contract,
+    ),
+    SchemaMigration(
+        5,
+        "agent_peer_messages",
+        "agent-peer-message-storage-v1",
+        _migration_0005_agent_peer_messages,
     ),
 )
 

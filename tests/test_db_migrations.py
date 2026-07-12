@@ -207,7 +207,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
 
         self.assertTrue(set(BOARD_TASK_ROUTING_COLUMNS) <= columns)
         self.assertIn((3, "board_task_routing_contract"), ledger)
-        self.assertEqual(ledger[-1], (4, "agent_lifecycle_contract"))
+        self.assertEqual(ledger[-1], (5, "agent_peer_messages"))
         self.assertFalse(set(BOARD_TASK_ROUTING_COLUMNS) & backup_columns)
         self.assertEqual(backup_version, (2,))
         self.assertEqual(rerun_backup_mtime, backup_mtime)
@@ -230,7 +230,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
                 conn.execute(f"ALTER TABLE pending_hires DROP COLUMN {column}")
             conn.execute("DROP TABLE agent_class_audit")
             conn.execute("DROP TABLE decisions")
-            conn.execute("DELETE FROM schema_migrations WHERE version=4")
+            conn.execute("DELETE FROM schema_migrations WHERE version>=4")
             conn.execute(
                 "UPDATE meta SET value='3' WHERE key='schema_version'"
             )
@@ -271,10 +271,9 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
                     "PRAGMA table_info(decisions)"
                 ).fetchall()
             }
-            ledger_tail = upgraded._conn.execute(
-                "SELECT version, name FROM schema_migrations "
-                "ORDER BY version DESC LIMIT 1"
-            ).fetchone()
+            ledger = upgraded._conn.execute(
+                "SELECT version, name FROM schema_migrations ORDER BY version"
+            ).fetchall()
 
             backup_path = path.with_name(
                 f"torque.db.pre-schema-v{SCHEMA_VERSION}.bak"
@@ -302,7 +301,8 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
         self.assertTrue(set(PENDING_HIRE_LIFECYCLE_COLUMNS) <= hire_columns)
         self.assertTrue(set(AGENT_CLASS_AUDIT_COLUMNS) <= audit_columns)
         self.assertTrue(set(DECISION_COLUMNS) <= decision_columns)
-        self.assertEqual(ledger_tail, (4, "agent_lifecycle_contract"))
+        self.assertIn((4, "agent_lifecycle_contract"), ledger)
+        self.assertEqual(ledger[-1], (5, "agent_peer_messages"))
         self.assertFalse(set(AGENT_LIFECYCLE_COLUMNS) & backup_agent_columns)
         self.assertNotIn("agent_class_audit", backup_tables)
         self.assertNotIn("decisions", backup_tables)
