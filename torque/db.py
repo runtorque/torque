@@ -558,11 +558,6 @@ _KINDS_SCHEMA_BACKUP_NAME = "torque.db.pre-kinds.bak"
 _KINDS_ENGINEER_OVERRIDE_ENV = "TORQUE_MIGRATE_ENGINEER_ID"
 _KINDS_ENGINEER_GROUP = "torque"
 _KINDS_ENGINEER_NAME = "Engineer"
-_AGENT_ACTIVITY_TS_MIGRATION_VERSION = 1
-_AGENT_ACTIVITY_TS_MIGRATION_VERSION_KEY = (
-    "schema_agent_activity_timestamps_version"
-)
-
 _AGENT_PERSISTED_COLS = [
     "id", "name", "slug", "group_name", "cell_type", "terminal_backend",
     "runner_backend",
@@ -1580,7 +1575,6 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._maybe_backup_pre_kinds_db()
         self._conn = sqlite3.connect(str(self.db_path))
         initialize_database(self._conn, self.backfill_agent_history)
-        self._migrate_agent_activity_timestamps_if_needed()
         self._refuse_unmigrated_legacy_rows_if_needed()
         self._migrate_kinds_schema_if_needed()
         self._backfill_kinds_if_needed()
@@ -10262,74 +10256,6 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             return int(raw or 0)
         except (TypeError, ValueError):
             return 0
-
-    def _current_agent_activity_ts_migration_version(self) -> int:
-        raw = self._read_meta_value(_AGENT_ACTIVITY_TS_MIGRATION_VERSION_KEY)
-        try:
-            return int(raw or 0)
-        except (TypeError, ValueError):
-            return 0
-
-    def _ensure_agent_activity_timestamp_columns(self) -> None:
-        for col in (
-            "last_progress_at",
-            "last_heartbeat_at",
-            "last_activity_at",
-        ):
-            try:
-                self._conn.execute(f"SELECT {col} FROM agents LIMIT 0")
-            except sqlite3.OperationalError:
-                self._conn.execute(
-                    f"ALTER TABLE agents ADD COLUMN {col} "
-                    "REAL NOT NULL DEFAULT 0"
-                )
-                self._conn.commit()
-
-    def _migrate_agent_activity_timestamps_if_needed(self) -> None:
-        """Backfill split progress/heartbeat clocks from legacy activity."""
-        self._ensure_agent_activity_timestamp_columns()
-        if (
-            self._current_agent_activity_ts_migration_version()
-            >= _AGENT_ACTIVITY_TS_MIGRATION_VERSION
-        ):
-            return
-
-        try:
-            self._conn.execute("BEGIN")
-            # Existing rows only had one mixed activity clock. Preserve that
-            # value by seeding both new clocks once, then keep the compatibility
-            # alias equal to max(progress, heartbeat).
-            self._conn.execute(
-                "UPDATE agents "
-                "SET last_progress_at = CASE "
-                "WHEN COALESCE(last_progress_at, 0) = 0 "
-                "THEN COALESCE(last_activity_at, 0) ELSE last_progress_at END, "
-                "last_heartbeat_at = CASE "
-                "WHEN COALESCE(last_heartbeat_at, 0) = 0 "
-                "THEN COALESCE(last_activity_at, 0) ELSE last_heartbeat_at END"
-            )
-            self._conn.execute(
-                "UPDATE agents SET last_activity_at = "
-                "MAX(COALESCE(last_activity_at, 0), "
-                "COALESCE(last_progress_at, 0), "
-                "COALESCE(last_heartbeat_at, 0))"
-            )
-            self._conn.execute(
-                "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
-                (
-                    _AGENT_ACTIVITY_TS_MIGRATION_VERSION_KEY,
-                    str(_AGENT_ACTIVITY_TS_MIGRATION_VERSION),
-                ),
-            )
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
-
-        log.info(
-            "migration: agent activity timestamps split applied (version=%d)",
-            _AGENT_ACTIVITY_TS_MIGRATION_VERSION,
-        )
 
     def _maybe_backup_pre_kinds_db(self):
         if not self.db_path.exists():

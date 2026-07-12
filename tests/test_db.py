@@ -630,7 +630,7 @@ class TorqueDBTests(unittest.TestCase):
 
         conn = sqlite3.connect(str(legacy_path))
         conn.execute("DROP TABLE agent_peer_messages")
-        conn.execute("DELETE FROM schema_migrations WHERE version=5")
+        conn.execute("DELETE FROM schema_migrations WHERE version>=5")
         conn.execute("UPDATE meta SET value='4' WHERE key='schema_version'")
         conn.commit()
         conn.close()
@@ -2436,7 +2436,7 @@ class TorqueDBTests(unittest.TestCase):
         self.assertTrue(loaded["group_settings"]["g"]["notifications"])
         self.assertNotIn("retired_toggle", loaded["group_settings"]["g"])
 
-    def test_agent_activity_timestamp_migration_is_idempotent(self):
+    def test_agent_activity_timestamp_ledger_migration_is_idempotent(self):
         cell = AgentCell(
             id="agent-activity",
             name="Worker",
@@ -2453,26 +2453,42 @@ class TorqueDBTests(unittest.TestCase):
             "DELETE FROM meta WHERE key=?",
             ("schema_agent_activity_timestamps_version",),
         )
+        self.db._conn.execute(
+            "DELETE FROM schema_migrations WHERE version>=6"
+        )
+        self.db._conn.execute(
+            "UPDATE meta SET value='5' WHERE key='schema_version'"
+        )
         self.db._conn.commit()
+        path = self.db.db_path
+        self.db.close()
 
-        self.db._migrate_agent_activity_timestamps_if_needed()
-        first = self.db._conn.execute(
+        migrated = TorqueDB(path)
+        self.addCleanup(migrated.close)
+        migrated.init()
+        first = migrated._conn.execute(
             "SELECT last_progress_at, last_heartbeat_at, last_activity_at "
             "FROM agents WHERE id=?",
             (cell.id,),
         ).fetchone()
-        first_meta = self.db._conn.execute(
+        first_meta = migrated._conn.execute(
             "SELECT value FROM meta WHERE key=?",
             ("schema_agent_activity_timestamps_version",),
         ).fetchone()
+        first_ledger = migrated._conn.execute(
+            "SELECT name FROM schema_migrations WHERE version=6"
+        ).fetchone()
+        migrated.close()
 
-        self.db._migrate_agent_activity_timestamps_if_needed()
-        second = self.db._conn.execute(
+        migrated_again = TorqueDB(path)
+        self.addCleanup(migrated_again.close)
+        migrated_again.init()
+        second = migrated_again._conn.execute(
             "SELECT last_progress_at, last_heartbeat_at, last_activity_at "
             "FROM agents WHERE id=?",
             (cell.id,),
         ).fetchone()
-        second_meta = self.db._conn.execute(
+        second_meta = migrated_again._conn.execute(
             "SELECT value FROM meta WHERE key=?",
             ("schema_agent_activity_timestamps_version",),
         ).fetchone()
@@ -2481,6 +2497,7 @@ class TorqueDBTests(unittest.TestCase):
         self.assertEqual(second, first)
         self.assertEqual(first_meta, ("1",))
         self.assertEqual(second_meta, first_meta)
+        self.assertEqual(first_ledger, ("agent_activity_timestamps",))
 
     def test_save_agent_and_board_task_update_preserve_kinds_fields(self):
         cell = AgentCell(

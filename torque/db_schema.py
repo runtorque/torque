@@ -15,7 +15,7 @@ import json
 import sqlite3
 from typing import Callable, Iterable
 
-SCHEMA_VERSION = "5"
+SCHEMA_VERSION = "6"
 
 
 @dataclass(frozen=True)
@@ -263,6 +263,16 @@ AGENT_LIFECYCLE_COLUMNS = {
     "effective_agent_class_snapshot": "TEXT NOT NULL DEFAULT '{}'",
     "effective_agent_class_applied_at": "REAL NOT NULL DEFAULT 0",
 }
+
+AGENT_ACTIVITY_TIMESTAMP_COLUMNS = {
+    "last_progress_at": "REAL NOT NULL DEFAULT 0",
+    "last_heartbeat_at": "REAL NOT NULL DEFAULT 0",
+    "last_activity_at": "REAL NOT NULL DEFAULT 0",
+}
+
+AGENT_ACTIVITY_TIMESTAMP_LEGACY_META_KEY = (
+    "schema_agent_activity_timestamps_version"
+)
 
 AGENT_MESSAGE_LOOP_RUNTIME_COLUMNS = {
     "deferred_at": "REAL NOT NULL DEFAULT 0",
@@ -717,9 +727,6 @@ CREATE TABLE IF NOT EXISTS agents (
     worktree_merge_squash INTEGER NOT NULL DEFAULT 1,
     agent_type            TEXT NOT NULL DEFAULT '',
     agent_session_id      TEXT NOT NULL DEFAULT '',
-    last_progress_at      REAL NOT NULL DEFAULT 0,
-    last_heartbeat_at     REAL NOT NULL DEFAULT 0,
-    last_activity_at      REAL NOT NULL DEFAULT 0,
     session_resume        INTEGER NOT NULL DEFAULT 1,
     idle_timeout          INTEGER NOT NULL DEFAULT 0,
     tasks_dispatched      INTEGER NOT NULL DEFAULT 0
@@ -3369,6 +3376,44 @@ def _migration_0005_agent_peer_messages(
         conn.execute(sql)
 
 
+def _migration_0006_agent_activity_timestamps(
+    conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Own split progress/heartbeat clocks and their one-time backfill."""
+
+    _ensure_columns(conn, "agents", AGENT_ACTIVITY_TIMESTAMP_COLUMNS)
+    marker = conn.execute(
+        "SELECT value FROM meta WHERE key=?",
+        (AGENT_ACTIVITY_TIMESTAMP_LEGACY_META_KEY,),
+    ).fetchone()
+    try:
+        already_backfilled = int((marker or (0,))[0] or 0) >= 1
+    except (TypeError, ValueError):
+        already_backfilled = False
+    if not already_backfilled:
+        conn.execute(
+            "UPDATE agents "
+            "SET last_progress_at = CASE "
+            "WHEN COALESCE(last_progress_at, 0) = 0 "
+            "THEN COALESCE(last_activity_at, 0) ELSE last_progress_at END, "
+            "last_heartbeat_at = CASE "
+            "WHEN COALESCE(last_heartbeat_at, 0) = 0 "
+            "THEN COALESCE(last_activity_at, 0) ELSE last_heartbeat_at END"
+        )
+        conn.execute(
+            "UPDATE agents SET last_activity_at = "
+            "MAX(COALESCE(last_activity_at, 0), "
+            "COALESCE(last_progress_at, 0), "
+            "COALESCE(last_heartbeat_at, 0))"
+        )
+    conn.execute(
+        "INSERT INTO meta(key, value) VALUES (?, '1') "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (AGENT_ACTIVITY_TIMESTAMP_LEGACY_META_KEY,),
+    )
+
+
 SCHEMA_MIGRATIONS = (
     SchemaMigration(
         1,
@@ -3399,6 +3444,12 @@ SCHEMA_MIGRATIONS = (
         "agent_peer_messages",
         "agent-peer-message-storage-v1",
         _migration_0005_agent_peer_messages,
+    ),
+    SchemaMigration(
+        6,
+        "agent_activity_timestamps",
+        "agent-progress-heartbeat-clocks-v1",
+        _migration_0006_agent_activity_timestamps,
     ),
 )
 
