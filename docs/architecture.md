@@ -49,6 +49,12 @@ The frontend consumes a full snapshot on connect and live deltas after that. JS 
 - agent history
 - shared memory entries
 
+Schema changes advance through the ordered `schema_migrations` ledger in
+`torque/db_schema.py`. Before an existing file-backed database advances to a
+new target version, Torque creates and verifies a sibling
+`torque.db.pre-schema-v<N>.bak` snapshot. Each target backup is created once;
+fresh databases do not create one.
+
 Ephemeral fields — current activity, current process, current path, worktree diff stats, error message, needs_attention, last summary — live in memory only. They're cleared on restart. This is deliberate: those fields are derived from live observation and would be wrong if persisted.
 
 The CLI's read-only commands (`torque task list`, `torque board list`, `torque action show`) read SQLite directly so they work even when the daemon is stopped.

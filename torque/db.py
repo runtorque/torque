@@ -45,6 +45,7 @@ from torque.db_board import (
 )
 from torque.db_memory import MemoryPersistenceMixin
 from torque.db_schema import (
+    SCHEMA_VERSION,
     create_ai_embedding_vec_table,
     drop_ai_embedding_vec_table,
     initialize_database,
@@ -509,6 +510,41 @@ def _group_settings_field_names() -> set[str] | None:
         except Exception:
             return None
     return set(getattr(group_settings_cls, "__dataclass_fields__", {}) or {})
+
+
+def _create_sqlite_backup(source_path: Path, backup_path: Path) -> None:
+    """Create and verify an atomic SQLite backup without replacing one."""
+
+    source_path = Path(source_path)
+    backup_path = Path(backup_path)
+    if backup_path.exists():
+        raise FileExistsError(f"SQLite backup already exists: {backup_path}")
+    backup_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = backup_path.with_name(
+        f".{backup_path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+    )
+    source = target = None
+    try:
+        source = sqlite3.connect(str(source_path))
+        target = sqlite3.connect(str(temp_path))
+        source.backup(target)
+        check = target.execute("PRAGMA quick_check").fetchone()
+        if not check or str(check[0]).lower() != "ok":
+            raise RuntimeError(
+                f"SQLite backup verification failed for {source_path}"
+            )
+        target.close()
+        target = None
+        source.close()
+        source = None
+        os.replace(temp_path, backup_path)
+    except Exception:
+        if target is not None:
+            target.close()
+        if source is not None:
+            source.close()
+        temp_path.unlink(missing_ok=True)
+        raise
 
 _KINDS_SCHEMA_MIGRATION_VERSION = 1
 _KINDS_BACKFILL_MIGRATION_VERSION = 2
@@ -1565,12 +1601,11 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
 
     def init(self):
         """Open connection, enable WAL, create tables if needed."""
+        self._maybe_backup_pending_schema_migration()
         self._maybe_backup_pre_kinds_db()
         self._conn = sqlite3.connect(str(self.db_path))
         initialize_database(self._conn, self.backfill_agent_history)
         self._ensure_agent_peer_messages_schema()
-        self._ensure_board_task_engineer_provenance_column()
-        self._ensure_board_task_assigned_architect_column()
         self._ensure_agent_queue_empty_emitted_column()
         self._ensure_agent_message_loop_deferred_columns()
         self._migrate_agent_activity_timestamps_if_needed()
@@ -1582,7 +1617,6 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._ensure_agent_class_columns()
         self._ensure_agent_class_audit_schema()
         self._ensure_decision_metadata_column()
-        self._ensure_board_task_suggested_specialization_column()
         self._ensure_pending_hire_requested_specializations_column()
         self._backfill_kinds_if_needed()
         self._fixup_kinds_task_assignments_if_needed()
@@ -1605,30 +1639,6 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                     f"{col_type} NOT NULL DEFAULT {default}"
                 )
                 self._conn.commit()
-
-    def _ensure_board_task_engineer_provenance_column(self):
-        try:
-            self._conn.execute(
-                "SELECT created_by_engineer_id FROM board_tasks LIMIT 0"
-            )
-        except sqlite3.OperationalError:
-            self._conn.execute(
-                "ALTER TABLE board_tasks ADD COLUMN created_by_engineer_id "
-                "TEXT NOT NULL DEFAULT ''"
-            )
-            self._conn.commit()
-
-    def _ensure_board_task_assigned_architect_column(self):
-        try:
-            self._conn.execute(
-                "SELECT assigned_architect_id FROM board_tasks LIMIT 0"
-            )
-        except sqlite3.OperationalError:
-            self._conn.execute(
-                "ALTER TABLE board_tasks ADD COLUMN assigned_architect_id "
-                "TEXT NOT NULL DEFAULT ''"
-            )
-            self._conn.commit()
 
     def _ensure_agent_dismissed_at_column(self):
         try:
@@ -1823,18 +1833,6 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         ):
             self._conn.execute(sql)
         self._conn.commit()
-
-    def _ensure_board_task_suggested_specialization_column(self):
-        try:
-            self._conn.execute(
-                "SELECT suggested_specialization FROM board_tasks LIMIT 0"
-            )
-        except sqlite3.OperationalError:
-            self._conn.execute(
-                "ALTER TABLE board_tasks ADD COLUMN suggested_specialization "
-                "TEXT NOT NULL DEFAULT ''"
-            )
-            self._conn.commit()
 
     def close(self):
         if self._conn:
@@ -10430,6 +10428,54 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
     def _kinds_backup_path(self) -> Path:
         return self.db_path.with_name(_KINDS_SCHEMA_BACKUP_NAME)
 
+    def _schema_backup_path(self) -> Path:
+        return self.db_path.with_name(
+            f"{self.db_path.name}.pre-schema-v{SCHEMA_VERSION}.bak"
+        )
+
+    def _current_schema_migration_version(self) -> int:
+        if not self.db_path.exists() or self.db_path.stat().st_size == 0:
+            return 0
+        conn = None
+        try:
+            conn = sqlite3.connect(str(self.db_path))
+            table = conn.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name='schema_migrations'"
+            ).fetchone()
+            if not table:
+                return 0
+            row = conn.execute(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
+            ).fetchone()
+            return int((row or (0,))[0] or 0)
+        except (sqlite3.DatabaseError, TypeError, ValueError):
+            return 0
+        finally:
+            if conn is not None:
+                conn.close()
+
+    def _maybe_backup_pending_schema_migration(self) -> None:
+        """Create one verified SQLite backup before each schema target."""
+
+        if not self.db_path.exists() or self.db_path.stat().st_size == 0:
+            return
+        try:
+            target_version = int(SCHEMA_VERSION)
+        except (TypeError, ValueError):
+            raise RuntimeError("SCHEMA_VERSION must be an integer") from None
+        if self._current_schema_migration_version() >= target_version:
+            return
+        backup_path = self._schema_backup_path()
+        if backup_path.exists():
+            return
+        _create_sqlite_backup(self.db_path, backup_path)
+        log.info(
+            "migration: created pre-schema-v%s backup at %s",
+            SCHEMA_VERSION,
+            backup_path,
+        )
+
     def _read_meta_value(self, key: str, *, db_path: Optional[Path] = None) -> Optional[str]:
         path = Path(db_path or self.db_path)
         if not path.exists():
@@ -10584,22 +10630,6 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             except sqlite3.OperationalError:
                 self._conn.execute(
                     f"ALTER TABLE agents ADD COLUMN {col} "
-                    f"{col_type} NOT NULL DEFAULT {default}"
-                )
-                self._conn.commit()
-
-        for col, col_type, default in [
-            ("assigned_engineer_id", "TEXT", "''"),
-            ("assigned_architect_id", "TEXT", "''"),
-            ("created_by_architect_id", "TEXT", "''"),
-            ("created_by_engineer_id", "TEXT", "''"),
-            ("suggested_action", "TEXT", "''"),
-        ]:
-            try:
-                self._conn.execute(f"SELECT {col} FROM board_tasks LIMIT 0")
-            except sqlite3.OperationalError:
-                self._conn.execute(
-                    f"ALTER TABLE board_tasks ADD COLUMN {col} "
                     f"{col_type} NOT NULL DEFAULT {default}"
                 )
                 self._conn.commit()

@@ -15,7 +15,7 @@ import json
 import sqlite3
 from typing import Callable, Iterable
 
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
 
 
 @dataclass(frozen=True)
@@ -224,6 +224,16 @@ MCP_IDEMPOTENCY_COLUMNS = {
     "compacted_at": "REAL NOT NULL DEFAULT 0",
     "created_at": "REAL NOT NULL DEFAULT 0",
     "updated_at": "REAL NOT NULL DEFAULT 0",
+}
+
+
+BOARD_TASK_ROUTING_COLUMNS = {
+    "assigned_engineer_id": "TEXT NOT NULL DEFAULT ''",
+    "assigned_architect_id": "TEXT NOT NULL DEFAULT ''",
+    "created_by_architect_id": "TEXT NOT NULL DEFAULT ''",
+    "created_by_engineer_id": "TEXT NOT NULL DEFAULT ''",
+    "suggested_action": "TEXT NOT NULL DEFAULT ''",
+    "suggested_specialization": "TEXT NOT NULL DEFAULT ''",
 }
 
 
@@ -2754,15 +2764,6 @@ def _reconcile_legacy_schema(conn: sqlite3.Connection, backfill_agent_history):
                 f"ALTER TABLE board_tasks ADD COLUMN {col} "
                 f"{col_type} NOT NULL DEFAULT {default}")
             conn.commit()
-    # Migrate: add assigned architect ownership metadata to board_tasks
-    try:
-        conn.execute("SELECT assigned_architect_id FROM board_tasks LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE board_tasks ADD COLUMN assigned_architect_id "
-            "TEXT NOT NULL DEFAULT ''"
-        )
-        conn.commit()
     # Migrate: add mandatory-review contract columns to board_tasks (TORQUE:256)
     for col, col_type, default in [
         ("requires_review", "INTEGER", "0"),
@@ -3299,8 +3300,17 @@ def _migration_0002_versioned_ledger(
     conn.execute(
         "INSERT INTO meta (key, value) VALUES ('schema_version', ?) "
         "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        (SCHEMA_VERSION,),
+        ("2",),
     )
+
+
+def _migration_0003_board_task_routing_contract(
+    conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Own board-task assignment and dispatch-hint columns in the ledger."""
+
+    _ensure_columns(conn, "board_tasks", BOARD_TASK_ROUTING_COLUMNS)
 
 
 SCHEMA_MIGRATIONS = (
@@ -3315,6 +3325,12 @@ SCHEMA_MIGRATIONS = (
         "versioned_migration_ledger",
         "migration-ledger-v1",
         _migration_0002_versioned_ledger,
+    ),
+    SchemaMigration(
+        3,
+        "board_task_routing_contract",
+        "board-task-routing-columns-v1",
+        _migration_0003_board_task_routing_contract,
     ),
 )
 
@@ -3409,6 +3425,11 @@ def _apply_schema_migrations(
         if migration.version == 1:
             migration.apply(conn, backfill_agent_history)
             conn.execute(
+                "INSERT INTO meta (key, value) VALUES ('schema_version', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (str(migration.version),),
+            )
+            conn.execute(
                 "INSERT INTO schema_migrations(version, name, checksum) "
                 "VALUES (?, ?, ?)",
                 (migration.version, migration.name, migration.checksum),
@@ -3420,6 +3441,11 @@ def _apply_schema_migrations(
             conn.execute("BEGIN")
             migration.apply(conn, backfill_agent_history)
             conn.execute(
+                "INSERT INTO meta (key, value) VALUES ('schema_version', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (str(migration.version),),
+            )
+            conn.execute(
                 "INSERT INTO schema_migrations(version, name, checksum) "
                 "VALUES (?, ?, ?)",
                 (migration.version, migration.name, migration.checksum),
@@ -3428,6 +3454,16 @@ def _apply_schema_migrations(
         except Exception:
             conn.rollback()
             raise
+
+    # ``schema_migrations`` is authoritative.  Keep the legacy meta mirror in
+    # sync even when an older database already had every ledger row but its
+    # meta value was missing or stale.
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES ('schema_version', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (str(ordered[-1].version),),
+    )
+    conn.commit()
 
 
 def initialize_database(conn: sqlite3.Connection, backfill_agent_history):

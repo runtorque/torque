@@ -4,9 +4,11 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from torque.db import TorqueDB
+from torque.db import TorqueDB, _create_sqlite_backup
 from torque.db_schema import (
+    BOARD_TASK_ROUTING_COLUMNS,
     SCHEMA_MIGRATIONS,
     SCHEMA_VERSION,
     SchemaMigration,
@@ -101,11 +103,15 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
         rows = conn.execute(
             "SELECT version FROM schema_migrations ORDER BY version"
         ).fetchall()
+        meta_version = conn.execute(
+            "SELECT value FROM meta WHERE key='schema_version'"
+        ).fetchone()
         rolled_back = conn.execute(
             "SELECT name FROM sqlite_master "
             "WHERE type='table' AND name='must_rollback'"
         ).fetchone()
         self.assertEqual(rows, [(1,)])
+        self.assertEqual(meta_version, ("1",))
         self.assertIsNone(rolled_back)
 
     def test_checksum_drift_fails_closed(self):
@@ -123,6 +129,107 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
         changed = (SchemaMigration(1, "baseline", "changed", baseline),)
         with self.assertRaisesRegex(RuntimeError, "ledger mismatch"):
             _apply_schema_migrations(conn, lambda: None, migrations=changed)
+
+    def test_applied_ledger_repairs_stale_meta_version(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = TorqueDB(Path(tmp) / "torque.db")
+            self.addCleanup(db.close)
+            db.init()
+            db._conn.execute(
+                "UPDATE meta SET value='stale' WHERE key='schema_version'"
+            )
+            db._conn.commit()
+
+            _apply_schema_migrations(db._conn, db.backfill_agent_history)
+            repaired = db._conn.execute(
+                "SELECT value FROM meta WHERE key='schema_version'"
+            ).fetchone()
+
+        self.assertEqual(repaired, (SCHEMA_VERSION,))
+
+    def test_version_three_owns_board_task_routing_columns_and_backup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "torque.db"
+            current = TorqueDB(path)
+            current.init()
+            current.close()
+
+            conn = sqlite3.connect(path)
+            for column in BOARD_TASK_ROUTING_COLUMNS:
+                conn.execute(f"ALTER TABLE board_tasks DROP COLUMN {column}")
+            conn.execute("DELETE FROM schema_migrations WHERE version=3")
+            conn.execute(
+                "UPDATE meta SET value='2' WHERE key='schema_version'"
+            )
+            conn.commit()
+            conn.close()
+
+            upgraded = TorqueDB(path)
+            self.addCleanup(upgraded.close)
+            upgraded.init()
+
+            columns = {
+                row[1]
+                for row in upgraded._conn.execute(
+                    "PRAGMA table_info(board_tasks)"
+                ).fetchall()
+            }
+            ledger = upgraded._conn.execute(
+                "SELECT version, name FROM schema_migrations ORDER BY version"
+            ).fetchall()
+            backup_path = path.with_name("torque.db.pre-schema-v3.bak")
+            backup_mtime = backup_path.stat().st_mtime_ns
+
+            backup = sqlite3.connect(backup_path)
+            self.addCleanup(backup.close)
+            backup_columns = {
+                row[1]
+                for row in backup.execute(
+                    "PRAGMA table_info(board_tasks)"
+                ).fetchall()
+            }
+            backup_version = backup.execute(
+                "SELECT MAX(version) FROM schema_migrations"
+            ).fetchone()
+
+            upgraded.close()
+            rerun = TorqueDB(path)
+            self.addCleanup(rerun.close)
+            rerun.init()
+            rerun_backup_mtime = backup_path.stat().st_mtime_ns
+
+        self.assertTrue(set(BOARD_TASK_ROUTING_COLUMNS) <= columns)
+        self.assertEqual(ledger[-1], (3, "board_task_routing_contract"))
+        self.assertFalse(set(BOARD_TASK_ROUTING_COLUMNS) & backup_columns)
+        self.assertEqual(backup_version, (2,))
+        self.assertEqual(rerun_backup_mtime, backup_mtime)
+
+    def test_atomic_backup_failure_leaves_source_and_destination_untouched(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source_path = Path(tmp) / "source.db"
+            backup_path = Path(tmp) / "source.db.pre-schema-v3.bak"
+            conn = sqlite3.connect(source_path)
+            conn.execute("CREATE TABLE marker (value TEXT NOT NULL)")
+            conn.execute("INSERT INTO marker(value) VALUES ('kept')")
+            conn.commit()
+            conn.close()
+
+            with mock.patch(
+                "torque.db.os.replace",
+                side_effect=OSError("injected replace failure"),
+            ):
+                with self.assertRaisesRegex(OSError, "injected replace"):
+                    _create_sqlite_backup(source_path, backup_path)
+
+            check = sqlite3.connect(source_path)
+            self.addCleanup(check.close)
+            marker = check.execute("SELECT value FROM marker").fetchone()
+            temporary_files = list(Path(tmp).glob(".*.tmp"))
+            backup_exists = backup_path.exists()
+
+        self.assertEqual(marker, ("kept",))
+        self.assertFalse(backup_exists)
+        self.assertEqual(temporary_files, [])
 
 
 if __name__ == "__main__":

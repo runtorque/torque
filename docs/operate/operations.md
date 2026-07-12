@@ -145,6 +145,12 @@ Existing `desktop` or `standalone` profile directories are left in place; Torque
 only uses them when you select them explicitly (for example with
 `TORQUE_PROFILE=desktop`).
 
+Before an existing database advances through a new versioned schema migration,
+Torque creates a verified sibling backup named
+`torque.db.pre-schema-v<N>.bak`. The backup is retained and never overwritten
+for that target version, so a failed startup leaves the pre-migration database
+available for manual recovery.
+
 Legacy Toolbelt data from older releases may still include a database at:
 
 ```text
