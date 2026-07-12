@@ -121,30 +121,30 @@ class MCPCreativeArchitectTests(unittest.IsolatedAsyncioTestCase):
         for name in {
             "torque_context",
             "architect_events_recent",
-            "architect_product_board_summary",
-            "architect_product_task_list",
-            "architect_product_task_show",
-            "architect_product_area_list",
-            "architect_product_area_show",
-            "architect_product_initiative_list",
-            "architect_product_initiative_show",
-            "architect_product_decision_list",
-            "architect_product_task_propose",
-            "architect_product_decision_create",
-            "architect_product_decision_update",
-            "architect_product_decision_link",
-            "architect_product_idea_brief_list",
-            "architect_product_idea_brief_show",
-            "architect_product_idea_brief_create",
-            "architect_product_idea_brief_update",
-            "architect_product_idea_brief_refine",
-            "architect_product_idea_brief_park",
-            "architect_product_idea_brief_archive",
-            "architect_product_idea_brief_propose",
-            "architect_product_peer_list",
-            "architect_product_peer_message",
-            "architect_product_message_user",
-            "architect_product_ask_user",
+            "architect_proposal_board_summary",
+            "architect_task_proposal_list",
+            "architect_task_proposal_show",
+            "architect_proposal_area_list",
+            "architect_proposal_area_show",
+            "architect_proposal_initiative_list",
+            "architect_proposal_initiative_show",
+            "architect_decision_proposal_list",
+            "architect_task_propose",
+            "architect_decision_propose",
+            "architect_decision_proposal_update",
+            "architect_decision_proposal_link",
+            "architect_idea_brief_list",
+            "architect_idea_brief_show",
+            "architect_idea_brief_create",
+            "architect_idea_brief_update",
+            "architect_idea_brief_refine",
+            "architect_idea_brief_park",
+            "architect_idea_brief_archive",
+            "architect_idea_brief_propose",
+            "architect_proposal_peer_list",
+            "architect_proposal_peer_message",
+            "architect_proposal_message_user",
+            "architect_proposal_ask_user",
             "architect_behavior_overlay_read",
             "architect_behavior_overlay_versions",
             "architect_behavior_overlay_diff",
@@ -228,7 +228,7 @@ class MCPCreativeArchitectTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Unknown tool", self._error_text(cross_scope))
 
         allowed = await self._call(
-            "architect_product_task_propose",
+            "architect_task_propose",
             {"title": "Idea slice", "description": "Proposal only."},
             req_id=100,
         )
@@ -388,7 +388,7 @@ class MCPCreativeArchitectTests(unittest.IsolatedAsyncioTestCase):
         before_tasks = set(self.state.board_tasks)
 
         created = await self._call(
-            "architect_product_idea_brief_create",
+            "architect_idea_brief_create",
             {
                 "title": "Idea Brief workflow",
                 "problem_opportunity": "Catalyst needs durable synthesis.",
@@ -411,7 +411,7 @@ class MCPCreativeArchitectTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(source_note["id"], brief["thinking_links"][0]["id"])
 
         listed = await self._call(
-            "architect_product_idea_brief_list",
+            "architect_idea_brief_list",
             {},
             req_id=31,
         )
@@ -426,7 +426,7 @@ class MCPCreativeArchitectTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(by_id[peer_brief["id"]]["caller_owned"])
 
         peer_update = await self._call(
-            "architect_product_idea_brief_update",
+            "architect_idea_brief_update",
             {"idea_brief": peer_brief["id"], "proposed_shape": "steal"},
             req_id=32,
         )
@@ -436,7 +436,7 @@ class MCPCreativeArchitectTests(unittest.IsolatedAsyncioTestCase):
             self.db.load_idea_brief(peer_brief["id"])["proposed_shape"],
         )
         cross_group_show = await self._call(
-            "architect_product_idea_brief_show",
+            "architect_idea_brief_show",
             {"idea_brief": other_brief["id"]},
             req_id=33,
         )
@@ -446,7 +446,7 @@ class MCPCreativeArchitectTests(unittest.IsolatedAsyncioTestCase):
         )
 
         refined = await self._call(
-            "architect_product_idea_brief_refine",
+            "architect_idea_brief_refine",
             {
                 "idea_brief": brief["id"],
                 "refinement_note": "Tightened to proposal-only Wave A.",
@@ -462,13 +462,13 @@ class MCPCreativeArchitectTests(unittest.IsolatedAsyncioTestCase):
         )
 
         parked = await self._call(
-            "architect_product_idea_brief_park",
+            "architect_idea_brief_park",
             {"idea_brief": brief["id"], "reason": "waiting"},
             req_id=35,
         )
         self.assertEqual("parked", self._result_payload(parked)["idea_brief"]["status"])
         proposed = await self._call(
-            "architect_product_idea_brief_propose",
+            "architect_idea_brief_propose",
             {"idea_brief": brief["id"], "note": "Ready for product-safe review."},
             req_id=36,
         )
@@ -482,7 +482,7 @@ class MCPCreativeArchitectTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(before_tasks, set(self.state.board_tasks))
 
         peer_message = await self._call(
-            "architect_product_peer_message",
+            "architect_proposal_peer_message",
             {
                 "architect_id": self.peer.id,
                 "message": "Please review this Idea Brief.",
@@ -493,5 +493,5 @@ class MCPCreativeArchitectTests(unittest.IsolatedAsyncioTestCase):
         peer_payload = self._result_payload(peer_message)
         self.assertEqual("ok", peer_payload["type"])
         saved = self.db.load_agent_peer_message(peer_payload["message_id"])
-        product_context = saved["context_snapshot"]["product_context"]
-        self.assertEqual([brief["id"]], product_context["idea_brief_ids"])
+        proposal_context = saved["context_snapshot"]["proposal_context"]
+        self.assertEqual([brief["id"]], proposal_context["idea_brief_ids"])

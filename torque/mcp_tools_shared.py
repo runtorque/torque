@@ -127,9 +127,9 @@ _ARCHITECT_PEER_MESSAGE_LENGTH_LIMIT = 16 * 1024
 _ARCHITECT_PEER_INBOX_DEFAULT_LIMIT = 20
 _ARCHITECT_PEER_INBOX_MAX_LIMIT = 100
 _ARCHITECT_PEER_SUMMARY_LOAD_LIMIT = 1000
-_PRODUCT_PEER_MARKER = "torque.product_peer.v1"
-_PRODUCT_DECISION_MARKER = "torque.product_decision.v1"
-_PRODUCT_CONTEXT_MARKER = "torque.product_context.v1"
+_PROPOSAL_PEER_MARKER = "torque.proposal_peer.v1"
+_PROPOSAL_DECISION_MARKER = "torque.decision_proposal.v1"
+_PROPOSAL_CONTEXT_MARKER = "torque.proposal_context.v1"
 _PRODUCT_TASK_LABELS = frozenset({"product-proposal", "proposal-only"})
 _PRODUCT_TASK_DEFAULT_LABELS = ("product-proposal", "proposal-only")
 _PRODUCT_TASK_UNSAFE_LANES = frozenset({
@@ -138,7 +138,7 @@ _PRODUCT_TASK_UNSAFE_LANES = frozenset({
     "Done",
     ARCHIVED_LANE,
 })
-_PRODUCT_JOURNAL_ENTRY_TYPES = {"observation", "checkpoint", "plan"}
+_PROPOSAL_JOURNAL_ENTRY_TYPES = {"observation", "checkpoint", "plan"}
 _PRODUCT_TASK_PROPOSAL_FORBIDDEN_ARGS = frozenset({
     "assigned_engineer_id",
     "assigned_architect_id",
@@ -2552,17 +2552,17 @@ _ARCHITECT_READ_TOOL_NAMES = frozenset({
     "pending_hire_status",
     "peer_inbox",
     "peer_list",
-    "product_area_list",
-    "product_area_show",
-    "product_board_summary",
-    "product_decision_list",
-    "product_initiative_list",
-    "product_initiative_show",
-    "product_journal_read",
-    "product_peer_inbox",
-    "product_peer_list",
-    "product_task_list",
-    "product_task_show",
+    "proposal_area_list",
+    "proposal_area_show",
+    "proposal_board_summary",
+    "decision_proposal_list",
+    "proposal_initiative_list",
+    "proposal_initiative_show",
+    "proposal_journal_read",
+    "proposal_peer_inbox",
+    "proposal_peer_list",
+    "task_proposal_list",
+    "task_proposal_show",
     "semantic_recall",
     "session_map",
     "specialization_show",
@@ -4457,7 +4457,7 @@ def _normalize_agent_user_message_context(
     }, ""
 
 
-def _cell_has_product_peer_authority(state, cell) -> bool:
+def _cell_has_proposal_peer_authority(state, cell) -> bool:
     if not cell:
         return False
     cell_id = str(getattr(cell, "id", "") or "").strip()
@@ -4469,8 +4469,8 @@ def _cell_has_product_peer_authority(state, cell) -> bool:
     )
 
 
-def _product_peer_allowlist_contains(state, caller_id: str, peer_id: str) -> bool:
-    allowlist = getattr(state, "product_peer_allowlist", None)
+def _proposal_peer_allowlist_contains(state, caller_id: str, peer_id: str) -> bool:
+    allowlist = getattr(state, "proposal_peer_allowlist", None)
     if not allowlist:
         return False
     caller_id = str(caller_id or "").strip()
@@ -4500,7 +4500,7 @@ def _cell_group(cell) -> str:
     return str(getattr(cell, "group", "") or "").strip()
 
 
-def _product_peer_scope_reason(state, caller_id: str, peer) -> str:
+def _proposal_peer_scope_reason(state, caller_id: str, peer) -> str:
     if not peer:
         return ""
     caller_id = str(caller_id or "").strip()
@@ -4517,9 +4517,9 @@ def _product_peer_scope_reason(state, caller_id: str, peer) -> str:
         return ""
     if not _cell_group(caller) or _cell_group(peer) != _cell_group(caller):
         return ""
-    if _cell_has_product_peer_authority(state, peer):
+    if _cell_has_proposal_peer_authority(state, peer):
         return "product-peer-authority"
-    if _product_peer_allowlist_contains(state, caller_id, peer_id):
+    if _proposal_peer_allowlist_contains(state, caller_id, peer_id):
         return "product-peer-allowlist"
     if _caller_authority_allows_capability(
             state,
@@ -4529,8 +4529,8 @@ def _product_peer_scope_reason(state, caller_id: str, peer) -> str:
     return ""
 
 
-def _product_peer_eligible(state, caller_id: str, peer) -> bool:
-    return bool(_product_peer_scope_reason(state, caller_id, peer))
+def _proposal_peer_eligible(state, caller_id: str, peer) -> bool:
+    return bool(_proposal_peer_scope_reason(state, caller_id, peer))
 
 
 def _resolve_product_architect_peer(state, caller_id: str,
@@ -4538,7 +4538,7 @@ def _resolve_product_architect_peer(state, caller_id: str,
     peer, error = _resolve_architect_peer(state, caller_id, architect_ident)
     if not peer:
         return None, error
-    if not _product_peer_eligible(state, caller_id, peer):
+    if not _proposal_peer_eligible(state, caller_id, peer):
         return None, "architect not found in product-peer scope"
     return peer, ""
 
@@ -4563,14 +4563,14 @@ def _decision_has_product_marker(decision: dict | None) -> bool:
     product = metadata.get("product_proposal", {})
     return (
         isinstance(product, dict)
-        and str(product.get("marker", "") or "").strip() == _PRODUCT_DECISION_MARKER
+        and str(product.get("marker", "") or "").strip() == _PROPOSAL_DECISION_MARKER
     )
 
 
 def _product_decision_metadata(caller_id: str) -> dict:
     return {
         "product_proposal": {
-            "marker": _PRODUCT_DECISION_MARKER,
+            "marker": _PROPOSAL_DECISION_MARKER,
             "owner_architect_id": str(caller_id or "").strip(),
             "proposed_only": True,
             "wave": "4B",
@@ -4602,7 +4602,7 @@ def _product_decisions_for_architect(state, caller_id: str, *,
     ]
 
 
-def _product_decision_linked_task_ids(state, caller_id: str) -> set[str]:
+def _decision_proposal_linked_task_ids(state, caller_id: str) -> set[str]:
     linked: set[str] = set()
     for decision in _product_decisions_for_architect(state, caller_id):
         linked.update(str(item or "").strip() for item in decision.get("linked_task_ids", []) or [])
@@ -4645,7 +4645,7 @@ def _parse_timestampish(value) -> float:
         return 0.0
 
 
-def _product_peer_route_message_for_task(
+def _proposal_peer_route_message_for_task(
         state,
         caller_id: str,
         task,
@@ -4687,7 +4687,7 @@ def _product_peer_route_message_for_task(
             str((row or {}).get("recipient_kind", "") or "").strip(),
         } != {"architect"}:
             continue
-        if not _row_has_product_peer_marker(row):
+        if not _row_has_proposal_peer_marker(row):
             continue
         context_task_ids = {
             str(item or "").strip()
@@ -4747,7 +4747,7 @@ def _routed_product_root_coverage_authorization(
         )
 
     has_cover_label = _task_has_covers_label(covering_task, task_id)
-    route_row = _product_peer_route_message_for_task(
+    route_row = _proposal_peer_route_message_for_task(
         state,
         caller_id,
         task,
@@ -4767,11 +4767,11 @@ def _routed_product_root_coverage_authorization(
     authorization = {
         "scope": "routed_product_proposal_root",
         "source": (
-            "covering_task_label_and_product_peer"
+            "covering_task_label_and_proposal_peer"
             if has_cover_label and route_row else
             "covering_task_label"
             if has_cover_label else
-            "product_peer_route"
+            "proposal_peer_route"
         ),
         "covered_task_id": task_id,
         "root_creator_architect_id": creator_id,
@@ -4817,7 +4817,7 @@ def _routed_product_proposal_root_pickup_authorization(
     creator = state.agents.get(creator_id)
     if not creator or str(getattr(creator, "group", "") or "").strip() != caller_group:
         return {}, "Task is not a same-group product-proposal product proposal"
-    if not _cell_has_product_peer_authority(state, creator):
+    if not _cell_has_proposal_peer_authority(state, creator):
         return {}, "Task creator does not have product proposal authority"
     if creator_id == caller_id:
         return {}, "Task was created by this architect; pickup is not required"
@@ -4827,7 +4827,7 @@ def _routed_product_proposal_root_pickup_authorization(
     if assigned_architect_id and assigned_architect_id != caller_id:
         return {}, "Task is already assigned to another architect"
 
-    route_row = _product_peer_route_message_for_task(
+    route_row = _proposal_peer_route_message_for_task(
         state,
         caller_id,
         task,
@@ -4845,7 +4845,7 @@ def _routed_product_proposal_root_pickup_authorization(
     ]
     authorization = {
         "scope": "routed_product_proposal_root_pickup",
-        "source": "product_peer_route",
+        "source": "proposal_peer_route",
         "task_id": task_id,
         "root_creator_architect_id": creator_id,
         "claiming_architect_id": caller_id,
@@ -4881,7 +4881,7 @@ def _product_task_visible_for_architect(state, caller_id: str, task) -> bool:
         return True
     if str(getattr(task, "created_by_architect_id", "") or "").strip() == str(caller_id or "").strip() and _task_has_product_label(task):
         return True
-    return task_id in _product_decision_linked_task_ids(state, caller_id)
+    return task_id in _decision_proposal_linked_task_ids(state, caller_id)
 
 
 def _product_visible_task_ids_for_architect(state, caller_id: str) -> set[str]:
@@ -4947,7 +4947,7 @@ def _product_task_items(state, caller_id: str, args: dict) -> tuple[list[dict], 
     return [_product_task_summary(state, caller_id, task) for task in tasks], ""
 
 
-def _product_task_list_json(state, caller_id: str, args: dict) -> tuple[str, bool]:
+def _task_proposal_list_json(state, caller_id: str, args: dict) -> tuple[str, bool]:
     limit, limit_error = _normalize_architect_task_list_limit(args.get("limit"))
     if limit_error:
         return limit_error, True
@@ -4956,14 +4956,14 @@ def _product_task_list_json(state, caller_id: str, args: dict) -> tuple[str, boo
         return error, True
     payload_items = items[:limit] if limit else []
     return _compact_json({
-        "type": "product_task_list",
+        "type": "task_proposal_list",
         "tasks": payload_items,
         "count": len(items),
         "truncated": bool(limit and len(items) > limit),
     }), False
 
 
-def _product_board_summary_json(state, caller_id: str, args: dict) -> tuple[str, bool]:
+def _proposal_board_summary_json(state, caller_id: str, args: dict) -> tuple[str, bool]:
     try:
         limit = int(args.get("limit", 20) or 20)
     except (TypeError, ValueError):
@@ -4977,7 +4977,7 @@ def _product_board_summary_json(state, caller_id: str, args: dict) -> tuple[str,
         lane = str(item.get("lane", "") or "")
         lane_counts[lane] = lane_counts.get(lane, 0) + 1
     return _compact_json({
-        "type": "product_board_summary",
+        "type": "proposal_board_summary",
         "tasks_total": len(items),
         "lanes": lane_counts,
         "tasks": items[:limit],
@@ -4986,7 +4986,7 @@ def _product_board_summary_json(state, caller_id: str, args: dict) -> tuple[str,
     }), False
 
 
-def _product_task_show_json(state, caller_id: str, args: dict) -> tuple[str, bool]:
+def _task_proposal_show_json(state, caller_id: str, args: dict) -> tuple[str, bool]:
     task_id = _resolve_task(state, args.get("task", ""))
     if not task_id:
         return "Task not found", True
@@ -5026,7 +5026,7 @@ def _product_initiative_ref(state, caller_id: str,
     return initiative_id, ""
 
 
-def _product_idea_brief_ref(state, caller_id: str,
+def _idea_brief_ref(state, caller_id: str,
                             brief_ref: str) -> tuple[str, dict | None, str]:
     caller = state.agents.get(str(caller_id or "").strip())
     group = str(getattr(caller, "group", "") or "").strip()
@@ -5141,13 +5141,13 @@ def _product_area_read_json(state, caller_id: str,
     }), False
 
 
-def _normalize_product_context(
+def _normalize_proposal_context(
         state,
         caller_id: str,
         caller_group: str,
         args: dict) -> tuple[dict, str]:
     if _dedupe_strings(args.get("context_engineer_ids", [])):
-        return {}, "context_engineer_ids are not supported for product wrappers"
+        return {}, "context_engineer_ids are not supported for proposal tools"
 
     task_ids = []
     task_snapshots = []
@@ -5208,7 +5208,7 @@ def _normalize_product_context(
     idea_brief_ids = []
     idea_brief_snapshots = []
     for brief_ident in _dedupe_strings(args.get("context_idea_brief_ids", [])):
-        brief_id, brief, brief_error = _product_idea_brief_ref(
+        brief_id, brief, brief_error = _idea_brief_ref(
             state,
             caller_id,
             brief_ident,
@@ -5231,8 +5231,8 @@ def _normalize_product_context(
         "context_decision_ids": decision_ids,
         "context_summary": context_summary,
         "context_snapshot": {
-            "product_context": {
-                "marker": _PRODUCT_CONTEXT_MARKER,
+            "proposal_context": {
+                "marker": _PROPOSAL_CONTEXT_MARKER,
                 "area_ids": area_ids,
                 "initiative_ids": initiative_ids,
                 "idea_brief_ids": idea_brief_ids,
@@ -5248,20 +5248,20 @@ def _normalize_product_context(
     }, ""
 
 
-def _product_context_anchor_count(context: dict) -> int:
+def _proposal_context_anchor_count(context: dict) -> int:
     snapshot = dict((context or {}).get("context_snapshot", {}) or {})
-    product = dict(snapshot.get("product_context", {}) or {})
+    proposal = dict(snapshot.get("proposal_context", {}) or {})
     return (
         len(list((context or {}).get("context_task_ids", []) or []))
         + len(list((context or {}).get("context_decision_ids", []) or []))
-        + len(list(product.get("area_ids", []) or []))
-        + len(list(product.get("initiative_ids", []) or []))
-        + len(list(product.get("idea_brief_ids", []) or []))
+        + len(list(proposal.get("area_ids", []) or []))
+        + len(list(proposal.get("initiative_ids", []) or []))
+        + len(list(proposal.get("idea_brief_ids", []) or []))
     )
 
 
-def _require_product_peer_anchor(context: dict, *, tool_name: str) -> str:
-    if _product_context_anchor_count(context) > 0:
+def _require_proposal_peer_anchor(context: dict, *, tool_name: str) -> str:
+    if _proposal_context_anchor_count(context) > 0:
         return ""
     return (
         f"{tool_name} requires at least one product-scope anchor "
@@ -5272,7 +5272,7 @@ def _require_product_peer_anchor(context: dict, *, tool_name: str) -> str:
 def _require_product_ack_anchor(ack_required: bool, context: dict) -> str:
     if not ack_required:
         return ""
-    if _product_context_anchor_count(context) <= 0:
+    if _proposal_context_anchor_count(context) <= 0:
         return (
             "ack_required=true requires comm.product_ack_request plus at least "
             "one product-scope anchor (Idea Brief, decision, task proposal, Area, or Initiative)"
@@ -5370,12 +5370,12 @@ def _restricted_behavior_overlay_proposal_allowed(
     )
 
 
-def _add_product_peer_marker(context: dict, *, source: str,
+def _add_proposal_peer_marker(context: dict, *, source: str,
                              caller_id: str) -> dict:
     enriched = dict(context or {})
     snapshot = dict(enriched.get("context_snapshot", {}) or {})
-    snapshot["product_peer"] = {
-        "marker": _PRODUCT_PEER_MARKER,
+    snapshot["proposal_peer"] = {
+        "marker": _PROPOSAL_PEER_MARKER,
         "source": source,
         "caller_id": str(caller_id or "").strip(),
         "scope": "product_proposal_v1",
@@ -5384,16 +5384,16 @@ def _add_product_peer_marker(context: dict, *, source: str,
     return enriched
 
 
-def _row_has_product_peer_marker(row: dict | None) -> bool:
+def _row_has_proposal_peer_marker(row: dict | None) -> bool:
     snapshot = dict((row or {}).get("context_snapshot", {}) or {})
-    product_peer = snapshot.get("product_peer", {})
+    proposal_peer = snapshot.get("proposal_peer", {})
     return (
-        isinstance(product_peer, dict)
-        and str(product_peer.get("marker", "") or "").strip() == _PRODUCT_PEER_MARKER
+        isinstance(proposal_peer, dict)
+        and str(proposal_peer.get("marker", "") or "").strip() == _PROPOSAL_PEER_MARKER
     )
 
 
-def _row_product_context(row: dict | None) -> dict:
+def _row_proposal_context(row: dict | None) -> dict:
     return {
         "context_task_ids": list((row or {}).get("context_task_ids", []) or []),
         "context_engineer_ids": [],
@@ -5403,7 +5403,7 @@ def _row_product_context(row: dict | None) -> dict:
     }
 
 
-def _product_peer_row_visible(state, caller_id: str, row: dict,
+def _proposal_peer_row_visible(state, caller_id: str, row: dict,
                               peer_id: str = "") -> bool:
     caller_id = str(caller_id or "").strip()
     participants = {
@@ -5419,7 +5419,7 @@ def _product_peer_row_visible(state, caller_id: str, row: dict,
         str((row or {}).get("recipient_kind", "") or "").strip(),
     } != {"architect"}:
         return False
-    if not _row_has_product_peer_marker(row):
+    if not _row_has_proposal_peer_marker(row):
         return False
     peer_architect_id = next((pid for pid in participants if pid != caller_id), "")
     peer = state.agents.get(peer_architect_id)
@@ -5429,10 +5429,10 @@ def _product_peer_row_visible(state, caller_id: str, row: dict,
     if str(getattr(peer, "group", "") or "").strip() != str(
             getattr(caller, "group", "") or "").strip():
         return False
-    return _product_peer_eligible(state, caller_id, peer)
+    return _proposal_peer_eligible(state, caller_id, peer)
 
 
-def _product_peer_inbox_json(state, caller_id: str,
+def _proposal_peer_inbox_json(state, caller_id: str,
                              args: dict) -> tuple[str, bool]:
     try:
         limit = int(args.get("limit", _ARCHITECT_PEER_INBOX_DEFAULT_LIMIT)
@@ -5461,7 +5461,7 @@ def _product_peer_inbox_json(state, caller_id: str,
     thread_id = str(args.get("thread_id", "") or "").strip()
     db = getattr(state, "db", None)
     if not db:
-        return _compact_json({"type": "product_peer_inbox", "threads": []}), False
+        return _compact_json({"type": "proposal_peer_inbox", "threads": []}), False
     row_limit = min(max(limit * 20, limit), 1000)
     rows = db.load_agent_peer_messages_for_agent(
         caller_id,
@@ -5472,7 +5472,7 @@ def _product_peer_inbox_json(state, caller_id: str,
     )
     grouped: dict[str, list[dict]] = {}
     for row in rows:
-        if not _product_peer_row_visible(state, caller_id, row, peer_id=peer_id):
+        if not _proposal_peer_row_visible(state, caller_id, row, peer_id=peer_id):
             continue
         grouped.setdefault(str(row.get("thread_id", "") or ""), []).append(row)
     threads = []
@@ -5510,7 +5510,7 @@ def _product_peer_inbox_json(state, caller_id: str,
         reverse=True,
     )
     return _compact_json({
-        "type": "product_peer_inbox",
+        "type": "proposal_peer_inbox",
         "threads": threads[:limit],
     }), False
 
@@ -6056,7 +6056,7 @@ def _idea_brief_patch_from_args(args: dict) -> dict:
     return {key: args[key] for key in allowed if key in args}
 
 
-async def _architect_product_idea_brief_tool(
+async def _architect_idea_brief_tool(
         tool_name: str,
         state,
         caller_id: str,
@@ -6068,7 +6068,7 @@ async def _architect_product_idea_brief_tool(
         return group_error, True
     include_archived = _thinking_bool_arg(args, "include_archived", False)
 
-    if tool_name == "product_idea_brief_list":
+    if tool_name == "idea_brief_list":
         try:
             briefs = [
                 _with_idea_brief_owner_flag(brief, caller_id)
@@ -6082,13 +6082,13 @@ async def _architect_product_idea_brief_tool(
         except ValueError as exc:
             return str(exc), True
         return _compact_json({
-            "type": "product_idea_brief_list",
+            "type": "idea_brief_list",
             "group": group,
             "idea_briefs": briefs,
             **idea_brief_contract_metadata(),
         }), False
 
-    if tool_name == "product_idea_brief_show":
+    if tool_name == "idea_brief_show":
         _brief_id, brief, error = _resolve_idea_brief_for_caller(
             state,
             group,
@@ -6098,11 +6098,11 @@ async def _architect_product_idea_brief_tool(
         if error:
             return error, True
         payload = _with_idea_brief_owner_flag(brief, caller_id)
-        payload["type"] = "product_idea_brief"
+        payload["type"] = "idea_brief"
         payload.update(idea_brief_contract_metadata())
         return _compact_json(payload), False
 
-    if tool_name == "product_idea_brief_create":
+    if tool_name == "idea_brief_create":
         problem = str(args.get("problem_opportunity", "") or "").strip()
         if not problem:
             return "problem_opportunity is required", True
@@ -6119,7 +6119,7 @@ async def _architect_product_idea_brief_tool(
         except ValueError as exc:
             return str(exc), True
         return _compact_json({
-            "type": "product_idea_brief_created",
+            "type": "idea_brief_created",
             "idea_brief": _with_idea_brief_owner_flag(brief, caller_id),
             **idea_brief_contract_metadata(),
         }), False
@@ -6128,7 +6128,7 @@ async def _architect_product_idea_brief_tool(
         state,
         group,
         args,
-        include_archived=(include_archived or tool_name == "product_idea_brief_archive"),
+        include_archived=(include_archived or tool_name == "idea_brief_archive"),
     )
     if error:
         return error, True
@@ -6136,7 +6136,7 @@ async def _architect_product_idea_brief_tool(
     if owner_error:
         return owner_error, True
 
-    if tool_name == "product_idea_brief_update":
+    if tool_name == "idea_brief_update":
         patch = _idea_brief_patch_from_args(args)
         patch["updated_by_kind"] = "architect"
         patch["updated_by_id"] = str(caller_id or "").strip()
@@ -6145,12 +6145,12 @@ async def _architect_product_idea_brief_tool(
         except ValueError as exc:
             return str(exc), True
         return _compact_json({
-            "type": "product_idea_brief_updated",
+            "type": "idea_brief_updated",
             "idea_brief": _with_idea_brief_owner_flag(updated, caller_id),
             **idea_brief_contract_metadata(),
         }), False
 
-    if tool_name == "product_idea_brief_refine":
+    if tool_name == "idea_brief_refine":
         patch = _idea_brief_patch_from_args(args)
         if "refinement_note" in args:
             patch["refinement_note"] = args.get("refinement_note", "")
@@ -6161,12 +6161,12 @@ async def _architect_product_idea_brief_tool(
         except ValueError as exc:
             return str(exc), True
         return _compact_json({
-            "type": "product_idea_brief_refined",
+            "type": "idea_brief_refined",
             "idea_brief": _with_idea_brief_owner_flag(refined, caller_id),
             **idea_brief_contract_metadata(),
         }), False
 
-    if tool_name == "product_idea_brief_park":
+    if tool_name == "idea_brief_park":
         try:
             parked = await state.park_idea_brief_async(
                 brief_id,
@@ -6177,12 +6177,12 @@ async def _architect_product_idea_brief_tool(
         except ValueError as exc:
             return str(exc), True
         return _compact_json({
-            "type": "product_idea_brief_parked",
+            "type": "idea_brief_parked",
             "idea_brief": _with_idea_brief_owner_flag(parked, caller_id),
             **idea_brief_contract_metadata(),
         }), False
 
-    if tool_name == "product_idea_brief_archive":
+    if tool_name == "idea_brief_archive":
         try:
             archived = await state.archive_idea_brief_async(
                 brief_id,
@@ -6193,12 +6193,12 @@ async def _architect_product_idea_brief_tool(
         except ValueError as exc:
             return str(exc), True
         return _compact_json({
-            "type": "product_idea_brief_archived",
+            "type": "idea_brief_archived",
             "idea_brief": _with_idea_brief_owner_flag(archived, caller_id),
             **idea_brief_contract_metadata(),
         }), False
 
-    if tool_name in {"product_idea_brief_propose", "product_idea_brief_promote"}:
+    if tool_name == "idea_brief_propose":
         try:
             proposed = await state.propose_idea_brief_async(
                 brief_id,
@@ -6210,7 +6210,7 @@ async def _architect_product_idea_brief_tool(
         except ValueError as exc:
             return str(exc), True
         return _compact_json({
-            "type": "product_idea_brief_proposed",
+            "type": "idea_brief_proposed",
             "idea_brief": _with_idea_brief_owner_flag(proposed, caller_id),
             "review_scope": IDEA_BRIEF_PROPOSAL_SCOPE,
             "proposal": proposed.get("proposal", {}) if proposed else {},
@@ -9667,7 +9667,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
     if tool_name in {"help_list", "help_show", "help_search", "help_query"}:
         return dispatch_help_tool(name, args, prefix=tool_prefix)
 
-    # -- Product wrapper tools --------------------------------------------
+    # -- Proposal-oriented tools ------------------------------------------
 
     if caller_kind == "architect" and tool_name.startswith("thinking_"):
         return await _architect_thinking_tool(
@@ -9678,8 +9678,8 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             args,
         )
 
-    if caller_kind == "architect" and tool_name.startswith("product_idea_brief_"):
-        return await _architect_product_idea_brief_tool(
+    if caller_kind == "architect" and tool_name.startswith("idea_brief_"):
+        return await _architect_idea_brief_tool(
             tool_name,
             real_state,
             caller_id,
@@ -9687,36 +9687,36 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             args,
         )
 
-    if caller_kind == "architect" and tool_name == "product_board_summary":
-        return _product_board_summary_json(real_state, caller_id, args)
+    if caller_kind == "architect" and tool_name == "proposal_board_summary":
+        return _proposal_board_summary_json(real_state, caller_id, args)
 
-    if caller_kind == "architect" and tool_name == "product_task_list":
-        return _product_task_list_json(real_state, caller_id, args)
+    if caller_kind == "architect" and tool_name == "task_proposal_list":
+        return _task_proposal_list_json(real_state, caller_id, args)
 
-    if caller_kind == "architect" and tool_name == "product_task_show":
-        return _product_task_show_json(real_state, caller_id, args)
+    if caller_kind == "architect" and tool_name == "task_proposal_show":
+        return _task_proposal_show_json(real_state, caller_id, args)
 
-    if caller_kind == "architect" and tool_name == "product_area_list":
+    if caller_kind == "architect" and tool_name == "proposal_area_list":
         return _product_area_read_json(real_state, caller_id, args, show=False)
 
-    if caller_kind == "architect" and tool_name == "product_area_show":
+    if caller_kind == "architect" and tool_name == "proposal_area_show":
         return _product_area_read_json(real_state, caller_id, args, show=True)
 
-    if caller_kind == "architect" and tool_name == "product_initiative_list":
+    if caller_kind == "architect" and tool_name == "proposal_initiative_list":
         return _product_initiative_read_json(real_state, caller_id, args, show=False)
 
-    if caller_kind == "architect" and tool_name == "product_initiative_show":
+    if caller_kind == "architect" and tool_name == "proposal_initiative_show":
         return _product_initiative_read_json(real_state, caller_id, args, show=True)
 
-    if caller_kind == "architect" and tool_name == "product_decision_list":
+    if caller_kind == "architect" and tool_name == "decision_proposal_list":
         decisions = _product_decisions_for_architect(
             real_state,
             caller_id,
             include_archived=bool(args.get("include_archived", False)),
         )
-        return _compact_json({"type": "product_decision_list", "decisions": decisions}), False
+        return _compact_json({"type": "decision_proposal_list", "decisions": decisions}), False
 
-    if caller_kind == "architect" and tool_name == "product_peer_list":
+    if caller_kind == "architect" and tool_name == "proposal_peer_list":
         include_dismissed, bool_error = _optional_bool_arg(args, "include_dismissed", False)
         if bool_error:
             return bool_error, True
@@ -9731,20 +9731,20 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 continue
             if _agent_dismissed_at(cell) and not include_dismissed:
                 continue
-            product_peer_scope = _product_peer_scope_reason(real_state, caller_id, cell)
-            if not product_peer_scope:
+            proposal_peer_scope = _proposal_peer_scope_reason(real_state, caller_id, cell)
+            if not proposal_peer_scope:
                 continue
             item = _architect_peer_item(real_state, cell)
-            item["product_peer_eligible"] = True
-            item["product_peer_scope"] = product_peer_scope
+            item["proposal_peer_eligible"] = True
+            item["proposal_peer_scope"] = proposal_peer_scope
             peers.append(item)
         peers.sort(key=lambda item: (str(item.get("name", "") or "").lower(), str(item.get("id", "") or "")))
-        return _compact_json({"type": "product_peers", "architect_id": caller_id, "architects": peers}), False
+        return _compact_json({"type": "proposal_peers", "architect_id": caller_id, "architects": peers}), False
 
-    if caller_kind == "architect" and tool_name == "product_peer_inbox":
-        return _product_peer_inbox_json(real_state, caller_id, args)
+    if caller_kind == "architect" and tool_name == "proposal_peer_inbox":
+        return _proposal_peer_inbox_json(real_state, caller_id, args)
 
-    if caller_kind == "architect" and tool_name == "product_task_propose":
+    if caller_kind == "architect" and tool_name == "task_propose":
         for forbidden in sorted(_PRODUCT_TASK_PROPOSAL_FORBIDDEN_ARGS):
             if forbidden not in args:
                 continue
@@ -9752,7 +9752,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             if value in (None, "", False, [], {}):
                 continue
             return (
-                f"{forbidden} is not accepted by architect_product_task_propose; "
+                f"{forbidden} is not accepted by architect_task_propose; "
                 "product task proposals are always queued, unassigned, and non-dispatched",
                 True,
             )
@@ -9824,7 +9824,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         )
         return _compact_json(response), False
 
-    if caller_kind == "architect" and tool_name == "product_decision_create":
+    if caller_kind == "architect" and tool_name == "decision_propose":
         title = str(args.get("title", "") or "").strip()
         rationale = str(args.get("rationale", "") or "").strip()
         if not title:
@@ -9833,9 +9833,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             return "rationale is required", True
         status = str(args.get("status", "") or "proposed").strip() or "proposed"
         if status != "proposed":
-            return "Product-wrapper decisions must remain proposed", True
+            return "Decision proposals must remain proposed", True
         if _dedupe_strings(args.get("linked_engineer_ids", [])):
-            return "Product-wrapper decisions cannot link engineers by default", True
+            return "Decision proposals cannot link engineers", True
         supersedes = str(args.get("supersedes", "") or "").strip() or None
         if supersedes:
             prior_decision, decision_error = _load_product_decision(real_state, caller_id, supersedes)
@@ -9862,9 +9862,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         })
         if not decision:
             return "Failed to save decision", True
-        return _compact_json({"type": "product_decision_created", "decision": decision}), False
+        return _compact_json({"type": "decision_proposed", "decision": decision}), False
 
-    if caller_kind == "architect" and tool_name == "product_decision_update":
+    if caller_kind == "architect" and tool_name == "decision_proposal_update":
         decision, decision_error = _load_product_decision(real_state, caller_id, args.get("id", ""))
         if not decision:
             return decision_error, True
@@ -9882,10 +9882,10 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if "status" in args:
             status = str(args.get("status", "") or "").strip()
             if status != "proposed":
-                return "Product-wrapper decisions must remain proposed", True
+                return "Decision proposals must remain proposed", True
             patch["status"] = "proposed"
         if "linked_engineer_ids" in args and _dedupe_strings(args.get("linked_engineer_ids", [])):
-            return "Product-wrapper decisions cannot link engineers by default", True
+            return "Decision proposals cannot link engineers", True
         if "supersedes" in args:
             supersedes = str(args.get("supersedes", "") or "").strip() or None
             if supersedes:
@@ -9908,11 +9908,11 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         updated = await real_state.save_decision_async(patch)
         if not updated:
             return "Failed to save decision", True
-        return _compact_json({"type": "product_decision_updated", "decision": updated}), False
+        return _compact_json({"type": "decision_proposal_updated", "decision": updated}), False
 
-    if caller_kind == "architect" and tool_name == "product_decision_link":
+    if caller_kind == "architect" and tool_name == "decision_proposal_link":
         if str(args.get("engineer_id", "") or "").strip():
-            return "Product-wrapper decisions cannot link engineers by default", True
+            return "Decision proposals cannot link engineers", True
         decision, decision_error = _load_product_decision(real_state, caller_id, args.get("id", ""))
         if not decision:
             return decision_error, True
@@ -9933,9 +9933,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         })
         if not updated:
             return "Failed to save decision", True
-        return _compact_json({"type": "product_decision_linked", "decision": updated}), False
+        return _compact_json({"type": "decision_proposal_linked", "decision": updated}), False
 
-    if caller_kind == "architect" and tool_name == "product_peer_message":
+    if caller_kind == "architect" and tool_name == "proposal_peer_message":
         recipient, recipient_error = _resolve_product_architect_peer(real_state, caller_id, str(args.get("architect_id", "") or "").strip())
         if not recipient:
             return recipient_error, True
@@ -9948,24 +9948,24 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             return ack_error, True
         if ack_required and not _caller_authority_allows_capability(real_state, caller_id, "message.ack_required"):
             return "ack_required=true requires comm.product_ack_request", True
-        context, context_error = _normalize_product_context(real_state, caller_id, _engineer_group, args)
+        context, context_error = _normalize_proposal_context(real_state, caller_id, _engineer_group, args)
         if context_error:
             return context_error, True
-        anchor_error = _require_product_peer_anchor(
+        anchor_error = _require_proposal_peer_anchor(
             context,
-            tool_name="architect_product_peer_message",
+            tool_name="architect_proposal_peer_message",
         )
         if anchor_error:
             return anchor_error, True
         ack_anchor_error = _require_product_ack_anchor(ack_required, context)
         if ack_anchor_error:
             return ack_anchor_error, True
-        context = _add_product_peer_marker(context, source="architect_product_peer_message", caller_id=caller_id)
+        context = _add_proposal_peer_marker(context, source="architect_proposal_peer_message", caller_id=caller_id)
         length_error = _validate_architect_peer_message_length(message, context.get("context_summary", ""))
         if length_error:
             return length_error, True
         try:
-            saved, created = _save_architect_peer_message(real_state, architect, recipient, action="architect_product_peer_message", message=message, ack_required=ack_required, context=context, idempotency_key=idempotency_key)
+            saved, created = _save_architect_peer_message(real_state, architect, recipient, action="architect_proposal_peer_message", message=message, ack_required=ack_required, context=context, idempotency_key=idempotency_key)
         except ValueError as exc:
             return str(exc), True
         if created:
@@ -9975,15 +9975,15 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 saved = current
         else:
             delivery = {"state": str(saved.get("delivery_state", "buffered") or "buffered"), "reason": str(saved.get("delivery_reason", "") or "")}
-        return _compact_json({"type": "ok", "message_id": saved["id"], "thread_id": saved["thread_id"], "recipient_architect_id": recipient.id, "ack_required": bool(saved.get("ack_required", False)), "delivery": delivery, "product_peer_marker": _PRODUCT_PEER_MARKER}), False
+        return _compact_json({"type": "ok", "message_id": saved["id"], "thread_id": saved["thread_id"], "recipient_architect_id": recipient.id, "ack_required": bool(saved.get("ack_required", False)), "delivery": delivery, "proposal_peer_marker": _PROPOSAL_PEER_MARKER}), False
 
-    if caller_kind == "architect" and tool_name == "product_peer_reply":
+    if caller_kind == "architect" and tool_name == "proposal_peer_reply":
         message_id = str(args.get("message_id", "") or "").strip()
         if not message_id:
             return "message_id is required", True
         db = getattr(real_state, "db", None)
         row = db.load_agent_peer_message(message_id) if db else None
-        if not row or not _product_peer_row_visible(real_state, caller_id, row):
+        if not row or not _proposal_peer_row_visible(real_state, caller_id, row):
             return "thread not found in product-peer scope", True
         caller = real_state.agents.get(str(caller_id or "").strip())
         participants = {str(row.get("sender_id", "") or "").strip(), str(row.get("recipient_id", "") or "").strip()}
@@ -10000,7 +10000,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if ack_required and not _caller_authority_allows_capability(real_state, caller_id, "message.ack_required"):
             return "ack_required=true requires comm.product_ack_request", True
         if _dedupe_strings(args.get("context_engineer_ids", [])):
-            context, context_error = _normalize_product_context(
+            context, context_error = _normalize_proposal_context(
                 real_state,
                 caller_id,
                 _engineer_group,
@@ -10008,41 +10008,41 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             )
             if context_error:
                 return context_error, True
-            return "context_engineer_ids are not supported for product wrappers", True
+            return "context_engineer_ids are not supported for proposal tools", True
         has_explicit_context = any(key in args for key in ("context_task_ids", "context_decision_ids", "context_area_ids", "context_initiative_ids", "context_idea_brief_ids", "context_summary"))
         if has_explicit_context:
-            context, context_error = _normalize_product_context(real_state, caller_id, _engineer_group, args)
+            context, context_error = _normalize_proposal_context(real_state, caller_id, _engineer_group, args)
             if context_error:
                 return context_error, True
         else:
-            context = _row_product_context(row)
-        anchor_error = _require_product_peer_anchor(
+            context = _row_proposal_context(row)
+        anchor_error = _require_proposal_peer_anchor(
             context,
-            tool_name="architect_product_peer_reply",
+            tool_name="architect_proposal_peer_reply",
         )
         if anchor_error:
             return anchor_error, True
         ack_anchor_error = _require_product_ack_anchor(ack_required, context)
         if ack_anchor_error:
             return ack_anchor_error, True
-        context = _add_product_peer_marker(context, source="architect_product_peer_reply", caller_id=caller_id)
+        context = _add_proposal_peer_marker(context, source="architect_proposal_peer_reply", caller_id=caller_id)
         length_error = _validate_architect_peer_message_length(message, context.get("context_summary", ""))
         if length_error:
             return length_error, True
         try:
-            saved, created = _save_architect_peer_message(real_state, caller, peer, action="architect_product_peer_reply", message=message, reply_to_id=message_id, thread_id=str(row.get("thread_id", "") or "").strip(), ack_required=ack_required, context=context, idempotency_key=idempotency_key)
+            saved, created = _save_architect_peer_message(real_state, caller, peer, action="architect_proposal_peer_reply", message=message, reply_to_id=message_id, thread_id=str(row.get("thread_id", "") or "").strip(), ack_required=ack_required, context=context, idempotency_key=idempotency_key)
         except ValueError as exc:
             return str(exc), True
         if created:
             await _inject_architect_peer_message(handle_command, real_state, caller, peer, saved, message)
-        return _compact_json({"type": "ok", "message_id": saved["id"], "thread_id": saved["thread_id"], "product_peer_marker": _PRODUCT_PEER_MARKER}), False
+        return _compact_json({"type": "ok", "message_id": saved["id"], "thread_id": saved["thread_id"], "proposal_peer_marker": _PROPOSAL_PEER_MARKER}), False
 
-    if caller_kind == "architect" and tool_name == "product_message_user":
+    if caller_kind == "architect" and tool_name == "proposal_message_user":
         sender = real_state.agents.get(str(caller_id or "").strip())
         message = str(args.get("message", "") or "").strip()
         if not message:
             return "message is required", True
-        context, context_error = _normalize_product_context(real_state, caller_id, _engineer_group, args)
+        context, context_error = _normalize_proposal_context(real_state, caller_id, _engineer_group, args)
         if context_error:
             return context_error, True
         length_error = _validate_architect_peer_message_length(message, context.get("context_summary", ""))
@@ -10053,14 +10053,14 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         except ValueError as exc:
             return str(exc), True
         payload = _direct_user_message_response(saved, deduped=not created)
-        payload["product_context_marker"] = _PRODUCT_CONTEXT_MARKER
+        payload["proposal_context_marker"] = _PROPOSAL_CONTEXT_MARKER
         return json.dumps(payload), False
 
-    if caller_kind == "architect" and tool_name == "product_ask_user":
+    if caller_kind == "architect" and tool_name == "proposal_ask_user":
         question = str(args.get("question", "") or "").strip()
         if not question:
             return "Question is required", True
-        context, context_error = _normalize_product_context(real_state, caller_id, _engineer_group, args)
+        context, context_error = _normalize_proposal_context(real_state, caller_id, _engineer_group, args)
         if context_error:
             return context_error, True
         architect = real_state.agents.get(str(caller_id or "").strip())
@@ -10086,11 +10086,11 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if not task:
             return "Failed to create product ask task", True
         save_direct_ask_mirror(real_state, architect, question, source_task_id=task.id)
-        return _compact_json({"type": "ok", "task_id": task.id, "status": "Awaiting Input", "labels": list(task.labels or []), "product_context_marker": _PRODUCT_CONTEXT_MARKER}), False
+        return _compact_json({"type": "ok", "task_id": task.id, "status": "Awaiting Input", "labels": list(task.labels or []), "proposal_context_marker": _PROPOSAL_CONTEXT_MARKER}), False
 
-    if caller_kind == "architect" and tool_name == "product_journal":
+    if caller_kind == "architect" and tool_name == "proposal_journal":
         entry_type = str(args.get("type", "") or "").strip()
-        if entry_type not in _PRODUCT_JOURNAL_ENTRY_TYPES:
+        if entry_type not in _PROPOSAL_JOURNAL_ENTRY_TYPES:
             return "type must be one of: observation, checkpoint, plan", True
         entry = str(args.get("entry", "") or "")
         if not entry:
@@ -10102,10 +10102,10 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             return result.get("message", "Unknown error"), True
         return json.dumps(result), False
 
-    if caller_kind == "architect" and tool_name == "product_journal_read":
+    if caller_kind == "architect" and tool_name == "proposal_journal_read":
         entries = real_state.architect_journal_read(caller_id, since=args.get("since", 0), limit=args.get("limit", 20))
-        entries = [entry for entry in entries if str((entry or {}).get("type", "") or "").strip() in _PRODUCT_JOURNAL_ENTRY_TYPES]
-        return json.dumps({"type": "product_journal", "entries": entries}), False
+        entries = [entry for entry in entries if str((entry or {}).get("type", "") or "").strip() in _PROPOSAL_JOURNAL_ENTRY_TYPES]
+        return json.dumps({"type": "proposal_journal", "entries": entries}), False
 
     # -- Read tools ---------------------------------------------------------
 

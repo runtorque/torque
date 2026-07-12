@@ -3768,7 +3768,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             source="product-peer route msg-123",
             authorization={
                 "scope": "routed_product_proposal_root_pickup",
-                "source": "product_peer_route",
+                "source": "proposal_peer_route",
                 "route_message_id": "msg-123",
             },
         )

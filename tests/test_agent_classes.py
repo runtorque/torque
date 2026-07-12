@@ -131,7 +131,7 @@ class AgentClassRegistryTests(unittest.TestCase):
         warnings = "\n".join(preview["warnings"])
         self.assertIn("proposal-only", warnings)
         self.assertIn("architect_thinking_*", warnings)
-        self.assertIn("architect_product_*", warnings)
+        self.assertIn("architect_idea_brief_*", warnings)
 
         self.assertNotIn(
             "class.admin",
@@ -578,9 +578,9 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
             capabilities=CAPABILITY_CATALOG,
         )
 
-        self.assertTrue(mcp_tool_allowed_by_authority("architect_product_board_summary", authority))
+        self.assertTrue(mcp_tool_allowed_by_authority("architect_proposal_board_summary", authority))
         self.assertTrue(mcp_tool_allowed_by_authority("architect_board_summary", authority))
-        self.assertFalse(mcp_tool_allowed_by_authority("architect_product_idea_brief_create", authority))
+        self.assertFalse(mcp_tool_allowed_by_authority("architect_idea_brief_create", authority))
         self.assertFalse(mcp_tool_allowed_by_authority("architect_task_create", authority))
         self.assertFalse(mcp_tool_allowed_by_authority("architect_engineer_hire", authority))
         self.assertFalse(mcp_tool_allowed_by_authority("architect_tool_search", authority))
@@ -661,9 +661,9 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         self.assertIn("non-binding until accepted", prompt_block)
         self.assertTrue(mcp_tool_allowed_by_authority("architect_thinking_scratchpad_create", authority))
         self.assertTrue(mcp_tool_allowed_by_authority("architect_thinking_mind_map_node_create", authority))
-        self.assertTrue(mcp_tool_allowed_by_authority("architect_product_idea_brief_create", authority))
-        self.assertTrue(mcp_tool_allowed_by_authority("architect_product_idea_brief_propose", authority))
-        self.assertTrue(mcp_tool_allowed_by_authority("architect_product_task_propose", authority))
+        self.assertTrue(mcp_tool_allowed_by_authority("architect_idea_brief_create", authority))
+        self.assertTrue(mcp_tool_allowed_by_authority("architect_idea_brief_propose", authority))
+        self.assertTrue(mcp_tool_allowed_by_authority("architect_task_propose", authority))
         self.assertTrue(mcp_tool_allowed_by_authority("architect_board_summary", authority))
         self.assertFalse(mcp_tool_allowed_by_authority("architect_tool_search", authority))
         self.assertTrue(mcp_tool_allowed_by_authority("architect_peer_message", authority))
@@ -1382,7 +1382,7 @@ class AgentClassDoctorAndCommandTests(unittest.TestCase):
         self.assertIn("Torque Steward", created_prompt["persistent_prompt_text"])
         self.assertIn("Effective Torque MCP authority", created_prompt["persistent_prompt_text"])
         self.assertIn("visible user-message tool", created_prompt["persistent_prompt_text"])
-        self.assertNotIn("architect_product_message_user", created_prompt["persistent_prompt_text"])
+        self.assertNotIn("architect_proposal_message_user", created_prompt["persistent_prompt_text"])
 
 
 if __name__ == "__main__":

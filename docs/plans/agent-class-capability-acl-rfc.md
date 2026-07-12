@@ -47,14 +47,15 @@ Implemented in the current working change:
   `group_health_brief` / `architect_group_health_brief` surface;
 - replacement of Product-Manager-specific task labels, decision metadata,
   route scopes, and proposal-root cleanup names with product-proposal
-  semantics.
+  semantics;
+- replacement of the `architect_product_*` wrapper namespace with semantic
+  proposal, task-proposal, decision-proposal, Idea Brief, and peer-tool names.
 
 Still required before this RFC is complete:
 
 - finish family-by-family list filtering and concrete resource scope checks
   for Planning objects, mixed-purpose messaging threads, event/semantic
   recall rows, and remaining aggregate/read models;
-- remove or rename historical class-oriented wrapper tools where practical;
 Date: 2026-07-11  
 Supersedes: `docs/plans/agent-classes-generic-authority-plan.md`
 
@@ -105,7 +106,7 @@ The current implementation is transitional rather than generic:
 At the time this RFC was accepted, Torque registered 227 MCP tools. Of those,
 226 had current central capability mappings, one registered tool was unmapped
 (`torque_stop_user_message_loop`), and one mapping referred to a stale tool
-(`architect_product_idea_brief_promote`). This is sufficient evidence that
+(`architect_product_idea_brief_promote`, now removed). This is sufficient evidence that
 authority metadata must be colocated with tool registration and audited
 fail-closed.
 

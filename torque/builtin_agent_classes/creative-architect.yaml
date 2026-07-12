@@ -44,8 +44,8 @@ prompt:
 warnings:
 - 'Creative Architect is proposal-only: ideas, decisions, tasks, and messages remain non-binding
   until accepted through normal Torque authority.'
-- Use architect_thinking_* wrappers for Scratchpad/Mind Map work, architect_product_idea_brief_*
-  wrappers for Idea Briefs, and architect_product_* wrappers for product proposals and product-anchored
+- Use architect_thinking_* wrappers for Scratchpad/Mind Map work, architect_idea_brief_*
+  wrappers for Idea Briefs, and proposal-oriented Architect tools for product proposals and product-anchored
   communication; raw execution/admin tools are denied.
 metadata:
   proposal_only: true

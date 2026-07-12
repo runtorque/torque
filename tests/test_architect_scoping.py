@@ -3536,7 +3536,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "context_task_ids": [root.id],
             "context_summary": "Explicit route request for TORQUE:991.",
             "context_snapshot": {
-                "product_peer": {"marker": "torque.product_peer.v1"},
+                "proposal_peer": {"marker": "torque.proposal_peer.v1"},
             },
         })
         covering = self._add_task(
@@ -3577,7 +3577,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(authorization["scope"], "routed_product_proposal_root")
         self.assertEqual(
             authorization["source"],
-            "covering_task_label_and_product_peer",
+            "covering_task_label_and_proposal_peer",
         )
         self.assertEqual(authorization["root_creator_architect_id"], pm.id)
         self.assertEqual(authorization["route_message_id"], "route-msg-991")
@@ -3608,7 +3608,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "context_task_ids": [root.id],
             "context_summary": "Explicit PM route request for TORQUE:1036.",
             "context_snapshot": {
-                "product_peer": {"marker": "torque.product_peer.v1"},
+                "proposal_peer": {"marker": "torque.proposal_peer.v1"},
             },
         })
         covering = self._add_task(
@@ -4085,7 +4085,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         )
         auth = {
             "scope": "routed_product_proposal_root",
-            "source": "covering_task_label_and_product_peer",
+            "source": "covering_task_label_and_proposal_peer",
             "covered_task_id": eligible_root.id,
             "root_creator_architect_id": pm.id,
             "covering_task_id": eligible_covering.id,
@@ -4135,7 +4135,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             actor_kind="architect",
             authorization={
                 "scope": "routed_product_proposal_root",
-                "source": "covering_task_label_and_product_peer",
+                "source": "covering_task_label_and_proposal_peer",
                 "covered_task_id": pending_root.id,
                 "root_creator_architect_id": pm.id,
                 "covering_task_id": pending_covering.id,
@@ -4247,7 +4247,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                 actor_kind="architect",
                 authorization={
                     "scope": "routed_product_proposal_root",
-                    "source": "covering_task_label_and_product_peer",
+                    "source": "covering_task_label_and_proposal_peer",
                     "covered_task_id": root.id,
                     "root_creator_architect_id": pm.id,
                     "covering_task_id": covering.id,

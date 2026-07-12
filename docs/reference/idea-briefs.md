@@ -1,15 +1,15 @@
 # Idea Brief backend contract (Wave A)
 
-Idea Briefs are durable, proposal-only synthesis artifacts for Catalyst/Creative product ideation. They are **not** executable tasks, accepted decisions, assignments, dispatches, merges, or deploy actions.
+Idea Briefs are durable, proposal-only synthesis artifacts for product ideation. They are **not** executable tasks, accepted decisions, assignments, dispatches, merges, or deploy actions.
 
 ## Status lifecycle
 
 - `draft` — editable working brief.
-- `proposed` — explicitly marked ready for product-safe Blueprint/Torqly/user review.
+- `proposed` — explicitly marked ready for product-safe review.
 - `parked` — durable but intentionally paused for later.
 - `archived` — hidden by default; terminal visibility state.
 
-`idea_brief_propose` / `architect_product_idea_brief_propose` only marks the brief proposed for review. The proposal payload records `auto_dispatch=false`, `auto_assign=false`, and empty `created_task_id` / `created_decision_id`.
+`idea_brief_propose` / `architect_idea_brief_propose` only marks the brief proposed for review. The proposal payload records `auto_dispatch=false`, `auto_assign=false`, and empty `created_task_id` / `created_decision_id`.
 
 ## Durable fields
 
@@ -96,20 +96,20 @@ Deltas use one op:
 
 The current Wave A frontend only keeps `state.idea_briefs` fresh; Wave B owns the visible panel/list/detail UI.
 
-## Catalyst-safe MCP wrappers
+## Proposal-safe MCP tools
 
-Creative/Catalyst uses product-safe Architect wrappers:
+Any Architect-derived class with the required Idea Brief capabilities can use:
 
-- `architect_product_idea_brief_list`
-- `architect_product_idea_brief_show`
-- `architect_product_idea_brief_create`
-- `architect_product_idea_brief_update`
-- `architect_product_idea_brief_refine`
-- `architect_product_idea_brief_park`
-- `architect_product_idea_brief_archive`
-- `architect_product_idea_brief_propose`
+- `architect_idea_brief_list`
+- `architect_idea_brief_show`
+- `architect_idea_brief_create`
+- `architect_idea_brief_update`
+- `architect_idea_brief_refine`
+- `architect_idea_brief_park`
+- `architect_idea_brief_archive`
+- `architect_idea_brief_propose`
 
-Wrapper rules:
+Tool rules:
 
 - Group argument, when supplied, must match caller group.
 - List/show are same-group reads and include `caller_owned`.
@@ -119,7 +119,7 @@ Wrapper rules:
 - Propose is review-only and never creates/dispatches/assigns work.
 - Propose returns `review_scope:"product_safe_review"` plus the persisted `proposal` object.
 
-Product peer/user context wrappers also accept `context_idea_brief_ids` and store them in `context_snapshot.product_context.idea_brief_ids`.
+Product peer/user context wrappers also accept `context_idea_brief_ids` and store them in `context_snapshot.proposal_context.idea_brief_ids`.
 
 ## Wave B UI smoke expectations
 

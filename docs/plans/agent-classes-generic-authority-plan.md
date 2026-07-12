@@ -346,7 +346,7 @@ acl:
       scope: children
     - action: task.read
       scope: group
-    - tool: architect_product_task_propose
+    - tool: architect_task_propose
 ```
 
 In deny mode:
@@ -366,7 +366,7 @@ Interpretation:
 - `mode: deny` starts from the base-kind ceiling and removes matching tools.
 - `allow` and `deny` entries can refer to:
   - `tool`: one exact MCP tool name;
-  - `family`: a glob over MCP tool names, such as `architect_product_*`;
+  - `family`: a glob over MCP tool names, such as `architect_proposal_*`;
   - `action`: a stable semantic action key;
   - `capability`: a legacy/internal capability atom or bucket, for migration.
 - The modes are exclusive: `mode: allow` must not include `deny`, and `mode: deny` must not include `allow`. Validation rejects mixed ACLs.
@@ -584,7 +584,7 @@ This keeps the UI simple while preserving hard runtime checks.
 
 ### Relationship to existing MCP tool wrappers
 
-Tool wrappers such as `architect_product_*` should be treated as normal MCP
+Tool wrappers such as `architect_proposal_*` should be treated as normal MCP
 tools/tool families, not as Product Manager-specific magic.
 
 For example:
@@ -593,7 +593,7 @@ For example:
 acl:
   mode: allow
   allow:
-    - family: architect_product_*
+    - family: architect_proposal_*
     - family: architect_thinking_*
 ```
 

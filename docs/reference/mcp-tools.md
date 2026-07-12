@@ -344,7 +344,7 @@ bound caller. The MCP implementations still reject an explicit canonical
 `thread_id` for a different agent as a spoof/stale-binding guard, but callers
 should not pass thread ids in the common path. User replies from the panel use
 `sender_kind=user` and are scoped to the addressed agent lane. For
-`architect_message_user` / `architect_product_message_user`, omitted
+`architect_message_user` / `architect_proposal_message_user`, omitted
 `reply_to_id` is inferred only when the calling Architect has exactly one
 pending direct user message; multiple pending user messages, an already-answered
 user thread, or an explicit `reply_to_id` outside the current Architect↔user

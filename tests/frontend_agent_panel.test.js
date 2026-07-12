@@ -3648,7 +3648,7 @@ test('agent class manager assigns Product Manager as desired and renders effecti
         { capability: 'message.user', scope: 'self' },
       ],
     },
-    warnings: ['Product Manager is draft/restricted; use architect_product_* wrappers only.'],
+    warnings: ['Product Manager is draft/restricted; use proposal-oriented Architect tools only.'],
     external_connector_caveat: 'External connector exposure is not governed by Agent Classes.',
     runtime_enforcement: 'launch_frozen_effective_authority',
   };
@@ -3794,7 +3794,7 @@ test('agent panel renders Product Manager dogfood state as compact capability AC
     warnings: [
       'External connectors are not governed by Agent Classes/Profile policy in Wave 7; manage connector access separately.',
       'External connector exposure is not governed or enforced by Agent Classes in Wave 7; manage connector access separately.',
-      'Raw Architect tools are denied; use architect_product_* wrappers only.',
+      'Raw Architect tools are denied; use proposal-oriented Architect tools only.',
       'Product Manager cannot dispatch, merge, deploy, administer, use raw tool picker authority, or message engineers/workers directly.',
     ],
     external_connector_caveat: 'External connector exposure is not governed or enforced by Agent Classes in Wave 7; manage connector access separately.',
@@ -3840,7 +3840,7 @@ test('agent panel renders Product Manager dogfood state as compact capability AC
   assert.match(classModalBody.innerHTML, /Effective ACL[\s\S]*task\.propose \(self\)/);
   assert.doesNotMatch(classModalBody.innerHTML, /class-policy-product-manager|Product Manager internal policy|differs from desired default/);
   assert.doesNotMatch(panel.innerHTML, /External connectors/);
-  assert.doesNotMatch(panel.innerHTML, /Raw Architect tools are denied; use architect_product_\* wrappers only\.[\s\S]*Raw Architect tools are denied/);
+  assert.doesNotMatch(panel.innerHTML, /Raw Architect tools are denied; use proposal-oriented Architect tools only\.[\s\S]*Raw Architect tools are denied/);
 });
 
 test('agent panel assigns and renders Creative as proposal-only Thinking class', () => {
@@ -3873,7 +3873,7 @@ test('agent panel assigns and renders Creative as proposal-only Thinking class',
     metadata: { proposal_only: true },
     warnings: [
       'Creative Architect is proposal-only: ideas remain non-binding until accepted through normal Torque authority.',
-      'Use architect_thinking_* wrappers for Scratchpad/Mind Map work and architect_product_* wrappers for product proposals.',
+      'Use architect_thinking_* wrappers for Scratchpad/Mind Map work and proposal-oriented Architect tools for product proposals.',
     ],
     external_connector_caveat: 'External connector exposure is not governed by Agent Classes.',
     apply_state: { applies_at: 'next_launch_or_relaunch', relaunch_required_after_assignment: true },
