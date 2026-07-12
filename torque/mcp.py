@@ -1160,6 +1160,49 @@ def _event_target_scope(state, caller_cell, event: dict | None) -> str:
     return "global"
 
 
+def _semantic_recall_target_scope(
+    state,
+    caller_cell,
+    result: dict | None,
+) -> str:
+    """Return scope for one semantic recall result's internal ACL anchors."""
+
+    if not caller_cell or not isinstance(result, dict):
+        return "global"
+    caller_id = str(getattr(caller_cell, "id", "") or "").strip()
+    owner_id = str(result.get("_acl_owner_id", "") or "").strip()
+    participant_ids = {
+        str(item or "").strip()
+        for item in (result.get("_acl_participant_ids", []) or [])
+        if str(item or "").strip()
+    }
+    if caller_id and caller_id in ({owner_id} | participant_ids):
+        return "self"
+    source_type = str(result.get("source_type", "") or "").strip()
+    source_id = str(result.get("source_id", "") or "").strip()
+    if source_type == "task" and source_id:
+        task = state.board_tasks.get(source_id)
+        if task is not None:
+            return _task_target_scope(state, caller_cell, task)
+    if source_type == "decision" and source_id:
+        decision = state.load_decision(source_id)
+        if decision is not None:
+            return _record_target_scope(state, caller_cell, decision)
+
+    scopes = []
+    for agent_id in ({owner_id} | participant_ids) - {""}:
+        agent = state.agents.get(agent_id)
+        if agent is not None:
+            scopes.append(_agent_target_scope(caller_cell, agent))
+    if scopes:
+        return min(scopes, key=lambda scope: SCOPE_RANK[scope])
+    caller_group = str(getattr(caller_cell, "group", "") or "").strip()
+    result_group = str(result.get("group", "") or "").strip()
+    if caller_group and caller_group == result_group:
+        return "group"
+    return "global"
+
+
 def _resolve_scoped_resource(state, caller_cell, resource_kind: str, reference):
     """Resolve one descriptor-declared resource without widening visibility."""
 
@@ -1209,6 +1252,8 @@ def _scoped_resource_relationship(state, caller_cell, resource_kind: str, resour
         return _task_target_scope(state, caller_cell, resource)
     if resource_kind == "event":
         return _event_target_scope(state, caller_cell, resource)
+    if resource_kind == "semantic_recall":
+        return _semantic_recall_target_scope(state, caller_cell, resource)
     if resource_kind in {"agent", "message_peer"}:
         return _agent_target_scope(caller_cell, resource)
     return _record_target_scope(state, caller_cell, resource)
@@ -1297,7 +1342,7 @@ def _result_collection_at_path(payload, path: str):
 def _scoped_result_resource(state, caller_cell, result_kind: str, item):
     """Resolve a declared result item to the resource used for ACL scope."""
 
-    if result_kind == "event" and isinstance(item, dict):
+    if result_kind in {"event", "semantic_recall"} and isinstance(item, dict):
         return item
     if isinstance(item, dict):
         if result_kind == "agent":
@@ -1337,7 +1382,7 @@ def _apply_tool_result_scope_filters(
 
     authority = _effective_class_authority_for_cell(caller_cell)
     tool_authority = MCP_TOOL_AUTHORITY_DEFINITIONS.get(tool_name)
-    if authority is None or not tool_authority or result.get("isError"):
+    if not tool_authority or result.get("isError"):
         return result
     filters = [
         requirement
@@ -1363,24 +1408,32 @@ def _apply_tool_result_scope_filters(
                 parent, key, collection = located
                 filtered = []
                 for item in collection:
-                    resource = _scoped_result_resource(
-                        state,
-                        caller_cell,
-                        requirement.result_kind,
-                        item,
-                    )
-                    if resource is None:
-                        continue
-                    target_scope = _scoped_resource_relationship(
-                        state,
-                        caller_cell,
-                        requirement.result_kind,
-                        resource,
-                    )
-                    if authority.allows(
-                        requirement.capability,
-                        scope=target_scope,
-                    ):
+                    allowed = authority is None
+                    if authority is not None:
+                        resource = _scoped_result_resource(
+                            state,
+                            caller_cell,
+                            requirement.result_kind,
+                            item,
+                        )
+                        if resource is not None:
+                            target_scope = _scoped_resource_relationship(
+                                state,
+                                caller_cell,
+                                requirement.result_kind,
+                                resource,
+                            )
+                            allowed = authority.allows(
+                                requirement.capability,
+                                scope=target_scope,
+                            )
+                    if allowed:
+                        if isinstance(item, dict):
+                            item = {
+                                key: value
+                                for key, value in item.items()
+                                if not str(key).startswith("_acl_")
+                            }
                         filtered.append(item)
                 parent[key] = filtered
                 # Collection summaries must not retain pre-filter counts.

@@ -68,12 +68,16 @@ Implemented in the current working change:
 - descriptor-driven `self`/`children`/`group` filtering for recent event rows,
   using task and attributed-agent relationships rather than treating the
   entire event feed as an indivisible group-wide aggregate.
+- descriptor-driven `self`/`children`/`group` filtering for semantic recall
+  results using internal owner/participant anchors that are stripped before
+  MCP output, while retaining the existing handler visibility checks as the
+  platform ceiling.
 
 Still required before this RFC is complete:
 
 - finish family-by-family list filtering and concrete resource scope checks
-  for semantic recall rows, linked Planning context embedded in aggregates,
-  and remaining aggregate/read models;
+  for linked Planning context embedded in aggregates and remaining
+  aggregate/read models;
 Date: 2026-07-11  
 Supersedes: `docs/plans/agent-classes-generic-authority-plan.md`
 

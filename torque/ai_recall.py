@@ -58,6 +58,12 @@ class RecallCandidate:
             "group": self.group_name,
             "snippet": _snippet(self.text),
             "updated_at": self.source_updated_at,
+            # Internal ACL anchors are removed by the common MCP result gate
+            # before protocol output. They retain the source relationship
+            # needed to narrow semantic recall below the handler's platform
+            # visibility ceiling without exposing indexed ownership metadata.
+            "_acl_owner_id": self.owner_id,
+            "_acl_participant_ids": list(self.participant_ids),
         }
 
 

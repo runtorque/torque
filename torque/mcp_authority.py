@@ -27,6 +27,7 @@ RESOURCE_KINDS = frozenset({
     "message_peer",
     "mind_map",
     "scratchpad_note",
+    "semantic_recall",
     "task",
 })
 

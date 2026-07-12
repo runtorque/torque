@@ -79,7 +79,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_semantic_recall", "authority": {"requirements": [{"capability": "semantic_recall.read","minimum_scope": "group","handler_scoped": True}]},
+        "name": "engineer_semantic_recall", "authority": {"requirements": [{"capability": "semantic_recall.read","minimum_scope": "self","result_kind": "semantic_recall","result_paths": ["results"]}]},
         "description": (
             "Search the local AI semantic index for snippets visible to this "
             "Engineer. Results are over-fetched then filtered through the "

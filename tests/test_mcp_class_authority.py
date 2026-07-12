@@ -339,6 +339,127 @@ class MCPClassAuthorityTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(payload["truncated"])
 
+    async def test_class_semantic_recall_self_scope_filters_and_sanitizes_results(self):
+        state, architect = self._state_with_architect()
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+            hired_by_architect_id=architect.id,
+        )
+        peer = self.state_mod.AgentCell(
+            id="architect-2",
+            name="Peer",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        state.agents[engineer.id] = engineer
+        state.agents[peer.id] = peer
+        state.groups["g"].extend([engineer.id, peer.id])
+        architect.effective_agent_class_snapshot = {
+            "effective_authority": {
+                "schema_version": 1,
+                "base_kind": "architect",
+                "acl_mode": "allow",
+                "capabilities": {"semantic_recall.read": "self"},
+            },
+        }
+        shared = importlib.import_module("torque.mcp_tools_shared")
+        original = shared.semantic_recall_payload
+
+        async def fake_recall_payload(**_kwargs):
+            return {
+                "type": "semantic_recall",
+                "status": "ok",
+                "message": "fixture",
+                "results": [
+                    {
+                        "rank": 1,
+                        "source_type": "architect_journal",
+                        "source_id": architect.id,
+                        "group": "g",
+                        "snippet": "own",
+                        "_acl_owner_id": architect.id,
+                        "_acl_participant_ids": [architect.id],
+                    },
+                    {
+                        "rank": 2,
+                        "source_type": "engineer_journal",
+                        "source_id": "2",
+                        "group": "g",
+                        "snippet": "child",
+                        "_acl_owner_id": engineer.id,
+                        "_acl_participant_ids": [engineer.id],
+                    },
+                    {
+                        "rank": 3,
+                        "source_type": "architect_journal",
+                        "source_id": peer.id,
+                        "group": "g",
+                        "snippet": "peer",
+                        "_acl_owner_id": peer.id,
+                        "_acl_participant_ids": [peer.id],
+                    },
+                ],
+            }
+
+        shared.semantic_recall_payload = fake_recall_payload
+        try:
+            handler = self.mcp_mod.create_mcp_handler(
+                lambda payload: self.fail(f"Unexpected command: {payload}"),
+                state,
+            )
+            response = await handler(FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "architect_semantic_recall",
+                        "arguments": {"query": "scope"},
+                    },
+                },
+                headers={"X-Torque-Cell-Id": architect.id},
+            ))
+            architect.effective_agent_class_snapshot = {}
+            unrestricted_response = await handler(FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "architect_semantic_recall",
+                        "arguments": {"query": "sanitize"},
+                    },
+                },
+                headers={"X-Torque-Cell-Id": architect.id},
+            ))
+        finally:
+            shared.semantic_recall_payload = original
+
+        payload = json.loads(response.payload["result"]["content"][0]["text"])
+        self.assertEqual(
+            [item["snippet"] for item in payload["results"]],
+            ["own"],
+        )
+        self.assertFalse(any(
+            key.startswith("_acl_")
+            for item in payload["results"]
+            for key in item
+        ))
+        unrestricted = json.loads(
+            unrestricted_response.payload["result"]["content"][0]["text"]
+        )
+        self.assertEqual(len(unrestricted["results"]), 3)
+        self.assertFalse(any(
+            key.startswith("_acl_")
+            for item in unrestricted["results"]
+            for key in item
+        ))
+
     async def test_class_thinking_self_scope_filters_lists_and_denies_peer_artifact(self):
         state, architect = self._state_with_architect()
         own_note = {

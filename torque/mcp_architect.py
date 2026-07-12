@@ -192,7 +192,7 @@ _ARCHITECT_TOOL_SPECS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "architect_semantic_recall", "authority": {"requirements": [{"capability": "semantic_recall.read","minimum_scope": "group","handler_scoped": True}]},
+        "name": "architect_semantic_recall", "authority": {"requirements": [{"capability": "semantic_recall.read","minimum_scope": "self","result_kind": "semantic_recall","result_paths": ["results"]}]},
         "description": (
             "Search the local AI semantic index for snippets visible to this "
             "Architect. Results are over-fetched then filtered through the "
