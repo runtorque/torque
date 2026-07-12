@@ -34,7 +34,10 @@ Implemented in the current working change:
   child-roster filtering, and group-only minima for role-wide behavior-overlay
   administration;
 - fail-closed registration validation requiring every scoped requirement to
-  declare target, result, scope-argument, or explicit handler enforcement.
+  declare target, result, scope-argument, or explicit handler enforcement;
+- product-peer, acknowledgement, and behavior-overlay wrapper refinements now
+  consult frozen canonical Agent Class authority before the temporary direct
+  Agent Profile fallback.
 
 Still required before this RFC is complete:
 

@@ -4464,8 +4464,8 @@ def _cell_has_product_peer_authority(state, cell) -> bool:
     if not cell_id:
         return False
     return (
-        _caller_profile_allows_capability(state, cell_id, "comm.peer_architect_message")
-        and _caller_profile_allows_capability(state, cell_id, "task.create_queued")
+        _caller_profile_allows_capability(state, cell_id, "message.architect_peer")
+        and _caller_profile_allows_capability(state, cell_id, "task.propose")
     )
 
 
@@ -4524,7 +4524,7 @@ def _product_peer_scope_reason(state, caller_id: str, peer) -> str:
     if _caller_profile_allows_capability(
             state,
             peer_id,
-            "comm.peer_architect_message"):
+            "message.architect_peer"):
         return "same-group-architect-peer-capable"
     return ""
 
@@ -5282,15 +5282,30 @@ def _require_product_ack_anchor(ack_required: bool, context: dict) -> str:
 
 def _caller_profile_allows_capability(state, caller_id: str,
                                       capability: str) -> bool:
-    """Best-effort effective-profile capability check for wrapper refinements.
+    """Check wrapper refinements against the caller's frozen authority.
 
-    No explicit effective profile means the historical full base-kind surface is
-    active, so the refinement allows the call. Restricted profiles must carry
-    the requested atom in their frozen/override policy.
+    Agent Class authority is canonical and takes precedence. Direct Agent
+    Profile policy remains only as a temporary fallback for sessions launched
+    before profile assignment is removed.
     """
     caller = getattr(state, "agents", {}).get(str(caller_id or "").strip())
     if not caller:
         return False
+    capability = str(capability or "").strip()
+    class_snapshot = getattr(caller, "effective_agent_class_snapshot", {}) or {}
+    if isinstance(class_snapshot, dict) and class_snapshot.get("effective_authority"):
+        try:
+            from .capability_catalog import CAPABILITY_CATALOG
+            from .mcp_authority import effective_authority_from_snapshot
+
+            authority = effective_authority_from_snapshot(
+                class_snapshot.get("effective_authority"),
+                capabilities=CAPABILITY_CATALOG,
+            )
+            return bool(authority and authority.has(capability))
+        except Exception:
+            log.exception("Failed to evaluate caller Agent Class authority")
+            return False
     raw_profile = None
     getter = getattr(state, "effective_agent_profile_for_cell", None)
     if callable(getter):
@@ -5313,6 +5328,7 @@ def _caller_profile_allows_capability(state, caller_id: str,
             profile_policy_by_id,
             profile_policy_from_definition,
         )
+        from .capability_catalog import canonical_capabilities_from_legacy_atoms
         if isinstance(raw_profile, AgentProfilePolicy):
             policy = raw_profile
         elif isinstance(raw_profile, AgentProfileDefinition):
@@ -5329,13 +5345,17 @@ def _caller_profile_allows_capability(state, caller_id: str,
         return False
     if policy is None or policy.is_full_base_kind_profile:
         return True
-    return str(capability or "").strip() in set(policy.grants)
+    return capability in canonical_capabilities_from_legacy_atoms(policy.grants)
 
 
 def _caller_has_behavior_overlay_admin(state, caller_id: str) -> bool:
-    """Return whether caller has the legacy broad overlay/profile-admin surface."""
+    """Return whether caller has behavior-overlay administration authority."""
 
-    return _caller_profile_allows_capability(state, caller_id, "profile.edit")
+    return _caller_profile_allows_capability(
+        state,
+        caller_id,
+        "behavior_overlay.admin",
+    )
 
 
 def _restricted_behavior_overlay_scope_allowed(
@@ -9965,7 +9985,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         ack_required, ack_error = _optional_bool_arg(args, "ack_required")
         if ack_error:
             return ack_error, True
-        if ack_required and not _caller_profile_allows_capability(real_state, caller_id, "comm.product_ack_request"):
+        if ack_required and not _caller_profile_allows_capability(real_state, caller_id, "message.ack_required"):
             return "ack_required=true requires comm.product_ack_request", True
         context, context_error = _normalize_product_context(real_state, caller_id, _engineer_group, args)
         if context_error:
@@ -10016,7 +10036,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         ack_required, ack_error = _optional_bool_arg(args, "ack_required")
         if ack_error:
             return ack_error, True
-        if ack_required and not _caller_profile_allows_capability(real_state, caller_id, "comm.product_ack_request"):
+        if ack_required and not _caller_profile_allows_capability(real_state, caller_id, "message.ack_required"):
             return "ack_required=true requires comm.product_ack_request", True
         if _dedupe_strings(args.get("context_engineer_ids", [])):
             context, context_error = _normalize_product_context(
