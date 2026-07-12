@@ -251,6 +251,94 @@ class MCPClassAuthorityTests(unittest.IsolatedAsyncioTestCase):
             [architect.id],
         )
 
+    async def test_class_event_self_scope_filters_child_activity(self):
+        state, architect = self._state_with_architect()
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+            hired_by_architect_id=architect.id,
+        )
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+            owner_engineer_id=engineer.id,
+        )
+        state.agents[engineer.id] = engineer
+        state.agents[worker.id] = worker
+        state.groups["g"].extend([engineer.id, worker.id])
+        child_task = self.state_mod.BoardTask(
+            id="task-child",
+            task="Child task",
+            group="g",
+            lane="In Progress",
+            assigned_engineer_id=engineer.id,
+            agent_id=worker.id,
+        )
+        state.board_tasks[child_task.id] = child_task
+        events = [
+            {
+                "id": "own-event",
+                "kind": "agent_error",
+                "timestamp": 2.0,
+                "cell_id": architect.id,
+                "agent_name": architect.name,
+                "group": "g",
+                "message": "Own event",
+            },
+            {
+                "id": "child-event",
+                "kind": "task_completed",
+                "timestamp": 1.0,
+                "cell_id": worker.id,
+                "agent_name": worker.name,
+                "group": "g",
+                "task_id": child_task.id,
+                "message": "Child event",
+            },
+        ]
+        state.panel_log = type(
+            "PanelLog",
+            (),
+            {"get_recent": lambda _self, _limit: list(reversed(events))},
+        )()
+        architect.effective_agent_class_snapshot = {
+            "effective_authority": {
+                "schema_version": 1,
+                "base_kind": "architect",
+                "acl_mode": "allow",
+                "capabilities": {"event.read": "self"},
+            },
+        }
+
+        handler = self.mcp_mod.create_mcp_handler(
+            lambda payload: self.fail(f"Unexpected command: {payload}"),
+            state,
+        )
+        response = await handler(FakeRequest(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "architect_events_recent",
+                    "arguments": {},
+                },
+            },
+            headers={"X-Torque-Cell-Id": architect.id},
+        ))
+        payload = json.loads(response.payload["result"]["content"][0]["text"])
+        self.assertEqual(
+            [item["id"] for item in payload["events"]],
+            ["own-event"],
+        )
+        self.assertFalse(payload["truncated"])
+
     async def test_class_thinking_self_scope_filters_lists_and_denies_peer_artifact(self):
         state, architect = self._state_with_architect()
         own_note = {

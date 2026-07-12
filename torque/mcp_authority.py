@@ -21,6 +21,7 @@ RESOURCE_KINDS = frozenset({
     "agent",
     "area",
     "decision",
+    "event",
     "idea_brief",
     "initiative",
     "message_peer",

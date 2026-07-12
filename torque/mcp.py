@@ -1125,6 +1125,41 @@ def _record_target_scope(state, caller_cell, record: dict | None) -> str:
     return "global"
 
 
+def _event_target_scope(state, caller_cell, event: dict | None) -> str:
+    """Return the narrowest caller relationship represented by an event."""
+
+    if not caller_cell or not isinstance(event, dict):
+        return "global"
+    caller_id = str(getattr(caller_cell, "id", "") or "").strip()
+    if caller_id and caller_id in {
+        str(event.get("cell_id", "") or "").strip(),
+        str(event.get("created_by_architect_id", "") or "").strip(),
+    }:
+        return "self"
+    scopes = []
+    task_id = str(event.get("task_id", "") or "").strip()
+    task = state.board_tasks.get(task_id) if task_id else None
+    if task is not None:
+        scopes.append(_task_target_scope(state, caller_cell, task))
+    for field in (
+        "cell_id",
+        "assigned_engineer_id",
+        "owner_engineer_id",
+        "peer_architect_id",
+    ):
+        target_id = str(event.get(field, "") or "").strip()
+        target = state.agents.get(target_id) if target_id else None
+        if target is not None:
+            scopes.append(_agent_target_scope(caller_cell, target))
+    if scopes:
+        return min(scopes, key=lambda scope: SCOPE_RANK[scope])
+    caller_group = str(getattr(caller_cell, "group", "") or "").strip()
+    event_group = str(event.get("group", "") or "").strip()
+    if caller_group and caller_group == event_group:
+        return "group"
+    return "global"
+
+
 def _resolve_scoped_resource(state, caller_cell, resource_kind: str, reference):
     """Resolve one descriptor-declared resource without widening visibility."""
 
@@ -1172,6 +1207,8 @@ def _resolve_scoped_resource(state, caller_cell, resource_kind: str, reference):
 def _scoped_resource_relationship(state, caller_cell, resource_kind: str, resource):
     if resource_kind == "task":
         return _task_target_scope(state, caller_cell, resource)
+    if resource_kind == "event":
+        return _event_target_scope(state, caller_cell, resource)
     if resource_kind in {"agent", "message_peer"}:
         return _agent_target_scope(caller_cell, resource)
     return _record_target_scope(state, caller_cell, resource)
@@ -1260,6 +1297,8 @@ def _result_collection_at_path(payload, path: str):
 def _scoped_result_resource(state, caller_cell, result_kind: str, item):
     """Resolve a declared result item to the resource used for ACL scope."""
 
+    if result_kind == "event" and isinstance(item, dict):
+        return item
     if isinstance(item, dict):
         if result_kind == "agent":
             reference = (

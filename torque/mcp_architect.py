@@ -216,7 +216,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_events_recent", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group","target_argument": "engineer_id","target_kind": "agent"}]},
+        "name": "architect_events_recent", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "self","result_kind": "event","result_paths": ["events"]},{"capability": "event.read","minimum_scope": "self","target_argument": "engineer_id","target_kind": "agent"}]},
         "description": (
             "Return recent architect-scoped coarse panel events with task, "
             "engineer, worker-owner, creator, digest-recipient, and "

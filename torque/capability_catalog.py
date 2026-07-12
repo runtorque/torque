@@ -100,7 +100,7 @@ CAPABILITY_CATALOG: dict[str, CapabilityDefinition] = {
             "event.read",
             "Read recent events",
             "Read recent activity, recovery summaries, and event streams.",
-            scopes=("group",),
+            scopes=("self", "children", "group"),
             ceilings={"engineer": "group", "architect": "group"},
         ),
         _scoped(
