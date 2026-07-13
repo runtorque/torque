@@ -126,3 +126,9 @@ test('compact agent drawer is explicit and closes without mutating panel layout'
   assert.equal(h.body.classList.contains('workspace-agents-open'), false);
   assert.equal(h.layout.last_active, 'chat');
 });
+
+test('compact agent drawer layers above the active panel canvas', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  assert.match(css, /workspace-mode-compact\.workspace-agents-open #standalone-main-stack\s*\{[^}]*position:\s*absolute;[^}]*z-index:\s*5;/s);
+  assert.match(css, /workspace-mode-compact #standalone-(?:bottom-dock|right-rail),[\s\S]*z-index:\s*4;/s);
+});

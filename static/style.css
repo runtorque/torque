@@ -5147,6 +5147,9 @@ body.runtime-embedded.workspace-mode-compact #standalone-main-stack {
 }
 body.runtime-embedded.workspace-mode-compact.workspace-agents-open #standalone-main-stack {
   display: flex;
+  position: absolute;
+  inset: 0;
+  z-index: 5;
 }
 body.runtime-embedded.workspace-mode-compact #standalone-bottom-dock,
 body.runtime-embedded.workspace-mode-compact #standalone-right-rail {
