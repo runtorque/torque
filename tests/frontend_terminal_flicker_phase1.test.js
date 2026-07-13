@@ -9,7 +9,7 @@
  *     continuous typing coalesces to a single flush. A pointer release keeps
  *     the immediate next-frame flush.
  *
- *  2. static/js/terminal.js — `_terminalComposeAutoResize` is a no-op (zero
+ *  2. static/js/terminal/composer.js — `_terminalComposeAutoResize` is a no-op (zero
  *     `taskAutoResize` reflow, zero `style.height` writes) when the focused
  *     composer's height inputs (text + stored height) are unchanged since the
  *     last pass, so per-delta render passes stop resizing the stage and
@@ -237,6 +237,10 @@ function createTerminalComposeHarness() {
   sandbox.globalThis = sandbox;
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/terminal.js');
+  loadScript(context, 'static/js/terminal/direct-messages.js');
+  loadScript(context, 'static/js/terminal/composer.js');
+  loadScript(context, 'static/js/terminal/composer-attachments.js');
+  loadScript(context, 'static/js/terminal/xterm-runtime.js');
 
   // Record every taskAutoResize call and the style.height writes it performs,
   // exactly as the real path does (auto -> scrollHeight px).

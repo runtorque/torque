@@ -32,6 +32,10 @@ test('frontend load order preserves state, rendering, panels, and boot boundarie
   const ws = indexOf(sources, 'static/js/ws.js');
   const render = indexOf(sources, 'static/js/render.js');
   const terminal = indexOf(sources, 'static/js/terminal.js');
+  const terminalDirectMessages = indexOf(sources, 'static/js/terminal/direct-messages.js');
+  const terminalComposer = indexOf(sources, 'static/js/terminal/composer.js');
+  const terminalAttachments = indexOf(sources, 'static/js/terminal/composer-attachments.js');
+  const terminalXterm = indexOf(sources, 'static/js/terminal/xterm-runtime.js');
   const board = indexOf(sources, 'static/js/board.js');
   const behavior = indexOf(sources, 'static/js/behavior_overlay.js');
   const agentPanel = indexOf(sources, 'static/js/agent_panel.js');
@@ -48,7 +52,11 @@ test('frontend load order preserves state, rendering, panels, and boot boundarie
 
   assert.ok(ws < render, 'canonical state must load before renderers');
   assert.ok(render < terminal, 'shared render helpers must load before terminal UI');
-  assert.ok(terminal < board, 'terminal globals must exist before panel boot');
+  assert.ok(terminal < terminalDirectMessages, 'Terminal core must load before feature modules');
+  assert.ok(terminalDirectMessages < terminalComposer, 'DM UI must load before the composer');
+  assert.ok(terminalComposer < terminalAttachments, 'composer primitives must load before attachments');
+  assert.ok(terminalAttachments < terminalXterm, 'composer modules must load before xterm runtime');
+  assert.ok(terminalXterm < board, 'terminal globals must exist before panel boot');
   assert.ok(board < behavior, 'feature panels load before agent panel composition');
   assert.ok(behavior < agentPanel, 'Behavior renderer must load before Agent panel');
   assert.ok(agentPanel < agentPanelVirtualLists, 'Agent panel core must load before feature modules');

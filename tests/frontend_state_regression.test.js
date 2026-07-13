@@ -570,6 +570,10 @@ function createEmbeddedTerminalHarness(overrides = {}) {
   }
   loadScript(context, 'static/js/markdown.js');
   loadScript(context, 'static/js/terminal.js');
+  loadScript(context, 'static/js/terminal/direct-messages.js');
+  loadScript(context, 'static/js/terminal/composer.js');
+  loadScript(context, 'static/js/terminal/composer-attachments.js');
+  loadScript(context, 'static/js/terminal/xterm-runtime.js');
   return { context, sandbox, document, sockets, terminals, status };
 }
 
@@ -13599,6 +13603,10 @@ test('embedded terminal direct-message resize and unrelated WS delta preserve sc
   loadScript(context, 'static/js/agent-focus.js');
   loadScript(context, 'static/js/grid/main.js');
   loadScript(context, 'static/js/terminal.js');
+  loadScript(context, 'static/js/terminal/direct-messages.js');
+  loadScript(context, 'static/js/terminal/composer.js');
+  loadScript(context, 'static/js/terminal/composer-attachments.js');
+  loadScript(context, 'static/js/terminal/xterm-runtime.js');
   const dom = attachTerminalWorkspaceDom(document);
 
   runInContext(context, `
@@ -13747,7 +13755,7 @@ test('embedded terminal direct-message resize and unrelated WS delta preserve sc
 });
 
 test('embedded terminal direct-message resize rail has a dedicated hit-zone outside header and compose controls', () => {
-  const terminalSource = fs.readFileSync(path.join(repoRoot, 'static/js/terminal.js'), 'utf8');
+  const terminalSource = fs.readFileSync(path.join(repoRoot, 'static/js/terminal/direct-messages.js'), 'utf8');
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
   const resizerIndex = terminalSource.indexOf('data-terminal-direct-messages-resizer');
   const sectionIndex = terminalSource.indexOf('<section class="terminal-direct-messages"');
@@ -18055,6 +18063,10 @@ test('incoming direct_message_upsert refreshes the real terminal direct-message 
   loadScript(context, 'static/js/agent-focus.js');
   loadScript(context, 'static/js/grid/main.js');
   loadScript(context, 'static/js/terminal.js');
+  loadScript(context, 'static/js/terminal/direct-messages.js');
+  loadScript(context, 'static/js/terminal/composer.js');
+  loadScript(context, 'static/js/terminal/composer-attachments.js');
+  loadScript(context, 'static/js/terminal/xterm-runtime.js');
   const dom = attachTerminalWorkspaceDom(document);
 
   runInContext(context, `

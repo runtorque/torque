@@ -360,6 +360,10 @@ function createTerminalHarness(detached) {
   sandbox.globalThis = sandbox;
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/terminal.js');
+  loadScript(context, 'static/js/terminal/direct-messages.js');
+  loadScript(context, 'static/js/terminal/composer.js');
+  loadScript(context, 'static/js/terminal/composer-attachments.js');
+  loadScript(context, 'static/js/terminal/xterm-runtime.js');
 
   // Guard + collaborators.
   sandbox._detachedWindowActive = function () { return !!detached; };
