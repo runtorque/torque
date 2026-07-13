@@ -209,7 +209,7 @@ function createSandbox() {
 }
 
 function loadModals(context) {
-  const filename = path.join(repoRoot, 'static/js/modals.js');
+  const filename = path.join(repoRoot, 'static/js/modals/core.js');
   vm.runInContext(fs.readFileSync(filename, 'utf8'), context, { filename });
 }
 

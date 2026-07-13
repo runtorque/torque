@@ -338,7 +338,9 @@ function createModalHarness() {
   sandbox.globalThis = sandbox;
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/keybindings.js');
+  loadScript(context, 'static/js/modals/core.js');
   loadScript(context, 'static/js/modals.js');
+  loadScript(context, 'static/js/modals/global-settings.js');
   vm.runInContext('_glsDefaults = keybindingDefaults(); _glsKeybindings = {}; _glsPendingConflict = null; _glsCapturing = null;', context);
   return { context, container, listeners };
 }

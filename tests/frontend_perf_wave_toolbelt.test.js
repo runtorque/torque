@@ -262,6 +262,14 @@ function createBoardLaneCacheHarness() {
   loadScript(context, 'static/js/board/view-state.js');
   loadScript(context, 'static/js/board/card-rendering.js');
   loadScript(context, 'static/js/board/card-actions.js');
+  loadScript(context, 'static/js/board/model.js');
+  loadScript(context, 'static/js/board/rendering.js');
+  loadScript(context, 'static/js/board/inline-create.js');
+  loadScript(context, 'static/js/board/selection.js');
+  loadScript(context, 'static/js/board/external-sync.js');
+  loadScript(context, 'static/js/board/drag-drop.js');
+  loadScript(context, 'static/js/board/filters.js');
+  loadScript(context, 'static/js/board/schedules.js');
   return { context, sandbox };
 }
 

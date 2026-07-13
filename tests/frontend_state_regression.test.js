@@ -393,10 +393,15 @@ function loadScript(context, relativePath) {
 
 function loadModalScripts(context) {
   [
+    'static/js/modals/core.js',
     'static/js/modals.js',
     'static/js/modals/add-cell.js',
     'static/js/modals/task-artifacts.js',
     'static/js/modals/task-modal.js',
+    'static/js/modals/group-settings.js',
+    'static/js/modals/worktrees.js',
+    'static/js/modals/global-settings.js',
+    'static/js/modals/schedules.js',
   ].forEach((file) => loadScript(context, file));
 }
 
@@ -405,6 +410,14 @@ function loadBoardScripts(context) {
   loadScript(context, 'static/js/board/view-state.js');
   loadScript(context, 'static/js/board/card-rendering.js');
   loadScript(context, 'static/js/board/card-actions.js');
+  loadScript(context, 'static/js/board/model.js');
+  loadScript(context, 'static/js/board/rendering.js');
+  loadScript(context, 'static/js/board/inline-create.js');
+  loadScript(context, 'static/js/board/selection.js');
+  loadScript(context, 'static/js/board/external-sync.js');
+  loadScript(context, 'static/js/board/drag-drop.js');
+  loadScript(context, 'static/js/board/filters.js');
+  loadScript(context, 'static/js/board/schedules.js');
 }
 
 function createEmbeddedTerminalHarness(overrides = {}) {
@@ -6257,7 +6270,7 @@ test('global settings Board subtab omits deprecated default lanes control', () =
 test('global settings subtabs switch and restore the selected System subtab', () => {
   const { sandbox, document } = createSandbox();
   const context = vm.createContext(sandbox);
-  loadScript(context, 'static/js/modals.js');
+  loadModalScripts(context);
 
   const pane = new FakeElement();
   pane.classList.add('gs-pane');
@@ -6660,7 +6673,7 @@ test('relay section shows when relay_config is present even without relay_connec
 
 test('global settings save sends the relay_* settings-layer keys', () => {
   const { context, document, sandbox } = createRelayStatusHarness();
-  loadScript(context, 'static/js/modals.js');
+  loadModalScripts(context);
   // ws.js (loaded by the relay harness) installs its own WebSocket `send`;
   // re-point it at the capture array so we can assert the save payload.
   runInContext(context, 'send = function(m) { sendCalls.push(m); };');
@@ -6700,7 +6713,7 @@ test('global settings save sends the relay_* settings-layer keys', () => {
 
 test('global settings save OMITS relay_enabled when the checkbox is untouched (tri-state inherit)', () => {
   const { context, document, sandbox } = createRelayStatusHarness();
-  loadScript(context, 'static/js/modals.js');
+  loadModalScripts(context);
   runInContext(context, 'send = function(m) { sendCalls.push(m); };');
   [
     'gls-default-cmd', 'gls-filter-window', 'gls-focus-new-tabs',
@@ -6732,7 +6745,7 @@ test('global settings save OMITS relay_enabled when the checkbox is untouched (t
 
 test('global settings save sends relay_enabled=false when the checkbox is explicitly toggled off', () => {
   const { context, document, sandbox } = createRelayStatusHarness();
-  loadScript(context, 'static/js/modals.js');
+  loadModalScripts(context);
   runInContext(context, 'send = function(m) { sendCalls.push(m); };');
   [
     'gls-default-cmd', 'gls-filter-window', 'gls-focus-new-tabs',
@@ -6762,7 +6775,7 @@ test('global settings save sends relay_enabled=false when the checkbox is explic
 test('status bar settings sync preserves focused dirty toggles and scroll', () => {
   const { sandbox, document } = createSandbox();
   const context = vm.createContext(sandbox);
-  loadScript(context, 'static/js/modals.js');
+  loadModalScripts(context);
   const list = document.register('gls-statusbar-visibility-list');
   list.scrollTop = 42;
   [
@@ -6806,7 +6819,7 @@ test('status bar settings sync preserves focused dirty toggles and scroll', () =
 
 test('global settings save includes status_bar_visibility from the new Status bar tab', () => {
   const { context, document, sandbox } = createRelayStatusHarness();
-  loadScript(context, 'static/js/modals.js');
+  loadModalScripts(context);
   runInContext(context, 'send = function(m) { sendCalls.push(m); };');
   [
     'gls-default-cmd', 'gls-filter-window', 'gls-focus-new-tabs',
@@ -16439,7 +16452,7 @@ test('embedded terminal initializes xterm scrollback from global settings', () =
 
 test('global scrollback setting edit updates existing and new embedded terminals', () => {
   const { context, document, sandbox, terminals } = createEmbeddedTerminalHarness();
-  loadScript(context, 'static/js/modals.js');
+  loadModalScripts(context);
 
   [
     'gls-default-cmd',
@@ -16489,7 +16502,7 @@ test('global scrollback setting edit updates existing and new embedded terminals
 
 test('global settings modal rejects out-of-range xterm scrollback', () => {
   const { context, document, sandbox } = createEmbeddedTerminalHarness();
-  loadScript(context, 'static/js/modals.js');
+  loadModalScripts(context);
 
   [
     'gls-default-cmd',

@@ -273,7 +273,7 @@ function createShowTaskMessagesHarness() {
       },
     };
   `);
-  const source = loadFile('static/js/board.js');
+  const source = loadFile('static/js/board/rendering.js');
   const fn = source.match(
     /function showTaskMessages\(taskId\)\s*\{[\s\S]*?\n\}/m)[0];
   vm.runInContext(fn, context);

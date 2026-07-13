@@ -124,7 +124,9 @@ function loadScript(context, relativePath) {
 function loadCommandsAndModals(context) {
   vm.runInContext('Date.now = function() { return __nowMs; }', context);
   loadScript(context, 'static/js/commands.js');
+  loadScript(context, 'static/js/modals/core.js');
   loadScript(context, 'static/js/modals.js');
+  loadScript(context, 'static/js/modals/global-settings.js');
 }
 
 function installConfirmStub(context, sandbox) {

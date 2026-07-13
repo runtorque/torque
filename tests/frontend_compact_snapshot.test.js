@@ -405,8 +405,8 @@ function createBoardConsumerContext() {
 test('boardDuplicateTask hydrates the full task before cloning', () => {
   const { context, sandbox } = createBoardConsumerContext();
   const boardSource = fs.readFileSync(
-    path.join(repoRoot, 'static/js/board.js'), 'utf8');
-  // Only load the helpers we need — the full board.js pulls in too many
+    path.join(repoRoot, 'static/js/board/external-sync.js'), 'utf8');
+  // Only load the helpers we need — the full Board module set pulls in too many
   // DOM dependencies. We extract just boardDuplicateTask + boardCloneTask.
   const duplicateFn = boardSource.match(
     /function boardDuplicateTask\(taskId\)\s*\{[\s\S]*?\n\}/m)[0];
@@ -446,7 +446,7 @@ test('boardDuplicateTask hydrates the full task before cloning', () => {
 test('boardCloneTask hydrates before opening the clone modal', () => {
   const { context, sandbox } = createBoardConsumerContext();
   const boardSource = fs.readFileSync(
-    path.join(repoRoot, 'static/js/board.js'), 'utf8');
+    path.join(repoRoot, 'static/js/board/external-sync.js'), 'utf8');
   const duplicateFn = boardSource.match(
     /function boardDuplicateTask\(taskId\)\s*\{[\s\S]*?\n\}/m)[0];
   const cloneFn = boardSource.match(

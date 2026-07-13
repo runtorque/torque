@@ -142,9 +142,14 @@ function createSandbox() {
 }
 
 function loadModals(context) {
-  const filename = path.join(repoRoot, 'static/js/modals.js');
-  const source = fs.readFileSync(filename, 'utf8');
-  vm.runInContext(source, context, { filename });
+  [
+    'static/js/modals/core.js',
+    'static/js/modals.js',
+  ].forEach(function(relPath) {
+    const filename = path.join(repoRoot, relPath);
+    const source = fs.readFileSync(filename, 'utf8');
+    vm.runInContext(source, context, { filename });
+  });
 }
 
 function labelsFor(listEl) {

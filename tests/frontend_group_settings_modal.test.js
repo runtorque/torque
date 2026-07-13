@@ -182,9 +182,16 @@ function createSandbox() {
 }
 
 function loadModals(context) {
-  const filename = path.join(repoRoot, 'static/js/modals.js');
-  const source = fs.readFileSync(filename, 'utf8');
-  vm.runInContext(source, context, { filename });
+  [
+    'static/js/modals/core.js',
+    'static/js/modals.js',
+    'static/js/modals/group-settings.js',
+    'static/js/modals/worktrees.js',
+  ].forEach(function(relPath) {
+    const filename = path.join(repoRoot, relPath);
+    const source = fs.readFileSync(filename, 'utf8');
+    vm.runInContext(source, context, { filename });
+  });
 }
 
 function loadWs(context) {
@@ -219,7 +226,7 @@ test('architect settings markup renders provider then command override', () => {
 
 test('architect settings markup removes paused control and renders checkpoint dropdown tooltip', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  const modalJs = fs.readFileSync(path.join(repoRoot, 'static/js/modals.js'), 'utf8');
+  const modalJs = fs.readFileSync(path.join(repoRoot, 'static/js/modals/group-settings.js'), 'utf8');
 
   assert.doesNotMatch(html, /gs-architect-paused|Event delivery paused/);
   assert.doesNotMatch(modalJs, /gs-architect-paused|architect_paused/);
@@ -796,7 +803,7 @@ test('group settings preserves Engineer and Architect sub-tabs across refresh', 
 
 test('group settings uses Group/Workers split plus scoped Engineer and Architect sub-tabs', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  const modals = fs.readFileSync(path.join(repoRoot, 'static/js/modals.js'), 'utf8');
+  const modals = fs.readFileSync(path.join(repoRoot, 'static/js/modals/group-settings.js'), 'utf8');
   const topStrip = html.slice(
     html.indexOf('<div class="gs-tabs">'),
     html.indexOf('    <!-- Group tab -->'),
@@ -935,7 +942,7 @@ test('group settings places all-kind defaults under Group and worker overrides u
 
 test('engineer System sub-tab groups permissions and digest settings', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  const modals = fs.readFileSync(path.join(repoRoot, 'static/js/modals.js'), 'utf8');
+  const modals = fs.readFileSync(path.join(repoRoot, 'static/js/modals/group-settings.js'), 'utf8');
   const engineerStart = html.indexOf('<div class="gs-pane" data-pane="engineer">');
   const architectStart = html.indexOf('<div class="gs-pane" data-pane="architect">');
   const engineerPane = html.slice(engineerStart, architectStart);
@@ -1037,7 +1044,7 @@ test('group settings Advanced sub-tab owns Delete group action', () => {
   const groupTabs = fs.readFileSync(path.join(repoRoot, 'static/js/grid/group-tabs.js'), 'utf8');
   const gridMain = fs.readFileSync(path.join(repoRoot, 'static/js/grid/main.js'), 'utf8');
   const main = fs.readFileSync(path.join(repoRoot, 'static/js/main.js'), 'utf8');
-  const modals = fs.readFileSync(path.join(repoRoot, 'static/js/modals.js'), 'utf8');
+  const modals = fs.readFileSync(path.join(repoRoot, 'static/js/modals/group-settings.js'), 'utf8');
 
   assert.equal(html.indexOf('data-tab="advanced"'), -1);
   assert.equal(html.indexOf('data-pane="advanced"'), -1);
@@ -1402,7 +1409,7 @@ test('group settings no longer renders the legacy no-engineer placeholder copy',
   })`, context);
 
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  const modalJs = fs.readFileSync(path.join(repoRoot, 'static/js/modals.js'), 'utf8');
+  const modalJs = fs.readFileSync(path.join(repoRoot, 'static/js/modals/group-settings.js'), 'utf8');
   const legacyCopy = new RegExp('No engineer' + ' agent');
   assert.doesNotMatch(html, legacyCopy);
   assert.doesNotMatch(modalJs, legacyCopy);

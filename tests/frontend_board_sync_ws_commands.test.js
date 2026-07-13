@@ -225,12 +225,23 @@ function loadScript(context, relativePath) {
 }
 
 function loadBoardSyncScripts(context) {
+  loadScript(context, 'static/js/modals/core.js');
   loadScript(context, 'static/js/modals.js');
   loadScript(context, 'static/js/modals/task-modal.js');
+  loadScript(context, 'static/js/modals/group-settings.js');
+  loadScript(context, 'static/js/modals/worktrees.js');
   loadScript(context, 'static/js/board.js');
   loadScript(context, 'static/js/board/view-state.js');
   loadScript(context, 'static/js/board/card-rendering.js');
   loadScript(context, 'static/js/board/card-actions.js');
+  loadScript(context, 'static/js/board/model.js');
+  loadScript(context, 'static/js/board/rendering.js');
+  loadScript(context, 'static/js/board/inline-create.js');
+  loadScript(context, 'static/js/board/selection.js');
+  loadScript(context, 'static/js/board/external-sync.js');
+  loadScript(context, 'static/js/board/drag-drop.js');
+  loadScript(context, 'static/js/board/filters.js');
+  loadScript(context, 'static/js/board/schedules.js');
   vm.runInContext(`
     _closeCtxMenu = function() {};
     closeNestedModal = function() { return false; };

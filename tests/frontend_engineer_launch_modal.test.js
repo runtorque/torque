@@ -136,9 +136,18 @@ function createSandbox() {
 }
 
 function loadScript(context, relPath) {
-  const filename = path.join(repoRoot, relPath);
-  const source = fs.readFileSync(filename, 'utf8');
-  vm.runInContext(source, context, { filename });
+  const paths = relPath === 'static/js/modals.js'
+    ? [
+      'static/js/modals/core.js',
+      'static/js/modals.js',
+      'static/js/modals/group-settings.js',
+    ]
+    : [relPath];
+  paths.forEach(function(scriptPath) {
+    const filename = path.join(repoRoot, scriptPath);
+    const source = fs.readFileSync(filename, 'utf8');
+    vm.runInContext(source, context, { filename });
+  });
 }
 
 test('openEngineerLaunchDialog populates persisted engineer launch settings', () => {

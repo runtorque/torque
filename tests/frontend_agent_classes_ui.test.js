@@ -125,9 +125,11 @@ function createHarness({ loadModals = false, loadAgentPanel = false } = {}) {
   sandbox.globalThis = sandbox;
   const context = vm.createContext(sandbox);
   if (loadModals) {
+    loadScript(context, 'static/js/modals/core.js');
     loadScript(context, 'static/js/modals.js');
     loadScript(context, 'static/js/modals/engineer-launch.js');
     loadScript(context, 'static/js/modals/add-cell.js');
+    loadScript(context, 'static/js/modals/group-settings.js');
   }
   loadScript(context, 'static/js/templates.js');
   if (loadAgentPanel) {
