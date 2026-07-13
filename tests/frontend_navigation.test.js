@@ -31,6 +31,8 @@ test('group navigation dedicates the rail to groups and moves view controls into
   assert.match(grid, /agent-view-toggle--grid/);
   assert.match(grid, /data-agent-view-toggle="grid"/);
   assert.match(grid, /data-agent-view-toggle="canvas"/);
+  assert.match(grid, /class="agent-grid-new-icon"[\s\S]*<span>New<\/span>/);
+  assert.match(css, /\.agent-grid-new-btn\s*\{[^}]*border:\s*1px solid var\(--border\);[^}]*border-radius:\s*var\(--radius\);[^}]*background:\s*transparent;/s);
   assert.match(css, /container:\s*agent-group-nav\s*\/\s*inline-size/);
   assert.match(css, /@container agent-group-nav \(max-width:\s*380px\)/);
 });

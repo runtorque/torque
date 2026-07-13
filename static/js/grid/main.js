@@ -32,7 +32,8 @@ function _renderAgentGridNewToolbar(groupName, disabled) {
     + ' data-group="' + esc(group) + '"'
     + (disabled ? ' disabled aria-disabled="true" title="Agent limit reached"' : ' aria-haspopup="menu" aria-expanded="false" title="Create a standalone agent"')
     + (disabled ? '' : ' onclick="openAgentGridNewMenu(event,' + groupArg + ')"')
-    + '>+ New</button>'
+    + '><svg class="agent-grid-new-icon" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 2v8M2 6h8"/></svg>'
+    + '<span>New</span></button>'
     + '</div>';
 }
 

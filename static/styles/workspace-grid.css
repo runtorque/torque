@@ -1084,21 +1084,38 @@ main {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 4px;
+  height: 24px;
   min-height: 24px;
-  padding: 3px 10px;
-  border: 1px solid color-mix(in srgb, var(--accent) 46%, var(--border) 54%);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-  color: var(--text);
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-dim);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 500;
+  letter-spacing: .02em;
   line-height: 1;
   white-space: nowrap;
+  transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
 }
-.agent-grid-new-btn:hover:not(:disabled),
+.agent-grid-new-icon {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+.agent-grid-new-btn:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+  color: var(--text);
+}
 .agent-grid-new-btn:focus-visible {
+  outline: none;
   border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  box-shadow: var(--focus-ring);
 }
 .agent-grid-new-btn:disabled {
   cursor: default;
