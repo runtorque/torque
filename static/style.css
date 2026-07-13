@@ -4997,6 +4997,143 @@ body.runtime-embedded .taskbar-aux-btn {
   .statusbar-chip-attention { display: none; }
   .statusbar-chip { max-width: 120px; padding-inline: 6px; }
 }
+
+/* ------------------------------------------------------------------ */
+/* Responsive workspace presentation                                  */
+/* ------------------------------------------------------------------ */
+/*
+ * The wide layout remains the operator-configurable multi-pane command
+ * center. Focused and compact modes present the same persisted panel state as
+ * one primary canvas, rather than squeezing every saved pane into the current
+ * viewport. The breakpoints mirror workspace_layout.js.
+ */
+body.runtime-embedded.workspace-mode-focused {
+  --workspace-focused-rail-width: 320px;
+}
+body.runtime-embedded.workspace-mode-focused #workspace-shell {
+  grid-template-columns: var(--workspace-focused-rail-width) 8px minmax(0, 1fr);
+}
+body.runtime-embedded.workspace-mode-focused #standalone-sidebar-shell {
+  display: block;
+  min-width: 0;
+}
+body.runtime-embedded.workspace-mode-focused #standalone-main-stack {
+  width: 100%;
+  height: 100%;
+}
+body.runtime-embedded.workspace-mode-focused #workspace-resize-handle,
+body.runtime-embedded.workspace-mode-focused #standalone-bottom-resize-handle,
+body.runtime-embedded.workspace-mode-focused #standalone-rail-resize-handle {
+  display: none;
+}
+body.runtime-embedded.workspace-mode-focused #terminal-workspace {
+  grid-column: 3;
+}
+body.runtime-embedded.workspace-mode-focused #standalone-bottom-dock,
+body.runtime-embedded.workspace-mode-focused #standalone-right-rail {
+  display: none;
+  position: fixed;
+  z-index: 24;
+  top: 0;
+  right: 0;
+  bottom: 30px;
+  left: calc(var(--workspace-focused-rail-width) + 8px);
+  width: auto;
+  height: auto;
+  min-width: 0;
+  border: 0;
+  border-left: 1px solid rgba(255,255,255,.08);
+  background: var(--bg);
+  box-shadow: -12px 0 34px rgba(0,0,0,.24);
+}
+body.runtime-embedded.workspace-mode-focused.workspace-panel-open[data-workspace-panel-zone="bottom"] #standalone-bottom-dock,
+body.runtime-embedded.workspace-mode-focused.workspace-panel-open[data-workspace-panel-zone="right"] #standalone-right-rail {
+  display: flex;
+}
+body.runtime-embedded.workspace-mode-focused .standalone-panel-zone-header {
+  min-height: 44px;
+  padding: 7px 12px;
+}
+body.runtime-embedded.workspace-mode-focused .standalone-panel-zone-body {
+  background: var(--bg);
+}
+
+body.runtime-embedded.workspace-mode-compact #workspace-shell {
+  display: block;
+  position: relative;
+}
+body.runtime-embedded.workspace-mode-compact #workspace-resize-handle,
+body.runtime-embedded.workspace-mode-compact #standalone-bottom-resize-handle,
+body.runtime-embedded.workspace-mode-compact #standalone-rail-resize-handle {
+  display: none;
+}
+body.runtime-embedded.workspace-mode-compact #terminal-workspace {
+  display: block;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+body.runtime-embedded.workspace-mode-compact #standalone-sidebar-shell {
+  display: block;
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  min-width: 0;
+  min-height: 0;
+  pointer-events: none;
+}
+body.runtime-embedded.workspace-mode-compact #standalone-main-stack {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  background: var(--bg-surface);
+  pointer-events: auto;
+}
+body.runtime-embedded.workspace-mode-compact.workspace-agents-open #standalone-main-stack {
+  display: flex;
+}
+body.runtime-embedded.workspace-mode-compact #standalone-bottom-dock,
+body.runtime-embedded.workspace-mode-compact #standalone-right-rail {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  border: 0;
+  background: var(--bg);
+  pointer-events: auto;
+}
+body.runtime-embedded.workspace-mode-compact.workspace-panel-open[data-workspace-panel-zone="bottom"] #standalone-bottom-dock,
+body.runtime-embedded.workspace-mode-compact.workspace-panel-open[data-workspace-panel-zone="right"] #standalone-right-rail {
+  display: flex;
+}
+body.runtime-embedded.workspace-mode-compact .standalone-panel-zone-header {
+  min-height: 44px;
+  padding: 7px 10px;
+}
+body.runtime-embedded.workspace-mode-compact #standalone-float-layer {
+  inset: 0 0 30px;
+}
+
+@media (max-width: 1479px) {
+  body.runtime-embedded #standalone-main-stack main {
+    --agent-architect-column-width: 142px;
+    --agent-engineer-column-width: 142px;
+  }
+}
+@media (max-width: 919px) {
+  body.runtime-embedded #standalone-main-stack main {
+    padding: 12px;
+    --agent-architect-column-width: 180px;
+    --agent-engineer-column-width: 180px;
+  }
+}
 /* ------------------------------------------------------------------ */
 /* Standalone dock workspace                                          */
 /* ------------------------------------------------------------------ */
