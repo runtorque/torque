@@ -15,7 +15,7 @@ import json
 import sqlite3
 from typing import Callable, Iterable
 
-SCHEMA_VERSION = "13"
+SCHEMA_VERSION = "20"
 
 
 @dataclass(frozen=True)
@@ -393,6 +393,159 @@ GROUP_PROVIDER_RUNTIME_COLUMNS = {
     "worker_boot_command": "TEXT NOT NULL DEFAULT ''",
     "worker_model": "TEXT NOT NULL DEFAULT ''",
     "worker_reasoning_effort": "TEXT NOT NULL DEFAULT ''",
+}
+
+BOARD_TASK_RUNTIME_COLUMNS = {
+    "action_name": "TEXT NOT NULL DEFAULT ''",
+    "action_vars": "TEXT NOT NULL DEFAULT '{}'",
+    "agent_template": "TEXT NOT NULL DEFAULT ''",
+    "parent_task_id": "TEXT NOT NULL DEFAULT ''",
+    "pipeline_depth": "INTEGER NOT NULL DEFAULT 0",
+    "pipeline_root_id": "TEXT NOT NULL DEFAULT ''",
+    "reply_agent_id": "TEXT NOT NULL DEFAULT ''",
+    "description": "TEXT NOT NULL DEFAULT ''",
+    "status": "TEXT NOT NULL DEFAULT ''",
+    "messages": "TEXT NOT NULL DEFAULT '[]'",
+    "messages_thread": "TEXT NOT NULL DEFAULT '[]'",
+    "scheduled_at": "TEXT NOT NULL DEFAULT ''",
+    "dispatch_state": "TEXT NOT NULL DEFAULT 'queued'",
+    "depends_on": "TEXT NOT NULL DEFAULT '[]'",
+    "attachments": "TEXT NOT NULL DEFAULT '[]'",
+    "board_sync": "TEXT NOT NULL DEFAULT '{}'",
+    "health_state": "TEXT NOT NULL DEFAULT 'healthy'",
+    "health_since": "TEXT NOT NULL DEFAULT ''",
+    "health_details": "TEXT NOT NULL DEFAULT '{}'",
+    "artifacts": "TEXT NOT NULL DEFAULT '[]'",
+}
+
+BOARD_TASK_COMPLETION_COLUMNS = {
+    "lane_entered_at": "TEXT NOT NULL DEFAULT ''",
+    "verification_mode": "TEXT NOT NULL DEFAULT ''",
+    "verification_state": "TEXT NOT NULL DEFAULT ''",
+    "verification_notes": "TEXT NOT NULL DEFAULT ''",
+    "verification_updated_at": "TEXT NOT NULL DEFAULT ''",
+    "verification_updated_by": "TEXT NOT NULL DEFAULT ''",
+    "verification_summary": "TEXT NOT NULL DEFAULT '{}'",
+    "completion_evidence": "TEXT NOT NULL DEFAULT '{}'",
+    "worktree_boundary": "TEXT NOT NULL DEFAULT '{}'",
+    "resume_after_boundary_task_id": "TEXT NOT NULL DEFAULT ''",
+    "archived_at": "TEXT NOT NULL DEFAULT ''",
+    "archived_from_lane": "TEXT NOT NULL DEFAULT ''",
+    "deliverable_required": "INTEGER NOT NULL DEFAULT 0",
+    "deliverable_type": "TEXT NOT NULL DEFAULT ''",
+    "deliverable_format": "TEXT NOT NULL DEFAULT ''",
+    "deliverable_artifact_title": "TEXT NOT NULL DEFAULT ''",
+    "requires_review": "INTEGER NOT NULL DEFAULT 0",
+    "pre_approved_by": "TEXT NOT NULL DEFAULT ''",
+}
+
+AGENT_RUNTIME_COLUMNS = {
+    "tasks_dispatched": "INTEGER NOT NULL DEFAULT 0",
+    "runner_backend": "TEXT NOT NULL DEFAULT 'pty'",
+    "worktree_base_dir": "TEXT NOT NULL DEFAULT '.torque/worktrees'",
+    "worktree_auto_checkpoint": "INTEGER NOT NULL DEFAULT 0",
+    "checkpoint_on_progress": "INTEGER NOT NULL DEFAULT 0",
+    "worktree_merge_squash": "INTEGER NOT NULL DEFAULT 1",
+    "session_resume": "INTEGER NOT NULL DEFAULT 1",
+    "idle_timeout": "INTEGER NOT NULL DEFAULT 0",
+}
+
+GROUP_OPERATIONAL_COLUMNS = {
+    "terminal_close_on_disconnect": "INTEGER NOT NULL DEFAULT 0",
+    "default_agent_template": "TEXT NOT NULL DEFAULT ''",
+    "board_default_labels": "TEXT NOT NULL DEFAULT '[]'",
+    "board_default_lane": "TEXT NOT NULL DEFAULT ''",
+    "board_default_action": "TEXT NOT NULL DEFAULT ''",
+    "board_sync_provider": "TEXT NOT NULL DEFAULT 'none'",
+    "board_sync_enabled": "INTEGER NOT NULL DEFAULT 0",
+    "board_sync_github": "TEXT NOT NULL DEFAULT '{}'",
+    "env_file": "TEXT NOT NULL DEFAULT ''",
+    "agent_env_file": "TEXT NOT NULL DEFAULT ''",
+    "terminal_env_file": "TEXT NOT NULL DEFAULT ''",
+    "worktree_symlinks": "TEXT NOT NULL DEFAULT '[]'",
+    "worktree_submodules": "TEXT NOT NULL DEFAULT '[]'",
+    "worktree_symlink_gitignored_paths": "INTEGER NOT NULL DEFAULT 0",
+    "worktree_merge_cleanup": "TEXT NOT NULL DEFAULT 'keep'",
+    "worktree_merge_preserve_diff": "INTEGER NOT NULL DEFAULT 0",
+    "engineer_merge_mode": "TEXT NOT NULL DEFAULT 'pr'",
+    "guidance_hint_cadence": "INTEGER NOT NULL DEFAULT 4",
+    "engineer_hint_snoozes": "TEXT NOT NULL DEFAULT '{}'",
+    "engineer_agent_id": "TEXT NOT NULL DEFAULT ''",
+    "default_engineer_specializations": "TEXT NOT NULL DEFAULT '[]'",
+    "checkpoint_on_progress": "INTEGER NOT NULL DEFAULT 0",
+    "architect_boot_command": "TEXT NOT NULL DEFAULT ''",
+    "architect_provider": "TEXT NOT NULL DEFAULT ''",
+    "architect_model": "TEXT NOT NULL DEFAULT ''",
+    "architect_reasoning_effort": "TEXT NOT NULL DEFAULT ''",
+    "architect_directory": "TEXT NOT NULL DEFAULT ''",
+    "architect_profile": "TEXT NOT NULL DEFAULT ''",
+    "architect_shell": "TEXT NOT NULL DEFAULT ''",
+    "architect_tab_color": "TEXT NOT NULL DEFAULT ''",
+    "architect_custom_instructions": "TEXT NOT NULL DEFAULT ''",
+    "architect_autonomy_mode": "TEXT NOT NULL DEFAULT 'dispatch_after_confirm'",
+    "architect_paused": "INTEGER NOT NULL DEFAULT 0",
+    "architect_digest_verbosity": "TEXT NOT NULL DEFAULT 'balanced'",
+    "architect_journal_checkpoint_frequency": (
+        "TEXT NOT NULL DEFAULT 'every_10_actions'"
+    ),
+    "architect_review_gate_thresholds": (
+        "TEXT NOT NULL DEFAULT "
+        "'{\"ship_direct_max\":50,\"review_default_above\":150,"
+        "\"self_review_bypass_allowed\":false}'"
+    ),
+    "architect_push_interval": "INTEGER NOT NULL DEFAULT 300",
+    "architect_max_interval": "INTEGER NOT NULL DEFAULT 600",
+    "architect_heartbeat_interval": "INTEGER NOT NULL DEFAULT 0",
+    "architect_suppress_empty_digests": "INTEGER NOT NULL DEFAULT 1",
+    "architect_enabled_events": "TEXT NOT NULL DEFAULT ''",
+    "engineer_behavior_requires_user_approval": "INTEGER NOT NULL DEFAULT 0",
+}
+
+ENGINEER_SETTINGS_COLUMNS = {
+    "pending_question": "TEXT NOT NULL DEFAULT ''",
+    "pending_question_set_at": "REAL NOT NULL DEFAULT 0",
+    "pending_question_actor_id": "TEXT NOT NULL DEFAULT ''",
+    "pending_note": "TEXT NOT NULL DEFAULT ''",
+    "pending_note_kind": "TEXT NOT NULL DEFAULT ''",
+    "pending_note_set_at": "REAL NOT NULL DEFAULT 0",
+    "pending_note_actor_id": "TEXT NOT NULL DEFAULT ''",
+    "restrict_to_created_agents": "INTEGER NOT NULL DEFAULT 0",
+    "engineer_can_override_worker_provider": "INTEGER NOT NULL DEFAULT 1",
+    "engineer_provider": "TEXT NOT NULL DEFAULT ''",
+    "engineer_boot_command": "TEXT NOT NULL DEFAULT ''",
+    "engineer_model": "TEXT NOT NULL DEFAULT ''",
+    "engineer_reasoning_effort": "TEXT NOT NULL DEFAULT ''",
+    "engineer_directory": "TEXT NOT NULL DEFAULT ''",
+    "engineer_profile": "TEXT NOT NULL DEFAULT ''",
+    "engineer_shell": "TEXT NOT NULL DEFAULT ''",
+    "engineer_tab_color": "TEXT NOT NULL DEFAULT ''",
+    "heartbeat_interval": "INTEGER NOT NULL DEFAULT 300",
+    "default_worker_concurrency": "INTEGER NOT NULL DEFAULT 2",
+    "autonomy_mode": "TEXT NOT NULL DEFAULT 'dispatch_when_clear'",
+    "wave_size_preference": "TEXT NOT NULL DEFAULT 'small'",
+    "same_agent_follow_up_preference": "TEXT NOT NULL DEFAULT 'balanced'",
+    "digest_verbosity": "TEXT NOT NULL DEFAULT 'balanced'",
+    "escalation_style": "TEXT NOT NULL DEFAULT 'note_then_ask'",
+}
+
+AGENT_DIGEST_RUNTIME_COLUMNS = {
+    "architect_digest": "INTEGER NOT NULL DEFAULT 0",
+    "wake_on_digest": "INTEGER NOT NULL DEFAULT 0",
+    "suppress_empty": "INTEGER NOT NULL DEFAULT 0",
+}
+
+MEMORY_RETENTION_COLUMNS = {
+    "retention_kind": "TEXT NOT NULL DEFAULT 'durable'",
+    "expires_at": "REAL",
+}
+
+GLOBAL_SETTINGS_CACHE_COLUMNS = {
+    "xterm_scrollback": "INTEGER NOT NULL DEFAULT 2000",
+}
+
+AUTO_DISPATCH_RUNTIME_COLUMNS = {
+    "engineer_owner_id": "TEXT NOT NULL DEFAULT ''",
+    "provider": "TEXT NOT NULL DEFAULT ''",
 }
 
 
@@ -2561,676 +2714,7 @@ def _reconcile_legacy_schema(conn: sqlite3.Connection, backfill_agent_history):
     _ensure_idea_brief_schema(conn)
     conn.commit()
     _migrate_behavior_overlay_scope_schema(conn)
-    # Migrate: add terminal_close_on_disconnect column
-    try:
-        conn.execute(
-            "SELECT terminal_close_on_disconnect FROM group_settings "
-            "LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE group_settings ADD COLUMN "
-            "terminal_close_on_disconnect INTEGER NOT NULL DEFAULT 0")
-        conn.commit()
-    # Migrate: add memory retention columns
-    try:
-        conn.execute(
-            "SELECT retention_kind FROM memory_entries LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE memory_entries ADD COLUMN "
-            "retention_kind TEXT NOT NULL DEFAULT 'durable'")
-        conn.commit()
-    try:
-        conn.execute(
-            "SELECT expires_at FROM memory_entries LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE memory_entries ADD COLUMN expires_at REAL")
-        conn.commit()
-    rebuild_memory_retention_indexes(conn)
-    # Migrate: add xterm scrollback setting cache column. Global settings
-    # remain persisted as key/value rows; this column keeps the schema
-    # migration explicit for installations created before the setting existed.
-    try:
-        conn.execute("SELECT xterm_scrollback FROM global_settings LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE global_settings ADD COLUMN "
-            "xterm_scrollback INTEGER NOT NULL DEFAULT 2000")
-        conn.commit()
-    # Migrate: add action_name and action_vars columns to board_tasks
-    for col, default in [("action_name", "''"),
-                         ("action_vars", "'{}'"),
-                         ("agent_template", "''")]:
-        try:
-            conn.execute(
-                f"SELECT {col} FROM board_tasks LIMIT 0")
-        except sqlite3.OperationalError:
-            conn.execute(
-                f"ALTER TABLE board_tasks ADD COLUMN {col} "
-                f"TEXT NOT NULL DEFAULT {default}")
-            conn.commit()
-    # Migrate: add pipeline columns to board_tasks
-    for col, default in [("parent_task_id", "''"),
-                         ("pipeline_depth", "0"),
-                         ("pipeline_root_id", "''")]:
-        try:
-            conn.execute(
-                f"SELECT {col} FROM board_tasks LIMIT 0")
-        except sqlite3.OperationalError:
-            col_type = "INTEGER" if col == "pipeline_depth" else "TEXT"
-            conn.execute(
-                f"ALTER TABLE board_tasks ADD COLUMN {col} "
-                f"{col_type} NOT NULL DEFAULT {default}")
-            conn.commit()
-    # Migrate: add reply_agent_id column to board_tasks
-    try:
-        conn.execute(
-            "SELECT reply_agent_id FROM board_tasks LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE board_tasks ADD COLUMN reply_agent_id "
-            "TEXT NOT NULL DEFAULT ''")
-        conn.commit()
-    # Migrate: add description column to board_tasks
-    try:
-        conn.execute(
-            "SELECT description FROM board_tasks LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE board_tasks ADD COLUMN description "
-            "TEXT NOT NULL DEFAULT ''")
-        conn.commit()
-    # Migrate: add status column to board_tasks
-    try:
-        conn.execute("SELECT status FROM board_tasks LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE board_tasks ADD COLUMN status "
-            "TEXT NOT NULL DEFAULT ''")
-        conn.commit()
-    # Migrate: add messages column to board_tasks
-    try:
-        conn.execute("SELECT messages FROM board_tasks LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE board_tasks ADD COLUMN messages "
-            "TEXT NOT NULL DEFAULT '[]'")
-        conn.commit()
-    # Migrate: add inline engineer→agent thread column to board_tasks
-    board_task_columns = {
-        row[1] for row in conn.execute("PRAGMA table_info(board_tasks)")
-    }
-    if "messages_thread" not in board_task_columns:
-        conn.execute(
-            "ALTER TABLE board_tasks ADD COLUMN messages_thread "
-            "TEXT NOT NULL DEFAULT '[]'")
-        conn.commit()
-    # Migrate: add scheduled_at column to board_tasks
-    try:
-        conn.execute(
-            "SELECT scheduled_at FROM board_tasks LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE board_tasks ADD COLUMN scheduled_at "
-            "TEXT NOT NULL DEFAULT ''")
-        conn.commit()
-    # Migrate: add queued-vs-live task dispatch state.
-    try:
-        conn.execute("SELECT dispatch_state FROM board_tasks LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE board_tasks ADD COLUMN dispatch_state "
-            "TEXT NOT NULL DEFAULT 'queued'")
-        conn.execute(
-            "UPDATE board_tasks SET dispatch_state='live' "
-            "WHERE COALESCE(agent_id, '') != '' OR lane='In Progress'")
-        conn.commit()
-    # Migrate: add depends_on column to board_tasks
-    try:
-        conn.execute(
-            "SELECT depends_on FROM board_tasks LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE board_tasks ADD COLUMN depends_on "
-            "TEXT NOT NULL DEFAULT '[]'")
-        conn.commit()
-    # Migrate: add attachments column to board_tasks
-    try:
-        conn.execute(
-            "SELECT attachments FROM board_tasks LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE board_tasks ADD COLUMN attachments "
-            "TEXT NOT NULL DEFAULT '[]'")
-        conn.commit()
-    # Migrate: add board-sync metadata column to board_tasks.
-    try:
-        conn.execute("SELECT board_sync FROM board_tasks LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE board_tasks ADD COLUMN board_sync "
-            "TEXT NOT NULL DEFAULT '{}'")
-        conn.commit()
-    # Migrate: add task health columns to board_tasks
-    for col, default in [
-        ("health_state", "'healthy'"),
-        ("health_since", "''"),
-        ("health_details", "'{}'"),
-    ]:
-        try:
-            conn.execute(
-                f"SELECT {col} FROM board_tasks LIMIT 0")
-        except sqlite3.OperationalError:
-            conn.execute(
-                f"ALTER TABLE board_tasks ADD COLUMN {col} "
-                f"TEXT NOT NULL DEFAULT {default}")
-            conn.commit()
-    # Migrate: add artifacts column to board_tasks
-    try:
-        conn.execute(
-            "SELECT artifacts FROM board_tasks LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE board_tasks ADD COLUMN artifacts "
-            "TEXT NOT NULL DEFAULT '[]'")
-        conn.commit()
-    # Migrate: add verification columns to board_tasks
-    for col, default in [
-        ("lane_entered_at", "''"),
-        ("verification_mode", "''"),
-        ("verification_state", "''"),
-        ("verification_notes", "''"),
-        ("verification_updated_at", "''"),
-        ("verification_updated_by", "''"),
-        ("verification_summary", "'{}'"),
-        ("completion_evidence", "'{}'"),
-        ("worktree_boundary", "'{}'"),
-        ("resume_after_boundary_task_id", "''"),
-        ("archived_at", "''"),
-        ("archived_from_lane", "''"),
-    ]:
-        try:
-            conn.execute(
-                f"SELECT {col} FROM board_tasks LIMIT 0")
-        except sqlite3.OperationalError:
-            conn.execute(
-                f"ALTER TABLE board_tasks ADD COLUMN {col} "
-                f"TEXT NOT NULL DEFAULT {default}")
-            conn.commit()
-    # Migrate: add deliverable contract columns to board_tasks
-    for col, col_type, default in [
-        ("deliverable_required", "INTEGER", "0"),
-        ("deliverable_type", "TEXT", "''"),
-        ("deliverable_format", "TEXT", "''"),
-        ("deliverable_artifact_title", "TEXT", "''"),
-    ]:
-        try:
-            conn.execute(f"SELECT {col} FROM board_tasks LIMIT 0")
-        except sqlite3.OperationalError:
-            conn.execute(
-                f"ALTER TABLE board_tasks ADD COLUMN {col} "
-                f"{col_type} NOT NULL DEFAULT {default}")
-            conn.commit()
-    # Migrate: add mandatory-review contract columns to board_tasks (TORQUE:256)
-    for col, col_type, default in [
-        ("requires_review", "INTEGER", "0"),
-        ("pre_approved_by", "TEXT", "''"),
-    ]:
-        try:
-            conn.execute(f"SELECT {col} FROM board_tasks LIMIT 0")
-        except sqlite3.OperationalError:
-            conn.execute(
-                f"ALTER TABLE board_tasks ADD COLUMN {col} "
-                f"{col_type} NOT NULL DEFAULT {default}")
-            conn.commit()
-    # Migrate: drop assignee column from board_tasks
-    try:
-        conn.execute(
-            "SELECT assignee FROM board_tasks LIMIT 0")
-        conn.execute(
-            "ALTER TABLE board_tasks DROP COLUMN assignee")
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass  # column already gone
-    # Migrate: add tasks_dispatched column to agents
-    for col, col_type, default in [
-        ("tasks_dispatched", "INTEGER", "0"),
-        ("runner_backend", "TEXT", "'pty'"),
-        ("worktree_base_dir", "TEXT", "'.torque/worktrees'"),
-        ("worktree_auto_checkpoint", "INTEGER", "0"),
-        ("checkpoint_on_progress", "INTEGER", "0"),
-        ("worktree_merge_squash", "INTEGER", "1"),
-        ("session_resume", "INTEGER", "1"),
-        ("idle_timeout", "INTEGER", "0"),
-    ]:
-        try:
-            conn.execute(f"SELECT {col} FROM agents LIMIT 0")
-        except sqlite3.OperationalError:
-            conn.execute(
-                f"ALTER TABLE agents ADD COLUMN {col} "
-                f"{col_type} NOT NULL DEFAULT {default}")
-            conn.commit()
-    # Migrate: add default_agent_template column
-    try:
-        conn.execute(
-            "SELECT default_agent_template FROM group_settings LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE group_settings ADD COLUMN "
-            "default_agent_template TEXT NOT NULL DEFAULT ''")
-        conn.commit()
-    # Migrate: add board_default_* columns to group_settings
-    for col, default in [("board_default_labels", "'[]'"),
-                         ("board_default_lane", "''"),
-                         ("board_default_action", "''")]:
-        try:
-            conn.execute(
-                f"SELECT {col} FROM group_settings LIMIT 0")
-        except sqlite3.OperationalError:
-            conn.execute(
-                f"ALTER TABLE group_settings ADD COLUMN "
-                f"{col} TEXT NOT NULL DEFAULT {default}")
-            conn.commit()
-    # Migrate: add board-sync group settings.
-    for col, col_type, default in (
-        ("board_sync_provider", "TEXT", "'none'"),
-        ("board_sync_enabled", "INTEGER", "0"),
-        ("board_sync_github", "TEXT", "'{}'"),
-    ):
-        try:
-            conn.execute(f"SELECT {col} FROM group_settings LIMIT 0")
-        except sqlite3.OperationalError:
-            conn.execute(
-                f"ALTER TABLE group_settings ADD COLUMN {col} "
-                f"{col_type} NOT NULL DEFAULT {default}")
-            conn.commit()
-    # Migrate: add env_file columns to group_settings
-    for col in ("env_file", "agent_env_file", "terminal_env_file"):
-        try:
-            conn.execute(
-                f"SELECT {col} FROM group_settings LIMIT 0")
-        except sqlite3.OperationalError:
-            conn.execute(
-                f"ALTER TABLE group_settings ADD COLUMN "
-                f"{col} TEXT NOT NULL DEFAULT ''")
-            conn.commit()
-    # Migrate: add worktree_symlinks column to group_settings
-    try:
-        conn.execute(
-            "SELECT worktree_symlinks FROM group_settings LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE group_settings ADD COLUMN "
-            "worktree_symlinks TEXT NOT NULL DEFAULT '[]'")
-        conn.commit()
-    # Migrate: add worktree_submodules column to group_settings
-    try:
-        conn.execute(
-            "SELECT worktree_submodules FROM group_settings LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE group_settings ADD COLUMN "
-            "worktree_submodules TEXT NOT NULL DEFAULT '[]'")
-        conn.commit()
-    # Migrate: add worktree_symlink_gitignored_paths column to group_settings
-    try:
-        conn.execute(
-            "SELECT worktree_symlink_gitignored_paths "
-            "FROM group_settings LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE group_settings ADD COLUMN "
-            "worktree_symlink_gitignored_paths "
-            "INTEGER NOT NULL DEFAULT 0")
-        conn.commit()
-    # Migrate: add worktree_merge_cleanup column to group_settings
-    try:
-        conn.execute(
-            "SELECT worktree_merge_cleanup FROM group_settings LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE group_settings ADD COLUMN "
-            "worktree_merge_cleanup TEXT NOT NULL DEFAULT 'keep'")
-        conn.commit()
-    # Migrate: add worktree_merge_preserve_diff column to group_settings
-    try:
-        conn.execute(
-            "SELECT worktree_merge_preserve_diff FROM group_settings LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE group_settings ADD COLUMN "
-            "worktree_merge_preserve_diff INTEGER NOT NULL DEFAULT 0")
-        conn.commit()
-    # Migrate: add engineer_merge_mode column to group_settings
-    try:
-        conn.execute(
-            "SELECT engineer_merge_mode FROM group_settings LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE group_settings ADD COLUMN "
-            "engineer_merge_mode TEXT NOT NULL DEFAULT 'pr'")
-        conn.commit()
-    # Migrate: add guidance_hint_cadence column to group_settings
-    try:
-        conn.execute(
-            "SELECT guidance_hint_cadence FROM group_settings LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE group_settings ADD COLUMN "
-            "guidance_hint_cadence INTEGER NOT NULL DEFAULT 4")
-        conn.commit()
-    # Migrate: add engineer_hint_snoozes column to group_settings
-    try:
-        conn.execute(
-            "SELECT engineer_hint_snoozes FROM group_settings LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE group_settings ADD COLUMN "
-            "engineer_hint_snoozes TEXT NOT NULL DEFAULT '{}'")
-        conn.commit()
-    # Migrate: add engineer_agent_id column to group_settings
-    try:
-        conn.execute(
-            "SELECT engineer_agent_id FROM group_settings LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE group_settings ADD COLUMN "
-            "engineer_agent_id TEXT NOT NULL DEFAULT ''")
-        conn.commit()
-    # Migrate: add default_engineer_specializations column to group_settings
-    try:
-        conn.execute(
-            "SELECT default_engineer_specializations FROM group_settings LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE group_settings ADD COLUMN "
-            "default_engineer_specializations TEXT NOT NULL DEFAULT '[]'")
-        conn.commit()
-    # Migrate: add architect settings columns to group_settings.
-    for col, col_type, default in (
-        ("architect_boot_command", "TEXT", "''"),
-        ("architect_provider", "TEXT", "''"),
-        ("architect_model", "TEXT", "''"),
-        ("architect_reasoning_effort", "TEXT", "''"),
-        ("architect_directory", "TEXT", "''"),
-        ("architect_profile", "TEXT", "''"),
-        ("architect_shell", "TEXT", "''"),
-        ("architect_tab_color", "TEXT", "''"),
-        ("architect_custom_instructions", "TEXT", "''"),
-        ("architect_autonomy_mode", "TEXT", "'dispatch_after_confirm'"),
-        ("architect_paused", "INTEGER", "0"),
-        ("architect_digest_verbosity", "TEXT", "'balanced'"),
-        (
-            "architect_journal_checkpoint_frequency",
-            "TEXT",
-            "'every_10_actions'",
-        ),
-        (
-            "architect_review_gate_thresholds",
-            "TEXT",
-            (
-                "'{\"ship_direct_max\":50,"
-                "\"review_default_above\":150,"
-                "\"self_review_bypass_allowed\":false}'"
-            ),
-        ),
-    ):
-        try:
-            conn.execute(f"SELECT {col} FROM group_settings LIMIT 0")
-        except sqlite3.OperationalError:
-            conn.execute(
-                f"ALTER TABLE group_settings ADD COLUMN {col} "
-                f"{col_type} NOT NULL DEFAULT {default}")
-            conn.commit()
-    # Migrate: add checkpoint_on_progress to group_settings + agents
-    for table in ("group_settings", "agents"):
-        try:
-            conn.execute(
-                f"SELECT checkpoint_on_progress FROM {table} LIMIT 0")
-        except sqlite3.OperationalError:
-            conn.execute(
-                f"ALTER TABLE {table} ADD COLUMN "
-                "checkpoint_on_progress INTEGER NOT NULL DEFAULT 0")
-            conn.commit()
     _ensure_terminal_backend_defaults_to_pty(conn)
-    # Migrate: add pending_question column to engineer_settings
-    try:
-        conn.execute(
-            "SELECT pending_question FROM engineer_settings LIMIT 0")
-    except sqlite3.OperationalError:
-        try:
-            conn.execute(
-                "ALTER TABLE engineer_settings ADD COLUMN "
-                "pending_question TEXT NOT NULL DEFAULT ''")
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass  # table may not exist yet
-    try:
-        conn.execute(
-            "SELECT pending_question_set_at FROM engineer_settings LIMIT 0")
-    except sqlite3.OperationalError:
-        try:
-            conn.execute(
-                "ALTER TABLE engineer_settings ADD COLUMN "
-                "pending_question_set_at REAL NOT NULL DEFAULT 0")
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass  # table may not exist yet
-    try:
-        conn.execute(
-            "SELECT pending_question_actor_id FROM engineer_settings LIMIT 0")
-    except sqlite3.OperationalError:
-        try:
-            conn.execute(
-                "ALTER TABLE engineer_settings ADD COLUMN "
-                "pending_question_actor_id TEXT NOT NULL DEFAULT ''")
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass  # table may not exist yet
-    for col in ("pending_note", "pending_note_kind"):
-        try:
-            conn.execute(
-                f"SELECT {col} FROM engineer_settings LIMIT 0")
-        except sqlite3.OperationalError:
-            try:
-                conn.execute(
-                    f"ALTER TABLE engineer_settings ADD COLUMN "
-                    f"{col} TEXT NOT NULL DEFAULT ''")
-                conn.commit()
-            except sqlite3.OperationalError:
-                pass
-    try:
-        conn.execute(
-            "SELECT pending_note_set_at FROM engineer_settings LIMIT 0")
-    except sqlite3.OperationalError:
-        try:
-            conn.execute(
-                "ALTER TABLE engineer_settings ADD COLUMN "
-                "pending_note_set_at REAL NOT NULL DEFAULT 0")
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
-    try:
-        conn.execute(
-            "SELECT pending_note_actor_id FROM engineer_settings LIMIT 0")
-    except sqlite3.OperationalError:
-        try:
-            conn.execute(
-                "ALTER TABLE engineer_settings ADD COLUMN "
-                "pending_note_actor_id TEXT NOT NULL DEFAULT ''")
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
-    try:
-        conn.execute(
-            "SELECT restrict_to_created_agents FROM engineer_settings LIMIT 0")
-    except sqlite3.OperationalError:
-        try:
-            conn.execute(
-                "ALTER TABLE engineer_settings ADD COLUMN "
-                "restrict_to_created_agents INTEGER NOT NULL DEFAULT 0")
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
-    try:
-        conn.execute(
-            "SELECT engineer_can_override_worker_provider "
-            "FROM engineer_settings LIMIT 0")
-    except sqlite3.OperationalError:
-        try:
-            conn.execute(
-                "ALTER TABLE engineer_settings ADD COLUMN "
-                "engineer_can_override_worker_provider "
-                "INTEGER NOT NULL DEFAULT 1")
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
-    # Migrate: add engineer_provider and launch override columns
-    for col in ("engineer_provider", "engineer_boot_command",
-                "engineer_model", "engineer_reasoning_effort",
-                "engineer_directory", "engineer_profile",
-                "engineer_shell", "engineer_tab_color"):
-        try:
-            conn.execute(
-                f"SELECT {col} FROM engineer_settings LIMIT 0")
-        except sqlite3.OperationalError:
-            try:
-                conn.execute(
-                    f"ALTER TABLE engineer_settings ADD COLUMN "
-                    f"{col} TEXT NOT NULL DEFAULT ''")
-                conn.commit()
-            except sqlite3.OperationalError:
-                pass
-    try:
-        conn.execute(
-            "SELECT heartbeat_interval FROM engineer_settings LIMIT 0")
-    except sqlite3.OperationalError:
-        try:
-            conn.execute(
-                "ALTER TABLE engineer_settings ADD COLUMN "
-                "heartbeat_interval INTEGER NOT NULL DEFAULT 300")
-            conn.execute(
-                "UPDATE engineer_settings "
-                "SET heartbeat_interval = max_interval")
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
-    for col, default in (
-        ("default_worker_concurrency", "2"),
-        ("autonomy_mode", "'dispatch_when_clear'"),
-        ("wave_size_preference", "'small'"),
-        ("same_agent_follow_up_preference", "'balanced'"),
-        ("digest_verbosity", "'balanced'"),
-        ("escalation_style", "'note_then_ask'"),
-    ):
-        try:
-            conn.execute(
-                f"SELECT {col} FROM engineer_settings LIMIT 0")
-        except sqlite3.OperationalError:
-            try:
-                conn.execute(
-                    f"ALTER TABLE engineer_settings ADD COLUMN "
-                    f"{col} "
-                    f"{'INTEGER' if col == 'default_worker_concurrency' else 'TEXT'} "
-                    f"NOT NULL DEFAULT {default}")
-                conn.commit()
-            except sqlite3.OperationalError:
-                pass
-    try:
-        conn.execute(
-            "UPDATE engineer_settings "
-            "SET enabled_events = ? "
-            "WHERE enabled_events = ?",
-            (
-                json.dumps([
-                    "agent_started",
-                    "task_dispatched",
-                    "task_derived",
-                    "task_health_alert",
-                ]),
-                json.dumps([
-                    "agent_started",
-                    "task_dispatched",
-                    "task_derived",
-                ]),
-            ),
-        )
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass
-    for col, default in (
-        ("architect_digest", "0"),
-        ("wake_on_digest", "0"),
-        ("suppress_empty", "0"),
-    ):
-        try:
-            conn.execute(
-                f"SELECT {col} FROM agent_digest_settings LIMIT 0")
-        except sqlite3.OperationalError:
-            try:
-                conn.execute(
-                    f"ALTER TABLE agent_digest_settings ADD COLUMN "
-                    f"{col} INTEGER NOT NULL DEFAULT {default}")
-                conn.commit()
-            except sqlite3.OperationalError:
-                pass
-    # Migrate: add architect digest tuning columns to group_settings.
-    # ``architect_enabled_events`` defaults to '' (empty string), which the
-    # runtime decodes as the quiet default: only server-enforced floor events
-    # plus any per-architect opt-ins.
-    for col, col_type, default in (
-        ("architect_push_interval", "INTEGER", "300"),
-        ("architect_max_interval", "INTEGER", "600"),
-        ("architect_heartbeat_interval", "INTEGER", "0"),
-        ("architect_suppress_empty_digests", "INTEGER", "1"),
-        ("architect_enabled_events", "TEXT", "''"),
-    ):
-        try:
-            conn.execute(f"SELECT {col} FROM group_settings LIMIT 0")
-        except sqlite3.OperationalError:
-            try:
-                conn.execute(
-                    f"ALTER TABLE group_settings ADD COLUMN {col} "
-                    f"{col_type} NOT NULL DEFAULT {default}")
-                conn.commit()
-            except sqlite3.OperationalError:
-                pass
-    try:
-        conn.execute(
-            "SELECT engineer_behavior_requires_user_approval "
-            "FROM group_settings LIMIT 0")
-    except sqlite3.OperationalError:
-        try:
-            conn.execute(
-                "ALTER TABLE group_settings ADD COLUMN "
-                "engineer_behavior_requires_user_approval "
-                "INTEGER NOT NULL DEFAULT 0")
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
-    try:
-        conn.execute(
-            "SELECT engineer_owner_id FROM auto_dispatch_queue LIMIT 0")
-    except sqlite3.OperationalError:
-        try:
-            conn.execute(
-                "ALTER TABLE auto_dispatch_queue ADD COLUMN "
-                "engineer_owner_id TEXT NOT NULL DEFAULT ''")
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
-    try:
-        conn.execute(
-            "SELECT provider FROM auto_dispatch_queue LIMIT 0")
-    except sqlite3.OperationalError:
-        try:
-            conn.execute(
-                "ALTER TABLE auto_dispatch_queue ADD COLUMN "
-                "provider TEXT NOT NULL DEFAULT ''")
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
     # Migrate: rename system labels with torque: prefix
     rows = conn.execute(
         "SELECT id, labels FROM board_tasks "
@@ -3467,6 +2951,115 @@ def _migration_0013_group_provider_runtime_settings(
     _ensure_columns(conn, "group_settings", GROUP_PROVIDER_RUNTIME_COLUMNS)
 
 
+def _migration_0014_board_task_runtime_contract(
+    conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Own task execution, pipeline, messaging, and health columns."""
+
+    dispatch_state_missing = not _column_exists(
+        conn, "board_tasks", "dispatch_state"
+    )
+    _ensure_columns(conn, "board_tasks", BOARD_TASK_RUNTIME_COLUMNS)
+    if dispatch_state_missing:
+        conn.execute(
+            "UPDATE board_tasks SET dispatch_state='live' "
+            "WHERE COALESCE(agent_id, '') != '' OR lane='In Progress'"
+        )
+    if _column_exists(conn, "board_tasks", "assignee"):
+        conn.execute("ALTER TABLE board_tasks DROP COLUMN assignee")
+
+
+def _migration_0015_board_task_completion_contract(
+    conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Own task verification, evidence, archival, and review columns."""
+
+    _ensure_columns(conn, "board_tasks", BOARD_TASK_COMPLETION_COLUMNS)
+
+
+def _migration_0016_agent_group_operational_contract(
+    conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Own persisted agent runtime and group operational settings."""
+
+    _ensure_columns(conn, "agents", AGENT_RUNTIME_COLUMNS)
+    _ensure_columns(conn, "group_settings", GROUP_OPERATIONAL_COLUMNS)
+
+
+def _migration_0017_engineer_settings_contract(
+    conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Own Engineer launch, autonomy, pending-input, and cadence settings."""
+
+    heartbeat_missing = not _column_exists(
+        conn, "engineer_settings", "heartbeat_interval"
+    )
+    _ensure_columns(conn, "engineer_settings", ENGINEER_SETTINGS_COLUMNS)
+    if heartbeat_missing and _column_exists(
+        conn, "engineer_settings", "max_interval"
+    ):
+        conn.execute(
+            "UPDATE engineer_settings SET heartbeat_interval=max_interval"
+        )
+    conn.execute(
+        "UPDATE engineer_settings SET enabled_events=? WHERE enabled_events=?",
+        (
+            json.dumps([
+                "agent_started",
+                "task_dispatched",
+                "task_derived",
+                "task_health_alert",
+            ]),
+            json.dumps([
+                "agent_started",
+                "task_dispatched",
+                "task_derived",
+            ]),
+        ),
+    )
+
+
+def _migration_0018_digest_runtime_contract(
+    conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Own per-agent digest delivery controls."""
+
+    _ensure_columns(
+        conn,
+        "agent_digest_settings",
+        AGENT_DIGEST_RUNTIME_COLUMNS,
+    )
+
+
+def _migration_0019_memory_global_contract(
+    conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Own memory retention metadata and global terminal cache settings."""
+
+    _ensure_columns(conn, "memory_entries", MEMORY_RETENTION_COLUMNS)
+    _ensure_columns(conn, "global_settings", GLOBAL_SETTINGS_CACHE_COLUMNS)
+    rebuild_memory_retention_indexes(conn, manage_transaction=False)
+
+
+def _migration_0020_auto_dispatch_runtime_contract(
+    conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Own Engineer/provider routing metadata for queued dispatches."""
+
+    _ensure_columns(
+        conn,
+        "auto_dispatch_queue",
+        AUTO_DISPATCH_RUNTIME_COLUMNS,
+    )
+
+
 SCHEMA_MIGRATIONS = (
     SchemaMigration(
         1,
@@ -3555,6 +3148,62 @@ SCHEMA_MIGRATIONS = (
         "group_provider_runtime_settings",
         "group-agent-worker-provider-runtime-v1",
         _migration_0013_group_provider_runtime_settings,
+        phase="post_init",
+        repair_on_boot=True,
+    ),
+    SchemaMigration(
+        14,
+        "board_task_runtime_contract",
+        "board-task-execution-pipeline-health-v1",
+        _migration_0014_board_task_runtime_contract,
+        phase="post_init",
+        repair_on_boot=True,
+    ),
+    SchemaMigration(
+        15,
+        "board_task_completion_contract",
+        "board-task-verification-evidence-review-v1",
+        _migration_0015_board_task_completion_contract,
+        phase="post_init",
+        repair_on_boot=True,
+    ),
+    SchemaMigration(
+        16,
+        "agent_group_operational_contract",
+        "agent-group-operational-settings-v1",
+        _migration_0016_agent_group_operational_contract,
+        phase="post_init",
+        repair_on_boot=True,
+    ),
+    SchemaMigration(
+        17,
+        "engineer_settings_contract",
+        "engineer-launch-autonomy-input-cadence-v1",
+        _migration_0017_engineer_settings_contract,
+        phase="post_init",
+        repair_on_boot=True,
+    ),
+    SchemaMigration(
+        18,
+        "digest_runtime_contract",
+        "agent-digest-runtime-controls-v1",
+        _migration_0018_digest_runtime_contract,
+        phase="post_init",
+        repair_on_boot=True,
+    ),
+    SchemaMigration(
+        19,
+        "memory_global_contract",
+        "memory-retention-global-terminal-cache-v1",
+        _migration_0019_memory_global_contract,
+        phase="post_init",
+        repair_on_boot=True,
+    ),
+    SchemaMigration(
+        20,
+        "auto_dispatch_runtime_contract",
+        "auto-dispatch-engineer-provider-routing-v1",
+        _migration_0020_auto_dispatch_runtime_contract,
         phase="post_init",
         repair_on_boot=True,
     ),
@@ -3741,21 +3390,22 @@ def _apply_schema_migrations(
         conn.commit()
 
 
-def _repair_applied_schema_contracts(
+def _reconcile_migration_owned_contracts(
     conn: sqlite3.Connection,
     backfill_agent_history,
 ) -> None:
-    """Reconcile additive contracts explicitly marked as boot-repairable.
+    """Prepare additive contracts explicitly marked as boot-repairable.
 
     Some historical installations (and recovery workflows) can retain a
     complete migration ledger while an additive table contract is partial.
     Keep that compatibility behavior attached to the owning migration instead
-    of accumulating independent column probes in the legacy baseline.
+    of accumulating independent column probes in the legacy baseline.  Pending
+    contracts are prepared too, because guarded data migrations 8-10 consume
+    the current row shape before later versions can be ledgered.
     """
 
-    applied = _applied_schema_migrations(conn)
     for migration in SCHEMA_MIGRATIONS:
-        if not migration.repair_on_boot or migration.version not in applied:
+        if not migration.repair_on_boot:
             continue
         try:
             conn.execute("BEGIN")
@@ -3764,6 +3414,32 @@ def _repair_applied_schema_contracts(
         except Exception:
             conn.rollback()
             raise
+
+
+def _apply_ready_automatic_migrations(
+    conn: sqlite3.Connection,
+    backfill_agent_history,
+) -> None:
+    """Advance consecutive migrations that need no external runner.
+
+    This lets already-adopted databases receive additive schema contracts
+    before the legacy compatibility pass reads those tables.  The walk stops
+    at the first runner-backed migration so guarded data work keeps its normal
+    post-init ordering.
+    """
+
+    applied = _applied_schema_migrations(conn)
+    for migration in SCHEMA_MIGRATIONS:
+        if migration.version in applied:
+            continue
+        if migration.requires_runner:
+            break
+        _apply_schema_migrations(
+            conn,
+            backfill_agent_history,
+            versions={migration.version},
+        )
+        applied[migration.version] = {"version": migration.version}
 
 
 def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
@@ -3777,14 +3453,24 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     # repairing that baseline until its remaining probes are converted into
     # explicit ledger migrations.  Fresh/unadopted databases run the same pass
     # through migration 1 below, so avoid doing it twice.
-    if 1 in _applied_schema_migrations(conn):
+    baseline_applied = 1 in _applied_schema_migrations(conn)
+    if baseline_applied:
+        # Validate the ledger before using migration-owned repair callbacks.
+        _apply_schema_migrations(
+            conn,
+            backfill_agent_history,
+            phases=set(),
+        )
+        _apply_ready_automatic_migrations(conn, backfill_agent_history)
+        _reconcile_migration_owned_contracts(conn, backfill_agent_history)
         _reconcile_legacy_schema(conn, backfill_agent_history)
     _apply_schema_migrations(
         conn,
         backfill_agent_history,
         phases={"schema"},
     )
-    _repair_applied_schema_contracts(conn, backfill_agent_history)
+    if not baseline_applied:
+        _reconcile_migration_owned_contracts(conn, backfill_agent_history)
 
 
 def finalize_database_migrations(
@@ -3884,7 +3570,11 @@ def finalize_database_migrations(
             kinds_version = _legacy_kinds_version(conn)
     return True
 
-def rebuild_memory_retention_indexes(conn: sqlite3.Connection):
+def rebuild_memory_retention_indexes(
+    conn: sqlite3.Connection,
+    *,
+    manage_transaction: bool = True,
+):
     """Ensure memory-entry indexes match the current retention schema."""
     for name in (
         "idx_memory_entries_scope",
@@ -3917,4 +3607,5 @@ def rebuild_memory_retention_indexes(conn: sqlite3.Connection):
         "CREATE INDEX IF NOT EXISTS idx_memory_entries_expiry "
         "ON memory_entries(retention_kind, expires_at)"
     )
-    conn.commit()
+    if manage_transaction:
+        conn.commit()

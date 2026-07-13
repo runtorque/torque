@@ -8,14 +8,23 @@ from unittest import mock
 
 from torque.db import TorqueDB, _create_sqlite_backup
 from torque.db_schema import (
+    AGENT_DIGEST_RUNTIME_COLUMNS,
     AGENT_CLASS_AUDIT_COLUMNS,
     AGENT_KIND_COLUMNS,
     AGENT_LIFECYCLE_COLUMNS,
     AGENT_MESSAGE_LOOP_RUNTIME_COLUMNS,
+    AGENT_RUNTIME_COLUMNS,
+    AUTO_DISPATCH_RUNTIME_COLUMNS,
+    BOARD_TASK_COMPLETION_COLUMNS,
     BOARD_TASK_ROUTING_COLUMNS,
+    BOARD_TASK_RUNTIME_COLUMNS,
     DECISION_COLUMNS,
     ENGINEER_JOURNAL_PROVENANCE_COLUMNS,
+    ENGINEER_SETTINGS_COLUMNS,
+    GLOBAL_SETTINGS_CACHE_COLUMNS,
+    GROUP_OPERATIONAL_COLUMNS,
     GROUP_PROVIDER_RUNTIME_COLUMNS,
+    MEMORY_RETENTION_COLUMNS,
     PENDING_HIRE_LIFECYCLE_COLUMNS,
     SCHEMA_MIGRATIONS,
     SCHEMA_VERSION,
@@ -217,7 +226,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
 
         self.assertTrue(set(BOARD_TASK_ROUTING_COLUMNS) <= columns)
         self.assertIn((3, "board_task_routing_contract"), ledger)
-        self.assertEqual(ledger[-1], (13, "group_provider_runtime_settings"))
+        self.assertEqual(ledger[-1], (20, "auto_dispatch_runtime_contract"))
         self.assertFalse(set(BOARD_TASK_ROUTING_COLUMNS) & backup_columns)
         self.assertEqual(backup_version, (2,))
         self.assertEqual(rerun_backup_mtime, backup_mtime)
@@ -312,7 +321,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
         self.assertTrue(set(AGENT_CLASS_AUDIT_COLUMNS) <= audit_columns)
         self.assertTrue(set(DECISION_COLUMNS) <= decision_columns)
         self.assertIn((4, "agent_lifecycle_contract"), ledger)
-        self.assertEqual(ledger[-1], (13, "group_provider_runtime_settings"))
+        self.assertEqual(ledger[-1], (20, "auto_dispatch_runtime_contract"))
         self.assertFalse(set(AGENT_LIFECYCLE_COLUMNS) & backup_agent_columns)
         self.assertNotIn("agent_class_audit", backup_tables)
         self.assertNotIn("decisions", backup_tables)
@@ -348,7 +357,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
 
         self.assertTrue(set(AGENT_KIND_COLUMNS) <= columns)
         self.assertIn((7, "agent_kind_schema"), ledger)
-        self.assertEqual(ledger[-1], (13, "group_provider_runtime_settings"))
+        self.assertEqual(ledger[-1], (20, "auto_dispatch_runtime_contract"))
 
     def test_post_init_phase_waits_for_kinds_stage_four(self):
         conn = sqlite3.connect(":memory:")
@@ -384,7 +393,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
         self.assertEqual(before_meta, ("7",))
         self.assertFalse(skipped)
         self.assertTrue(finalized)
-        self.assertEqual(after[-1], (13, "group_provider_runtime_settings"))
+        self.assertEqual(after[-1], (20, "auto_dispatch_runtime_contract"))
         self.assertEqual(after_meta, (SCHEMA_VERSION,))
 
     def test_post_init_runner_is_retryable_and_skipped_after_ledger(self):
@@ -559,6 +568,63 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
         ).fetchone()
         self.assertTrue(set(GROUP_PROVIDER_RUNTIME_COLUMNS) <= columns)
         self.assertEqual(repaired_applied_at, applied_at)
+
+    def test_applied_operational_contracts_repair_partial_schema(self):
+        conn = sqlite3.connect(":memory:")
+        self.addCleanup(conn.close)
+        initialize_database(conn, lambda: None)
+        conn.execute(
+            "INSERT INTO meta(key, value) VALUES "
+            "('schema_kinds_migration_version', '4')"
+        )
+        conn.commit()
+        self.assertTrue(
+            finalize_database_migrations(
+                conn,
+                lambda: None,
+                post_init_runners=self._post_init_runners(),
+            )
+        )
+        ledger_before = conn.execute(
+            "SELECT version, applied_at FROM schema_migrations ORDER BY version"
+        ).fetchall()
+        contracts = (
+            ("board_tasks", BOARD_TASK_RUNTIME_COLUMNS),
+            ("board_tasks", BOARD_TASK_COMPLETION_COLUMNS),
+            ("agents", AGENT_RUNTIME_COLUMNS),
+            ("group_settings", GROUP_OPERATIONAL_COLUMNS),
+            ("engineer_settings", ENGINEER_SETTINGS_COLUMNS),
+            ("agent_digest_settings", AGENT_DIGEST_RUNTIME_COLUMNS),
+            ("global_settings", GLOBAL_SETTINGS_CACHE_COLUMNS),
+            ("auto_dispatch_queue", AUTO_DISPATCH_RUNTIME_COLUMNS),
+        )
+        for table, columns in contracts:
+            for column in columns:
+                conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+        for index_name in (
+            "idx_memory_entries_scope",
+            "idx_memory_entries_group",
+            "idx_memory_entries_project",
+            "idx_memory_entries_expiry",
+        ):
+            conn.execute(f"DROP INDEX IF EXISTS {index_name}")
+        for column in MEMORY_RETENTION_COLUMNS:
+            conn.execute(f"ALTER TABLE memory_entries DROP COLUMN {column}")
+        conn.commit()
+
+        initialize_database(conn, lambda: None)
+
+        for table, columns in contracts + (
+            ("memory_entries", MEMORY_RETENTION_COLUMNS),
+        ):
+            actual = {
+                row[1] for row in conn.execute(f"PRAGMA table_info({table})")
+            }
+            self.assertTrue(set(columns) <= actual, table)
+        ledger_after = conn.execute(
+            "SELECT version, applied_at FROM schema_migrations ORDER BY version"
+        ).fetchall()
+        self.assertEqual(ledger_after, ledger_before)
 
     def test_post_init_runner_and_ledger_row_roll_back_together(self):
         conn = sqlite3.connect(":memory:")
