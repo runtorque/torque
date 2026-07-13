@@ -16424,3 +16424,94 @@ body.runtime-embedded .cell .cell-engineer-ask {
 .terminal-shell:has(.terminal-empty) .terminal-topbar-right .terminal-topbar-btn-primary {
   display: none;
 }
+
+/* Board cards keep operational state visible while folding long taxonomy
+   trails behind an explicit, keyboard-focusable +N disclosure. */
+.board-card {
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 44px;
+  padding: 10px 11px;
+  border-color: color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.022), transparent 68px),
+    var(--bg-cell);
+}
+.board-card:hover,
+.board-card.board-card-hovered {
+  border-color: color-mix(in srgb, var(--text-dim) 46%, var(--border));
+}
+.board-card.focused,
+.board-card.board-card-selected {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  box-shadow: inset 3px 0 0 var(--accent), 0 8px 22px rgba(0,0,0,.16);
+}
+.board-card-info {
+  gap: 4px;
+}
+.board-card-title {
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+.board-card-status-bar {
+  font-size: 9px;
+  line-height: 1.3;
+}
+.board-card-meta {
+  gap: 4px;
+  margin-top: 2px;
+}
+.board-card-label {
+  min-height: 16px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-size: 8px;
+  line-height: 14px;
+}
+.board-card-label-overflow-item {
+  display: none;
+}
+.board-card-labels-expanded .board-card-label-overflow-item {
+  display: inline-flex;
+}
+.board-card-label-overflow {
+  display: inline-flex;
+  align-items: center;
+  border: 1px dashed color-mix(in srgb, var(--text-dim) 44%, var(--border));
+  color: var(--text-dim);
+  background: transparent;
+}
+.board-card-label-overflow:hover,
+.board-card-label-overflow:focus-visible {
+  color: var(--text);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.initiative-column,
+.initiative-detail,
+.initiative-secondary-wrap {
+  border-radius: 11px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.02), transparent 90px),
+    color-mix(in srgb, var(--bg-surface) 90%, var(--bg));
+}
+.initiative-card {
+  min-height: 72px;
+  padding: 10px;
+  border-radius: 9px;
+  background: var(--bg-cell);
+}
+.initiative-card:hover,
+.initiative-card.selected {
+  border-color: color-mix(in srgb, var(--accent) 74%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-cell));
+}
+.initiative-card-title {
+  font-size: 12px;
+}
+.initiative-detail {
+  padding: 14px;
+}

@@ -694,3 +694,47 @@ test('board_pull_preview response opens diff dialog with selectable fields and r
     { message: 'repo not found', taskId: 'task-1' },
   ]);
 });
+
+test('board cards keep critical labels visible and fold long label trails behind +N', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadBoardSyncScripts(context);
+  sandbox.state.board_tasks['task-1'].labels = [
+    'one', 'two', 'three', 'four', 'five', 'six', 'seven',
+    'torque:blocked', 'torque:error', 'torque:system-note',
+  ];
+
+  const html = vm.runInContext(
+    `_renderBoardCard(state.board_tasks['task-1'], {}, 0, null)`,
+    context,
+  );
+  assert.match(html, /board-label-blocked/);
+  assert.match(html, /board-label-error/);
+  assert.match(html, /board-card-label-overflow-item/);
+  assert.match(html, /class="board-card-label board-card-label-overflow"/);
+  assert.match(html, /aria-expanded="false"/);
+  assert.match(html, /\+5 labels/);
+  assert.match(html, /title="Hidden labels: four, five, six, seven, system-note"/);
+});
+
+test('board label disclosure toggles only its card and keeps event propagation contained', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadBoardSyncScripts(context);
+  const card = new FakeElement('card');
+  const button = new FakeElement('button');
+  button.textContent = '+3 labels';
+  button.closest = () => card;
+  let stopped = 0;
+  sandbox._labelToggleEvent = { stopPropagation() { stopped += 1; } };
+  sandbox._labelToggleButton = button;
+
+  assert.equal(vm.runInContext('boardToggleCardLabels(_labelToggleEvent, _labelToggleButton)', context), true);
+  assert.equal(card.classList.contains('board-card-labels-expanded'), true);
+  assert.equal(button.textContent, '−3 labels');
+  assert.equal(button.getAttribute('aria-expanded'), 'true');
+  assert.equal(vm.runInContext('boardToggleCardLabels(_labelToggleEvent, _labelToggleButton)', context), false);
+  assert.equal(card.classList.contains('board-card-labels-expanded'), false);
+  assert.equal(button.textContent, '+3 labels');
+  assert.equal(stopped, 2);
+});
