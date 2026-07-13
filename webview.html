@@ -31,8 +31,12 @@
       <header>
         <div id="conn-dot" title="Disconnected"></div>
         <h1 class="app-wordmark">TORQUE</h1>
-        <button class="hdr-btn" onclick="restartDaemon()" title="Restart Torque">&#x21BB;</button>
-        <button class="hdr-btn" onclick="openGlobalSettings()" title="Settings">&#9881;</button>
+        <button class="hdr-btn hdr-icon-btn" onclick="restartDaemon()" title="Restart Torque" aria-label="Restart Torque">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.2 5.5A5.7 5.7 0 1 0 13 11"></path><path d="M13.2 2.7v2.8h-2.8"></path></svg>
+        </button>
+        <button class="hdr-btn hdr-icon-btn" onclick="openGlobalSettings()" title="Settings" aria-label="Settings">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2"></circle><path d="M8 2.2v1.2M8 12.6v1.2M2.2 8h1.2M12.6 8h1.2M3.9 3.9l.9.9M11.2 11.2l.9.9M12.1 3.9l-.9.9M4.8 11.2l-.9.9"></path></svg>
+        </button>
         <div class="hdr-spacer"></div>
         <button id="add-group-header-btn" class="hdr-btn" onclick="openAddGroup()">+ Group</button>
       </header>
@@ -428,14 +432,35 @@
 
 <!-- Group Settings modal -->
 <div class="overlay" id="modal-group-settings">
-  <div class="modal modal-tall">
-    <h2 id="gs-title">Group Settings</h2>
-    <div class="gs-tabs">
-      <button class="gs-tab active" data-tab="group" onclick="switchGsTab('group')">Group</button>
-      <button class="gs-tab" data-tab="workers" onclick="switchGsTab('workers')">Workers</button>
-      <button class="gs-tab" data-tab="engineer" onclick="switchGsTab('engineer')">Engineers</button>
-      <button class="gs-tab" data-tab="architect" onclick="switchGsTab('architect')">Architects</button>
+  <div class="modal modal-tall settings-dialog" role="dialog" aria-modal="true" aria-labelledby="gs-title">
+    <div class="settings-dialog-header">
+      <div class="settings-dialog-heading">
+        <h2 id="gs-title">Group Settings</h2>
+        <p id="gs-scope-subtitle">Defaults and integrations for this workspace</p>
+      </div>
+      <label class="settings-search">
+        <span class="settings-search-icon" aria-hidden="true">⌕</span>
+        <input id="gs-settings-search" type="search" placeholder="Find a setting…" autocomplete="off"
+               oninput="settingsShellSearch('modal-group-settings', this.value)" aria-label="Search group settings">
+      </label>
+      <button type="button" class="settings-close" aria-label="Close Group Settings"
+              onclick="settingsShellRequestClose('modal-group-settings')">×</button>
     </div>
+    <div class="gs-tabs settings-primary-nav" role="tablist" aria-label="Group settings sections">
+      <button class="gs-tab active" data-tab="group" onclick="switchGsTab('group')" role="tab">
+        <span>Group</span><small>Workspace defaults</small>
+      </button>
+      <button class="gs-tab" data-tab="workers" onclick="switchGsTab('workers')" role="tab">
+        <span>Workers</span><small>Runtime and worktrees</small>
+      </button>
+      <button class="gs-tab" data-tab="engineer" onclick="switchGsTab('engineer')" role="tab">
+        <span>Engineers</span><small>Autonomy and digests</small>
+      </button>
+      <button class="gs-tab" data-tab="architect" onclick="switchGsTab('architect')" role="tab">
+        <span>Architects</span><small>Guidance and journals</small>
+      </button>
+    </div>
+    <div class="settings-search-results" data-settings-search-results hidden></div>
 
     <!-- Group tab -->
     <div class="gs-pane active" data-pane="group">
@@ -532,16 +557,30 @@
           <div class="gs-settings-section">
             <div class="gs-settings-section-title">GitHub mapping and behavior</div>
             <div class="gs-settings-section-body">
-              <label>Lane → status mapping <span class="label-hint">JSON object</span></label>
-              <textarea id="gs-board-sync-github-lane-map" rows="4" spellcheck="false" placeholder='{"Backlog":"Todo","In Progress":"In Progress","Done":"Done"}'></textarea>
+              <label>Lane → status mapping</label>
+              <div id="gs-board-sync-lane-map-editor" class="settings-map-editor" aria-label="Lane to GitHub status mapping"></div>
+              <button type="button" class="btn-secondary settings-map-add" onclick="gsBoardSyncMapAddRow('lane')">+ Add mapping</button>
+              <details class="settings-raw-config">
+                <summary>Advanced · edit raw JSON</summary>
+                <textarea id="gs-board-sync-github-lane-map" rows="4" spellcheck="false"
+                          oninput="gsBoardSyncMapRender('lane')"
+                          placeholder='{"Backlog":"Todo","In Progress":"In Progress","Done":"Done"}'></textarea>
+              </details>
               <label class="gs-checkbox">
                 <input id="gs-board-sync-github-close-via-pr" type="checkbox"> Close linked issues via PR body
               </label>
               <label class="gs-checkbox">
                 <input id="gs-board-sync-github-create-labels" type="checkbox"> Create missing labels in GitHub (recommended)
               </label>
-              <label>Assignee map <span class="label-hint">Torque ID/slug → GitHub login JSON</span></label>
-              <textarea id="gs-board-sync-github-assignee-map" rows="4" spellcheck="false" placeholder='{"worker-1":"octocat","backend-engineer":"hubot"}'></textarea>
+              <label>Assignee mapping <span class="label-hint">Torque agent → GitHub login</span></label>
+              <div id="gs-board-sync-assignee-map-editor" class="settings-map-editor" aria-label="Torque agent to GitHub assignee mapping"></div>
+              <button type="button" class="btn-secondary settings-map-add" onclick="gsBoardSyncMapAddRow('assignee')">+ Add assignee</button>
+              <details class="settings-raw-config">
+                <summary>Advanced · edit raw JSON</summary>
+                <textarea id="gs-board-sync-github-assignee-map" rows="4" spellcheck="false"
+                          oninput="gsBoardSyncMapRender('assignee')"
+                          placeholder='{"worker-1":"octocat","backend-engineer":"hubot"}'></textarea>
+              </details>
             </div>
           </div>
         </div>
@@ -561,9 +600,13 @@
             <div class="label-hint task-modal-section-intro">Recurring guidance hints (for example the user-message reply-tool hint and the engineer identity anchor) show on the 1st occurrence, then every N agent messages. 0 = every message.</div>
           </div>
         </div>
-        <label>Delete group</label>
-        <div class="label-hint task-modal-section-intro">Delete this group and its cells. This action uses the existing delete confirmation flow.</div>
-        <button type="button" class="btn-danger" onclick="deleteSettingsGroup()">Delete group</button>
+        <section class="settings-danger-zone" aria-labelledby="gs-danger-zone-title">
+          <div>
+            <strong id="gs-danger-zone-title">Danger zone</strong>
+            <p>Delete this group and every agent and terminal it contains. You will be asked to confirm.</p>
+          </div>
+          <button type="button" class="btn-danger" onclick="deleteSettingsGroup()">Delete group</button>
+        </section>
       </div>
     </div>
 
@@ -990,9 +1033,13 @@
       </div>
     </div>
 
-    <div class="modal-actions">
-      <button class="btn-cancel" onclick="closeModals()">Cancel</button>
-      <button class="btn-primary" onclick="submitGroupSettings()">Save</button>
+    <div class="modal-actions settings-dialog-footer">
+      <span class="settings-save-state" id="gs-save-state" aria-live="polite">No unsaved changes</span>
+      <button type="button" class="btn-secondary settings-reset-section"
+              onclick="settingsShellResetSection('modal-group-settings')">Reset section</button>
+      <span class="settings-footer-spacer"></span>
+      <button class="btn-cancel" onclick="settingsShellRequestClose('modal-group-settings')">Cancel</button>
+      <button class="btn-primary" id="gs-save-btn" onclick="submitGroupSettings()" disabled>Save changes</button>
     </div>
   </div>
 </div>
@@ -1016,18 +1063,83 @@
 
 <!-- Global Settings modal -->
 <div class="overlay" id="modal-global-settings">
-  <div class="modal modal-tall">
-    <h2>Settings</h2>
-    <div class="gs-tabs">
-      <button class="gs-tab active" data-tab="gls-general" onclick="switchGlsTab('gls-general')">General</button>
-      <button class="gs-tab" data-tab="gls-ai" onclick="switchGlsTab('gls-ai')">AI</button>
-      <button class="gs-tab" data-tab="gls-statusbar" onclick="switchGlsTab('gls-statusbar')">Status bar</button>
-      <button class="gs-tab" data-tab="gls-keybindings" onclick="switchGlsTab('gls-keybindings')">Keybindings</button>
-      <button class="gs-tab" data-tab="gls-system" onclick="switchGlsTab('gls-system')">System</button>
+  <div class="modal modal-tall settings-dialog" role="dialog" aria-modal="true" aria-labelledby="gls-title">
+    <div class="settings-dialog-header">
+      <div class="settings-dialog-heading">
+        <h2 id="gls-title">Torque Settings</h2>
+        <p id="gls-scope-subtitle">Application preferences for this profile</p>
+      </div>
+      <label class="settings-search">
+        <span class="settings-search-icon" aria-hidden="true">⌕</span>
+        <input id="gls-settings-search" type="search" placeholder="Find a setting…" autocomplete="off"
+               oninput="settingsShellSearch('modal-global-settings', this.value)" aria-label="Search application settings">
+      </label>
+      <button type="button" class="settings-close" aria-label="Close Torque Settings"
+              onclick="settingsShellRequestClose('modal-global-settings')">×</button>
+    </div>
+    <div class="gs-tabs settings-primary-nav" role="tablist" aria-label="Application settings sections">
+      <button class="gs-tab active" data-tab="gls-appearance" onclick="switchGlsTab('gls-appearance')" role="tab">
+        <span>Appearance</span><small>Theme and density</small>
+      </button>
+      <button class="gs-tab" data-tab="gls-general" onclick="switchGlsTab('gls-general')" role="tab">
+        <span>General</span><small>Runtime and Board</small>
+      </button>
+      <button class="gs-tab" data-tab="gls-ai" onclick="switchGlsTab('gls-ai')" role="tab">
+        <span>AI</span><small>Providers and recall</small>
+      </button>
+      <button class="gs-tab" data-tab="gls-statusbar" onclick="switchGlsTab('gls-statusbar')" role="tab">
+        <span>Status bar</span><small>Visible indicators</small>
+      </button>
+      <button class="gs-tab" data-tab="gls-keybindings" onclick="switchGlsTab('gls-keybindings')" role="tab">
+        <span>Shortcuts</span><small>Keyboard controls</small>
+      </button>
+      <button class="gs-tab" data-tab="gls-system" onclick="switchGlsTab('gls-system')" role="tab">
+        <span>System</span><small>Daemon and Relay</small>
+      </button>
+    </div>
+    <div class="settings-search-results" data-settings-search-results hidden></div>
+
+    <!-- Appearance tab: client-local preferences, previewed immediately. -->
+    <div class="gs-pane active" data-pane="gls-appearance">
+      <div class="settings-pane-intro">
+        <h3>Appearance</h3>
+        <p>Fine-tune Torque's visual density without changing the workspace layout.</p>
+      </div>
+      <section class="gs-settings-section settings-control-list">
+        <div class="gs-settings-section-title">Interface</div>
+        <div class="gs-settings-section-body">
+          <label>Contrast</label>
+          <select id="gls-appearance-contrast" onchange="settingsAppearancePreview()">
+            <option value="balanced">Balanced</option>
+            <option value="high">High contrast</option>
+            <option value="soft">Soft</option>
+          </select>
+          <label>Accent</label>
+          <div class="settings-accent-options" id="gls-appearance-accent-options" role="radiogroup" aria-label="Accent color">
+            <button type="button" class="settings-accent-swatch" data-accent="blue" aria-label="Blue" onclick="settingsAppearanceSetAccent('blue')"></button>
+            <button type="button" class="settings-accent-swatch" data-accent="violet" aria-label="Violet" onclick="settingsAppearanceSetAccent('violet')"></button>
+            <button type="button" class="settings-accent-swatch" data-accent="teal" aria-label="Teal" onclick="settingsAppearanceSetAccent('teal')"></button>
+            <button type="button" class="settings-accent-swatch" data-accent="amber" aria-label="Amber" onclick="settingsAppearanceSetAccent('amber')"></button>
+          </div>
+          <label>UI scale <span class="label-hint" id="gls-appearance-scale-value">100%</span></label>
+          <input id="gls-appearance-scale" type="range" min="90" max="115" step="5" value="100" oninput="settingsAppearancePreview()">
+          <label>Terminal font size <span class="label-hint" id="gls-appearance-terminal-font-value">12px</span></label>
+          <input id="gls-appearance-terminal-font" type="range" min="10" max="18" step="1" value="12" oninput="settingsAppearancePreview()">
+          <label>Density</label>
+          <select id="gls-appearance-density" onchange="settingsAppearancePreview()">
+            <option value="compact">Compact</option>
+            <option value="comfortable">Comfortable</option>
+          </select>
+          <label class="gs-checkbox settings-toggle-row">
+            <input id="gls-appearance-reduce-motion" type="checkbox" onchange="settingsAppearancePreview()">
+            <span><strong>Reduce motion</strong><small>Minimize non-essential interface animation.</small></span>
+          </label>
+        </div>
+      </section>
     </div>
 
     <!-- General tab -->
-    <div class="gs-pane active" data-pane="gls-general">
+    <div class="gs-pane" data-pane="gls-general">
       <div class="gs-subtabs">
         <button class="gs-subtab active" data-subtab="gls-server" onclick="switchGlsSubTab(this)">Server</button>
         <button class="gs-subtab" data-subtab="gls-board" onclick="switchGlsSubTab(this)">Board</button>
@@ -1094,6 +1206,14 @@
 
     <!-- Status bar tab -->
     <div class="gs-pane" data-pane="gls-statusbar">
+      <div class="settings-pane-intro">
+        <h3>Status bar</h3>
+        <p>Choose the operational signals that stay visible across the workspace.</p>
+      </div>
+      <div class="statusbar-settings-preview" aria-label="Status bar preview">
+        <span class="statusbar-settings-preview-label">Preview</span>
+        <div id="gls-statusbar-preview-items" class="statusbar-settings-preview-items"></div>
+      </div>
       <section class="gs-settings-section">
         <div class="gs-settings-section-title">Visible status items</div>
         <div class="gs-settings-section-body statusbar-settings-list" id="gls-statusbar-visibility-list">
@@ -1105,49 +1225,49 @@
           <label class="gs-checkbox">
             <input type="checkbox" id="gls-statusbar-daemon-status"
                    data-statusbar-item="daemon_status"
-                   onchange="this.dataset.statusBarDirty='1'">
+                   onchange="_onStatusBarSettingsChange(this)">
             Daemon + Supervisor status
           </label>
           <label class="gs-checkbox">
             <input type="checkbox" id="gls-statusbar-claude-usage"
                    data-statusbar-item="claude_usage"
-                   onchange="this.dataset.statusBarDirty='1'">
+                   onchange="_onStatusBarSettingsChange(this)">
             Claude usage
           </label>
           <label class="gs-checkbox">
             <input type="checkbox" id="gls-statusbar-codex-usage"
                    data-statusbar-item="codex_usage"
-                   onchange="this.dataset.statusBarDirty='1'">
+                   onchange="_onStatusBarSettingsChange(this)">
             Codex usage
           </label>
           <label class="gs-checkbox">
             <input type="checkbox" id="gls-statusbar-deploy"
                    data-statusbar-item="deploy"
-                   onchange="this.dataset.statusBarDirty='1'">
+                   onchange="_onStatusBarSettingsChange(this)">
             Deploy pending
           </label>
           <label class="gs-checkbox">
             <input type="checkbox" id="gls-statusbar-health"
                    data-statusbar-item="health"
-                   onchange="this.dataset.statusBarDirty='1'">
+                   onchange="_onStatusBarSettingsChange(this)">
             Health
           </label>
           <label class="gs-checkbox">
             <input type="checkbox" id="gls-statusbar-workload"
                    data-statusbar-item="workload"
-                   onchange="this.dataset.statusBarDirty='1'">
+                   onchange="_onStatusBarSettingsChange(this)">
             Agents workload
           </label>
           <label class="gs-checkbox">
             <input type="checkbox" id="gls-statusbar-tasks"
                    data-statusbar-item="tasks"
-                   onchange="this.dataset.statusBarDirty='1'">
+                   onchange="_onStatusBarSettingsChange(this)">
             Active tasks
           </label>
           <label class="gs-checkbox">
             <input type="checkbox" id="gls-statusbar-attention"
                    data-statusbar-item="attention"
-                   onchange="this.dataset.statusBarDirty='1'">
+                   onchange="_onStatusBarSettingsChange(this)">
             Attention
           </label>
         </div>
@@ -1156,6 +1276,15 @@
 
     <!-- Keybindings tab -->
     <div class="gs-pane" data-pane="gls-keybindings">
+      <div class="settings-pane-intro">
+        <h3>Keyboard shortcuts</h3>
+        <p>Search commands, rebind shortcuts, and resolve conflicts in place.</p>
+      </div>
+      <div class="settings-list-toolbar">
+        <input id="gls-keybinding-search" type="search" placeholder="Search shortcuts…"
+               oninput="_filterKeybindingSettings(this.value)" aria-label="Search keyboard shortcuts">
+        <button type="button" class="btn-secondary" onclick="_resetAllKeybindings()">Reset all</button>
+      </div>
       <div id="gls-keybinding-list"></div>
     </div>
 
@@ -1199,7 +1328,10 @@
             <div id="gls-daemon-started-at" class="daemon-status-value" title="Time the daemon started">—</div>
           </div>
           <div class="daemon-actions">
-            <button type="button" id="gls-restart-daemon-btn" class="btn-secondary">↻ Restart Daemon</button>
+            <button type="button" id="gls-restart-daemon-btn" class="btn-secondary">
+              <span class="btn-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M13.2 5.5A5.7 5.7 0 1 0 13 11"></path><path d="M13.2 2.7v2.8h-2.8"></path></svg></span>
+              Restart Daemon
+            </button>
             <button type="button" id="gls-stop-daemon-btn" class="btn-danger-outline">
               <span class="btn-icon btn-icon-stop" aria-hidden="true">
                 <svg viewBox="0 0 16 16" focusable="false">
@@ -1396,10 +1528,14 @@
       </div>
     </div>
 
-    <div class="modal-actions">
-      <button class="btn-cancel" onclick="closeModals()">Cancel</button>
-      <button class="btn-primary" id="gls-global-save-btn" onclick="submitGlobalSettings()">Save</button>
-      <button class="btn-primary" id="gls-ai-save-btn" onclick="submitAiSettings()" hidden>Save AI settings</button>
+    <div class="modal-actions settings-dialog-footer">
+      <span class="settings-save-state" id="gls-save-state" aria-live="polite">No unsaved changes</span>
+      <button type="button" class="btn-secondary settings-reset-section"
+              onclick="settingsShellResetSection('modal-global-settings')">Reset section</button>
+      <span class="settings-footer-spacer"></span>
+      <button class="btn-cancel" onclick="settingsShellRequestClose('modal-global-settings')">Cancel</button>
+      <button class="btn-primary" id="gls-global-save-btn" onclick="submitGlobalSettings()" disabled>Save changes</button>
+      <button class="btn-primary" id="gls-ai-save-btn" onclick="submitAiSettings()" hidden disabled>Save AI settings</button>
     </div>
   </div>
 </div>
@@ -1958,6 +2094,7 @@
 <script src="/static/js/terminal/composer-attachments.js"></script>
 <script src="/static/js/terminal/xterm-runtime.js"></script>
 <script src="/static/js/modals/core.js"></script>
+<script src="/static/js/modals/settings-shell.js"></script>
 <script src="/static/js/modals.js"></script>
 <script src="/static/js/ai_settings.js"></script>
 <script src="/static/js/modals/engineer-launch.js"></script>

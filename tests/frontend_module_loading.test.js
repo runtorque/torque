@@ -69,6 +69,7 @@ test('frontend load order preserves state, rendering, panels, and boot boundarie
   const terminalAttachments = indexOf(sources, 'static/js/terminal/composer-attachments.js');
   const terminalXterm = indexOf(sources, 'static/js/terminal/xterm-runtime.js');
   const modalCore = indexOf(sources, 'static/js/modals/core.js');
+  const modalSettingsShell = indexOf(sources, 'static/js/modals/settings-shell.js');
   const modals = indexOf(sources, 'static/js/modals.js');
   const modalTask = indexOf(sources, 'static/js/modals/task-modal.js');
   const modalGroupSettings = indexOf(sources, 'static/js/modals/group-settings.js');
@@ -113,7 +114,8 @@ test('frontend load order preserves state, rendering, panels, and boot boundarie
   assert.ok(terminalComposer < terminalAttachments, 'composer primitives must load before attachments');
   assert.ok(terminalAttachments < terminalXterm, 'composer modules must load before xterm runtime');
   assert.ok(terminalXterm < modalCore, 'terminal globals must exist before modal composition');
-  assert.ok(modalCore < modals, 'modal framework must load before form modules');
+  assert.ok(modalCore < modalSettingsShell, 'modal framework must load before the Settings shell');
+  assert.ok(modalSettingsShell < modals, 'Settings shell must load before domain form modules');
   assert.ok(modals < modalTask, 'agent-management state must load before task forms');
   assert.ok(modalTask < modalGroupSettings, 'task forms must load before settings forms');
   assert.ok(modalGroupSettings < modalWorktrees, 'Group Settings must load before worktree history');

@@ -2,23 +2,44 @@
 /* Variables                                                           */
 /* ------------------------------------------------------------------ */
 :root {
-  --bg:          #0d1117;
-  --bg-surface:  #161b22;
-  --bg-cell:     #1c2129;
-  --bg-hover:    #252c35;
-  --border:      #30363d;
-  --text:        #e6edf3;
-  --text-dim:    #8b949e;
-  --accent:      #58a6ff;
+  --bg:          #0b0f14;
+  --bg-surface:  #121820;
+  --bg-cell:     #18202a;
+  --bg-hover:    #222c38;
+  --bg-raised:   #1d2632;
+  --bg-inset:    #0f141b;
+  --border:      #303a47;
+  --border-subtle: #252e39;
+  --border-strong: #465466;
+  --text:        #edf2f7;
+  --text-dim:    #9aa8b8;
+  --text-secondary: #bac5d1;
+  --text-faint:  #748295;
+  --accent:      #62a8ff;
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --accent-muted: color-mix(in srgb, var(--accent) 30%, var(--border));
   --green:       #3fb950;
   --red:         #f85149;
-  --amber:       #d29922;
+  --amber:       #e3a629;
   --warn:        var(--amber);
   --danger:      var(--red);
   --muted:       var(--text-dim);
   --font:        ui-monospace, "SF Mono", "Cascadia Mono", "Segoe UI Mono",
                  "Liberation Mono", Menlo, Consolas, monospace;
   --radius:      6px;
+  --radius-sm:   4px;
+  --radius-lg:   10px;
+  --space-1:     4px;
+  --space-2:     8px;
+  --space-3:     12px;
+  --space-4:     16px;
+  --space-5:     24px;
+  --focus-ring:  0 0 0 2px var(--bg), 0 0 0 4px color-mix(in srgb, var(--accent) 72%, white 8%);
+  --shadow-float: 0 16px 46px rgba(0, 0, 0, .42), 0 2px 8px rgba(0, 0, 0, .28);
+  --transition-fast: 140ms ease;
+  --ui-scale: 1;
+  --ui-font-size: 11px;
+  --terminal-font-size: 12px;
   --standalone-sidebar-width: 340px;
   --standalone-main-stack-min-width: 360px;
   --standalone-right-rail-min-width: 320px;
@@ -39,7 +60,7 @@ html, body {
   height: 100%; width: 100%;
   background: var(--bg);
   color: var(--text);
-  font: 11px/1.4 var(--font);
+  font: var(--ui-font-size)/1.4 var(--font);
   overflow-x: hidden;
   -webkit-user-select: text;
   user-select: text;
@@ -51,13 +72,77 @@ button {
   font: inherit; cursor: pointer;
   background: none; border: none; color: var(--text);
 }
-input, select {
+input, select, textarea {
   font: inherit; color: var(--text);
-  background: var(--bg); border: 1px solid var(--border);
+  background: var(--bg-inset); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 6px 8px;
   outline: none; width: 100%;
+  transition: border-color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
 }
-input:focus, select:focus { border-color: var(--accent); }
+input:hover, select:hover, textarea:hover { border-color: var(--border-strong); }
+input:focus, select:focus, textarea:focus {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--bg-inset) 88%, var(--accent) 12%);
+}
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+button:disabled, input:disabled, select:disabled, textarea:disabled {
+  cursor: not-allowed;
+  opacity: .52;
+}
+::placeholder { color: var(--text-faint); opacity: .9; }
+::selection { background: color-mix(in srgb, var(--accent) 38%, transparent); color: var(--text); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+html[data-torque-contrast="high"] {
+  --bg: #070a0e;
+  --bg-surface: #111820;
+  --bg-cell: #1a2430;
+  --border: #465466;
+  --border-subtle: #344151;
+  --text: #ffffff;
+  --text-dim: #b5c1cf;
+  --text-faint: #8e9db0;
+}
+html[data-torque-contrast="soft"] {
+  --bg: #11161c;
+  --bg-surface: #171d25;
+  --bg-cell: #1c242d;
+  --border: #303946;
+  --border-subtle: #29323d;
+  --text: #dfe6ee;
+  --text-dim: #929eac;
+}
+html[data-torque-density="comfortable"] {
+  --space-1: 5px;
+  --space-2: 10px;
+  --space-3: 14px;
+  --space-4: 19px;
+  --space-5: 28px;
+}
+html[data-torque-reduce-motion="true"] *,
+html[data-torque-reduce-motion="true"] *::before,
+html[data-torque-reduce-motion="true"] *::after {
+  scroll-behavior: auto !important;
+  transition-duration: .01ms !important;
+  animation-duration: .01ms !important;
+  animation-iteration-count: 1 !important;
+}
 
 /* Text selection defaults to on; only drag/chrome surfaces opt out. */
 button,
@@ -189,6 +274,23 @@ body.tauri-mode #taskbar-conn-dot {
   transition: color .15s, border-color .15s;
 }
 .hdr-btn:hover { color: var(--text); border-color: var(--text-dim); }
+.hdr-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+}
+.hdr-icon-btn svg,
+.btn-icon svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 
 /* ------------------------------------------------------------------ */
 /* Main scroll area                                                    */

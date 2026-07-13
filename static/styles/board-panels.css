@@ -4030,3 +4030,75 @@ body[data-torque-mode="desktop"] .diff-view-modal {
   margin: -4px 0 10px;
 }
 
+/* Board visual polish -------------------------------------------------
+   Preserve the existing lanes and card density controls, but strengthen the
+   task/state hierarchy and make drag/selection feedback more immediate. */
+.board-lane-header {
+  border-bottom-color: var(--border-subtle);
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+}
+.board-lane-header-name { font-weight: 700; letter-spacing: -.01em; }
+.board-lane-header-counts,
+.board-lane-header-summary { color: var(--text-faint); }
+.board-card {
+  position: relative;
+  border-color: var(--border-subtle);
+  border-left-width: 2px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.018), transparent 46%),
+    var(--bg-cell);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.015);
+  transition: transform var(--transition-fast), background var(--transition-fast),
+    border-color var(--transition-fast), box-shadow var(--transition-fast), opacity var(--transition-fast);
+}
+.board-card:hover,
+.board-card.board-card-hovered {
+  transform: translateY(-1px);
+  border-color: var(--border-strong);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.03), transparent 48%),
+    var(--bg-hover);
+  box-shadow: 0 5px 14px rgba(0,0,0,.16);
+}
+.board-card:has(.board-card-dot.working) { border-left-color: var(--green); }
+.board-card:has(.board-card-dot.attention) { border-left-color: var(--amber); }
+.board-card:has(.board-card-dot.disconnected) { border-left-color: var(--red); }
+.board-card:has(.board-card-dot.idle) { border-left-color: var(--accent-muted); }
+.board-card.focused,
+.board-card-selected {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  box-shadow: inset 2px 0 0 var(--accent), 0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-cell));
+}
+.board-card-title { color: var(--text); font-weight: 600; line-height: 1.32; }
+.board-card-status-bar,
+.board-card-id,
+.board-card-last-transition,
+.board-card-task-id,
+.board-card-lane-entered { color: var(--text-faint); }
+.board-card-label {
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  line-height: 13px;
+}
+.board-card-done { opacity: .68; }
+.board-card-done:hover { opacity: .9; }
+.board-card.dragging {
+  opacity: .36;
+  transform: scale(.985);
+  border-style: dashed;
+}
+.board-lane-tab.drop-target {
+  box-shadow: inset 0 -2px 0 var(--accent);
+  background: var(--accent-soft);
+}
+.board-cards:empty::after {
+  content: 'No tasks in this lane';
+  display: block;
+  padding: 20px 10px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius);
+  color: var(--text-faint);
+  text-align: center;
+}

@@ -552,6 +552,25 @@
   font-size: 10px;
   line-height: 1.4;
 }
+
+.ai-settings-loading {
+  min-height: 210px;
+  padding: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  color: var(--text-faint);
+  background:
+    linear-gradient(90deg, transparent, rgba(255,255,255,.035), transparent) 0 0 / 220% 100%,
+    linear-gradient(var(--bg-cell) 0 0) 14px 44px / calc(100% - 28px) 38px no-repeat,
+    linear-gradient(var(--bg-cell) 0 0) 14px 92px / calc(50% - 18px) 86px no-repeat,
+    linear-gradient(var(--bg-cell) 0 0) calc(50% + 4px) 92px / calc(50% - 18px) 86px no-repeat,
+    var(--bg-inset);
+  animation: ai-settings-shimmer 1.5s ease-in-out infinite;
+}
+@keyframes ai-settings-shimmer {
+  0% { background-position: 100% 0, 14px 44px, 14px 92px, calc(50% + 4px) 92px, 0 0; }
+  100% { background-position: -100% 0, 14px 44px, 14px 92px, calc(50% + 4px) 92px, 0 0; }
+}
 .ai-settings-copy {
   margin: 6px 0 0;
 }

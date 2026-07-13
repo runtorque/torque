@@ -140,11 +140,13 @@ function installConfirmStub(context, sandbox) {
 test('global settings System tab markup is present without removing existing tabs', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
 
-  assert.match(html, /data-tab="gls-general"[^>]*>General<\/button>/);
-  assert.match(html, /data-tab="gls-statusbar"[^>]*>Status bar<\/button>/);
-  assert.match(html, /data-tab="gls-keybindings"[^>]*>Keybindings<\/button>/);
-  assert.match(html, /data-tab="gls-system"[^>]*>System<\/button>/);
-  assert.match(html, /<div class="gs-pane active" data-pane="gls-general">/);
+  assert.match(html, /data-tab="gls-appearance"[^>]*>[\s\S]*?<span>Appearance<\/span>/);
+  assert.match(html, /data-tab="gls-general"[^>]*>[\s\S]*?<span>General<\/span>/);
+  assert.match(html, /data-tab="gls-statusbar"[^>]*>[\s\S]*?<span>Status bar<\/span>/);
+  assert.match(html, /data-tab="gls-keybindings"[^>]*>[\s\S]*?<span>Shortcuts<\/span>/);
+  assert.match(html, /data-tab="gls-system"[^>]*>[\s\S]*?<span>System<\/span>/);
+  assert.match(html, /<div class="gs-pane active" data-pane="gls-appearance">/);
+  assert.match(html, /<div class="gs-pane" data-pane="gls-general">/);
   assert.match(html, /<div class="gs-pane" data-pane="gls-statusbar">/);
   assert.match(html, /<div class="gs-pane" data-pane="gls-keybindings">/);
   assert.match(html, /<div class="gs-pane" data-pane="gls-system">/);

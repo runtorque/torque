@@ -135,6 +135,139 @@ function _gsParseJsonMapSilent(id) {
   }
 }
 
+function _gsBoardSyncMapConfig(kind) {
+  return kind === 'assignee'
+    ? {
+        textareaId: 'gs-board-sync-github-assignee-map',
+        hostId: 'gs-board-sync-assignee-map-editor',
+        keyPlaceholder: 'Torque agent ID or slug',
+        valuePlaceholder: 'GitHub login',
+        empty: 'No assignee mappings yet.',
+      }
+    : {
+        textareaId: 'gs-board-sync-github-lane-map',
+        hostId: 'gs-board-sync-lane-map-editor',
+        keyPlaceholder: 'Torque lane',
+        valuePlaceholder: 'GitHub status',
+        empty: 'No lane mappings yet.',
+      };
+}
+
+function _gsBoardSyncMapSyncFromEditor(kind) {
+  const config = _gsBoardSyncMapConfig(kind);
+  const host = document.getElementById(config.hostId);
+  const textarea = document.getElementById(config.textareaId);
+  if (!host || !textarea || !host.querySelectorAll) return;
+  const out = {};
+  host.querySelectorAll('.settings-map-row').forEach(function(row) {
+    const key = row.querySelector('.settings-map-key');
+    const value = row.querySelector('.settings-map-value');
+    const k = String(key && key.value || '').trim();
+    const v = String(value && value.value || '').trim();
+    if (k && v) out[k] = v;
+  });
+  textarea.value = Object.keys(out).length ? JSON.stringify(out, null, 2) : '';
+}
+
+function _gsBoardSyncMapAppendRow(kind, keyValue, mappedValue) {
+  const config = _gsBoardSyncMapConfig(kind);
+  const host = document.getElementById(config.hostId);
+  if (!host || !host.appendChild || !document.createElement) return null;
+  const row = document.createElement('div');
+  row.className = 'settings-map-row';
+
+  const key = document.createElement('input');
+  key.type = 'text';
+  key.className = 'settings-map-key';
+  key.value = keyValue || '';
+  key.placeholder = config.keyPlaceholder;
+  key.setAttribute('aria-label', config.keyPlaceholder);
+
+  const arrow = document.createElement('span');
+  arrow.className = 'settings-map-arrow';
+  arrow.textContent = '→';
+  arrow.setAttribute('aria-hidden', 'true');
+
+  const value = document.createElement('input');
+  value.type = 'text';
+  value.className = 'settings-map-value';
+  value.value = mappedValue || '';
+  value.placeholder = config.valuePlaceholder;
+  value.setAttribute('aria-label', config.valuePlaceholder);
+
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'settings-map-remove';
+  remove.textContent = '×';
+  remove.setAttribute('aria-label', 'Remove mapping');
+  remove.onclick = function() {
+    row.remove();
+    _gsBoardSyncMapSyncFromEditor(kind);
+    if (!host.querySelector('.settings-map-row')) gsBoardSyncMapRender(kind);
+    if (typeof settingsShellMarkDirty === 'function') {
+      settingsShellMarkDirty('modal-group-settings');
+    }
+  };
+  key.oninput = value.oninput = function() { _gsBoardSyncMapSyncFromEditor(kind); };
+
+  row.appendChild(key);
+  row.appendChild(arrow);
+  row.appendChild(value);
+  row.appendChild(remove);
+  host.appendChild(row);
+  return key;
+}
+
+function gsBoardSyncMapRender(kind, options) {
+  const config = _gsBoardSyncMapConfig(kind);
+  const host = document.getElementById(config.hostId);
+  const textarea = document.getElementById(config.textareaId);
+  if (!host || !textarea || !host.replaceChildren || !document.createElement) return;
+  host.replaceChildren();
+  const raw = String(textarea.value || '').trim();
+  let parsed = {};
+  let valid = true;
+  if (raw) {
+    try {
+      parsed = JSON.parse(raw);
+      valid = !!parsed && typeof parsed === 'object' && !Array.isArray(parsed);
+    } catch (_err) {
+      valid = false;
+    }
+  }
+  if (!valid) {
+    const error = document.createElement('div');
+    error.className = 'settings-map-empty settings-map-error';
+    error.textContent = 'Raw JSON is invalid. Fix it in Advanced to restore the visual editor.';
+    host.appendChild(error);
+    return;
+  }
+  Object.keys(parsed).forEach(function(key) {
+    _gsBoardSyncMapAppendRow(kind, key, parsed[key]);
+  });
+  if (options && options.appendBlank) {
+    const input = _gsBoardSyncMapAppendRow(kind, '', '');
+    if (input && input.focus) input.focus();
+  }
+  if (!host.querySelector('.settings-map-row')) {
+    const empty = document.createElement('div');
+    empty.className = 'settings-map-empty';
+    empty.textContent = config.empty;
+    host.appendChild(empty);
+  }
+}
+
+function gsBoardSyncMapAddRow(kind) {
+  const config = _gsBoardSyncMapConfig(kind);
+  const host = document.getElementById(config.hostId);
+  if (host && host.querySelector) {
+    const empty = host.querySelector('.settings-map-empty');
+    if (empty) empty.remove();
+  }
+  const input = _gsBoardSyncMapAppendRow(kind, '', '');
+  if (input && input.focus) input.focus();
+}
+
 function _gsBoardSyncProjectNumberValue() {
   const el = document.getElementById('gs-board-sync-github-project-number');
   return parseInt(el && el.value, 10) || 0;
@@ -411,6 +544,7 @@ function _gsBoardSyncApplyLaneMapSuggestion(msg) {
     out[String(key).trim()] = String(suggestion[key]).trim();
   });
   textarea.value = JSON.stringify(out, null, 2);
+  gsBoardSyncMapRender('lane');
   const strategy = String(msg.lane_status_map_strategy || '').trim();
   let message = strategy === 'position'
     ? 'Auto-filled lane → status mapping by lane/status position.'
@@ -481,11 +615,11 @@ function _handleBoardSyncPreflight(msg) {
 
 function switchGsTab(name) {
   name = _normalizeGsSelection(name, '').tab;
-  document.querySelectorAll('.gs-tab').forEach(t =>
+  document.querySelectorAll('#modal-group-settings .gs-tab').forEach(t =>
     t.classList.toggle('active', t.dataset.tab === name));
-  document.querySelectorAll('.gs-pane').forEach(p =>
+  document.querySelectorAll('#modal-group-settings .gs-pane').forEach(p =>
     p.classList.toggle('active', p.dataset.pane === name));
-  const pane = document.querySelector(`.gs-pane[data-pane="${name}"]`);
+  const pane = document.querySelector(`#modal-group-settings .gs-pane[data-pane="${name}"]`);
   if (!pane) return;
   const preferredSubtab = _gsActiveSubTabs[name] || '';
   const subtabs = Array.prototype.slice.call(pane.querySelectorAll('.gs-subtab'));
@@ -497,6 +631,9 @@ function switchGsTab(name) {
     nextSubtab = pane.querySelector('.gs-subtab');
   }
   if (nextSubtab) switchGsSubTab(name, nextSubtab);
+  if (typeof settingsShellSyncView === 'function') {
+    settingsShellSyncView('modal-group-settings');
+  }
 }
 
 function switchGsSubTab(pane, btn) {
@@ -511,6 +648,9 @@ function switchGsSubTab(pane, btn) {
     : pane;
   if (paneName && target) _gsActiveSubTabs[paneName] = target;
   if (target === 'group-sync') _gsBoardSyncMaybeLoadProjects();
+  if (typeof settingsShellSyncView === 'function') {
+    settingsShellSyncView('modal-group-settings');
+  }
 }
 
 function openGroupSettings(group, initialTab, initialSubtab) {
@@ -1254,6 +1394,8 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-board-sync-github-close-via-pr').checked = syncGithub.github_close_issues_via_pr !== false;
   document.getElementById('gs-board-sync-github-create-labels').checked = syncGithub.github_create_missing_labels !== false;
   document.getElementById('gs-board-sync-github-assignee-map').value = _gsStringifyJsonMap(syncGithub.github_assignee_map);
+  gsBoardSyncMapRender('lane');
+  gsBoardSyncMapRender('assignee');
   _gsBoardSyncProjectOptions = [];
   _gsBoardSyncProjectsLoadedKey = '';
   _gsBoardSyncRenderProjectOptions();
@@ -1382,6 +1524,9 @@ function _showGroupSettings(group, data) {
   _gsInitialTab = 'group';
   _gsInitialSubtab = '';
   document.getElementById('modal-group-settings').classList.add('visible');
+  if (typeof settingsShellCaptureBaseline === 'function') {
+    settingsShellCaptureBaseline('modal-group-settings');
+  }
   const focusId = initialTab === 'engineer'
     ? 'gs-engineer-provider'
     : initialTab === 'architect'

@@ -234,7 +234,9 @@ function _aiSetSaveStatus(message, level) {
 function _aiSettingsSyncSaveButtons(name) {
   var globalSaveBtn = document.getElementById('gls-global-save-btn');
   var aiSaveBtn = document.getElementById('gls-ai-save-btn');
-  if (globalSaveBtn) globalSaveBtn.hidden = name === 'gls-ai';
+  var modal = document.getElementById('modal-global-settings');
+  var readOnly = !!(modal && modal.classList && modal.classList.contains('settings-read-only'));
+  if (globalSaveBtn) globalSaveBtn.hidden = name === 'gls-ai' || readOnly;
   if (aiSaveBtn) aiSaveBtn.hidden = name !== 'gls-ai';
 }
 

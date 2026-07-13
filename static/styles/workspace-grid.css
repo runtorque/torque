@@ -1132,6 +1132,13 @@ main {
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.agent-group-tabs-list::-webkit-scrollbar { height: 4px; }
+.agent-group-tabs-list::-webkit-scrollbar-track { background: transparent; }
+.agent-group-tabs-list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--border-strong);
 }
 .agent-group-tabs-empty {
   flex: 0 0 auto;
@@ -2273,6 +2280,97 @@ body.runtime-embedded .agent-focus-header {
   border-radius: 3px; line-height: 1.4;
 }
 
+/* Visual polish: agent cards keep their existing grid geometry while making
+   identity, selection, and runtime state easier to scan. */
+.cell {
+  border-color: var(--border-subtle);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.022), transparent 42%),
+    var(--bg-cell);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.018);
+  transition: transform var(--transition-fast), background var(--transition-fast),
+    border-color var(--transition-fast), box-shadow var(--transition-fast), opacity var(--transition-fast);
+}
+.cell:hover {
+  transform: translateY(-1px);
+  border-color: var(--border-strong);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.035), transparent 48%),
+    var(--bg-hover);
+  box-shadow: 0 5px 14px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.025);
+}
+.cell.active,
+.cell.selected {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  background:
+    linear-gradient(180deg, var(--accent-soft), transparent 54%),
+    var(--bg-cell);
+  box-shadow: inset 2px 0 0 var(--accent), 0 0 0 1px color-mix(in srgb, var(--accent) 15%, transparent);
+}
+.cell.focused { outline: 0; box-shadow: var(--focus-ring); }
+.cell.stopped { opacity: .68; }
+.cell.stopped:hover { opacity: .84; }
+.cell-name { color: var(--text); font-size: 9.5px; letter-spacing: -.01em; }
+.agent-card-line,
+.cell-task,
+.cell-worker-cycle,
+.cell-engineer-queue,
+.cell-architect-activity { color: var(--text-faint); }
+.cell-status {
+  box-shadow: 0 0 0 2px var(--bg-cell);
+}
+.cell-status.working,
+.cell-status.running { box-shadow: 0 0 0 2px var(--bg-cell), 0 0 7px color-mix(in srgb, var(--green) 46%, transparent); }
+.cell-status.attention,
+.cell-status.error { box-shadow: 0 0 0 2px var(--bg-cell), 0 0 7px color-mix(in srgb, currentColor 42%, transparent); }
+.cell-architect-badge {
+  color: color-mix(in srgb, var(--amber) 88%, white);
+  background: color-mix(in srgb, var(--amber) 13%, transparent);
+  border-color: color-mix(in srgb, var(--amber) 32%, transparent);
+}
+.cell-engineer-badge { background: var(--accent-soft); border-color: var(--accent-muted); }
+.agent-context-meter { color: var(--text-faint); opacity: .86; }
+
+/* Terminal and DMs: clearer shell hierarchy and quieter message chrome. */
+.terminal-topbar,
+.terminal-statusbar {
+  border-color: var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-surface) 90%, transparent);
+}
+.terminal-title { color: var(--text); letter-spacing: -.01em; }
+.terminal-group-pill { background: var(--accent-soft); }
+.terminal-stage { background: var(--bg-inset); }
+.terminal-surface {
+  border-color: var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.025), 0 8px 28px rgba(0,0,0,.12);
+}
+.terminal-direct-messages {
+  border-color: var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-surface) 94%, var(--bg-inset));
+}
+.terminal-direct-message {
+  border-color: var(--border-subtle);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg-raised) 72%, transparent);
+  box-shadow: none;
+}
+.terminal-direct-message--user-to-agent {
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border-subtle));
+  background: var(--accent-soft);
+}
+.terminal-direct-message-meta { color: var(--text-faint); }
+.terminal-direct-message-sender { color: var(--text-secondary); }
+.terminal-compose-input {
+  border-color: var(--border-subtle);
+  background: var(--bg-inset);
+}
+.terminal-compose-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
 /* ------------------------------------------------------------------ */
 /* Agent details (selected agent info panel)                           */
 /* ------------------------------------------------------------------ */
@@ -2867,4 +2965,3 @@ body.runtime-embedded .term-list {
 body.runtime-embedded .term-row.term-add {
   margin: 6px 11px 11px;
 }
-

@@ -1,5 +1,40 @@
 /* Terminal module: xterm runtime. */
 
+function _xtermCssValue(name, fallback) {
+  if (typeof getComputedStyle !== 'function' || !document || !document.documentElement) {
+    return fallback;
+  }
+  var value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
+function _xtermAppearanceOptions() {
+  var fontSize = parseFloat(_xtermCssValue('--terminal-font-size', '13'));
+  if (!Number.isFinite(fontSize)) fontSize = 13;
+  var accent = _xtermCssValue('--accent', '#62a8ff');
+  var selection = /^#[0-9a-f]{6}$/i.test(accent) ? accent + '4d' : 'rgba(98,168,255,.3)';
+  return {
+    fontSize: fontSize,
+    theme: {
+      background: _xtermCssValue('--bg', '#0b0f14'),
+      foreground: _xtermCssValue('--text', '#edf2f7'),
+      cursor: accent,
+      selectionBackground: selection,
+    },
+  };
+}
+
+function _applyEmbeddedTerminalAppearance() {
+  var appearance = _xtermAppearanceOptions();
+  for (var key in _embeddedTerminalSessions) {
+    var entry = _embeddedTerminalSessions[key];
+    if (!entry || !entry.terminal || !entry.terminal.options) continue;
+    entry.terminal.options.fontSize = appearance.fontSize;
+    entry.terminal.options.theme = appearance.theme;
+    _scheduleEmbeddedTerminalFit(entry);
+  }
+}
+
 function _xtermScrollbackFromSettings(settings) {
   var raw = settings && settings.xterm_scrollback;
   var value = Number(raw);
@@ -812,22 +847,18 @@ function _connectEmbeddedTerminal(cell, surface) {
   };
   _embeddedTerminalSessions[sessionKey] = entry;
   _embeddedTerminalPendingFocusKey = sessionKey;
+  var xtermAppearance = _xtermAppearanceOptions();
   entry.terminal = new Terminal({
     allowProposedApi: true,
     allowTransparency: false,
     convertEol: false,
     cursorBlink: true,
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-    fontSize: 13,
+    fontSize: xtermAppearance.fontSize,
     lineHeight: 1.0,
     letterSpacing: 0,
     scrollback: _currentXtermScrollback(),
-    theme: {
-      background: '#0d1117',
-      foreground: '#e6edf3',
-      cursor: '#58a6ff',
-      selectionBackground: 'rgba(88,166,255,0.28)',
-    },
+    theme: xtermAppearance.theme,
   });
   entry.fit = new FitAddon.FitAddon();
   entry.terminal.loadAddon(entry.fit);

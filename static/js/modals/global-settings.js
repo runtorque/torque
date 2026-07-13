@@ -4,6 +4,7 @@ var _glsKeybindings = {};     // current keybinding overrides being edited
 var _glsDefaults = {};        // default keybinding specs from server
 var _glsCapturing = null;     // action name currently capturing a keypress
 var _glsPendingConflict = null; // pending custom in-modal reassign confirmation
+var _glsKeybindingFilter = '';
 var GLS_STATUS_BAR_VISIBILITY_ITEMS = [
   'daemon_status',
   'claude_usage',
@@ -71,6 +72,43 @@ function _syncStatusBarSettingsFromGlobal(settings, opts) {
     if (!locked) input.checked = !!visibility[key];
     if (opts.force && input.dataset) delete input.dataset.statusBarDirty;
   });
+  _renderStatusBarSettingsPreview();
+}
+
+function _onStatusBarSettingsChange(input) {
+  if (input && input.dataset) input.dataset.statusBarDirty = '1';
+  _renderStatusBarSettingsPreview();
+}
+
+function _renderStatusBarSettingsPreview() {
+  var host = document.getElementById('gls-statusbar-preview-items');
+  if (!host || !host.replaceChildren || !document.createElement) return;
+  var labels = {
+    daemon_status: '● Daemon',
+    claude_usage: 'Claude 5h 42%',
+    codex_usage: 'Codex 5h 20%',
+    deploy: 'Deploy +2',
+    health: 'Health good',
+    workload: 'Agents 3 run',
+    tasks: 'Tasks 4 active',
+    attention: 'Attention 1',
+  };
+  host.replaceChildren();
+  GLS_STATUS_BAR_VISIBILITY_ITEMS.forEach(function(key) {
+    var input = document.getElementById(_glsStatusBarInputId(key));
+    if (!input || !input.checked) return;
+    var chip = document.createElement('span');
+    chip.className = 'statusbar-settings-preview-chip';
+    chip.dataset.item = key;
+    chip.textContent = labels[key] || key;
+    host.appendChild(chip);
+  });
+  if (!host.children.length) {
+    var empty = document.createElement('span');
+    empty.className = 'statusbar-settings-preview-empty';
+    empty.textContent = 'No optional items selected';
+    host.appendChild(empty);
+  }
 }
 
 function _collectStatusBarVisibilitySettings() {
@@ -223,6 +261,9 @@ function switchGlsTab(name) {
   document.querySelectorAll('#modal-global-settings .gs-pane').forEach(p =>
     p.classList.toggle('active', p.dataset.pane === name));
   if (name === 'gls-system') loadDaemonStatus();
+  if (typeof settingsShellSyncView === 'function') {
+    settingsShellSyncView('modal-global-settings');
+  }
 }
 
 var _glsActiveSubTabs = {};
@@ -264,6 +305,9 @@ function switchGlsSubTab(btn) {
   if (container.dataset && container.dataset.pane && target) {
     _glsActiveSubTabs[container.dataset.pane] = target;
   }
+  if (typeof settingsShellSyncView === 'function') {
+    settingsShellSyncView('modal-global-settings');
+  }
 }
 
 function openGlobalSettings() {
@@ -285,6 +329,10 @@ function _showGlobalSettingsModal(data) {
     ? sanitizeKeybindingOverrides(s.keybindings || {})
     : Object.assign({}, s.keybindings || {});
   _glsPendingConflict = null;
+
+  if (!modalWasVisible && typeof settingsAppearancePopulate === 'function') {
+    settingsAppearancePopulate();
+  }
 
   // General > Server
   document.getElementById('gls-default-cmd').value = s.default_command || '';
@@ -338,11 +386,17 @@ function _showGlobalSettingsModal(data) {
   }
 
   if (modalWasVisible && activeTabName) switchGlsTab(activeTabName);
-  else switchGlsTab('gls-general');
+  else switchGlsTab('gls-appearance');
   _syncGlsSubTabs(modalWasVisible);
 
   modal.classList.add('visible');
-  if (!modalWasVisible) document.getElementById('gls-default-cmd').focus();
+  if (!modalWasVisible) {
+    if (typeof settingsShellCaptureBaseline === 'function') {
+      settingsShellCaptureBaseline('modal-global-settings');
+    }
+    var firstAppearanceControl = document.getElementById('gls-appearance-contrast');
+    if (firstAppearanceControl) firstAppearanceControl.focus();
+  }
 }
 
 function _kbDefaultBinding(action) {
@@ -436,6 +490,9 @@ function _kbSetOverride(action, binding) {
   var defBinding = _kbDefaultBinding(action);
   if (defBinding && _kbBindingSame(normalized, defBinding)) delete _glsKeybindings[action];
   else _glsKeybindings[action] = normalized;
+  if (typeof settingsShellForceDirty === 'function') {
+    settingsShellForceDirty('modal-global-settings');
+  }
 }
 
 function _kbApplyBindingWithConflictCheck(action, binding, reset) {
@@ -457,8 +514,10 @@ function _kbApplyBindingWithConflictCheck(action, binding, reset) {
     _renderKeybindingList();
     return;
   }
-  if (reset) delete _glsKeybindings[action];
-  else _kbSetOverride(action, normalized);
+  if (reset) {
+    delete _glsKeybindings[action];
+    if (typeof settingsShellForceDirty === 'function') settingsShellForceDirty('modal-global-settings');
+  } else _kbSetOverride(action, normalized);
   _glsPendingConflict = null;
   _renderKeybindingList();
 }
@@ -499,6 +558,16 @@ function _renderKeybindingList() {
   var html = '';
   html += _kbConflictWarningHtml();
   var actions = _kbActionOrder();
+  var query = String(_glsKeybindingFilter || '').trim().toLowerCase();
+  if (query) {
+    actions = actions.filter(function(action) {
+      var def = _glsDefaults[action] || {};
+      return [action, def.label || '', def.description || ''].join(' ').toLowerCase().indexOf(query) >= 0;
+    });
+  }
+  if (!actions.length) {
+    html += '<div class="settings-list-empty">No shortcuts match “' + esc(_glsKeybindingFilter) + '”.</div>';
+  }
   for (var ai = 0; ai < actions.length; ai++) {
     var action = actions[ai];
     var def = _glsDefaults[action];
@@ -527,6 +596,21 @@ function _renderKeybindingList() {
   }
   container.innerHTML = html;
   container.scrollTop = scrollTop;
+}
+
+function _filterKeybindingSettings(query) {
+  _glsKeybindingFilter = String(query || '');
+  _renderKeybindingList();
+}
+
+function _resetAllKeybindings() {
+  _glsKeybindings = {};
+  _glsPendingConflict = null;
+  _glsCapturing = null;
+  if (typeof settingsShellForceDirty === 'function') {
+    settingsShellForceDirty('modal-global-settings');
+  }
+  _renderKeybindingList();
 }
 
 function _startCapture(action) {
@@ -580,6 +664,7 @@ function _resetKeybinding(action) {
   var defBinding = _kbDefaultBinding(action);
   if (!defBinding) {
     delete _glsKeybindings[action];
+    if (typeof settingsShellForceDirty === 'function') settingsShellForceDirty('modal-global-settings');
     _renderKeybindingList();
     return;
   }
@@ -658,6 +743,7 @@ function submitGlobalSettings() {
   var relayPrivateKeyPathEl = document.getElementById('gls-relay-private-key-path');
   if (relayPrivateKeyPathEl) settings.relay_private_key_path = relayPrivateKeyPathEl.value.trim();
 
+  if (typeof settingsAppearanceCommit === 'function') settingsAppearanceCommit();
   send({ cmd: 'update_global_settings', settings: settings });
   closeModals();
 }

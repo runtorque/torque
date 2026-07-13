@@ -816,15 +816,15 @@ test('group settings uses Group/Workers split plus scoped Engineer and Architect
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   const modals = fs.readFileSync(path.join(repoRoot, 'static/js/modals/group-settings.js'), 'utf8');
   const topStrip = html.slice(
-    html.indexOf('<div class="gs-tabs">'),
+    html.indexOf('<div class="gs-tabs settings-primary-nav" role="tablist" aria-label="Group settings sections">'),
     html.indexOf('    <!-- Group tab -->'),
   );
   const topTabs = Array.from(topStrip.matchAll(/data-tab="([^"]+)"/g), (match) => match[1]);
   assert.deepEqual(topTabs, ['group', 'workers', 'engineer', 'architect']);
   assert.doesNotMatch(topStrip, />Agents<\/button>/);
-  assert.match(topStrip, />Workers<\/button>/);
-  assert.match(topStrip, />Engineers<\/button>/);
-  assert.match(topStrip, />Architects<\/button>/);
+  assert.match(topStrip, /<span>Workers<\/span>/);
+  assert.match(topStrip, /<span>Engineers<\/span>/);
+  assert.match(topStrip, /<span>Architects<\/span>/);
   assert.doesNotMatch(topStrip, />Engineer<\/button>/);
   assert.doesNotMatch(topStrip, />Architect<\/button>/);
 
