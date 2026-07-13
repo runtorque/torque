@@ -17,6 +17,15 @@ test('panelbar exposes five primary controls and moves secondary panels behind M
   assert.match(html, /id="workspace-more-menu"[^>]*role="menu"/);
 });
 
+test('revamped workspace tokens keep text and controls readable at 100 percent zoom', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  assert.match(css, /--control-height:\s*32px/);
+  assert.match(css, /html,\s*\nbody\s*\{[^}]*font-size:\s*12px/s);
+  assert.match(css, /body\.runtime-embedded \.cell \.cell-name\s*\{[^}]*font-size:\s*11px/s);
+  assert.match(css, /body\.runtime-embedded\.workspace-mode-focused \.agent-grid\s*\{[^}]*--agent-architect-column-width:\s*136px/s);
+  assert.match(css, /\.terminal-shell:has\(\.terminal-empty\)[^}]*terminal-topbar-btn-primary/s);
+});
+
 class FakeClassList {
   constructor() { this.items = new Set(); }
   add(...names) { names.forEach((name) => this.items.add(name)); }

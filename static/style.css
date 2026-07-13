@@ -16158,3 +16158,269 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"]:not(.nav-secondary) { 
     grid-template-columns: 1fr;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Design revamp: shared visual hierarchy and readable agent roster    */
+/* ------------------------------------------------------------------ */
+:root {
+  --bg:          #0a0e14;
+  --bg-surface:  #111721;
+  --bg-cell:     #171e29;
+  --bg-hover:    #202a38;
+  --border:      #2b3645;
+  --text:        #edf2f7;
+  --text-dim:    #9aa8b8;
+  --accent:      #70a9ff;
+  --green:       #4fd17a;
+  --red:         #ff6b72;
+  --amber:       #efb64b;
+  --radius:      8px;
+  --radius-lg:   12px;
+  --control-height: 32px;
+  --surface-raised-shadow: 0 16px 44px rgba(0,0,0,.28);
+}
+
+html,
+body {
+  font-size: 12px;
+  line-height: 1.48;
+  background:
+    radial-gradient(circle at 72% -10%, rgba(112,169,255,.07), transparent 30%),
+    var(--bg);
+}
+
+button:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 78%, white);
+  outline-offset: 2px;
+}
+
+input,
+select,
+textarea {
+  min-height: var(--control-height);
+  border-color: color-mix(in srgb, var(--border) 88%, var(--text-dim));
+  background: color-mix(in srgb, var(--bg) 86%, var(--bg-surface));
+}
+
+header {
+  min-height: 44px;
+  padding: 7px 10px;
+  background: color-mix(in srgb, var(--bg-surface) 94%, #000 6%);
+}
+header h1 {
+  font-size: 12px;
+}
+.hdr-btn {
+  min-width: 30px;
+  min-height: 30px;
+  padding: 4px 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+}
+
+body.runtime-embedded #panelbar {
+  flex-basis: 34px;
+  height: 34px;
+}
+body.runtime-embedded .taskbar-app,
+body.runtime-embedded .statusbar-info > .daemon-connection-status:first-child,
+body.runtime-embedded .statusbar-info .relay-status,
+body.runtime-embedded .statusbar-chip {
+  min-height: 34px;
+}
+.workspace-more-menu {
+  bottom: 42px;
+}
+body.runtime-embedded.workspace-mode-focused #standalone-bottom-dock,
+body.runtime-embedded.workspace-mode-focused #standalone-right-rail {
+  bottom: 34px;
+}
+body.runtime-embedded.workspace-mode-compact #standalone-float-layer {
+  inset: 0 0 34px;
+}
+
+.standalone-panel-zone-header {
+  min-height: 42px;
+  padding: 7px 10px;
+  background: color-mix(in srgb, var(--bg-surface) 95%, white 5%);
+}
+.standalone-panel-tab {
+  min-height: 28px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+}
+.standalone-panel-tab.active {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 34%, transparent);
+}
+.standalone-panel-zone-body {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.012), transparent 160px),
+    var(--bg);
+}
+
+.agent-group-tabs-host {
+  padding-top: 7px;
+  background: color-mix(in srgb, var(--bg-surface) 92%, var(--bg));
+}
+.agent-group-tab {
+  min-height: 30px;
+  padding: 5px 10px;
+  border-radius: 999px;
+}
+.agent-group-tab.active,
+.agent-group-tab[aria-selected="true"] {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent);
+}
+.agent-grid-new-btn {
+  min-height: 30px;
+  padding-inline: 12px;
+}
+
+body.runtime-embedded .agent-grid {
+  --agent-architect-column-width: 112px;
+  --agent-engineer-column-width: 112px;
+  --agent-grid-card-basis: var(--agent-engineer-column-width);
+  --agent-grid-card-min: var(--agent-engineer-column-width);
+  --agent-grid-card-max: var(--agent-engineer-column-width);
+  --agent-grid-card-height: 116px;
+  --agent-card-height: var(--agent-grid-card-height);
+  gap: 10px;
+  padding: 10px;
+}
+body.runtime-embedded.workspace-mode-focused .agent-grid {
+  --agent-architect-column-width: 136px;
+  --agent-engineer-column-width: 136px;
+  --agent-grid-card-basis: var(--agent-engineer-column-width);
+  --agent-grid-card-min: var(--agent-engineer-column-width);
+  --agent-grid-card-max: var(--agent-engineer-column-width);
+  --agent-grid-card-height: 120px;
+}
+body.runtime-embedded.workspace-mode-compact .agent-grid {
+  --agent-architect-column-width: 180px;
+  --agent-engineer-column-width: 180px;
+  --agent-grid-card-basis: var(--agent-engineer-column-width);
+  --agent-grid-card-min: var(--agent-engineer-column-width);
+  --agent-grid-card-max: var(--agent-engineer-column-width);
+  --agent-grid-card-height: 120px;
+}
+
+body.runtime-embedded .cell {
+  justify-content: flex-start;
+  padding: 31px 9px 27px;
+  border-color: color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.025), transparent 70%),
+    var(--bg-cell);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.025);
+}
+body.runtime-embedded .cell:hover {
+  border-color: color-mix(in srgb, var(--text-dim) 52%, var(--border));
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.035), transparent 70%),
+    var(--bg-hover);
+}
+body.runtime-embedded .cell.active,
+body.runtime-embedded .cell.selected {
+  border-color: color-mix(in srgb, var(--accent) 78%, var(--border));
+  box-shadow:
+    inset 3px 0 0 var(--accent),
+    0 8px 22px rgba(0,0,0,.2);
+}
+body.runtime-embedded .cell.stopped {
+  opacity: .8;
+}
+.cell-name {
+  font-size: 11px;
+  line-height: 1.25;
+}
+body.runtime-embedded .cell .cell-name {
+  font-size: 11px;
+}
+.cell-task,
+.agent-card-line,
+.cell-engineer-ask {
+  font-size: 9px;
+  line-height: 1.3;
+}
+body.runtime-embedded .cell .cell-task,
+body.runtime-embedded .cell .agent-card-line,
+body.runtime-embedded .cell .cell-engineer-ask {
+  font-size: 9px;
+}
+.agent-card-body {
+  gap: 5px;
+}
+.cell-header-controls {
+  top: 5px;
+  left: 5px;
+  gap: 3px;
+}
+.cell-close,
+.cell-engineer-toggle {
+  width: 22px;
+  height: 22px;
+  font-size: 11px;
+  border-radius: 6px;
+}
+.agent-context-meter {
+  top: 8px;
+  left: 58px;
+  right: 18px;
+  font-size: 8px;
+}
+.cell-status {
+  top: 8px;
+  right: 8px;
+  width: 9px;
+  height: 9px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 10%, transparent);
+}
+.agent-card-provider,
+.cell-type {
+  left: 8px;
+  bottom: 7px;
+  font-size: 8px;
+}
+.agent-card-kind,
+.cell-engineer-badge,
+.cell-architect-badge,
+.cell-worker-badge,
+.cell-agent-badge,
+.cell-dismissed-badge {
+  right: 7px;
+  bottom: 6px;
+  font-size: 8px;
+  padding: 1px 6px;
+  line-height: 1.35;
+}
+.cell-agent-class-badge {
+  max-width: calc(100% - 14px);
+}
+.cell-relaunch {
+  font-size: 9px;
+  margin-top: auto;
+  padding-top: 4px;
+}
+.agent-execution-heading,
+.section-label {
+  font-size: 10px;
+  letter-spacing: .06em;
+}
+.agent-execution-heading {
+  min-height: 24px;
+}
+
+/* The central empty state already contains the clear relaunch action. Avoid a
+   second identical button in the top bar and leave that space for context. */
+.terminal-shell:has(.terminal-empty) .terminal-topbar-right .terminal-topbar-btn-primary {
+  display: none;
+}
