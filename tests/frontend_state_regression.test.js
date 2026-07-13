@@ -23079,12 +23079,9 @@ test('standalone panel titles use current operator-facing names', () => {
 test('taskbar labels the selected-agent panel as Agent', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   assert.match(html, /data-app="board"[\s\S]*data-app="chat"[\s\S]*data-app="actions"/);
-  assert.match(html, /id="taskbar-workspace" class="taskbar-app taskbar-primary-control"/);
-  assert.match(html, /<button class="taskbar-app nav-primary" data-app="board" onclick="togglePanel\('board'\)">&#9776; Board<\/button>/);
-  assert.match(html, /<button class="taskbar-app nav-primary" data-app="chat" onclick="togglePanel\('chat'\)">&#9993; Chat<\/button>/);
-  assert.match(html, /<button class="taskbar-app nav-primary" data-app="engineer" onclick="togglePanel\('engineer'\)">&#x2696; Agent<\/button>/);
-  assert.match(html, /<button class="taskbar-app nav-secondary" data-app="history" onclick="togglePanel\('history'\)">&#8635; History<\/button>/);
-  assert.match(html, /id="taskbar-more" class="taskbar-app taskbar-primary-control"/);
+  assert.match(html, /<button class="taskbar-app" data-app="chat" onclick="togglePanel\('chat'\)">&#9993; Chat<\/button>/);
+  assert.match(html, /<button class="taskbar-app" data-app="engineer" onclick="togglePanel\('engineer'\)">&#x2696; Agent<\/button>/);
+  assert.match(html, /<button class="taskbar-app" data-app="history" onclick="togglePanel\('history'\)">&#8635; History<\/button>/);
   assert.doesNotMatch(html, /&#x2696; Architects<\/button>/);
 });
 

@@ -243,7 +243,7 @@ class WebviewStatusBarLayoutTests(unittest.TestCase):
         self.assertIn('id="taskbar-restore-layout"', panel_html)
         self.assertGreater(
             panel_html.index('id="taskbar-restore-layout"'),
-            panel_html.rindex('class="taskbar-app'),
+            panel_html.rindex('class="taskbar-app"'),
             "Restore layout button follows the panel app buttons in the bottom cluster",
         )
 

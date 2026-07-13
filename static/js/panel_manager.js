@@ -712,9 +712,6 @@ function _standalonePanelSetLayout(next, opts) {
     _activePanelApp = _standalonePanelActiveApp();
   }
   _standaloneRenderPanelWorkspace();
-  if (typeof _syncWorkspaceLayoutPresentation === 'function') {
-    _syncWorkspaceLayoutPresentation();
-  }
   if (!opts.fromServer) _standalonePanelSaveLayout();
 }
 
@@ -811,7 +808,6 @@ function _standaloneRunPanelOpenHooks(app, opts) {
 function _standaloneSelectPanel(app, opts) {
   if (!_standalonePanelsEnabled()) return false;
   opts = opts || {};
-  if (typeof workspaceHideAgents === 'function') workspaceHideAgents();
   var detachedEntry = _detachedPanelEntry(app);
   if (detachedEntry && detachedEntry.label
       && window.nativeApi && window.nativeApi.available()) {

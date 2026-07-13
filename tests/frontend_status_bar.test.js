@@ -65,11 +65,6 @@ class FakeDocument {
     return this.elements.get(id);
   }
   getElementById(id) { return this.elements.get(id) || null; }
-  createElement(tagName) {
-    const el = new FakeElement('', this);
-    el.tagName = String(tagName || 'div').toUpperCase();
-    return el;
-  }
   addEventListener(type, fn) {
     if (!this._listeners.has(type)) this._listeners.set(type, []);
     this._listeners.get(type).push(fn);
@@ -111,9 +106,6 @@ function createSandbox() {
     'statusbar-workload',
     'statusbar-tasks',
     'statusbar-attention',
-    'statusbar-overview',
-    'statusbar-overview-label',
-    'statusbar-overview-menu',
   ].forEach((id) => document.ensure(id));
   const panelbar = document.register('panelbar');
   const statusInfo = document.getElementById('statusbar-info');
@@ -134,10 +126,6 @@ function createSandbox() {
     'statusbar-tasks',
     'statusbar-attention',
   ].forEach((id) => statusInfo.appendChild(document.getElementById(id)));
-  const overview = document.getElementById('statusbar-overview');
-  overview.tagName = 'BUTTON';
-  overview.appendChild(document.getElementById('statusbar-overview-label'));
-  statusInfo.appendChild(overview);
   const panelButtons = document.getElementById('statusbar-panel-buttons');
   const board = document.register('panel-board-button');
   const chat = document.register('panel-chat-button');
@@ -147,7 +135,6 @@ function createSandbox() {
   const spacer = document.register('taskbar-spacer');
   panelbar.appendChild(spacer);
   panelbar.appendChild(statusInfo);
-  panelbar.appendChild(document.getElementById('statusbar-overview-menu'));
   document.body.appendChild(panelbar);
 
   const sendCalls = [];
@@ -227,39 +214,6 @@ test('status chips live right-aligned inside the bottom panelbar without a right
   assert.match(panelbarHtml, /id="statusbar-metrics"[\s\S]*hidden/);
   assert.match(panelbarHtml, /id="statusbar-tasks"[\s\S]*onclick="statusBarOpenTasks\(\)"/);
   assert.match(panelbarHtml, /id="statusbar-attention"[\s\S]*onclick="statusBarOpenAttention\(\)"/);
-});
-
-test('focused workspace status overview summarizes urgency and exposes configured rows', () => {
-  const { sandbox, document } = createSandbox();
-  const context = vm.createContext(sandbox);
-  loadStatusBar(context);
-  vm.runInContext(`_statusBarRefreshOverview({
-    attention: { count: 2 },
-    agents: { error: 0 },
-    deploy: { visible: false, level: 'muted', label: 'Deploy 0' },
-    metrics: { level: 'normal' }
-  })`, context);
-  assert.equal(document.getElementById('statusbar-overview-label').textContent, '2 attention');
-  assert.equal(document.getElementById('statusbar-overview').getAttribute('data-level'), 'warn');
-  assert.equal(vm.runInContext('statusBarToggleOverview()', context), true);
-  assert.equal(document.getElementById('statusbar-overview-menu').hidden, false);
-  assert.ok(document.getElementById('statusbar-overview-menu').children.length > 0);
-  vm.runInContext('statusBarCloseOverview()', context);
-  assert.equal(document.getElementById('statusbar-overview-menu').hidden, true);
-});
-
-test('focused workspace status overview surfaces agent errors before attention', () => {
-  const { sandbox, document } = createSandbox();
-  const context = vm.createContext(sandbox);
-  loadStatusBar(context);
-  vm.runInContext(`_statusBarRefreshOverview({
-    attention: { count: 3 },
-    agents: { error: 1 },
-    deploy: { visible: false, level: 'muted', label: 'Deploy 0' },
-    metrics: { level: 'normal' }
-  })`, context);
-  assert.equal(document.getElementById('statusbar-overview-label').textContent, '1 agent error');
-  assert.equal(document.getElementById('statusbar-overview').getAttribute('data-level'), 'danger');
 });
 
 test('status bar visibility defaults are lean and each toggle gates its chip', () => {
@@ -598,7 +552,6 @@ test('refreshStatusBar updates static nodes without wiping panel-button nodes or
     'statusbar-workload',
     'statusbar-tasks',
     'statusbar-attention',
-    'statusbar-overview',
   ]);
   assert.deepEqual(beforeChildren, [board, chat]);
 

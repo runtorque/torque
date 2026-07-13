@@ -1133,49 +1133,16 @@ function _renderBoardCard(t, childrenOf, depth, renderState) {
       meta += '<span class="board-card-label board-card-priority board-card-priority-' + esc(priority) + '">'
         + 'Priority: ' + esc(_boardPriorityText(priority)) + '</span>';
     }
-    var criticalLabelHtml = [];
-    var regularLabelHtml = [];
-    var regularLabelNames = [];
     for (var li = 0; li < userLbls.length; li++) {
       var lc = labelColor(userLbls[li]);
-      regularLabelHtml.push('<span class="board-card-label" style="background:' + lc + '22;color:' + lc + '">'
-        + esc(userLbls[li]) + '</span>');
-      regularLabelNames.push(userLbls[li]);
+      meta += '<span class="board-card-label" style="background:' + lc + '22;color:' + lc + '">' + esc(userLbls[li]) + '</span>';
     }
     for (var li = 0; li < sysLbls.length; li++) {
       var lb = sysLbls[li];
       var cls = 'board-card-label board-label-system';
       if (lb === 'torque:blocked') cls += ' board-label-blocked';
       else if (lb === 'torque:error') cls += ' board-label-error';
-      var systemLabelHtml = '<span class="' + cls + '">' + esc(displayLabel(lb)) + '</span>';
-      if (lb === 'torque:blocked' || lb === 'torque:error') criticalLabelHtml.push(systemLabelHtml);
-      else {
-        regularLabelHtml.push(systemLabelHtml);
-        regularLabelNames.push(displayLabel(lb));
-      }
-    }
-    var boardCardVisibleLabelLimit = 5;
-    for (var criticalIndex = 0; criticalIndex < criticalLabelHtml.length; criticalIndex++) {
-      meta += criticalLabelHtml[criticalIndex];
-    }
-    var regularVisibleCount = Math.max(0, boardCardVisibleLabelLimit - criticalLabelHtml.length);
-    for (var regularIndex = 0; regularIndex < regularLabelHtml.length; regularIndex++) {
-      if (regularIndex < regularVisibleCount) {
-        meta += regularLabelHtml[regularIndex];
-      } else {
-        meta += regularLabelHtml[regularIndex].replace(
-          'class="board-card-label',
-          'class="board-card-label board-card-label-overflow-item'
-        );
-      }
-    }
-    var hiddenLabelCount = Math.max(0, regularLabelHtml.length - regularVisibleCount);
-    if (hiddenLabelCount) {
-      var hiddenLabelTitle = regularLabelNames.slice(regularVisibleCount).join(', ');
-      meta += '<button type="button" class="board-card-label board-card-label-overflow"'
-        + ' aria-expanded="false" title="Hidden labels: ' + esc(hiddenLabelTitle) + '"'
-        + ' onclick="boardToggleCardLabels(event,this)">+'
-        + hiddenLabelCount + (hiddenLabelCount === 1 ? ' label' : ' labels') + '</button>';
+      meta += '<span class="' + cls + '">' + esc(displayLabel(lb)) + '</span>';
     }
   }
   var dependencyBadges = _boardTaskDependencyBadges(t);
@@ -1303,17 +1270,4 @@ function _renderBoardCard(t, childrenOf, depth, renderState) {
     }
   }
   return cardHtml;
-}
-
-function boardToggleCardLabels(event, button) {
-  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
-  if (!button || typeof button.closest !== 'function') return false;
-  var card = button.closest('.board-card');
-  if (!card || !card.classList) return false;
-  var expanded = card.classList.toggle('board-card-labels-expanded');
-  button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-  var label = String(button.textContent || '');
-  if (expanded && label.charAt(0) === '+') button.textContent = '−' + label.slice(1);
-  if (!expanded && label.charAt(0) === '−') button.textContent = '+' + label.slice(1);
-  return expanded;
 }
