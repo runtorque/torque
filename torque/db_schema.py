@@ -15,7 +15,7 @@ import json
 import sqlite3
 from typing import Callable, Iterable
 
-SCHEMA_VERSION = "8"
+SCHEMA_VERSION = "10"
 
 
 @dataclass(frozen=True)
@@ -3462,6 +3462,20 @@ def _migration_0008_kinds_legacy_stages_complete(
         )
 
 
+def _migration_0009_digest_settings_backfill(
+    _conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Ledger the legacy group-to-agent digest settings backfill."""
+
+
+def _migration_0010_canonical_task_ids(
+    _conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Ledger canonical task-ID rewriting and reference reconciliation."""
+
+
 SCHEMA_MIGRATIONS = (
     SchemaMigration(
         1,
@@ -3510,6 +3524,20 @@ SCHEMA_MIGRATIONS = (
         "kinds_legacy_stages_complete",
         "kinds-backfill-cleanup-stage4-v1",
         _migration_0008_kinds_legacy_stages_complete,
+        phase="post_init",
+    ),
+    SchemaMigration(
+        9,
+        "digest_settings_backfill",
+        "legacy-engineer-to-agent-digest-v1",
+        _migration_0009_digest_settings_backfill,
+        phase="post_init",
+    ),
+    SchemaMigration(
+        10,
+        "canonical_task_ids",
+        "canonical-task-ids-and-references-v1",
+        _migration_0010_canonical_task_ids,
         phase="post_init",
     ),
 )
@@ -3577,6 +3605,7 @@ def _apply_schema_migrations(
     *,
     migrations: Iterable[SchemaMigration] = SCHEMA_MIGRATIONS,
     phases: Iterable[str] | None = None,
+    versions: Iterable[int] | None = None,
     apply_overrides: dict[int, Callable] | None = None,
 ) -> None:
     """Apply missing migrations in order and reject ledger drift.
@@ -3588,6 +3617,7 @@ def _apply_schema_migrations(
 
     ordered = _validate_migration_catalog(migrations)
     selected_phases = None if phases is None else set(phases)
+    selected_versions = None if versions is None else set(versions)
     overrides = dict(apply_overrides or {})
     _ensure_schema_migrations_table(conn)
     applied = _applied_schema_migrations(conn)
@@ -3622,6 +3652,11 @@ def _apply_schema_migrations(
         if migration.version in applied:
             continue
         if selected_phases is not None and migration.phase not in selected_phases:
+            continue
+        if (
+            selected_versions is not None
+            and migration.version not in selected_versions
+        ):
             continue
         missing_predecessors = set(range(1, migration.version)) - completed
         if missing_predecessors:
@@ -3702,23 +3737,25 @@ def finalize_database_migrations(
     conn: sqlite3.Connection,
     backfill_agent_history,
     *,
-    post_init_runner: Callable[[], object] | None = None,
+    post_init_runners: dict[int, Callable[[], object]] | None = None,
 ) -> bool:
-    """Apply guarded post-init work and its ledger row atomically.
+    """Apply guarded post-init work and ledger each runner atomically.
 
-    ``post_init_runner`` participates in a transaction owned here and must not
-    begin, commit, or roll back independently.
+    Runners participate in transactions owned here and must not begin, commit,
+    or roll back independently.
     """
 
+    runners = dict(post_init_runners or {})
     kinds_version = _legacy_kinds_version(conn)
     applied = _applied_schema_migrations(conn)
 
     if 8 in applied and kinds_version < KINDS_LEGACY_COMPLETE_VERSION:
-        if post_init_runner is None:
+        kinds_runner = runners.get(8)
+        if kinds_runner is None:
             return False
         try:
             conn.execute("BEGIN")
-            post_init_runner()
+            kinds_runner()
             if _legacy_kinds_version(conn) < KINDS_LEGACY_COMPLETE_VERSION:
                 raise _PostInitMigrationNotReady()
             conn.commit()
@@ -3728,35 +3765,66 @@ def finalize_database_migrations(
         except Exception:
             conn.rollback()
             raise
+        kinds_version = _legacy_kinds_version(conn)
 
-    overrides = None
-    if kinds_version < KINDS_LEGACY_COMPLETE_VERSION:
-        if post_init_runner is None:
-            return False
+    post_init_migrations = [
+        migration
+        for migration in SCHEMA_MIGRATIONS
+        if migration.phase == "post_init"
+    ]
+    for migration in post_init_migrations:
+        if migration.version in applied:
+            continue
+        runner = runners.get(migration.version)
+        if migration.version == 8:
+            if kinds_version < KINDS_LEGACY_COMPLETE_VERSION:
+                if runner is None:
+                    return False
 
-        def apply_guarded_kinds_completion(connection, backfill) -> None:
-            post_init_runner()
-            if (
-                _legacy_kinds_version(connection)
-                < KINDS_LEGACY_COMPLETE_VERSION
-            ):
-                raise _PostInitMigrationNotReady()
-            _migration_0008_kinds_legacy_stages_complete(
+                def apply_guarded_kinds_completion(
+                    connection,
+                    backfill,
+                ) -> None:
+                    runner()
+                    if (
+                        _legacy_kinds_version(connection)
+                        < KINDS_LEGACY_COMPLETE_VERSION
+                    ):
+                        raise _PostInitMigrationNotReady()
+                    migration.apply(connection, backfill)
+
+                apply_migration = apply_guarded_kinds_completion
+            else:
+                apply_migration = migration.apply
+        else:
+            if runner is None:
+                return False
+
+            def apply_runner_migration(
                 connection,
                 backfill,
+                *,
+                _runner=runner,
+                _migration=migration,
+            ) -> None:
+                _runner()
+                _migration.apply(connection, backfill)
+
+            apply_migration = apply_runner_migration
+
+        try:
+            _apply_schema_migrations(
+                conn,
+                backfill_agent_history,
+                phases={"post_init"},
+                versions={migration.version},
+                apply_overrides={migration.version: apply_migration},
             )
-
-        overrides = {8: apply_guarded_kinds_completion}
-
-    try:
-        _apply_schema_migrations(
-            conn,
-            backfill_agent_history,
-            phases={"post_init"},
-            apply_overrides=overrides,
-        )
-    except _PostInitMigrationNotReady:
-        return False
+        except _PostInitMigrationNotReady:
+            return False
+        applied[migration.version] = {"version": migration.version}
+        if migration.version == 8:
+            kinds_version = _legacy_kinds_version(conn)
     return True
 
 def rebuild_memory_retention_indexes(conn: sqlite3.Connection):

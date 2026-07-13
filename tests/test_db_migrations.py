@@ -25,6 +25,10 @@ from torque.db_schema import (
 
 
 class SchemaMigrationLedgerTests(unittest.TestCase):
+    @staticmethod
+    def _post_init_runners(kinds_runner=lambda: None):
+        return {8: kinds_runner, 9: lambda: None, 10: lambda: None}
+
     def test_fresh_database_records_contiguous_migration_ledger(self):
         with tempfile.TemporaryDirectory() as tmp:
             db = TorqueDB(Path(tmp) / "torque.db")
@@ -210,7 +214,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
 
         self.assertTrue(set(BOARD_TASK_ROUTING_COLUMNS) <= columns)
         self.assertIn((3, "board_task_routing_contract"), ledger)
-        self.assertEqual(ledger[-1], (8, "kinds_legacy_stages_complete"))
+        self.assertEqual(ledger[-1], (10, "canonical_task_ids"))
         self.assertFalse(set(BOARD_TASK_ROUTING_COLUMNS) & backup_columns)
         self.assertEqual(backup_version, (2,))
         self.assertEqual(rerun_backup_mtime, backup_mtime)
@@ -305,7 +309,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
         self.assertTrue(set(AGENT_CLASS_AUDIT_COLUMNS) <= audit_columns)
         self.assertTrue(set(DECISION_COLUMNS) <= decision_columns)
         self.assertIn((4, "agent_lifecycle_contract"), ledger)
-        self.assertEqual(ledger[-1], (8, "kinds_legacy_stages_complete"))
+        self.assertEqual(ledger[-1], (10, "canonical_task_ids"))
         self.assertFalse(set(AGENT_LIFECYCLE_COLUMNS) & backup_agent_columns)
         self.assertNotIn("agent_class_audit", backup_tables)
         self.assertNotIn("decisions", backup_tables)
@@ -341,7 +345,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
 
         self.assertTrue(set(AGENT_KIND_COLUMNS) <= columns)
         self.assertIn((7, "agent_kind_schema"), ledger)
-        self.assertEqual(ledger[-1], (8, "kinds_legacy_stages_complete"))
+        self.assertEqual(ledger[-1], (10, "canonical_task_ids"))
 
     def test_post_init_phase_waits_for_kinds_stage_four(self):
         conn = sqlite3.connect(":memory:")
@@ -361,7 +365,11 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
             "('schema_kinds_migration_version', '4')"
         )
         conn.commit()
-        finalized = finalize_database_migrations(conn, lambda: None)
+        finalized = finalize_database_migrations(
+            conn,
+            lambda: None,
+            post_init_runners=self._post_init_runners(),
+        )
         after = conn.execute(
             "SELECT version, name FROM schema_migrations ORDER BY version"
         ).fetchall()
@@ -373,7 +381,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
         self.assertEqual(before_meta, ("7",))
         self.assertFalse(skipped)
         self.assertTrue(finalized)
-        self.assertEqual(after[-1], (8, "kinds_legacy_stages_complete"))
+        self.assertEqual(after[-1], (10, "canonical_task_ids"))
         self.assertEqual(after_meta, (SCHEMA_VERSION,))
 
     def test_post_init_runner_is_retryable_and_skipped_after_ledger(self):
@@ -389,7 +397,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
             finalize_database_migrations(
                 conn,
                 lambda: None,
-                post_init_runner=incomplete_runner,
+                post_init_runners=self._post_init_runners(incomplete_runner),
             )
         )
 
@@ -404,7 +412,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
             finalize_database_migrations(
                 conn,
                 lambda: None,
-                post_init_runner=completing_runner,
+                post_init_runners=self._post_init_runners(completing_runner),
             )
         )
 
@@ -415,7 +423,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
             finalize_database_migrations(
                 conn,
                 lambda: None,
-                post_init_runner=must_not_run,
+                post_init_runners=self._post_init_runners(must_not_run),
             )
         )
         self.assertEqual(calls, ["incomplete", "complete"])
@@ -437,7 +445,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
             finalize_database_migrations(
                 conn,
                 lambda: None,
-                post_init_runner=failing_runner,
+                post_init_runners=self._post_init_runners(failing_runner),
             )
 
         marker = conn.execute(
@@ -453,6 +461,42 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
         ).fetchone()
         self.assertIsNone(marker)
         self.assertIsNone(ledger)
+        self.assertIsNone(table)
+
+    def test_later_post_init_runner_rolls_back_without_losing_prior_entry(self):
+        conn = sqlite3.connect(":memory:")
+        self.addCleanup(conn.close)
+        initialize_database(conn, lambda: None)
+        conn.execute(
+            "INSERT INTO meta(key, value) VALUES "
+            "('schema_kinds_migration_version', '4')"
+        )
+        conn.commit()
+
+        def failing_digest_runner():
+            conn.execute("CREATE TABLE digest_runner_rollback(id INTEGER)")
+            raise RuntimeError("injected digest runner failure")
+
+        with self.assertRaisesRegex(RuntimeError, "injected digest"):
+            finalize_database_migrations(
+                conn,
+                lambda: None,
+                post_init_runners={
+                    8: lambda: None,
+                    9: failing_digest_runner,
+                    10: lambda: None,
+                },
+            )
+
+        ledger = conn.execute(
+            "SELECT version FROM schema_migrations WHERE version>=8 "
+            "ORDER BY version"
+        ).fetchall()
+        table = conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='digest_runner_rollback'"
+        ).fetchone()
+        self.assertEqual(ledger, [(8,)])
         self.assertIsNone(table)
 
     def test_atomic_backup_failure_leaves_source_and_destination_untouched(self):

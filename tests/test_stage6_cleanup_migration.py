@@ -121,7 +121,7 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
         conn.execute(
             "DELETE FROM meta WHERE key='schema_kinds_migration_version'"
         )
-        conn.execute("DELETE FROM schema_migrations WHERE version=8")
+        conn.execute("DELETE FROM schema_migrations WHERE version>=8")
         conn.execute(
             "UPDATE meta SET value='7' WHERE key='schema_version'"
         )

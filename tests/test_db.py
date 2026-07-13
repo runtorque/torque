@@ -3077,6 +3077,12 @@ class TorqueDBTests(unittest.TestCase):
         self.assertEqual(loaded["schedules"]["sched"]["last_task_id"], "TORQUE:1")
         self.assertEqual(loaded["task_id_aliases"]["task-root"], "TORQUE:1")
         self.assertEqual(loaded["task_id_aliases"]["task-child"], "TORQUE:1:1")
+        self.assertEqual(
+            migrated_db._conn.execute(
+                "SELECT name FROM schema_migrations WHERE version=10"
+            ).fetchone(),
+            ("canonical_task_ids",),
+        )
 
     def test_load_all_restores_board_saved_views_by_group(self):
         views = {
@@ -3903,6 +3909,13 @@ class TorqueDBTests(unittest.TestCase):
                 "enabled_events": ["task_completed"],
             },
         )
+        self.db._conn.execute(
+            "DELETE FROM schema_migrations WHERE version>=9"
+        )
+        self.db._conn.execute(
+            "UPDATE meta SET value='8' WHERE key='schema_version'"
+        )
+        self.db._conn.commit()
         self.db.close()
 
         reopened = TorqueDB(self.db.db_path)
@@ -3918,6 +3931,12 @@ class TorqueDBTests(unittest.TestCase):
         self.assertEqual(loaded["heartbeat_interval"], 240)
         self.assertEqual(loaded["digest_verbosity"], "compact")
         self.assertEqual(loaded["enabled_events"], ["task_completed"])
+        self.assertEqual(
+            reopened._conn.execute(
+                "SELECT name FROM schema_migrations WHERE version=9"
+            ).fetchone(),
+            ("digest_settings_backfill",),
+        )
 
     def test_engineer_task_log_roundtrip_and_group_rename(self):
         first_id = self.db.save_engineer_task_log_entry(

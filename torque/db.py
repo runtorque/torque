@@ -25,7 +25,7 @@ import uuid
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from torque import __version__
 from torque.behavior_overlay import (
@@ -1570,6 +1570,21 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
     def _insert_board_task_row(self, executor, task) -> None:
         insert_board_task(executor, task)
 
+    def _post_init_migration_runners(self) -> dict[int, Callable[[], None]]:
+        return {
+            8: lambda: self._run_kinds_legacy_stages(
+                manage_transaction=False
+            ),
+            9: lambda: (
+                self._migrate_agent_digest_settings_from_legacy_engineer_settings(
+                    manage_transaction=False
+                )
+            ),
+            10: lambda: self.migrate_task_ids_if_needed(
+                manage_transaction=False
+            ),
+        }
+
     def init(self):
         """Open connection, enable WAL, create tables if needed."""
         self._maybe_backup_pending_schema_migration()
@@ -1580,12 +1595,8 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         finalize_database_migrations(
             self._conn,
             self.backfill_agent_history,
-            post_init_runner=lambda: self._run_kinds_legacy_stages(
-                manage_transaction=False
-            ),
+            post_init_runners=self._post_init_migration_runners(),
         )
-        self._migrate_agent_digest_settings_from_legacy_engineer_settings()
-        self.migrate_task_ids_if_needed()
 
     def close(self):
         if self._conn:
@@ -2266,7 +2277,11 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         ).fetchone()
         return bool(row)
 
-    def _migrate_agent_digest_settings_from_legacy_engineer_settings(self):
+    def _migrate_agent_digest_settings_from_legacy_engineer_settings(
+        self,
+        *,
+        manage_transaction: bool = True,
+    ) -> None:
         """Backfill per-agent digest settings from legacy per-group rows."""
         if not self._legacy_engineer_rows_exist():
             return
@@ -2330,6 +2345,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                     "architect_digest": False,
                     "wake_on_digest": False,
                 },
+                commit=manage_transaction,
             )
 
     def load_task_id_aliases(self) -> dict[str, str]:
@@ -4020,7 +4036,11 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 (root_id, next_child),
             )
 
-    def migrate_task_ids_if_needed(self):
+    def migrate_task_ids_if_needed(
+        self,
+        *,
+        manage_transaction: bool = True,
+    ) -> None:
         """Rewrite legacy task IDs into canonical group-scoped IDs."""
         rows = self._conn.execute(
             "SELECT * FROM board_tasks"
@@ -4031,7 +4051,8 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         tasks = [decode_board_task_row(row, cols) for row in rows]
         if all(is_canonical_task_id(task.get("id", "")) for task in tasks):
             self._reseed_task_id_counters()
-            self._conn.commit()
+            if manage_transaction:
+                self._conn.commit()
             return
 
         by_id = {str(task["id"]): task for task in tasks}
@@ -4317,7 +4338,8 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                     shutil.move(str(old_dir), str(new_dir))
 
         self._reseed_task_id_counters()
-        self._conn.commit()
+        if manage_transaction:
+            self._conn.commit()
 
     # -- Panel events -------------------------------------------------------
 
@@ -4922,7 +4944,13 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             _snapshot_db_payload(settings or {}),
         )
 
-    def save_agent_digest_settings(self, agent_id: str, settings: dict):
+    def save_agent_digest_settings(
+        self,
+        agent_id: str,
+        settings: dict,
+        *,
+        commit: bool = True,
+    ) -> None:
         """Upsert per-agent digest settings."""
         enabled_events = json.dumps(
             settings.get(
@@ -4959,7 +4987,8 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 1 if settings.get("suppress_empty", False) else 0,
             ),
         )
-        self._conn.commit()
+        if commit:
+            self._conn.commit()
 
     def load_engineer_settings(self, group_name: str) -> dict | None:
         """Load engineer settings for a group. Returns None if not set."""
