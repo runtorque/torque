@@ -16,11 +16,28 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 WEBVIEW = ROOT / "webview.html"
-STYLE = ROOT / "static" / "style.css"
+STYLE_MODULES = [
+    ROOT / "static" / "styles" / name
+    for name in (
+        "tokens-base.css",
+        "workspace-grid.css",
+        "modals.css",
+        "workspace-shell.css",
+        "board-panels.css",
+        "agent-panel.css",
+        "desktop-features.css",
+        "feature-panels.css",
+    )
+]
 
 
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def _read_app_styles() -> str:
+    """Return the production stylesheet cascade as one searchable source."""
+    return "\n".join(_read(path) for path in STYLE_MODULES)
 
 
 class WebviewHeaderLocationTests(unittest.TestCase):
@@ -114,7 +131,7 @@ class StandaloneMainStackFlexDirectionTests(unittest.TestCase):
     """Both mode-variants of #standalone-main-stack must stack header above main."""
 
     def test_default_toolbelt_rule_is_flex_column(self):
-        css = _read(STYLE)
+        css = _read_app_styles()
         pattern = re.compile(
             r"#standalone-main-stack\s*\{([^}]*)\}",
             re.DOTALL,
@@ -122,7 +139,7 @@ class StandaloneMainStackFlexDirectionTests(unittest.TestCase):
         match = pattern.search(css)
         self.assertIsNotNone(
             match,
-            "Missing base #standalone-main-stack rule in style.css",
+            "Missing base #standalone-main-stack rule in the app stylesheet cascade",
         )
         rule_body = match.group(1)
         self.assertIn(
@@ -133,7 +150,7 @@ class StandaloneMainStackFlexDirectionTests(unittest.TestCase):
         )
 
     def test_runtime_embedded_rule_is_flex_column(self):
-        css = _read(STYLE)
+        css = _read_app_styles()
         pattern = re.compile(
             r"body\.runtime-embedded\s+#standalone-main-stack\s*\{([^}]*)\}",
             re.DOTALL,
@@ -141,7 +158,7 @@ class StandaloneMainStackFlexDirectionTests(unittest.TestCase):
         match = pattern.search(css)
         self.assertIsNotNone(
             match,
-            "Missing body.runtime-embedded #standalone-main-stack rule in style.css",
+            "Missing body.runtime-embedded #standalone-main-stack rule in the app stylesheet cascade",
         )
         rule_body = match.group(1)
         self.assertIn(
@@ -156,7 +173,7 @@ class StandaloneMainStackFlexDirectionTests(unittest.TestCase):
         # Sanity: the outer grid still places #standalone-main-stack in
         # column 1 so the relocated header stays within the agent panel
         # bounds and doesn't spill into the terminal-workspace column.
-        css = _read(STYLE)
+        css = _read_app_styles()
         pattern = re.compile(
             r"body\.runtime-embedded\s+#standalone-main-stack\s*\{([^}]*)\}",
             re.DOTALL,

@@ -3,10 +3,15 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const source = fs.readFileSync(
-  path.join(__dirname, '..', 'static', 'js', 'ws.js'),
+const source = [
+  'ws/delta-registry.js',
+  'ws/delta-apply.js',
+  'ws.js',
+  'ws/invalidation.js',
+].map((relativePath) => fs.readFileSync(
+  path.join(__dirname, '..', 'static', 'js', relativePath),
   'utf8',
-);
+)).join('\n');
 
 const targetedOps = [
   'agent_message_history_append',
