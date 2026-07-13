@@ -550,7 +550,7 @@ test('supervisor taskbar CSS and panel-manager registration are bounded to stand
   ].map((file) => fs.readFileSync(path.join(repoRoot, file), 'utf8')).join('\n');
 
   assert.match(html, /id="panel-supervisor"/);
-  assert.match(html, /data-app="supervisor"[^>]*togglePanel\('supervisor'\)/);
+  assert.match(html, /data-app="supervisor"[^>]*panelNavOpenPanel\('supervisor'\)/);
   assert.match(html, /static\/js\/supervisor\.js[\s\S]*static\/js\/panel_manager\.js/);
   assert.match(css, /\.taskbar-app\[data-app="supervisor"\]\s*\{\s*display:\s*none;\s*\}/);
   assert.match(css, /body\.runtime-embedded \.taskbar-app\[data-app="supervisor"\]\s*\{\s*display:\s*inline-flex;\s*\}/);

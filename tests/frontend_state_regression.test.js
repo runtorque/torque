@@ -23142,10 +23142,11 @@ test('standalone panel titles use current operator-facing names', () => {
 test('taskbar labels the selected-agent panel as Agent', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   assert.match(html, /data-app="board"[\s\S]*data-app="chat"[\s\S]*data-app="actions"/);
-  assert.match(html, /<button class="taskbar-app" data-app="chat" onclick="togglePanel\('chat'\)">&#9993; Chat<\/button>/);
-  assert.match(html, /<button class="taskbar-app" data-app="engineer" onclick="togglePanel\('engineer'\)">&#x2696; Agent<\/button>/);
-  assert.match(html, /<button class="taskbar-app" data-app="history" onclick="togglePanel\('history'\)">&#8635; History<\/button>/);
-  assert.doesNotMatch(html, /&#x2696; Architects<\/button>/);
+  assert.match(html, /data-app="chat" onclick="panelNavOpenPanel\('chat'\)"[\s\S]*taskbar-app-label">Chat<\/span>/);
+  assert.match(html, /data-app="engineer" onclick="panelNavOpenPanel\('engineer'\)"[\s\S]*taskbar-app-label">Agent<\/span>/);
+  assert.match(html, /data-app="history" onclick="panelNavOpenPanel\('history'\)"[\s\S]*taskbar-app-label">History<\/span>/);
+  assert.match(html, /id="panel-nav-more-button"[\s\S]*More<\/span>/);
+  assert.doesNotMatch(html, /taskbar-app-label">Architects<\/span>/);
 });
 
 test('chat panel renders snapshot threads and selected read-only message tail', () => {
@@ -26745,7 +26746,7 @@ test('agent grid group tabs render standalone controls and switch active group',
 
   sandbox.state.runtime = { mode: 'standalone', embedded_terminal: true };
   runInContext(context, `renderGroupSwitcher();`);
-  assert.equal(addGroupHeaderButton.hidden, true);
+  assert.equal(addGroupHeaderButton.hidden, false);
   let tabsHtml = runInContext(context, `_renderAgentGroupTabsHtml()`);
   assert.match(tabsHtml, /class="agent-group-tabs"/);
   assert.match(tabsHtml, /role="tablist" aria-label="Groups"/);
@@ -26753,11 +26754,12 @@ test('agent grid group tabs render standalone controls and switch active group',
   assert.match(tabsHtml, /onGroupTabClick\(&quot;alpha&quot;, event\)/);
   assert.match(tabsHtml, /oncontextmenu="onGroupTabContextMenu\(event, &quot;alpha&quot;\)"/);
   assert.match(tabsHtml, /title="beta"[\s\S]*beta/);
-  assert.match(tabsHtml, /\+ New Group/);
-  assert.match(tabsHtml, /title="Group settings"/);
-  assert.match(tabsHtml, /openActiveGroupSettings\(event\)/);
-  assert.match(tabsHtml, /&#9881;/);
-  assert.doesNotMatch(tabsHtml, /<select|Group:|openActiveGroupMenu|&#8942;|Delete group/);
+  assert.match(tabsHtml, /class="agent-group-tab-menu"[\s\S]*openAgentGroupTabActions/);
+  assert.match(tabsHtml, /class="agent-group-compact-trigger"/);
+  assert.match(tabsHtml, /class="agent-group-quick-search"/);
+  assert.match(tabsHtml, />\+<\/span> New group/);
+  assert.match(tabsHtml, /&#8943;/);
+  assert.doesNotMatch(tabsHtml, /agent-view-toggle|agent-group-tab-actions|<select|Delete group/);
 
   sandbox.openedGroupSettings = [];
   sandbox.openGroupSettings = function(group) {
@@ -26903,7 +26905,7 @@ test('legacy header group switcher clears removed dropdown chrome', () => {
   assert.equal(root.hidden, true);
   assert.equal(root.innerHTML, '');
   assert.equal(root._torqueLastHtml, '');
-  assert.equal(addGroupHeaderButton.hidden, true);
+  assert.equal(addGroupHeaderButton.hidden, false);
 
   runInContext(context, `
     state.runtime = { mode: 'toolbelt', embedded_terminal: false };
@@ -29756,7 +29758,7 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
   );
   assert.match(
     css,
-    /body\.runtime-embedded #panelbar\s*\{[^}]*flex-basis:\s*30px;[^}]*height:\s*30px;/s,
+    /body\.runtime-embedded #panelbar\s*\{[^}]*flex-basis:\s*24px;[^}]*height:\s*24px;/s,
   );
   assert.doesNotMatch(
     html,
@@ -29797,10 +29799,10 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
     css,
     /body\.runtime-embedded\.standalone-panel-dragging #standalone-bottom-dock,\s*body\.runtime-embedded\.standalone-panel-dragging #standalone-right-rail\s*\{/s,
   );
-  assert.match(css, /\.agent-group-tabs-host\s*\{[^}]*flex:\s*0 0 auto;[^}]*padding:\s*6px 8px 0;[^}]*border-bottom:\s*1px solid var\(--border\);/s);
-  assert.match(css, /body\.runtime-embedded \.agent-group-tabs-host\s*\{[^}]*padding:\s*8px 12px 0;/s);
+  assert.match(css, /\.agent-group-tabs-host\s*\{[^}]*container:\s*agent-group-nav\s*\/\s*inline-size;[^}]*padding:\s*3px 6px;[^}]*border-bottom:\s*1px solid var\(--border\);/s);
   assert.match(css, /\.agent-group-tabs-list\s*\{[^}]*overflow-x:\s*auto;[^}]*overflow-y:\s*hidden;/s);
-  assert.match(css, /\.agent-group-tab-actions\s*\{[^}]*flex:\s*0 0 auto;[^}]*margin-left:\s*auto;/s);
+  assert.match(css, /@container agent-group-nav \(max-width:\s*380px\)\s*\{[^}]*\.agent-group-tabs-list\s*\{\s*display:\s*none;/s);
+  assert.doesNotMatch(css, /\.agent-group-tab-actions\s*\{/s);
 });
 
 test('bottom status bar uses dark segmented status-bar styling', () => {
@@ -29811,13 +29813,13 @@ test('bottom status bar uses dark segmented status-bar styling', () => {
     /--statusbar-divider:\s*color-mix\(in srgb,\s*var\(--border\)/,
     /#panelbar\s*\{[^}]*gap:\s*0;[^}]*background:\s*var\(--statusbar-bg\);[^}]*border-top:\s*1px solid var\(--statusbar-divider\);[^}]*padding:\s*0 4px;/s,
     /\.statusbar-info\s*\{[^}]*flex-direction:\s*row;[^}]*justify-content:\s*flex-end;[^}]*gap:\s*0;/s,
-    /\.statusbar-panel-buttons\s*\{[^}]*gap:\s*0;[^}]*overflow-x:\s*auto;/s,
+    /\.statusbar-panel-buttons\s*\{[^}]*gap:\s*2px;[^}]*overflow:\s*hidden;/s,
     /\.statusbar-info > \.daemon-connection-status:first-child,\s*\.statusbar-info \.relay-status\s*\{[^}]*min-height:\s*24px;[^}]*border-left:\s*1px solid var\(--statusbar-divider\);/s,
     /\.statusbar-info \.relay-status\s*\{[^}]*display:\s*inline-flex;[^}]*justify-content:\s*flex-start;/s,
     /\.statusbar-chip\s*\{[^}]*border:\s*0;[^}]*border-left:\s*1px solid var\(--statusbar-divider\);[^}]*border-radius:\s*0;[^}]*background:\s*transparent;[^}]*box-shadow:\s*inset 2px 0 0 transparent;/s,
     /\.statusbar-chip--warn\s*\{[^}]*box-shadow:\s*inset 2px 0 0 var\(--warn\);/s,
     /\.statusbar-chip--danger\s*\{[^}]*box-shadow:\s*inset 2px 0 0 var\(--danger\);/s,
-    /\.taskbar-app\s*\{[^}]*border-right:\s*1px solid var\(--statusbar-divider\);[^}]*border-radius:\s*0;/s,
+    /\.taskbar-app\s*\{[^}]*border-right:\s*0;[^}]*border-radius:\s*4px;/s,
   ].forEach((pattern) => assert.match(css, pattern));
 
   const chipRule = css.match(/\.statusbar-chip\s*\{[^}]*\}/s);

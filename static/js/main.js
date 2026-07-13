@@ -30,9 +30,7 @@ function _scheduleGroupSwitcherSelectSync() {
 function renderGroupSwitcher() {
   var root = document.getElementById('group-switcher');
   var addGroupButton = document.getElementById('add-group-header-btn');
-  var singleGroupMode = typeof _singleGroupModeEnabled === 'function'
-    && _singleGroupModeEnabled();
-  if (addGroupButton) addGroupButton.hidden = singleGroupMode;
+  if (addGroupButton) addGroupButton.hidden = false;
   if (!root) return;
   root.hidden = true;
   if (root._torqueLastHtml !== '') {
@@ -269,6 +267,7 @@ function togglePanel(appName) {
     if (handled) {
       if (_panelAppVisible(appName)) _loadPanelApp(appName);
       if (typeof renderActivePanel === 'function') renderActivePanel();
+      if (typeof panelNavSyncActive === 'function') panelNavSyncActive();
     }
     return handled;
   }
@@ -325,6 +324,7 @@ function togglePanel(appName) {
   }
   // Persist panel state to server
   send({ cmd: 'board_set_panel', active: _activePanelApp || '' });
+  if (typeof panelNavSyncActive === 'function') panelNavSyncActive();
 }
 
 function _restorePanelState() {
@@ -1288,7 +1288,11 @@ function _handleTorqueGlobalKeydown(e) {
 
 document.addEventListener('keydown', _handleTorqueGlobalKeydown);
 
-document.addEventListener('click', () => { closeMenus(); closeContextMenu(); });
+document.addEventListener('click', () => {
+  closeMenus();
+  closeContextMenu();
+  if (typeof closeNavigationMenus === 'function') closeNavigationMenus();
+});
 document.querySelectorAll('.overlay').forEach(o => {
   o.addEventListener('mousedown', (e) => { if (e.target === o) closeModals(); });
 });

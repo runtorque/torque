@@ -243,7 +243,7 @@ class WebviewStatusBarLayoutTests(unittest.TestCase):
             "Claude usage chip must render as an unknown placeholder",
         )
 
-    def test_panel_buttons_keep_ids_data_app_labels_and_toggle_handlers(self):
+    def test_panel_buttons_keep_ids_data_app_labels_and_launcher_handlers(self):
         panel_html = _panelbar_html(_read(WEBVIEW))
 
         for app in self.PANEL_APPS:
@@ -251,10 +251,10 @@ class WebviewStatusBarLayoutTests(unittest.TestCase):
                 panel_html,
                 r'<button[^>]*class="[^"]*\btaskbar-app\b[^"]*"[^>]*data-app="'
                 + re.escape(app)
-                + r'"[^>]*onclick="togglePanel\('
+                + r'"[^>]*onclick="panelNavOpenPanel\('
                 + re.escape(repr(app))
                 + r'\)"',
-                f"{app} panel button must remain a .taskbar-app with its toggle handler",
+                f"{app} panel button must remain a .taskbar-app with its launcher handler",
             )
 
         self.assertIn('id="taskbar-restore-layout"', panel_html)

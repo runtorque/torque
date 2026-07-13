@@ -33,6 +33,39 @@ var KEYBINDING_ACTIONS = {
       { id: 'previous', label: 'Previous group', binding: { key: 'Tab', ctrl: false, meta: false, alt: false, shift: true }, run: function() { switchGroup(-1); } },
     ],
   },
+  'navigator.open': {
+    order: 22,
+    label: 'Open Go To',
+    description: 'Search groups, agents, and panels from one palette.',
+    fixed: true,
+    display: '\u2318K / Ctrl+K',
+    defaultBindings: [
+      { id: 'mac', label: 'Open Go To', binding: { key: 'k', ctrl: false, meta: true, alt: false, shift: false }, run: function() { return openNavigationPalette('all'); } },
+      { id: 'other', label: 'Open Go To', binding: { key: 'k', ctrl: true, meta: false, alt: false, shift: false }, run: function() { return openNavigationPalette('all'); } },
+    ],
+  },
+  'group.open': {
+    order: 23,
+    label: 'Open group switcher',
+    description: 'Search and switch to any group.',
+    fixed: true,
+    display: '\u2318G / Ctrl+G',
+    defaultBindings: [
+      { id: 'mac', label: 'Open group switcher', binding: { key: 'g', ctrl: false, meta: true, alt: false, shift: false }, run: function() { return openGroupNavigator(); } },
+      { id: 'other', label: 'Open group switcher', binding: { key: 'g', ctrl: true, meta: false, alt: false, shift: false }, run: function() { return openGroupNavigator(); } },
+    ],
+  },
+  'panel.open': {
+    order: 24,
+    label: 'Open panel switcher',
+    description: 'Search, open, pin, and reorder panels.',
+    fixed: true,
+    display: '\u2318P / Ctrl+P',
+    defaultBindings: [
+      { id: 'mac', label: 'Open panel switcher', binding: { key: 'p', ctrl: false, meta: true, alt: false, shift: false }, run: function() { return openPanelNavigator(); } },
+      { id: 'other', label: 'Open panel switcher', binding: { key: 'p', ctrl: true, meta: false, alt: false, shift: false }, run: function() { return openPanelNavigator(); } },
+    ],
+  },
   'composer.focus': {
     order: 30,
     label: 'Focus composer',

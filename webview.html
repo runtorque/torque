@@ -37,8 +37,15 @@
         <button class="hdr-btn hdr-icon-btn" onclick="openGlobalSettings()" title="Settings" aria-label="Settings">
           <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2"></circle><path d="M8 2.2v1.2M8 12.6v1.2M2.2 8h1.2M12.6 8h1.2M3.9 3.9l.9.9M11.2 11.2l.9.9M12.1 3.9l-.9.9M4.8 11.2l-.9.9"></path></svg>
         </button>
+        <button class="hdr-btn hdr-icon-btn" onclick="openNavigationPalette('all')"
+                title="Go to (⌘K / Ctrl+K)" aria-label="Go to">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4"></circle><path d="m10 10 3 3"></path></svg>
+        </button>
         <div class="hdr-spacer"></div>
-        <button id="add-group-header-btn" class="hdr-btn" onclick="openAddGroup()">+ Group</button>
+        <button id="add-group-header-btn" class="hdr-btn hdr-icon-btn" onclick="openAddGroup()"
+                title="New group" aria-label="New group">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"></path></svg>
+        </button>
       </header>
       <div id="app-group-tabs-host" class="agent-group-tabs-host app-group-tabs-host" data-agent-group-tabs-host></div>
       <main id="main"></main>
@@ -1812,38 +1819,26 @@
 <!-- Panel bar (bottom dock for panel apps) -->
 <div id="panelbar">
   <div id="statusbar-panel-buttons" class="statusbar-panel-buttons" aria-label="Panels">
-    <button class="taskbar-app" data-app="board" onclick="togglePanel('board')">&#9776; Board</button>
-    <button class="taskbar-app" data-app="chat" onclick="togglePanel('chat')">&#9993; Chat</button>
-    <button class="taskbar-app" data-app="actions" onclick="togglePanel('actions')">&#9998; Actions</button>
-    <button class="taskbar-app" data-app="initiatives" onclick="togglePanel('initiatives')">&#9873; Planning</button>
-    <button class="taskbar-app" data-app="thinking" onclick="togglePanel('thinking')" title="Thinking" aria-label="Thinking">
-      <span class="taskbar-app-icon thinking-nav-icon" aria-hidden="true">
-        <svg class="thinking-connected-nodes-icon" viewBox="0 0 16 16" focusable="false">
-          <path d="M7.15 5.55 4.9 9.65M8.85 5.55l2.25 4.1M5.8 11.4h4.4"/>
-          <circle cx="8" cy="4" r="1.8"/>
-          <circle cx="4" cy="11.4" r="1.8"/>
-          <circle cx="12" cy="11.4" r="1.8"/>
-        </svg>
-      </span>
-      <span>Thinking</span>
+    <button class="taskbar-app" data-app="board" onclick="panelNavOpenPanel('board')"><span class="taskbar-app-label">Board</span></button>
+    <button class="taskbar-app" data-app="chat" onclick="panelNavOpenPanel('chat')"><span class="taskbar-app-label">Chat</span></button>
+    <button class="taskbar-app" data-app="actions" onclick="panelNavOpenPanel('actions')"><span class="taskbar-app-label">Actions</span></button>
+    <button class="taskbar-app" data-app="initiatives" onclick="panelNavOpenPanel('initiatives')"><span class="taskbar-app-label">Planning</span></button>
+    <button class="taskbar-app" data-app="thinking" onclick="panelNavOpenPanel('thinking')"><span class="taskbar-app-label">Thinking</span></button>
+    <button class="taskbar-app" data-app="mission-control" onclick="panelNavOpenPanel('mission-control')"><span class="taskbar-app-label">Mission</span></button>
+    <button class="taskbar-app" data-app="templates" onclick="panelNavOpenPanel('templates')"><span class="taskbar-app-label">Library</span></button>
+    <button class="taskbar-app" data-app="history" onclick="panelNavOpenPanel('history')"><span class="taskbar-app-label">History</span></button>
+    <button class="taskbar-app" data-app="context" onclick="panelNavOpenPanel('context')"><span class="taskbar-app-label">Context</span></button>
+    <button class="taskbar-app" data-app="engineer" onclick="panelNavOpenPanel('engineer')"><span class="taskbar-app-label">Agent</span></button>
+    <button class="taskbar-app" data-app="events" onclick="panelNavOpenPanel('events')"><span class="taskbar-app-label">Events</span></button>
+    <button class="taskbar-app" data-app="supervisor" onclick="panelNavOpenPanel('supervisor')"><span class="taskbar-app-label">Supervisor</span></button>
+    <button class="taskbar-app" data-app="health" onclick="panelNavOpenPanel('health')"><span class="taskbar-app-label">Health</span></button>
+    <button class="taskbar-app" data-app="help" onclick="panelNavOpenPanel('help')"><span class="taskbar-app-label">Help</span></button>
+    <button id="panel-nav-more-button" class="panel-nav-more-button" type="button"
+            onclick="togglePanelNavMore(event)" title="Open panel switcher (⌘P / Ctrl+P)"
+            aria-label="More panels" aria-haspopup="dialog" aria-expanded="false">
+      <span class="taskbar-app-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><circle cx="3" cy="8" r="1"/><circle cx="8" cy="8" r="1"/><circle cx="13" cy="8" r="1"/></svg></span>
+      <span class="taskbar-app-label">More</span>
     </button>
-    <button class="taskbar-app" data-app="mission-control" onclick="togglePanel('mission-control')">&#9737; Mission</button>
-    <button class="taskbar-app" data-app="templates" onclick="togglePanel('templates')">&#9823; Library</button>
-    <button class="taskbar-app" data-app="history" onclick="togglePanel('history')">&#8635; History</button>
-    <button class="taskbar-app" data-app="context" onclick="togglePanel('context')">
-      <span class="taskbar-app-icon" aria-hidden="true">
-        <svg viewBox="0 0 16 16">
-          <path d="M2.5 3.5c0-.83.67-1.5 1.5-1.5h3.25c1.03 0 2.03.33 2.85.94L10.5 3.5v9.5l-.4-.29A4.82 4.82 0 0 0 7.25 12H4a1.5 1.5 0 0 1-1.5-1.5z"/>
-          <path d="M13.5 3.5c0-.83-.67-1.5-1.5-1.5H8.75c-1.03 0-2.03.33-2.85.94L5.5 3.5v9.5l.4-.29A4.82 4.82 0 0 1 8.75 12H12a1.5 1.5 0 0 0 1.5-1.5z"/>
-        </svg>
-      </span>
-      <span>Context</span>
-    </button>
-    <button class="taskbar-app" data-app="engineer" onclick="togglePanel('engineer')">&#x2696; Agent</button>
-    <button class="taskbar-app" data-app="events" onclick="togglePanel('events')">&#x26A0; Events</button>
-    <button class="taskbar-app" data-app="supervisor" onclick="togglePanel('supervisor')">&#9635; Supervisor</button>
-    <button class="taskbar-app" data-app="health" onclick="togglePanel('health')">&#9829; Health</button>
-    <button class="taskbar-app" data-app="help" onclick="togglePanel('help')">? Help</button>
     <button id="taskbar-restore-layout" class="taskbar-aux-btn"
             onclick="restoreStandaloneLayoutDefaults()"
             title="Restore the default standalone workspace layout"
@@ -1908,6 +1903,40 @@
           onclick="statusBarOpenAttention()"
           onkeydown="statusBarChipKeydown(event, statusBarOpenAttention)"
           title="Attention items">Attention —</span>
+  </div>
+</div>
+
+<div id="panel-nav-more-menu" class="panel-nav-more-menu" role="dialog" aria-label="Panel switcher" hidden
+     onclick="event.stopPropagation()">
+  <div class="panel-nav-more-header">
+    <strong>Panels</strong>
+    <span>Pin or reorder your launcher</span>
+  </div>
+  <input id="panel-nav-more-search" class="panel-nav-more-search" type="search"
+         placeholder="Find a panel…" aria-label="Find a panel"
+         oninput="panelNavFilterMore(this.value)" onkeydown="panelNavMoreKeydown(event)">
+  <div id="panel-nav-more-results" class="panel-nav-more-results"></div>
+</div>
+
+<div class="overlay navigation-palette-overlay" id="modal-navigation-palette">
+  <div class="navigation-palette" role="dialog" aria-modal="true" aria-labelledby="navigation-palette-title">
+    <div class="navigation-palette-search-row">
+      <span class="navigation-palette-search-icon" aria-hidden="true">⌕</span>
+      <input id="navigation-palette-input" type="search" autocomplete="off"
+             placeholder="Go to a group, agent, or panel…" aria-label="Go to"
+             oninput="navigationPaletteFilter(this.value)" onkeydown="navigationPaletteKeydown(event)">
+      <kbd>Esc</kbd>
+    </div>
+    <div class="navigation-palette-heading">
+      <h2 id="navigation-palette-title">Go to</h2>
+      <span id="navigation-palette-scope-label">Groups, agents, and panels</span>
+    </div>
+    <div id="navigation-palette-results" class="navigation-palette-results" role="listbox"></div>
+    <div class="navigation-palette-footer">
+      <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span>
+      <span><kbd>↵</kbd> Open</span>
+      <span><kbd>⌘K</kbd> Go to</span>
+    </div>
   </div>
 </div>
 
@@ -2055,7 +2084,7 @@
   </div>
 </div>
 
-<!-- JS (order matters: constants → compact → ws → keybindings → render → commands/native/markdown → modals → board core/modules → main) -->
+<!-- JS (order matters: constants → compact → ws → keybindings → render → commands/native/markdown → modals → board/panels → navigation → main) -->
 <!-- Enterprise frontend injection seam. Community builds keep this manifest
      empty, so remote/EE panels fail closed unless enterprise assets replace or
      extend it before panel_manager.js runs. -->
@@ -2143,6 +2172,8 @@
 <script src="/static/js/health.js"></script>
 <script src="/static/js/help.js"></script>
 <script src="/static/js/panel_manager.js"></script>
+<script src="/static/js/navigation/panel-launcher.js"></script>
+<script src="/static/js/navigation/palette.js"></script>
 <script src="/static/js/log_viewer.js"></script>
 <script src="/static/onboarding/welcome.js"></script>
 <script src="/static/cheatsheet/cheatsheet.js"></script>

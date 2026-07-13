@@ -2,7 +2,32 @@ function _renderAgentGridNewToolbar(groupName, disabled) {
   const group = String(groupName || '').trim();
   if (!group) return '';
   const groupArg = _jsStringAttr(group);
+  let viewToggle = '';
+  if (typeof _torqueAgentViewMode === 'function'
+      && typeof _singleGroupModeEnabled === 'function'
+      && _singleGroupModeEnabled()) {
+    const vm = _torqueAgentViewMode();
+    const gridIcon = '<svg viewBox="0 0 12 12" aria-hidden="true">'
+      + '<rect x=".75" y=".75" width="4.25" height="4.25" rx=".8"/>'
+      + '<rect x="7" y=".75" width="4.25" height="4.25" rx=".8"/>'
+      + '<rect x=".75" y="7" width="4.25" height="4.25" rx=".8"/>'
+      + '<rect x="7" y="7" width="4.25" height="4.25" rx=".8"/>'
+      + '</svg>';
+    const canvasIcon = '<svg viewBox="0 0 12 12" aria-hidden="true">'
+      + '<circle cx="2" cy="2.2" r="1.2"/><circle cx="6" cy="6" r="1.2"/><circle cx="10" cy="9.8" r="1.2"/>'
+      + '<path d="m3 2.9 2.1 2.2M7 6.9 9.1 9"/>'
+      + '</svg>';
+    viewToggle = '<div class="agent-view-toggle agent-view-toggle--grid" role="group" aria-label="Agent view">'
+      + '<button type="button" class="agent-view-toggle-btn' + (vm === 'grid' ? ' is-active' : '') + '"'
+      + ' data-agent-view-toggle="grid" onclick="_torqueSetAgentViewMode(\'grid\')"'
+      + ' title="Grid view" aria-label="Grid view">' + gridIcon + '</button>'
+      + '<button type="button" class="agent-view-toggle-btn' + (vm === 'canvas' ? ' is-active' : '') + '"'
+      + ' data-agent-view-toggle="canvas" onclick="_torqueSetAgentViewMode(\'canvas\')"'
+      + ' title="Canvas view" aria-label="Canvas view">' + canvasIcon + '</button>'
+      + '</div>';
+  }
   return '<div class="agent-grid-toolbar" data-agent-grid-toolbar>'
+    + viewToggle
     + '<button type="button" class="agent-grid-new-btn" data-agent-grid-new-button'
     + ' data-group="' + esc(group) + '"'
     + (disabled ? ' disabled aria-disabled="true" title="Agent limit reached"' : ' aria-haspopup="menu" aria-expanded="false" title="Create a standalone agent"')

@@ -486,7 +486,7 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
-  margin-right: 6px;
+  margin-right: 0;
   height: 22px;
 }
 .agent-view-toggle-btn {
@@ -496,16 +496,26 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   border-right: 1px solid var(--border);
   font: inherit;
   font-size: 11px;
-  padding: 0 8px;
+  padding: 0 6px;
   cursor: pointer;
   letter-spacing: 0.02em;
   line-height: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 28px;
+  min-width: 24px;
 }
-.agent-view-toggle-btn svg { display: block; }
+.agent-view-toggle-btn svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.agent-view-toggle--grid { height: 24px; }
 .agent-view-toggle-btn:last-child { border-right: 0; }
 .agent-view-toggle-btn:hover { background: var(--bg-hover); color: var(--text); }
 .agent-view-toggle-btn.is-active {

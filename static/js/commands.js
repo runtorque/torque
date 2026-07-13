@@ -934,7 +934,15 @@ function onGroupTabContextMenu(e, group) {
       || !Object.prototype.hasOwnProperty.call(state.groups, groupName)) {
     return;
   }
-  showContextMenu(e ? e.clientX : 0, e ? e.clientY : 0, [
+  let x = e ? Number(e.clientX || 0) : 0;
+  let y = e ? Number(e.clientY || 0) : 0;
+  if ((!x && !y) && e && e.currentTarget
+      && typeof e.currentTarget.getBoundingClientRect === 'function') {
+    const rect = e.currentTarget.getBoundingClientRect();
+    x = rect.left;
+    y = rect.bottom + 4;
+  }
+  showContextMenu(x, y, [
     { label: 'Group settings', action: 'openGroupSettings(' + JSON.stringify(groupName) + ')' },
   ]);
 }

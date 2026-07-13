@@ -192,8 +192,9 @@ textarea,
 /* ------------------------------------------------------------------ */
 header {
   position: sticky; top: 0; z-index: 10;
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 10px;
+  display: flex; align-items: center; gap: 6px;
+  min-height: 30px;
+  padding: 3px 8px;
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border);
 }
@@ -277,8 +278,8 @@ body.tauri-mode #taskbar-conn-dot {
 .hdr-icon-btn {
   display: inline-grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   padding: 0;
 }
 .hdr-icon-btn svg,

@@ -207,7 +207,7 @@ test('status chips live right-aligned inside the bottom panelbar without a right
     /body\.runtime-embedded #workspace-shell\s*\{[^}]*grid-template-columns:\s*max\(var\(--standalone-sidebar-width\),\s*calc\(var\(--standalone-main-stack-min-width\)\s*\+\s*8px\s*\+\s*var\(--standalone-right-rail-width,\s*var\(--standalone-right-rail-min-width\)\)\)\)\s+8px\s+minmax\(0,\s*1fr\);/s,
   );
   assert.match(css, /#panelbar\s*\{[^}]*flex:\s*0 0 24px;[^}]*height:\s*24px;/s);
-  assert.match(css, /body\.runtime-embedded #panelbar\s*\{[^}]*flex-basis:\s*30px;[^}]*height:\s*30px;/s);
+  assert.match(css, /body\.runtime-embedded #panelbar\s*\{[^}]*flex-basis:\s*24px;[^}]*height:\s*24px;/s);
   assert.match(css, /\.statusbar-info\s*\{[^}]*flex-direction:\s*row;[^}]*justify-content:\s*flex-end;[^}]*margin-left:\s*auto;/s);
   assert.match(css, /\.taskbar-spacer\s*\{[^}]*flex:\s*1 1 auto;/s);
   assert.match(panelbarHtml, /id="daemon-status-indicator"[\s\S]*hidden/);

@@ -1073,6 +1073,7 @@ main {
   right: var(--agents-grid-pane-pad-x);
   z-index: 20;
   display: flex;
+  gap: 6px;
   justify-content: flex-end;
   align-items: center;
   min-width: 0;
@@ -1104,10 +1105,12 @@ main {
   opacity: .45;
 }
 .agent-group-tabs-host {
+  container: agent-group-nav / inline-size;
   flex: 0 0 auto;
   min-width: 0;
-  padding: 6px 8px 0;
+  padding: 3px 6px;
   border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 91%, var(--bg-surface));
 }
 .agent-group-tabs-host:empty {
   display: none;
@@ -1117,22 +1120,26 @@ main {
   z-index: 5;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 0;
   min-width: 0;
-  padding: 2px 0 4px;
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  min-height: 24px;
+  padding: 0;
+  background: transparent;
 }
 .agent-group-tabs-list {
   /* Overflow choice: horizontal scroll is limited to tabs; actions stay fixed. */
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   flex: 1 1 auto;
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;
   scrollbar-color: var(--border-strong) transparent;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 8px, #000 calc(100% - 8px), transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 8px, #000 calc(100% - 8px), transparent 100%);
+  scroll-behavior: smooth;
 }
 .agent-group-tabs-list::-webkit-scrollbar { height: 4px; }
 .agent-group-tabs-list::-webkit-scrollbar-track { background: transparent; }
@@ -1150,9 +1157,10 @@ main {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   max-width: 150px;
-  padding: 4px 9px;
+  min-height: 22px;
+  padding: 2px 7px;
   border: 1px solid transparent;
   border-radius: 999px;
   color: var(--text-dim);
@@ -1178,46 +1186,133 @@ main {
 }
 .agent-group-tab-count {
   flex: 0 0 auto;
-  min-width: 16px;
-  padding: 1px 5px;
+  min-width: 14px;
+  padding: 1px 4px;
   border-radius: 999px;
   color: var(--text-dim);
   background: var(--bg-surface);
   font-size: 9px;
   text-align: center;
 }
-.agent-group-tab-actions {
-  flex: 0 0 auto;
+.agent-group-tab-menu {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  margin-right: -3px;
+  padding: 0;
+  border-radius: 5px;
+  color: var(--text-faint);
+  line-height: 1;
+  opacity: .62;
+}
+.agent-group-tab:hover .agent-group-tab-menu,
+.agent-group-tab:focus-within .agent-group-tab-menu {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  opacity: 1;
+}
+.agent-group-compact { display: none; min-width: 0; width: 100%; position: relative; }
+.agent-group-compact-trigger {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-left: auto;
-}
-.agent-group-tab-action {
-  flex: 0 0 auto;
+  width: 100%;
   min-height: 24px;
-  padding: 4px 8px;
-  border: 1px solid var(--border);
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
   border-radius: var(--radius);
-  color: var(--text-dim);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--text);
+  text-align: left;
+}
+.agent-group-compact-trigger > svg {
+  width: 12px;
+  height: 12px;
+  margin-left: auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+.agent-group-compact-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-group-quick-switcher {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 5px);
+  left: 0;
+  right: 0;
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-float);
+}
+.agent-group-quick-search {
+  width: 100%;
+  min-height: 28px;
+  margin: 0 0 5px;
+  padding: 4px 7px;
   font-size: 10px;
 }
-.agent-group-tab-action:hover {
+.agent-group-quick-results {
+  display: grid;
+  gap: 2px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.agent-group-quick-option,
+.agent-group-quick-new {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 7px;
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  text-align: left;
+}
+.agent-group-quick-option:hover,
+.agent-group-quick-option:focus-visible,
+.agent-group-quick-option.active,
+.agent-group-quick-new:hover,
+.agent-group-quick-new:focus-visible {
+  background: var(--bg-hover);
   color: var(--text);
-  border-color: var(--text-dim);
 }
-.agent-group-tab-action:disabled {
-  opacity: .4;
-  cursor: default;
+.agent-group-quick-option small { color: var(--text-faint); font-size: 9px; }
+.agent-group-quick-option svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.7;
 }
-.agent-group-tab-action:disabled:hover {
-  color: var(--text-dim);
-  border-color: var(--border);
+.agent-group-quick-new {
+  grid-template-columns: auto minmax(0, 1fr);
+  margin-top: 5px;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0 0 var(--radius) var(--radius);
+  color: var(--accent);
 }
-.agent-group-tab-action-settings {
-  width: 26px;
-  padding-left: 0;
-  padding-right: 0;
+@container agent-group-nav (max-width: 420px) {
+  .agent-group-tab { max-width: 118px; padding-inline: 6px; }
+  .agent-group-tab-count {
+    min-width: auto;
+    padding: 0;
+    background: transparent;
+  }
+}
+@container agent-group-nav (max-width: 380px) {
+  .agent-group-tabs-list { display: none; }
+  .agent-group-compact { display: block; }
 }
 .agent-focus-resizer {
   flex: 0 0 24px;
@@ -1329,7 +1424,7 @@ body.runtime-embedded main {
   padding: 0;
 }
 body.runtime-embedded .agent-group-tabs-host {
-  padding: 8px 12px 0;
+  padding: 3px 6px;
 }
 body.runtime-embedded .agents-grid-pane {
   --agents-grid-pane-pad-x: 12px;

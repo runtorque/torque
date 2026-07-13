@@ -193,6 +193,10 @@ test('Thinking panel is registered as a first-class panel with responsive CSS', 
     'static/js/ws/action-router.js',
   ].map((file) => fs.readFileSync(path.join(repoRoot, file), 'utf8')).join('\n');
   const webview = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const panelLauncher = fs.readFileSync(
+    path.join(repoRoot, 'static/js/navigation/panel-launcher.js'),
+    'utf8',
+  );
   const css = appStylesheetSource();
 
   assert.match(manager, /_standalonePanelApps = \[[^\]]*'thinking'/);
@@ -205,7 +209,8 @@ test('Thinking panel is registered as a first-class panel with responsive CSS', 
   assert.match(ws, /case 'idea_brief_upsert':[\s\S]*_markSurface\(flags, 'thinking'\)/);
   assert.match(ws, /ideaBriefReceiveMutation/);
   assert.match(webview, /id="panel-thinking"/);
-  assert.match(webview, /data-app="thinking"[\s\S]*thinking-connected-nodes-icon[\s\S]*<span>Thinking<\/span>/);
+  assert.match(webview, /data-app="thinking"[^>]*panelNavOpenPanel\('thinking'\)[\s\S]*taskbar-app-label">Thinking<\/span>/);
+  assert.match(panelLauncher, /thinking:\s*'<path[^']*<circle[^']*'/);
   assert.doesNotMatch(webview, /&#9889;\s*Thinking/);
   assert.match(manager, /function _standalonePanelIconNode\([^)]*\)[\s\S]*app !== 'thinking'/);
   assert.match(manager, /standalone-panel-tab-has-icon/);

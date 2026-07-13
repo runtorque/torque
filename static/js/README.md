@@ -34,6 +34,9 @@ defined by the `<link>` elements in that file.
 - **Terminal and operator input:** `terminal.js` plus `terminal/` modules.
 - **Panels and forms:** modal modules, Board modules, feature panels,
   `agent_panel.js` plus `agent-panel/` modules, and `panel_manager.js`.
+- **Workspace navigation:** `navigation/panel-launcher.js` owns local panel pins,
+  ordering, and overflow; `navigation/palette.js` composes the shared groups,
+  agents, and panels Go To index after panel metadata is available.
 - **Boot:** `main.js` is last. It may assume every runtime module has loaded.
 
 The stylesheet cascade is also explicit in `webview.html`: tokens/base,

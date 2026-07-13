@@ -99,6 +99,8 @@ test('frontend load order preserves state, rendering, panels, and boot boundarie
   const agentPanelLegacyEngineer = indexOf(sources, 'static/js/agent-panel/legacy-engineer.js');
   const agentPanelClasses = indexOf(sources, 'static/js/agent-panel/classes.js');
   const panelManager = indexOf(sources, 'static/js/panel_manager.js');
+  const panelNavigation = indexOf(sources, 'static/js/navigation/panel-launcher.js');
+  const navigationPalette = indexOf(sources, 'static/js/navigation/palette.js');
   const main = indexOf(sources, 'static/js/main.js');
 
   assert.ok(ws < wsInteraction, 'canonical state must load before WS feature modules');
@@ -144,5 +146,8 @@ test('frontend load order preserves state, rendering, panels, and boot boundarie
   assert.ok(agentPanelHierarchy < agentPanelLegacyEngineer, 'hierarchy helpers must load before legacy group UI');
   assert.ok(agentPanelLegacyEngineer < agentPanelClasses, 'legacy support must load before class management');
   assert.ok(agentPanelClasses < panelManager, 'Agent panel modules must load before panel manager');
+  assert.ok(panelManager < panelNavigation, 'panel placement must load before compact navigation');
+  assert.ok(panelNavigation < navigationPalette, 'panel metadata must load before the Go To palette');
+  assert.ok(navigationPalette < main, 'compact navigation must initialize before the main boot script');
   assert.equal(main, sources.length - 1, 'main.js must remain the final boot script');
 });

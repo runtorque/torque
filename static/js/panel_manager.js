@@ -1236,6 +1236,7 @@ function _standaloneUpdateTaskbarButtons() {
       btn.classList.toggle('selected', activeApp === app);
     }
   });
+  if (typeof panelNavSyncActive === 'function') panelNavSyncActive();
 }
 
 function standalonePanelDragStart(event, app) {
