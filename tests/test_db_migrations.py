@@ -376,6 +376,51 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
         self.assertEqual(after[-1], (8, "kinds_legacy_stages_complete"))
         self.assertEqual(after_meta, (SCHEMA_VERSION,))
 
+    def test_post_init_runner_is_retryable_and_skipped_after_ledger(self):
+        conn = sqlite3.connect(":memory:")
+        self.addCleanup(conn.close)
+        initialize_database(conn, lambda: None)
+        calls = []
+
+        def incomplete_runner():
+            calls.append("incomplete")
+
+        self.assertFalse(
+            finalize_database_migrations(
+                conn,
+                lambda: None,
+                post_init_runner=incomplete_runner,
+            )
+        )
+
+        def completing_runner():
+            calls.append("complete")
+            conn.execute(
+                "INSERT INTO meta(key, value) VALUES "
+                "('schema_kinds_migration_version', '4')"
+            )
+            conn.commit()
+
+        self.assertTrue(
+            finalize_database_migrations(
+                conn,
+                lambda: None,
+                post_init_runner=completing_runner,
+            )
+        )
+
+        def must_not_run():
+            raise AssertionError("completed post-init runner was called again")
+
+        self.assertTrue(
+            finalize_database_migrations(
+                conn,
+                lambda: None,
+                post_init_runner=must_not_run,
+            )
+        )
+        self.assertEqual(calls, ["incomplete", "complete"])
+
     def test_atomic_backup_failure_leaves_source_and_destination_untouched(self):
         with tempfile.TemporaryDirectory() as tmp:
             source_path = Path(tmp) / "source.db"

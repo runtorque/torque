@@ -1577,14 +1577,10 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._conn = sqlite3.connect(str(self.db_path))
         initialize_database(self._conn, self.backfill_agent_history)
         self._refuse_unmigrated_legacy_rows_if_needed()
-        self._mark_kinds_schema_ready_if_needed()
-        self._backfill_kinds_if_needed()
-        self._fixup_kinds_task_assignments_if_needed()
-        self._cleanup_kinds_legacy_columns_if_needed()
-        self._backfill_empty_worker_kinds_if_needed()
         finalize_database_migrations(
             self._conn,
             self.backfill_agent_history,
+            post_init_runner=self._run_kinds_legacy_stages,
         )
         self._migrate_agent_digest_settings_from_legacy_engineer_settings()
         self.migrate_task_ids_if_needed()
@@ -10317,6 +10313,15 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "migration: kinds schema applied (version=1, backup=%s)",
             self._kinds_backup_path(),
         )
+
+    def _run_kinds_legacy_stages(self) -> None:
+        """Advance restart-safe kinds stages behind the guarded finalizer."""
+
+        self._mark_kinds_schema_ready_if_needed()
+        self._backfill_kinds_if_needed()
+        self._fixup_kinds_task_assignments_if_needed()
+        self._cleanup_kinds_legacy_columns_if_needed()
+        self._backfill_empty_worker_kinds_if_needed()
 
     def _find_engineer_candidate_ids(self) -> list[str]:
         template_sql = self._optional_column_sql("agents", "template")

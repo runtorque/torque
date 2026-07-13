@@ -3690,6 +3690,8 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
 def finalize_database_migrations(
     conn: sqlite3.Connection,
     backfill_agent_history,
+    *,
+    post_init_runner: Callable[[], object] | None = None,
 ) -> bool:
     """Apply guarded post-init migrations when legacy prerequisites pass."""
 
@@ -3701,6 +3703,19 @@ def finalize_database_migrations(
         kinds_version = int((row or (0,))[0] or 0)
     except (TypeError, ValueError):
         kinds_version = 0
+    if (
+        kinds_version < KINDS_LEGACY_COMPLETE_VERSION
+        and post_init_runner is not None
+    ):
+        post_init_runner()
+        row = conn.execute(
+            "SELECT value FROM meta WHERE key=?",
+            (KINDS_LEGACY_META_KEY,),
+        ).fetchone()
+        try:
+            kinds_version = int((row or (0,))[0] or 0)
+        except (TypeError, ValueError):
+            kinds_version = 0
     if kinds_version < KINDS_LEGACY_COMPLETE_VERSION:
         return False
     _apply_schema_migrations(
