@@ -26,6 +26,20 @@ test('revamped workspace tokens keep text and controls readable at 100 percent z
   assert.match(css, /\.terminal-shell:has\(\.terminal-empty\)[^}]*terminal-topbar-btn-primary/s);
 });
 
+test('global Settings uses a desktop navigation rail with a single-column compact fallback', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  assert.match(css, /#modal-global-settings \.modal\s*\{[^}]*grid-template-columns:\s*164px minmax\(0, 1fr\)/s);
+  assert.match(css, /#modal-global-settings \.gs-tabs\s*\{[^}]*flex-direction:\s*column/s);
+  assert.match(css, /@media \(max-width: 720px\)[\s\S]*#modal-global-settings \.modal\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/s);
+  assert.match(css, /workspace-mode-focused #statusbar-info > :not\(#statusbar-overview\)/);
+});
+
+test('focused Help restores primary-workspace controls and a readable content measure', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  assert.match(css, /workspace-mode-focused #panel-help\[data-panel-placement="right"\] \.help-query-row,[\s\S]*workspace-mode-compact #panel-help\[data-panel-placement="right"\] \.help-query-row\s*\{[^}]*flex-wrap:\s*nowrap/s);
+  assert.match(css, /workspace-mode-focused #panel-help \.help-topic-detail,[\s\S]*width:\s*min\(100%, 1120px\)/s);
+});
+
 class FakeClassList {
   constructor() { this.items = new Set(); }
   add(...names) { names.forEach((name) => this.items.add(name)); }

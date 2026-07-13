@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Torque</title>
-<link rel="stylesheet" href="/static/style.css?v=responsive-workspace-6">
+<link rel="stylesheet" href="/static/style.css?v=responsive-workspace-8">
 <link rel="stylesheet" href="/static/vendor/xterm/xterm.css">
 </head>
 <body spellcheck="false" autocorrect="off">
@@ -1772,7 +1772,19 @@
           onclick="statusBarOpenAttention()"
           onkeydown="statusBarChipKeydown(event, statusBarOpenAttention)"
           title="Attention items">Attention —</span>
+    <button id="statusbar-overview"
+            class="statusbar-overview"
+            type="button"
+            onclick="statusBarToggleOverview(event)"
+            aria-haspopup="menu"
+            aria-expanded="false"
+            title="Workspace status summary">
+      <span class="statusbar-overview-dot" aria-hidden="true"></span>
+      <span id="statusbar-overview-label">Status</span>
+    </button>
   </div>
+  <div id="statusbar-overview-menu" class="statusbar-overview-menu"
+       role="menu" aria-label="Workspace status" hidden></div>
 </div>
 
 <!-- Context menu (right-click) -->
@@ -1966,7 +1978,7 @@
 <script src="/static/js/templates.js"></script>
 <script src="/static/js/history.js"></script>
 <script src="/static/js/events.js"></script>
-<script src="/static/js/status_bar.js"></script>
+<script src="/static/js/status_bar.js?v=design-revamp-1"></script>
 <script src="/static/js/context.js"></script>
 <script src="/static/js/behavior_overlay.js"></script>
 <script src="/static/js/agent_panel.js"></script>
