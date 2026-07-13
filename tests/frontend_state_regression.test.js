@@ -830,6 +830,13 @@ function createEngineerHarness() {
   loadScript(context, 'static/js/agent-focus.js');
   loadScript(context, 'static/js/grid/main.js');
   loadScript(context, 'static/js/agent_panel.js');
+  loadScript(context, 'static/js/agent-panel/virtual-lists.js');
+  loadScript(context, 'static/js/agent-panel/events.js');
+  loadScript(context, 'static/js/agent-panel/architect.js');
+  loadScript(context, 'static/js/agent-panel/engineer.js');
+  loadScript(context, 'static/js/agent-panel/worker.js');
+  loadScript(context, 'static/js/agent-panel/hierarchy.js');
+  loadScript(context, 'static/js/agent-panel/legacy-engineer.js');
   loadScript(context, 'static/js/agent-panel/classes.js');
   return { context, document };
 }
@@ -855,6 +862,13 @@ function createEngineerWsHarness() {
   loadScript(context, 'static/js/agent-focus.js');
   loadScript(context, 'static/js/grid/main.js');
   loadScript(context, 'static/js/agent_panel.js');
+  loadScript(context, 'static/js/agent-panel/virtual-lists.js');
+  loadScript(context, 'static/js/agent-panel/events.js');
+  loadScript(context, 'static/js/agent-panel/architect.js');
+  loadScript(context, 'static/js/agent-panel/engineer.js');
+  loadScript(context, 'static/js/agent-panel/worker.js');
+  loadScript(context, 'static/js/agent-panel/hierarchy.js');
+  loadScript(context, 'static/js/agent-panel/legacy-engineer.js');
   loadScript(context, 'static/js/agent-panel/classes.js');
   runInContext(context, `
     send = function(message) { sendCalls.push(message); };
@@ -948,6 +962,13 @@ function createChatHarness(overrides = {}) {
   loadScript(context, 'static/js/agent-focus.js');
   loadScript(context, 'static/js/grid/main.js');
   loadScript(context, 'static/js/agent_panel.js');
+  loadScript(context, 'static/js/agent-panel/virtual-lists.js');
+  loadScript(context, 'static/js/agent-panel/events.js');
+  loadScript(context, 'static/js/agent-panel/architect.js');
+  loadScript(context, 'static/js/agent-panel/engineer.js');
+  loadScript(context, 'static/js/agent-panel/worker.js');
+  loadScript(context, 'static/js/agent-panel/hierarchy.js');
+  loadScript(context, 'static/js/agent-panel/legacy-engineer.js');
   loadScript(context, 'static/js/agent-panel/classes.js');
   loadScript(context, 'static/js/markdown.js');
   loadScript(context, 'static/js/chat.js');

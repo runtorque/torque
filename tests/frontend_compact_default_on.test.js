@@ -142,7 +142,7 @@ function createEngineerSummaryHarness() {
     var _engineerVerificationLabels = { pending: 'Pending', failed: 'Failed',
       attempted: 'Attempted', passed: 'Passed' };
   `);
-  const source = loadFile('static/js/agent_panel.js');
+  const source = loadFile('static/js/agent-panel/legacy-engineer.js');
   const healthFn = source.match(
     /function _engineerTaskHealthSummary\(group\)\s*\{[\s\S]*?\n\}/m)[0];
   const verifyFn = source.match(

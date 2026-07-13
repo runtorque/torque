@@ -133,6 +133,13 @@ function createHarness({ loadModals = false, loadAgentPanel = false } = {}) {
   if (loadAgentPanel) {
     loadScript(context, 'static/js/behavior_overlay.js');
     loadScript(context, 'static/js/agent_panel.js');
+    loadScript(context, 'static/js/agent-panel/virtual-lists.js');
+    loadScript(context, 'static/js/agent-panel/events.js');
+    loadScript(context, 'static/js/agent-panel/architect.js');
+    loadScript(context, 'static/js/agent-panel/engineer.js');
+    loadScript(context, 'static/js/agent-panel/worker.js');
+    loadScript(context, 'static/js/agent-panel/hierarchy.js');
+    loadScript(context, 'static/js/agent-panel/legacy-engineer.js');
     loadScript(context, 'static/js/agent-panel/classes.js');
   }
   return { context, document, panel, sendCalls, toasts, confirms, sandbox };

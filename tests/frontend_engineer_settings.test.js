@@ -44,9 +44,21 @@ function createSandbox() {
 }
 
 function loadEngineer(context) {
-  const filename = path.join(repoRoot, 'static/js/agent_panel.js');
-  const source = fs.readFileSync(filename, 'utf8');
-  vm.runInContext(source, context, { filename });
+  [
+    'static/js/agent_panel.js',
+    'static/js/agent-panel/virtual-lists.js',
+    'static/js/agent-panel/events.js',
+    'static/js/agent-panel/architect.js',
+    'static/js/agent-panel/engineer.js',
+    'static/js/agent-panel/worker.js',
+    'static/js/agent-panel/hierarchy.js',
+    'static/js/agent-panel/legacy-engineer.js',
+    'static/js/agent-panel/classes.js',
+  ].forEach(function(relPath) {
+    const filename = path.join(repoRoot, relPath);
+    const source = fs.readFileSync(filename, 'utf8');
+    vm.runInContext(source, context, { filename });
+  });
 }
 
 test('focused engineer panel shows Journal, Events, Queued, and Completed tabs without settings tabs', () => {
