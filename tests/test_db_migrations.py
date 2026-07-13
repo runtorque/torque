@@ -19,6 +19,8 @@ from torque.db_schema import (
     SCHEMA_VERSION,
     SchemaMigration,
     _apply_schema_migrations,
+    finalize_database_migrations,
+    initialize_database,
 )
 
 
@@ -208,7 +210,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
 
         self.assertTrue(set(BOARD_TASK_ROUTING_COLUMNS) <= columns)
         self.assertIn((3, "board_task_routing_contract"), ledger)
-        self.assertEqual(ledger[-1], (7, "agent_kind_schema"))
+        self.assertEqual(ledger[-1], (8, "kinds_legacy_stages_complete"))
         self.assertFalse(set(BOARD_TASK_ROUTING_COLUMNS) & backup_columns)
         self.assertEqual(backup_version, (2,))
         self.assertEqual(rerun_backup_mtime, backup_mtime)
@@ -303,7 +305,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
         self.assertTrue(set(AGENT_CLASS_AUDIT_COLUMNS) <= audit_columns)
         self.assertTrue(set(DECISION_COLUMNS) <= decision_columns)
         self.assertIn((4, "agent_lifecycle_contract"), ledger)
-        self.assertEqual(ledger[-1], (7, "agent_kind_schema"))
+        self.assertEqual(ledger[-1], (8, "kinds_legacy_stages_complete"))
         self.assertFalse(set(AGENT_LIFECYCLE_COLUMNS) & backup_agent_columns)
         self.assertNotIn("agent_class_audit", backup_tables)
         self.assertNotIn("decisions", backup_tables)
@@ -319,7 +321,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
             conn = sqlite3.connect(path)
             for column in AGENT_KIND_COLUMNS:
                 conn.execute(f"ALTER TABLE agents DROP COLUMN {column}")
-            conn.execute("DELETE FROM schema_migrations WHERE version=7")
+            conn.execute("DELETE FROM schema_migrations WHERE version>=7")
             conn.execute(
                 "UPDATE meta SET value='6' WHERE key='schema_version'"
             )
@@ -333,13 +335,46 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
                 row[1]
                 for row in upgraded._conn.execute("PRAGMA table_info(agents)")
             }
-            ledger_tail = upgraded._conn.execute(
-                "SELECT version, name FROM schema_migrations "
-                "ORDER BY version DESC LIMIT 1"
-            ).fetchone()
+            ledger = upgraded._conn.execute(
+                "SELECT version, name FROM schema_migrations ORDER BY version"
+            ).fetchall()
 
         self.assertTrue(set(AGENT_KIND_COLUMNS) <= columns)
-        self.assertEqual(ledger_tail, (7, "agent_kind_schema"))
+        self.assertIn((7, "agent_kind_schema"), ledger)
+        self.assertEqual(ledger[-1], (8, "kinds_legacy_stages_complete"))
+
+    def test_post_init_phase_waits_for_kinds_stage_four(self):
+        conn = sqlite3.connect(":memory:")
+        self.addCleanup(conn.close)
+
+        initialize_database(conn, lambda: None)
+        before = conn.execute(
+            "SELECT version FROM schema_migrations ORDER BY version"
+        ).fetchall()
+        before_meta = conn.execute(
+            "SELECT value FROM meta WHERE key='schema_version'"
+        ).fetchone()
+        skipped = finalize_database_migrations(conn, lambda: None)
+
+        conn.execute(
+            "INSERT INTO meta(key, value) VALUES "
+            "('schema_kinds_migration_version', '4')"
+        )
+        conn.commit()
+        finalized = finalize_database_migrations(conn, lambda: None)
+        after = conn.execute(
+            "SELECT version, name FROM schema_migrations ORDER BY version"
+        ).fetchall()
+        after_meta = conn.execute(
+            "SELECT value FROM meta WHERE key='schema_version'"
+        ).fetchone()
+
+        self.assertEqual(before, [(version,) for version in range(1, 8)])
+        self.assertEqual(before_meta, ("7",))
+        self.assertFalse(skipped)
+        self.assertTrue(finalized)
+        self.assertEqual(after[-1], (8, "kinds_legacy_stages_complete"))
+        self.assertEqual(after_meta, (SCHEMA_VERSION,))
 
     def test_atomic_backup_failure_leaves_source_and_destination_untouched(self):
         with tempfile.TemporaryDirectory() as tmp:

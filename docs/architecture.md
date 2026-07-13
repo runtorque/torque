@@ -53,7 +53,9 @@ Schema changes advance through the ordered `schema_migrations` ledger in
 `torque/db_schema.py`. Before an existing file-backed database advances to a
 new target version, Torque creates and verifies a sibling
 `torque.db.pre-schema-v<N>.bak` snapshot. Each target backup is created once;
-fresh databases do not create one.
+fresh databases do not create one. Migrations may be schema-phase or guarded
+post-init entries; guarded entries are ledgered only after their legacy
+backfill and cleanup prerequisites are complete.
 
 Ephemeral fields — current activity, current process, current path, worktree diff stats, error message, needs_attention, last summary — live in memory only. They're cleared on restart. This is deliberate: those fields are derived from live observation and would be wrong if persisted.
 

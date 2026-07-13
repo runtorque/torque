@@ -15,7 +15,7 @@ import json
 import sqlite3
 from typing import Callable, Iterable
 
-SCHEMA_VERSION = "7"
+SCHEMA_VERSION = "8"
 
 
 @dataclass(frozen=True)
@@ -26,6 +26,7 @@ class SchemaMigration:
     name: str
     signature: str
     apply: Callable[[sqlite3.Connection, Callable], None]
+    phase: str = "schema"
 
     @property
     def checksum(self) -> str:
@@ -281,6 +282,8 @@ AGENT_KIND_COLUMNS = {
 AGENT_ACTIVITY_TIMESTAMP_LEGACY_META_KEY = (
     "schema_agent_activity_timestamps_version"
 )
+KINDS_LEGACY_META_KEY = "schema_kinds_migration_version"
+KINDS_LEGACY_COMPLETE_VERSION = 4
 
 AGENT_MESSAGE_LOOP_RUNTIME_COLUMNS = {
     "deferred_at": "REAL NOT NULL DEFAULT 0",
@@ -3431,6 +3434,26 @@ def _migration_0007_agent_kind_schema(
     _ensure_columns(conn, "agents", AGENT_KIND_COLUMNS)
 
 
+def _migration_0008_kinds_legacy_stages_complete(
+    conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Ledger the guarded kinds backfill/cleanup only after stage 4."""
+
+    row = conn.execute(
+        "SELECT value FROM meta WHERE key=?",
+        (KINDS_LEGACY_META_KEY,),
+    ).fetchone()
+    try:
+        version = int((row or (0,))[0] or 0)
+    except (TypeError, ValueError):
+        version = 0
+    if version < KINDS_LEGACY_COMPLETE_VERSION:
+        raise RuntimeError(
+            "Kinds legacy stages are incomplete; expected stage 4"
+        )
+
+
 SCHEMA_MIGRATIONS = (
     SchemaMigration(
         1,
@@ -3474,6 +3497,13 @@ SCHEMA_MIGRATIONS = (
         "agent-kind-columns-gated-v1",
         _migration_0007_agent_kind_schema,
     ),
+    SchemaMigration(
+        8,
+        "kinds_legacy_stages_complete",
+        "kinds-backfill-cleanup-stage4-v1",
+        _migration_0008_kinds_legacy_stages_complete,
+        phase="post_init",
+    ),
 )
 
 
@@ -3516,6 +3546,20 @@ def _validate_migration_catalog(
         )
     if len({item.name for item in ordered}) != len(ordered):
         raise RuntimeError("Schema migration names must be unique")
+    valid_phases = {"schema", "post_init"}
+    invalid_phases = sorted({item.phase for item in ordered} - valid_phases)
+    if invalid_phases:
+        raise RuntimeError(
+            f"Unknown schema migration phase(s): {invalid_phases}"
+        )
+    seen_post_init = False
+    for item in ordered:
+        if item.phase == "post_init":
+            seen_post_init = True
+        elif seen_post_init:
+            raise RuntimeError(
+                "Schema migrations cannot follow post-init migrations"
+            )
     return ordered
 
 
@@ -3524,6 +3568,7 @@ def _apply_schema_migrations(
     backfill_agent_history,
     *,
     migrations: Iterable[SchemaMigration] = SCHEMA_MIGRATIONS,
+    phases: Iterable[str] | None = None,
 ) -> None:
     """Apply missing migrations in order and reject ledger drift.
 
@@ -3533,6 +3578,7 @@ def _apply_schema_migrations(
     """
 
     ordered = _validate_migration_catalog(migrations)
+    selected_phases = None if phases is None else set(phases)
     _ensure_schema_migrations_table(conn)
     applied = _applied_schema_migrations(conn)
     catalog = {item.version: item for item in ordered}
@@ -3561,9 +3607,19 @@ def _apply_schema_migrations(
     ):
         raise RuntimeError("Schema migration ledger contains a version gap")
 
+    completed = set(applied)
     for migration in ordered:
         if migration.version in applied:
             continue
+        if selected_phases is not None and migration.phase not in selected_phases:
+            continue
+        missing_predecessors = set(range(1, migration.version)) - completed
+        if missing_predecessors:
+            raise RuntimeError(
+                "Cannot apply schema migration "
+                f"{migration.version} before version(s) "
+                f"{sorted(missing_predecessors)}"
+            )
         if migration.version == 1:
             migration.apply(conn, backfill_agent_history)
             conn.execute(
@@ -3577,6 +3633,7 @@ def _apply_schema_migrations(
                 (migration.version, migration.name, migration.checksum),
             )
             conn.commit()
+            completed.add(migration.version)
             continue
 
         try:
@@ -3593,6 +3650,7 @@ def _apply_schema_migrations(
                 (migration.version, migration.name, migration.checksum),
             )
             conn.commit()
+            completed.add(migration.version)
         except Exception:
             conn.rollback()
             raise
@@ -3600,12 +3658,13 @@ def _apply_schema_migrations(
     # ``schema_migrations`` is authoritative.  Keep the legacy meta mirror in
     # sync even when an older database already had every ledger row but its
     # meta value was missing or stale.
-    conn.execute(
-        "INSERT INTO meta (key, value) VALUES ('schema_version', ?) "
-        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        (str(ordered[-1].version),),
-    )
-    conn.commit()
+    if completed:
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES ('schema_version', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (str(max(completed)),),
+        )
+        conn.commit()
 
 
 def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
@@ -3621,7 +3680,35 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     # through migration 1 below, so avoid doing it twice.
     if 1 in _applied_schema_migrations(conn):
         _reconcile_legacy_schema(conn, backfill_agent_history)
-    _apply_schema_migrations(conn, backfill_agent_history)
+    _apply_schema_migrations(
+        conn,
+        backfill_agent_history,
+        phases={"schema"},
+    )
+
+
+def finalize_database_migrations(
+    conn: sqlite3.Connection,
+    backfill_agent_history,
+) -> bool:
+    """Apply guarded post-init migrations when legacy prerequisites pass."""
+
+    row = conn.execute(
+        "SELECT value FROM meta WHERE key=?",
+        (KINDS_LEGACY_META_KEY,),
+    ).fetchone()
+    try:
+        kinds_version = int((row or (0,))[0] or 0)
+    except (TypeError, ValueError):
+        kinds_version = 0
+    if kinds_version < KINDS_LEGACY_COMPLETE_VERSION:
+        return False
+    _apply_schema_migrations(
+        conn,
+        backfill_agent_history,
+        phases={"post_init"},
+    )
+    return True
 
 def rebuild_memory_retention_indexes(conn: sqlite3.Connection):
     """Ensure memory-entry indexes match the current retention schema."""

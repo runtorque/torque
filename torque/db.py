@@ -49,6 +49,7 @@ from torque.db_schema import (
     SCHEMA_VERSION,
     create_ai_embedding_vec_table,
     drop_ai_embedding_vec_table,
+    finalize_database_migrations,
     initialize_database,
 )
 from torque.idea_briefs import (
@@ -1581,6 +1582,10 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._fixup_kinds_task_assignments_if_needed()
         self._cleanup_kinds_legacy_columns_if_needed()
         self._backfill_empty_worker_kinds_if_needed()
+        finalize_database_migrations(
+            self._conn,
+            self.backfill_agent_history,
+        )
         self._migrate_agent_digest_settings_from_legacy_engineer_settings()
         self.migrate_task_ids_if_needed()
 
