@@ -18,6 +18,7 @@ from torque.db_schema import (
     PENDING_HIRE_LIFECYCLE_COLUMNS,
     SCHEMA_MIGRATIONS,
     SCHEMA_VERSION,
+    SLUGGED_ENTITY_TABLES,
     SchemaMigration,
     _apply_schema_migrations,
     finalize_database_migrations,
@@ -215,7 +216,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
 
         self.assertTrue(set(BOARD_TASK_ROUTING_COLUMNS) <= columns)
         self.assertIn((3, "board_task_routing_contract"), ledger)
-        self.assertEqual(ledger[-1], (11, "engineer_journal_provenance"))
+        self.assertEqual(ledger[-1], (12, "persisted_entity_slugs"))
         self.assertFalse(set(BOARD_TASK_ROUTING_COLUMNS) & backup_columns)
         self.assertEqual(backup_version, (2,))
         self.assertEqual(rerun_backup_mtime, backup_mtime)
@@ -310,7 +311,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
         self.assertTrue(set(AGENT_CLASS_AUDIT_COLUMNS) <= audit_columns)
         self.assertTrue(set(DECISION_COLUMNS) <= decision_columns)
         self.assertIn((4, "agent_lifecycle_contract"), ledger)
-        self.assertEqual(ledger[-1], (11, "engineer_journal_provenance"))
+        self.assertEqual(ledger[-1], (12, "persisted_entity_slugs"))
         self.assertFalse(set(AGENT_LIFECYCLE_COLUMNS) & backup_agent_columns)
         self.assertNotIn("agent_class_audit", backup_tables)
         self.assertNotIn("decisions", backup_tables)
@@ -346,7 +347,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
 
         self.assertTrue(set(AGENT_KIND_COLUMNS) <= columns)
         self.assertIn((7, "agent_kind_schema"), ledger)
-        self.assertEqual(ledger[-1], (11, "engineer_journal_provenance"))
+        self.assertEqual(ledger[-1], (12, "persisted_entity_slugs"))
 
     def test_post_init_phase_waits_for_kinds_stage_four(self):
         conn = sqlite3.connect(":memory:")
@@ -382,7 +383,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
         self.assertEqual(before_meta, ("7",))
         self.assertFalse(skipped)
         self.assertTrue(finalized)
-        self.assertEqual(after[-1], (11, "engineer_journal_provenance"))
+        self.assertEqual(after[-1], (12, "persisted_entity_slugs"))
         self.assertEqual(after_meta, (SCHEMA_VERSION,))
 
     def test_post_init_runner_is_retryable_and_skipped_after_ledger(self):
@@ -462,6 +463,36 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
         self.assertIn("idx_engineer_journal_group_author", indexes)
         self.assertIn("idx_engineer_journal_source_key", indexes)
         self.assertEqual(ledger, ("engineer_journal_provenance",))
+
+    def test_automatic_post_init_migration_repairs_entity_slugs(self):
+        conn = sqlite3.connect(":memory:")
+        self.addCleanup(conn.close)
+        initialize_database(conn, lambda: None)
+        conn.execute(
+            "INSERT INTO meta(key, value) VALUES "
+            "('schema_kinds_migration_version', '4')"
+        )
+        for table in SLUGGED_ENTITY_TABLES:
+            conn.execute(f"ALTER TABLE {table} DROP COLUMN slug")
+        conn.commit()
+
+        self.assertTrue(
+            finalize_database_migrations(
+                conn,
+                lambda: None,
+                post_init_runners=self._post_init_runners(),
+            )
+        )
+
+        for table in SLUGGED_ENTITY_TABLES:
+            columns = {
+                row[1] for row in conn.execute(f"PRAGMA table_info({table})")
+            }
+            self.assertIn("slug", columns)
+        ledger = conn.execute(
+            "SELECT name FROM schema_migrations WHERE version=12"
+        ).fetchone()
+        self.assertEqual(ledger, ("persisted_entity_slugs",))
 
     def test_post_init_runner_and_ledger_row_roll_back_together(self):
         conn = sqlite3.connect(":memory:")

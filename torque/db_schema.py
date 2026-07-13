@@ -15,7 +15,7 @@ import json
 import sqlite3
 from typing import Callable, Iterable
 
-SCHEMA_VERSION = "11"
+SCHEMA_VERSION = "12"
 
 
 @dataclass(frozen=True)
@@ -379,6 +379,8 @@ ENGINEER_JOURNAL_PROVENANCE_COLUMNS = {
     "author_cell_id": "TEXT NOT NULL DEFAULT ''",
     "source_key": "TEXT NOT NULL DEFAULT ''",
 }
+
+SLUGGED_ENTITY_TABLES = ("agents", "groups", "board_tasks")
 
 
 def _ensure_mcp_idempotency_schema(conn: sqlite3.Connection) -> None:
@@ -2546,15 +2548,6 @@ def _reconcile_legacy_schema(conn: sqlite3.Connection, backfill_agent_history):
     _ensure_idea_brief_schema(conn)
     conn.commit()
     _migrate_behavior_overlay_scope_schema(conn)
-    # Migrate: add slug columns to existing tables
-    for table in ("agents", "groups", "board_tasks"):
-        try:
-            conn.execute(f"SELECT slug FROM {table} LIMIT 0")
-        except sqlite3.OperationalError:
-            conn.execute(
-                f"ALTER TABLE {table} ADD COLUMN slug "
-                f"TEXT NOT NULL DEFAULT ''")
-            conn.commit()
     # Migrate: add agent_provider column
     try:
         conn.execute(
@@ -3481,6 +3474,16 @@ def _migration_0011_engineer_journal_provenance(
     )
 
 
+def _migration_0012_persisted_entity_slugs(
+    conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Own persisted slugs for agents, groups, and board tasks."""
+
+    for table in SLUGGED_ENTITY_TABLES:
+        _ensure_columns(conn, table, {"slug": "TEXT NOT NULL DEFAULT ''"})
+
+
 SCHEMA_MIGRATIONS = (
     SchemaMigration(
         1,
@@ -3553,6 +3556,13 @@ SCHEMA_MIGRATIONS = (
         "engineer_journal_provenance",
         "engineer-journal-provenance-v1",
         _migration_0011_engineer_journal_provenance,
+        phase="post_init",
+    ),
+    SchemaMigration(
+        12,
+        "persisted_entity_slugs",
+        "agent-group-task-slugs-v1",
+        _migration_0012_persisted_entity_slugs,
         phase="post_init",
     ),
 )
