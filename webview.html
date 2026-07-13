@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Torque</title>
-<link rel="stylesheet" href="/static/style.css?v=responsive-workspace-1">
+<link rel="stylesheet" href="/static/style.css?v=responsive-workspace-3">
 <link rel="stylesheet" href="/static/vendor/xterm/xterm.css">
 </head>
 <body spellcheck="false" autocorrect="off">
@@ -1669,11 +1669,13 @@
 <!-- Panel bar (bottom dock for panel apps) -->
 <div id="panelbar">
   <div id="statusbar-panel-buttons" class="statusbar-panel-buttons" aria-label="Panels">
-    <button class="taskbar-app" data-app="board" onclick="togglePanel('board')">&#9776; Board</button>
-    <button class="taskbar-app" data-app="chat" onclick="togglePanel('chat')">&#9993; Chat</button>
-    <button class="taskbar-app" data-app="actions" onclick="togglePanel('actions')">&#9998; Actions</button>
-    <button class="taskbar-app" data-app="initiatives" onclick="togglePanel('initiatives')">&#9873; Planning</button>
-    <button class="taskbar-app" data-app="thinking" onclick="togglePanel('thinking')" title="Thinking" aria-label="Thinking">
+    <button id="taskbar-workspace" class="taskbar-app taskbar-primary-control"
+            type="button" onclick="workspaceToggleAgents()" aria-label="Workspace">&#9672; Workspace</button>
+    <button class="taskbar-app nav-primary" data-app="board" onclick="togglePanel('board')">&#9776; Board</button>
+    <button class="taskbar-app nav-primary" data-app="chat" onclick="togglePanel('chat')">&#9993; Chat</button>
+    <button class="taskbar-app nav-secondary" data-app="actions" onclick="togglePanel('actions')">&#9998; Actions</button>
+    <button class="taskbar-app nav-secondary" data-app="initiatives" onclick="togglePanel('initiatives')">&#9873; Planning</button>
+    <button class="taskbar-app nav-secondary" data-app="thinking" onclick="togglePanel('thinking')" title="Thinking" aria-label="Thinking">
       <span class="taskbar-app-icon thinking-nav-icon" aria-hidden="true">
         <svg class="thinking-connected-nodes-icon" viewBox="0 0 16 16" focusable="false">
           <path d="M7.15 5.55 4.9 9.65M8.85 5.55l2.25 4.1M5.8 11.4h4.4"/>
@@ -1684,10 +1686,10 @@
       </span>
       <span>Thinking</span>
     </button>
-    <button class="taskbar-app" data-app="mission-control" onclick="togglePanel('mission-control')">&#9737; Mission</button>
-    <button class="taskbar-app" data-app="templates" onclick="togglePanel('templates')">&#9823; Library</button>
-    <button class="taskbar-app" data-app="history" onclick="togglePanel('history')">&#8635; History</button>
-    <button class="taskbar-app" data-app="context" onclick="togglePanel('context')">
+    <button class="taskbar-app nav-secondary" data-app="mission-control" onclick="togglePanel('mission-control')">&#9737; Mission</button>
+    <button class="taskbar-app nav-secondary" data-app="templates" onclick="togglePanel('templates')">&#9823; Library</button>
+    <button class="taskbar-app nav-secondary" data-app="history" onclick="togglePanel('history')">&#8635; History</button>
+    <button class="taskbar-app nav-secondary" data-app="context" onclick="togglePanel('context')">
       <span class="taskbar-app-icon" aria-hidden="true">
         <svg viewBox="0 0 16 16">
           <path d="M2.5 3.5c0-.83.67-1.5 1.5-1.5h3.25c1.03 0 2.03.33 2.85.94L10.5 3.5v9.5l-.4-.29A4.82 4.82 0 0 0 7.25 12H4a1.5 1.5 0 0 1-1.5-1.5z"/>
@@ -1696,11 +1698,14 @@
       </span>
       <span>Context</span>
     </button>
-    <button class="taskbar-app" data-app="engineer" onclick="togglePanel('engineer')">&#x2696; Agent</button>
-    <button class="taskbar-app" data-app="events" onclick="togglePanel('events')">&#x26A0; Events</button>
-    <button class="taskbar-app" data-app="supervisor" onclick="togglePanel('supervisor')">&#9635; Supervisor</button>
-    <button class="taskbar-app" data-app="health" onclick="togglePanel('health')">&#9829; Health</button>
-    <button class="taskbar-app" data-app="help" onclick="togglePanel('help')">? Help</button>
+    <button class="taskbar-app nav-primary" data-app="engineer" onclick="togglePanel('engineer')">&#x2696; Agent</button>
+    <button class="taskbar-app nav-secondary" data-app="events" onclick="togglePanel('events')">&#x26A0; Events</button>
+    <button class="taskbar-app nav-secondary" data-app="supervisor" onclick="togglePanel('supervisor')">&#9635; Supervisor</button>
+    <button class="taskbar-app nav-secondary" data-app="health" onclick="togglePanel('health')">&#9829; Health</button>
+    <button class="taskbar-app nav-secondary" data-app="help" onclick="togglePanel('help')">? Help</button>
+    <button id="taskbar-more" class="taskbar-app taskbar-primary-control"
+            type="button" onclick="workspaceToggleMoreMenu(event)"
+            aria-label="More panels" aria-haspopup="menu" aria-expanded="false">&#8943; More</button>
     <button id="taskbar-restore-layout" class="taskbar-aux-btn"
             onclick="restoreStandaloneLayoutDefaults()"
             title="Restore the default standalone workspace layout"
@@ -1713,6 +1718,8 @@
       </span>
     </button>
   </div>
+  <div id="workspace-more-menu" class="workspace-more-menu" role="menu"
+       aria-label="More panels" hidden></div>
   <div class="taskbar-spacer" aria-hidden="true"></div>
   <!-- Status bar. Keep stable chip ids/nodes intact; status_bar.js updates
        these nodes in place while the panel launcher buttons keep focus. -->
@@ -1968,7 +1975,7 @@
 <script src="/static/js/health.js"></script>
 <script src="/static/js/help.js"></script>
 <script src="/static/js/panel_manager.js"></script>
-<script src="/static/js/workspace_layout.js"></script>
+<script src="/static/js/workspace_layout.js?v=responsive-workspace-3"></script>
 <script src="/static/js/log_viewer.js"></script>
 <script src="/static/onboarding/welcome.js"></script>
 <script src="/static/cheatsheet/cheatsheet.js"></script>

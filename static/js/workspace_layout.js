@@ -10,6 +10,7 @@ var _workspaceLayoutMode = '';
 var _workspaceLayoutResizeFrame = 0;
 var _workspaceLayoutFocusedBreakpoint = 1480;
 var _workspaceLayoutCompactBreakpoint = 920;
+var _workspaceMoreMenuOpen = false;
 
 function _workspaceLayoutModeForWidth(width) {
   var next = Number(width || 0);
@@ -104,7 +105,126 @@ function _syncWorkspaceLayoutPresentation() {
     body.classList.toggle('workspace-panel-open', !!panel.open);
     if (mode !== 'compact') body.classList.remove('workspace-agents-open');
   }
+  _workspaceSyncNavigation(panel);
   return mode;
+}
+
+function _workspaceSetMoreMenuOpen(open) {
+  _workspaceMoreMenuOpen = !!open;
+  var menu = document.getElementById && document.getElementById('workspace-more-menu');
+  var button = document.getElementById && document.getElementById('taskbar-more');
+  if (menu) menu.hidden = !_workspaceMoreMenuOpen;
+  if (button) {
+    button.setAttribute('aria-expanded', _workspaceMoreMenuOpen ? 'true' : 'false');
+    if (button.classList) button.classList.toggle('menu-open', _workspaceMoreMenuOpen);
+  }
+}
+
+function workspaceCloseMoreMenu() {
+  if (typeof document === 'undefined' || !document) return false;
+  _workspaceSetMoreMenuOpen(false);
+  return true;
+}
+
+function _workspaceBuildMoreMenu() {
+  if (typeof document === 'undefined' || !document || !document.getElementById) return;
+  var menu = document.getElementById('workspace-more-menu');
+  if (!menu || menu.dataset.built === 'true') return;
+  var sourceButtons = typeof document.querySelectorAll === 'function'
+    ? document.querySelectorAll('.taskbar-app.nav-secondary[data-app]')
+    : [];
+  for (var i = 0; i < sourceButtons.length; i++) {
+    var source = sourceButtons[i];
+    var app = source && source.dataset ? String(source.dataset.app || '') : '';
+    if (!app) continue;
+    var item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'workspace-more-item';
+    item.dataset.app = app;
+    item.setAttribute('role', 'menuitem');
+    item.textContent = String(source.textContent || app).trim();
+    item.onclick = function(selectedApp) {
+      return function() {
+        workspaceCloseMoreMenu();
+        workspaceHideAgents();
+        if (typeof togglePanel === 'function') togglePanel(selectedApp);
+        setTimeout(_syncWorkspaceLayoutPresentation, 0);
+      };
+    }(app);
+    menu.appendChild(item);
+  }
+  menu.dataset.built = 'true';
+}
+
+function workspaceToggleMoreMenu(event) {
+  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+  _workspaceBuildMoreMenu();
+  _workspaceSetMoreMenuOpen(!_workspaceMoreMenuOpen);
+  return _workspaceMoreMenuOpen;
+}
+
+function workspaceToggleAgents() {
+  workspaceCloseMoreMenu();
+  _syncWorkspaceLayoutPresentation();
+  if (_workspaceLayoutMode === 'compact') {
+    var body = document.body;
+    var open = !!(body.classList && body.classList.contains('workspace-agents-open'));
+    if (open) workspaceHideAgents();
+    else workspaceShowAgents();
+    _workspaceSyncNavigation(_workspaceActivePanelPresentation());
+    return !open;
+  }
+  var panel = _workspaceActivePanelPresentation();
+  if (_workspaceLayoutMode === 'focused' && panel.open && typeof togglePanel === 'function') {
+    togglePanel(panel.app);
+  }
+  var main = document.getElementById && document.getElementById('main');
+  if (main && typeof main.focus === 'function') main.focus();
+  setTimeout(_syncWorkspaceLayoutPresentation, 0);
+  return true;
+}
+
+function _workspaceSyncNavigation(panel) {
+  if (typeof document === 'undefined' || !document || !document.getElementById) return;
+  panel = panel || _workspaceActivePanelPresentation();
+  var workspaceButton = document.getElementById('taskbar-workspace');
+  var moreButton = document.getElementById('taskbar-more');
+  var agentsOpen = !!(
+    document.body
+    && document.body.classList
+    && document.body.classList.contains('workspace-agents-open')
+  );
+  if (workspaceButton && workspaceButton.classList) {
+    workspaceButton.classList.toggle(
+      'selected',
+      agentsOpen || (_workspaceLayoutMode === 'focused' && !panel.open)
+    );
+  }
+  if (_workspaceLayoutMode !== 'wide' && typeof document.querySelectorAll === 'function') {
+    var primaryPanelButtons = document.querySelectorAll('.taskbar-app.nav-primary[data-app]');
+    for (var primaryIndex = 0; primaryIndex < primaryPanelButtons.length; primaryIndex++) {
+      var primaryButton = primaryPanelButtons[primaryIndex];
+      if (primaryButton.classList) {
+        primaryButton.classList.toggle(
+          'active',
+          !!(panel.open && primaryButton.dataset.app === panel.app)
+        );
+      }
+    }
+  }
+  var activeSource = typeof document.querySelector === 'function' && panel.app
+    ? document.querySelector('.taskbar-app.nav-secondary[data-app="' + panel.app.replace(/"/g, '') + '"]')
+    : null;
+  if (moreButton && moreButton.classList) {
+    moreButton.classList.toggle('selected', !!activeSource || _workspaceMoreMenuOpen);
+  }
+  var menuItems = typeof document.querySelectorAll === 'function'
+    ? document.querySelectorAll('.workspace-more-item[data-app]')
+    : [];
+  for (var i = 0; i < menuItems.length; i++) {
+    var item = menuItems[i];
+    if (item.classList) item.classList.toggle('active', item.dataset.app === panel.app && panel.open);
+  }
 }
 
 function workspaceShowAgents() {
@@ -140,6 +260,9 @@ if (typeof window !== 'undefined' && window) {
   window._syncWorkspaceLayoutPresentation = _syncWorkspaceLayoutPresentation;
   window.workspaceShowAgents = workspaceShowAgents;
   window.workspaceHideAgents = workspaceHideAgents;
+  window.workspaceToggleAgents = workspaceToggleAgents;
+  window.workspaceToggleMoreMenu = workspaceToggleMoreMenu;
+  window.workspaceCloseMoreMenu = workspaceCloseMoreMenu;
 }
 
 (function() {
@@ -153,8 +276,13 @@ if (typeof window !== 'undefined' && window) {
       if (target.closest('.taskbar-app, .standalone-panel-tab, .standalone-panel-zone-actions')) {
         setTimeout(_syncWorkspaceLayoutPresentation, 0);
       }
+      if (!target.closest('#workspace-more-menu, #taskbar-more')) workspaceCloseMoreMenu();
+    });
+    document.addEventListener('keydown', function(event) {
+      if (event && event.key === 'Escape') workspaceCloseMoreMenu();
     });
     document.addEventListener('DOMContentLoaded', function() {
+      _workspaceBuildMoreMenu();
       _syncWorkspaceLayoutPresentation();
       var main = document.getElementById && document.getElementById('main');
       if (main && typeof main.addEventListener === 'function') {

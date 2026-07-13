@@ -6,6 +6,17 @@ const vm = require('node:vm');
 
 const repoRoot = path.resolve(__dirname, '..');
 
+test('panelbar exposes five primary controls and moves secondary panels behind More', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  assert.match(html, /id="taskbar-workspace"[^>]*workspaceToggleAgents\(\)/);
+  assert.match(html, /class="taskbar-app nav-primary" data-app="board"/);
+  assert.match(html, /class="taskbar-app nav-primary" data-app="chat"/);
+  assert.match(html, /class="taskbar-app nav-primary" data-app="engineer"/);
+  assert.match(html, /id="taskbar-more"[^>]*workspaceToggleMoreMenu\(event\)/);
+  assert.match(html, /class="taskbar-app nav-secondary" data-app="initiatives"/);
+  assert.match(html, /id="workspace-more-menu"[^>]*role="menu"/);
+});
+
 class FakeClassList {
   constructor() { this.items = new Set(); }
   add(...names) { names.forEach((name) => this.items.add(name)); }
