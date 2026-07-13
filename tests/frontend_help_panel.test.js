@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const repoRoot = path.resolve(__dirname, '..');
+const { appStylesheetSource } = require('./frontend_stylesheet_loader');
 
 function decodeEntities(value) {
   return String(value || '')
@@ -411,7 +412,7 @@ test('Help panel is wired as a first-class panel app', () => {
   const manager = fs.readFileSync(path.join(repoRoot, 'static/js/panel_manager.js'), 'utf8');
   const main = fs.readFileSync(path.join(repoRoot, 'static/js/main.js'), 'utf8');
   const render = fs.readFileSync(path.join(repoRoot, 'static/js/render.js'), 'utf8');
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   assert.match(webview, /id="panel-help"/);
   assert.match(webview, /data-app="help"/);

@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const repoRoot = path.resolve(__dirname, '..');
+const { appStylesheetSource } = require('./frontend_stylesheet_loader');
 
 class FakeClassList {
   constructor() { this._set = new Set(); }
@@ -539,7 +540,7 @@ test('supervisor panel persists UI state and restores sort state from snapshot',
 
 test('supervisor taskbar CSS and panel-manager registration are bounded to standalone', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   const panelManager = fs.readFileSync(path.join(repoRoot, 'static/js/panel_manager.js'), 'utf8');
   const main = fs.readFileSync(path.join(repoRoot, 'static/js/main.js'), 'utf8');
   const render = fs.readFileSync(path.join(repoRoot, 'static/js/render.js'), 'utf8');

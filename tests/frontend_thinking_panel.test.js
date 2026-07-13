@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const repoRoot = path.resolve(__dirname, '..');
+const { appStylesheetSource } = require('./frontend_stylesheet_loader');
 
 function decodeEntities(value) {
   return String(value || '')
@@ -192,7 +193,7 @@ test('Thinking panel is registered as a first-class panel with responsive CSS', 
     'static/js/ws/action-router.js',
   ].map((file) => fs.readFileSync(path.join(repoRoot, file), 'utf8')).join('\n');
   const webview = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   assert.match(manager, /_standalonePanelApps = \[[^\]]*'thinking'/);
   assert.match(manager, /thinking:\s*'Thinking'/);

@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const repoRoot = path.resolve(__dirname, '..');
+const { appStylesheetSource } = require('./frontend_stylesheet_loader');
 
 function decodeEntities(value) {
   return String(value || '')
@@ -197,7 +198,7 @@ test('Mission Control panel app is wired as a Board/Planning/Actions peer with r
   const webview = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   const manager = fs.readFileSync(path.join(repoRoot, 'static/js/panel_manager.js'), 'utf8');
   const main = fs.readFileSync(path.join(repoRoot, 'static/js/main.js'), 'utf8');
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   assert.match(webview, /id="panel-mission-control"/);
   assert.match(webview, /data-app="mission-control"/);

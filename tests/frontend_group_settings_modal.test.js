@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const repoRoot = path.resolve(__dirname, '..');
+const { appStylesheetSource } = require('./frontend_stylesheet_loader');
 
 class FakeClassList {
   constructor() {
@@ -250,7 +251,7 @@ test('architect settings markup removes paused control and renders checkpoint dr
 
 test('group settings renders system prompt preview controls for Engineer and Architect', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   assert.match(
     html,
@@ -266,7 +267,7 @@ test('group settings renders system prompt preview controls for Engineer and Arc
 
 test('group settings markup renders board sync provider subtab and task sync mount', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   assert.match(html, /data-subtab="group-sync"[\s\S]*>Sync provider<\/button>/);
   assert.match(html, /<select id="gs-board-sync-provider"[\s\S]*<option value="none">None<\/option>[\s\S]*<option value="github">GitHub<\/option>/);
@@ -284,7 +285,7 @@ test('group settings markup renders board sync provider subtab and task sync mou
 
 test('board sync inline-row buttons keep labels on one line (no wrap)', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   // Labels render as intact single-line text, not split across lines.
   assert.match(html, /id="gs-board-sync-use-current-repo"[^>]*>Use current repo<\/button>/);
@@ -1155,7 +1156,7 @@ test('group settings sub-tab switching preserves scroll focus and inline draft s
 
 test('group settings sub-tab CSS remains reusable in narrow embedded layouts', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   assert.match(html, /<div class="gs-pane active" data-pane="group">\s*<div class="gs-subtabs">/);
   assert.match(html, /<div class="gs-pane" data-pane="workers">\s*<div class="gs-subtabs">/);
@@ -1168,7 +1169,7 @@ test('group settings sub-tab CSS remains reusable in narrow embedded layouts', (
 
 test('group settings removes terminal-backend-only profile and tab-color controls', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   const ws = fs.readFileSync(path.join(repoRoot, 'static/js/ws/full-state.js'), 'utf8');
   const start = html.indexOf('<!-- Group Settings modal -->');
   const end = html.indexOf('<!-- Global Settings modal -->', start);

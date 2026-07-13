@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const repoRoot = path.resolve(__dirname, '..');
+const { appStylesheetSource } = require('./frontend_stylesheet_loader');
 
 class FakeClassList {
   constructor(initial = []) {
@@ -3063,7 +3064,7 @@ test('renderBoard rerender moves cascaded task from In Progress to Done lane', (
 });
 
 test('wide standalone lane columns keep their direct children from shrinking', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   assert.match(
     css,
@@ -3072,7 +3073,7 @@ test('wide standalone lane columns keep their direct children from shrinking', (
 });
 
 test('wide standalone board lanes keep card contrast with a lighter panel and visible borders', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   assert.match(
     css,
@@ -4166,7 +4167,7 @@ test('board card task ID copy button is hover-revealed and does not reflow the I
   runInContext(context, `boardCopyTaskIdFromCard('TORQUE:741')`);
   assert.deepEqual(copied, ['TORQUE:741']);
 
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   assert.match(css, /\.board-card-info\s*\{[^}]*position:\s*relative;/s);
   assert.match(css, /\.board-card-id-copy\s*\{[^}]*position:\s*absolute;[^}]*left:\s*-14px;[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;/s);
   assert.match(css, /\.board-card:hover \.board-card-id-copy,[\s\S]*\.board-card\.board-card-hovered \.board-card-id-copy,[\s\S]*\.board-card\.focused \.board-card-id-copy,[\s\S]*\.board-card-id-copy:focus-visible\s*\{[^}]*opacity:\s*1;[^}]*pointer-events:\s*auto;/);
@@ -5947,7 +5948,7 @@ test('runtime delta refreshes daemon status detail without panel invalidation', 
 });
 
 test('daemon status is browser-visible and not only Tauri-gated (CSS)', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   assert.match(css, /\.statusbar-info \.daemon-connection-status\s*\{[^}]*display:\s*inline-flex[^}]*\}/);
   assert.match(css, /\.daemon-connection-status #taskbar-conn-dot\s*\{[^}]*display:\s*inline-block[^}]*\}/);
   assert.doesNotMatch(css, /body\.tauri-mode[^{]*\.daemon-connection-status\b/);
@@ -6187,7 +6188,7 @@ test('relay status-bar chip is derived from daemon-status visibility and relay c
 });
 
 test('relay-status indicator is browser-visible and not Tauri-gated (CSS)', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   // Base rule renders the indicator (inline-flex) — visible by default.
   const baseRule = css.match(/^\.relay-status\s*\{[^}]*\}/m);
   assert.ok(baseRule, '.relay-status base rule exists');
@@ -6218,7 +6219,7 @@ test('modal Relay dot uses the relay-status-dot base so color modifiers win the 
 
   // The `.relay-status-dot` base must precede its color modifiers in source so
   // the modifier wins at equal specificity.
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   const baseIdx = css.search(/^\.relay-status-dot\s*\{/m);
   const greenIdx = css.search(/^\.relay-status-dot--green\s*\{/m);
   assert.ok(baseIdx >= 0 && greenIdx >= 0, 'relay dot base + modifier rules exist');
@@ -6328,7 +6329,7 @@ test('global settings subtabs switch and restore the selected System subtab', ()
 
 test('relay source badges are removed from System settings markup and relay config DOM', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   [
     'gls-relay-enabled-badge',
     'gls-relay-url-badge',
@@ -6342,7 +6343,7 @@ test('relay source badges are removed from System settings markup and relay conf
 
 test('Stop Daemon uses an outline danger button with an SVG stop icon', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   const stopButton = html.match(/<button[^>]*id="gls-stop-daemon-btn"[\s\S]*?<\/button>/);
   assert.ok(stopButton, 'Stop Daemon button exists');
   const classAttr = stopButton[0].match(/class="([^"]*)"/);
@@ -7387,7 +7388,7 @@ test('device-link gate: enabled+url → canMint; disabled / no-url / absent gate
 
 test('device-link confirm buttons use primary/secondary app button styling', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   const confirmStart = html.indexOf('id="gls-relay-device-link-confirm"');
   assert.ok(confirmStart >= 0, 'device-link confirm markup exists');
   const confirmEnd = html.indexOf('id="gls-relay-device-link-error"', confirmStart);
@@ -11266,7 +11267,7 @@ test('embedded terminal websocket URL carries the page client id', () => {
 });
 
 test('embedded terminal shell keeps terminal stage on the flexible row after tab strip removal', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   const baseRule = css.match(/\.terminal-shell\s*\{[^}]+\}/);
   const runtimeRule = css.match(/body\.runtime-embedded \.terminal-shell\s*\{[^}]+\}/);
   assert.ok(baseRule, 'base terminal shell CSS rule exists');
@@ -12341,7 +12342,7 @@ test('embedded terminal tail button appears after manual scroll and re-arms tail
 });
 
 test('embedded terminal keeps visual inset on xterm so FitAddon rows match the visible viewport', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   const surfaceRule = css.match(/^\.terminal-surface\s*\{[^}]*\}/m);
   const xtermRule = css.match(/^\.terminal-surface \.xterm\s*\{[^}]*\}/m);
   const tailButtonRule = css.match(/^\.terminal-tail-button\s*\{[^}]*\}/m);
@@ -12576,7 +12577,7 @@ test('embedded terminal direct-message System rows render as right-aligned green
   assert.match(html, /<span class="terminal-direct-message-badge">System<\/span>/);
   assert.match(html, /<div class="terminal-direct-message-body torque-markdown"><p>\/loop started: Every 5m — run checks<\/p><\/div>/);
 
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   const systemRule = css.match(/\.terminal-direct-message--system\s*\{[^}]+\}/);
   assert.ok(systemRule, 'System direct-message CSS rule exists');
   assert.match(systemRule[0], /align-self:\s*flex-end;/);
@@ -13230,13 +13231,13 @@ test('embedded terminal direct-message drag selection does not select or reset s
 });
 
 test('direct-message and chat message bodies explicitly allow native text selection', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   assert.match(css, /\.terminal-direct-message-body\s*\{[^}]*-webkit-user-select:\s*text;[^}]*user-select:\s*text;/s);
   assert.match(css, /\.chat-message-body\s*\{[^}]*-webkit-user-select:\s*text;[^}]*user-select:\s*text;/s);
 });
 
 test('terminal composer defaults to at least three lines with markdown-friendly monospace stack', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   const rule = css.match(/\.terminal-compose-input\s*\{[^}]+\}/);
   assert.ok(rule, 'terminal composer input CSS rule exists');
   assert.match(rule[0], /min-height:\s*68px;/);
@@ -13782,7 +13783,7 @@ test('embedded terminal direct-message resize and unrelated WS delta preserve sc
 
 test('embedded terminal direct-message resize rail has a dedicated hit-zone outside header and compose controls', () => {
   const terminalSource = fs.readFileSync(path.join(repoRoot, 'static/js/terminal/direct-messages.js'), 'utf8');
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   const resizerIndex = terminalSource.indexOf('data-terminal-direct-messages-resizer');
   const sectionIndex = terminalSource.indexOf('<section class="terminal-direct-messages"');
   const headerIndex = terminalSource.indexOf('terminal-direct-messages-header');
@@ -16942,7 +16943,7 @@ test('Architect Journal long entries and pinned checkpoint collapse locally by d
   assert.match(html, /journal six/);
   assert.match(html, /short five/);
 
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   assert.match(css, /\.agent-panel-journal-clipped\s*\{[^}]*max-height:\s*calc\(1\.45em \* 5\);[^}]*overflow:\s*hidden;/);
 
   const card = new FakeElement('journal-card');
@@ -21414,7 +21415,7 @@ test('renderAgentPanel keeps the same Messages anchor visible when new message c
 });
 
 test('agent Messages tab owns a full-height scroll region and preserves full body wrapping', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   assert.match(
     css,
@@ -21571,7 +21572,7 @@ test('context-window meter is anchored to the header strip, not the bottom role-
   // the provider label (bottom-left) and the role pill (bottom-right). On narrow
   // 77px cards a wide pill ("Architect"/"Engineer") overlapped the centered meter.
   // It must stay top-anchored, clear of the top-left controls and top-right dot.
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   const meterRule = css.match(/\.agent-context-meter\s*\{[^}]*\}/s);
   assert.ok(meterRule, 'expected an .agent-context-meter rule');
   const rule = meterRule[0];
@@ -21588,7 +21589,7 @@ test('grid context meter clears the done-flourish badge and the expanded attenti
   //     would paint dim meter text over the green pill — hide the meter while active.
   //  2) the attention/dismissed dot expands to 12px @ right:2px, clipping ~2px into
   //     the meter's default right:12px inset — push the meter clear in those states.
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   const flourishRule = css.match(
     /\.cell-status\.cell-status-done-flourish\s*~\s*\.agent-context-meter\s*\{[^}]*\}/s,
@@ -21826,7 +21827,7 @@ test('renderAgentCell keeps done flourish timing stable across rerenders', () =>
 });
 
 test('engineer agent card toggle shares the close control reveal affordances and icon-only default chrome', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   assert.match(css, /\.cell-header-controls\s*\{[^}]*position:\s*absolute;[^}]*display:\s*flex;[^}]*align-items:\s*center;/);
   // Controls are now always visible (opacity:1 + pointer-events:auto by default).
@@ -21840,7 +21841,7 @@ test('engineer agent card toggle shares the close control reveal affordances and
 });
 
 test('agent kind badges render in the bottom-right opposite the provider badge', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   const providerRule = css.match(/\.agent-card-provider\s*\{[^}]*\}/)[0];
   const engineerRule = css.match(/\.cell-engineer-badge\s*\{[^}]*\}/)[0];
   const architectRule = css.match(/\.cell-architect-badge\s*\{[^}]*\}/)[0];
@@ -21866,7 +21867,7 @@ test('agent kind badges render in the bottom-right opposite the provider badge',
 });
 
 test('agent cards do not define legacy engineer edge chrome', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   const engineerCellRules = Array.from(
     css.matchAll(/^\.cell\.engineer\s*\{[^}]*\}/gm),
     (match) => match[0],
@@ -23227,7 +23228,7 @@ test('chat panel renders message markdown with escaped raw HTML and safe links',
 });
 
 test('markdown code blocks reserve horizontal scrollbar space for message bodies', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   const blockRule = css.match(/\.torque-markdown \.torque-md-code-block\s*\{[^}]*\}/s);
   assert.ok(blockRule, 'markdown code block CSS rule exists');
   assert.match(blockRule[0], /overflow-x:\s*auto;/);
@@ -23920,7 +23921,7 @@ test('chat narrow thread list hides previews and moves badges to the right side'
   assert.match(listHtml, /chat-thread-last/);
   assert.match(listHtml, /chat-thread-badges[\s\S]*Ack required 2[\s\S]*Pending/);
 
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   assert.match(css, /\.chat-panel\[data-chat-layout="narrow"\]\s+\.chat-thread-last\s*\{[^}]*display:\s*none;/s);
   assert.match(css, /\.chat-panel\[data-chat-layout="narrow"\]\s+\.chat-thread-badges\s*\{[^}]*grid-column:\s*2;[^}]*align-items:\s*flex-end;/s);
 });
@@ -24798,7 +24799,7 @@ test('compact standalone add-agent flow keeps advanced options collapsed by defa
 
 test('task modal keeps a scrollable body separate from its footer actions', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   assert.match(html, /<div id="task-modal-body" class="task-modal-body">[\s\S]*<div class="modal-actions">/);
   assert.match(css, /#modal-task \.modal\s*\{[^}]*overflow:\s*hidden;/);
@@ -24834,7 +24835,7 @@ test('task modal prioritizes labels, dependencies, and schedule before lower-fre
 
 test('task modal keeps external and verification collapsed by default with responsive section styles', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   assert.match(html, /<details class="task-modal-section">\s*<summary>External/);
   assert.match(html, /<details class="task-modal-section">\s*<summary>Verification/);
@@ -24846,7 +24847,7 @@ test('task modal keeps external and verification collapsed by default with respo
 
 test('engineer and architect group settings use sub-tabs instead of collapsible sections', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   const engineerGeneral = html.indexOf('data-subpane="engineer-general"');
   const engineerBehavior = html.indexOf('data-subpane="engineer-behavior"');
@@ -24877,14 +24878,14 @@ test('engineer and architect group settings use sub-tabs instead of collapsible 
 });
 
 test('context menu constrains width and clamps wrapped task-title rows', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   assert.match(css, /#ctx-menu\s*\{[^}]*max-width:\s*min\(320px,\s*calc\(100vw - 8px\)\);/);
   assert.match(css, /#ctx-menu button\.ctx-button-wrap\s*\{[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere;[^}]*-webkit-line-clamp:\s*2;/);
 });
 
 test('inline add-task toolbar wraps buttons instead of overflowing narrow card widths', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   // Parent toolbar row must allow wrapping so the right-side group can
   // drop onto a second line when the card is narrow (prevents Submit from
@@ -25388,7 +25389,7 @@ test('merge diff review opens in a wide tall custom modal without hiding the wor
 });
 
 test('diff modal tracks task modal breakpoints at twenty percent wider', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   assert.match(css, /\.diff-view-modal\s*\{[^}]*336px/);
   assert.match(css, /\.diff-view-modal\s*\{[^}]*90vh/);
@@ -27273,7 +27274,7 @@ test('stratified grid renders Architects stratum and architect card without inli
   assert.match(main.innerHTML, /class="agent-card-kind cell-architect-badge">Architect<\/div>/);
   assert.doesNotMatch(main.innerHTML, /agent-grid-new-architect-row/);
 
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   assert.match(css, /\.agent-band--architect\s*\{[\s\S]*grid-template-columns:\s*var\(--agent-architect-column-width\)/);
 
   const architectBandBlocks = [...css.matchAll(/\.agent-band--architect\s*\{[^}]*\}/g)].map(match => match[0]);
@@ -27354,7 +27355,7 @@ test('grid-level creation toolbar replaces hierarchical creation controls', () =
   assert.doesNotMatch(main.innerHTML, /\+ Add Worker|\+ New Engineer|\+ New Architect/);
   assert.doesNotMatch(main.innerHTML, /data-agent-strata=/);
 
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   assert.match(css, /--agent-grid-card-height:\s*96px;/);
   assert.match(css, /--agent-grid-card-basis:\s*var\(--agent-engineer-column-width\);/);
   assert.match(css, /\.agent-grid-toolbar\s*\{[\s\S]*justify-content:\s*flex-end;/);
@@ -28001,7 +28002,7 @@ test('main render uses containment primitives and retires cell hierarchy indenta
   assert.match(main.innerHTML, /loose-workers-strip/);
   assert.match(main.innerHTML, /engineer-row/);
 
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   assert.doesNotMatch(
     css,
     new RegExp('\\.cell\\.architect-' + 'owned-engineer|\\.cell\\.architect-' + 'owned-worker|\\.cell\\.engineer-' + 'owned-worker'),
@@ -28166,7 +28167,7 @@ test('main render keeps responsive worker cards inside their engineer row and fi
   for (let i = 1; i <= 7; i++) assert.match(firstRowHtml, new RegExp('Worker ' + i));
   assert.doesNotMatch(firstRowHtml, /Engineer B/);
 
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   assert.match(css, /--agent-architect-column-width:\s*77px/);
   assert.match(css, /\.agent-section\s*\{[^}]*grid-template-columns:\s*var\(--agent-architect-column-width\)\s+minmax\(0,\s*1fr\)/s);
   assert.match(css, /\.agent-grid \.engineer-row\s*\{[^}]*display:\s*flex/s);
@@ -29726,7 +29727,7 @@ test('panel resize bounds stay narrow by default and expand in embedded runtime'
 
 test('standalone shell owns the full-width bottom dock rows and drag selector', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   assert.match(
     css,
@@ -29803,7 +29804,7 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
 });
 
 test('bottom status bar uses dark segmented status-bar styling', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   [
     /--statusbar-bg:\s*color-mix\(in srgb,\s*var\(--bg\)/,
@@ -29826,7 +29827,7 @@ test('bottom status bar uses dark segmented status-bar styling', () => {
 });
 
 test('history and supervisor panels fill standalone dock and float bodies', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   [
     /body\.runtime-embedded \.standalone-panel-zone-body > #panel-history,[\s\S]*body\.runtime-embedded \.standalone-panel-zone-body > #panel-supervisor,[\s\S]*body\.runtime-embedded \.standalone-float-body > #panel-history,[\s\S]*body\.runtime-embedded \.standalone-float-body > #panel-supervisor[\s\S]*\{[^}]*height:\s*100%;[^}]*width:\s*100%;[^}]*min-height:\s*0;[^}]*min-width:\s*0;/s,
@@ -29838,7 +29839,7 @@ test('history and supervisor panels fill standalone dock and float bodies', () =
 });
 
 test('standalone keeps the legacy bottom panel parking host fully collapsed', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   assert.match(
     css,
@@ -29847,7 +29848,7 @@ test('standalone keeps the legacy bottom panel parking host fully collapsed', ()
 });
 
 test('standalone float resize handles define edge cursors and disable selection while resizing', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   assert.match(css, /\.standalone-float-resize-handle\s*\{[^}]*position:\s*absolute;[^}]*pointer-events:\s*auto;/s);
   assert.match(css, /\.standalone-float-resize-handle-n\s*\{[^}]*cursor:\s*n-resize;/s);
@@ -29862,7 +29863,7 @@ test('standalone float resize handles define edge cursors and disable selection 
 });
 
 test('app css defaults to selectable text while draggable chrome opts out', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   assert.match(css, /html,\s*body\s*\{[^}]*-webkit-user-select:\s*text;[^}]*user-select:\s*text;/s);
   assert.doesNotMatch(css, /html,\s*body\s*\{[^}]*user-select:\s*none;/s);

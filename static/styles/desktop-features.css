@@ -1,0 +1,824 @@
+/* ------------------------------------------------------------------ */
+/* Tauri native polish: detached panels, logs, onboarding, shortcuts   */
+/* ------------------------------------------------------------------ */
+body.detached-window #workspace-shell,
+body.detached-window #standalone-float-layer,
+body.detached-window #panelbar,
+body.detached-window #workspace-resize-handle,
+body.detached-window header,
+body.detached-window #terminal-workspace {
+  display: none !important;
+}
+body.detached-window #bottom-panel {
+  position: fixed;
+  inset: 0;
+  display: block;
+  height: 100vh;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  background: var(--bg);
+  z-index: 1;
+}
+body.detached-window #bottom-panel.collapsed { transform: none; }
+body.detached-window #panel-resize-handle { display: none; }
+body.detached-window #bottom-panel > div:not(.panel-hidden):not(#panel-resize-handle) {
+  height: 100%;
+  overflow: auto;
+}
+
+.log-viewer-modal,
+.cheatsheet-modal,
+.welcome-modal { max-width: 900px; }
+.log-viewer-header,
+.cheatsheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.log-viewer-header h2,
+.cheatsheet-header h2,
+.welcome-modal h2 { margin: 0; }
+.log-viewer-actions,
+.welcome-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.log-viewer-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.log-viewer-targets {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.log-viewer-target {
+  padding: 5px 9px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.log-viewer-target:last-child { border-right: 0; }
+.log-viewer-target:hover { color: var(--text); background: var(--bg-hover); }
+.log-viewer-target.active { color: #fff; background: var(--accent); }
+.log-viewer-toolbar label { margin: 0; }
+.log-viewer-toolbar input,
+.log-viewer-toolbar select,
+.cheatsheet-search {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 5px 7px;
+  font-size: 11px;
+}
+.log-viewer-list {
+  min-height: 360px;
+  max-height: min(62vh, 640px);
+  overflow: auto;
+  background: #090c10;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.log-line {
+  display: grid;
+  grid-template-columns: 80px 72px minmax(0, 1fr);
+  gap: 8px;
+  white-space: pre-wrap;
+  border-bottom: 1px solid rgba(255,255,255,.04);
+  padding: 2px 0;
+}
+.log-line-time { color: var(--text-dim); }
+.log-line-level { font-weight: 700; color: var(--text-dim); }
+.log-level-error .log-line-level { color: var(--status-red); }
+.log-level-warning .log-line-level { color: var(--status-orange); }
+.log-level-info .log-line-level { color: var(--accent); }
+.log-level-debug .log-line-level { color: var(--text-dim); }
+.log-line-message { min-width: 0; overflow-wrap: anywhere; }
+.log-viewer-empty,
+.cheatsheet-empty { color: var(--text-dim); padding: 16px; text-align: center; }
+
+.cheatsheet-content {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+  overflow: auto;
+}
+.cheatsheet-section {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-subtle, rgba(255,255,255,.03));
+  padding: 10px;
+}
+.cheatsheet-section h3 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-dim);
+  margin: 0 0 8px;
+}
+.cheatsheet-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-top: 1px solid rgba(255,255,255,.06);
+}
+.cheatsheet-row:first-of-type { border-top: 0; }
+.cheatsheet-title { font-size: 12px; font-weight: 700; }
+.cheatsheet-desc { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+.cheatsheet-row kbd {
+  align-self: start;
+  min-width: 52px;
+  text-align: center;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.welcome-modal { text-align: left; }
+.welcome-eyebrow {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  margin-bottom: 8px;
+}
+.welcome-lede {
+  color: var(--text-dim);
+  line-height: 1.55;
+  margin: 8px 0 14px;
+}
+.welcome-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.welcome-steps li {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--bg-subtle, rgba(255,255,255,.03));
+}
+.welcome-steps strong { display: block; margin-bottom: 4px; }
+.welcome-steps span { color: var(--text-dim); font-size: 11px; line-height: 1.45; }
+.welcome-actions { margin-top: 16px; }
+
+/* PTY Supervisor panel --------------------------------------------------- */
+.taskbar-app[data-app="supervisor"] { display: none; }
+body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex; }
+
+#panel-supervisor {
+  overflow: auto;
+  min-height: 0;
+  min-width: 0;
+  height: 100%;
+  width: 100%;
+}
+.supervisor-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 100%;
+  min-width: 0;
+  width: 100%;
+  padding: 12px;
+  color: var(--text);
+}
+.supervisor-header,
+.supervisor-toolbar,
+.supervisor-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.supervisor-header {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.supervisor-header h2 {
+  margin: 0;
+  font-size: 15px;
+}
+.supervisor-header p {
+  margin: 2px 0 0;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.supervisor-status {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.supervisor-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--red);
+  box-shadow: 0 0 0 3px rgba(248, 81, 73, .12);
+}
+.supervisor-dot.connected {
+  background: var(--green);
+  box-shadow: 0 0 0 3px rgba(63, 185, 80, .12);
+}
+.supervisor-toolbar {
+  flex-wrap: wrap;
+}
+.supervisor-toolbar button,
+.supervisor-terminate,
+.supervisor-sort {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-cell);
+  color: var(--text);
+  font-size: 11px;
+  padding: 4px 8px;
+}
+.supervisor-terminate {
+  color: var(--red);
+}
+.supervisor-terminate:disabled {
+  color: var(--text-dim);
+  opacity: .7;
+}
+.supervisor-restart-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.supervisor-restart {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--amber, #d29922);
+}
+.supervisor-restart:disabled {
+  color: var(--text-dim);
+  cursor: not-allowed;
+  opacity: .75;
+}
+.supervisor-spinner {
+  width: 11px;
+  height: 11px;
+  border: 2px solid rgba(255,255,255,.18);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: diff-spin .8s linear infinite;
+  flex: 0 0 auto;
+}
+.supervisor-restart-status {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.supervisor-restart-status-error {
+  color: var(--red);
+}
+.supervisor-sort {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font-weight: 600;
+}
+.supervisor-auto {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.supervisor-auto input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: auto;
+  margin: 0;
+  padding: 0;
+}
+.supervisor-updated {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.supervisor-banner {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.supervisor-banner-unavailable,
+.supervisor-banner-error {
+  border-color: rgba(248, 81, 73, .35);
+  background: rgba(248, 81, 73, .08);
+  color: var(--text);
+}
+.supervisor-empty {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--text-dim);
+  padding: 18px;
+  text-align: center;
+}
+.supervisor-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.supervisor-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.supervisor-table th,
+.supervisor-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 7px 8px;
+  text-align: left;
+  vertical-align: middle;
+}
+.supervisor-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-surface);
+  color: var(--text-dim);
+}
+.supervisor-row { cursor: pointer; }
+.supervisor-row-self,
+.supervisor-card-self {
+  background: rgba(88, 166, 255, .05);
+}
+.supervisor-chevron {
+  display: inline-block;
+  width: 12px;
+  color: var(--text-dim);
+}
+.supervisor-muted {
+  color: var(--text-dim);
+}
+.supervisor-row:hover,
+.supervisor-row.selected,
+.supervisor-card:hover,
+.supervisor-card.selected {
+  background: var(--bg-hover);
+}
+.supervisor-owner {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 120px;
+}
+.supervisor-owner span,
+.supervisor-card-meta,
+.supervisor-card-path {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.supervisor-command,
+.supervisor-path {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.supervisor-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.supervisor-pill-alive {
+  color: var(--green);
+  background: rgba(63, 185, 80, .12);
+}
+.supervisor-pill-exited {
+  color: var(--text-dim);
+  background: rgba(139, 148, 158, .14);
+}
+.supervisor-detail-row td {
+  background: rgba(255, 255, 255, .02);
+}
+.supervisor-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px 12px;
+  margin: 0;
+}
+.supervisor-detail-grid dt {
+  color: var(--text-dim);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.supervisor-detail-grid dd {
+  margin: 2px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.supervisor-detail-warning dd { color: var(--amber); }
+.supervisor-cards { display: none; }
+.supervisor-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  cursor: pointer;
+}
+.supervisor-card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+.supervisor-card-command {
+  margin-top: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.supervisor-card-path {
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.supervisor-card-actions {
+  margin-top: 8px;
+}
+.supervisor-card-details {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 760px) {
+  .supervisor-table-wrap { display: none; }
+  .supervisor-cards {
+    display: grid;
+    gap: 8px;
+  }
+}
+
+/* ---- Agent view toggle (lives in the group-tabs action row) ---- */
+.agent-view-toggle {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-right: 6px;
+  height: 22px;
+}
+.agent-view-toggle-btn {
+  background: transparent;
+  color: var(--text-dim);
+  border: 0;
+  border-right: 1px solid var(--border);
+  font: inherit;
+  font-size: 11px;
+  padding: 0 8px;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+}
+.agent-view-toggle-btn svg { display: block; }
+.agent-view-toggle-btn:last-child { border-right: 0; }
+.agent-view-toggle-btn:hover { background: var(--bg-hover); color: var(--text); }
+.agent-view-toggle-btn.is-active {
+  background: var(--bg-cell);
+  color: var(--text);
+}
+
+/* ---- Canvas (alternate agents view) ---- */
+.agent-canvas {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background:
+    radial-gradient(circle, rgba(255,255,255,0.03) 1px, transparent 1px) 0 0 / 22px 22px,
+    var(--bg);
+  position: relative;
+}
+.agent-canvas-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 20px 24px 80px 24px;
+}
+.canvas-empty {
+  margin: 60px auto;
+  text-align: center;
+  color: var(--text-dim);
+}
+.canvas-empty-title { font-size: 14px; margin-bottom: 6px; color: var(--text); }
+.canvas-empty-hint  { font-size: 12px; }
+
+/* Tree = a vertical stack of rows. Each row has a stack of guide
+   cells on the left (one per ancestor depth) followed by the card
+   itself. The guides do all the line-drawing via pseudo-elements,
+   and the card flexes to fill the remaining width. */
+.agent-canvas-inner,
+.canvas-tree {
+  --canvas-row-gap: 4px;
+}
+.canvas-tree {
+  display: flex;
+  flex-direction: column;
+  gap: var(--canvas-row-gap);
+}
+.canvas-row {
+  display: flex;
+  align-items: stretch;
+  min-height: 34px;
+}
+.canvas-row > .canvas-card,
+.canvas-row > [data-canvas-row-host] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.canvas-row > [data-canvas-row-host] {
+  display: flex;
+}
+.canvas-row > [data-canvas-row-host] > .canvas-card {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Guide cell — one per ancestor depth, plus optionally one for the
+   current row's own connector. All four variants share the same
+   geometry: a vertical line at x=16 from top of cell, optionally
+   capped at vertical center; a horizontal stub at the center going
+   right to the card. The card sits flush against the guide, so the
+   horizontal stub ends exactly at the card's left edge. */
+.canvas-guide {
+  flex: 0 0 32px;
+  align-self: stretch;
+  position: relative;
+}
+.canvas-guide::before,
+.canvas-guide::after {
+  content: '';
+  position: absolute;
+  background: var(--border);
+}
+/* "through" — vertical line all the way through; ancestor's spine
+   continues past this row. No horizontal stub. The line is extended
+   BELOW the row by --canvas-row-gap so it bridges the flex gap to
+   the next row's pseudo-element (otherwise the gap shows up as a
+   visible discontinuity in the spine). */
+.canvas-guide--through::before {
+  left: 16px;
+  top: 0;
+  bottom: calc(0px - var(--canvas-row-gap, 4px));
+  width: 2px;
+}
+/* "tee" — vertical line all the way through + horizontal stub at
+   center. Used when this row's own parent has more siblings after
+   this row. Same gap-bridging extension as --through. */
+.canvas-guide--tee::before {
+  left: 16px;
+  top: 0;
+  bottom: calc(0px - var(--canvas-row-gap, 4px));
+  width: 2px;
+}
+.canvas-guide--tee::after {
+  left: 16px;
+  top: 50%;
+  right: 0;
+  height: 2px;
+  transform: translateY(-1px);
+}
+/* "corner" — vertical line from top to center only + horizontal
+   stub at center. Used for the LAST child at this row's depth, so
+   the spine stops exactly at the bend. */
+.canvas-guide--corner::before {
+  left: 16px;
+  top: 0;
+  height: 50%;
+  width: 2px;
+}
+.canvas-guide--corner::after {
+  left: 16px;
+  top: 50%;
+  right: 0;
+  height: 2px;
+  transform: translateY(-1px);
+}
+/* "empty" — no line. Used when the ancestor's spine ended before
+   reaching this row (ancestor was the last child at its depth). */
+.canvas-guide--empty {}
+
+/* Inline "+ Add" button rendered inside a row when a parent has no
+   children yet. Sits in place of a card and has the same flex
+   behavior so it fills the remaining width. */
+.canvas-row > .canvas-add-inline {
+  flex: 1 1 auto;
+  min-width: 0;
+  align-self: center;
+  min-height: 0;
+}
+
+/* Cards: two-row layout.
+   Row 1 (header): name | kind | provider | (spacer) | status dot
+   Row 2 (meta):   kind-specific stats, separated by middle dots */
+.canvas-card {
+  background: var(--bg-cell);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 8px 5px 8px;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  position: relative;
+  transition: border-color 0.12s ease, background 0.12s ease;
+  line-height: 1.25;
+}
+.canvas-card-header + * {
+  margin-top: 3px;
+}
+.canvas-card:hover {
+  background: var(--bg-hover);
+  border-color: #4d5765;
+}
+.canvas-card.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.canvas-card.is-focused {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+.canvas-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text);
+  min-width: 0;
+}
+.canvas-card-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+/* Role text in the header — italic, dimmed, just the kind (provider
+   moves to a corner badge). e.g. 'Architect' / 'Engineer' / 'Worker'. */
+.canvas-card-role {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-style: italic;
+  flex: 0 0 auto;
+}
+/* Provider badge in the card's bottom-right corner. */
+.canvas-card-provider-badge {
+  position: absolute;
+  right: 6px;
+  bottom: 4px;
+  font-size: 8px;
+  font-style: italic;
+  color: var(--text-dim);
+  opacity: 0.75;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
+/* Third-row run-state line — 'idle', 'Running: <detail>',
+   'stopped', or 'Error: <msg>'. Always present, even when empty,
+   so card vertical rhythm stays consistent. */
+.canvas-card-status-line {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 42px; /* room for the provider badge in the corner */
+}
+.canvas-card-header-spacer { flex: 1 1 auto; min-width: 8px; }
+/* Inline stats anchored to the right side of the header — e.g.
+   '2 engineers' for an architect, '4 workers · queue 1' for an
+   engineer. Same dimmed italic treatment as the role label. */
+.canvas-card-header-stats {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-style: italic;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.canvas-card-header-stats .canvas-card-sep {
+  font-style: normal;
+}
+.canvas-card-pause {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  color: var(--amber);
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+}
+.canvas-card-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  flex: 0 0 6px;
+}
+.canvas-card.is-running .canvas-card-status-dot { background: var(--green); }
+.canvas-card.is-error   .canvas-card-status-dot { background: var(--red); }
+.canvas-card.is-idle    .canvas-card-status-dot { background: var(--amber); }
+.canvas-card.is-stopped .canvas-card-status-dot { background: #57606a; }
+
+.canvas-card-meta {
+  font-size: 10px;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  min-width: 0;
+}
+.canvas-card-meta > * {
+  flex: 0 0 auto;
+}
+.canvas-card-sep {
+  color: var(--border);
+  opacity: 0.7;
+}
+.canvas-card-stat--task {
+  cursor: pointer;
+  font-family: var(--font);
+  color: var(--accent);
+}
+.canvas-card-stat--task:hover { text-decoration: underline; }
+.canvas-card-stat--muted { opacity: 0.6; font-style: italic; }
+.canvas-card-stat--branch {
+  font-family: var(--font);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.canvas-card-stat--diff { font-family: var(--font); }
+
+.canvas-card-architect { border-left: 3px solid var(--amber); }   /* yellow */
+.canvas-card-engineer  { border-left: 3px solid var(--accent); }  /* blue */
+.canvas-card-worker    { border-left: 3px solid var(--green); }   /* green */
+.canvas-card-name {
+  /* Override the old fixed cap so names use the full row width. */
+  max-width: none;
+}
+/* Inline add affordance — a row with no card, just a dashed-border
+   button rendered with the same guide/corner connector as a real
+   child row. */
+.canvas-add-inline {
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--text-dim);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  text-align: left;
+}
+.canvas-add-inline:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+/* ------------------------------------------------------------------ */

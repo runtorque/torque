@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const repoRoot = path.resolve(__dirname, '..');
+const { appStylesheetSource } = require('./frontend_stylesheet_loader');
 
 class FakeClassList {
   constructor() { this.items = new Set(); }
@@ -56,7 +57,7 @@ test('panel manager detects detached Tauri window URL mode', () => {
 
 test('Tauri mode hides redundant main bar wordmark without hiding browser standalone branding', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   assert.match(
     html,

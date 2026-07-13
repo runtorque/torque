@@ -36,5 +36,11 @@ defined by the `<link>` elements in that file.
   `agent_panel.js` plus `agent-panel/` modules, and `panel_manager.js`.
 - **Boot:** `main.js` is last. It may assume every runtime module has loaded.
 
+The stylesheet cascade is also explicit in `webview.html`: tokens/base,
+workspace/grid, modals, workspace shell, Board and operator panels, Agent
+panel, desktop features, then feature panels. `static/style.css` is retained
+only as a compatibility `@import` entrypoint; production loads the files in
+`static/styles/` directly.
+
 The source manifest used by tests is derived from `webview.html`; do not create
 a second handwritten production manifest.

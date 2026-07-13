@@ -6,6 +6,7 @@ const path = require('node:path');
 const {
   repoRoot,
   webviewScriptSources,
+  webviewStylesheetSources,
 } = require('./frontend_script_loader');
 
 function indexOf(sources, source) {
@@ -25,6 +26,31 @@ test('webview frontend scripts are unique and exist on disk', () => {
       `missing frontend script: ${source}`,
     );
   }
+});
+
+test('webview stylesheet modules are unique, ordered, and exist on disk', () => {
+  const sources = webviewStylesheetSources();
+  const appStyles = sources.filter((source) => source.startsWith('static/styles/'));
+  assert.deepEqual(appStyles, [
+    'static/styles/tokens-base.css',
+    'static/styles/workspace-grid.css',
+    'static/styles/modals.css',
+    'static/styles/workspace-shell.css',
+    'static/styles/board-panels.css',
+    'static/styles/agent-panel.css',
+    'static/styles/desktop-features.css',
+    'static/styles/feature-panels.css',
+  ]);
+  assert.equal(new Set(sources).size, sources.length, 'stylesheet sources must not be duplicated');
+  for (const source of sources) {
+    assert.equal(fs.existsSync(path.join(repoRoot, source)), true, `missing stylesheet: ${source}`);
+  }
+  const compatibilityCss = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const compatibilityImports = Array.from(
+    compatibilityCss.matchAll(/@import url\("\.\/styles\/([^"?]+)"\);/g),
+    (match) => `static/styles/${match[1]}`,
+  );
+  assert.deepEqual(compatibilityImports, appStyles, 'compatibility imports must mirror runtime cascade order');
 });
 
 test('frontend load order preserves state, rendering, panels, and boot boundaries', () => {

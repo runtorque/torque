@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const repoRoot = path.resolve(__dirname, '..');
+const { appStylesheetSource } = require('./frontend_stylesheet_loader');
 
 function decodeEntities(value) {
   return String(value || '')
@@ -174,7 +175,7 @@ function sampleInitiative(overrides = {}) {
 
 
 test('Planning CSS supports bottom full-width layout and side-panel responsive treatment', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   assert.match(css, /body\.runtime-embedded \.standalone-panel-zone-body > #panel-initiatives,[\s\S]*body\.runtime-embedded \.standalone-float-body > #panel-initiatives[\s\S]*\{[^}]*height:\s*100%;[^}]*width:\s*100%;[^}]*min-height:\s*0;[^}]*min-width:\s*0;/s);
   assert.match(css, /#panel-initiatives\s*\{[^}]*display:\s*flex;[^}]*height:\s*100%;[^}]*width:\s*100%;[^}]*min-width:\s*0;[^}]*container-type:\s*inline-size;/s);
@@ -192,7 +193,7 @@ test('Planning CSS supports bottom full-width layout and side-panel responsive t
 });
 
 test('Planning Areas toolbar CSS keeps search and filters contained by wrapping inside list pane', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   const filtersBlock = css.match(/\.areas-filters\s*\{([^}]*)\}/s);
   assert.ok(filtersBlock, 'areas filters CSS block exists');
   assert.match(filtersBlock[1], /display:\s*flex;/);
@@ -212,7 +213,7 @@ test('Planning Areas toolbar CSS keeps search and filters contained by wrapping 
 });
 
 test('Planning CSS uses compact panel typography and control density', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
 
   assert.match(css, /\.planning-panel\s*\{[^}]*font-size:\s*11px;[^}]*line-height:\s*1\.35;/s);
   assert.match(css, /\.planning-panel \.tpled-new-btn\s*\{[^}]*font-size:\s*12px;[^}]*padding:\s*1px\s+7px;/s);

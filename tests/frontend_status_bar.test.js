@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const repoRoot = path.resolve(__dirname, '..');
+const { appStylesheetSource } = require('./frontend_stylesheet_loader');
 
 class FakeClassList {
   constructor() { this._set = new Set(); }
@@ -183,7 +184,7 @@ function runTimer(timer) {
 
 test('status chips live right-aligned inside the bottom panelbar without a right rail', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   const panelbarStart = html.indexOf('<div id="panelbar">');
   const panelbarEnd = html.indexOf('<!-- Context menu', panelbarStart);
   assert.ok(panelbarStart >= 0 && panelbarEnd > panelbarStart, '#panelbar markup exists');

@@ -1,0 +1,429 @@
+/* ------------------------------------------------------------------ */
+/* Variables                                                           */
+/* ------------------------------------------------------------------ */
+:root {
+  --bg:          #0d1117;
+  --bg-surface:  #161b22;
+  --bg-cell:     #1c2129;
+  --bg-hover:    #252c35;
+  --border:      #30363d;
+  --text:        #e6edf3;
+  --text-dim:    #8b949e;
+  --accent:      #58a6ff;
+  --green:       #3fb950;
+  --red:         #f85149;
+  --amber:       #d29922;
+  --warn:        var(--amber);
+  --danger:      var(--red);
+  --muted:       var(--text-dim);
+  --font:        ui-monospace, "SF Mono", "Cascadia Mono", "Segoe UI Mono",
+                 "Liberation Mono", Menlo, Consolas, monospace;
+  --radius:      6px;
+  --standalone-sidebar-width: 340px;
+  --standalone-main-stack-min-width: 360px;
+  --standalone-right-rail-min-width: 320px;
+  --statusbar-bg: color-mix(in srgb, var(--bg) 88%, #000 12%);
+  --statusbar-bg-strong: color-mix(in srgb, var(--bg) 72%, #000 28%);
+  --statusbar-fg: var(--text);
+  --statusbar-muted: color-mix(in srgb, var(--text-dim) 88%, var(--text) 12%);
+  --statusbar-divider: color-mix(in srgb, var(--border) 82%, #000 18%);
+  --statusbar-segment-hover: color-mix(in srgb, var(--accent) 15%, transparent);
+  --statusbar-segment-active: color-mix(in srgb, var(--accent) 23%, transparent);
+}
+
+/* ------------------------------------------------------------------ */
+/* Reset                                                               */
+/* ------------------------------------------------------------------ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  height: 100%; width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font: 11px/1.4 var(--font);
+  overflow-x: hidden;
+  -webkit-user-select: text;
+  user-select: text;
+}
+body {
+  display: flex; flex-direction: column;
+}
+button {
+  font: inherit; cursor: pointer;
+  background: none; border: none; color: var(--text);
+}
+input, select {
+  font: inherit; color: var(--text);
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 6px 8px;
+  outline: none; width: 100%;
+}
+input:focus, select:focus { border-color: var(--accent); }
+
+/* Text selection defaults to on; only drag/chrome surfaces opt out. */
+button,
+select,
+summary,
+.cell,
+.term-row,
+.group-hdr,
+.board-card,
+.ghost-card,
+.pl-canvas-wrap {
+  -webkit-user-select: none;
+  user-select: none;
+}
+input,
+textarea,
+[contenteditable="true"],
+.agent-card-line,
+.agent-card-trunc,
+.agent-section-user-name,
+.agent-section-user-badge,
+.group-name,
+.group-count,
+.term-name,
+.term-path,
+.agent-group-tab-name,
+.agent-group-tab-count,
+.board-card-id,
+.board-card-last-transition,
+.board-card-title,
+.board-card-task-id,
+.board-card-lane-entered,
+.board-card-label,
+.board-card-lane-badge,
+.board-card-created-by-label,
+.board-card-assigned-engineer-name,
+.board-card-agent,
+.board-card-verification-note,
+.board-card-chain,
+.board-card-activity {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* ------------------------------------------------------------------ */
+/* Header                                                              */
+/* ------------------------------------------------------------------ */
+header {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+}
+#conn-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--red); flex-shrink: 0;
+  transition: background .3s;
+}
+#conn-dot.ok { background: var(--green); }
+header h1 {
+  font-size: 11px; font-weight: 700;
+  letter-spacing: .06em;
+}
+body.tauri-mode header .app-wordmark {
+  display: none;
+}
+/* Desktop client: header (status dot + reload + settings + wordmark) lives in the
+   OS menu bar and bottom taskbar instead. Standalone (browser) UI keeps it. */
+body.tauri-mode header {
+  display: none;
+}
+#taskbar-conn-dot {
+  display: none;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--red); flex-shrink: 0;
+  transition: background .3s;
+  margin-left: 8px;
+}
+#taskbar-conn-dot.ok { background: var(--green); }
+body.tauri-mode #taskbar-conn-dot {
+  display: inline-block;
+}
+/* Labelled daemon status in the taskbar. Reuses the relay indicator visual
+   language, but keeps the historical #taskbar-conn-dot as the WS/daemon dot
+   anchor so relay_status.js can still mount beside it. Unlike the old bare
+   dot, this labelled indicator is browser-visible as well as desktop-visible. */
+.daemon-connection-status #taskbar-conn-dot {
+  display: inline-block;
+  margin-left: 0;
+}
+.statusbar-info .daemon-connection-status {
+  display: inline-flex;
+}
+/* Relay-connection indicator (TORQUE:560). Daemon<->relay-cloud connection —
+   deliberately distinct from the daemon `#conn-dot` (browser<->daemon WS) via
+   the "Relay" label so the two are never confusable. Mounts beside whichever
+   connection dot `RELAY_STATUS_MOUNT` selects; renders identically. */
+.relay-status {
+  display: inline-flex; align-items: center; gap: 5px;
+  flex-shrink: 0;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+  font-size: 10px; color: var(--text-dim);
+  letter-spacing: .02em;
+}
+.relay-status[hidden], .relay-status--hidden { display: none; }
+.relay-status-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-dim);
+  transition: background .3s;
+}
+.relay-status-label { white-space: nowrap; }
+/* Dot color groups: all five states stay distinct in the label/tooltip text;
+   only the dot collapses to four urgency colors. */
+.relay-status-dot--green { background: var(--green); }
+.relay-status-dot--amber { background: var(--amber); }
+.relay-status-dot--red { background: var(--red); }
+.relay-status-dot--grey { background: var(--text-dim); }
+/* When mounted in the bottom status cluster, keep the indicator visible in browser and
+   desktop profiles, matching the labelled daemon status. */
+.statusbar-info .relay-status { display: inline-flex; }
+.hdr-spacer { flex: 1; min-width: 0; }
+.hdr-btn {
+  font-size: 10px; padding: 3px 8px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--text-dim);
+  transition: color .15s, border-color .15s;
+}
+.hdr-btn:hover { color: var(--text); border-color: var(--text-dim); }
+
+/* ------------------------------------------------------------------ */
+/* Main scroll area                                                    */
+/* ------------------------------------------------------------------ */
+#workspace-shell {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+#standalone-sidebar-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+#standalone-main-stack {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+main {
+  padding: 8px; overflow-y: auto; flex: 1; min-height: 0; min-width: 0;
+  --agent-architect-column-width: 77px;
+  --agent-engineer-column-width: 77px;
+  --agent-card-height: 96px;
+  --agent-user-card-height: 74px;
+  --agent-engineer-card-height: var(--agent-card-height);
+  --agent-worker-card-height: var(--agent-card-height);
+}
+#standalone-bottom-dock,
+#standalone-right-rail,
+#standalone-bottom-resize-handle,
+#standalone-rail-resize-handle,
+#standalone-float-layer { display: none; }
+#terminal-workspace { display: none; }
+
+body.runtime-embedded #workspace-shell {
+  display: grid;
+  grid-template-columns:
+    max(var(--standalone-sidebar-width), calc(var(--standalone-main-stack-min-width) + 8px + var(--standalone-right-rail-width, var(--standalone-right-rail-min-width))))
+    8px
+    minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+}
+body.runtime-embedded #standalone-sidebar-shell {
+  display: grid;
+  grid-template-columns: minmax(var(--standalone-main-stack-min-width), 1fr) 8px var(--standalone-right-rail-width, var(--standalone-right-rail-min-width));
+  grid-template-rows: minmax(0, 1fr) 8px var(--standalone-bottom-height, 280px);
+  min-height: 0;
+  grid-column: 1;
+  grid-row: 1;
+}
+body.runtime-embedded #standalone-main-stack {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  grid-column: 1;
+  grid-row: 1;
+}
+body.runtime-embedded #app-group-tabs-host {
+  position: relative;
+  z-index: 15;
+}
+body.runtime-embedded #standalone-rail-resize-handle {
+  grid-column: 2;
+  grid-row: 1;
+}
+body.runtime-embedded #standalone-right-rail {
+  grid-column: 3;
+  grid-row: 1;
+}
+body.runtime-embedded #standalone-right-rail:not(.collapsed) {
+  min-width: var(--standalone-right-rail-min-width);
+}
+body.runtime-embedded #standalone-bottom-resize-handle {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+body.runtime-embedded #standalone-bottom-dock {
+  grid-column: 1 / -1;
+  grid-row: 3;
+}
+body.runtime-embedded main {
+  padding: 12px 12px 10px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.02), transparent 180px),
+    var(--bg-surface);
+  --agent-architect-column-width: 106px;
+  --agent-engineer-column-width: 106px;
+  --agent-card-height: 108px;
+  --agent-user-card-height: 80px;
+  --agent-engineer-card-height: var(--agent-card-height);
+  --agent-worker-card-height: var(--agent-card-height);
+}
+body.runtime-embedded #standalone-bottom-dock,
+body.runtime-embedded #standalone-right-rail {
+  display: flex;
+  flex-direction: column;
+}
+body.runtime-embedded #standalone-bottom-resize-handle,
+body.runtime-embedded #standalone-rail-resize-handle,
+body.runtime-embedded #standalone-float-layer {
+  display: block;
+}
+#workspace-resize-handle {
+  display: none;
+}
+body.runtime-embedded #workspace-resize-handle {
+  display: block;
+  cursor: col-resize;
+  position: relative;
+  background: rgba(255,255,255,.02);
+  grid-column: 2;
+  grid-row: 1;
+}
+body.runtime-embedded #workspace-resize-handle::before {
+  content: '';
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 3px;
+  width: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 90%, transparent);
+  transition: background .15s ease;
+}
+body.runtime-embedded #workspace-resize-handle:hover::before,
+body.workspace-resizing #workspace-resize-handle::before {
+  background: color-mix(in srgb, var(--accent) 60%, var(--border));
+}
+body.runtime-embedded #terminal-workspace {
+  display: block;
+  grid-column: 3;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+  background:
+    radial-gradient(circle at top left, rgba(88,166,255,.08), transparent 28%),
+    linear-gradient(180deg, rgba(255,255,255,.015), transparent 28%),
+    var(--bg);
+}
+body.runtime-embedded #standalone-float-layer {
+  position: fixed;
+  inset: 44px 0 30px 0;
+  pointer-events: none;
+  z-index: 20;
+}
+
+/* ------------------------------------------------------------------ */
+/* Empty state                                                         */
+/* ------------------------------------------------------------------ */
+.empty {
+  text-align: center; color: var(--text-dim);
+  padding: 32px 12px; font-size: 11px; line-height: 1.6;
+}
+.empty-icon { font-size: 28px; margin-bottom: 8px; opacity: .5; }
+.empty-action {
+  display: inline-flex;
+  margin-top: 10px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  background: var(--bg-cell);
+}
+.empty-action:hover {
+  border-color: var(--text-dim);
+  background: var(--bg-hover);
+}
+
+/* ------------------------------------------------------------------ */
+/* Group card                                                          */
+/* ------------------------------------------------------------------ */
+.group {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+}
+.group-hdr {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.group-name {
+  font-weight: 600; font-size: 11px; flex: 1;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.group-count {
+  font-size: 10px; color: var(--text-dim);
+  background: var(--bg); padding: 1px 5px;
+  border-radius: 8px;
+}
+.group-toggle {
+  font-size: 10px; color: var(--text-dim);
+  width: 16px; height: 16px;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform .2s ease-out;
+}
+.group.collapsed .group-toggle { transform: rotate(-90deg); }
+.group.collapsed .group-hdr { border-bottom: none; }
+.group-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows .2s ease-out;
+}
+.group.collapsed .group-body { grid-template-rows: 0fr; }
+.group-body-inner {
+  overflow: hidden;
+  /* Grid sizing tokens shared by nested agent-grid layout surfaces. */
+  --agent-architect-column-width: 77px;
+  --agent-engineer-column-width: 77px;
+  --agent-card-height: 96px;
+  --agent-user-card-height: 74px;
+  --agent-engineer-card-height: var(--agent-card-height);
+  --agent-worker-card-height: var(--agent-card-height);
+}
+body.runtime-embedded .group-body-inner {
+  --agent-architect-column-width: 106px;
+  --agent-engineer-column-width: 106px;
+  --agent-card-height: 108px;
+  --agent-user-card-height: 80px;
+  --agent-engineer-card-height: var(--agent-card-height);
+  --agent-worker-card-height: var(--agent-card-height);
+}
+.group-btn {
+  font-size: 12px; color: var(--text-dim);
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 4px; transition: background .15s, color .15s;
+}
+.group-btn:hover { background: var(--bg-hover); color: var(--text); }
+
+/* ------------------------------------------------------------------ */

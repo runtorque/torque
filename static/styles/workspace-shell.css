@@ -1,0 +1,685 @@
+/* ------------------------------------------------------------------ */
+/* Status + panel bar                                                 */
+/* ------------------------------------------------------------------ */
+#panelbar {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  background: var(--statusbar-bg);
+  border-top: 1px solid var(--statusbar-divider);
+  padding: 0 4px;
+  flex: 0 0 24px;
+  height: 24px;
+  min-width: 0;
+  overflow: hidden;
+}
+body.runtime-embedded #panelbar {
+  gap: 0;
+  flex-basis: 30px;
+  height: 30px;
+  padding: 0 8px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.035), transparent 90%),
+    var(--statusbar-bg);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
+}
+.taskbar-app {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  min-height: 100%;
+  font-size: 10px; color: var(--statusbar-muted);
+  padding: 0 8px;
+  border-right: 1px solid var(--statusbar-divider);
+  border-radius: 0;
+  white-space: nowrap;
+  transition: color .15s, background .15s;
+}
+body.runtime-embedded .taskbar-app {
+  gap: 6px;
+  min-height: 30px;
+  font-size: 10px;
+  padding: 0 8px;
+  border-radius: 0;
+}
+.taskbar-app-icon {
+  width: 12px;
+  height: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.taskbar-app-icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.thinking-icon,
+.standalone-panel-tab-icon,
+.standalone-float-title-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.thinking-connected-nodes-icon {
+  width: 100%;
+  height: 100%;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.65;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.taskbar-app:hover { color: var(--statusbar-fg); background: var(--statusbar-segment-hover); }
+.taskbar-app.active { color: var(--accent); background: var(--statusbar-segment-active); }
+body.runtime-embedded .taskbar-app.active {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.taskbar-spacer {
+  flex: 1 1 auto;
+  min-width: 8px;
+}
+.statusbar-info,
+.statusbar-panel-buttons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.statusbar-info {
+  flex: 0 1 auto;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0;
+  margin-left: auto;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.statusbar-panel-buttons {
+  flex: 0 1 auto;
+  gap: 0;
+  justify-content: flex-start;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.statusbar-panel-buttons::-webkit-scrollbar { display: none; }
+.statusbar-info > .daemon-connection-status:first-child,
+.statusbar-info .relay-status {
+  height: 100%;
+  min-height: 24px;
+  padding: 0 8px;
+  border-left: 1px solid var(--statusbar-divider);
+  background: transparent;
+  color: var(--statusbar-muted);
+  font-size: 10px;
+  line-height: 1;
+}
+.statusbar-info .relay-status {
+  display: inline-flex;
+  justify-content: flex-start;
+}
+.statusbar-info .relay-status[hidden],
+.statusbar-info .relay-status--hidden {
+  display: none;
+}
+body.runtime-embedded .statusbar-info > .daemon-connection-status:first-child,
+body.runtime-embedded .statusbar-info .relay-status {
+  min-height: 30px;
+  font-size: 10px;
+}
+.statusbar-info #taskbar-conn-dot,
+.statusbar-info .relay-status-dot {
+  width: 7px;
+  height: 7px;
+}
+.statusbar-info .relay-status-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.statusbar-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+  width: auto;
+  max-width: 150px;
+  height: 100%;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-left: 1px solid var(--statusbar-divider);
+  border-radius: 0;
+  background: transparent;
+  color: var(--statusbar-muted);
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: .01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: inset 2px 0 0 transparent;
+}
+body.runtime-embedded .statusbar-chip {
+  min-height: 30px;
+  padding: 0 8px;
+  font-size: 10px;
+}
+.statusbar-chip[hidden] { display: none !important; }
+.statusbar-chip-button {
+  font: inherit;
+  cursor: pointer;
+}
+.statusbar-chip[role="button"] {
+  cursor: pointer;
+}
+.statusbar-chip-button:hover {
+  color: var(--statusbar-fg);
+  background: var(--statusbar-segment-hover);
+}
+.statusbar-chip[role="button"]:hover,
+.statusbar-chip[role="button"]:focus-visible {
+  color: var(--statusbar-fg);
+  background: var(--statusbar-segment-hover);
+  outline: none;
+}
+.statusbar-chip--normal {
+  color: var(--statusbar-fg);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--green) 58%, transparent);
+}
+.statusbar-chip--warn {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 11%, transparent);
+  box-shadow: inset 2px 0 0 var(--warn);
+}
+.statusbar-chip--danger {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  box-shadow: inset 2px 0 0 var(--danger);
+}
+.statusbar-chip--muted,
+.statusbar-chip--unknown {
+  color: var(--statusbar-muted);
+  background: transparent;
+  opacity: .86;
+}
+.statusbar-chip-attention.statusbar-chip--warn,
+.statusbar-chip-attention.statusbar-chip--danger {
+  font-weight: 700;
+}
+.taskbar-aux-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  width: 32px;
+  min-width: 32px;
+  min-height: 100%;
+  font-size: 10px;
+  color: var(--statusbar-muted);
+  padding: 0 8px;
+  border: 0;
+  border-left: 1px solid var(--statusbar-divider);
+  border-radius: 0;
+  background: transparent;
+  transition: color .15s, border-color .15s, background .15s;
+}
+body.runtime-embedded .taskbar-aux-btn {
+  display: inline-flex;
+  font-size: 10px;
+}
+.taskbar-aux-icon,
+.taskbar-aux-icon svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+.taskbar-aux-icon svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.taskbar-aux-btn:hover {
+  color: var(--statusbar-fg);
+  background: var(--statusbar-segment-hover);
+}
+.taskbar-app.panel-attention,
+.taskbar-app.has-badge {
+  box-shadow: inset 0 0 0 1px var(--amber);
+  animation: panel-attention-pulse 2s ease-in-out infinite;
+}
+@keyframes panel-attention-pulse {
+  0%, 100% { box-shadow: inset 0 0 0 1px var(--amber); }
+  50%      { box-shadow: inset 0 0 0 1px var(--amber), 0 0 4px var(--amber); }
+}
+
+@media (max-width: 1280px) {
+  .statusbar-chip-tasks { display: none; }
+}
+@media (max-width: 1140px) {
+  .statusbar-chip-agents { display: none; }
+}
+@media (max-width: 980px) {
+  .statusbar-chip-deploy { display: none; }
+}
+@media (max-width: 860px) {
+  .statusbar-chip-attention { display: none; }
+}
+@media (max-width: 760px) {
+  .statusbar-chip-deploy,
+  .statusbar-chip-agents,
+  .statusbar-chip-tasks,
+  .statusbar-chip-attention { display: none; }
+  .statusbar-chip { max-width: 120px; padding-inline: 6px; }
+}
+/* ------------------------------------------------------------------ */
+/* Standalone dock workspace                                          */
+/* ------------------------------------------------------------------ */
+body.runtime-embedded #standalone-bottom-resize-handle,
+body.runtime-embedded #standalone-rail-resize-handle {
+  position: relative;
+  background: rgba(255,255,255,.02);
+}
+body.runtime-embedded #standalone-bottom-resize-handle {
+  cursor: ns-resize;
+}
+body.runtime-embedded #standalone-rail-resize-handle {
+  cursor: col-resize;
+}
+body.runtime-embedded #standalone-bottom-resize-handle::before,
+body.runtime-embedded #standalone-rail-resize-handle::before {
+  content: '';
+  position: absolute;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 88%, transparent);
+}
+body.runtime-embedded #standalone-bottom-resize-handle::before {
+  left: 50%;
+  top: 2px;
+  width: 44px;
+  height: 3px;
+  transform: translateX(-50%);
+}
+body.runtime-embedded #standalone-rail-resize-handle::before {
+  top: 10px;
+  bottom: 10px;
+  left: 3px;
+  width: 2px;
+}
+body.runtime-embedded #standalone-bottom-resize-handle.collapsed,
+body.runtime-embedded #standalone-rail-resize-handle.collapsed {
+  opacity: 0;
+  pointer-events: none;
+}
+body.runtime-embedded #standalone-bottom-dock,
+body.runtime-embedded #standalone-right-rail {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.06);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.02), transparent 120px),
+    var(--bg-surface);
+}
+body.runtime-embedded #standalone-bottom-dock {
+  border-top-color: rgba(255,255,255,.08);
+}
+body.runtime-embedded #standalone-right-rail {
+  border-left-color: rgba(255,255,255,.08);
+}
+.standalone-panel-zone-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255,255,255,.02);
+}
+.standalone-panel-zone-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+}
+.standalone-panel-tab,
+.standalone-panel-zone-btn {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  background: var(--bg-cell);
+  font: inherit;
+  font-size: 10px;
+  padding: 3px 8px;
+  transition: color .15s, border-color .15s, background .15s, box-shadow .15s;
+}
+.standalone-panel-tab:hover,
+.standalone-panel-zone-btn:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+.standalone-panel-zone-btn:focus-visible {
+  outline: none;
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-cell));
+  position: relative;
+  z-index: 1;
+}
+.standalone-panel-tab.active {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-cell));
+}
+.standalone-panel-tab-has-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.standalone-panel-tab-icon {
+  width: 12px;
+  height: 12px;
+}
+.standalone-panel-tab-label {
+  min-width: 0;
+}
+.standalone-panel-zone-actions,
+.standalone-float-actions {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.standalone-panel-zone-btn-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 0;
+  flex: 0 0 auto;
+}
+.standalone-panel-zone-btn-icon + .standalone-panel-zone-btn-icon {
+  margin-left: -1px;
+}
+.standalone-panel-zone-btn-icon:first-child {
+  border-top-left-radius: 8px;
+  border-bottom-left-radius: 8px;
+}
+.standalone-panel-zone-btn-icon:last-child {
+  border-top-right-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+.standalone-panel-zone-btn-icon:hover,
+.standalone-panel-zone-btn-icon:focus-visible {
+  z-index: 1;
+}
+.standalone-panel-zone-btn-glyph {
+  width: 14px;
+  height: 14px;
+  display: block;
+  stroke: currentColor;
+  fill: none;
+  pointer-events: none;
+}
+.standalone-panel-zone-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+}
+.standalone-panel-empty-drop {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed rgba(88,166,255,.28);
+  border-radius: 10px;
+  margin: 8px;
+  color: var(--text-dim);
+  background: rgba(88,166,255,.05);
+  text-align: center;
+  letter-spacing: .02em;
+}
+#standalone-bottom-dock,
+#standalone-right-rail {
+  display: flex;
+  flex-direction: column;
+}
+#standalone-bottom-dock.collapsed,
+#standalone-right-rail.collapsed {
+  visibility: hidden;
+}
+body.runtime-embedded .standalone-panel-zone-body > #panel-board,
+body.runtime-embedded .standalone-panel-zone-body > #panel-chat,
+body.runtime-embedded .standalone-panel-zone-body > #panel-actions,
+body.runtime-embedded .standalone-panel-zone-body > #panel-initiatives,
+body.runtime-embedded .standalone-panel-zone-body > #panel-thinking,
+body.runtime-embedded .standalone-panel-zone-body > #panel-mission-control,
+body.runtime-embedded .standalone-panel-zone-body > #panel-templates,
+body.runtime-embedded .standalone-panel-zone-body > #panel-history,
+body.runtime-embedded .standalone-panel-zone-body > #panel-context,
+body.runtime-embedded .standalone-panel-zone-body > #panel-events,
+body.runtime-embedded .standalone-panel-zone-body > #panel-agent,
+body.runtime-embedded .standalone-panel-zone-body > #panel-supervisor,
+body.runtime-embedded .standalone-panel-zone-body > #panel-health,
+body.runtime-embedded .standalone-panel-zone-body > #panel-help,
+body.runtime-embedded .standalone-float-body > #panel-board,
+body.runtime-embedded .standalone-float-body > #panel-chat,
+body.runtime-embedded .standalone-float-body > #panel-actions,
+body.runtime-embedded .standalone-float-body > #panel-initiatives,
+body.runtime-embedded .standalone-float-body > #panel-thinking,
+body.runtime-embedded .standalone-float-body > #panel-mission-control,
+body.runtime-embedded .standalone-float-body > #panel-templates,
+body.runtime-embedded .standalone-float-body > #panel-history,
+body.runtime-embedded .standalone-float-body > #panel-context,
+body.runtime-embedded .standalone-float-body > #panel-events,
+body.runtime-embedded .standalone-float-body > #panel-agent,
+body.runtime-embedded .standalone-float-body > #panel-supervisor,
+body.runtime-embedded .standalone-float-body > #panel-health,
+body.runtime-embedded .standalone-float-body > #panel-help {
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+body.runtime-embedded.standalone-panel-dragging #standalone-bottom-dock,
+body.runtime-embedded.standalone-panel-dragging #standalone-right-rail {
+  pointer-events: auto;
+}
+#standalone-bottom-dock.drag-target,
+#standalone-right-rail.drag-target {
+  box-shadow: inset 0 0 0 2px rgba(88,166,255,.6);
+}
+.standalone-float-shell {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 10px;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.03), transparent 120px),
+    var(--bg-surface);
+  box-shadow: 0 18px 60px rgba(0,0,0,.35);
+  pointer-events: auto;
+}
+.standalone-float-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: move;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.standalone-float-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+}
+.standalone-float-title-has-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.standalone-float-title-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
+}
+.standalone-float-body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.standalone-float-resize-handle {
+  position: absolute;
+  z-index: 3;
+  pointer-events: auto;
+  touch-action: none;
+}
+.standalone-float-resize-handle-n,
+.standalone-float-resize-handle-s {
+  left: 12px;
+  right: 12px;
+  height: 8px;
+}
+.standalone-float-resize-handle-n {
+  top: 0;
+  cursor: n-resize;
+}
+.standalone-float-resize-handle-s {
+  bottom: 0;
+  cursor: s-resize;
+}
+.standalone-float-resize-handle-e,
+.standalone-float-resize-handle-w {
+  top: 12px;
+  bottom: 12px;
+  width: 8px;
+}
+.standalone-float-resize-handle-e {
+  right: 0;
+  cursor: e-resize;
+}
+.standalone-float-resize-handle-w {
+  left: 0;
+  cursor: w-resize;
+}
+.standalone-float-resize-handle-ne,
+.standalone-float-resize-handle-nw,
+.standalone-float-resize-handle-se,
+.standalone-float-resize-handle-sw {
+  width: 16px;
+  height: 16px;
+}
+.standalone-float-resize-handle-ne {
+  top: 0;
+  right: 0;
+  cursor: ne-resize;
+}
+.standalone-float-resize-handle-nw {
+  top: 0;
+  left: 0;
+  cursor: nw-resize;
+}
+.standalone-float-resize-handle-se {
+  right: 0;
+  bottom: 0;
+  cursor: se-resize;
+}
+.standalone-float-resize-handle-sw {
+  left: 0;
+  bottom: 0;
+  cursor: sw-resize;
+}
+.standalone-float-resize-handle-se::after {
+  content: '';
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 8px;
+  height: 8px;
+  border-right: 1px solid rgba(255,255,255,.24);
+  border-bottom: 1px solid rgba(255,255,255,.24);
+  opacity: .75;
+  pointer-events: none;
+}
+body.standalone-float-resizing {
+  user-select: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Bottom panel (collapsible, hosts panel apps)                        */
+/* ------------------------------------------------------------------ */
+#bottom-panel {
+  flex-shrink: 0;
+  overflow: hidden;
+  border-top: 1px solid var(--border);
+  background: var(--bg-surface);
+  height: var(--panel-height, 20vh);
+}
+body.runtime-embedded #bottom-panel {
+  height: var(--panel-height, clamp(220px, 28vh, 340px));
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.02), transparent 130px),
+    var(--bg-surface);
+  border-top-color: rgba(255,255,255,.06);
+  box-shadow: 0 -18px 40px rgba(0,0,0,.2);
+}
+body.runtime-embedded #bottom-panel.collapsed {
+  height: 0;
+  border-top: none;
+  box-shadow: none;
+}
+#bottom-panel.collapsed {
+  height: 0;
+  border-top: none;
+}
+
+/* Resize handle */
+.panel-resize-handle {
+  height: 5px; cursor: ns-resize;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.panel-resize-handle::after {
+  content: '';
+  width: 32px; height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+  transition: background .15s;
+}
+.panel-resize-handle:hover::after { background: var(--text-dim); }
+body.runtime-embedded .panel-resize-handle::after {
+  width: 44px;
+  background: color-mix(in srgb, var(--border) 88%, transparent);
+}
+

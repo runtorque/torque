@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const repoRoot = path.resolve(__dirname, '..');
+const { appStylesheetSource } = require('./frontend_stylesheet_loader');
 
 function loadScript(context, relPath) {
   const filename = path.join(repoRoot, relPath);
@@ -270,7 +271,7 @@ test('architect execution workers remain a full-width multi-column grid with one
   assert.match(sectionHtml, /data-worker-count="6"/);
   assert.match(sectionHtml, /Panelsmith[\s\S]*Worker 1[\s\S]*Worker 2[\s\S]*Worker 3[\s\S]*Worker 4[\s\S]*Worker 5[\s\S]*Worker 6/);
 
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   const executionBandDisplay = classOnlyCssDeclaration(
     css,
     ['agent-band', 'agent-band--architect-execution', 'agent-section', 'agent-section-architect'],
@@ -462,7 +463,7 @@ test('legacy selectPrincipal persists compatibility state without filtering the 
 });
 
 test('stratified grid CSS defines flat architect strip, retained execution area, wrapping workers, and responsive behavior', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   const paneBlock = (css.match(/\.agents-grid-pane\s*\{[^}]*\}/) || [''])[0];
   const toolbarBlock = (css.match(/\.agent-grid-toolbar\s*\{[^}]*\}/) || [''])[0];
 

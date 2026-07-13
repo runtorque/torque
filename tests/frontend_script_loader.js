@@ -16,6 +16,16 @@ function webviewScriptSources(html) {
   );
 }
 
+function webviewStylesheetSources(html) {
+  const source = html == null
+    ? fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8')
+    : String(html);
+  return Array.from(
+    source.matchAll(/<link\s+[^>]*rel=["']stylesheet["'][^>]*href=["']\/([^"']+)["'][^>]*>/g),
+    (match) => match[1],
+  );
+}
+
 function loadFrontendScript(context, relativePath) {
   const filename = path.join(repoRoot, relativePath);
   const source = fs.readFileSync(filename, 'utf8');
@@ -38,6 +48,7 @@ function loadWebviewScriptsThrough(context, finalScript, options = {}) {
 module.exports = {
   repoRoot,
   webviewScriptSources,
+  webviewStylesheetSources,
   loadFrontendScript,
   loadWebviewScriptsThrough,
 };

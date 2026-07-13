@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const repoRoot = path.resolve(__dirname, '..');
+const { appStylesheetSource } = require('./frontend_stylesheet_loader');
 
 function loadScript(context, relPath) {
   const filename = path.join(repoRoot, relPath);
@@ -1799,7 +1800,7 @@ test('architect Journal header keeps entry and decision counts grouped', () => {
     /<span class="agent-panel-worklog-title">Journal<\/span><span class="agent-panel-worklog-count" data-agent-panel-journal-count>2<\/span><span class="agent-panel-worklog-note"> · 1 decision<\/span>/
   );
 
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   assert.match(
     css,
     /\.agent-panel-panel\[data-agent-panel-kind="architect"\]\[data-agent-panel-tab="journal"\] \.agent-panel-worklog-header\s*\{[^}]*justify-content:\s*flex-start;/
@@ -2559,7 +2560,7 @@ test('focused architect decision rows clamp titles and use compact secondary met
   assert.match(panel.innerHTML, /Edit/);
   assert.match(panel.innerHTML, /Archive/);
 
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const css = appStylesheetSource();
   assert.match(
     css,
     /\.architect-decision-toggle\s*\{[^}]*flex:\s*1 1 auto;/
