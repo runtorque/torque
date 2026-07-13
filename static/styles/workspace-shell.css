@@ -598,16 +598,16 @@ body.runtime-embedded #standalone-right-rail {
 .standalone-panel-zone-header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   justify-content: space-between;
-  padding: 6px 8px;
+  padding: 3px 6px;
   border-bottom: 1px solid var(--border);
   background: rgba(255,255,255,.02);
 }
 .standalone-panel-zone-tabs {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
   overflow-x: auto;
 }
@@ -619,7 +619,9 @@ body.runtime-embedded #standalone-right-rail {
   background: var(--bg-cell);
   font: inherit;
   font-size: 10px;
-  padding: 3px 8px;
+  height: 24px;
+  padding: 0 7px;
+  line-height: 1;
   transition: color .15s, border-color .15s, background .15s, box-shadow .15s;
 }
 .standalone-panel-tab:hover,
@@ -643,11 +645,11 @@ body.runtime-embedded #standalone-right-rail {
 .standalone-panel-tab-has-icon {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
 }
 .standalone-panel-tab-icon {
-  width: 12px;
-  height: 12px;
+  width: 11px;
+  height: 11px;
 }
 .standalone-panel-tab-label {
   min-width: 0;
@@ -665,8 +667,8 @@ body.runtime-embedded #standalone-right-rail {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border-radius: 0;
   flex: 0 0 auto;

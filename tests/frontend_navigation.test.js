@@ -54,6 +54,9 @@ test('panel launcher is compact, pinned, searchable, and backed by consistent SV
   assert.match(palette, /function openNavigationPalette/);
   assert.match(nav, /return '<span class="taskbar-app-icon"[\s\S]*<svg/);
   assert.match(css, /body\.runtime-embedded #panelbar\s*\{[^}]*flex-basis:\s*24px;[^}]*height:\s*24px;/s);
+  assert.match(css, /\.standalone-panel-zone-header\s*\{[^}]*gap:\s*6px;[^}]*padding:\s*3px 6px;/s);
+  assert.match(css, /\.standalone-panel-tab,[\s\S]*?\.standalone-panel-zone-btn\s*\{[^}]*height:\s*24px;[^}]*padding:\s*0 7px;/s);
+  assert.match(css, /\.standalone-panel-zone-btn-icon\s*\{[^}]*width:\s*24px;[^}]*height:\s*24px;/s);
   assert.match(css, /\.taskbar-app\.panel-nav-hidden\s*\{\s*display:\s*none !important;/);
   assert.match(css, /@container panel-launcher \(max-width:\s*1180px\)/);
 });
