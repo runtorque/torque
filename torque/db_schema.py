@@ -15,7 +15,7 @@ import json
 import sqlite3
 from typing import Callable, Iterable
 
-SCHEMA_VERSION = "10"
+SCHEMA_VERSION = "11"
 
 
 @dataclass(frozen=True)
@@ -27,6 +27,7 @@ class SchemaMigration:
     signature: str
     apply: Callable[[sqlite3.Connection, Callable], None]
     phase: str = "schema"
+    requires_runner: bool = False
 
     @property
     def checksum(self) -> str:
@@ -372,6 +373,11 @@ AGENT_PEER_MESSAGE_COLUMNS = {
     "read_at": "REAL NOT NULL DEFAULT 0",
     "archived_at": "REAL NOT NULL DEFAULT 0",
     "idempotency_key": "TEXT NOT NULL DEFAULT ''",
+}
+
+ENGINEER_JOURNAL_PROVENANCE_COLUMNS = {
+    "author_cell_id": "TEXT NOT NULL DEFAULT ''",
+    "source_key": "TEXT NOT NULL DEFAULT ''",
 }
 
 
@@ -2540,30 +2546,6 @@ def _reconcile_legacy_schema(conn: sqlite3.Connection, backfill_agent_history):
     _ensure_idea_brief_schema(conn)
     conn.commit()
     _migrate_behavior_overlay_scope_schema(conn)
-    # Migrate: add journal author provenance for engineer-scoped reads
-    try:
-        conn.execute("SELECT author_cell_id FROM engineer_journal LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE engineer_journal ADD COLUMN "
-            "author_cell_id TEXT NOT NULL DEFAULT ''")
-        conn.commit()
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_engineer_journal_group_author "
-        "ON engineer_journal(group_name, author_cell_id, id DESC)")
-    try:
-        conn.execute("SELECT source_key FROM engineer_journal LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE engineer_journal ADD COLUMN "
-            "source_key TEXT NOT NULL DEFAULT ''")
-        conn.commit()
-    conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS "
-        "idx_engineer_journal_source_key "
-        "ON engineer_journal(group_name, author_cell_id, source_key) "
-        "WHERE source_key <> ''")
-    conn.commit()
     # Migrate: add slug columns to existing tables
     for table in ("agents", "groups", "board_tasks"):
         try:
@@ -3476,6 +3458,29 @@ def _migration_0010_canonical_task_ids(
     """Ledger canonical task-ID rewriting and reference reconciliation."""
 
 
+def _migration_0011_engineer_journal_provenance(
+    conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Own journal author/source provenance and lookup indexes."""
+
+    _ensure_columns(
+        conn,
+        "engineer_journal",
+        ENGINEER_JOURNAL_PROVENANCE_COLUMNS,
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_engineer_journal_group_author "
+        "ON engineer_journal(group_name, author_cell_id, id DESC)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS "
+        "idx_engineer_journal_source_key "
+        "ON engineer_journal(group_name, author_cell_id, source_key) "
+        "WHERE source_key <> ''"
+    )
+
+
 SCHEMA_MIGRATIONS = (
     SchemaMigration(
         1,
@@ -3525,6 +3530,7 @@ SCHEMA_MIGRATIONS = (
         "kinds-backfill-cleanup-stage4-v1",
         _migration_0008_kinds_legacy_stages_complete,
         phase="post_init",
+        requires_runner=True,
     ),
     SchemaMigration(
         9,
@@ -3532,12 +3538,21 @@ SCHEMA_MIGRATIONS = (
         "legacy-engineer-to-agent-digest-v1",
         _migration_0009_digest_settings_backfill,
         phase="post_init",
+        requires_runner=True,
     ),
     SchemaMigration(
         10,
         "canonical_task_ids",
         "canonical-task-ids-and-references-v1",
         _migration_0010_canonical_task_ids,
+        phase="post_init",
+        requires_runner=True,
+    ),
+    SchemaMigration(
+        11,
+        "engineer_journal_provenance",
+        "engineer-journal-provenance-v1",
+        _migration_0011_engineer_journal_provenance,
         phase="post_init",
     ),
 )
@@ -3587,6 +3602,16 @@ def _validate_migration_catalog(
     if invalid_phases:
         raise RuntimeError(
             f"Unknown schema migration phase(s): {invalid_phases}"
+        )
+    invalid_runner_migrations = [
+        item.version
+        for item in ordered
+        if item.requires_runner and item.phase != "post_init"
+    ]
+    if invalid_runner_migrations:
+        raise RuntimeError(
+            "Runner-backed migrations must use the post_init phase: "
+            f"{invalid_runner_migrations}"
         )
     seen_post_init = False
     for item in ordered:
@@ -3798,19 +3823,22 @@ def finalize_database_migrations(
                 apply_migration = migration.apply
         else:
             if runner is None:
-                return False
+                if migration.requires_runner:
+                    return False
+                apply_migration = migration.apply
+            else:
 
-            def apply_runner_migration(
-                connection,
-                backfill,
-                *,
-                _runner=runner,
-                _migration=migration,
-            ) -> None:
-                _runner()
-                _migration.apply(connection, backfill)
+                def apply_runner_migration(
+                    connection,
+                    backfill,
+                    *,
+                    _runner=runner,
+                    _migration=migration,
+                ) -> None:
+                    _runner()
+                    _migration.apply(connection, backfill)
 
-            apply_migration = apply_runner_migration
+                apply_migration = apply_runner_migration
 
         try:
             _apply_schema_migrations(
