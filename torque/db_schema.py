@@ -15,7 +15,7 @@ import json
 import sqlite3
 from typing import Callable, Iterable
 
-SCHEMA_VERSION = "12"
+SCHEMA_VERSION = "13"
 
 
 @dataclass(frozen=True)
@@ -28,6 +28,7 @@ class SchemaMigration:
     apply: Callable[[sqlite3.Connection, Callable], None]
     phase: str = "schema"
     requires_runner: bool = False
+    repair_on_boot: bool = False
 
     @property
     def checksum(self) -> str:
@@ -381,6 +382,18 @@ ENGINEER_JOURNAL_PROVENANCE_COLUMNS = {
 }
 
 SLUGGED_ENTITY_TABLES = ("agents", "groups", "board_tasks")
+
+GROUP_PROVIDER_RUNTIME_COLUMNS = {
+    "agent_terminal_profile": "TEXT NOT NULL DEFAULT ''",
+    "agent_provider": "TEXT NOT NULL DEFAULT ''",
+    "agent_boot_command": "TEXT NOT NULL DEFAULT ''",
+    "agent_model": "TEXT NOT NULL DEFAULT ''",
+    "agent_reasoning_effort": "TEXT NOT NULL DEFAULT ''",
+    "worker_provider": "TEXT NOT NULL DEFAULT ''",
+    "worker_boot_command": "TEXT NOT NULL DEFAULT ''",
+    "worker_model": "TEXT NOT NULL DEFAULT ''",
+    "worker_reasoning_effort": "TEXT NOT NULL DEFAULT ''",
+}
 
 
 def _ensure_mcp_idempotency_schema(conn: sqlite3.Connection) -> None:
@@ -2548,45 +2561,6 @@ def _reconcile_legacy_schema(conn: sqlite3.Connection, backfill_agent_history):
     _ensure_idea_brief_schema(conn)
     conn.commit()
     _migrate_behavior_overlay_scope_schema(conn)
-    # Migrate: add agent_provider column
-    try:
-        conn.execute(
-            "SELECT agent_terminal_profile FROM group_settings LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE group_settings ADD COLUMN "
-            "agent_terminal_profile TEXT NOT NULL DEFAULT ''")
-        conn.commit()
-    try:
-        conn.execute(
-            "SELECT agent_provider FROM group_settings LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE group_settings ADD COLUMN "
-            "agent_provider TEXT NOT NULL DEFAULT ''")
-        conn.commit()
-    for col in ("agent_model", "agent_reasoning_effort"):
-        try:
-            conn.execute(
-                f"SELECT {col} FROM group_settings LIMIT 0")
-        except sqlite3.OperationalError:
-            conn.execute(
-                f"ALTER TABLE group_settings ADD COLUMN "
-                f"{col} TEXT NOT NULL DEFAULT ''")
-            conn.commit()
-    for col in (
-            "worker_provider",
-            "worker_boot_command",
-            "worker_model",
-            "worker_reasoning_effort"):
-        try:
-            conn.execute(
-                f"SELECT {col} FROM group_settings LIMIT 0")
-        except sqlite3.OperationalError:
-            conn.execute(
-                f"ALTER TABLE group_settings ADD COLUMN "
-                f"{col} TEXT NOT NULL DEFAULT ''")
-            conn.commit()
     # Migrate: add terminal_close_on_disconnect column
     try:
         conn.execute(
@@ -3484,6 +3458,15 @@ def _migration_0012_persisted_entity_slugs(
         _ensure_columns(conn, table, {"slug": "TEXT NOT NULL DEFAULT ''"})
 
 
+def _migration_0013_group_provider_runtime_settings(
+    conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Own group-level defaults for agent and worker provider launches."""
+
+    _ensure_columns(conn, "group_settings", GROUP_PROVIDER_RUNTIME_COLUMNS)
+
+
 SCHEMA_MIGRATIONS = (
     SchemaMigration(
         1,
@@ -3557,6 +3540,7 @@ SCHEMA_MIGRATIONS = (
         "engineer-journal-provenance-v1",
         _migration_0011_engineer_journal_provenance,
         phase="post_init",
+        repair_on_boot=True,
     ),
     SchemaMigration(
         12,
@@ -3564,6 +3548,15 @@ SCHEMA_MIGRATIONS = (
         "agent-group-task-slugs-v1",
         _migration_0012_persisted_entity_slugs,
         phase="post_init",
+        repair_on_boot=True,
+    ),
+    SchemaMigration(
+        13,
+        "group_provider_runtime_settings",
+        "group-agent-worker-provider-runtime-v1",
+        _migration_0013_group_provider_runtime_settings,
+        phase="post_init",
+        repair_on_boot=True,
     ),
 )
 
@@ -3748,6 +3741,31 @@ def _apply_schema_migrations(
         conn.commit()
 
 
+def _repair_applied_schema_contracts(
+    conn: sqlite3.Connection,
+    backfill_agent_history,
+) -> None:
+    """Reconcile additive contracts explicitly marked as boot-repairable.
+
+    Some historical installations (and recovery workflows) can retain a
+    complete migration ledger while an additive table contract is partial.
+    Keep that compatibility behavior attached to the owning migration instead
+    of accumulating independent column probes in the legacy baseline.
+    """
+
+    applied = _applied_schema_migrations(conn)
+    for migration in SCHEMA_MIGRATIONS:
+        if not migration.repair_on_boot or migration.version not in applied:
+            continue
+        try:
+            conn.execute("BEGIN")
+            migration.apply(conn, backfill_agent_history)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+
 def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     """Configure SQLite and advance the database to ``SCHEMA_VERSION``."""
 
@@ -3766,6 +3784,7 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
         backfill_agent_history,
         phases={"schema"},
     )
+    _repair_applied_schema_contracts(conn, backfill_agent_history)
 
 
 def finalize_database_migrations(

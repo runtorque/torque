@@ -15,6 +15,7 @@ from torque.db_schema import (
     BOARD_TASK_ROUTING_COLUMNS,
     DECISION_COLUMNS,
     ENGINEER_JOURNAL_PROVENANCE_COLUMNS,
+    GROUP_PROVIDER_RUNTIME_COLUMNS,
     PENDING_HIRE_LIFECYCLE_COLUMNS,
     SCHEMA_MIGRATIONS,
     SCHEMA_VERSION,
@@ -216,7 +217,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
 
         self.assertTrue(set(BOARD_TASK_ROUTING_COLUMNS) <= columns)
         self.assertIn((3, "board_task_routing_contract"), ledger)
-        self.assertEqual(ledger[-1], (12, "persisted_entity_slugs"))
+        self.assertEqual(ledger[-1], (13, "group_provider_runtime_settings"))
         self.assertFalse(set(BOARD_TASK_ROUTING_COLUMNS) & backup_columns)
         self.assertEqual(backup_version, (2,))
         self.assertEqual(rerun_backup_mtime, backup_mtime)
@@ -311,7 +312,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
         self.assertTrue(set(AGENT_CLASS_AUDIT_COLUMNS) <= audit_columns)
         self.assertTrue(set(DECISION_COLUMNS) <= decision_columns)
         self.assertIn((4, "agent_lifecycle_contract"), ledger)
-        self.assertEqual(ledger[-1], (12, "persisted_entity_slugs"))
+        self.assertEqual(ledger[-1], (13, "group_provider_runtime_settings"))
         self.assertFalse(set(AGENT_LIFECYCLE_COLUMNS) & backup_agent_columns)
         self.assertNotIn("agent_class_audit", backup_tables)
         self.assertNotIn("decisions", backup_tables)
@@ -347,7 +348,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
 
         self.assertTrue(set(AGENT_KIND_COLUMNS) <= columns)
         self.assertIn((7, "agent_kind_schema"), ledger)
-        self.assertEqual(ledger[-1], (12, "persisted_entity_slugs"))
+        self.assertEqual(ledger[-1], (13, "group_provider_runtime_settings"))
 
     def test_post_init_phase_waits_for_kinds_stage_four(self):
         conn = sqlite3.connect(":memory:")
@@ -383,7 +384,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
         self.assertEqual(before_meta, ("7",))
         self.assertFalse(skipped)
         self.assertTrue(finalized)
-        self.assertEqual(after[-1], (12, "persisted_entity_slugs"))
+        self.assertEqual(after[-1], (13, "group_provider_runtime_settings"))
         self.assertEqual(after_meta, (SCHEMA_VERSION,))
 
     def test_post_init_runner_is_retryable_and_skipped_after_ledger(self):
@@ -493,6 +494,71 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
             "SELECT name FROM schema_migrations WHERE version=12"
         ).fetchone()
         self.assertEqual(ledger, ("persisted_entity_slugs",))
+
+    def test_automatic_post_init_migration_repairs_provider_runtime_settings(self):
+        conn = sqlite3.connect(":memory:")
+        self.addCleanup(conn.close)
+        initialize_database(conn, lambda: None)
+        conn.execute(
+            "INSERT INTO meta(key, value) VALUES "
+            "('schema_kinds_migration_version', '4')"
+        )
+        for column in GROUP_PROVIDER_RUNTIME_COLUMNS:
+            conn.execute(f"ALTER TABLE group_settings DROP COLUMN {column}")
+        conn.commit()
+
+        self.assertTrue(
+            finalize_database_migrations(
+                conn,
+                lambda: None,
+                post_init_runners=self._post_init_runners(),
+            )
+        )
+
+        columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(group_settings)")
+        }
+        ledger = conn.execute(
+            "SELECT name FROM schema_migrations WHERE version=13"
+        ).fetchone()
+        self.assertTrue(set(GROUP_PROVIDER_RUNTIME_COLUMNS) <= columns)
+        self.assertEqual(ledger, ("group_provider_runtime_settings",))
+
+    def test_applied_provider_contract_repairs_without_reledgering(self):
+        conn = sqlite3.connect(":memory:")
+        self.addCleanup(conn.close)
+        initialize_database(conn, lambda: None)
+        conn.execute(
+            "INSERT INTO meta(key, value) VALUES "
+            "('schema_kinds_migration_version', '4')"
+        )
+        conn.commit()
+        self.assertTrue(
+            finalize_database_migrations(
+                conn,
+                lambda: None,
+                post_init_runners=self._post_init_runners(),
+            )
+        )
+        applied_at = conn.execute(
+            "SELECT applied_at FROM schema_migrations WHERE version=13"
+        ).fetchone()
+        for column in GROUP_PROVIDER_RUNTIME_COLUMNS:
+            conn.execute(f"ALTER TABLE group_settings DROP COLUMN {column}")
+        conn.commit()
+
+        initialize_database(conn, lambda: None)
+
+        columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(group_settings)")
+        }
+        repaired_applied_at = conn.execute(
+            "SELECT applied_at FROM schema_migrations WHERE version=13"
+        ).fetchone()
+        self.assertTrue(set(GROUP_PROVIDER_RUNTIME_COLUMNS) <= columns)
+        self.assertEqual(repaired_applied_at, applied_at)
 
     def test_post_init_runner_and_ledger_row_roll_back_together(self):
         conn = sqlite3.connect(":memory:")
