@@ -133,6 +133,7 @@ function createHarness({ loadModals = false, loadAgentPanel = false } = {}) {
   if (loadAgentPanel) {
     loadScript(context, 'static/js/behavior_overlay.js');
     loadScript(context, 'static/js/agent_panel.js');
+    loadScript(context, 'static/js/agent-panel/classes.js');
   }
   return { context, document, panel, sendCalls, toasts, confirms, sandbox };
 }

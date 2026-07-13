@@ -106,6 +106,7 @@ function createHarness() {
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/behavior_overlay.js');
   loadScript(context, 'static/js/agent_panel.js');
+  loadScript(context, 'static/js/agent-panel/classes.js');
   return {
     context,
     panel,

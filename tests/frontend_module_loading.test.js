@@ -35,6 +35,7 @@ test('frontend load order preserves state, rendering, panels, and boot boundarie
   const board = indexOf(sources, 'static/js/board.js');
   const behavior = indexOf(sources, 'static/js/behavior_overlay.js');
   const agentPanel = indexOf(sources, 'static/js/agent_panel.js');
+  const agentPanelClasses = indexOf(sources, 'static/js/agent-panel/classes.js');
   const panelManager = indexOf(sources, 'static/js/panel_manager.js');
   const main = indexOf(sources, 'static/js/main.js');
 
@@ -43,6 +44,7 @@ test('frontend load order preserves state, rendering, panels, and boot boundarie
   assert.ok(terminal < board, 'terminal globals must exist before panel boot');
   assert.ok(board < behavior, 'feature panels load before agent panel composition');
   assert.ok(behavior < agentPanel, 'Behavior renderer must load before Agent panel');
-  assert.ok(agentPanel < panelManager, 'Agent panel must register before panel manager');
+  assert.ok(agentPanel < agentPanelClasses, 'Agent panel core must load before feature modules');
+  assert.ok(agentPanelClasses < panelManager, 'Agent panel modules must load before panel manager');
   assert.equal(main, sources.length - 1, 'main.js must remain the final boot script');
 });

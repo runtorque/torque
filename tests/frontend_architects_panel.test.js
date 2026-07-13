@@ -85,6 +85,7 @@ function createArchitectHarness() {
   loadScript(context, 'static/js/agent-focus.js');
   loadScript(context, 'static/js/grid/main.js');
   loadScript(context, 'static/js/agent_panel.js');
+  loadScript(context, 'static/js/agent-panel/classes.js');
   return { context, sandbox, panel, content, pendingHireBanner };
 }
 

@@ -830,6 +830,7 @@ function createEngineerHarness() {
   loadScript(context, 'static/js/agent-focus.js');
   loadScript(context, 'static/js/grid/main.js');
   loadScript(context, 'static/js/agent_panel.js');
+  loadScript(context, 'static/js/agent-panel/classes.js');
   return { context, document };
 }
 
@@ -854,6 +855,7 @@ function createEngineerWsHarness() {
   loadScript(context, 'static/js/agent-focus.js');
   loadScript(context, 'static/js/grid/main.js');
   loadScript(context, 'static/js/agent_panel.js');
+  loadScript(context, 'static/js/agent-panel/classes.js');
   runInContext(context, `
     send = function(message) { sendCalls.push(message); };
     render = function() {};
@@ -946,6 +948,7 @@ function createChatHarness(overrides = {}) {
   loadScript(context, 'static/js/agent-focus.js');
   loadScript(context, 'static/js/grid/main.js');
   loadScript(context, 'static/js/agent_panel.js');
+  loadScript(context, 'static/js/agent-panel/classes.js');
   loadScript(context, 'static/js/markdown.js');
   loadScript(context, 'static/js/chat.js');
   runInContext(context, `

@@ -75,6 +75,7 @@ function createAgentPanelHarness() {
   sandbox.globalThis = sandbox;
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/agent_panel.js');
+  loadScript(context, 'static/js/agent-panel/classes.js');
   return { context, sandbox, panel };
 }
 
