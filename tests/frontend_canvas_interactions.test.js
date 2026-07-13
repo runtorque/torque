@@ -511,6 +511,7 @@ test('canvas render honors skipTerminalRefresh from direct and invalidated main 
   };
   context.renderTerminalWorkspace = function() { terminalCalls += 1; };
   context.updateEventsAttentionBadge = function() {};
+  context.state.runtime = { mode: 'standalone' };
   context.state.groups = { alpha: ['worker-1', 'worker-2'] };
   seed(context, [
     worker('worker-1', 'Viewed Worker', '', 1),
@@ -520,6 +521,10 @@ test('canvas render honors skipTerminalRefresh from direct and invalidated main 
   vm.runInContext('render({ skipTerminalRefresh: true })', context);
   assert.equal(shellCalls, 1, 'canvas shell still renders with skipTerminalRefresh');
   assert.equal(terminalCalls, 0, 'direct canvas render must honor skipTerminalRefresh');
+  assert.match(main.innerHTML, /data-agent-view-toggle="grid"/,
+    'canvas view must keep the control that returns to the grid visible');
+  assert.match(main.innerHTML, /data-agent-view-toggle="canvas"/,
+    'canvas view must keep the active view control visible');
 
   vm.runInContext('render()', context);
   assert.equal(shellCalls, 2, 'normal canvas render still updates the shell');
