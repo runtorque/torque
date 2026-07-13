@@ -549,7 +549,7 @@ test('supervisor taskbar CSS and panel-manager registration are bounded to stand
   assert.match(html, /data-app="supervisor"[^>]*togglePanel\('supervisor'\)/);
   assert.match(html, /static\/js\/supervisor\.js[\s\S]*static\/js\/panel_manager\.js/);
   assert.match(css, /\.taskbar-app\[data-app="supervisor"\]\s*\{\s*display:\s*none;\s*\}/);
-  assert.match(css, /body\.runtime-embedded \.taskbar-app\[data-app="supervisor"\]\s*\{\s*display:\s*inline-flex;\s*\}/);
+  assert.match(css, /body\.runtime-embedded \.taskbar-app\[data-app="supervisor"\]:not\(\.nav-secondary\)\s*\{\s*display:\s*inline-flex;\s*\}/);
   assert.match(css, /\.supervisor-auto input\[type="checkbox"\]\s*\{[^}]*width:\s*auto;[^}]*padding:\s*0;/s);
   assert.match(panelManager, /_standalonePanelApps = \[[^\]]*'supervisor'/);
   assert.match(panelManager, /supervisor:\s*'Supervisor'/);
