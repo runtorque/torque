@@ -543,7 +543,10 @@ test('supervisor taskbar CSS and panel-manager registration are bounded to stand
   const panelManager = fs.readFileSync(path.join(repoRoot, 'static/js/panel_manager.js'), 'utf8');
   const main = fs.readFileSync(path.join(repoRoot, 'static/js/main.js'), 'utf8');
   const render = fs.readFileSync(path.join(repoRoot, 'static/js/render.js'), 'utf8');
-  const ws = fs.readFileSync(path.join(repoRoot, 'static/js/ws.js'), 'utf8');
+  const ws = [
+    'static/js/ws/action-router.js',
+    'static/js/ws/delta-registry.js',
+  ].map((file) => fs.readFileSync(path.join(repoRoot, file), 'utf8')).join('\n');
 
   assert.match(html, /id="panel-supervisor"/);
   assert.match(html, /data-app="supervisor"[^>]*togglePanel\('supervisor'\)/);

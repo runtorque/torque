@@ -2,7 +2,7 @@
  *
  * Two fixes, two behaviors under test:
  *
- *  1. static/js/ws.js — the post-keystroke delta-render flush is debounced.
+ *  1. static/js/ws/interaction-guard.js — the post-keystroke delta-render flush is debounced.
  *     A typing-gated release (keyup / compositionend on a text-editing target)
  *     must NOT flush the pending delta batch on the next frame; it schedules a
  *     trailing idle flush (~250 ms) that re-arms on each keystroke so
@@ -94,6 +94,12 @@ function createWsGateHarness() {
   sandbox.globalThis = sandbox;
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/ws.js');
+  loadScript(context, 'static/js/ws/interaction-guard.js');
+  loadScript(context, 'static/js/ws/full-state.js');
+  loadScript(context, 'static/js/ws/invalidation.js');
+  loadScript(context, 'static/js/ws/delta-registry.js');
+  loadScript(context, 'static/js/ws/delta-apply.js');
+  loadScript(context, 'static/js/ws/action-router.js');
 
   // Count real flushes without doing any DOM work.
   let flushCount = 0;

@@ -30,6 +30,12 @@ test('webview frontend scripts are unique and exist on disk', () => {
 test('frontend load order preserves state, rendering, panels, and boot boundaries', () => {
   const sources = webviewScriptSources();
   const ws = indexOf(sources, 'static/js/ws.js');
+  const wsInteraction = indexOf(sources, 'static/js/ws/interaction-guard.js');
+  const wsFullState = indexOf(sources, 'static/js/ws/full-state.js');
+  const wsInvalidation = indexOf(sources, 'static/js/ws/invalidation.js');
+  const wsRegistry = indexOf(sources, 'static/js/ws/delta-registry.js');
+  const wsDeltaApply = indexOf(sources, 'static/js/ws/delta-apply.js');
+  const wsActionRouter = indexOf(sources, 'static/js/ws/action-router.js');
   const render = indexOf(sources, 'static/js/render.js');
   const terminal = indexOf(sources, 'static/js/terminal.js');
   const terminalDirectMessages = indexOf(sources, 'static/js/terminal/direct-messages.js');
@@ -68,7 +74,13 @@ test('frontend load order preserves state, rendering, panels, and boot boundarie
   const panelManager = indexOf(sources, 'static/js/panel_manager.js');
   const main = indexOf(sources, 'static/js/main.js');
 
-  assert.ok(ws < render, 'canonical state must load before renderers');
+  assert.ok(ws < wsInteraction, 'canonical state must load before WS feature modules');
+  assert.ok(wsInteraction < wsFullState, 'interaction guard must load before hydration');
+  assert.ok(wsFullState < wsInvalidation, 'full-state hydration must load before delta invalidation');
+  assert.ok(wsInvalidation < wsRegistry, 'delta helpers must load before registry initialization');
+  assert.ok(wsRegistry < wsDeltaApply, 'delta registry must load before state application');
+  assert.ok(wsDeltaApply < wsActionRouter, 'delta state application must load before message routing');
+  assert.ok(wsActionRouter < render, 'all canonical WS modules must load before renderers');
   assert.ok(render < terminal, 'shared render helpers must load before terminal UI');
   assert.ok(terminal < terminalDirectMessages, 'Terminal core must load before feature modules');
   assert.ok(terminalDirectMessages < terminalComposer, 'DM UI must load before the composer');

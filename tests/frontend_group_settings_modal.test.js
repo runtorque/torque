@@ -195,9 +195,19 @@ function loadModals(context) {
 }
 
 function loadWs(context) {
-  const filename = path.join(repoRoot, 'static/js/ws.js');
-  const source = fs.readFileSync(filename, 'utf8');
-  vm.runInContext(source, context, { filename });
+  [
+    'static/js/ws.js',
+    'static/js/ws/interaction-guard.js',
+    'static/js/ws/full-state.js',
+    'static/js/ws/invalidation.js',
+    'static/js/ws/delta-registry.js',
+    'static/js/ws/delta-apply.js',
+    'static/js/ws/action-router.js',
+  ].forEach(function(relPath) {
+    const filename = path.join(repoRoot, relPath);
+    const source = fs.readFileSync(filename, 'utf8');
+    vm.runInContext(source, context, { filename });
+  });
 }
 
 function loadEngineerLaunchModals(context) {
@@ -1159,7 +1169,7 @@ test('group settings sub-tab CSS remains reusable in narrow embedded layouts', (
 test('group settings removes terminal-backend-only profile and tab-color controls', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
-  const ws = fs.readFileSync(path.join(repoRoot, 'static/js/ws.js'), 'utf8');
+  const ws = fs.readFileSync(path.join(repoRoot, 'static/js/ws/full-state.js'), 'utf8');
   const start = html.indexOf('<!-- Group Settings modal -->');
   const end = html.indexOf('<!-- Global Settings modal -->', start);
   const modal = html.slice(start, end === -1 ? html.indexOf('<!-- Confirm dialog', start) : end);

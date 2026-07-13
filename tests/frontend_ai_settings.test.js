@@ -126,7 +126,17 @@ function createAiContext({ withWs = false } = {}) {
   sandbox.global = sandbox;
   sandbox.globalThis = sandbox;
   const context = vm.createContext(sandbox);
-  if (withWs) loadScript(context, 'static/js/ws.js');
+  if (withWs) {
+    [
+      'static/js/ws.js',
+      'static/js/ws/interaction-guard.js',
+      'static/js/ws/full-state.js',
+      'static/js/ws/invalidation.js',
+      'static/js/ws/delta-registry.js',
+      'static/js/ws/delta-apply.js',
+      'static/js/ws/action-router.js',
+    ].forEach((file) => loadScript(context, file));
+  }
   loadScript(context, 'static/js/ai_settings.js');
   return { context, document, elements, sendCalls, confirmMessages, renderCalls, modal, aiTab, aiPane };
 }

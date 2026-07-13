@@ -386,9 +386,22 @@ function createSandbox(overrides = {}) {
 }
 
 function loadScript(context, relativePath) {
-  const filename = path.join(repoRoot, relativePath);
-  const source = fs.readFileSync(filename, 'utf8');
-  vm.runInContext(source, context, { filename });
+  const paths = relativePath === 'static/js/ws.js'
+    ? [
+      'static/js/ws.js',
+      'static/js/ws/interaction-guard.js',
+      'static/js/ws/full-state.js',
+      'static/js/ws/invalidation.js',
+      'static/js/ws/delta-registry.js',
+      'static/js/ws/delta-apply.js',
+      'static/js/ws/action-router.js',
+    ]
+    : [relativePath];
+  paths.forEach(function(scriptPath) {
+    const filename = path.join(repoRoot, scriptPath);
+    const source = fs.readFileSync(filename, 'utf8');
+    vm.runInContext(source, context, { filename });
+  });
 }
 
 function loadModalScripts(context) {

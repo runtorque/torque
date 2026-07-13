@@ -186,7 +186,11 @@ test('Thinking panel is registered as a first-class panel with responsive CSS', 
   const manager = fs.readFileSync(path.join(repoRoot, 'static/js/panel_manager.js'), 'utf8');
   const main = fs.readFileSync(path.join(repoRoot, 'static/js/main.js'), 'utf8');
   const render = fs.readFileSync(path.join(repoRoot, 'static/js/render.js'), 'utf8');
-  const ws = fs.readFileSync(path.join(repoRoot, 'static/js/ws.js'), 'utf8');
+  const ws = [
+    'static/js/ws/invalidation.js',
+    'static/js/ws/delta-apply.js',
+    'static/js/ws/action-router.js',
+  ].map((file) => fs.readFileSync(path.join(repoRoot, file), 'utf8')).join('\n');
   const webview = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 

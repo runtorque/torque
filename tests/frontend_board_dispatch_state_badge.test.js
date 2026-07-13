@@ -112,6 +112,12 @@ function createDeltaPatchContext() {
   sandbox.globalThis = sandbox;
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/ws.js');
+  loadScript(context, 'static/js/ws/interaction-guard.js');
+  loadScript(context, 'static/js/ws/full-state.js');
+  loadScript(context, 'static/js/ws/invalidation.js');
+  loadScript(context, 'static/js/ws/delta-registry.js');
+  loadScript(context, 'static/js/ws/delta-apply.js');
+  loadScript(context, 'static/js/ws/action-router.js');
   loadScript(context, 'static/js/board/card-rendering.js');
   return { context, badge, renderCalls, rafCalls: () => rafCalls };
 }

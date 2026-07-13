@@ -1022,6 +1022,12 @@ function createDeferHarness() {
   sandbox.window = sandbox;
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/ws.js');
+  loadScript(context, 'static/js/ws/interaction-guard.js');
+  loadScript(context, 'static/js/ws/full-state.js');
+  loadScript(context, 'static/js/ws/invalidation.js');
+  loadScript(context, 'static/js/ws/delta-registry.js');
+  loadScript(context, 'static/js/ws/delta-apply.js');
+  loadScript(context, 'static/js/ws/action-router.js');
   return { context, sandbox, renderCalls };
 }
 
@@ -1313,11 +1319,11 @@ test('TORQUE:264 — grid/main.js gates main grid writes on byte-equality caches
     'aggregate split-shell cache must still be updated after grid/main writes');
 });
 
-test('TORQUE:264 — ws.js exposes _userHovering + _userInteracting() gate', () => {
-  const source = fs.readFileSync(
-    path.join(repoRoot, 'static/js/ws.js'),
-    'utf8',
-  );
+test('TORQUE:264 — WS interaction modules expose _userHovering + _userInteracting() gate', () => {
+  const source = [
+    'static/js/ws/interaction-guard.js',
+    'static/js/ws/invalidation.js',
+  ].map((file) => fs.readFileSync(path.join(repoRoot, file), 'utf8')).join('\n');
   assert.match(source, /var\s+_userHovering\s*=\s*false/,
     'ws.js must declare _userHovering — companion flag to _userPressing for the hover-defer pipeline');
   assert.match(source, /function\s+_userInteracting\s*\(/,
