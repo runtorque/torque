@@ -285,6 +285,21 @@ AGENT_ACTIVITY_TIMESTAMP_LEGACY_META_KEY = (
 KINDS_LEGACY_META_KEY = "schema_kinds_migration_version"
 KINDS_LEGACY_COMPLETE_VERSION = 4
 
+
+class _PostInitMigrationNotReady(RuntimeError):
+    """Internal signal for a guarded migration that should retry later."""
+
+
+def _legacy_kinds_version(conn: sqlite3.Connection) -> int:
+    row = conn.execute(
+        "SELECT value FROM meta WHERE key=?",
+        (KINDS_LEGACY_META_KEY,),
+    ).fetchone()
+    try:
+        return int((row or (0,))[0] or 0)
+    except (TypeError, ValueError):
+        return 0
+
 AGENT_MESSAGE_LOOP_RUNTIME_COLUMNS = {
     "deferred_at": "REAL NOT NULL DEFAULT 0",
     "deferred_reason": "TEXT NOT NULL DEFAULT ''",
@@ -3440,14 +3455,7 @@ def _migration_0008_kinds_legacy_stages_complete(
 ) -> None:
     """Ledger the guarded kinds backfill/cleanup only after stage 4."""
 
-    row = conn.execute(
-        "SELECT value FROM meta WHERE key=?",
-        (KINDS_LEGACY_META_KEY,),
-    ).fetchone()
-    try:
-        version = int((row or (0,))[0] or 0)
-    except (TypeError, ValueError):
-        version = 0
+    version = _legacy_kinds_version(conn)
     if version < KINDS_LEGACY_COMPLETE_VERSION:
         raise RuntimeError(
             "Kinds legacy stages are incomplete; expected stage 4"
@@ -3569,6 +3577,7 @@ def _apply_schema_migrations(
     *,
     migrations: Iterable[SchemaMigration] = SCHEMA_MIGRATIONS,
     phases: Iterable[str] | None = None,
+    apply_overrides: dict[int, Callable] | None = None,
 ) -> None:
     """Apply missing migrations in order and reject ledger drift.
 
@@ -3579,6 +3588,7 @@ def _apply_schema_migrations(
 
     ordered = _validate_migration_catalog(migrations)
     selected_phases = None if phases is None else set(phases)
+    overrides = dict(apply_overrides or {})
     _ensure_schema_migrations_table(conn)
     applied = _applied_schema_migrations(conn)
     catalog = {item.version: item for item in ordered}
@@ -3620,8 +3630,9 @@ def _apply_schema_migrations(
                 f"{migration.version} before version(s) "
                 f"{sorted(missing_predecessors)}"
             )
+        apply_migration = overrides.get(migration.version, migration.apply)
         if migration.version == 1:
-            migration.apply(conn, backfill_agent_history)
+            apply_migration(conn, backfill_agent_history)
             conn.execute(
                 "INSERT INTO meta (key, value) VALUES ('schema_version', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -3638,7 +3649,7 @@ def _apply_schema_migrations(
 
         try:
             conn.execute("BEGIN")
-            migration.apply(conn, backfill_agent_history)
+            apply_migration(conn, backfill_agent_history)
             conn.execute(
                 "INSERT INTO meta (key, value) VALUES ('schema_version', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -3693,36 +3704,59 @@ def finalize_database_migrations(
     *,
     post_init_runner: Callable[[], object] | None = None,
 ) -> bool:
-    """Apply guarded post-init migrations when legacy prerequisites pass."""
+    """Apply guarded post-init work and its ledger row atomically.
 
-    row = conn.execute(
-        "SELECT value FROM meta WHERE key=?",
-        (KINDS_LEGACY_META_KEY,),
-    ).fetchone()
-    try:
-        kinds_version = int((row or (0,))[0] or 0)
-    except (TypeError, ValueError):
-        kinds_version = 0
-    if (
-        kinds_version < KINDS_LEGACY_COMPLETE_VERSION
-        and post_init_runner is not None
-    ):
-        post_init_runner()
-        row = conn.execute(
-            "SELECT value FROM meta WHERE key=?",
-            (KINDS_LEGACY_META_KEY,),
-        ).fetchone()
+    ``post_init_runner`` participates in a transaction owned here and must not
+    begin, commit, or roll back independently.
+    """
+
+    kinds_version = _legacy_kinds_version(conn)
+    applied = _applied_schema_migrations(conn)
+
+    if 8 in applied and kinds_version < KINDS_LEGACY_COMPLETE_VERSION:
+        if post_init_runner is None:
+            return False
         try:
-            kinds_version = int((row or (0,))[0] or 0)
-        except (TypeError, ValueError):
-            kinds_version = 0
+            conn.execute("BEGIN")
+            post_init_runner()
+            if _legacy_kinds_version(conn) < KINDS_LEGACY_COMPLETE_VERSION:
+                raise _PostInitMigrationNotReady()
+            conn.commit()
+        except _PostInitMigrationNotReady:
+            conn.rollback()
+            return False
+        except Exception:
+            conn.rollback()
+            raise
+
+    overrides = None
     if kinds_version < KINDS_LEGACY_COMPLETE_VERSION:
+        if post_init_runner is None:
+            return False
+
+        def apply_guarded_kinds_completion(connection, backfill) -> None:
+            post_init_runner()
+            if (
+                _legacy_kinds_version(connection)
+                < KINDS_LEGACY_COMPLETE_VERSION
+            ):
+                raise _PostInitMigrationNotReady()
+            _migration_0008_kinds_legacy_stages_complete(
+                connection,
+                backfill,
+            )
+
+        overrides = {8: apply_guarded_kinds_completion}
+
+    try:
+        _apply_schema_migrations(
+            conn,
+            backfill_agent_history,
+            phases={"post_init"},
+            apply_overrides=overrides,
+        )
+    except _PostInitMigrationNotReady:
         return False
-    _apply_schema_migrations(
-        conn,
-        backfill_agent_history,
-        phases={"post_init"},
-    )
     return True
 
 def rebuild_memory_retention_indexes(conn: sqlite3.Connection):

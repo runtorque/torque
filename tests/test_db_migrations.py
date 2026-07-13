@@ -399,7 +399,6 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
                 "INSERT INTO meta(key, value) VALUES "
                 "('schema_kinds_migration_version', '4')"
             )
-            conn.commit()
 
         self.assertTrue(
             finalize_database_migrations(
@@ -420,6 +419,41 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
             )
         )
         self.assertEqual(calls, ["incomplete", "complete"])
+
+    def test_post_init_runner_and_ledger_row_roll_back_together(self):
+        conn = sqlite3.connect(":memory:")
+        self.addCleanup(conn.close)
+        initialize_database(conn, lambda: None)
+
+        def failing_runner():
+            conn.execute(
+                "INSERT INTO meta(key, value) VALUES "
+                "('schema_kinds_migration_version', '4')"
+            )
+            conn.execute("CREATE TABLE must_rollback_post_init(id INTEGER)")
+            raise RuntimeError("injected post-init failure")
+
+        with self.assertRaisesRegex(RuntimeError, "injected post-init"):
+            finalize_database_migrations(
+                conn,
+                lambda: None,
+                post_init_runner=failing_runner,
+            )
+
+        marker = conn.execute(
+            "SELECT value FROM meta "
+            "WHERE key='schema_kinds_migration_version'"
+        ).fetchone()
+        ledger = conn.execute(
+            "SELECT name FROM schema_migrations WHERE version=8"
+        ).fetchone()
+        table = conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='must_rollback_post_init'"
+        ).fetchone()
+        self.assertIsNone(marker)
+        self.assertIsNone(ledger)
+        self.assertIsNone(table)
 
     def test_atomic_backup_failure_leaves_source_and_destination_untouched(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1580,7 +1580,9 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         finalize_database_migrations(
             self._conn,
             self.backfill_agent_history,
-            post_init_runner=self._run_kinds_legacy_stages,
+            post_init_runner=lambda: self._run_kinds_legacy_stages(
+                manage_transaction=False
+            ),
         )
         self._migrate_agent_digest_settings_from_legacy_engineer_settings()
         self.migrate_task_ids_if_needed()
@@ -10228,6 +10230,15 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         )
 
     def _read_meta_value(self, key: str, *, db_path: Optional[Path] = None) -> Optional[str]:
+        if db_path is None and self._conn is not None:
+            try:
+                row = self._conn.execute(
+                    "SELECT value FROM meta WHERE key=?",
+                    (key,),
+                ).fetchone()
+                return None if not row else str(row[0])
+            except sqlite3.OperationalError:
+                return None
         path = Path(db_path or self.db_path)
         if not path.exists():
             return None
@@ -10286,7 +10297,11 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
 
         log.info("migration: created pre-kinds backup at %s", backup_path)
 
-    def _mark_kinds_schema_ready_if_needed(self):
+    def _mark_kinds_schema_ready_if_needed(
+        self,
+        *,
+        manage_transaction: bool = True,
+    ) -> None:
         """Advance the legacy stage marker after its refusal gate passes.
 
         Migration 7 owns the columns.  The separate marker remains until the
@@ -10308,20 +10323,26 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
             (_KINDS_SCHEMA_MIGRATION_MIGRATED_AT_KEY, migrated_at),
         )
-        self._conn.commit()
+        if manage_transaction:
+            self._conn.commit()
         log.info(
             "migration: kinds schema applied (version=1, backup=%s)",
             self._kinds_backup_path(),
         )
 
-    def _run_kinds_legacy_stages(self) -> None:
+    def _run_kinds_legacy_stages(
+        self,
+        *,
+        manage_transaction: bool = True,
+    ) -> None:
         """Advance restart-safe kinds stages behind the guarded finalizer."""
 
-        self._mark_kinds_schema_ready_if_needed()
-        self._backfill_kinds_if_needed()
-        self._fixup_kinds_task_assignments_if_needed()
-        self._cleanup_kinds_legacy_columns_if_needed()
-        self._backfill_empty_worker_kinds_if_needed()
+        kwargs = {"manage_transaction": manage_transaction}
+        self._mark_kinds_schema_ready_if_needed(**kwargs)
+        self._backfill_kinds_if_needed(**kwargs)
+        self._fixup_kinds_task_assignments_if_needed(**kwargs)
+        self._cleanup_kinds_legacy_columns_if_needed(**kwargs)
+        self._backfill_empty_worker_kinds_if_needed(**kwargs)
 
     def _find_engineer_candidate_ids(self) -> list[str]:
         template_sql = self._optional_column_sql("agents", "template")
@@ -10622,7 +10643,11 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         for sql in supporting_sql:
             self._conn.execute(sql)
 
-    def _cleanup_kinds_legacy_columns_if_needed(self) -> None:
+    def _cleanup_kinds_legacy_columns_if_needed(
+        self,
+        *,
+        manage_transaction: bool = True,
+    ) -> None:
         version = self._current_kinds_migration_version()
         if version >= _KINDS_CLEANUP_MIGRATION_VERSION:
             return
@@ -10644,7 +10669,8 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                     str(_KINDS_CLEANUP_MIGRATION_VERSION),
                 ),
             )
-            self._conn.commit()
+            if manage_transaction:
+                self._conn.commit()
             return
 
         mirrored_rows, drift_rows = self._legacy_cleanup_row_counts()
@@ -10655,7 +10681,8 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             )
 
         try:
-            self._conn.execute("BEGIN")
+            if manage_transaction:
+                self._conn.execute("BEGIN")
             self._rebuild_table_without_columns(
                 "agents",
                 new_table="agents_new",
@@ -10673,13 +10700,19 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                     str(_KINDS_CLEANUP_MIGRATION_VERSION),
                 ),
             )
-            self._conn.commit()
+            if manage_transaction:
+                self._conn.commit()
         except Exception:
-            self._conn.rollback()
+            if manage_transaction:
+                self._conn.rollback()
             raise
 
 
-    def _backfill_empty_worker_kinds_if_needed(self) -> None:
+    def _backfill_empty_worker_kinds_if_needed(
+        self,
+        *,
+        manage_transaction: bool = True,
+    ) -> None:
         version = self._current_kinds_migration_version()
         if version < _KINDS_CLEANUP_MIGRATION_VERSION:
             return
@@ -10688,7 +10721,8 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
 
         updated = 0
         try:
-            self._conn.execute("BEGIN")
+            if manage_transaction:
+                self._conn.execute("BEGIN")
             cursor = self._conn.execute(
                 "UPDATE agents SET kind='worker' "
                 "WHERE cell_type='agent' "
@@ -10711,9 +10745,11 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
                 (_KINDS_SCHEMA_MIGRATION_MIGRATED_AT_KEY, migrated_at),
             )
-            self._conn.commit()
+            if manage_transaction:
+                self._conn.commit()
         except Exception:
-            self._conn.rollback()
+            if manage_transaction:
+                self._conn.rollback()
             raise
 
         log.info(
@@ -10808,7 +10844,11 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 )
         return updated
 
-    def _backfill_kinds_if_needed(self):
+    def _backfill_kinds_if_needed(
+        self,
+        *,
+        manage_transaction: bool = True,
+    ) -> None:
         version = self._current_kinds_migration_version()
         if version < _KINDS_SCHEMA_MIGRATION_VERSION:
             return
@@ -10822,7 +10862,8 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         worker_count = 0
         task_count = 0
         try:
-            self._conn.execute("BEGIN")
+            if manage_transaction:
+                self._conn.execute("BEGIN")
 
             engineer_name = engineer_slug = ""
             if engineer_id:
@@ -10900,9 +10941,11 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
                 (_KINDS_TASK_ASSIGNMENT_FIXUP_APPLIED_KEY, "1"),
             )
-            self._conn.commit()
+            if manage_transaction:
+                self._conn.commit()
         except Exception:
-            self._conn.rollback()
+            if manage_transaction:
+                self._conn.rollback()
             raise
 
         log.info(
@@ -10912,7 +10955,11 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             task_count,
         )
 
-    def _fixup_kinds_task_assignments_if_needed(self):
+    def _fixup_kinds_task_assignments_if_needed(
+        self,
+        *,
+        manage_transaction: bool = True,
+    ) -> None:
         version = self._current_kinds_migration_version()
         if version != _KINDS_BACKFILL_MIGRATION_VERSION:
             return
@@ -10925,7 +10972,8 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
 
         updated = 0
         try:
-            self._conn.execute("BEGIN")
+            if manage_transaction:
+                self._conn.execute("BEGIN")
             group_engineer_map = self._load_group_engineer_map()
             updated = self._backfill_task_assignments_from_group_settings(
                 group_engineer_map,
@@ -10936,9 +10984,11 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
                 (_KINDS_TASK_ASSIGNMENT_FIXUP_APPLIED_KEY, "1"),
             )
-            self._conn.commit()
+            if manage_transaction:
+                self._conn.commit()
         except Exception:
-            self._conn.rollback()
+            if manage_transaction:
+                self._conn.rollback()
             raise
 
         log.info("migration: kinds task assignment fixup applied (updated=%d)", updated)
