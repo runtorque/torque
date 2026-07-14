@@ -919,14 +919,14 @@ function renderLegacyGroupPanel() {
   var html = '<div class="agent-panel-panel">';
 
   // Header
-  html += '<div class="agent-panel-header">';
-  html += '<div class="agent-panel-header-copy">';
-  html += '<span class="agent-panel-title">Agent';
+  html += '<div class="agent-panel-header ui-panel-header">';
+  html += '<div class="agent-panel-header-copy ui-panel-header__copy">';
+  html += '<span class="agent-panel-title ui-panel-header__title">Agent';
   if (group) html += ' — ' + _esc(group);
   html += '</span>';
-  html += '<div class="agent-panel-subtitle">Architect roster, engineer hierarchy, orchestration journal, digest queue, queued assignments, completed work, and session map.</div>';
+  html += '<div class="agent-panel-subtitle ui-panel-header__subtitle">Architect roster, engineer hierarchy, orchestration journal, digest queue, queued assignments, completed work, and session map.</div>';
   html += '</div>';
-  html += '<div class="agent-panel-header-right">';
+  html += '<div class="agent-panel-header-right ui-panel-header__actions">';
   html += '<button type="button" class="agent-panel-add-engineer-btn" onclick="engineerOpenAddArchitect()">+ Add Architect</button>';
   html += '<button type="button" class="agent-panel-add-engineer-btn" onclick="engineerOpenAddEngineer()">+ Add Engineer</button>';
   // Buffer stats + Pause/Resume toggle

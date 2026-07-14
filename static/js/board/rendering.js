@@ -514,7 +514,7 @@ function renderBoard() {
   if (typeof _compactModeActive === 'function' && _compactModeActive()) {
     searchHint += ' Description bodies are searched only for tasks whose detail has been opened.';
   }
-  html += '<div class="board-search-bar">';
+  html += '<div class="board-search-bar ui-toolbar ui-toolbar--bordered">';
   html += '<div class="board-search-input-wrap">';
   html += '<input type="text" class="board-search-input" id="board-search-input"'
     + ' placeholder="Search tasks..." value="' + esc(_boardSearchQuery) + '"'

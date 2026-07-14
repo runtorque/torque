@@ -2609,9 +2609,9 @@ function renderThinkingPanel() {
   var briefs = _ideaBriefsForGroup(group, _ideaBriefIncludeArchived);
   var activeTab = String(_thinkingActiveTab || 'scratchpad');
   var html = '<div class="thinking-panel">';
-  html += '<div class="tpled-header thinking-header"><div class="tpled-header-copy"><div class="tpled-header-title-row">' + _thinkingConnectedNodesIcon('thinking-header-icon') + '<span class="tpled-header-title">Thinking</span></div>';
-  html += '<div class="tpled-header-subtitle">Scratchpad, Mind Map, and Idea Briefs are group-scoped thinking tools for ' + _thinkingEsc(group || 'all groups') + '; they stay separate from Planning execution.</div></div>';
-  html += '<div class="tpled-header-controls"><span class="thinking-total">' + _thinkingEsc(notes.length + ' notes · ' + maps.length + ' maps · ' + briefs.length + ' briefs') + '</span><button class="tpled-new-btn" onclick="thinkingRefresh()" title="Refresh Thinking data">&#x21BB;</button></div></div>';
+  html += '<div class="tpled-header thinking-header ui-panel-header ui-panel-header--surface"><div class="tpled-header-copy ui-panel-header__copy"><div class="tpled-header-title-row ui-panel-header__title-row">' + _thinkingConnectedNodesIcon('thinking-header-icon') + '<span class="tpled-header-title ui-panel-header__title">Thinking</span></div>';
+  html += '<div class="tpled-header-subtitle ui-panel-header__subtitle">Scratchpad, Mind Map, and Idea Briefs are group-scoped thinking tools for ' + _thinkingEsc(group || 'all groups') + '; they stay separate from Planning execution.</div></div>';
+  html += '<div class="tpled-header-controls ui-panel-header__actions"><span class="thinking-total">' + _thinkingEsc(notes.length + ' notes · ' + maps.length + ' maps · ' + briefs.length + ' briefs') + '</span><button class="tpled-new-btn" onclick="thinkingRefresh()" title="Refresh Thinking data">&#x21BB;</button></div></div>';
   html += _renderThinkingTabs(notes.length, maps.length, briefs.length);
   if (_thinkingLastError) html += '<div class="thinking-error">' + _thinkingEsc(_thinkingLastError) + '</div>';
   if (_ideaBriefLastError && activeTab === 'idea-briefs') html += '<div class="thinking-error">' + _thinkingEsc(_ideaBriefLastError) + '</div>';

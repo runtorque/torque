@@ -189,3 +189,45 @@ test('card geometry does not drift back into feature styles', () => {
   assert.doesNotMatch(agent, /^\.agent-panel-message-card\s*\{[^}]*border-radius:/ms);
   assert.doesNotMatch(agent, /^\.agent-panel-stream-card\s*\{[^}]*(?:border|background|padding):/ms);
 });
+
+test('shared panel headers separate identity, actions, and toolbar rows', () => {
+  const css = source('static/styles/components.css');
+
+  assert.match(css, /\.ui-panel-header,\s*\.tpled-header,\s*\.events-header,\s*\.agent-panel-header\s*\{[^}]*display:\s*flex;[^}]*gap:\s*var\(--space-2\) 10px;[^}]*padding:\s*var\(--space-2\) 10px;[^}]*border-bottom:\s*1px solid var\(--border\);/s);
+  assert.match(css, /\.ui-panel-header__actions,[\s\S]*?\.agent-panel-header-right\s*\{[^}]*justify-content:\s*flex-end;[^}]*flex:\s*0 1 auto;[^}]*margin-left:\s*auto;[^}]*flex-wrap:\s*wrap;/s);
+  assert.match(css, /\.tpled-header-controls\.ui-panel-header__actions\s*\{[^}]*flex:\s*0 1 auto;[^}]*justify-content:\s*flex-end;/s);
+  assert.match(css, /\.ui-toolbar\s*\{[^}]*display:\s*flex;[^}]*align-items:\s*center;[^}]*flex-wrap:\s*wrap;[^}]*padding:\s*var\(--space-1\) var\(--space-2\);/s);
+  assert.match(css, /\.ui-toolbar--bordered\s*\{[^}]*border-bottom:\s*1px solid var\(--border\);/s);
+});
+
+test('core panel-header and toolbar consumers opt into the canonical API', () => {
+  const board = source('static/js/board/rendering.js');
+  const events = source('static/js/events.js');
+  const initiatives = source('static/js/initiatives.js');
+  const thinking = source('static/js/thinking.js');
+  const agent = source('static/js/agent_panel.js');
+  const engineer = source('static/js/agent-panel/legacy-engineer.js');
+
+  assert.match(board, /class="board-search-bar ui-toolbar ui-toolbar--bordered"/);
+  assert.match(events, /class="events-header ui-panel-header ui-panel-header--surface"/);
+  assert.match(events, /class="events-header-actions ui-panel-header__actions"/);
+  assert.match(initiatives, /class="tpled-header initiatives-header ui-panel-header ui-panel-header--surface"/);
+  assert.match(initiatives, /class="tpled-header-controls ui-panel-header__actions"/);
+  assert.match(thinking, /class="tpled-header thinking-header ui-panel-header ui-panel-header--surface"/);
+  assert.match(thinking, /class="tpled-header-controls ui-panel-header__actions"/);
+  assert.match(agent, /class="agent-panel-header ui-panel-header"/);
+  assert.match(agent, /class="agent-panel-header-right ui-panel-header__actions"/);
+  assert.match(engineer, /class="agent-panel-header ui-panel-header"/);
+});
+
+test('panel-header geometry does not drift back into feature styles', () => {
+  const board = source('static/styles/board-panels.css');
+  const agent = source('static/styles/agent-panel.css');
+
+  assert.doesNotMatch(board, /^\.tpled-header\s*\{/m);
+  assert.doesNotMatch(board, /^\.events-header\s*\{/m);
+  assert.doesNotMatch(board, /^\.board-search-bar\s*\{[^}]*(?:display|padding|border-bottom|flex-wrap):/ms);
+  assert.doesNotMatch(agent, /^\.agent-panel-header\s*\{/m);
+  assert.doesNotMatch(agent, /^\.agent-panel-header-(?:copy|right)\s*\{/m);
+  assert.doesNotMatch(agent, /^\.agent-panel-(?:title|subtitle)\s*\{/m);
+});

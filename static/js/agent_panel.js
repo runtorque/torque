@@ -771,19 +771,19 @@ function _agentPanelShell(title, subtitle, kind, activeTab, bodyHtml, headerRigh
   if (activeTab) html += ' data-agent-panel-tab="' + _agentPanelEsc(activeTab) + '"';
   if (agentId) html += ' data-agent-panel-agent-id="' + _agentPanelEsc(agentId) + '"';
   html += '>';
-  html += '<div class="agent-panel-header">';
+  html += '<div class="agent-panel-header ui-panel-header">';
   if (headerBreadcrumbHtml) {
     html += '<div class="agent-panel-header-breadcrumb" data-agent-panel-header-breadcrumb>'
       + headerBreadcrumbHtml
       + '</div>';
   }
-  html += '<div class="agent-panel-header-copy">';
-  html += '<span class="agent-panel-title">' + _agentPanelEsc(title || 'Agent') + '</span>';
+  html += '<div class="agent-panel-header-copy ui-panel-header__copy">';
+  html += '<span class="agent-panel-title ui-panel-header__title">' + _agentPanelEsc(title || 'Agent') + '</span>';
   if (subtitle) {
-    html += '<div class="agent-panel-subtitle">' + _agentPanelEsc(subtitle) + '</div>';
+    html += '<div class="agent-panel-subtitle ui-panel-header__subtitle">' + _agentPanelEsc(subtitle) + '</div>';
   }
   html += '</div>';
-  html += '<div class="agent-panel-header-right" data-agent-panel-header-right>'
+  html += '<div class="agent-panel-header-right ui-panel-header__actions" data-agent-panel-header-right>'
     + (headerRightHtml || '')
     + '</div>';
   html += '</div>';

@@ -296,9 +296,25 @@ The canonical CSS API lives in `static/styles/components.css`:
 
 - Panel headers use compact, aligned controls and preserve the content width for
   the panel's primary information.
+- Header identity copy stays on the leading edge. Local actions stay on the
+  trailing edge and wrap only when the panel cannot preserve both regions.
+- Search, filter, and editor controls belong in a toolbar row rather than being
+  mixed into the title hierarchy.
 - Repeated panel actions belong in the same order: navigation first, then local
   actions, then layout/window controls.
 - Resizable panels must preserve operator-selected dimensions and content state.
+
+The canonical CSS API lives in `static/styles/components.css`:
+
+- `.ui-panel-header` establishes the shared header boundary and responsive row.
+- `.ui-panel-header--surface` adds the quiet raised header surface.
+- `.ui-panel-header__copy`, `__title-row`, `__title`, and `__subtitle` define the
+  identity hierarchy.
+- `.ui-panel-header__actions` aligns local actions at the trailing edge.
+- `.ui-toolbar` is the compact wrapping row for search, filters, and editors;
+  `.ui-toolbar--bordered` separates it from following content.
+- Planning, Thinking, Events, and Agent headers retain compatibility aliases
+  while their markup migrates. The Board search/filter row uses the toolbar API.
 
 ### Modals, menus, and popovers
 
@@ -375,7 +391,7 @@ the rule is intentionally global and documented here.
 | Buttons | Core variants standardized | Migrate feature-specific aliases and audit icon buttons |
 | Inputs and selectors | Core variants standardized | Migrate remaining feature-specific aliases and audit field labeling |
 | Cards | Core variants standardized | Audit grid identity cards and nested contained surfaces |
-| Toolbars and panel headers | Pending | Standardize spacing, ordering, and overflow |
+| Toolbars and panel headers | Core variants standardized | Migrate remaining Help, Context, Health, and editor toolbars |
 | Menus and popovers | Pending | Standardize geometry and focus restoration |
 | Modals | Pending | Standardize headers, actions, widths, and destructive flows |
 | Badges, tags, and status | Pending | Separate semantic pills from action controls |
@@ -541,6 +557,31 @@ the rule is intentionally global and documented here.
   canonical markup, and removal of duplicate feature geometry. Existing board,
   Context, and agent-panel regression suites protect rendering and rerender
   behavior; live checks verify computed card geometry.
+
+### D-009 — Panel identity and toolbar controls use separate shared rows
+
+- Date: 2026-07-14
+- Status: accepted
+- Decision: Panel headers share an 8px-by-10px wrapping boundary, a consistent
+  title/subtitle hierarchy, and trailing local actions. Search, filter, and
+  editor controls use a separate compact toolbar primitive with optional bottom
+  boundary.
+- Rationale: Planning and Thinking reserved a full-width second row for a count
+  and refresh action, while Events and Agent independently duplicated nearly the
+  same header geometry. Board search/filter layout was another local flex row.
+  Separating identity from working controls keeps headers compact and makes
+  responsive wrapping predictable.
+- Scope: `static/styles/components.css`, Planning and Thinking headers, Events
+  header, Agent headers, and the Board search/filter toolbar.
+- Constraints: Feature controls that genuinely require a full-width editor row
+  may retain that row through the compatibility control container. Context,
+  Help, Health, modal headers, desktop diagnostics, and nested editor toolbars
+  remain follow-up migrations. Window/layout chrome stays outside panel content
+  headers.
+- Verification: `tests/frontend_components.test.js` protects the shared API,
+  canonical consumer markup, and removal of duplicated header geometry from
+  feature styles. Existing panel suites protect rendering behavior; live checks
+  verify same-row Planning/Thinking actions and wrapping toolbar geometry.
 
 ## Decision entry template
 

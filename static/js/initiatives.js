@@ -1617,12 +1617,12 @@ function renderInitiativesPanel() {
   var areaTotal = _areasListForGroup(group).length;
   var html = '';
   html += '<div class="initiatives-panel planning-panel">';
-  html += '<div class="tpled-header initiatives-header">';
-  html += '<div class="tpled-header-copy"><div class="tpled-header-title-row"><span class="tpled-header-title">Planning</span></div>';
-  html += '<div class="tpled-header-subtitle">' + (activeTab === 'areas'
+  html += '<div class="tpled-header initiatives-header ui-panel-header ui-panel-header--surface">';
+  html += '<div class="tpled-header-copy ui-panel-header__copy"><div class="tpled-header-title-row ui-panel-header__title-row"><span class="tpled-header-title ui-panel-header__title">Planning</span></div>';
+  html += '<div class="tpled-header-subtitle ui-panel-header__subtitle">' + (activeTab === 'areas'
     ? 'Areas capture compact product/system briefs, links, and typed notes for ' + esc(group || 'all groups') + '.'
     : 'Initiatives grouped by roadmap bucket for ' + esc(group || 'all groups') + '. Linked execution stays on Board tasks.') + '</div></div>';
-  html += '<div class="tpled-header-controls">';
+  html += '<div class="tpled-header-controls ui-panel-header__actions">';
   html += '<span class="initiative-total">' + esc(activeTab === 'areas' ? _areaCountLabel(areaTotal) : _initiativeCountLabel(initiativeTotal)) + '</span>';
   html += '<button class="tpled-new-btn" onclick="planningRefresh()" title="Refresh planning data">&#x21BB;</button>';
   html += '</div></div>';

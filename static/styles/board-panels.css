@@ -1575,10 +1575,7 @@ body.runtime-embedded .board-empty {
 
 /* Search & filter toolbar */
 .board-search-bar {
-  display: flex; align-items: center; gap: 6px;
-  padding: 4px 8px; flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
+  flex-shrink: 0;
 }
 body.runtime-embedded .board-search-bar {
   gap: 8px;
@@ -2297,43 +2294,8 @@ body.runtime-embedded .board-empty-action:focus-visible {
   height: calc(100% - 5px);
 }
 
-/* Header bar */
-.tpled-header {
-  display: flex; align-items: flex-start; justify-content: space-between;
-  gap: 8px 10px; flex-wrap: wrap;
-  padding: 8px 10px;
-  background: var(--bg-hover);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.tpled-header-copy {
-  min-width: 0;
-  flex: 1 1 180px;
-}
-.tpled-header-title-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.tpled-header-title {
-  font-size: 12px; font-weight: 700;
-  color: var(--text);
-  flex-shrink: 0;
-}
-.tpled-header-subtitle {
-  font-size: 10px;
-  color: var(--text-dim);
-  margin-top: 2px;
-  line-height: 1.35;
-}
-.tpled-header-controls {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  flex: 1 1 100%;
-}
+/* Header controls */
+.tpled-header-title { flex-shrink: 0; }
 .tpled-select {
   flex: 1 1 180px; min-width: 0;
   font-size: 10px; padding: 3px 4px;
@@ -2811,34 +2773,6 @@ body.runtime-embedded .board-empty-action:focus-visible {
 #panel-events {
   display: flex; flex-direction: column;
   height: calc(100% - 5px);
-}
-.events-header {
-  display: flex; align-items: flex-start; justify-content: space-between;
-  gap: 8px 10px; flex-wrap: wrap;
-  padding: 8px 10px 6px;
-  background: var(--bg-hover);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.events-header-copy {
-  min-width: 0;
-  flex: 1 1 180px;
-}
-.events-header-title {
-  font-size: 12px; font-weight: 700;
-  color: var(--text);
-}
-.events-header-subtitle {
-  font-size: 10px;
-  color: var(--text-dim);
-  margin-top: 2px;
-  line-height: 1.35;
-}
-.events-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
 }
 .events-filter-btn {
   font-size: 9px; padding: 2px 6px;

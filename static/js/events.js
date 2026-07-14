@@ -394,12 +394,12 @@ function _eventsBuildShellHtml(grp, attention) {
     ? 'Attention inbox and recent activity for ' + grp
     : 'Attention inbox and recent activity across Torque';
 
-  html += '<div class="events-header">';
-  html += '<div class="events-header-copy">';
-  html += '<div class="events-header-title">Events</div>';
-  html += '<div class="events-header-subtitle">' + esc(scopeLabel) + '</div>';
+  html += '<div class="events-header ui-panel-header ui-panel-header--surface">';
+  html += '<div class="events-header-copy ui-panel-header__copy">';
+  html += '<div class="events-header-title ui-panel-header__title">Events</div>';
+  html += '<div class="events-header-subtitle ui-panel-header__subtitle">' + esc(scopeLabel) + '</div>';
   html += '</div>';
-  html += '<div class="events-header-actions">';
+  html += '<div class="events-header-actions ui-panel-header__actions">';
   html += '<select class="events-kind-filter" onchange="eventsSetKindFilter(this.value)">';
   html += '<option value="all"' + (_eventsKindFilter === 'all' ? ' selected' : '') + '>All</option>';
   html += '<option value="errors"' + (_eventsKindFilter === 'errors' ? ' selected' : '') + '>Errors</option>';

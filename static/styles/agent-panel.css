@@ -14,16 +14,6 @@
   min-height: 0;
   overflow: hidden;
 }
-.agent-panel-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px 10px;
-  flex-wrap: wrap;
-  padding: 8px 10px 6px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
 .agent-panel-header-breadcrumb {
   flex: 1 0 100%;
   min-width: 0;
@@ -31,29 +21,6 @@
 .agent-panel-header-breadcrumb .agent-panel-hierarchy-breadcrumb {
   padding: 4px 6px;
   background: color-mix(in srgb, var(--bg-hover) 28%, transparent);
-}
-.agent-panel-header-copy {
-  min-width: 0;
-  flex: 1 1 180px;
-}
-.agent-panel-title {
-  font-weight: 600;
-  font-size: 12px;
-  color: var(--text);
-}
-.agent-panel-subtitle {
-  font-size: 10px;
-  color: var(--text-dim);
-  margin-top: 2px;
-  line-height: 1.35;
-}
-.agent-panel-header-right {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
-  flex-wrap: wrap;
-  justify-content: flex-end;
 }
 .agent-panel-add-engineer-btn {
   background: var(--accent);
