@@ -33,6 +33,7 @@ test('webview stylesheet modules are unique, ordered, and exist on disk', () => 
   const appStyles = sources.filter((source) => source.startsWith('static/styles/'));
   assert.deepEqual(appStyles, [
     'static/styles/tokens-base.css',
+    'static/styles/components.css',
     'static/styles/workspace-grid.css',
     'static/styles/modals.css',
     'static/styles/workspace-shell.css',

@@ -33,6 +33,7 @@ test('group navigation dedicates the rail to groups and moves view controls into
   assert.match(grid, /data-agent-view-toggle="canvas"/);
   assert.match(grid, /class="agent-grid-new-icon"[\s\S]*<span>New<\/span>/);
   assert.match(css, /\.agent-grid-new-btn\s*\{[^}]*border:\s*1px solid var\(--border\);[^}]*border-radius:\s*var\(--radius\);[^}]*background:\s*transparent;/s);
+  assert.match(css, /\.agent-group-tab\s*\{[^}]*min-height:\s*var\(--control-height-xs\);[^}]*padding:\s*2px var\(--control-padding-x-xs\);[^}]*border-radius:\s*var\(--radius-sm\);[^}]*font-size:\s*var\(--control-font-size-xs\);/s);
   assert.match(css, /container:\s*agent-group-nav\s*\/\s*inline-size/);
   assert.match(css, /@container agent-group-nav \(max-width:\s*380px\)/);
 });
@@ -55,10 +56,27 @@ test('panel launcher is compact, pinned, searchable, and backed by consistent SV
   assert.match(nav, /return '<span class="taskbar-app-icon"[\s\S]*<svg/);
   assert.match(css, /body\.runtime-embedded #panelbar\s*\{[^}]*flex-basis:\s*24px;[^}]*height:\s*24px;/s);
   assert.match(css, /\.standalone-panel-zone-header\s*\{[^}]*gap:\s*6px;[^}]*padding:\s*3px 6px;/s);
-  assert.match(css, /\.standalone-panel-tab,[\s\S]*?\.standalone-panel-zone-btn\s*\{[^}]*height:\s*24px;[^}]*padding:\s*0 7px;/s);
+  assert.match(css, /\.standalone-panel-tab,[\s\S]*?\.standalone-panel-zone-btn\s*\{[^}]*border:\s*var\(--control-border\);[^}]*font-size:\s*var\(--control-font-size-xs\);[^}]*height:\s*var\(--control-height-sm\);[^}]*padding:\s*0 var\(--control-padding-x-xs\);/s);
+  assert.match(css, /\.standalone-panel-tab\s*\{[^}]*border-radius:\s*var\(--radius-sm\);/s);
   assert.match(css, /\.standalone-panel-zone-btn-icon\s*\{[^}]*width:\s*24px;[^}]*height:\s*24px;/s);
   assert.match(css, /\.taskbar-app\.panel-nav-hidden\s*\{\s*display:\s*none !important;/);
   assert.match(css, /@container panel-launcher \(max-width:\s*1180px\)/);
+});
+
+test('design foundations expose a shared compact control scale', () => {
+  const tokens = source('static/styles/tokens-base.css');
+
+  assert.match(tokens, /--control-height-xs:\s*22px;/);
+  assert.match(tokens, /--control-height-sm:\s*24px;/);
+  assert.match(tokens, /--control-height-md:\s*28px;/);
+  assert.match(tokens, /--control-padding-x-xs:\s*7px;/);
+  assert.match(tokens, /--control-padding-x-sm:\s*8px;/);
+  assert.match(tokens, /--control-padding-x-md:\s*10px;/);
+  assert.match(tokens, /--control-font-size-xs:\s*10px;/);
+  assert.match(tokens, /--control-font-size-sm:\s*11px;/);
+  assert.match(tokens, /--control-border:\s*1px solid var\(--border\);/);
+  assert.match(tokens, /\.hdr-btn\s*\{[^}]*font-size:\s*var\(--control-font-size-xs\);[^}]*border:\s*var\(--control-border\);/s);
+  assert.match(tokens, /\.hdr-icon-btn\s*\{[^}]*width:\s*var\(--control-height-sm\);[^}]*height:\s*var\(--control-height-sm\);/s);
 });
 
 function createNavigationContext() {

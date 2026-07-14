@@ -6353,7 +6353,7 @@ test('Stop Daemon uses an outline danger button with an SVG stop icon', () => {
   assert.equal(classes.includes('btn-danger'), false, 'Stop Daemon no longer uses solid danger style');
   assert.doesNotMatch(stopButton[0], /■/);
   assert.match(stopButton[0], /<svg\b[\s\S]*<rect\b/, 'Stop Daemon renders a stop SVG');
-  assert.match(css, /\.btn-danger-outline\s*\{[^}]*background:\s*transparent[^}]*border:/s);
+  assert.match(css, /\.btn-danger-outline\s*\{[^}]*background:\s*transparent;[^}]*border-color:/s);
 });
 
 test('relay_connection delta patches state in place without a panel/grid rebuild', () => {
@@ -7404,9 +7404,9 @@ test('device-link confirm buttons use primary/secondary app button styling', () 
   assert.ok(yesClasses.includes('btn-primary'), 'Generate uses primary button styling');
   assert.ok(noClasses.includes('btn-secondary'), 'Cancel uses secondary button styling');
   assert.equal(noClasses.includes('btn-cancel'), false, 'Cancel is not bare text styling');
-  assert.match(css,
-    /\.gls-relay-device-link-confirm-actions \.btn-primary,\s*\.gls-relay-device-link-confirm-actions \.btn-secondary\s*\{[^}]*padding:\s*5px 14px;[^}]*font-size:\s*11px;[^}]*font-weight:\s*600;[^}]*\}/s,
-    'confirm actions carry modal-action sizing',
+  assert.doesNotMatch(css,
+    /\.gls-relay-device-link-confirm-actions \.btn-primary,\s*\.gls-relay-device-link-confirm-actions \.btn-secondary\s*\{/s,
+    'confirm actions inherit the shared button component instead of redefining it',
   );
 });
 

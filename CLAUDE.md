@@ -108,6 +108,7 @@ Workers should not ask the user directly. Use `torque_ask` only for blocking hum
 - JS: no framework, no TypeScript, no build step. `webview.html` script order matters (core globals first, then board/modal submodules, then feature panels). State is patched in place from WS deltas.
 - Live frontend panels must preserve operator state across routine rerenders: scroll/viewport anchor, hover/focus/caret, inline drafts, expanded sections, and selection. Prefer shared capture/restore helpers in `static/js/render.js` and add Node frontend regression coverage for rerender-stability fixes.
 - CSS: single stylesheet, CSS custom properties for theming, monospace throughout.
+- `DESIGN.md` is the maintained source of truth for UI principles, tokens, component standards, and durable design decisions. UI changes must reuse its rules or update the relevant standard and decision log alongside the implementation.
 - Use custom modal/context-menu flows instead of native blocking dialogs so desktop and browser behavior stays consistent.
 
 ### Surface-invalidation discipline

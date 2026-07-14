@@ -20,6 +20,7 @@ STYLE_MODULES = [
     ROOT / "static" / "styles" / name
     for name in (
         "tokens-base.css",
+        "components.css",
         "workspace-grid.css",
         "modals.css",
         "workspace-shell.css",

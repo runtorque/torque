@@ -34,6 +34,15 @@
   --space-3:     12px;
   --space-4:     16px;
   --space-5:     24px;
+  --control-height-xs: 22px;
+  --control-height-sm: 24px;
+  --control-height-md: 28px;
+  --control-padding-x-xs: 7px;
+  --control-padding-x-sm: 8px;
+  --control-padding-x-md: 10px;
+  --control-font-size-xs: 10px;
+  --control-font-size-sm: 11px;
+  --control-border: 1px solid var(--border);
   --focus-ring:  0 0 0 2px var(--bg), 0 0 0 4px color-mix(in srgb, var(--accent) 72%, white 8%);
   --shadow-float: 0 16px 46px rgba(0, 0, 0, .42), 0 2px 8px rgba(0, 0, 0, .28);
   --transition-fast: 140ms ease;
@@ -269,8 +278,8 @@ body.tauri-mode #taskbar-conn-dot {
 .statusbar-info .relay-status { display: inline-flex; }
 .hdr-spacer { flex: 1; min-width: 0; }
 .hdr-btn {
-  font-size: 10px; padding: 3px 8px;
-  border: 1px solid var(--border); border-radius: var(--radius);
+  font-size: var(--control-font-size-xs); padding: 3px var(--control-padding-x-sm);
+  border: var(--control-border); border-radius: var(--radius);
   color: var(--text-dim);
   transition: color .15s, border-color .15s;
 }
@@ -278,8 +287,8 @@ body.tauri-mode #taskbar-conn-dot {
 .hdr-icon-btn {
   display: inline-grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: var(--control-height-sm);
+  height: var(--control-height-sm);
   padding: 0;
 }
 .hdr-icon-btn svg,

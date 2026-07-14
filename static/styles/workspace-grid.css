@@ -1176,13 +1176,13 @@ main {
   align-items: center;
   gap: 4px;
   max-width: 150px;
-  min-height: 22px;
-  padding: 2px 7px;
+  min-height: var(--control-height-xs);
+  padding: 2px var(--control-padding-x-xs);
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   color: var(--text-dim);
   background: transparent;
-  font-size: 10px;
+  font-size: var(--control-font-size-xs);
   cursor: pointer;
   transition: background .15s, border-color .15s, color .15s;
 }

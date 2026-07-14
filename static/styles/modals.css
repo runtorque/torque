@@ -116,20 +116,10 @@
 .modal-actions {
   display: flex; gap: 8px; margin-top: 14px; justify-content: flex-end;
 }
-.modal-actions button {
-  padding: 5px 14px; border-radius: var(--radius);
-  font-size: 11px; font-weight: 600;
-}
 .system-prompt-preview-row {
   display: flex;
   justify-content: flex-start;
   margin-top: 6px;
-}
-.system-prompt-preview-btn {
-  padding: 5px 10px;
-  border-radius: var(--radius);
-  font-size: 11px;
-  font-weight: 600;
 }
 .modal.preview-popup {
   max-width: 680px;
@@ -178,52 +168,6 @@
 body.standalone-mode .preview-popup {
   max-width: min(80vw, 1180px);
 }
-.btn-cancel { color: var(--text-dim); }
-.btn-cancel:hover { color: var(--text); }
-.btn-primary {
-  background: var(--accent); color: #fff;
-  border-radius: var(--radius);
-}
-.btn-primary:hover { filter: brightness(1.15); }
-.btn-danger { background: var(--red); color: #fff; }
-.btn-danger:hover { filter: brightness(1.15); }
-.btn-danger-outline {
-  padding: 4px 10px;
-  border-radius: var(--radius);
-  font-size: 11px;
-  font-weight: 600;
-  background: transparent;
-  color: var(--red);
-  border: 1px solid color-mix(in srgb, var(--red) 70%, var(--border));
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.btn-danger-outline:hover {
-  background: color-mix(in srgb, var(--red) 10%, transparent);
-  border-color: var(--red);
-}
-.btn-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  width: 12px;
-  height: 12px;
-}
-.btn-icon svg {
-  display: block;
-  width: 12px;
-  height: 12px;
-  fill: currentColor;
-}
-.btn-green {
-  background: var(--green); color: #fff;
-  padding: 5px 14px; border-radius: var(--radius);
-  font-size: 11px; font-weight: 600;
-}
-.btn-green:hover { filter: brightness(1.15); }
 .hidden { display: none !important; }
 
 /* Specializations picker */
@@ -308,21 +252,6 @@ body.standalone-mode .preview-popup {
 .specializations-footer .specializations-reset:disabled {
   opacity: 0.5; cursor: not-allowed;
 }
-.btn-link {
-  background: transparent; border: none; color: var(--accent);
-  cursor: pointer; padding: 0; font-size: 11px; font-weight: 600;
-}
-.btn-link:hover { filter: brightness(1.2); }
-.btn-secondary {
-  padding: 4px 10px; border-radius: var(--radius);
-  font-size: 11px; font-weight: 600;
-  background: var(--bg-input, rgba(255,255,255,0.08));
-  color: var(--text);
-  border: 1px solid var(--border, rgba(255,255,255,0.1));
-  cursor: pointer;
-}
-.btn-secondary:hover { filter: brightness(1.15); }
-
 /* Color swatches */
 .color-swatches {
   display: flex; gap: 3px; padding: 2px;
@@ -572,7 +501,6 @@ body.runtime-embedded #modal-group .modal-summary {
   border-top: 1px solid var(--border-subtle);
   background: color-mix(in srgb, var(--bg-raised) 76%, var(--bg-surface));
 }
-.settings-dialog-footer button { min-height: 32px; }
 .settings-footer-spacer { flex: 1; }
 .settings-save-state {
   color: var(--text-faint);
@@ -1134,13 +1062,6 @@ body.runtime-embedded #modal-group .modal-summary {
 .gls-relay-daemon-credential-confirm[hidden] { display: none; }
 .gls-relay-daemon-credential-confirm-msg { color: var(--text); }
 .gls-relay-daemon-credential-confirm-actions { display: flex; gap: 6px; }
-.gls-relay-daemon-credential-confirm-actions .btn-primary,
-.gls-relay-daemon-credential-confirm-actions .btn-secondary {
-  padding: 5px 14px;
-  border-radius: var(--radius);
-  font-size: 11px;
-  font-weight: 600;
-}
 .gls-relay-daemon-credential-error {
   display: flex;
   flex-direction: column;
@@ -1258,13 +1179,6 @@ body.runtime-embedded #modal-group .modal-summary {
 .gls-relay-device-link-confirm[hidden] { display: none; }
 .gls-relay-device-link-confirm-msg { color: var(--text); }
 .gls-relay-device-link-confirm-actions { display: flex; gap: 6px; }
-.gls-relay-device-link-confirm-actions .btn-primary,
-.gls-relay-device-link-confirm-actions .btn-secondary {
-  padding: 5px 14px;
-  border-radius: var(--radius);
-  font-size: 11px;
-  font-weight: 600;
-}
 .gls-relay-device-link-error {
   display: flex;
   flex-direction: column;

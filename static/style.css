@@ -1,5 +1,6 @@
 /* Compatibility entrypoint. webview.html loads these files directly to make cascade order explicit. */
 @import url("./styles/tokens-base.css");
+@import url("./styles/components.css");
 @import url("./styles/workspace-grid.css");
 @import url("./styles/modals.css");
 @import url("./styles/workspace-shell.css");

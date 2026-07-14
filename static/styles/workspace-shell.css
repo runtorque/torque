@@ -613,16 +613,19 @@ body.runtime-embedded #standalone-right-rail {
 }
 .standalone-panel-tab,
 .standalone-panel-zone-btn {
-  border: 1px solid var(--border);
+  border: var(--control-border);
   border-radius: 999px;
   color: var(--text-dim);
   background: var(--bg-cell);
   font: inherit;
-  font-size: 10px;
-  height: 24px;
-  padding: 0 7px;
+  font-size: var(--control-font-size-xs);
+  height: var(--control-height-sm);
+  padding: 0 var(--control-padding-x-xs);
   line-height: 1;
   transition: color .15s, border-color .15s, background .15s, box-shadow .15s;
+}
+.standalone-panel-tab {
+  border-radius: var(--radius-sm);
 }
 .standalone-panel-tab:hover,
 .standalone-panel-zone-btn:hover {

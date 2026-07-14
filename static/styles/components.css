@@ -1,0 +1,148 @@
+/* ------------------------------------------------------------------ */
+/* Shared components                                                   */
+/* ------------------------------------------------------------------ */
+
+/* Buttons
+ *
+ * New markup should combine `.btn` with one intent class. Existing
+ * variant-only markup remains supported while surfaces migrate.
+ */
+.btn,
+.btn-primary,
+.btn-secondary,
+.btn-cancel,
+.btn-quiet,
+.btn-danger,
+.btn-danger-outline,
+.btn-green,
+.btn-success,
+.btn-warning,
+.btn-rebase {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: var(--control-height-md);
+  padding: 0 var(--control-padding-x-md);
+  border: var(--control-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--control-font-size-sm);
+  font-weight: 600;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+  vertical-align: middle;
+  transition: color var(--transition-fast), border-color var(--transition-fast),
+    background var(--transition-fast), filter var(--transition-fast);
+}
+
+.btn,
+.btn-secondary {
+  color: var(--text);
+  background: var(--bg-cell);
+  border-color: var(--border);
+}
+.btn:hover:not(:disabled),
+.btn-secondary:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+.btn-primary {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.btn-primary:hover:not(:disabled) { filter: brightness(1.12); }
+
+.btn-quiet,
+.btn-cancel {
+  color: var(--text-dim);
+  background: transparent;
+  border-color: transparent;
+}
+.btn-quiet:hover:not(:disabled),
+.btn-cancel:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--bg-hover);
+  border-color: var(--border-subtle);
+}
+
+.btn-danger {
+  color: #fff;
+  background: var(--red);
+  border-color: var(--red);
+}
+.btn-danger:hover:not(:disabled) { filter: brightness(1.12); }
+
+.btn-danger-outline {
+  color: var(--red);
+  background: transparent;
+  border-color: color-mix(in srgb, var(--red) 70%, var(--border));
+}
+.btn-danger-outline:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+  border-color: var(--red);
+}
+
+.btn-success,
+.btn-green {
+  color: #fff;
+  background: var(--green);
+  border-color: var(--green);
+}
+.btn-success:hover:not(:disabled),
+.btn-green:hover:not(:disabled) { filter: brightness(1.12); }
+
+.btn-warning,
+.btn-rebase {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 18%, transparent);
+  border-color: color-mix(in srgb, var(--amber) 42%, var(--border));
+}
+.btn-warning:hover:not(:disabled),
+.btn-rebase:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--amber) 28%, transparent);
+  border-color: color-mix(in srgb, var(--amber) 65%, var(--border));
+}
+
+.btn-sm {
+  min-height: var(--control-height-sm);
+  padding: 0 var(--control-padding-x-sm);
+  font-size: var(--control-font-size-xs);
+}
+.btn-xs {
+  min-height: var(--control-height-xs);
+  padding: 0 var(--control-padding-x-xs);
+  font-size: var(--control-font-size-xs);
+}
+
+.btn-link {
+  padding: 0;
+  border: 0;
+  color: var(--accent);
+  background: transparent;
+  font-size: var(--control-font-size-sm);
+  font-weight: 600;
+  line-height: inherit;
+}
+.btn-link:hover:not(:disabled) {
+  color: color-mix(in srgb, var(--accent) 78%, white);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+}
+.btn-icon svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
