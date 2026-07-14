@@ -37,14 +37,22 @@ Safe alternatives:
 See [docs/reference/architecture.md](docs/reference/architecture.md) for the detailed file-by-file reference. High-level map:
 
 - `torque.py`: installed entrypoint; anchors runtime paths and starts the standalone daemon loop.
-- `torque/server.py`: aiohttp routes, command dispatch, agent launch/reuse, action rendering, worker/engineer/architect integration glue.
+- `torque/server.py`: aiohttp/runtime composition root. Domain command semantics belong in `torque/commands/`; keep transport wiring and dependency composition here rather than adding new command branches.
+- `torque/server_routes.py`: factories for event ingest, HTTP, WebSocket, upload, profile-harness, log, and attachment handlers; `server.py` supplies runtime dependencies and registers the returned handlers.
+- `torque/commands/`: domain-grouped backend command handlers and explicit route manifests; `torque/server.py` re-exports compatibility symbols while remaining the composition root.
+- `torque/services/worktrees/`: worktree target resolution, merge preflight, direct/PR finalization, nested-submodule handling, workflow-breach gates, and merge evidence. `torque/server.py` supplies the remaining runtime callbacks and re-exports legacy helper names.
+- `torque/services/`: composed domain orchestration behind compatibility facades such as `MatrixState`; new business rules should move here instead of growing the facade.
+- `torque/persistence/`: domain SQLite operations composed behind the `TorqueDB` compatibility facade; shared persistence primitives live here instead of growing `torque/db.py`.
+- `torque/worktree.py`, `worktree_manager/`: thin `WorktreeManager` composition facade plus focused lifecycle, nested-submodule, change/checkpoint, merge, refresh, and GitHub modules.
+- `torque/mcp_tools_shared.py`, `mcp_scoped/`: authenticated scoped-tool composition plus domain dispatchers for proposals, reads, inventory, tasks, planning, communications, and worktrees.
 - `torque/server_agent.py`, `server_dispatch.py`, `server_worktrees.py`, `server_artifacts.py`, `server_actions.py`: extracted helpers for server-heavy concerns.
-- `torque/state.py`: core dataclasses (`AgentCell`, `BoardTask`, settings) and `MatrixState` mutation/delta logic.
+- `torque/state.py`: core dataclasses (`AgentCell`, `BoardTask`, settings), normalization helpers, and the composed `MatrixState` shell.
+- `torque/state_board_*.py`, `state_core_views.py`, `state_lifecycle.py`, `state_loading.py`, `state_messages.py`, `state_runtime.py`, `state_services.py`, `state_settings.py`: focused `MatrixState` mixins for board behavior, agent/health/UI views, identity/lifecycle, hydration, messaging/history, broadcast/runtime, service compatibility, and operator settings/visibility.
 - `torque/db*.py`: SQLite schema, persistence, board, and shared-memory helpers.
 - `torque/actions.py`: YAML action discovery plus Jinja2 `prompt` rendering; only `prompt` renders, `torque` is reserved, and `transitions` define valid derives.
 - `torque/templates.py`, `roles.py`, `specializations.py`: agent template/config discovery and role/specialization resolution.
-- `torque/worktree.py`, `worktree_boundaries.py`: git worktree lifecycle, checkpointing, merge/boundary safety.
-- `torque/mcp*.py`, `mcp_engineer_tools/`: worker, engineer, architect MCP tool surfaces and scoping.
+- `torque/worktree_boundaries.py`, `worktree_streams.py`: worktree boundary and stream projections shared across orchestration surfaces.
+- `torque/mcp*.py`, `mcp_engineer_tools/`: worker, engineer, architect MCP transport/tool specifications around the scoped implementation.
 - `torque/engineer.py`, `architect.py`: persistent role prompts, journals/digests/decisions, orchestration behavior.
 - `torque/adapters/`: provider integrations (`claude-code`, `codex`, `gemini-cli`, generic).
 - `webview.html` + `static/js/*` + `static/style.css`: plain frontend; script load order is architectural.
@@ -125,6 +133,7 @@ Run `make test`; it self-sanitizes inherited `TORQUE_*` runtime variables. Use t
 Moved reference material lives here to keep boot context small:
 
 - [Detailed architecture reference](docs/reference/architecture.md)
+- [Backend modularity boundaries](docs/reference/backend-modularity.md)
 - [Claude Code hooks gotchas](docs/reference/hooks-gotchas.md)
 - [Install locations](docs/reference/install-locations.md)
 - [AI operator guide](docs/operate/ai.md)

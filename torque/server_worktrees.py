@@ -6,7 +6,7 @@ import asyncio
 import re
 import shlex
 
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 
 from .config import log
@@ -25,6 +25,33 @@ _TORQUE_TASK_REF_RE = re.compile(
 )
 _MARKDOWN_FENCE_RE = re.compile(r"^[ \t]{0,3}(?P<fence>`{3,}|~{3,})")
 _INLINE_CODE_TICKS_RE = re.compile(r"`+")
+
+
+@dataclass
+class WorktreeCommandTarget:
+    """Value object for live-agent or driverless worktree operations."""
+
+    id: str
+    name: str
+    group: str
+    worktree_path: str
+    worktree_branch: str
+    worktree_repo_root: str
+    worktree_base_branch: str
+    git_root: str = ""
+    slug: str = ""
+    worktree_merge_squash: bool = True
+    worktree_checkpoints: int = 0
+    worktree_dirty: bool = False
+    worktree_diff: dict | None = None
+    worktree_changed_files: list | None = None
+    worktree_ahead: int = 0
+    worktree_behind: int = 0
+    worktree_merged: bool = False
+    current_task_id: str = ""
+    source_agent_id: str = ""
+    driverless: bool = False
+    cell: object | None = None
 
 
 def _parse_diff_git_paths(line: str) -> tuple[str, str]:

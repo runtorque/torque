@@ -238,15 +238,15 @@ class DispatchTaskInvokesPromotionTests(unittest.TestCase):
 
     def setUp(self):
         install_aiohttp_stub()
-        self.server_mod = importlib.reload(
-            importlib.import_module("torque.server")
+        self.dispatch_mod = importlib.reload(
+            importlib.import_module("torque.commands.task_dispatch")
         )
 
     def test_dispatch_task_handler_references_promote_helper(self):
-        source = Path(self.server_mod.__file__).read_text()
+        source = Path(self.dispatch_mod.__file__).read_text()
         # Anchor to the dispatch_task handler so we don't accidentally
         # match an unrelated future caller of the helper.
-        marker = 'elif cmd == "dispatch_task":'
+        marker = "async def handle_dispatch_task_command("
         idx = source.find(marker)
         self.assertGreaterEqual(
             idx, 0, "dispatch_task command branch missing")
