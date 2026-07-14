@@ -2395,10 +2395,7 @@ body.runtime-embedded .board-empty-action:focus-visible {
 .tpled-form label:first-child { margin-top: 0; }
 .tpled-form input,
 .tpled-form textarea {
-  width: 100%; box-sizing: border-box;
-  font-size: 10px; padding: 4px 6px;
-  background: var(--bg); color: var(--text);
-  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg);
 }
 .tpled-form textarea {
   resize: none; overflow: hidden;
@@ -2612,13 +2609,7 @@ body.runtime-embedded .board-empty-action:focus-visible {
 }
 .tpled-loc-gate-fields input[type="number"] {
   width: 86px;
-  box-sizing: border-box;
-  font-size: 10px;
-  padding: 4px 6px;
   background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
 }
 .tpled-loc-gate-fields input:disabled,
 .tpled-loc-bypass:disabled {
@@ -3006,17 +2997,9 @@ body.runtime-embedded .board-empty-action:focus-visible {
 }
 .events-resolve-textarea {
   width: 100%; min-height: 28px; max-height: 120px;
-  padding: 4px 6px;
-  font-size: 11px; font-family: inherit;
-  color: var(--text);
   background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
   resize: none; overflow: hidden;
   margin-bottom: 4px;
-}
-.events-resolve-textarea:focus {
-  outline: none; border-color: var(--accent);
 }
 .events-attention-actions {
   display: flex; gap: 6px;

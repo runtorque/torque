@@ -1370,14 +1370,6 @@ body.runtime-embedded #modal-group .modal-summary {
 .label-req {
   color: var(--red); font-weight: 700;
 }
-textarea {
-  font: inherit; color: var(--text);
-  background: var(--bg); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 6px 8px;
-  outline: none; width: 100%; resize: vertical;
-  min-height: 48px;
-}
-textarea:focus { border-color: var(--accent); }
 textarea.task-tpl-var, #task-task-input, #task-description-input {
   min-height: 0; max-height: 30vh; resize: none; overflow-y: auto;
 }
@@ -1403,7 +1395,7 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   font: inherit;
   line-height: normal;
   color: var(--text);
-  background: var(--bg);
+  background: var(--bg-inset);
   border: 1px solid transparent;
   border-radius: var(--radius);
   white-space: pre-wrap;

@@ -538,12 +538,7 @@ button.agent-panel-hierarchy-crumb:focus-visible {
 .architect-decision-status-select,
 .architect-decision-input,
 .architect-decision-textarea {
-  font: inherit;
-  color: var(--text);
   background: var(--bg-cell);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 8px;
 }
 .architect-decision-link-select,
 .architect-decision-status-select {
@@ -791,11 +786,6 @@ button.agent-panel-hierarchy-crumb:focus-visible {
 .agent-panel-mcp-filters input,
 .agent-panel-mcp-filters select {
   background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text);
-  font: 10px var(--font);
-  padding: 5px 6px;
   min-width: 0;
 }
 .agent-panel-mcp-list {
@@ -1866,11 +1856,6 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   flex: 1;
   min-width: 0;
   background: var(--bg-cell);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text);
-  font: 10px var(--font);
-  padding: 2px 4px;
 }
 
 .agent-panel-events-list {

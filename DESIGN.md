@@ -205,10 +205,26 @@ tabs. Do not apply tab styles to them merely because their class name contains
 ### Inputs and selectors
 
 - Inputs, selects, and textareas use `--radius`, `--bg-inset`, and `--border`.
+- Standard single-line fields are 28px tall with an 11px label. Compact editor
+  and toolbar fields are 24px tall with a 10px label.
 - Every field needs a visible label or an equivalent accessible name.
 - Placeholder text provides an example or hint, never the only label.
 - Validation and disabled state must remain legible without relying on opacity
   alone for the explanatory text.
+
+The canonical CSS API lives in `static/styles/components.css`:
+
+- Native text-like inputs, selects, and textareas receive the default primitive
+  automatically; `.form-control` is the explicit API for new markup.
+- `.form-control-sm` selects compact geometry. Existing agent-panel and action-
+  editor selectors are temporary compatibility aliases.
+- `.is-invalid` or `aria-invalid="true"` applies the shared invalid treatment.
+- `.form-error` styles the adjacent explanatory message. Invalid color alone is
+  not a substitute for useful error text.
+
+Checkboxes, radio buttons, range controls, color pickers, file controls, and
+switches keep their native or dedicated component geometry and are not text
+fields.
 
 ### Cards and contained surfaces
 
@@ -297,7 +313,7 @@ the rule is intentionally global and documented here.
 | Panel tabs | Standardized | Verify all panel zones and narrow widths |
 | Feature navigation tabs | Core variants standardized | Migrate compatibility aliases to the canonical API |
 | Buttons | Core variants standardized | Migrate feature-specific aliases and audit icon buttons |
-| Inputs and selectors | Baseline | Audit sizing and validation states |
+| Inputs and selectors | Core variants standardized | Migrate remaining feature-specific aliases and audit field labeling |
 | Cards | Pending | Reconcile grid, board, context, and agent cards |
 | Toolbars and panel headers | Pending | Standardize spacing, ordering, and overflow |
 | Menus and popovers | Pending | Standardize geometry and focus restoration |
@@ -377,6 +393,29 @@ the rule is intentionally global and documented here.
 - Verification: `tests/frontend_components.test.js` protects both shared
   variants and prevents feature stylesheets from redefining their core visual
   grammar.
+
+### D-005 — Text fields use default and compact primitives
+
+- Date: 2026-07-14
+- Status: accepted
+- Decision: Text-like inputs, selects, and textareas share one visual primitive.
+  Standard single-line fields use 28px geometry and compact editor/toolbar fields
+  use 24px geometry. Both share radius, surface, border, hover, focus, disabled,
+  and invalid-state behavior.
+- Rationale: Form styling lived in the reset layer and was repeatedly rebuilt in
+  agent, Planning, Thinking, modal, and action-editor styles. A component-level
+  primitive makes fields align with buttons and tabs while keeping density an
+  explicit variant instead of a feature-local accident.
+- Scope: `static/styles/components.css`, native text-like fields, agent decision
+  and filter fields, Planning and Thinking forms, action-template editors, event
+  resolution input, and modal textareas.
+- Constraints: Search experiences may intentionally use larger geometry.
+  Checkboxes, radios, ranges, color/file controls, switches, and specialized
+  code-editor behavior are separate components. Layout width and resize behavior
+  remain owned by their surfaces.
+- Verification: `tests/frontend_components.test.js` protects the shared API and
+  keeps form primitives out of the reset and migrated feature stylesheets. Live
+  browser checks verify default and compact computed geometry.
 
 ## Decision entry template
 

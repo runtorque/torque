@@ -220,8 +220,8 @@ test('Planning CSS uses compact panel typography and control density', () => {
   assert.match(css, /\.ui-tab--contained,\s*\.planning-tab,\s*\.thinking-tab,\s*\.agent-panel-events-subtab\s*\{[^}]*min-height:\s*var\(--control-height-sm\);[^}]*padding:\s*0 var\(--control-padding-x-sm\);/s);
   assert.match(css, /\.initiative-column-title\s*\{[^}]*font-size:\s*12px;/s);
   assert.match(css, /\.initiative-detail h2\s*\{[^}]*font-size:\s*14px;/s);
-  assert.match(css, /\.initiative-form input,\s*\.initiative-form select,\s*\.initiative-form textarea,\s*\.initiative-link-add input\s*\{[^}]*font-size:\s*11px;[^}]*padding:\s*5px\s+7px;/s);
-  assert.match(css, /\.areas-filters input,\s*\.areas-filters select,\s*\.area-note-editor input,\s*\.area-note-editor select,\s*\.area-note-editor textarea,\s*\.area-link-related-add select\s*\{[^}]*font-size:\s*11px;[^}]*padding:\s*5px\s+7px;/s);
+  assert.match(css, /\.form-control,\s*:where\(input:not\([\s\S]*?select,\s*textarea\s*\{[^}]*font-size:\s*var\(--control-font-size-sm\);/s);
+  assert.match(css, /\.form-control:not\(textarea\),\s*:where\(input:not\([\s\S]*?select\s*\{[^}]*min-height:\s*var\(--control-height-md\);[^}]*padding:\s*0 var\(--control-padding-x-sm\);/s);
 });
 
 test('Planning initial load requests Initiatives and Areas when opened', () => {

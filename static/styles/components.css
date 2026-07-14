@@ -2,6 +2,97 @@
 /* Shared components                                                   */
 /* ------------------------------------------------------------------ */
 
+/* Form controls
+ *
+ * Native text-like fields receive the default primitive automatically.
+ * New markup may add `.form-control` explicitly and `.form-control-sm`
+ * for dense toolbars and editors. Non-text controls keep native geometry.
+ */
+.form-control,
+:where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="hidden"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="image"])),
+select,
+textarea {
+  width: 100%;
+  border: var(--control-border);
+  border-radius: var(--radius);
+  outline: none;
+  color: var(--text);
+  background: var(--bg-inset);
+  font-family: var(--font);
+  font-size: var(--control-font-size-sm);
+  transition: color var(--transition-fast), border-color var(--transition-fast),
+    background var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.form-control:not(textarea),
+:where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="hidden"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="image"])),
+select {
+  min-height: var(--control-height-md);
+  padding: 0 var(--control-padding-x-sm);
+  line-height: 1.2;
+}
+
+textarea.form-control,
+textarea {
+  min-height: 48px;
+  padding: 6px var(--control-padding-x-sm);
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.form-control:hover:not(:disabled),
+:where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="hidden"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="image"]):hover:not(:disabled)),
+select:hover:not(:disabled),
+textarea:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+.form-control:focus,
+:where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="hidden"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="image"]):focus),
+select:focus,
+textarea:focus {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--bg-inset) 88%, var(--accent) 12%);
+}
+
+.form-control-sm,
+.agent-panel-mcp-filters input,
+.agent-panel-mcp-filters select,
+.agent-panel-field select,
+.tpled-form input,
+.tpled-form select,
+.tpled-form textarea,
+.tpled-loc-gate-fields input[type="number"],
+.events-resolve-textarea {
+  min-height: var(--control-height-sm);
+  padding: 0 var(--control-padding-x-xs);
+  font-size: var(--control-font-size-xs);
+}
+
+textarea.form-control-sm,
+.tpled-form textarea,
+.events-resolve-textarea {
+  min-height: var(--control-height-sm);
+  padding-block: 4px;
+  line-height: 1.4;
+}
+
+.form-control.is-invalid,
+.form-control[aria-invalid="true"],
+input[aria-invalid="true"],
+select[aria-invalid="true"],
+textarea[aria-invalid="true"] {
+  border-color: var(--red);
+  background: color-mix(in srgb, var(--bg-inset) 88%, var(--red) 12%);
+}
+
+.form-error {
+  margin-top: var(--space-1);
+  color: var(--red);
+  font-size: var(--control-font-size-xs);
+  line-height: 1.4;
+}
+
 /* Buttons
  *
  * New markup should combine `.btn` with one intent class. Existing

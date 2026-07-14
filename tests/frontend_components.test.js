@@ -9,6 +9,34 @@ function source(file) {
   return fs.readFileSync(path.join(repoRoot, file), 'utf8');
 }
 
+test('shared form controls define default, compact, and invalid states', () => {
+  const css = source('static/styles/components.css');
+
+  assert.match(css, /\.form-control,\s*:where\(input:not\([\s\S]*?select,\s*textarea\s*\{[^}]*border:\s*var\(--control-border\);[^}]*border-radius:\s*var\(--radius\);[^}]*background:\s*var\(--bg-inset\);[^}]*font-size:\s*var\(--control-font-size-sm\);/s);
+  assert.match(css, /\.form-control:not\(textarea\),\s*:where\(input:not\([\s\S]*?select\s*\{[^}]*min-height:\s*var\(--control-height-md\);[^}]*padding:\s*0 var\(--control-padding-x-sm\);/s);
+  assert.match(css, /textarea\.form-control,\s*textarea\s*\{[^}]*min-height:\s*48px;[^}]*padding:\s*6px var\(--control-padding-x-sm\);[^}]*resize:\s*vertical;/s);
+  assert.match(css, /\.form-control-sm,[\s\S]*?\.events-resolve-textarea\s*\{[^}]*min-height:\s*var\(--control-height-sm\);[^}]*font-size:\s*var\(--control-font-size-xs\);/s);
+  assert.match(css, /\.form-control\.is-invalid,[\s\S]*?textarea\[aria-invalid="true"\]\s*\{[^}]*border-color:\s*var\(--red\);/s);
+  assert.match(css, /\.form-error\s*\{[^}]*color:\s*var\(--red\);[^}]*font-size:\s*var\(--control-font-size-xs\);/s);
+});
+
+test('form primitives live in the shared component stylesheet', () => {
+  const tokens = source('static/styles/tokens-base.css');
+  const modals = source('static/styles/modals.css');
+  const features = source('static/styles/feature-panels.css');
+  const agent = source('static/styles/agent-panel.css');
+  const thinkingRule = features.match(/\.thinking-form input,\s*\.thinking-form select,\s*\.thinking-form textarea\s*\{([^}]*)\}/s);
+  const agentFilterRule = agent.match(/\.agent-panel-mcp-filters input,\s*\.agent-panel-mcp-filters select\s*\{([^}]*)\}/s);
+
+  assert.doesNotMatch(tokens, /^input, select, textarea\s*\{/m);
+  assert.doesNotMatch(modals, /^textarea\s*\{/m);
+  assert.doesNotMatch(features, /^\.initiative-form input,\s*$/m);
+  assert.ok(thinkingRule, 'Thinking retains only its local min-width layout rule');
+  assert.doesNotMatch(thinkingRule[1], /border|background|padding|font-size/);
+  assert.ok(agentFilterRule, 'Agent filters retain only surface layout and background');
+  assert.doesNotMatch(agentFilterRule[1], /border|padding|font-size/);
+});
+
 test('shared button component defines canonical intents and sizes', () => {
   const css = source('static/styles/components.css');
 

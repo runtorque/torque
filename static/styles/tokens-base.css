@@ -81,18 +81,6 @@ button {
   font: inherit; cursor: pointer;
   background: none; border: none; color: var(--text);
 }
-input, select, textarea {
-  font: inherit; color: var(--text);
-  background: var(--bg-inset); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 6px 8px;
-  outline: none; width: 100%;
-  transition: border-color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
-}
-input:hover, select:hover, textarea:hover { border-color: var(--border-strong); }
-input:focus, select:focus, textarea:focus {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--bg-inset) 88%, var(--accent) 12%);
-}
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,

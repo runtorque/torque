@@ -1786,20 +1786,6 @@
 }
 .initiative-form label,
 .initiative-links-section h3 { display: block; margin: 8px 0 3px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
-.initiative-form input,
-.initiative-form select,
-.initiative-form textarea,
-.initiative-link-add input {
-  width: 100%;
-  box-sizing: border-box;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--input-bg, rgba(0, 0, 0, 0.18));
-  color: var(--fg);
-  font: inherit;
-  font-size: 11px;
-  padding: 5px 7px;
-}
 .initiative-form textarea { resize: vertical; min-height: 50px; }
 .initiative-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .initiative-detail-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 9px; }
@@ -1940,14 +1926,6 @@
 .area-note-editor textarea,
 .area-link-related-add select {
   min-width: 0;
-  box-sizing: border-box;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--input-bg, rgba(0, 0, 0, 0.18));
-  color: var(--fg);
-  font: inherit;
-  font-size: 11px;
-  padding: 5px 7px;
 }
 .areas-filters input,
 .areas-filters select {
@@ -2281,18 +2259,7 @@
 }
 .thinking-form input,
 .thinking-form select,
-.thinking-form textarea {
-  width: 100%;
-  min-width: 0;
-  box-sizing: border-box;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--input-bg, rgba(0, 0, 0, 0.18));
-  color: var(--fg);
-  font: inherit;
-  font-size: 11px;
-  padding: 5px 7px;
-}
+.thinking-form textarea { min-width: 0; }
 .thinking-form textarea { resize: vertical; min-height: 50px; }
 .thinking-scratch-editor textarea { min-height: 220px; }
 .thinking-detail-actions,
@@ -3081,10 +3048,7 @@
 /* Agent Class trusted UI                                              */
 /* ------------------------------------------------------------------ */
 .tpled-form select {
-  width: 100%; box-sizing: border-box;
-  font-size: 10px; padding: 4px 6px;
-  background: var(--bg); color: var(--text);
-  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg);
 }
 .agent-class-badge {
   border-color: rgba(88, 166, 255, 0.35);
