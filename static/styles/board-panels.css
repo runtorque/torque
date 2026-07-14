@@ -1652,17 +1652,11 @@ body.runtime-embedded .board-display-select {
 /* Filter dropdown buttons */
 .board-filter-btn-wrap { position: relative; }
 .board-filter-btn {
-  font: 9px/1 var(--font); color: var(--text-dim);
-  background: var(--bg-cell); border: 1px solid var(--border);
-  border-radius: 3px; padding: 3px 6px;
-  cursor: pointer; white-space: nowrap;
-  transition: all .1s;
+  flex: 0 0 auto;
 }
 body.runtime-embedded .board-filter-btn {
-  padding: 5px 8px;
-  border-radius: 999px;
+  min-height: var(--control-height-sm);
 }
-.board-filter-btn:hover { color: var(--text); border-color: var(--text-dim); }
 body.runtime-embedded .taskbar-app:focus-visible,
 body.runtime-embedded .terminal-tab-select:focus-visible,
 body.runtime-embedded .terminal-tab-close:focus-visible,
@@ -1671,9 +1665,6 @@ body.runtime-embedded .board-filter-btn:focus-visible,
 body.runtime-embedded .board-empty-action:focus-visible {
   outline: 2px solid rgba(88,166,255,.4);
   outline-offset: 1px;
-}
-.board-filter-btn.active {
-  color: var(--accent); border-color: var(--accent);
 }
 .board-filter-btn-count {
   display: inline-block;
@@ -1777,12 +1768,10 @@ body.runtime-embedded .board-empty-action:focus-visible {
 }
 .board-saved-view-delete:hover { color: var(--text); }
 .board-filter-active-chip {
-  font: 9px/1 var(--font);
-  border-radius: 9px; padding: 2px 7px;
-  cursor: pointer; white-space: nowrap;
-  transition: opacity .1s;
+  min-height: var(--control-height-xs);
+  padding-inline: var(--control-padding-x-xs);
+  font-size: 9px;
 }
-.board-filter-active-chip:hover { opacity: .7; }
 .board-filter-active-label {
   color: var(--accent); border: 1px solid var(--accent);
   background: rgba(88,166,255,.1);
@@ -3014,13 +3003,8 @@ body.runtime-embedded .board-empty-action:focus-visible {
 .wt-symlink-presets {
   display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;
 }
-.wt-symlink-presets .btn-xs {
-  color: var(--text-dim); background: var(--bg-hover, rgba(255,255,255,.06));
-  border: 1px solid var(--border, rgba(255,255,255,.1));
-  border-radius: 3px; cursor: pointer; font-family: var(--mono, monospace);
-}
-.wt-symlink-presets .btn-xs:hover {
-  color: var(--text); background: rgba(255,255,255,.1);
+.wt-symlink-presets .preset-button {
+  font-family: var(--mono, monospace);
 }
 
 /* Log section */
@@ -3594,8 +3578,6 @@ body[data-torque-mode="desktop"] .diff-view-modal {
 .schedule-type-toggle { display: flex; width: 100%; margin-bottom: 8px; }
 .schedule-type-btn { flex: 1; }
 .schedule-presets { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
-.schedule-preset { font-size: 10px; padding: 2px 8px; background: var(--bg-hover); border: 1px solid var(--border); border-radius: 3px; color: var(--dim); cursor: pointer; }
-.schedule-preset:hover { border-color: var(--accent); color: var(--fg); }
 
 /* -- Attachments --------------------------------------------------------- */
 .attachments-zone {

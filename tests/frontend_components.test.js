@@ -118,3 +118,42 @@ test('segmented-control visual primitives do not drift back into feature styles'
   assert.doesNotMatch(board, /^\.tpled-view-btn\s*\{/m);
   assert.doesNotMatch(board, /^\.schedule-type-btn\s*\{[^}]*background:/ms);
 });
+
+test('shared filter chips and presets use compact rectangular action geometry', () => {
+  const css = source('static/styles/components.css');
+
+  assert.match(css, /\.filter-chip,\s*\.preset-button,[\s\S]*?\.schedule-preset\s*\{[^}]*min-height:\s*var\(--control-height-sm\);[^}]*padding:\s*0 var\(--control-padding-x-sm\);[^}]*border-radius:\s*var\(--radius-sm\);[^}]*font-size:\s*var\(--control-font-size-xs\);/s);
+  assert.match(css, /\.filter-chip\.active,[\s\S]*?\.initiative-secondary-toggle\.active\s*\{[^}]*color:\s*var\(--accent\);[^}]*border-color:\s*var\(--accent-muted\);[^}]*background:\s*var\(--accent-soft\);/s);
+  assert.match(css, /\.filter-chip:disabled,[\s\S]*?\.filter-chip\.disabled\s*\{[^}]*cursor:\s*not-allowed;/s);
+});
+
+test('filter consumers expose state while presets remain momentary actions', () => {
+  const board = source('static/js/board/rendering.js');
+  const filters = source('static/js/board/filters.js');
+  const initiatives = source('static/js/initiatives.js');
+  const thinking = source('static/js/thinking.js');
+  const html = source('webview.html');
+
+  assert.match(board, /class="filter-chip board-filter-btn[\s\S]*?aria-haspopup="true" aria-expanded=/);
+  assert.match(board, /class="filter-chip board-filter-btn[\s\S]*?aria-pressed=/);
+  assert.match(board, /<button type="button" class="filter-chip board-filter-active-chip[\s\S]*?aria-label="Remove/);
+  assert.doesNotMatch(board, /<span class="board-filter-active-chip/);
+  assert.match(filters, /setAttribute\('aria-expanded', 'true'\)/);
+  assert.match(initiatives, /class="filter-chip initiative-secondary-toggle[\s\S]*?aria-pressed=/);
+  assert.match(thinking, /class="filter-chip[\s\S]*?aria-pressed=/);
+  assert.match(html, /class="preset-button schedule-preset"/);
+  assert.match(html, /class="preset-button" onclick="_addWtSymlinkPreset/);
+  assert.doesNotMatch(html, /class="preset-button[^>]*aria-pressed/);
+});
+
+test('filter and preset geometry does not drift back into feature styles', () => {
+  const board = source('static/styles/board-panels.css');
+  const features = source('static/styles/feature-panels.css');
+
+  assert.doesNotMatch(board, /^body\.runtime-embedded \.board-filter-btn\s*\{[^}]*border-radius:/ms);
+  assert.doesNotMatch(board, /^\.board-filter-active-chip\s*\{[^}]*border-radius:/ms);
+  assert.doesNotMatch(board, /^\.schedule-preset\s*\{/m);
+  assert.doesNotMatch(board, /^\.wt-symlink-presets \.preset-button\s*\{[^}]*(?:border|background):/ms);
+  assert.doesNotMatch(features, /^\.initiative-secondary-toggle\s*\{[^}]*border-radius:/ms);
+  assert.doesNotMatch(features, /^\.idea-brief-filter-row \.active\s*\{/m);
+});

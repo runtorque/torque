@@ -238,6 +238,71 @@ textarea[aria-invalid="true"] {
   fill: currentColor;
 }
 
+/* Filter chips and presets
+ *
+ * Filter chips expose a persistent selected state. Preset buttons apply a
+ * value immediately without remaining selected. Both share compact,
+ * rectangular action geometry and remain distinct from metadata pills.
+ */
+.filter-chip,
+.preset-button,
+.board-filter-btn,
+.board-filter-active-chip,
+.initiative-secondary-toggle,
+.schedule-preset {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: var(--control-height-sm);
+  padding: 0 var(--control-padding-x-sm);
+  border: var(--control-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  background: var(--bg-cell);
+  font-family: var(--font);
+  font-size: var(--control-font-size-xs);
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.filter-chip:hover:not(:disabled),
+.preset-button:hover:not(:disabled),
+.board-filter-btn:hover:not(:disabled),
+.board-filter-active-chip:hover:not(:disabled),
+.initiative-secondary-toggle:hover:not(:disabled),
+.schedule-preset:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+
+.filter-chip.active,
+.filter-chip[aria-pressed="true"],
+.filter-chip[aria-expanded="true"],
+.board-filter-btn.active,
+.board-filter-btn[aria-pressed="true"],
+.board-filter-btn[aria-expanded="true"],
+.initiative-secondary-toggle.active {
+  color: var(--accent);
+  border-color: var(--accent-muted);
+  background: var(--accent-soft);
+}
+
+.filter-chip:disabled,
+.preset-button:disabled,
+.filter-chip.disabled {
+  color: var(--text-faint);
+  border-color: var(--border-subtle);
+  background: var(--bg-inset);
+  cursor: not-allowed;
+}
+
 /* Navigation tabs
  *
  * Navigation has two shared visual variants: contained tabs for switching

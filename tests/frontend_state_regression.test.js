@@ -3102,7 +3102,7 @@ test('wide embedded schedules view keeps the display-row toggle and does not res
 
   assert.equal(runInContext(context, '_boardShowSchedules'), true);
   assert.match(panel.innerHTML, /board-schedules-toggle-wrap/);
-  assert.match(panel.innerHTML, /board-filter-btn active" onclick="boardToggleSchedules\(\)">Schedules/);
+  assert.match(panel.innerHTML, /filter-chip board-filter-btn active" aria-pressed="true" onclick="boardToggleSchedules\(\)">Schedules/);
   assert.match(panel.innerHTML, /board-view-menu-wrap/);
   assert.match(panel.innerHTML, /onclick="boardApplyQuickView\('recent'\)">Recent/);
   assert.doesNotMatch(panel.innerHTML, /board-lane-bar/);
@@ -26270,7 +26270,7 @@ test('main agent grid omits the retired legacy creation dropdown', () => {
   assert.doesNotMatch(main.innerHTML, /cell-add-drop/);
   assert.doesNotMatch(main.innerHTML, /agent-grid-global-add-row/);
   assert.doesNotMatch(main.innerHTML, /agent-add-menu/);
-  assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*data-agent-grid-new-button[\s\S]*>\+ New<\/button>/);
+  assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*data-agent-grid-new-button[\s\S]*class="agent-grid-new-icon"[\s\S]*<span>New<\/span>/);
   assert.doesNotMatch(main.innerHTML, /ghost-card ghost-card--worker|ghost-card ghost-card--engineer|ghost-card ghost-card--architect/);
   assert.doesNotMatch(main.innerHTML, /\+ Add Worker|\+ New Engineer|\+ New Architect/);
 });
@@ -27162,7 +27162,7 @@ test('grid-level New worker affordance survives delta rerenders and uses standal
   `);
 
   assert.doesNotMatch(main.innerHTML, /principals-row/);
-  assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*>\+ New<\/button>/);
+  assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*class="agent-grid-new-icon"[\s\S]*<span>New<\/span>/);
   assert.doesNotMatch(main.innerHTML, /class="ghost-card ghost-card--engineer|class="ghost-card ghost-card--worker|\+ New Engineer|\+ Add Worker/);
   main.scrollTop = 37;
 
@@ -27176,7 +27176,7 @@ test('grid-level New worker affordance survives delta rerenders and uses standal
     });
   `);
 
-  assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*>\+ New<\/button>/);
+  assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*class="agent-grid-new-icon"[\s\S]*<span>New<\/span>/);
   assert.doesNotMatch(main.innerHTML, /class="ghost-card ghost-card--engineer|class="ghost-card ghost-card--worker|\+ New Engineer|\+ Add Worker/);
   assert.equal(jsonValue(context, `focusedItemId`), 'eng-a');
   assert.equal(jsonValue(context, `String(state.selected_principal_id || '')`), '');
@@ -27272,7 +27272,7 @@ test('stratified grid renders Architects stratum and architect card without inli
   assert.doesNotMatch(main.innerHTML, /class="principals-row"/);
   assert.match(main.innerHTML, /data-agent-strata="architects"[\s\S]*data-drag-id="arch-a"[\s\S]*Architect A/);
   assert.doesNotMatch(main.innerHTML, /\+ New Architect|agent-new-architect-card/);
-  assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*>\+ New<\/button>/);
+  assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*class="agent-grid-new-icon"[\s\S]*<span>New<\/span>/);
   assert.match(main.innerHTML, /class="agent-card-kind cell-architect-badge">Architect<\/div>/);
   assert.doesNotMatch(main.innerHTML, /agent-grid-new-architect-row/);
 
@@ -27352,7 +27352,7 @@ test('grid-level creation toolbar replaces hierarchical creation controls', () =
 
   runInContext(context, `render();`);
 
-  assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*class="agent-grid-new-btn"[\s\S]*>\+ New<\/button>/);
+  assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*class="agent-grid-new-btn"[\s\S]*class="agent-grid-new-icon"[\s\S]*<span>New<\/span>/);
   assert.doesNotMatch(main.innerHTML, /class="ghost-card ghost-card--worker|class="ghost-card ghost-card--engineer|class="ghost-card ghost-card--architect/);
   assert.doesNotMatch(main.innerHTML, /\+ Add Worker|\+ New Engineer|\+ New Architect/);
   assert.doesNotMatch(main.innerHTML, /data-agent-strata=/);
@@ -29591,7 +29591,7 @@ test('grid-level + New dropdown exposes standalone creation flows', () => {
     render();
   `);
 
-  assert.match(document.getElementById('main').innerHTML, /data-agent-grid-toolbar[\s\S]*>\+ New<\/button>/);
+  assert.match(document.getElementById('main').innerHTML, /data-agent-grid-toolbar[\s\S]*class="agent-grid-new-icon"[\s\S]*<span>New<\/span>/);
   assert.deepEqual(jsonValue(context, `window._navCreationControls`), []);
 
   context.openAgentGridNewMenu({

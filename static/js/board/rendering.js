@@ -525,7 +525,8 @@ function renderBoard() {
     if (hasLabels || _boardFilterLabels.length) {
       var lblCount = _boardFilterLabels.length;
       html += '<div class="board-filter-btn-wrap" id="board-label-filter-wrap">';
-      html += '<button class="board-filter-btn' + (lblCount ? ' active' : '') + '"'
+      html += '<button type="button" class="filter-chip board-filter-btn' + (lblCount ? ' active' : '') + '"'
+        + ' aria-haspopup="true" aria-expanded="' + (_boardFilterDropdownType === 'label' ? 'true' : 'false') + '"'
         + ' onclick="boardToggleLabelFilter()">'
         + 'Labels' + (lblCount ? ' <span class="board-filter-btn-count">' + lblCount + '</span>' : '')
         + ' &#9662;</button>';
@@ -534,20 +535,23 @@ function renderBoard() {
     if (hasActions || _boardFilterActions.length) {
       var actFCount = _boardFilterActions.length;
       html += '<div class="board-filter-btn-wrap" id="board-action-filter-wrap">';
-      html += '<button class="board-filter-btn' + (actFCount ? ' active' : '') + '"'
+      html += '<button type="button" class="filter-chip board-filter-btn' + (actFCount ? ' active' : '') + '"'
+        + ' aria-haspopup="true" aria-expanded="' + (_boardFilterDropdownType === 'action' ? 'true' : 'false') + '"'
         + ' onclick="boardToggleActionFilter()">'
         + 'Actions' + (actFCount ? ' <span class="board-filter-btn-count">' + actFCount + '</span>' : '')
         + ' &#9662;</button>';
       html += '</div>';
     }
     if (hasQuickViews) {
-      html += '<button class="board-filter-btn' + (recentQuickViewActive ? ' active' : '') + '"'
+      html += '<button type="button" class="filter-chip board-filter-btn' + (recentQuickViewActive ? ' active' : '') + '"'
+        + ' aria-pressed="' + (recentQuickViewActive ? 'true' : 'false') + '"'
         + ' onclick="boardApplyQuickView(\'recent\')">Recent</button>';
     }
     if (hasAgents || _boardFilterAgents.length) {
       var agtFCount = _boardFilterAgents.length;
       html += '<div class="board-filter-btn-wrap" id="board-agent-filter-wrap">';
-      html += '<button class="board-filter-btn' + (agtFCount ? ' active' : '') + '"'
+      html += '<button type="button" class="filter-chip board-filter-btn' + (agtFCount ? ' active' : '') + '"'
+        + ' aria-haspopup="true" aria-expanded="' + (_boardFilterDropdownType === 'agent' ? 'true' : 'false') + '"'
         + ' onclick="boardToggleAgentFilter()">'
         + 'Agents' + (agtFCount ? ' <span class="board-filter-btn-count">' + agtFCount + '</span>' : '')
         + ' &#9662;</button>';
@@ -556,7 +560,8 @@ function renderBoard() {
     if (hasHealth || _boardFilterHealth.length) {
       var healthFCount = _boardFilterHealth.length;
       html += '<div class="board-filter-btn-wrap" id="board-health-filter-wrap">';
-      html += '<button class="board-filter-btn' + (healthFCount ? ' active' : '') + '"'
+      html += '<button type="button" class="filter-chip board-filter-btn' + (healthFCount ? ' active' : '') + '"'
+        + ' aria-haspopup="true" aria-expanded="' + (_boardFilterDropdownType === 'health' ? 'true' : 'false') + '"'
         + ' onclick="boardToggleHealthFilter()">'
         + 'Health' + (healthFCount ? ' <span class="board-filter-btn-count">' + healthFCount + '</span>' : '')
         + ' &#9662;</button>';
@@ -569,12 +574,14 @@ function renderBoard() {
   html += '<div class="board-search-spacer"></div>';
   if (showViewMenuButton) {
     html += '<div class="board-filter-btn-wrap" id="board-view-menu-wrap">';
-    html += '<button class="board-filter-btn' + (_boardViewMenuOpen ? ' active' : '') + '"'
+    html += '<button type="button" class="filter-chip board-filter-btn' + (_boardViewMenuOpen ? ' active' : '') + '"'
+      + ' aria-haspopup="true" aria-expanded="' + (_boardViewMenuOpen ? 'true' : 'false') + '"'
       + ' onclick="boardToggleViewMenu()">View &#9662;</button>';
     html += '</div>';
   }
   html += '<div class="board-filter-btn-wrap" id="board-schedules-toggle-wrap">';
-  html += '<button class="board-filter-btn' + (_boardShowSchedules ? ' active' : '') + '"'
+  html += '<button type="button" class="filter-chip board-filter-btn' + (_boardShowSchedules ? ' active' : '') + '"'
+    + ' aria-pressed="' + (_boardShowSchedules ? 'true' : 'false') + '"'
     + ' onclick="boardToggleSchedules()">'
     + 'Schedules'
     + (schedCount ? ' <span class="board-filter-btn-count">' + schedCount + '</span>' : '')
@@ -592,20 +599,21 @@ function renderBoard() {
           + ' placeholder="View name" value="' + esc(_boardSavingViewName) + '"'
           + ' oninput="boardUpdateSaveViewName(this.value)"'
           + ' onkeydown="boardSaveViewKeydown(event)">';
-        html += '<button class="board-filter-btn active" onclick="boardSubmitSaveView()">Save</button>';
-        html += '<button class="board-filter-btn" onclick="boardCancelSaveView()">Cancel</button>';
+        html += '<button type="button" class="btn btn-primary btn-xs" onclick="boardSubmitSaveView()">Save</button>';
+        html += '<button type="button" class="btn btn-quiet btn-xs" onclick="boardCancelSaveView()">Cancel</button>';
         html += '</div>';
       } else if (currentViewSavable) {
-        html += '<button class="board-filter-btn" onclick="boardStartSaveView()">Save View</button>';
+        html += '<button type="button" class="btn btn-secondary btn-xs" onclick="boardStartSaveView()">Save View</button>';
       }
     }
     for (var vi = 0; vi < savedViews.length; vi++) {
       var view = savedViews[vi];
       var viewName = esc(view.name).replace(/'/g, "\\'");
       html += '<div class="board-saved-view">';
-      html += '<button class="board-filter-btn'
+      html += '<button type="button" class="filter-chip board-filter-btn'
         + (_boardViewMatchesCurrent(view) ? ' active' : '')
-        + '" onclick="boardApplySavedView(\'' + viewName + '\')">'
+        + '" aria-pressed="' + (_boardViewMatchesCurrent(view) ? 'true' : 'false') + '"'
+        + ' onclick="boardApplySavedView(\'' + viewName + '\')">'
         + esc(view.name) + '</button>';
       html += '<button class="board-saved-view-delete"'
         + ' onclick="event.stopPropagation();boardDeleteSavedView(\'' + viewName + '\')">&times;</button>';
@@ -620,27 +628,31 @@ function renderBoard() {
       html += '<div class="board-filter-active">';
       for (var fi = 0; fi < _boardFilterLabels.length; fi++) {
         var fl = _boardFilterLabels[fi];
-        html += '<span class="board-filter-active-chip board-filter-active-label"'
+        html += '<button type="button" class="filter-chip board-filter-active-chip board-filter-active-label"'
+          + ' aria-label="Remove label filter ' + esc(fl) + '"'
           + ' onclick="boardRemoveFilterLabel(\'' + esc(fl).replace(/'/g, "\\'") + '\')">'
-          + esc(fl) + ' &times;</span>';
+          + esc(fl) + ' &times;</button>';
       }
       for (var fi = 0; fi < _boardFilterActions.length; fi++) {
         var fa = _boardFilterActions[fi];
-        html += '<span class="board-filter-active-chip board-filter-active-action"'
+        html += '<button type="button" class="filter-chip board-filter-active-chip board-filter-active-action"'
+          + ' aria-label="Remove action filter ' + esc(fa) + '"'
           + ' onclick="boardRemoveFilterAction(\'' + esc(fa).replace(/'/g, "\\'") + '\')">'
-          + esc(fa) + ' &times;</span>';
+          + esc(fa) + ' &times;</button>';
       }
       for (var fi = 0; fi < _boardFilterAgents.length; fi++) {
         var aid = _boardFilterAgents[fi];
-        html += '<span class="board-filter-active-chip board-filter-active-action"'
+        html += '<button type="button" class="filter-chip board-filter-active-chip board-filter-active-action"'
+          + ' aria-label="Remove agent filter ' + esc(_boardAgentName(aid) || aid) + '"'
           + ' onclick="boardRemoveFilterAgent(\'' + esc(aid).replace(/'/g, "\\'") + '\')">'
-          + esc(_boardAgentName(aid) || aid) + ' &times;</span>';
+          + esc(_boardAgentName(aid) || aid) + ' &times;</button>';
       }
       for (var fi = 0; fi < _boardFilterHealth.length; fi++) {
         var hs = _boardFilterHealth[fi];
-        html += '<span class="board-filter-active-chip board-filter-active-health"'
+        html += '<button type="button" class="filter-chip board-filter-active-chip board-filter-active-health"'
+          + ' aria-label="Remove health filter ' + esc(_boardHealthDisplayName(hs)) + '"'
           + ' onclick="boardRemoveFilterHealth(\'' + esc(hs).replace(/'/g, "\\'") + '\')">'
-          + esc(_boardHealthDisplayName(hs)) + ' &times;</span>';
+          + esc(_boardHealthDisplayName(hs)) + ' &times;</button>';
       }
       html += '</div>';
     }

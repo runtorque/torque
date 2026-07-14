@@ -1746,18 +1746,7 @@
 }
 .initiative-secondary-head { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px; }
 .initiative-secondary-toggles { display: flex; flex-wrap: wrap; gap: 5px; }
-.initiative-secondary-toggle {
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--fg);
-  padding: 3px 7px;
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
-}
 .initiative-secondary-toggle span { color: var(--muted); }
-.initiative-secondary-toggle.active { border-color: var(--accent); color: var(--accent); }
 .initiative-column-secondary { margin-top: 8px; max-height: 260px; }
 
 .initiative-detail {
@@ -2295,17 +2284,11 @@
   padding: 7px;
   border-bottom: 1px solid var(--border);
 }
-.idea-brief-filter-row .btn-secondary,
 .idea-brief-actions .btn-secondary,
 .idea-brief-actions .btn-primary,
 .idea-brief-link-actions .btn-secondary {
   font-size: 11px;
   padding: 4px 8px;
-}
-.idea-brief-filter-row .active {
-  border-color: var(--accent);
-  color: var(--accent);
-  background: rgba(88, 166, 255, .10);
 }
 .idea-brief-card .idea-brief-status-pill { margin-right: 4px; }
 .idea-brief-status-pill {

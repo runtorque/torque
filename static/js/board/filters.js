@@ -417,6 +417,7 @@ function _boardOpenFilterDropdown(wrapId, kind, names, counts, selectedArr) {
   search.addEventListener('input', function() { buildList(search.value); });
 
   document.body.appendChild(dd);
+  btn.setAttribute('aria-expanded', 'true');
 
   // Adjust if dropdown overflows viewport
   requestAnimationFrame(function() {
@@ -450,6 +451,8 @@ function _boardOpenFilterDropdown(wrapId, kind, names, counts, selectedArr) {
 
 function _boardCloseFilterDropdown() {
   _boardFilterDropdownType = null;
+  var expanded = document.querySelectorAll('.board-filter-btn[aria-expanded="true"]');
+  for (var i = 0; i < expanded.length; i++) expanded[i].setAttribute('aria-expanded', 'false');
   if (_boardFilterDropdownCleanup) _boardFilterDropdownCleanup();
 }
 

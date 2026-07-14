@@ -732,10 +732,10 @@
             <button class="btn btn-sm" onclick="_addWtSymlink()">Add</button>
           </div>
           <div class="wt-symlink-presets">
-            <button class="btn btn-xs" onclick="_addWtSymlinkPreset('node_modules')">node_modules</button>
-            <button class="btn btn-xs" onclick="_addWtSymlinkPreset('.venv')">.venv</button>
-            <button class="btn btn-xs" onclick="_addWtSymlinkPreset('vendor/bundle')">vendor/bundle</button>
-            <button class="btn btn-xs" onclick="_addWtSymlinkPreset('vendor')">vendor/</button>
+            <button type="button" class="preset-button" onclick="_addWtSymlinkPreset('node_modules')">node_modules</button>
+            <button type="button" class="preset-button" onclick="_addWtSymlinkPreset('.venv')">.venv</button>
+            <button type="button" class="preset-button" onclick="_addWtSymlinkPreset('vendor/bundle')">vendor/bundle</button>
+            <button type="button" class="preset-button" onclick="_addWtSymlinkPreset('vendor')">vendor/</button>
           </div>
         </div>
       </div>
@@ -1995,12 +1995,12 @@
       <input id="schedule-cron-input" autocomplete="off" placeholder="0 9 * * *"
              onkeydown="if(event.key==='Escape')closeModals();">
       <div class="schedule-presets">
-        <button class="schedule-preset" onclick="scheduleSetCron('*/30 * * * *')">Every 30m</button>
-        <button class="schedule-preset" onclick="scheduleSetCron('0 * * * *')">Hourly</button>
-        <button class="schedule-preset" onclick="scheduleSetCron('0 9 * * *')">Daily 9am</button>
-        <button class="schedule-preset" onclick="scheduleSetCron('0 9 * * 1-5')">Weekdays</button>
-        <button class="schedule-preset" onclick="scheduleSetCron('0 9 * * 1')">Weekly</button>
-        <button class="schedule-preset" onclick="scheduleSetCron('0 9 1 * *')">Monthly</button>
+        <button type="button" class="preset-button schedule-preset" onclick="scheduleSetCron('*/30 * * * *')">Every 30m</button>
+        <button type="button" class="preset-button schedule-preset" onclick="scheduleSetCron('0 * * * *')">Hourly</button>
+        <button type="button" class="preset-button schedule-preset" onclick="scheduleSetCron('0 9 * * *')">Daily 9am</button>
+        <button type="button" class="preset-button schedule-preset" onclick="scheduleSetCron('0 9 * * 1-5')">Weekdays</button>
+        <button type="button" class="preset-button schedule-preset" onclick="scheduleSetCron('0 9 * * 1')">Weekly</button>
+        <button type="button" class="preset-button schedule-preset" onclick="scheduleSetCron('0 9 1 * *')">Monthly</button>
       </div>
     </div>
     <div id="schedule-at-section" style="display:none">

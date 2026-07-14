@@ -2403,7 +2403,7 @@ function _renderIdeaBriefList(group) {
   var loadKey = group + '|' + (_ideaBriefIncludeArchived ? '1' : '0');
   var html = '<aside class="thinking-list-pane idea-brief-list-pane">';
   html += '<div class="thinking-list-toolbar idea-brief-list-toolbar"><div><strong>Idea Briefs</strong><span>Opportunity proposals linked to Thinking</span></div><button type="button" class="btn-primary" onclick="ideaBriefNew()">New brief</button></div>';
-  html += '<div class="idea-brief-filter-row"><button type="button" class="btn-secondary' + (_ideaBriefIncludeArchived ? ' active' : '') + '" onclick="ideaBriefToggleArchived()">' + (_ideaBriefIncludeArchived ? 'Hide archived' : 'Show archived') + '</button><button type="button" class="btn-secondary" onclick="ideaBriefRefresh()">Refresh</button></div>';
+  html += '<div class="idea-brief-filter-row"><button type="button" class="filter-chip' + (_ideaBriefIncludeArchived ? ' active' : '') + '" aria-pressed="' + (_ideaBriefIncludeArchived ? 'true' : 'false') + '" onclick="ideaBriefToggleArchived()">' + (_ideaBriefIncludeArchived ? 'Hide archived' : 'Show archived') + '</button><button type="button" class="btn btn-secondary btn-sm" onclick="ideaBriefRefresh()">Refresh</button></div>';
   if (_ideaBriefLoadingGroup === loadKey && _ideaBriefLoadedGroup !== loadKey) {
     html += '<div class="thinking-loading">Loading Idea Briefs…</div>';
   }

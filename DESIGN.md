@@ -223,6 +223,28 @@ The canonical CSS API lives in `static/styles/components.css`:
 Filter chips, on/off switches, navigation tabs, and semantic badges are separate
 components even if they also expose selected state.
 
+### Filter chips and presets
+
+- Filter chips narrow or reveal content and keep a visible selected state. They
+  use compact 24px rectangular geometry and `aria-pressed` for direct toggles.
+- A filter that opens a menu uses `aria-haspopup` and `aria-expanded`; its active
+  visual state may also indicate that the resulting filter is non-empty.
+- Applied filter values remain operable removal buttons, not non-semantic spans.
+  Their accessible name states which filter will be removed.
+- Preset buttons apply a value immediately and do not remain selected. They share
+  filter-chip geometry, but never borrow selected-state semantics.
+
+The canonical CSS API lives in `static/styles/components.css`:
+
+- `.filter-chip` is the shared stateful filter or reveal control.
+- `.preset-button` is the shared momentary preset action.
+- Board filters and applied values, initiative secondary buckets, schedule cron
+  presets, and worktree symlink presets use compatibility aliases while their
+  markup migrates.
+
+Counts, statuses, labels, and other semantic metadata remain pills where that
+shape helps them read as annotations rather than controls.
+
 ### Inputs and selectors
 
 - Inputs, selects, and textareas use `--radius`, `--bg-inset`, and `--border`.
@@ -334,6 +356,7 @@ the rule is intentionally global and documented here.
 | Panel tabs | Standardized | Verify all panel zones and narrow widths |
 | Feature navigation tabs | Core variants standardized | Migrate compatibility aliases to the canonical API |
 | Segmented controls | Core variant standardized | Migrate compatibility aliases and audit keyboard behavior |
+| Filter chips and presets | Core variants standardized | Audit remaining feature-local toggles and removable values |
 | Buttons | Core variants standardized | Migrate feature-specific aliases and audit icon buttons |
 | Inputs and selectors | Core variants standardized | Migrate remaining feature-specific aliases and audit field labeling |
 | Cards | Pending | Reconcile grid, board, context, and agent cards |
@@ -460,6 +483,27 @@ the rule is intentionally global and documented here.
   keeps the migrated visual primitive out of feature stylesheets. Existing
   interaction tests protect behavior; live browser checks verify computed sizes
   and selected state.
+
+### D-007 — Filters and presets use rectangular action geometry
+
+- Date: 2026-07-14
+- Status: accepted
+- Decision: Stateful filter chips and momentary preset buttons share the 24px
+  control height, 4px corners, compact typography, and interaction treatment.
+  Filters expose pressed or expanded state; presets do not imply persistence.
+- Rationale: Board filters were still rendered as full pills while feature
+  filters and presets used several unrelated sizes and radii. Shared geometry
+  makes these controls read as actions without conflating them with navigation,
+  segmented modes, or metadata.
+- Scope: `static/styles/components.css`, board filter triggers and removable
+  values, saved board views, initiative secondary buckets, idea-brief archive
+  visibility, schedule cron presets, and worktree symlink presets.
+- Constraints: Status, count, label, and identity pills remain semantic metadata.
+  Ordinary commands continue to use the button primitive. Mutually exclusive
+  always-visible choices continue to use segmented controls.
+- Verification: `tests/frontend_components.test.js` protects shared geometry,
+  semantic state, and the removal of feature-local pill geometry. Live browser
+  checks verify board filters at default and active states.
 
 ## Decision entry template
 

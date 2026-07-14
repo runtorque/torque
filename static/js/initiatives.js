@@ -686,7 +686,7 @@ function _renderInitiativesRoadmap(group, buckets) {
   INITIATIVE_SECONDARY_STATUSES.forEach(function(status) {
     var open = !!_initiativesSecondaryExpanded[status];
     var count = (buckets[status] || []).length;
-    html += '<button type="button" class="initiative-secondary-toggle' + (open ? ' active' : '') + '" onclick="initiativesToggleSecondary(\'' + esc(status) + '\')">';
+    html += '<button type="button" class="filter-chip initiative-secondary-toggle' + (open ? ' active' : '') + '" aria-pressed="' + (open ? 'true' : 'false') + '" onclick="initiativesToggleSecondary(\'' + esc(status) + '\')">';
     html += esc(status) + ' <span>' + count + '</span></button>';
   });
   html += '</div>';
