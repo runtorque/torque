@@ -384,7 +384,7 @@ function _boardOpenFilterDropdown(wrapId, kind, names, counts, selectedArr) {
       span.textContent = displayName;
       row.appendChild(span);
       var badge = document.createElement('span');
-      badge.className = 'board-filter-dropdown-count';
+      badge.className = 'board-filter-dropdown-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count';
       badge.textContent = counts[name];
       row.appendChild(badge);
       list.appendChild(row);

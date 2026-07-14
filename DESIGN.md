@@ -377,10 +377,13 @@ The canonical CSS API lives in `static/styles/components.css`:
   semantic intent with text, border, and a restrained tint. The nearby label or
   badge text remains the primary state cue; color is reinforcement.
 - `--count` uses tabular numerals and a stable minimum width for numeric totals.
-- Agent identity badges, Agent-panel journal entry types, and Health runtime and
-  coverage states are the first canonical consumers. Board labels, profile
-  badges, status-bar compounds, history/event markers, and remaining counts are
-  deliberate follow-up migrations.
+- Agent identity badges, Agent-panel journal entry types, Health runtime and
+  coverage states, Board task metadata, and Board count indicators are canonical
+  consumers. Profile badges, status-bar compounds, history/event markers, and
+  remaining counts are deliberate follow-up migrations.
+- A count may use the badge primitive inside a tab, filter, or menu item without
+  changing the parent control's semantics. The count is an annotation; the
+  containing tab, filter, or menu item remains the interactive target.
 
 ### Empty, loading, and error states
 
@@ -442,7 +445,7 @@ the rule is intentionally global and documented here.
 | Toolbars and panel headers | Core variants standardized | Migrate remaining Help, Context, Health, and editor toolbars |
 | Menus and popovers | Core variants standardized | Migrate task, terminal, dependency, and editor dropdowns |
 | Modals | Core variants standardized | Migrate task, settings, artifact, diff, and multi-section dialogs |
-| Badges, tags, and status | Core variants standardized | Migrate Board, profile, status-bar, history/event, and count consumers |
+| Badges, tags, and status | Board metadata standardized | Migrate profile, status-bar, history/event, and remaining count consumers |
 | Empty/loading/error states | Pending | Define reusable patterns and language |
 
 ## Decision log
@@ -694,15 +697,20 @@ the rule is intentionally global and documented here.
   micro-pill geometry five times. One primitive makes metadata recognizable
   across surfaces while preserving Torque's dense agent grid.
 - Scope: `static/styles/components.css`, agent-card identity/class badges,
-  Agent-panel journal entry types, and Health supervisor/coverage states.
+  Agent-panel journal entry types, Health supervisor/coverage states, Board task
+  metadata labels, and Board lane/filter/selection count indicators.
 - Constraints: Pills remain appropriate for short metadata. Interactive filter
   chips, presets, tabs, actions, and compound status-bar controls are not badges
-  and retain their own semantics and geometry. Board labels, profile badges,
-  history/events, and remaining count indicators are follow-up migrations.
+  and retain their own semantics and geometry. A nested count badge annotates a
+  control without replacing its control boundary. Clickable Board engineer,
+  GitHub, dependency, and attachment chips remain control chips rather than
+  badges. Profile badges, history/events, and remaining count indicators are
+  follow-up migrations.
 - Verification: `tests/frontend_components.test.js` protects shared geometry,
   semantic variants, canonical consumer markup, and removal of duplicated badge
-  geometry. Existing Agent-panel and Health suites protect rendered content;
-  live checks verify agent-card and Health badge geometry and console cleanliness.
+  geometry. Existing Agent-panel, Health, and Board suites protect rendered
+  content; live checks verify card metadata, nested counts, control-chip
+  separation, and console cleanliness.
 
 ## Decision entry template
 

@@ -412,7 +412,6 @@
   opacity: 0.35;
 }
 .board-lane-tab .lane-count {
-  font-size: 9px; color: var(--text-dim);
   margin-left: 4px;
 }
 
@@ -503,13 +502,7 @@ body.runtime-embedded #panel-board .board-wide-lane {
   color: var(--accent);
 }
 .board-wide-lane-count {
-  font-size: 9px;
-  line-height: 16px;
-  color: var(--text-dim);
-  background: var(--bg-cell);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0 6px;
+  flex: 0 0 auto;
 }
 .board-wide-lane-summary {
   font-size: 9px;
@@ -938,10 +931,17 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
   font-size: 8px;
   color: var(--text-dim);
 }
-.board-card-label {
-  font-size: 8px; color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
-  border-radius: 3px; padding: 0 4px; line-height: 14px;
+.board-card-control-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 14px;
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 8px;
+  font-weight: 600;
+  line-height: 1.25;
+  white-space: nowrap;
 }
 .board-card-external-chip {
   display: inline-flex;
@@ -1011,22 +1011,6 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
   line-height: 1;
   opacity: .85;
 }
-.board-card-created-by-user {
-  color: var(--text-dim);
-  background: color-mix(in srgb, var(--text-dim) 10%, transparent);
-}
-.board-card-created-by-system {
-  color: var(--text-dim);
-  background: color-mix(in srgb, var(--text-dim) 14%, transparent);
-}
-.board-card-created-by-architect {
-  color: var(--amber);
-  background: color-mix(in srgb, var(--amber) 15%, transparent);
-}
-.board-card-created-by-engineer {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
-}
 .board-card-assigned-engineer {
   display: inline-flex;
   align-items: center;
@@ -1083,67 +1067,19 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
   border-style: dashed;
 }
 .board-card-template {
-  color: var(--fg-dim); font-style: italic;
-  background: color-mix(in srgb, var(--fg-dim) 12%, transparent);
+  font-style: italic;
 }
 .board-card-verification {
   font-weight: 600;
 }
-.board-card-verification-pending,
-.board-card-verification-attempted {
-  color: var(--amber);
-  background: color-mix(in srgb, var(--amber) 14%, transparent);
-}
-.board-card-verification-passed {
-  color: var(--green);
-  background: color-mix(in srgb, var(--green) 14%, transparent);
-}
-.board-card-verification-failed {
-  color: var(--red);
-  background: color-mix(in srgb, var(--red) 14%, transparent);
-}
-.board-card-verification-mode {
-  color: var(--text-dim);
-  background: color-mix(in srgb, var(--text-dim) 12%, transparent);
-}
 .board-card-completion-evidence {
   font-weight: 600;
-}
-.board-card-completion-evidence-verified {
-  color: var(--green);
-  background: color-mix(in srgb, var(--green) 18%, transparent);
-}
-.board-card-completion-evidence-evidence_attached {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 .board-card-priority {
   font-weight: 600;
 }
-.board-card-priority-low {
-  color: var(--green);
-  background: color-mix(in srgb, var(--green) 14%, transparent);
-}
-.board-card-priority-medium {
-  color: var(--amber);
-  background: color-mix(in srgb, var(--amber) 14%, transparent);
-}
-.board-card-priority-high {
-  color: var(--red);
-  background: color-mix(in srgb, var(--red) 14%, transparent);
-}
 .board-label-system {
-  color: var(--text-dim);
-  background: color-mix(in srgb, var(--text-dim) 12%, transparent);
   font-style: italic;
-}
-.board-label-system.board-label-blocked {
-  color: var(--amber);
-  background: color-mix(in srgb, var(--amber) 12%, transparent);
-}
-.board-label-system.board-label-error {
-  color: var(--red);
-  background: color-mix(in srgb, var(--red) 12%, transparent);
 }
 .board-card-pr-link {
   font-size: 9px; text-decoration: none; cursor: pointer;
@@ -1212,66 +1148,17 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
 .board-card-menu-btn:hover { background: var(--bg); color: var(--text); }
 /* Status badge */
 .board-card-status {
-  color: var(--green);
-  background: color-mix(in srgb, var(--green) 15%, transparent);
   font-weight: 600;
 }
 .board-card-dispatch {
   font-weight: 600;
 }
-.board-card-dispatch-blocked {
-  color: var(--amber);
-  background: color-mix(in srgb, var(--amber) 16%, transparent);
-}
-.board-card-dispatch-scheduled {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
-}
-.board-card-dispatch-warning {
-  color: #ff7b72;
-  background: rgba(255, 123, 114, 0.14);
-}
-.board-card-dispatch-queued {
-  color: var(--text-dim);
-  background: color-mix(in srgb, var(--text-dim) 12%, transparent);
-}
-.board-card-dispatch-checking {
-  color: var(--text-dim);
-  background: color-mix(in srgb, var(--text-dim) 10%, transparent);
-}
 .board-card-dispatch-state {
   font-weight: 800;
   letter-spacing: .04em;
-  border: 1px solid transparent;
-}
-.board-card-dispatch-state-queued {
-  color: var(--amber);
-  background: color-mix(in srgb, var(--amber) 15%, transparent);
-  border-color: color-mix(in srgb, var(--amber) 26%, transparent);
-}
-.board-card-dispatch-state-live {
-  color: var(--green);
-  background: color-mix(in srgb, var(--green) 15%, transparent);
-  border-color: color-mix(in srgb, var(--green) 28%, transparent);
 }
 .board-card-health {
   font-weight: 600;
-}
-.board-card-health-blocked {
-  color: var(--amber);
-  background: color-mix(in srgb, var(--amber) 16%, transparent);
-}
-.board-card-health-stalled {
-  color: var(--red);
-  background: color-mix(in srgb, var(--red) 16%, transparent);
-}
-.board-card-health-thrashing {
-  color: #ff7b72;
-  background: rgba(255, 123, 114, 0.14);
-}
-.board-card-health-idle-risk {
-  color: #e3b341;
-  background: rgba(227, 179, 65, 0.14);
 }
 /* Subordinate (derived) cards */
 .board-card-subordinate {
@@ -1286,7 +1173,6 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
 .board-card-subordinate .board-card-status-bar { font-size: 7px; line-height: 12px; }
 .board-card-subordinate .board-card-dot { width: 5px; height: 5px; }
 .board-card-subordinate .board-card-meta { gap: 2px; }
-.board-card-subordinate .board-card-label { font-size: 7px; }
 .board-card-subordinate .board-card-quick-controls,
 .board-card-subordinate .board-card-quick-editor { display: none; }
 .board-card-subordinate .board-card-agent { font-size: 8px; }
@@ -1321,8 +1207,6 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
   z-index: 10;
 }
 .board-selection-count {
-  font-size: 10px; font-weight: 600;
-  color: var(--accent);
   margin-right: 4px;
 }
 .board-selection-btn {
@@ -1654,10 +1538,6 @@ body.runtime-embedded .board-empty-action:focus-visible {
   outline-offset: 1px;
 }
 .board-filter-btn-count {
-  display: inline-block;
-  background: var(--accent); color: var(--bg);
-  border-radius: 7px; padding: 0 4px;
-  font-size: 8px; line-height: 14px;
   margin-left: 2px;
 }
 /* Filter dropdown overlay (appended to body) */
@@ -1697,9 +1577,7 @@ body.runtime-embedded .board-empty-action:focus-visible {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .board-filter-dropdown-count {
-  font-size: 8px; color: var(--text-dim);
-  background: var(--bg); border-radius: 7px;
-  padding: 1px 5px; flex-shrink: 0;
+  flex-shrink: 0;
 }
 /* Active filter chips row */
 .board-filter-active {
@@ -1785,12 +1663,6 @@ body.runtime-embedded .board-empty-action:focus-visible {
 .board-view-menu-toggle {
   margin-top: 8px;
 }
-.board-card-lane-badge {
-  font-size: 8px; color: var(--accent);
-  background: rgba(88,166,255,.1);
-  border-radius: 3px; padding: 1px 4px;
-}
-
 /* Dragging cards */
 .board-card.dragging { opacity: .3; pointer-events: none; }
 .board-lane-tab.drop-target {
@@ -3380,18 +3252,10 @@ body[data-torque-mode="desktop"] .diff-view-modal {
 }
 .modal-wide { max-width: 760px; }
 
-.board-card-scheduled {
-  background: rgba(88, 166, 255, 0.15);
-  color: var(--accent);
-}
 .board-card-due-soon {
-  background: rgba(210, 153, 34, 0.15);
-  color: var(--amber);
   font-weight: 600;
 }
 .board-card-overdue {
-  background: rgba(248, 81, 73, 0.14);
-  color: var(--red);
   font-weight: 600;
 }
 .board-label-dep-blocked {
@@ -3880,12 +3744,6 @@ body[data-torque-mode="desktop"] .diff-view-modal {
 .board-card-last-transition,
 .board-card-task-id,
 .board-card-lane-entered { color: var(--text-faint); }
-.board-card-label {
-  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  line-height: 13px;
-}
 .board-card-done { opacity: .68; }
 .board-card-done:hover { opacity: .9; }
 .board-card.dragging {

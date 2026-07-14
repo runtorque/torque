@@ -1105,7 +1105,8 @@ function taskDepsSearch(e) {
     var t = tasks[id];
     var title = (t.task || '').toLowerCase();
     if (title.indexOf(val) >= 0 || id.indexOf(val) >= 0) {
-      var laneBadge = '<span class="board-card-lane-badge">' + esc(t.lane || '') + '</span>';
+      var laneBadge = '<span class="board-card-lane-badge ui-badge ui-badge--compact ui-badge--accent">'
+        + esc(t.lane || '') + '</span>';
       html += '<div class="deps-option" onmousedown="event.preventDefault()" onclick="taskAddDep(\'' + id + '\')">'
         + esc((t.task || '').substring(0, 50)) + ' ' + laneBadge + '</div>';
       count++;
@@ -1144,7 +1145,10 @@ function _renderTaskDepChips() {
   for (var i = 0; i < _taskDeps.length; i++) {
     var t = tasks[_taskDeps[i]];
     var label = t ? (t.task || '').substring(0, 30) : _taskDeps[i];
-    var laneBadge = t ? ' <span class="board-card-lane-badge" style="font-size:9px">' + esc(t.lane || '') + '</span>' : '';
+    var laneBadge = t
+      ? ' <span class="board-card-lane-badge ui-badge ui-badge--compact ui-badge--accent">'
+        + esc(t.lane || '') + '</span>'
+      : '';
     html += '<span class="label-chip">' + esc(label) + laneBadge
       + '<button onclick="taskRemoveDep(' + i + ')">&times;</button></span>';
   }

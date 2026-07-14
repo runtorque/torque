@@ -2,6 +2,30 @@
 /* Board card rendering, badges, scheduling, and archive surfaces     */
 /* ------------------------------------------------------------------ */
 
+function _boardMetadataBadgeClass(localClass, intent, count) {
+  var classes = [
+    'board-card-label',
+    'ui-badge',
+    'ui-badge--compact',
+    'ui-badge--' + (intent || 'neutral'),
+  ];
+  if (count) classes.push('ui-badge--count');
+  if (localClass) classes.push(localClass);
+  return classes.join(' ');
+}
+
+function _boardMetadataIntentForHealth(stateName) {
+  if (stateName === 'stalled' || stateName === 'thrashing') return 'danger';
+  if (stateName === 'blocked' || stateName === 'idle-risk') return 'warning';
+  return 'neutral';
+}
+
+function _boardMetadataIntentForVerification(stateName) {
+  if (stateName === 'passed') return 'success';
+  if (stateName === 'failed') return 'danger';
+  return 'warning';
+}
+
 function _boardTaskTimestampMs(task) {
   if (!task) return 0;
   var iso = task.updated_at || task.created_at || '';
@@ -17,6 +41,7 @@ function _boardTaskScheduleMeta(task, nowMs) {
   if (Number.isNaN(when)) {
     return {
       className: 'board-card-scheduled',
+      intent: 'accent',
       label: 'Due ' + formatted,
     };
   }
@@ -25,17 +50,20 @@ function _boardTaskScheduleMeta(task, nowMs) {
   if (task.lane !== 'Done' && diffMs < 0) {
     return {
       className: 'board-card-scheduled board-card-overdue',
+      intent: 'danger',
       label: 'Overdue ' + formatted,
     };
   }
   if (task.lane !== 'Done' && diffMs <= 86400000) {
     return {
       className: 'board-card-scheduled board-card-due-soon',
+      intent: 'warning',
       label: 'Due ' + formatted,
     };
   }
   return {
     className: 'board-card-scheduled',
+    intent: 'accent',
     label: (task.lane === 'Done' ? 'Due ' : 'Scheduled ') + formatted,
   };
 }
@@ -218,7 +246,8 @@ function _boardExternalGithubChipHtml(task) {
   if (!isGithub && !(task.provider || task.external_id)) return '';
   if (!isGithub) {
     var extLabel = (task.provider ? task.provider + ': ' : '') + (task.external_id || 'linked');
-    return '<span class="board-card-label board-card-template" title="Linked external ticket">' + esc(extLabel) + '</span>';
+    return '<span class="' + esc(_boardMetadataBadgeClass('board-card-template', 'neutral'))
+      + '" title="Linked external ticket">' + esc(extLabel) + '</span>';
   }
   var issueNumber = _boardGithubIssueNumber(task);
   var issueUrl = _boardGithubIssueUrl(task);
@@ -232,11 +261,11 @@ function _boardExternalGithubChipHtml(task) {
     + '<span class="board-card-sync-state board-card-sync-state-' + esc(syncMeta.state)
     + '" title="' + esc(syncMeta.title) + '">' + esc(syncMeta.icon) + '</span>';
   if (issueUrl) {
-    return '<a class="board-card-label board-card-external-chip board-card-github-chip" href="' + esc(issueUrl) + '"'
+    return '<a class="board-card-control-chip board-card-external-chip board-card-github-chip" href="' + esc(issueUrl) + '"'
       + ' onclick="event.stopPropagation();window.open(this.href);return false"'
       + ' title="' + esc(title) + '">' + content + '</a>';
   }
-  return '<span class="board-card-label board-card-external-chip board-card-github-chip" title="' + esc(title) + '">' + content + '</span>';
+  return '<span class="board-card-control-chip board-card-external-chip board-card-github-chip" title="' + esc(title) + '">' + content + '</span>';
 }
 
 function _boardStaleDoneTaskIds(model) {
@@ -369,6 +398,7 @@ function _boardTaskDispatchEligibility(task) {
   if (_boardTaskNeedsEligibilityRefs(task)) {
     return {
       className: 'board-card-dispatch board-card-dispatch-checking',
+      intent: 'neutral',
       label: 'Checking refs',
       title: 'Loading action/role availability',
     };
@@ -379,6 +409,7 @@ function _boardTaskDispatchEligibility(task) {
     if (unmetDeps.length > 2) preview += ', +' + (unmetDeps.length - 2);
     return {
       className: 'board-card-dispatch board-card-dispatch-blocked',
+      intent: 'warning',
       label: _boardDependencyBlockedLabel(task),
       title: 'Waiting on: ' + preview,
     };
@@ -386,6 +417,7 @@ function _boardTaskDispatchEligibility(task) {
   if (task.labels && task.labels.indexOf('torque:blocked') >= 0) {
     return {
       className: 'board-card-dispatch board-card-dispatch-blocked',
+      intent: 'warning',
       label: 'Blocked',
       title: 'Task is explicitly blocked',
     };
@@ -393,6 +425,7 @@ function _boardTaskDispatchEligibility(task) {
   if (_boardTaskIsFutureScheduled(task)) {
     return {
       className: 'board-card-dispatch board-card-dispatch-scheduled',
+      intent: 'accent',
       label: 'Scheduled later',
       title: 'Dispatch window opens ' + _schedFormatTime(task.scheduled_at),
     };
@@ -405,6 +438,7 @@ function _boardTaskDispatchEligibility(task) {
     if (missingTemplate) missing.push('role');
     return {
       className: 'board-card-dispatch board-card-dispatch-warning',
+      intent: 'danger',
       label: missing.length === 2 ? 'Missing refs' : 'Missing ' + missing[0],
       title: missingAction && missingTemplate
         ? 'Missing action "' + task.action_name + '" and role "' + task.agent_template + '"'
@@ -593,7 +627,7 @@ function _boardAssignedEngineerBadgeHtml(task) {
   var displayName = _boardAgentDisplayName(engineerId) || engineerId;
   var initial = String(displayName || '?').trim().charAt(0).toUpperCase() || '?';
   var status = engineer ? (_boardAgentStatus(engineerId) || 'idle') : 'missing';
-  var cls = 'board-card-label board-card-assigned-engineer';
+  var cls = 'board-card-control-chip board-card-assigned-engineer';
   if (!engineer) cls += ' board-card-assigned-engineer-missing';
   var attrs = ' data-assigned-engineer-id="' + esc(engineerId) + '"'
     + ' title="' + esc('Assigned engineer: ' + displayName) + '"';
@@ -633,13 +667,14 @@ function _boardTaskDispatchStateBadge(task) {
       ? 'Dispatch state: live — task has been dispatched'
       : 'Dispatch state: queued — assigned but not yet dispatched',
     className: 'board-card-dispatch-state board-card-dispatch-state-' + dispatchState,
+    intent: live ? 'success' : 'warning',
   };
 }
 
 function _boardTaskDispatchStateBadgeHtml(task) {
   var badge = _boardTaskDispatchStateBadge(task);
   if (!badge) return '';
-  return '<span class="board-card-label ' + esc(badge.className) + '"'
+  return '<span class="' + esc(_boardMetadataBadgeClass(badge.className, badge.intent)) + '"'
     + ' data-dispatch-state-badge="1"'
     + ' data-dispatch-state="' + esc(badge.state) + '"'
     + ' title="' + esc(badge.title) + '">' + esc(badge.label) + '</span>';
@@ -706,7 +741,7 @@ function _boardPatchDispatchStateBadgeElement(el, task) {
     }
     return true;
   }
-  el.className = 'board-card-label ' + badge.className;
+  el.className = _boardMetadataBadgeClass(badge.className, badge.intent);
   if (el.dataset) {
     el.dataset.dispatchStateBadge = '1';
     el.dataset.dispatchState = badge.state;
@@ -861,6 +896,7 @@ function _boardTaskDependencyBadges(task) {
       if (unmetDeps.length > 2) unmetPreview += ', +' + (unmetDeps.length - 2);
       badges.push({
         className: 'board-card-dependency board-card-dependency-blocked',
+        intent: 'warning',
         label: _boardDependencyBlockedLabel(task),
         title: 'Waiting on: ' + unmetPreview,
         targetTaskId: unmetDepTasks[0].id,
@@ -868,6 +904,7 @@ function _boardTaskDependencyBadges(task) {
     } else {
       badges.push({
         className: 'board-card-dependency board-card-dependency-ready',
+        intent: 'neutral',
         label: 'Deps ' + deps.length,
         title: deps.length + ' dependenc' + (deps.length === 1 ? 'y is' : 'ies are') + ' satisfied',
       });
@@ -882,6 +919,7 @@ function _boardTaskDependencyBadges(task) {
     var activeDependentTasks = _boardActiveDependents(task);
     badges.push({
       className: 'board-card-dependency board-card-dependency-blocking',
+      intent: 'accent',
       label: 'Blocks ' + activeDependents.length,
       title: 'Blocking: ' + blockingPreview,
       targetTaskId: activeDependentTasks[0].id,
@@ -1094,34 +1132,61 @@ function _renderBoardCard(t, childrenOf, depth, renderState) {
   meta += _boardTaskDispatchStateBadgeHtml(t);
   var dispatchEligibility = _boardTaskDispatchEligibility(t);
   if (dispatchEligibility && dispatchEligibility.label !== dependencyBlockedLabel) {
-    meta += '<span class="board-card-label ' + esc(dispatchEligibility.className)
+    meta += '<span class="' + esc(_boardMetadataBadgeClass(
+      dispatchEligibility.className,
+      dispatchEligibility.intent,
+    ))
       + '" title="' + esc(dispatchEligibility.title) + '">'
       + esc(dispatchEligibility.label) + '</span>';
   }
-  if (showExecutionState && t.status) meta += '<span class="board-card-label board-card-status">' + esc(t.status) + '</span>';
+  if (showExecutionState && t.status) {
+    meta += '<span class="' + esc(_boardMetadataBadgeClass('board-card-status', 'success'))
+      + '">' + esc(t.status) + '</span>';
+  }
   var healthState = _boardTaskHealthState(t);
   var healthLabel = _boardTaskHealthLabel(t);
   if (showExecutionState && healthState !== 'healthy'
       && healthLabel !== dependencyBlockedLabel) {
-    meta += '<span class="board-card-label board-card-health board-card-health-' + esc(healthState)
+    meta += '<span class="' + esc(_boardMetadataBadgeClass(
+      'board-card-health board-card-health-' + healthState,
+      _boardMetadataIntentForHealth(healthState),
+    ))
       + '" title="' + esc(_boardHealthTitle(t)) + '">' + esc(healthLabel) + '</span>';
   }
   if (_boardVerificationState(t)) {
-    meta += '<span class="board-card-label board-card-verification board-card-verification-' + esc(_boardVerificationState(t))
+    var verificationState = _boardVerificationState(t);
+    meta += '<span class="' + esc(_boardMetadataBadgeClass(
+      'board-card-verification board-card-verification-' + verificationState,
+      _boardMetadataIntentForVerification(verificationState),
+    ))
       + '">' + esc(_boardVerificationLabel(t)) + '</span>';
   }
   if (_boardVerificationMode(t)) {
-    meta += '<span class="board-card-label board-card-verification-mode">' + esc(_boardVerificationMode(t)) + '</span>';
+    meta += '<span class="' + esc(_boardMetadataBadgeClass('board-card-verification-mode', 'neutral'))
+      + '">' + esc(_boardVerificationMode(t)) + '</span>';
   }
   if (_boardCompletionEvidenceStatus(t)) {
     var evidenceStatus = _boardCompletionEvidenceStatus(t);
-    meta += '<span class="board-card-label board-card-completion-evidence board-card-completion-evidence-' + esc(evidenceStatus)
+    var evidenceIntent = evidenceStatus === 'verified' ? 'success' : 'accent';
+    meta += '<span class="' + esc(_boardMetadataBadgeClass(
+      'board-card-completion-evidence board-card-completion-evidence-' + evidenceStatus,
+      evidenceIntent,
+    ))
       + '" title="' + esc(_boardCompletionEvidenceTitle(t)) + '">'
       + esc(_boardCompletionEvidenceLabel(t)) + '</span>';
   }
-  if (_boardHasActiveFilters() && t.lane) meta += '<span class="board-card-lane-badge">' + esc(t.lane) + '</span>';
-  if (t.action_name) meta += '<span class="board-card-label board-card-template">' + esc(t.action_name) + '</span>';
-  if (t.agent_template) meta += '<span class="board-card-label board-card-template">role: ' + esc(t.agent_template) + '</span>';
+  if (_boardHasActiveFilters() && t.lane) {
+    meta += '<span class="' + esc(_boardMetadataBadgeClass('board-card-lane-badge', 'accent'))
+      + '">' + esc(t.lane) + '</span>';
+  }
+  if (t.action_name) {
+    meta += '<span class="' + esc(_boardMetadataBadgeClass('board-card-template', 'neutral'))
+      + '">' + esc(t.action_name) + '</span>';
+  }
+  if (t.agent_template) {
+    meta += '<span class="' + esc(_boardMetadataBadgeClass('board-card-template', 'neutral'))
+      + '">role: ' + esc(t.agent_template) + '</span>';
+  }
   if (t.labels && t.labels.length) {
     var userLbls = [], sysLbls = [];
     var priority = _boardTaskPriority(t);
@@ -1130,18 +1195,31 @@ function _renderBoardCard(t, childrenOf, depth, renderState) {
       else if (!/^priority:/.test(t.labels[li])) userLbls.push(t.labels[li]);
     }
     if (priority) {
-      meta += '<span class="board-card-label board-card-priority board-card-priority-' + esc(priority) + '">'
+      var priorityIntent = priority === 'low' ? 'success' : (priority === 'high' ? 'danger' : 'warning');
+      meta += '<span class="' + esc(_boardMetadataBadgeClass(
+        'board-card-priority board-card-priority-' + priority,
+        priorityIntent,
+      )) + '">'
         + 'Priority: ' + esc(_boardPriorityText(priority)) + '</span>';
     }
     for (var li = 0; li < userLbls.length; li++) {
       var lc = labelColor(userLbls[li]);
-      meta += '<span class="board-card-label" style="background:' + lc + '22;color:' + lc + '">' + esc(userLbls[li]) + '</span>';
+      meta += '<span class="' + esc(_boardMetadataBadgeClass('', 'neutral'))
+        + '" style="background:' + lc + '22;color:' + lc + ';border-color:' + lc + '55">'
+        + esc(userLbls[li]) + '</span>';
     }
     for (var li = 0; li < sysLbls.length; li++) {
       var lb = sysLbls[li];
-      var cls = 'board-card-label board-label-system';
-      if (lb === 'torque:blocked') cls += ' board-label-blocked';
-      else if (lb === 'torque:error') cls += ' board-label-error';
+      var cls = 'board-label-system';
+      var labelIntent = 'neutral';
+      if (lb === 'torque:blocked') {
+        cls += ' board-label-blocked';
+        labelIntent = 'warning';
+      } else if (lb === 'torque:error') {
+        cls += ' board-label-error';
+        labelIntent = 'danger';
+      }
+      cls = _boardMetadataBadgeClass(cls, labelIntent);
       meta += '<span class="' + cls + '">' + esc(displayLabel(lb)) + '</span>';
     }
   }
@@ -1151,23 +1229,25 @@ function _renderBoardCard(t, childrenOf, depth, renderState) {
     var depClassName = depBadge.className;
     var depAttrs = '';
     if (depBadge.targetTaskId) {
-      depClassName += ' board-card-badge-jump';
+      depClassName = 'board-card-control-chip ' + depClassName + ' board-card-badge-jump';
       depAttrs = ' onclick="event.stopPropagation();boardJumpToTask(\''
         + esc(depBadge.targetTaskId).replace(/'/g, "\\'") + '\')"';
+    } else {
+      depClassName = _boardMetadataBadgeClass(depClassName, depBadge.intent, true);
     }
-    meta += '<span class="board-card-label ' + esc(depClassName) + '"'
+    meta += '<span class="' + esc(depClassName) + '"'
       + depAttrs + ' title="' + esc(depBadge.title) + '">' + esc(depBadge.label) + '</span>';
   }
   var scheduleMeta = _boardTaskScheduleMeta(t);
   if (scheduleMeta) {
-    meta += '<span class="board-card-label ' + esc(scheduleMeta.className)
+    meta += '<span class="' + esc(_boardMetadataBadgeClass(scheduleMeta.className, scheduleMeta.intent))
       + '" title="' + esc(scheduleMeta.label) + '">' + esc(scheduleMeta.label) + '</span>';
   }
   var artifactCount = typeof _artifactCountForTask === 'function'
     ? _artifactCountForTask(t)
     : (((t.attachments || []).length) + ((t.artifacts || []).length));
   if (artifactCount) {
-    meta += '<span class="board-card-label board-card-attachments"'
+    meta += '<span class="board-card-control-chip board-card-attachments"'
       + ' title="' + artifactCount + ' artifact' + (artifactCount === 1 ? '' : 's') + '"'
       + ' onclick="event.stopPropagation();openTaskArtifactBrowser(\'' + t.id + '\')">'
       + '&#x1F4CE; ' + artifactCount + '</span>';

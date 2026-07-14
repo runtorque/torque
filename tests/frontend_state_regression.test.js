@@ -2597,11 +2597,11 @@ test('board lane tabs exclude engineer message followups from actionable counts'
   );
   assert.match(
     panel.innerHTML,
-    /data-lane="Backlog"[\s\S]*?<span class="lane-count">1<\/span>/,
+    /data-lane="Backlog"[\s\S]*?<span class="lane-count [^"]*ui-badge--count">1<\/span>/,
   );
   assert.doesNotMatch(
     panel.innerHTML,
-    /data-lane="Backlog"[\s\S]*?<span class="lane-count">2<\/span>/,
+    /data-lane="Backlog"[\s\S]*?<span class="lane-count [^"]*ui-badge--count">2<\/span>/,
   );
 });
 
@@ -3904,7 +3904,7 @@ test('_renderBoardCard hides redundant group chips and only shows execution badg
   `);
 
   assert.equal((html.match(/board-card-group/g) || []).length, 0);
-  assert.equal((html.match(/board-card-label board-card-status/g) || []).length, 1);
+  assert.equal((html.match(/class="[^"]*board-card-status(?:\s|")/g) || []).length, 1);
   assert.equal((html.match(/board-card-health-stalled/g) || []).length, 1);
 });
 
@@ -4311,6 +4311,7 @@ test('_boardTaskScheduleMeta distinguishes scheduled, due-soon, and overdue stat
     ),
     JSON.stringify({
       className: 'board-card-scheduled',
+      intent: 'accent',
       label: 'Scheduled Apr 10 09:30',
     }),
   );
@@ -4324,6 +4325,7 @@ test('_boardTaskScheduleMeta distinguishes scheduled, due-soon, and overdue stat
     ),
     JSON.stringify({
       className: 'board-card-scheduled board-card-due-soon',
+      intent: 'warning',
       label: 'Due Apr 8 08:00',
     }),
   );
@@ -4337,6 +4339,7 @@ test('_boardTaskScheduleMeta distinguishes scheduled, due-soon, and overdue stat
     ),
     JSON.stringify({
       className: 'board-card-scheduled board-card-overdue',
+      intent: 'danger',
       label: 'Overdue Apr 7 09:00',
     }),
   );
@@ -4420,6 +4423,7 @@ test('_boardTaskDispatchEligibility only surfaces backlog dispatch blockers and 
     ),
     JSON.stringify({
       className: 'board-card-dispatch board-card-dispatch-blocked',
+      intent: 'warning',
       label: 'Blocked by dep',
       title: 'Waiting on: Dependency',
     }),
@@ -4438,6 +4442,7 @@ test('_boardTaskDispatchEligibility only surfaces backlog dispatch blockers and 
     ),
     JSON.stringify({
       className: 'board-card-dispatch board-card-dispatch-scheduled',
+      intent: 'accent',
       label: 'Scheduled later',
       title: 'Dispatch window opens Apr 8 12:00',
     }),
@@ -4457,6 +4462,7 @@ test('_boardTaskDispatchEligibility only surfaces backlog dispatch blockers and 
     ),
     JSON.stringify({
       className: 'board-card-dispatch board-card-dispatch-warning',
+      intent: 'danger',
       label: 'Missing refs',
       title: 'Missing action "missing/action" and role "missing-template"',
     }),
@@ -4681,12 +4687,14 @@ test('_boardTaskDependencyBadges exposes blocked and blocking counts compactly',
     JSON.stringify([
       {
         className: 'board-card-dependency board-card-dependency-blocked',
+        intent: 'warning',
         label: 'Blocked by depA +2 more',
         title: 'Waiting on: API contract, Cache seed, +1',
         targetTaskId: 'depA',
       },
       {
         className: 'board-card-dependency board-card-dependency-blocking',
+        intent: 'accent',
         label: 'Blocks 2',
         title: 'Blocking: Rollout docs, Release notes',
         targetTaskId: 'blocked1',

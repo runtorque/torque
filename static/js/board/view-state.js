@@ -599,7 +599,7 @@ function _renderBoardDisplayControls() {
   html += '<button class="board-view-menu-toggle ui-menu-item' + (_boardShowArchived ? ' active is-selected' : '') + '"'
     + ' onclick="boardToggleArchived()">'
     + (_boardShowArchived ? 'Hide archived' : 'Show archived')
-    + (archivedCount ? ' <span class="board-filter-btn-count">' + archivedCount + '</span>' : '')
+    + (archivedCount ? ' <span class="board-filter-btn-count ui-badge ui-badge--micro ui-badge--accent ui-badge--count">' + archivedCount + '</span>' : '')
     + '</button>';
   return html;
 }

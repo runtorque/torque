@@ -348,7 +348,7 @@ function _boardRenderWideLaneColumn(lane, model, filtersActive) {
       + ' title="Show ' + esc(lane) + ' lane"'
       + ' aria-label="Show ' + esc(lane) + ' lane">'
       + '<span class="board-wide-lane-name">' + esc(lane) + '</span>'
-      + '<span class="board-wide-lane-count">' + laneCount + '</span>'
+      + '<span class="board-wide-lane-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + laneCount + '</span>'
       + '</button>';
     html += '</div>';
     html += '</section>';
@@ -360,7 +360,7 @@ function _boardRenderWideLaneColumn(lane, model, filtersActive) {
   html += '<div class="board-wide-lane-title-row">';
   html += '<button class="board-wide-lane-select" onclick="boardSelectLane(\'' + escLane + '\')">';
   html += '<span class="board-wide-lane-name">' + esc(lane) + '</span>';
-  html += '<span class="board-wide-lane-count">' + laneCount + '</span>';
+  html += '<span class="board-wide-lane-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + laneCount + '</span>';
   html += '</button>';
   html += '<button class="board-wide-lane-toggle"'
     + ' onclick="boardToggleWideLane(event,\'' + escLane + '\')"'
@@ -528,7 +528,7 @@ function renderBoard() {
       html += '<button type="button" class="filter-chip board-filter-btn' + (lblCount ? ' active' : '') + '"'
         + ' aria-haspopup="dialog" aria-expanded="' + (_boardFilterDropdownType === 'label' ? 'true' : 'false') + '"'
         + ' onclick="boardToggleLabelFilter()">'
-        + 'Labels' + (lblCount ? ' <span class="board-filter-btn-count">' + lblCount + '</span>' : '')
+        + 'Labels' + (lblCount ? ' <span class="board-filter-btn-count ui-badge ui-badge--micro ui-badge--accent ui-badge--count">' + lblCount + '</span>' : '')
         + ' &#9662;</button>';
       html += '</div>';
     }
@@ -538,7 +538,7 @@ function renderBoard() {
       html += '<button type="button" class="filter-chip board-filter-btn' + (actFCount ? ' active' : '') + '"'
         + ' aria-haspopup="dialog" aria-expanded="' + (_boardFilterDropdownType === 'action' ? 'true' : 'false') + '"'
         + ' onclick="boardToggleActionFilter()">'
-        + 'Actions' + (actFCount ? ' <span class="board-filter-btn-count">' + actFCount + '</span>' : '')
+        + 'Actions' + (actFCount ? ' <span class="board-filter-btn-count ui-badge ui-badge--micro ui-badge--accent ui-badge--count">' + actFCount + '</span>' : '')
         + ' &#9662;</button>';
       html += '</div>';
     }
@@ -553,7 +553,7 @@ function renderBoard() {
       html += '<button type="button" class="filter-chip board-filter-btn' + (agtFCount ? ' active' : '') + '"'
         + ' aria-haspopup="dialog" aria-expanded="' + (_boardFilterDropdownType === 'agent' ? 'true' : 'false') + '"'
         + ' onclick="boardToggleAgentFilter()">'
-        + 'Agents' + (agtFCount ? ' <span class="board-filter-btn-count">' + agtFCount + '</span>' : '')
+        + 'Agents' + (agtFCount ? ' <span class="board-filter-btn-count ui-badge ui-badge--micro ui-badge--accent ui-badge--count">' + agtFCount + '</span>' : '')
         + ' &#9662;</button>';
       html += '</div>';
     }
@@ -563,7 +563,7 @@ function renderBoard() {
       html += '<button type="button" class="filter-chip board-filter-btn' + (healthFCount ? ' active' : '') + '"'
         + ' aria-haspopup="dialog" aria-expanded="' + (_boardFilterDropdownType === 'health' ? 'true' : 'false') + '"'
         + ' onclick="boardToggleHealthFilter()">'
-        + 'Health' + (healthFCount ? ' <span class="board-filter-btn-count">' + healthFCount + '</span>' : '')
+        + 'Health' + (healthFCount ? ' <span class="board-filter-btn-count ui-badge ui-badge--micro ui-badge--accent ui-badge--count">' + healthFCount + '</span>' : '')
         + ' &#9662;</button>';
       html += '</div>';
     }
@@ -584,7 +584,7 @@ function renderBoard() {
     + ' aria-pressed="' + (_boardShowSchedules ? 'true' : 'false') + '"'
     + ' onclick="boardToggleSchedules()">'
     + 'Schedules'
-    + (schedCount ? ' <span class="board-filter-btn-count">' + schedCount + '</span>' : '')
+    + (schedCount ? ' <span class="board-filter-btn-count ui-badge ui-badge--micro ui-badge--accent ui-badge--count">' + schedCount + '</span>' : '')
     + '</button>';
   html += '</div>';
   html += '</div>';
@@ -698,7 +698,7 @@ function renderBoard() {
         + ' ondragover="boardLaneTabDragOver(event)"'
         + ' ondragleave="boardLaneTabDragLeave(event)"'
         + ' ondrop="boardLaneTabDrop(event)">'
-        + esc(l) + '<span class="lane-count">' + cnt + '</span>'
+        + esc(l) + '<span class="lane-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">' + cnt + '</span>'
         + '</button>';
     }
     html += '</div>';

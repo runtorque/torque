@@ -366,6 +366,35 @@ test('agent identity, journal, and Health badges use the canonical API', () => {
   assert.match(health, /class="health-metrics-history-meta"[\s\S]*?class="ui-badge ui-badge--neutral"/);
 });
 
+test('Board metadata and count annotations use badges while clickable chips remain controls', () => {
+  const card = source('static/js/board/card-rendering.js');
+  const render = source('static/js/render.js');
+  const board = source('static/js/board/rendering.js');
+  const filters = source('static/js/board/filters.js');
+  const selection = source('static/js/board/selection.js');
+  const css = source('static/styles/board-panels.css');
+
+  assert.match(card, /function _boardMetadataBadgeClass[\s\S]*?'board-card-label',[\s\S]*?'ui-badge',[\s\S]*?'ui-badge--compact',[\s\S]*?'ui-badge--' \+ \(intent \|\| 'neutral'\)/);
+  assert.match(render, /_boardMetadataBadgeClass\([\s\S]*?'board-card-created-by board-card-created-by-' \+ meta\.kind,[\s\S]*?intent/);
+  assert.match(card, /_boardMetadataBadgeClass\('board-card-status', 'success'\)/);
+  assert.match(card, /_boardMetadataIntentForHealth\(healthState\)/);
+  assert.match(card, /_boardMetadataIntentForVerification\(verificationState\)/);
+  assert.match(card, /board-card-control-chip board-card-assigned-engineer/);
+  assert.match(card, /board-card-control-chip board-card-external-chip board-card-github-chip/);
+  assert.match(card, /board-card-control-chip ' \+ depClassName \+ ' board-card-badge-jump/);
+  assert.match(card, /board-card-control-chip board-card-attachments/);
+
+  assert.match(board, /board-wide-lane-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count/);
+  assert.match(board, /lane-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count/);
+  assert.match(board, /board-filter-btn-count ui-badge ui-badge--micro ui-badge--accent ui-badge--count/);
+  assert.match(filters, /board-filter-dropdown-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count/);
+  assert.match(selection, /board-selection-count ui-badge ui-badge--compact ui-badge--accent ui-badge--count/);
+
+  assert.match(css, /\.board-card-control-chip\s*\{[^}]*min-height:\s*14px;[^}]*border-radius:\s*4px;/s);
+  assert.doesNotMatch(css, /^\.board-card-label\s*\{/m);
+  assert.doesNotMatch(css, /^\.board-(?:filter-btn|filter-dropdown|wide-lane)-count\s*\{[^}]*(?:font-size|padding|border-radius|background):/ms);
+});
+
 test('badge geometry does not drift back into feature styles', () => {
   const grid = source('static/styles/workspace-grid.css');
   const agent = source('static/styles/agent-panel.css');

@@ -203,7 +203,8 @@ function _renderBoardSelectionBar() {
   var archiveIds = _boardSelectedArchiveIds(false);
   var restoreIds = _boardSelectedArchiveIds(true);
   var html = '<div class="board-selection-bar">';
-  html += '<span class="board-selection-count">' + count + ' selected</span>';
+  html += '<span class="board-selection-count ui-badge ui-badge--compact ui-badge--accent ui-badge--count">'
+    + count + ' selected</span>';
   // Move to lane dropdown
   html += '<div class="board-selection-dropdown-wrap">';
   html += '<button class="board-selection-btn" onclick="boardBulkToggleMove(event)">Move to &#9662;</button>';

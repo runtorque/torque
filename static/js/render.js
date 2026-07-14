@@ -656,7 +656,13 @@ function _taskCreatedByMeta(task) {
 
 function _taskCreatedByBadgeHtml(task) {
   const meta = _taskCreatedByMeta(task);
-  const cls = 'board-card-label board-card-created-by board-card-created-by-' + meta.kind;
+  const intent = meta.kind === 'architect'
+    ? 'warning'
+    : (meta.kind === 'engineer' ? 'accent' : 'neutral');
+  const cls = _boardMetadataBadgeClass(
+    'board-card-created-by board-card-created-by-' + meta.kind,
+    intent,
+  );
   return '<span class="' + esc(cls) + '"'
     + ' data-created-by="' + esc(meta.raw) + '"'
     + ' title="' + esc(meta.title) + '">'
