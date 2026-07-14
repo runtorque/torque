@@ -488,3 +488,55 @@ textarea[aria-invalid="true"] {
   outline: 1px solid var(--accent-muted);
   outline-offset: -1px;
 }
+
+/* Cards and contained surfaces
+ *
+ * Cards share one boundary and state grammar. Surface-specific styles own
+ * internal layout, density, and semantic edge accents.
+ */
+.ui-card,
+.board-card,
+.context-card,
+.agent-panel-message-card,
+.agent-panel-stream-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-cell);
+  transition: color var(--transition-fast), border-color var(--transition-fast),
+    background var(--transition-fast), box-shadow var(--transition-fast),
+    transform var(--transition-fast), opacity var(--transition-fast);
+}
+
+.ui-card--compact,
+.agent-panel-message-card,
+.agent-panel-stream-card {
+  padding: var(--space-2);
+}
+
+.ui-card--comfortable,
+.context-card {
+  padding: 10px;
+}
+
+.ui-card--interactive,
+.board-card,
+.context-card {
+  cursor: pointer;
+}
+
+.ui-card--interactive:hover,
+.board-card:hover,
+.board-card.board-card-hovered,
+.context-card:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+
+.ui-card.is-selected,
+.ui-card[aria-selected="true"],
+.board-card.focused,
+.board-card-selected,
+.context-card.selected {
+  border-color: var(--accent-muted);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-cell));
+}

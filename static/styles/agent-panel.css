@@ -1030,11 +1030,7 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   scrollbar-width: thin;
 }
 .agent-panel-message-card {
-  padding: 8px;
-  border: 1px solid var(--border);
   border-left: 2px solid color-mix(in srgb, var(--text-dim) 45%, var(--border));
-  border-radius: var(--radius);
-  background: var(--bg-cell);
   flex-shrink: 0;
 }
 .agent-panel-message-in {
@@ -1306,10 +1302,6 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   gap: 8px;
 }
 .agent-panel-stream-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 7px;

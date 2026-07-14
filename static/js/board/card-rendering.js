@@ -1036,7 +1036,7 @@ function _renderBoardCard(t, childrenOf, depth, renderState) {
       + ' data-indent-level="' + indentLevel + '"'
       + ' style="--board-card-indent-level:' + indentLevel + '"'
     : '';
-  var cardHtml = '<div class="board-card' + focused + selected + hovered + quickOpen + subClass + doneClass + '"'
+  var cardHtml = '<div class="board-card ui-card ui-card--interactive' + focused + selected + hovered + quickOpen + subClass + doneClass + '"'
     + ' data-task-id="' + t.id + '"'
     + indentAttrs
     + ' draggable="true"'

@@ -157,3 +157,35 @@ test('filter and preset geometry does not drift back into feature styles', () =>
   assert.doesNotMatch(features, /^\.initiative-secondary-toggle\s*\{[^}]*border-radius:/ms);
   assert.doesNotMatch(features, /^\.idea-brief-filter-row \.active\s*\{/m);
 });
+
+test('shared cards define boundary, density, and interactive state primitives', () => {
+  const css = source('static/styles/components.css');
+
+  assert.match(css, /\.ui-card,\s*\.board-card,\s*\.context-card,\s*\.agent-panel-message-card,\s*\.agent-panel-stream-card\s*\{[^}]*border:\s*1px solid var\(--border\);[^}]*border-radius:\s*var\(--radius\);[^}]*background:\s*var\(--bg-cell\);[^}]*transition:/s);
+  assert.match(css, /\.ui-card--compact,\s*\.agent-panel-message-card,\s*\.agent-panel-stream-card\s*\{[^}]*padding:\s*var\(--space-2\);/s);
+  assert.match(css, /\.ui-card--comfortable,\s*\.context-card\s*\{[^}]*padding:\s*10px;/s);
+  assert.match(css, /\.ui-card--interactive:hover,[\s\S]*?\.context-card:hover\s*\{[^}]*border-color:\s*var\(--border-strong\);[^}]*background:\s*var\(--bg-hover\);/s);
+  assert.match(css, /\.ui-card\.is-selected,[\s\S]*?\.context-card\.selected\s*\{[^}]*border-color:\s*var\(--accent-muted\);[^}]*background:\s*color-mix\(in srgb, var\(--accent\) 8%, var\(--bg-cell\)\);/s);
+});
+
+test('card consumers opt into the canonical API without losing surface identity', () => {
+  const board = source('static/js/board/card-rendering.js');
+  const context = source('static/js/context.js');
+  const agent = source('static/js/agent_panel.js');
+  const engineer = source('static/js/agent-panel/legacy-engineer.js');
+
+  assert.match(board, /class="board-card ui-card ui-card--interactive/);
+  assert.match(context, /class="context-card ui-card ui-card--comfortable ui-card--interactive/);
+  assert.match(agent, /class="agent-panel-message-card ui-card ui-card--compact/);
+  assert.match(engineer, /class="agent-panel-stream-card ui-card ui-card--compact/);
+});
+
+test('card geometry does not drift back into feature styles', () => {
+  const board = source('static/styles/board-panels.css');
+  const agent = source('static/styles/agent-panel.css');
+
+  assert.doesNotMatch(board, /^\.board-card\s*\{[^}]*border-radius:/ms);
+  assert.doesNotMatch(board, /^\.context-card\s*\{[^}]*(?:border|background):/ms);
+  assert.doesNotMatch(agent, /^\.agent-panel-message-card\s*\{[^}]*border-radius:/ms);
+  assert.doesNotMatch(agent, /^\.agent-panel-stream-card\s*\{[^}]*(?:border|background|padding):/ms);
+});

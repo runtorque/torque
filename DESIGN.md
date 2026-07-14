@@ -271,11 +271,26 @@ fields.
 
 ### Cards and contained surfaces
 
-- Cards use `--radius` and should be separated primarily by border and surface
-  contrast.
+- Cards use `--radius`, `--border`, and `--bg-cell`; they are separated primarily
+  by boundary and surface contrast rather than large shadows.
+- Interactive cards strengthen their boundary and surface on hover. Selected
+  cards use an accent boundary plus a quiet accent-soft surface.
+- Compact cards use 8px internal padding. Comfortable list cards use 10px.
+  Density-sensitive cards may own their padding while retaining shared states.
+- Semantic edge accents may communicate status or direction, but do not replace
+  the shared card boundary.
 - Avoid nesting multiple fully bordered cards when spacing or a subtle divider
   can express the same hierarchy.
 - Repeated cards in a list must keep their action placement consistent.
+
+The canonical CSS API lives in `static/styles/components.css`:
+
+- `.ui-card` is the shared boundary and surface primitive.
+- `.ui-card--interactive` adds hover affordance.
+- `.ui-card--compact` and `.ui-card--comfortable` select internal padding.
+- `.is-selected` or `aria-selected="true"` applies the selected state.
+- Board tasks, Context entries, agent messages, and agent work streams use
+  compatibility aliases while markup migrates.
 
 ### Panels and toolbars
 
@@ -359,7 +374,7 @@ the rule is intentionally global and documented here.
 | Filter chips and presets | Core variants standardized | Audit remaining feature-local toggles and removable values |
 | Buttons | Core variants standardized | Migrate feature-specific aliases and audit icon buttons |
 | Inputs and selectors | Core variants standardized | Migrate remaining feature-specific aliases and audit field labeling |
-| Cards | Pending | Reconcile grid, board, context, and agent cards |
+| Cards | Core variants standardized | Audit grid identity cards and nested contained surfaces |
 | Toolbars and panel headers | Pending | Standardize spacing, ordering, and overflow |
 | Menus and popovers | Pending | Standardize geometry and focus restoration |
 | Modals | Pending | Standardize headers, actions, widths, and destructive flows |
@@ -504,6 +519,28 @@ the rule is intentionally global and documented here.
 - Verification: `tests/frontend_components.test.js` protects shared geometry,
   semantic state, and the removal of feature-local pill geometry. Live browser
   checks verify board filters at default and active states.
+
+### D-008 — Repeated content cards share one boundary and state grammar
+
+- Date: 2026-07-14
+- Status: accepted
+- Decision: Repeated content cards use a 6px radius, the standard card surface
+  and boundary, shared fast transitions, a stronger hover boundary, and a quiet
+  accent selected state. Compact and comfortable padding remain explicit.
+- Rationale: Board tasks, Context entries, and agent message/stream cards had
+  converged on similar structures but still used unrelated radii, border colors,
+  backgrounds, and transitions. One primitive makes card hierarchy predictable
+  without erasing the information density each surface needs.
+- Scope: `static/styles/components.css`, board task cards, Context entry cards,
+  agent message cards, and agent work-stream cards.
+- Constraints: Board task cards retain lane/status edge accents and density
+  modes. Agent messages retain direction accents. Detail editors and large
+  contained forms are surfaces rather than repeated list cards. Metadata pills
+  inside cards remain governed separately.
+- Verification: `tests/frontend_components.test.js` protects the shared API,
+  canonical markup, and removal of duplicate feature geometry. Existing board,
+  Context, and agent-panel regression suites protect rendering and rerender
+  behavior; live checks verify computed card geometry.
 
 ## Decision entry template
 

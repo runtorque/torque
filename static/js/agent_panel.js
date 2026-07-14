@@ -705,7 +705,7 @@ function _agentPanelMessageCardHtml(agent, message, index, options) {
     .replace(/[^a-zA-Z0-9_:-]/g, '');
   if (!anchorAttr) anchorAttr = 'data-agent-panel-anchor';
   var extraAttrs = String(options.extraAttrs || '');
-  var rowHtml = '<div class="agent-panel-message-card agent-panel-message-' + _agentPanelAttr(direction)
+  var rowHtml = '<div class="agent-panel-message-card ui-card ui-card--compact agent-panel-message-' + _agentPanelAttr(direction)
     + '" ' + anchorAttr + '="' + _agentPanelAttr(anchorKey) + '"'
     + (extraAttrs ? ' ' + extraAttrs : '') + '>';
   rowHtml += '<div class="agent-panel-message-card-header">';

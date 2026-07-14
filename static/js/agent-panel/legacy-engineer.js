@@ -2169,7 +2169,7 @@ function _agentPanelLegacyRenderOpenStreamCard(stream, index) {
   var visibilityItems = _engineerStreamVisibilityItems(stream);
   var key = _engineerStreamAnchorKey(stream, index, title, branch);
 
-  var html = '<div class="agent-panel-stream-card" data-engineer-anchor="' + _esc(key) + '">';
+  var html = '<div class="agent-panel-stream-card ui-card ui-card--compact" data-engineer-anchor="' + _esc(key) + '">';
   html += '<div class="agent-panel-stream-card-header">';
   html += '<div class="agent-panel-stream-heading">';
   html += '<div class="agent-panel-stream-title-row">';

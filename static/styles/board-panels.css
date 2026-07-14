@@ -640,15 +640,8 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
 .board-card {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 8px;
-  background: var(--bg-cell);
-  border: 1px solid transparent;
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: background .15s, border-color .15s;
   min-height: 32px;
 }
-.board-card:hover,
-.board-card.board-card-hovered { background: var(--bg-hover); }
 /* Brief highlight when a board task is opened externally via the
    clickable TORQUE:XXX label on a worker card. */
 .board-card.board-card--external-focus {
@@ -749,10 +742,7 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
   height: 22px;
   margin-top: 1px;
 }
-.board-card.focused {
-  border-color: var(--accent);
-  outline: none;
-}
+.board-card.focused { outline: none; }
 .board-card-dot {
   width: 7px; height: 7px; border-radius: 50%;
   flex-shrink: 0; background: var(--text-dim);
@@ -2022,22 +2012,14 @@ body.runtime-embedded .board-empty-action:focus-visible {
   border-radius: 10px;
   background: color-mix(in srgb, var(--bg-cell) 80%, transparent);
 }
-.context-card,
 .context-detail-card,
 .context-editor {
   background: var(--bg-cell);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
 }
 .context-card {
-  padding: 10px;
-  cursor: pointer;
-  transition: border-color .15s, background .15s;
-}
-.context-card:hover { background: var(--bg-hover); }
-.context-card.selected {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 7%, var(--bg-cell));
+  min-width: 0;
 }
 .context-card.pinned {
   box-shadow: inset 2px 0 0 0 var(--amber);
@@ -3973,8 +3955,6 @@ body[data-torque-mode="desktop"] .diff-view-modal {
     linear-gradient(180deg, rgba(255,255,255,.018), transparent 46%),
     var(--bg-cell);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.015);
-  transition: transform var(--transition-fast), background var(--transition-fast),
-    border-color var(--transition-fast), box-shadow var(--transition-fast), opacity var(--transition-fast);
 }
 .board-card:hover,
 .board-card.board-card-hovered {

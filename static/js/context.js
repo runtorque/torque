@@ -320,7 +320,7 @@ function _renderContextEntryCard(entry) {
     : (entry.source_name || entry.source_id || 'Unknown source');
   var meta = sourceLabel + ' · ' + _contextScopeLabel(entry.scope_kind, entry.scope_ref);
   var links = Array.isArray(entry.links) ? entry.links : [];
-  var html = '<div class="context-card'
+  var html = '<div class="context-card ui-card ui-card--comfortable ui-card--interactive'
     + (selected ? ' selected' : '')
     + (entry.pinned ? ' pinned' : '')
     + '" onclick="contextSelectEntry(\'' + entry.id + '\')">';

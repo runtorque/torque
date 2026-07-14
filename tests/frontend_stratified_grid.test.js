@@ -246,7 +246,7 @@ test('stratified grid renders architects, orphan engineers, and orphan workers r
   assert.match(mainEl.innerHTML, /data-agent-strata="workers"[\s\S]*loose-workers-strip[\s\S]*Loose Worker/);
   assert.doesNotMatch(mainEl.innerHTML, /agent-strata-heading/);
   assert.doesNotMatch(mainEl.innerHTML, /\+ Add Worker|\+ New Engineer|\+ New Architect/);
-  assert.match(mainEl.innerHTML, /data-agent-grid-toolbar[\s\S]*data-agent-grid-new-button[\s\S]*>\+ New<\/button>/);
+  assert.match(mainEl.innerHTML, /data-agent-grid-toolbar[\s\S]*data-agent-grid-new-button[\s\S]*class="agent-grid-new-icon"[\s\S]*<span>New<\/span>/);
 });
 
 test('architect execution workers remain a full-width multi-column grid with one engineer and many workers', () => {
