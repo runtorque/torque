@@ -444,7 +444,7 @@ body.runtime-embedded #modal-group .modal-summary {
   min-height: 46px;
   padding: 8px 10px 8px 13px;
   border: 0;
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   color: var(--text-secondary);
   text-align: left;
 }
@@ -889,31 +889,6 @@ body.runtime-embedded #modal-group .modal-summary {
   margin-top: 8px;
 }
 
-/* Tab bar */
-.gs-tabs {
-  display: flex;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  margin-bottom: 12px;
-  overflow: hidden;
-}
-.gs-tab {
-  flex: 1;
-  padding: 5px 0;
-  font-size: 10px; font-weight: 600;
-  color: var(--text-dim);
-  text-align: center;
-  border-right: 1px solid var(--border);
-  transition: color .15s, background .15s;
-}
-.gs-tab:last-child { border-right: none; }
-.gs-tab:hover { color: var(--text); background: var(--bg-hover); }
-.gs-tab.active {
-  color: var(--text);
-  background: var(--accent);
-  color: #fff;
-}
-
 /* Tab panes */
 .gs-pane {
   display: none;
@@ -1256,18 +1231,6 @@ body.runtime-embedded #modal-group .modal-summary {
   border-bottom: 1px solid var(--border);
   margin-bottom: 10px;
   padding-bottom: 0;
-}
-.gs-subtab {
-  font-size: 9px; font-weight: 600;
-  color: var(--text-dim);
-  padding: 2px 0 5px;
-  border-bottom: 2px solid transparent;
-  transition: color .15s, border-color .15s;
-}
-.gs-subtab:hover { color: var(--text); }
-.gs-subtab.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
 }
 .gs-subpane { display: none; }
 .gs-subpane.active { display: block; }

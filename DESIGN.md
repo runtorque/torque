@@ -176,16 +176,31 @@ supported while existing surfaces migrate.
 
 - Group tabs and panel tabs use `--radius-sm`; they are compact rectangular tabs,
   not pills.
+- Feature navigation uses one of two shared variants: contained tabs for peer
+  surfaces and underline tabs for dense navigation within a panel.
 - Group tabs are 22px tall. Panel tabs are 24px tall.
 - The active tab uses accent color plus a visible border/background change.
 - Hover and keyboard focus must remain distinct from the active state.
 - Labels should remain readable under constrained widths; use truncation only
   when a switcher or tooltip exposes the complete label.
 
-Current implementations:
+The canonical CSS API lives in `static/styles/components.css`:
 
-- `.agent-group-tab` in `static/styles/workspace-grid.css`
-- `.standalone-panel-tab` in `static/styles/workspace-shell.css`
+- `.ui-tab` is the shared base for new markup.
+- `.ui-tab--contained` is a 24px rectangular tab with a visible boundary and
+  selected background. Planning, Thinking, and agent-event tabs currently use
+  compatibility aliases for this variant.
+- `.ui-tab--underline` is a 24px borderless tab with an active underline. Agent
+  panel, settings subnavigation, and narrow board-lane tabs currently use
+  compatibility aliases for this variant.
+- `.agent-group-tab` and `.standalone-panel-tab` remain compact workspace-specific
+  navigation variants.
+- `.gs-tab` remains a roomier primary settings rail item because it carries a
+  title and description; it still uses rectangular geometry and shared states.
+
+Segmented toggles, filters, terminal cards, badges, and tags are not navigation
+tabs. Do not apply tab styles to them merely because their class name contains
+“tab.”
 
 ### Inputs and selectors
 
@@ -280,6 +295,7 @@ the rule is intentionally global and documented here.
 | Foundations and tokens | Core scale standardized | Migrate component families and audit remaining literals |
 | Group tabs | Standardized | Verify compact switcher parity |
 | Panel tabs | Standardized | Verify all panel zones and narrow widths |
+| Feature navigation tabs | Core variants standardized | Migrate compatibility aliases to the canonical API |
 | Buttons | Core variants standardized | Migrate feature-specific aliases and audit icon buttons |
 | Inputs and selectors | Baseline | Audit sizing and validation states |
 | Cards | Pending | Reconcile grid, board, context, and agent cards |
@@ -338,6 +354,29 @@ the rule is intentionally global and documented here.
   but should not redefine core button geometry or intent colors.
 - Verification: `tests/frontend_components.test.js` protects the shared API and
   prevents core button rules from drifting back into feature stylesheets.
+
+### D-004 — Feature navigation has contained and underline variants
+
+- Date: 2026-07-14
+- Status: accepted
+- Decision: Peer feature surfaces use 24px contained rectangular tabs; dense
+  in-panel navigation uses 24px underline tabs. Both variants share typography,
+  interaction transitions, active-state semantics, and the control geometry
+  scale.
+- Rationale: Planning, Thinking, agent events, settings subsections, agent panel
+  views, and board lanes had independently evolved near-duplicate tab styles.
+  Two semantic variants preserve the hierarchy each context needs without
+  retaining unrelated pill shapes, sizes, and active treatments.
+- Scope: `static/styles/components.css`, Planning and Thinking feature tabs,
+  agent panel and agent-event tabs, settings subnavigation, narrow board-lane
+  tabs, and the primary settings rail's corner geometry.
+- Constraints: Group/panel workspace tabs retain their denser variants. The
+  primary settings rail remains larger because each item includes descriptive
+  copy. Segmented toggles, filters, terminal cards, badges, and tags are outside
+  this decision.
+- Verification: `tests/frontend_components.test.js` protects both shared
+  variants and prevents feature stylesheets from redefining their core visual
+  grammar.
 
 ## Decision entry template
 

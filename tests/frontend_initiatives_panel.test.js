@@ -217,7 +217,7 @@ test('Planning CSS uses compact panel typography and control density', () => {
 
   assert.match(css, /\.planning-panel\s*\{[^}]*font-size:\s*11px;[^}]*line-height:\s*1\.35;/s);
   assert.match(css, /\.planning-panel \.tpled-new-btn\s*\{[^}]*font-size:\s*12px;[^}]*padding:\s*1px\s+7px;/s);
-  assert.match(css, /\.planning-tab\s*\{[^}]*font-size:\s*11px;[^}]*padding:\s*4px\s+8px;/s);
+  assert.match(css, /\.ui-tab--contained,\s*\.planning-tab,\s*\.thinking-tab,\s*\.agent-panel-events-subtab\s*\{[^}]*min-height:\s*var\(--control-height-sm\);[^}]*padding:\s*0 var\(--control-padding-x-sm\);/s);
   assert.match(css, /\.initiative-column-title\s*\{[^}]*font-size:\s*12px;/s);
   assert.match(css, /\.initiative-detail h2\s*\{[^}]*font-size:\s*14px;/s);
   assert.match(css, /\.initiative-form input,\s*\.initiative-form select,\s*\.initiative-form textarea,\s*\.initiative-link-add input\s*\{[^}]*font-size:\s*11px;[^}]*padding:\s*5px\s+7px;/s);

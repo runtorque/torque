@@ -1904,23 +1904,7 @@
   padding: 7px 12px 0;
   border-top: 1px solid rgba(255, 255, 255, 0.04);
 }
-.planning-tab {
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-size: 11px;
-  padding: 4px 8px;
-  cursor: pointer;
-}
 .planning-tab span { color: var(--muted); margin-left: 4px; }
-.planning-tab:hover,
-.planning-tab.active {
-  color: var(--fg);
-  border-color: var(--accent);
-  background: rgba(100, 160, 255, 0.10);
-}
 .areas-workspace {
   width: 100%;
   min-width: 0;
@@ -2159,23 +2143,7 @@
   padding: 7px 12px 0;
   border-top: 1px solid rgba(255, 255, 255, 0.04);
 }
-.thinking-tab {
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-size: 11px;
-  padding: 4px 8px;
-  cursor: pointer;
-}
 .thinking-tab span { color: var(--muted); margin-left: 4px; }
-.thinking-tab:hover,
-.thinking-tab.active {
-  color: var(--fg);
-  border-color: var(--accent);
-  background: rgba(100, 160, 255, 0.10);
-}
 .thinking-workspace {
   flex: 1 1 auto;
   min-width: 0;

@@ -146,3 +146,111 @@
   height: 12px;
   fill: currentColor;
 }
+
+/* Navigation tabs
+ *
+ * Navigation has two shared visual variants: contained tabs for switching
+ * peer feature surfaces, and underline tabs for dense navigation inside a
+ * panel. Settings' primary rail is intentionally roomier, but shares the
+ * same base interaction language through `.gs-tab`.
+ */
+.ui-tab,
+.ui-tab--contained,
+.ui-tab--underline,
+.planning-tab,
+.thinking-tab,
+.agent-panel-tab,
+.agent-panel-events-subtab,
+.gs-tab,
+.gs-subtab,
+.board-lane-tab {
+  appearance: none;
+  font-family: var(--font);
+  font-size: var(--control-font-size-xs);
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.ui-tab--contained,
+.planning-tab,
+.thinking-tab,
+.agent-panel-events-subtab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--control-height-sm);
+  padding: 0 var(--control-padding-x-sm);
+  border: var(--control-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  background: transparent;
+  white-space: nowrap;
+}
+.ui-tab--contained:hover,
+.planning-tab:hover,
+.thinking-tab:hover,
+.agent-panel-events-subtab:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+.ui-tab--contained.active,
+.ui-tab--contained[aria-selected="true"],
+.planning-tab.active,
+.planning-tab[aria-selected="true"],
+.thinking-tab.active,
+.thinking-tab[aria-selected="true"],
+.agent-panel-events-subtab.active,
+.agent-panel-events-subtab[aria-selected="true"] {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.ui-tab--underline,
+.agent-panel-tab,
+.gs-subtab,
+.board-lane-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--control-height-sm);
+  padding: 0 var(--control-padding-x-sm);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--text-dim);
+  background: transparent;
+  text-align: center;
+}
+.ui-tab--underline:hover,
+.agent-panel-tab:hover,
+.gs-subtab:hover,
+.board-lane-tab:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.ui-tab--underline.active,
+.ui-tab--underline[aria-selected="true"],
+.agent-panel-tab.active,
+.agent-panel-tab[aria-selected="true"],
+.gs-subtab.active,
+.gs-subtab[aria-selected="true"],
+.board-lane-tab.active,
+.board-lane-tab[aria-selected="true"] {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.ui-tabs--contained,
+.agent-panel-events-subtabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: var(--control-border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-cell);
+}

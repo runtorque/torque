@@ -406,17 +406,7 @@
 }
 .board-lane-tabs::-webkit-scrollbar { display: none; }
 .board-lane-tab {
-  font-size: 10px; font-weight: 500;
-  color: var(--text-dim);
-  padding: 4px 10px;
   white-space: nowrap; flex-shrink: 0;
-  border-bottom: 2px solid transparent;
-  transition: color .15s, border-color .15s, background .15s;
-}
-.board-lane-tab:hover { color: var(--text); background: var(--bg-hover); }
-.board-lane-tab.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
 }
 .board-lane-tab.dimmed {
   opacity: 0.35;

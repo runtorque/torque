@@ -93,19 +93,6 @@
 }
 .agent-panel-tab {
   flex: 1;
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--text-dim);
-  padding: 5px 0;
-  font: 10px var(--font);
-  cursor: pointer;
-  text-align: center;
-}
-.agent-panel-tab:hover { color: var(--text); }
-.agent-panel-tab.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
 }
 
 .agent-panel-content {
@@ -645,28 +632,7 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   gap: 8px;
 }
 .agent-panel-events-subtabs {
-  display: inline-flex;
   align-self: flex-start;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--bg-cell);
-}
-.agent-panel-events-subtab {
-  background: transparent;
-  border: none;
-  border-radius: 999px;
-  color: var(--text-dim);
-  cursor: pointer;
-  font: 10px var(--font);
-  font-weight: 600;
-  padding: 4px 10px;
-}
-.agent-panel-events-subtab:hover { color: var(--text); }
-.agent-panel-events-subtab.active {
-  background: var(--accent);
-  color: #000;
 }
 .agent-panel-events-inbox,
 .agent-panel-events-lifecycle {
@@ -2265,4 +2231,3 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   color: #041b07;
   border-color: color-mix(in srgb, var(--green) 36%, transparent);
 }
-
