@@ -105,6 +105,133 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* Menus and popovers
+ *
+ * Floating surfaces share one boundary and elevation. Menu rows use the
+ * standard compact control rhythm while allowing feature-specific inner
+ * layouts such as counts, checkboxes, and trailing icons.
+ */
+.ui-popover,
+#ctx-menu,
+.agent-group-quick-switcher,
+.board-filter-dropdown,
+.board-view-menu {
+  padding: var(--space-1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-float);
+  max-height: min(360px, calc(100vh - 8px));
+  color: var(--text);
+}
+
+.ui-menu-item,
+#ctx-menu button:not(.ctx-label),
+.agent-group-quick-option,
+.agent-group-quick-new,
+.board-filter-dropdown-item,
+.board-view-menu-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--control-height-md);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  background: transparent;
+  font-family: var(--font);
+  font-size: var(--control-font-size-xs);
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.ui-menu-item:hover,
+.ui-menu-item:focus-visible,
+#ctx-menu button:not(.ctx-label):hover,
+#ctx-menu button:not(.ctx-label):focus-visible,
+.agent-group-quick-option:hover,
+.agent-group-quick-option:focus-visible,
+.agent-group-quick-new:hover,
+.agent-group-quick-new:focus-visible,
+.board-filter-dropdown-item:hover,
+.board-filter-dropdown-item:focus-within,
+.board-view-menu-toggle:hover,
+.board-view-menu-toggle:focus-visible {
+  border-color: var(--border);
+  color: var(--text);
+  background: var(--bg-hover);
+  outline: none;
+}
+
+.ui-menu-item.is-selected,
+.ui-menu-item[aria-checked="true"],
+.agent-group-quick-option.active,
+.board-view-menu-toggle.active {
+  border-color: var(--accent-muted);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.ui-menu-item--danger,
+#ctx-menu button.danger {
+  color: var(--red);
+}
+
+.ui-menu-item--danger:hover,
+.ui-menu-item--danger:focus-visible,
+#ctx-menu button.danger:hover,
+#ctx-menu button.danger:focus-visible {
+  border-color: color-mix(in srgb, var(--red) 48%, var(--border));
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 12%, var(--bg-hover));
+}
+
+.ui-menu-item:disabled,
+.ui-menu-item[aria-disabled="true"],
+#ctx-menu button:disabled {
+  opacity: .42;
+  cursor: not-allowed;
+}
+
+.ui-menu-item:disabled:hover,
+.ui-menu-item[aria-disabled="true"]:hover,
+#ctx-menu button:disabled:hover {
+  border-color: transparent;
+  color: var(--text-secondary);
+  background: transparent;
+}
+
+.ui-menu-label,
+.ctx-label,
+.board-filter-dropdown-header {
+  padding: 6px var(--space-2) 3px;
+  color: var(--text-dim);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.ui-menu-separator,
+.ctx-sep {
+  height: 1px;
+  margin: var(--space-1);
+  background: var(--border);
+}
+
+.ui-menu-section,
+.board-view-menu-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
 /* Form controls
  *
  * Native text-like fields receive the default primitive automatically.

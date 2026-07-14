@@ -526,7 +526,7 @@ function renderBoard() {
       var lblCount = _boardFilterLabels.length;
       html += '<div class="board-filter-btn-wrap" id="board-label-filter-wrap">';
       html += '<button type="button" class="filter-chip board-filter-btn' + (lblCount ? ' active' : '') + '"'
-        + ' aria-haspopup="true" aria-expanded="' + (_boardFilterDropdownType === 'label' ? 'true' : 'false') + '"'
+        + ' aria-haspopup="dialog" aria-expanded="' + (_boardFilterDropdownType === 'label' ? 'true' : 'false') + '"'
         + ' onclick="boardToggleLabelFilter()">'
         + 'Labels' + (lblCount ? ' <span class="board-filter-btn-count">' + lblCount + '</span>' : '')
         + ' &#9662;</button>';
@@ -536,7 +536,7 @@ function renderBoard() {
       var actFCount = _boardFilterActions.length;
       html += '<div class="board-filter-btn-wrap" id="board-action-filter-wrap">';
       html += '<button type="button" class="filter-chip board-filter-btn' + (actFCount ? ' active' : '') + '"'
-        + ' aria-haspopup="true" aria-expanded="' + (_boardFilterDropdownType === 'action' ? 'true' : 'false') + '"'
+        + ' aria-haspopup="dialog" aria-expanded="' + (_boardFilterDropdownType === 'action' ? 'true' : 'false') + '"'
         + ' onclick="boardToggleActionFilter()">'
         + 'Actions' + (actFCount ? ' <span class="board-filter-btn-count">' + actFCount + '</span>' : '')
         + ' &#9662;</button>';
@@ -551,7 +551,7 @@ function renderBoard() {
       var agtFCount = _boardFilterAgents.length;
       html += '<div class="board-filter-btn-wrap" id="board-agent-filter-wrap">';
       html += '<button type="button" class="filter-chip board-filter-btn' + (agtFCount ? ' active' : '') + '"'
-        + ' aria-haspopup="true" aria-expanded="' + (_boardFilterDropdownType === 'agent' ? 'true' : 'false') + '"'
+        + ' aria-haspopup="dialog" aria-expanded="' + (_boardFilterDropdownType === 'agent' ? 'true' : 'false') + '"'
         + ' onclick="boardToggleAgentFilter()">'
         + 'Agents' + (agtFCount ? ' <span class="board-filter-btn-count">' + agtFCount + '</span>' : '')
         + ' &#9662;</button>';
@@ -561,7 +561,7 @@ function renderBoard() {
       var healthFCount = _boardFilterHealth.length;
       html += '<div class="board-filter-btn-wrap" id="board-health-filter-wrap">';
       html += '<button type="button" class="filter-chip board-filter-btn' + (healthFCount ? ' active' : '') + '"'
-        + ' aria-haspopup="true" aria-expanded="' + (_boardFilterDropdownType === 'health' ? 'true' : 'false') + '"'
+        + ' aria-haspopup="dialog" aria-expanded="' + (_boardFilterDropdownType === 'health' ? 'true' : 'false') + '"'
         + ' onclick="boardToggleHealthFilter()">'
         + 'Health' + (healthFCount ? ' <span class="board-filter-btn-count">' + healthFCount + '</span>' : '')
         + ' &#9662;</button>';
@@ -575,7 +575,7 @@ function renderBoard() {
   if (showViewMenuButton) {
     html += '<div class="board-filter-btn-wrap" id="board-view-menu-wrap">';
     html += '<button type="button" class="filter-chip board-filter-btn' + (_boardViewMenuOpen ? ' active' : '') + '"'
-      + ' aria-haspopup="true" aria-expanded="' + (_boardViewMenuOpen ? 'true' : 'false') + '"'
+      + ' aria-haspopup="dialog" aria-expanded="' + (_boardViewMenuOpen ? 'true' : 'false') + '"'
       + ' onclick="boardToggleViewMenu()">View &#9662;</button>';
     html += '</div>';
   }

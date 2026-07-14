@@ -1942,7 +1942,8 @@
 </div>
 
 <!-- Context menu (right-click) -->
-<div id="ctx-menu"></div>
+<div id="ctx-menu" class="ui-popover ui-menu" role="menu" aria-hidden="true"
+  onkeydown="contextMenuKeydown(event)"></div>
 
 <!-- Resolve ask task -->
 <div class="overlay" id="modal-resolve">

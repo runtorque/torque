@@ -1663,9 +1663,7 @@ body.runtime-embedded .board-empty-action:focus-visible {
 /* Filter dropdown overlay (appended to body) */
 .board-filter-dropdown {
   z-index: 200;
-  background: var(--bg-cell); border: 1px solid var(--border);
-  border-radius: 4px; min-width: 180px; max-width: 260px;
-  box-shadow: 0 4px 12px rgba(0,0,0,.4);
+  min-width: 180px; max-width: 260px;
 }
 .board-filter-dropdown-search {
   display: block; width: 100%; box-sizing: border-box;
@@ -1683,11 +1681,8 @@ body.runtime-embedded .board-empty-action:focus-visible {
   scrollbar-width: thin;
 }
 .board-filter-dropdown-item {
-  display: flex; align-items: center; gap: 6px;
-  padding: 3px 8px; cursor: pointer;
-  font-size: 10px; color: var(--text);
+  gap: 6px;
 }
-.board-filter-dropdown-item:hover { background: rgba(88,166,255,.08); }
 .board-filter-dropdown-item input[type="checkbox"] {
   width: auto;
   margin: 0;
@@ -1705,10 +1700,6 @@ body.runtime-embedded .board-empty-action:focus-visible {
   font-size: 8px; color: var(--text-dim);
   background: var(--bg); border-radius: 7px;
   padding: 1px 5px; flex-shrink: 0;
-}
-.board-filter-dropdown-header {
-  font-size: 8px; color: var(--text-dim); text-transform: uppercase;
-  letter-spacing: .5px; padding: 5px 8px 2px;
 }
 /* Active filter chips row */
 .board-filter-active {
@@ -1783,16 +1774,6 @@ body.runtime-embedded .board-empty-action:focus-visible {
 .board-view-menu {
   z-index: 200;
   min-width: 176px;
-  background: var(--bg-cell);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  box-shadow: 0 4px 12px rgba(0,0,0,.4);
-  padding: 8px;
-}
-.board-view-menu-section {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
 }
 .board-view-menu-section + .board-view-menu-section {
   margin-top: 8px;
@@ -1802,23 +1783,7 @@ body.runtime-embedded .board-empty-action:focus-visible {
   width: 100%;
 }
 .board-view-menu-toggle {
-  width: 100%;
   margin-top: 8px;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg-elev-1);
-  color: var(--text-dim);
-  text-align: left;
-  transition: border-color .1s, color .1s, background .1s;
-}
-.board-view-menu-toggle:hover {
-  color: var(--text);
-  border-color: var(--text-dim);
-}
-.board-view-menu-toggle.active {
-  color: var(--accent);
-  border-color: var(--accent);
 }
 .board-card-lane-badge {
   font-size: 8px; color: var(--accent);

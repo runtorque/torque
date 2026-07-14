@@ -43,6 +43,7 @@ function _renderAgentGroupTabsHtml() {
       + '<span class="agent-group-tab-count" aria-label="' + count + ' agents">' + count + '</span>'
       + (selected
         ? '<button type="button" class="agent-group-tab-menu" title="Group actions" aria-label="Group actions for ' + esc(group) + '"'
+          + ' aria-haspopup="menu" aria-expanded="false"'
           + ' onclick="openAgentGroupTabActions(event,' + groupArg + ')">'
           + '<span aria-hidden="true">&#8943;</span></button>'
         : '')
@@ -58,7 +59,7 @@ function _renderAgentGroupTabsHtml() {
     + (active ? '<span class="agent-group-tab-count">' + activeCount + '</span>' : '')
     + '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4.5 3 3 3-3"/></svg>'
     + '</button>';
-  html += '<div class="agent-group-quick-switcher" role="dialog" aria-label="Switch group" hidden'
+  html += '<div class="agent-group-quick-switcher ui-popover" role="dialog" aria-label="Switch group" hidden'
     + ' onclick="event.stopPropagation()">'
     + '<input class="agent-group-quick-search" type="search" placeholder="Find a group…"'
     + ' aria-label="Find a group" oninput="filterAgentGroupQuickSwitcher(this.value)"'
@@ -68,7 +69,7 @@ function _renderAgentGroupTabsHtml() {
     const selected = group === active;
     const count = ((state.groups || {})[group] || []).length;
     const groupArg = _jsStringAttr(group);
-    html += '<button type="button" class="agent-group-quick-option' + (selected ? ' active' : '') + '"'
+    html += '<button type="button" class="agent-group-quick-option ui-menu-item' + (selected ? ' active is-selected' : '') + '"'
       + ' data-group-switch-option data-search="' + esc(group.toLowerCase()) + '"'
       + ' onclick="selectAgentGroupFromQuickSwitcher(' + groupArg + ')">'
       + '<span>' + esc(group) + '</span><small>' + count + ' agents</small>'
@@ -76,7 +77,7 @@ function _renderAgentGroupTabsHtml() {
       + '</button>';
   }
   html += '</div>';
-  html += '<button type="button" class="agent-group-quick-new" onclick="closeAgentGroupQuickSwitcher();openAddGroup()">'
+  html += '<button type="button" class="agent-group-quick-new ui-menu-item" onclick="closeAgentGroupQuickSwitcher();openAddGroup()">'
     + '<span aria-hidden="true">+</span> New group</button>';
   html += '</div></div>';
   html += '</div>';
@@ -130,7 +131,7 @@ function _agentGroupQuickSwitcher() {
   return document.querySelector && document.querySelector('.agent-group-quick-switcher');
 }
 
-function closeAgentGroupQuickSwitcher() {
+function closeAgentGroupQuickSwitcher(restoreFocus) {
   const popover = _agentGroupQuickSwitcher();
   if (!popover) return;
   popover.hidden = true;
@@ -138,6 +139,7 @@ function closeAgentGroupQuickSwitcher() {
     ? popover.parentNode.querySelector('.agent-group-compact-trigger')
     : null;
   if (trigger) trigger.setAttribute('aria-expanded', 'false');
+  if (restoreFocus && trigger && typeof trigger.focus === 'function') trigger.focus();
 }
 
 function toggleAgentGroupQuickSwitcher(event) {
@@ -177,7 +179,7 @@ function agentGroupQuickSwitcherKeydown(event) {
   if (!event) return;
   if (event.key === 'Escape') {
     event.preventDefault();
-    closeAgentGroupQuickSwitcher();
+    closeAgentGroupQuickSwitcher(true);
     return;
   }
   if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;

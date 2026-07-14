@@ -327,6 +327,22 @@ The canonical CSS API lives in `static/styles/components.css`:
 - Escape closes dismissible transient surfaces. Destructive confirmation should
   name the affected object.
 
+Menus and compact popovers use the canonical API in
+`static/styles/components.css`:
+
+- `.ui-popover` defines the raised boundary, 10px corners, shadow, and viewport
+  height limit.
+- `.ui-menu-item` defines 28px rows with shared hover and keyboard-focus states.
+- `.is-selected` or `aria-checked="true"` applies the selected state;
+  `.ui-menu-item--danger` applies destructive intent without turning the whole
+  row into a solid warning block.
+- `.ui-menu-label`, `.ui-menu-separator`, and `.ui-menu-section` define internal
+  grouping.
+- Opening a menu focuses its first working control. Escape returns focus to the
+  invoker; outside-pointer dismissal does not steal focus from the new target.
+- Group actions, the compact group switcher, Board filters, and Board View use
+  the shared API. Large dialogs remain governed by the modal family.
+
 ### Badges, tags, and counts
 
 - Pill geometry is appropriate because these elements describe metadata rather
@@ -392,7 +408,7 @@ the rule is intentionally global and documented here.
 | Inputs and selectors | Core variants standardized | Migrate remaining feature-specific aliases and audit field labeling |
 | Cards | Core variants standardized | Audit grid identity cards and nested contained surfaces |
 | Toolbars and panel headers | Core variants standardized | Migrate remaining Help, Context, Health, and editor toolbars |
-| Menus and popovers | Pending | Standardize geometry and focus restoration |
+| Menus and popovers | Core variants standardized | Migrate task, terminal, dependency, and editor dropdowns |
 | Modals | Pending | Standardize headers, actions, widths, and destructive flows |
 | Badges, tags, and status | Pending | Separate semantic pills from action controls |
 | Empty/loading/error states | Pending | Define reusable patterns and language |
@@ -582,6 +598,31 @@ the rule is intentionally global and documented here.
   canonical consumer markup, and removal of duplicated header geometry from
   feature styles. Existing panel suites protect rendering behavior; live checks
   verify same-row Planning/Thinking actions and wrapping toolbar geometry.
+
+### D-010 — Menus share a raised surface, compact rows, and focus lifecycle
+
+- Date: 2026-07-14
+- Status: accepted
+- Decision: Compact menus and popovers use a 10px raised surface with the shared
+  floating shadow and border, 28px menu rows, explicit selected/destructive/
+  disabled states, viewport height limits, and keyboard-aware focus lifecycle.
+- Rationale: Group actions used 6px corners and 24px rows while Board filter and
+  View popovers used separate 4px surfaces and unrelated hover/selected states.
+  They also differed in whether opening moved focus and whether Escape returned
+  it. One primitive makes transient controls predictable visually and
+  operationally.
+- Scope: `static/styles/components.css`, the shared context menu used by group
+  actions, the compact group switcher, Board filter popovers, and Board View.
+- Constraints: Searchable filters and View controls use dialog semantics because
+  they contain inputs and selects, not only commands. Outside-pointer dismissal
+  must preserve the pointer's new focus target. Task dependency pickers,
+  terminal completion dropdowns, nested editor popovers, and full modals remain
+  follow-up migrations.
+- Verification: `tests/frontend_components.test.js` protects shared geometry,
+  canonical markup, semantics, keyboard traversal, Escape restoration, and
+  removal of duplicate feature geometry. Existing Board and group navigation
+  suites protect behavior; live checks verify computed surface/item geometry,
+  focus entry, Escape restoration, and absence of console errors.
 
 ## Decision entry template
 

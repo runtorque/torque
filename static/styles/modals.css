@@ -1512,20 +1512,12 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 #ctx-menu {
   display: none; position: fixed;
   z-index: 150;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: 0 4px 12px rgba(0,0,0,.4);
-  padding: 2px;
   min-width: 120px;
   max-width: min(320px, calc(100vw - 8px));
 }
 #ctx-menu.open { display: block; }
 #ctx-menu button {
-  display: block; width: 100%;
-  padding: 5px 10px; font-size: 10px;
-  color: var(--text-dim); text-align: left;
-  border-radius: 3px; white-space: nowrap;
+  white-space: nowrap;
 }
 #ctx-menu button.ctx-button-wrap {
   white-space: normal;
@@ -1537,21 +1529,8 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
-#ctx-menu button:hover { background: var(--bg-hover); color: var(--text); }
-#ctx-menu button.danger:hover { background: var(--red); color: #fff; }
-#ctx-menu button:disabled {
-  opacity: .35; cursor: not-allowed;
-}
-#ctx-menu button:disabled:hover { background: none; color: var(--text-dim); }
 .ctx-label {
-  font-size: 9px !important; font-weight: 600 !important;
-  color: var(--text) !important; text-transform: uppercase;
-  letter-spacing: .05em; cursor: default !important;
-  opacity: .7;
-}
-.ctx-sep {
-  height: 1px; background: var(--border);
-  margin: 2px 4px;
+  cursor: default !important;
 }
 .ctx-id {
   color: var(--text-dim); font-size: 9px;

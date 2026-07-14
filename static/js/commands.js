@@ -765,49 +765,94 @@ function _nextDragSibling(el) {
 
 /* Context menu (right-click) */
 
-function closeContextMenu() {
-  document.getElementById('ctx-menu').classList.remove('open');
+let _contextMenuInvoker = null;
+
+function closeContextMenu(options) {
+  options = options || {};
+  const menu = document.getElementById('ctx-menu');
+  const invoker = _contextMenuInvoker;
+  menu.classList.remove('open');
+  menu.setAttribute('aria-hidden', 'true');
+  if (invoker && typeof invoker.setAttribute === 'function') {
+    invoker.setAttribute('aria-expanded', 'false');
+  }
+  _contextMenuInvoker = null;
+  if (options.restoreFocus !== false && invoker && typeof invoker.focus === 'function') {
+    invoker.focus();
+  }
 }
 
-function showContextMenu(x, y, items) {
+function showContextMenu(x, y, items, options) {
+  options = options || {};
   const menu = document.getElementById('ctx-menu');
+  closeContextMenu({ restoreFocus: false });
+  _contextMenuInvoker = options.invoker || document.activeElement || null;
   let html = '';
   for (const item of items) {
     if (item.separator) {
-      html += '<div class="ctx-sep"></div>';
+      html += '<div class="ctx-sep ui-menu-separator" role="separator"></div>';
     } else if (item.submenu) {
-      html += `<button onclick="event.stopPropagation();${esc(item.submenu)}">${esc(item.label)} \u25B8</button>`;
+      html += `<button type="button" role="menuitem" class="ui-menu-item" onclick="event.stopPropagation();${esc(item.submenu)}">${esc(item.label)} \u25B8</button>`;
     } else {
-      const cls = item.danger ? ' class="danger"' : '';
-      html += `<button${cls} onclick="closeContextMenu();${esc(item.action)}">${esc(item.label)}</button>`;
+      const cls = item.danger ? 'ui-menu-item ui-menu-item--danger danger' : 'ui-menu-item';
+      html += `<button type="button" role="menuitem" class="${cls}" onclick="closeContextMenu();${esc(item.action)}">${esc(item.label)}</button>`;
     }
   }
   menu.innerHTML = html;
   menu.style.left = x + 'px';
   menu.style.top = y + 'px';
+  menu.setAttribute('aria-hidden', 'false');
   menu.classList.add('open');
+  if (_contextMenuInvoker && typeof _contextMenuInvoker.setAttribute === 'function'
+      && _contextMenuInvoker.getAttribute('aria-haspopup')) {
+    _contextMenuInvoker.setAttribute('aria-expanded', 'true');
+  }
 
   // Adjust if menu overflows viewport
   requestAnimationFrame(() => {
     const rect = menu.getBoundingClientRect();
     if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 4) + 'px';
     if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 4) + 'px';
+    const firstItem = menu.querySelector('button:not(:disabled)');
+    if (firstItem && typeof firstItem.focus === 'function') firstItem.focus();
   });
+}
+
+function contextMenuKeydown(event) {
+  if (!event) return;
+  const menu = document.getElementById('ctx-menu');
+  if (!menu || !menu.classList.contains('open')) return;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
+    closeContextMenu();
+    return;
+  }
+  if (['ArrowDown', 'ArrowUp', 'Home', 'End'].indexOf(event.key) < 0) return;
+  const items = Array.prototype.slice.call(menu.querySelectorAll('button:not(:disabled)'));
+  if (!items.length) return;
+  let index = items.indexOf(document.activeElement);
+  if (event.key === 'Home') index = 0;
+  else if (event.key === 'End') index = items.length - 1;
+  else if (event.key === 'ArrowDown') index = index < 0 ? 0 : (index + 1) % items.length;
+  else index = index < 0 ? items.length - 1 : (index - 1 + items.length) % items.length;
+  event.preventDefault();
+  items[index].focus();
 }
 
 function _showWorktreeSubmenu(id) {
   const menu = document.getElementById('ctx-menu');
   const cell = state.agents[id];
   if (!cell) return;
-  let html = `<button class="ctx-label" disabled>Worktree</button>`;
-  html += `<div class="ctx-sep"></div>`;
-  html += `<button onclick="closeContextMenu();worktreeViewDiff('${id}')">View Diff</button>`;
-  html += `<button onclick="closeContextMenu();worktreeCheckpoint('${id}')">Checkpoint</button>`;
-  html += `<button onclick="closeContextMenu();worktreeHistory('${id}')">History\u2026</button>`;
-  html += `<button onclick="closeContextMenu();worktreeCreatePR('${id}')">Create PR</button>`;
-  html += `<button onclick="closeContextMenu();worktreeMerge('${id}')">Create PR + Merge</button>`;
-  html += `<div class="ctx-sep"></div>`;
-  html += `<button class="danger" onclick="closeContextMenu();worktreeRemove('${id}')">Delete Worktree</button>`;
+  let html = `<button type="button" class="ctx-label ui-menu-label" disabled>Worktree</button>`;
+  html += `<div class="ctx-sep ui-menu-separator" role="separator"></div>`;
+  html += `<button type="button" role="menuitem" class="ui-menu-item" onclick="closeContextMenu();worktreeViewDiff('${id}')">View Diff</button>`;
+  html += `<button type="button" role="menuitem" class="ui-menu-item" onclick="closeContextMenu();worktreeCheckpoint('${id}')">Checkpoint</button>`;
+  html += `<button type="button" role="menuitem" class="ui-menu-item" onclick="closeContextMenu();worktreeHistory('${id}')">History\u2026</button>`;
+  html += `<button type="button" role="menuitem" class="ui-menu-item" onclick="closeContextMenu();worktreeCreatePR('${id}')">Create PR</button>`;
+  html += `<button type="button" role="menuitem" class="ui-menu-item" onclick="closeContextMenu();worktreeMerge('${id}')">Create PR + Merge</button>`;
+  html += `<div class="ctx-sep ui-menu-separator" role="separator"></div>`;
+  html += `<button type="button" role="menuitem" class="ui-menu-item ui-menu-item--danger danger" onclick="closeContextMenu();worktreeRemove('${id}')">Delete Worktree</button>`;
   menu.innerHTML = html;
 }
 
@@ -944,7 +989,7 @@ function onGroupTabContextMenu(e, group) {
   }
   showContextMenu(x, y, [
     { label: 'Group settings', action: 'openGroupSettings(' + JSON.stringify(groupName) + ')' },
-  ]);
+  ], { invoker: e && e.currentTarget });
 }
 
 function _agentGridNewMenuItems(group) {
@@ -972,7 +1017,7 @@ function openAgentGridNewMenu(e, group) {
     x = rect.left;
     y = rect.bottom + 4;
   }
-  showContextMenu(x, y, items);
+  showContextMenu(x, y, items, { invoker: target });
 }
 
 function _cellContextMenuItems(id) {

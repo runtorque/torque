@@ -1264,11 +1264,6 @@ main {
   top: calc(100% + 5px);
   left: 0;
   right: 0;
-  padding: 6px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-lg);
-  background: var(--bg-raised);
-  box-shadow: var(--shadow-float);
 }
 .agent-group-quick-search {
   width: 100%;
@@ -1287,22 +1282,6 @@ main {
 .agent-group-quick-new {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 28px;
-  padding: 4px 7px;
-  border-radius: var(--radius);
-  color: var(--text-secondary);
-  text-align: left;
-}
-.agent-group-quick-option:hover,
-.agent-group-quick-option:focus-visible,
-.agent-group-quick-option.active,
-.agent-group-quick-new:hover,
-.agent-group-quick-new:focus-visible {
-  background: var(--bg-hover);
-  color: var(--text);
 }
 .agent-group-quick-option small { color: var(--text-faint); font-size: 9px; }
 .agent-group-quick-option svg {
@@ -1316,7 +1295,6 @@ main {
   grid-template-columns: auto minmax(0, 1fr);
   margin-top: 5px;
   border-top: 1px solid var(--border-subtle);
-  border-radius: 0 0 var(--radius) var(--radius);
   color: var(--accent);
 }
 @container agent-group-nav (max-width: 420px) {

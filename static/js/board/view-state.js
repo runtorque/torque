@@ -577,7 +577,7 @@ function _renderBoardDisplayControls() {
   var sortMode = _boardLaneSortMode(_boardSelectedLane);
   var densityMode = _boardCardDensityMode();
   var archivedCount = _boardArchivedCount();
-  var html = '<div class="board-view-menu-section">';
+  var html = '<div class="board-view-menu-section ui-menu-section">';
   html += '<label class="board-display-label" for="board-lane-sort-select">Sort</label>';
   html += '<select class="board-display-select" id="board-lane-sort-select"'
     + ' onchange="boardSetLaneSort(this.value)">';
@@ -587,7 +587,7 @@ function _renderBoardDisplayControls() {
   html += '<option value="due"' + (sortMode === 'due' ? ' selected' : '') + '>Due Soonest</option>';
   html += '</select>';
   html += '</div>';
-  html += '<div class="board-view-menu-section">';
+  html += '<div class="board-view-menu-section ui-menu-section">';
   html += '<label class="board-display-label" for="board-card-density-select">Density</label>';
   html += '<select class="board-display-select" id="board-card-density-select"'
     + ' onchange="boardSetCardDensity(this.value)">';
@@ -596,7 +596,7 @@ function _renderBoardDisplayControls() {
   html += '<option value="detailed"' + (densityMode === 'detailed' ? ' selected' : '') + '>Detailed</option>';
   html += '</select>';
   html += '</div>';
-  html += '<button class="board-view-menu-toggle' + (_boardShowArchived ? ' active' : '') + '"'
+  html += '<button class="board-view-menu-toggle ui-menu-item' + (_boardShowArchived ? ' active is-selected' : '') + '"'
     + ' onclick="boardToggleArchived()">'
     + (_boardShowArchived ? 'Hide archived' : 'Show archived')
     + (archivedCount ? ' <span class="board-filter-btn-count">' + archivedCount + '</span>' : '')
@@ -626,13 +626,30 @@ function _boardOpenViewMenu() {
   _boardViewMenuOpen = true;
 
   var menu = document.createElement('div');
-  menu.className = 'board-view-menu';
+  menu.className = 'board-view-menu ui-popover';
   menu.id = 'board-view-menu-active';
+  menu.setAttribute('role', 'dialog');
+  menu.setAttribute('aria-label', 'Board view options');
   menu.style.position = 'fixed';
   menu.style.top = (rect.bottom + 2) + 'px';
   menu.style.left = rect.left + 'px';
   menu.innerHTML = _renderBoardDisplayControls();
   document.body.appendChild(menu);
+
+  menu.addEventListener('keydown', function(e) {
+    if (!e || e.key !== 'Escape') return;
+    e.preventDefault();
+    e.stopPropagation();
+    _boardCloseViewMenu();
+    renderBoard();
+    requestAnimationFrame(function() {
+      var currentWrap = document.getElementById('board-view-menu-wrap');
+      var currentTrigger = currentWrap && currentWrap.querySelector
+        ? currentWrap.querySelector('.board-filter-btn')
+        : null;
+      if (currentTrigger && typeof currentTrigger.focus === 'function') currentTrigger.focus();
+    });
+  });
 
   requestAnimationFrame(function() {
     if (typeof menu.getBoundingClientRect !== 'function') return;
@@ -643,6 +660,8 @@ function _boardOpenViewMenu() {
     if (menuRect.bottom > window.innerHeight) {
       menu.style.top = Math.max(4, rect.top - menuRect.height - 2) + 'px';
     }
+    var firstControl = menu.querySelector('select, button:not(:disabled)');
+    if (firstControl && typeof firstControl.focus === 'function') firstControl.focus();
   });
 
   var handler = function(e) {

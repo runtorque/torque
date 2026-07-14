@@ -1290,7 +1290,7 @@ document.addEventListener('keydown', _handleTorqueGlobalKeydown);
 
 document.addEventListener('click', () => {
   closeMenus();
-  closeContextMenu();
+  closeContextMenu({ restoreFocus: false });
   if (typeof closeNavigationMenus === 'function') closeNavigationMenus();
 });
 document.querySelectorAll('.overlay').forEach(o => {

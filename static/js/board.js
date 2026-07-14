@@ -40,6 +40,7 @@ var _boardFilterAgents = [];    // active agent ID filters (OR logic)
 var _boardFilterHealth = [];    // active health filters (OR logic)
 var _boardFilterDropdownType = null;   // 'label' | 'action' | 'agent' | 'health' | null
 var _boardFilterDropdownCleanup = null;
+var _boardFilterDropdownTriggerWrapId = '';
 var _boardViewMenuCleanup = null;
 var _boardViewMenuOpen = false;
 var _boardPreFilterLane = '';    // saved lane before search, restored on clear

@@ -134,7 +134,7 @@ test('filter consumers expose state while presets remain momentary actions', () 
   const thinking = source('static/js/thinking.js');
   const html = source('webview.html');
 
-  assert.match(board, /class="filter-chip board-filter-btn[\s\S]*?aria-haspopup="true" aria-expanded=/);
+  assert.match(board, /class="filter-chip board-filter-btn[\s\S]*?aria-haspopup="dialog" aria-expanded=/);
   assert.match(board, /class="filter-chip board-filter-btn[\s\S]*?aria-pressed=/);
   assert.match(board, /<button type="button" class="filter-chip board-filter-active-chip[\s\S]*?aria-label="Remove/);
   assert.doesNotMatch(board, /<span class="board-filter-active-chip/);
@@ -230,4 +230,58 @@ test('panel-header geometry does not drift back into feature styles', () => {
   assert.doesNotMatch(agent, /^\.agent-panel-header\s*\{/m);
   assert.doesNotMatch(agent, /^\.agent-panel-header-(?:copy|right)\s*\{/m);
   assert.doesNotMatch(agent, /^\.agent-panel-(?:title|subtitle)\s*\{/m);
+});
+
+test('shared menus define one floating surface and compact item state grammar', () => {
+  const css = source('static/styles/components.css');
+
+  assert.match(css, /\.ui-popover,\s*#ctx-menu,\s*\.agent-group-quick-switcher,\s*\.board-filter-dropdown,\s*\.board-view-menu\s*\{[^}]*padding:\s*var\(--space-1\);[^}]*border:\s*1px solid var\(--border-strong\);[^}]*border-radius:\s*var\(--radius-lg\);[^}]*background:\s*var\(--bg-raised\);[^}]*box-shadow:\s*var\(--shadow-float\);[^}]*max-height:/s);
+  assert.match(css, /\.ui-menu-item,\s*#ctx-menu button:not\(\.ctx-label\),[\s\S]*?\.board-view-menu-toggle\s*\{[^}]*min-height:\s*var\(--control-height-md\);[^}]*padding:\s*var\(--space-1\) var\(--space-2\);[^}]*border-radius:\s*var\(--radius\);[^}]*font-size:\s*var\(--control-font-size-xs\);/s);
+  assert.match(css, /\.ui-menu-item\.is-selected,[\s\S]*?\.board-view-menu-toggle\.active\s*\{[^}]*border-color:\s*var\(--accent-muted\);[^}]*color:\s*var\(--accent\);[^}]*background:\s*var\(--accent-soft\);/s);
+  assert.match(css, /\.ui-menu-item--danger:hover,[\s\S]*?#ctx-menu button\.danger:focus-visible\s*\{[^}]*color:\s*var\(--red\);[^}]*background:\s*color-mix\(in srgb, var\(--red\) 12%, var\(--bg-hover\)\);/s);
+});
+
+test('group and Board popovers opt into canonical markup and semantics', () => {
+  const html = source('webview.html');
+  const groups = source('static/js/grid/group-tabs.js');
+  const commands = source('static/js/commands.js');
+  const board = source('static/js/board/rendering.js');
+  const filters = source('static/js/board/filters.js');
+  const view = source('static/js/board/view-state.js');
+
+  assert.match(html, /id="ctx-menu" class="ui-popover ui-menu" role="menu" aria-hidden="true"/);
+  assert.match(groups, /aria-haspopup="menu" aria-expanded="false"/);
+  assert.match(groups, /class="agent-group-quick-switcher ui-popover" role="dialog"/);
+  assert.match(groups, /class="agent-group-quick-option ui-menu-item/);
+  assert.match(commands, /role="menuitem" class="ui-menu-item/);
+  assert.match(board, /aria-haspopup="dialog" aria-expanded=/);
+  assert.match(filters, /className = 'board-filter-dropdown ui-popover'/);
+  assert.match(filters, /className = 'board-filter-dropdown-item ui-menu-item'/);
+  assert.match(view, /className = 'board-view-menu ui-popover'/);
+  assert.match(view, /class="board-view-menu-toggle ui-menu-item/);
+});
+
+test('transient menus restore focus on Escape and support keyboard traversal', () => {
+  const groups = source('static/js/grid/group-tabs.js');
+  const commands = source('static/js/commands.js');
+  const filters = source('static/js/board/filters.js');
+  const view = source('static/js/board/view-state.js');
+
+  assert.match(groups, /event\.key === 'Escape'[\s\S]*?closeAgentGroupQuickSwitcher\(true\)/);
+  assert.match(commands, /function closeContextMenu\(options\)[\s\S]*?options\.restoreFocus !== false[\s\S]*?invoker\.focus\(\)/);
+  assert.match(commands, /function contextMenuKeydown\(event\)[\s\S]*?ArrowDown[\s\S]*?ArrowUp[\s\S]*?items\[index\]\.focus\(\)/);
+  assert.match(filters, /dd\.addEventListener\('keydown'[\s\S]*?e\.key !== 'Escape'[\s\S]*?_boardCloseFilterDropdown\(\{ restoreFocus: true \}\)/);
+  assert.match(view, /menu\.addEventListener\('keydown'[\s\S]*?e\.key !== 'Escape'[\s\S]*?currentTrigger\.focus\(\)/);
+});
+
+test('menu geometry does not drift back into feature styles', () => {
+  const grid = source('static/styles/workspace-grid.css');
+  const board = source('static/styles/board-panels.css');
+  const modals = source('static/styles/modals.css');
+
+  assert.doesNotMatch(grid, /^\.agent-group-quick-switcher\s*\{[^}]*(?:padding|border-radius|background|box-shadow):/ms);
+  assert.doesNotMatch(board, /^\.board-filter-dropdown\s*\{[^}]*(?:background|border-radius|box-shadow):/ms);
+  assert.doesNotMatch(board, /^\.board-view-menu\s*\{[^}]*(?:padding|background|border-radius|box-shadow):/ms);
+  assert.doesNotMatch(modals, /^#ctx-menu\s*\{[^}]*(?:padding|background|border-radius|box-shadow):/ms);
+  assert.doesNotMatch(modals, /^#ctx-menu button\s*\{[^}]*(?:padding|font-size|border-radius|color):/ms);
 });

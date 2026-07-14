@@ -323,8 +323,10 @@ function _boardOpenFilterDropdown(wrapId, kind, names, counts, selectedArr) {
   var rect = btn.getBoundingClientRect();
 
   var dd = document.createElement('div');
-  dd.className = 'board-filter-dropdown';
+  dd.className = 'board-filter-dropdown ui-popover';
   dd.id = 'board-filter-dropdown-active';
+  dd.setAttribute('role', 'dialog');
+  dd.setAttribute('aria-label', 'Filter board by ' + (kind === 'health' ? 'health state' : kind));
   dd.style.position = 'fixed';
   dd.style.top = (rect.bottom + 2) + 'px';
   dd.style.left = rect.left + 'px';
@@ -360,7 +362,7 @@ function _boardOpenFilterDropdown(wrapId, kind, names, counts, selectedArr) {
 
     function addRow(name) {
       var row = document.createElement('label');
-      row.className = 'board-filter-dropdown-item';
+      row.className = 'board-filter-dropdown-item ui-menu-item';
       var cb = document.createElement('input');
       cb.type = 'checkbox';
       cb.checked = selectedValues().indexOf(name) >= 0;
@@ -396,14 +398,14 @@ function _boardOpenFilterDropdown(wrapId, kind, names, counts, selectedArr) {
       }
       if (sysNames.length) {
         var hdr = document.createElement('div');
-        hdr.className = 'board-filter-dropdown-header';
+        hdr.className = 'board-filter-dropdown-header ui-menu-label';
         hdr.textContent = 'System';
         list.appendChild(hdr);
         for (var i = 0; i < sysNames.length; i++) addRow(sysNames[i]);
       }
       if (userNames.length) {
         var hdr = document.createElement('div');
-        hdr.className = 'board-filter-dropdown-header';
+        hdr.className = 'board-filter-dropdown-header ui-menu-label';
         hdr.textContent = 'Labels';
         list.appendChild(hdr);
         for (var i = 0; i < userNames.length; i++) addRow(userNames[i]);
@@ -418,6 +420,14 @@ function _boardOpenFilterDropdown(wrapId, kind, names, counts, selectedArr) {
 
   document.body.appendChild(dd);
   btn.setAttribute('aria-expanded', 'true');
+  _boardFilterDropdownTriggerWrapId = wrapId;
+
+  dd.addEventListener('keydown', function(e) {
+    if (!e || e.key !== 'Escape') return;
+    e.preventDefault();
+    e.stopPropagation();
+    _boardCloseFilterDropdown({ restoreFocus: true });
+  });
 
   // Adjust if dropdown overflows viewport
   requestAnimationFrame(function() {
@@ -449,11 +459,19 @@ function _boardOpenFilterDropdown(wrapId, kind, names, counts, selectedArr) {
   };
 }
 
-function _boardCloseFilterDropdown() {
+function _boardCloseFilterDropdown(options) {
+  options = options || {};
+  var triggerWrapId = _boardFilterDropdownTriggerWrapId;
   _boardFilterDropdownType = null;
   var expanded = document.querySelectorAll('.board-filter-btn[aria-expanded="true"]');
   for (var i = 0; i < expanded.length; i++) expanded[i].setAttribute('aria-expanded', 'false');
   if (_boardFilterDropdownCleanup) _boardFilterDropdownCleanup();
+  _boardFilterDropdownTriggerWrapId = '';
+  if (options.restoreFocus && triggerWrapId) {
+    var wrap = document.getElementById(triggerWrapId);
+    var trigger = wrap && wrap.querySelector ? wrap.querySelector('.board-filter-btn') : null;
+    if (trigger && typeof trigger.focus === 'function') trigger.focus();
+  }
 }
 
 /* ---- Keyboard nav --------------------------------------------------- */
