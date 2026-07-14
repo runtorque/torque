@@ -345,3 +345,81 @@ textarea[aria-invalid="true"] {
   border-radius: var(--radius-sm);
   background: var(--bg-cell);
 }
+
+/* Segmented controls
+ *
+ * Segmented controls choose one mutually exclusive mode inside a compact
+ * local context. They are not navigation tabs, filters, or metadata pills.
+ */
+.segmented-control,
+.agent-view-toggle,
+.tpled-view-toggle,
+.log-viewer-targets,
+.schedule-type-toggle {
+  display: inline-flex;
+  align-items: stretch;
+  min-height: var(--control-height-sm);
+  overflow: hidden;
+  border: var(--control-border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+}
+
+.segmented-control__item,
+.agent-view-toggle-btn,
+.tpled-view-btn,
+.log-viewer-target,
+.schedule-type-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(var(--control-height-sm) - 2px);
+  padding: 0 var(--control-padding-x-sm);
+  border: 0;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+  color: var(--text-dim);
+  background: transparent;
+  font-family: var(--font);
+  font-size: var(--control-font-size-xs);
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  transition: color var(--transition-fast), background var(--transition-fast),
+    outline-color var(--transition-fast);
+}
+
+.segmented-control__item:last-child,
+.agent-view-toggle-btn:last-child,
+.tpled-view-btn:last-child,
+.log-viewer-target:last-child,
+.schedule-type-btn:last-child {
+  border-right: 0;
+}
+
+.segmented-control__item:hover:not(:disabled),
+.agent-view-toggle-btn:hover:not(:disabled),
+.tpled-view-btn:hover:not(:disabled),
+.log-viewer-target:hover:not(:disabled),
+.schedule-type-btn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.segmented-control__item.is-active,
+.segmented-control__item[aria-pressed="true"],
+.segmented-control__item[aria-selected="true"],
+.agent-view-toggle-btn.is-active,
+.agent-view-toggle-btn[aria-pressed="true"],
+.tpled-view-btn.active,
+.tpled-view-btn[aria-pressed="true"],
+.tpled-view-btn[aria-selected="true"],
+.log-viewer-target.active,
+.log-viewer-target[aria-selected="true"],
+.schedule-type-btn.active,
+.schedule-type-btn[aria-pressed="true"] {
+  color: var(--text);
+  background: var(--accent-soft);
+  outline: 1px solid var(--accent-muted);
+  outline-offset: -1px;
+}

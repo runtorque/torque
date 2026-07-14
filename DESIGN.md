@@ -202,6 +202,27 @@ Segmented toggles, filters, terminal cards, badges, and tags are not navigation
 tabs. Do not apply tab styles to them merely because their class name contains
 “tab.”
 
+### Segmented controls
+
+- Segmented controls choose one mutually exclusive local mode or view. They use
+  compact rectangular geometry rather than pills.
+- The outer control is 24px tall with `--radius-sm`; items share boundaries and
+  do not round their individual corners.
+- Selected state uses the accent-soft surface, an inset accent boundary, and an
+  explicit `aria-pressed` or `aria-selected` state.
+- Use segmented controls only when the options are peers and always visible.
+  Use a select when space is constrained or the option set is long.
+
+The canonical CSS API lives in `static/styles/components.css`:
+
+- `.segmented-control` is the shared container.
+- `.segmented-control__item` is the shared option.
+- Grid/Canvas, Editor/DAG, Library sections, log targets, and schedule type use
+  compatibility aliases while their markup migrates.
+
+Filter chips, on/off switches, navigation tabs, and semantic badges are separate
+components even if they also expose selected state.
+
 ### Inputs and selectors
 
 - Inputs, selects, and textareas use `--radius`, `--bg-inset`, and `--border`.
@@ -312,6 +333,7 @@ the rule is intentionally global and documented here.
 | Group tabs | Standardized | Verify compact switcher parity |
 | Panel tabs | Standardized | Verify all panel zones and narrow widths |
 | Feature navigation tabs | Core variants standardized | Migrate compatibility aliases to the canonical API |
+| Segmented controls | Core variant standardized | Migrate compatibility aliases and audit keyboard behavior |
 | Buttons | Core variants standardized | Migrate feature-specific aliases and audit icon buttons |
 | Inputs and selectors | Core variants standardized | Migrate remaining feature-specific aliases and audit field labeling |
 | Cards | Pending | Reconcile grid, board, context, and agent cards |
@@ -416,6 +438,28 @@ the rule is intentionally global and documented here.
 - Verification: `tests/frontend_components.test.js` protects the shared API and
   keeps form primitives out of the reset and migrated feature stylesheets. Live
   browser checks verify default and compact computed geometry.
+
+### D-006 — Mutually exclusive local modes use segmented controls
+
+- Date: 2026-07-14
+- Status: accepted
+- Decision: Always-visible choices between mutually exclusive local modes use a
+  shared 24px segmented control with 4px outer corners, square internal items,
+  quiet default styling, and an accent-soft selected state.
+- Rationale: Grid/Canvas, Editor/DAG, Library modes, log targets, and schedule
+  type had independently evolved different heights, corner radii, borders, text
+  sizes, and selected treatments. A shared primitive makes mode switching read
+  consistently without conflating it with navigation or metadata pills.
+- Scope: `static/styles/components.css`, agent view mode, Actions and Library
+  view controls, log target selection, schedule type, and their selected-state
+  ARIA attributes.
+- Constraints: Navigation tabs follow D-001 and D-004. Filters, presets, on/off
+  switches, checkboxes, badges, tags, and terminal cards are not segmented
+  controls. Long or responsive option sets should use a select instead.
+- Verification: `tests/frontend_components.test.js` protects shared geometry and
+  keeps the migrated visual primitive out of feature stylesheets. Existing
+  interaction tests protect behavior; live browser checks verify computed sizes
+  and selected state.
 
 ## Decision entry template
 

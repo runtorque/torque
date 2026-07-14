@@ -1982,10 +1982,10 @@
     <select id="schedule-group-select"
             onkeydown="if(event.key==='Escape')closeModals();"></select>
     <label>Schedule type</label>
-    <div class="schedule-type-toggle">
-      <button class="schedule-type-btn active" id="schedule-type-recurring"
+    <div class="schedule-type-toggle" role="group" aria-label="Schedule type">
+      <button type="button" class="schedule-type-btn active" id="schedule-type-recurring" aria-pressed="true"
               onclick="scheduleSetType('recurring')">Recurring</button>
-      <button class="schedule-type-btn" id="schedule-type-oneshot"
+      <button type="button" class="schedule-type-btn" id="schedule-type-oneshot" aria-pressed="false"
               onclick="scheduleSetType('oneshot')">One-time</button>
     </div>
     <div id="schedule-cron-section">

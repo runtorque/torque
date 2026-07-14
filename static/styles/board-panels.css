@@ -2633,21 +2633,12 @@ body.runtime-embedded .board-empty-action:focus-visible {
 
 /* View toggle */
 .tpled-view-toggle {
-  display: flex; gap: 1px; margin-left: auto;
-  background: var(--border); border-radius: var(--radius);
-  overflow: hidden; flex-shrink: 0;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 .library-tab-toggle {
   margin-left: 0;
 }
-.tpled-view-btn {
-  font-size: 9px; padding: 2px 8px;
-  background: var(--bg); color: var(--text-dim);
-  border: none; cursor: pointer;
-}
-.tpled-view-btn.active { background: var(--accent); color: var(--bg); }
-.tpled-view-btn:hover:not(.active) { color: var(--text); }
-
 /* Pipelines canvas view */
 .tpled-pipelines {
   flex: 1; overflow: hidden; position: relative;
@@ -3600,11 +3591,8 @@ body[data-torque-mode="desktop"] .diff-view-modal {
 .board-schedule-delete-btn:hover { background: var(--red); }
 
 /* Schedule modal */
-.schedule-type-toggle { display: flex; gap: 0; margin-bottom: 8px; }
-.schedule-type-btn { flex: 1; padding: 6px; background: var(--bg-hover); border: 1px solid var(--border); color: var(--dim); cursor: pointer; font-size: 11px; }
-.schedule-type-btn:first-child { border-radius: 4px 0 0 4px; }
-.schedule-type-btn:last-child { border-radius: 0 4px 4px 0; }
-.schedule-type-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.schedule-type-toggle { display: flex; width: 100%; margin-bottom: 8px; }
+.schedule-type-btn { flex: 1; }
 .schedule-presets { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
 .schedule-preset { font-size: 10px; padding: 2px 8px; background: var(--bg-hover); border: 1px solid var(--border); border-radius: 3px; color: var(--dim); cursor: pointer; }
 .schedule-preset:hover { border-color: var(--accent); color: var(--fg); }

@@ -94,10 +94,12 @@ function openScheduleModal(editId) {
 
 function scheduleSetType(type) {
   _schedType = type;
-  document.getElementById('schedule-type-recurring')
-    .classList.toggle('active', type === 'recurring');
-  document.getElementById('schedule-type-oneshot')
-    .classList.toggle('active', type === 'oneshot');
+  var recurringButton = document.getElementById('schedule-type-recurring');
+  var oneshotButton = document.getElementById('schedule-type-oneshot');
+  recurringButton.classList.toggle('active', type === 'recurring');
+  recurringButton.setAttribute('aria-pressed', type === 'recurring' ? 'true' : 'false');
+  oneshotButton.classList.toggle('active', type === 'oneshot');
+  oneshotButton.setAttribute('aria-pressed', type === 'oneshot' ? 'true' : 'false');
   document.getElementById('schedule-cron-section')
     .style.display = type === 'recurring' ? '' : 'none';
   document.getElementById('schedule-at-section')

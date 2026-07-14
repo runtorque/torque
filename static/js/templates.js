@@ -51,10 +51,10 @@ function _libraryTabsHtml() {
   var rolesActive = _libraryActiveTab === 'roles';
   var specsActive = _libraryActiveTab === 'specializations';
   var classesActive = _libraryActiveTab === 'agent_classes';
-  return '<div class="tpled-view-toggle library-tab-toggle">'
-    + '<button class="tpled-view-btn' + (rolesActive ? ' active' : '') + '" onclick="librarySwitchTab(\'roles\')">Roles</button>'
-    + '<button class="tpled-view-btn' + (specsActive ? ' active' : '') + '" onclick="librarySwitchTab(\'specializations\')">Specializations</button>'
-    + '<button class="tpled-view-btn' + (classesActive ? ' active' : '') + '" onclick="librarySwitchTab(\'agent_classes\')">Agent Classes</button>'
+  return '<div class="tpled-view-toggle library-tab-toggle" role="tablist" aria-label="Library sections">'
+    + '<button type="button" role="tab" class="tpled-view-btn' + (rolesActive ? ' active' : '') + '" aria-selected="' + (rolesActive ? 'true' : 'false') + '" onclick="librarySwitchTab(\'roles\')">Roles</button>'
+    + '<button type="button" role="tab" class="tpled-view-btn' + (specsActive ? ' active' : '') + '" aria-selected="' + (specsActive ? 'true' : 'false') + '" onclick="librarySwitchTab(\'specializations\')">Specializations</button>'
+    + '<button type="button" role="tab" class="tpled-view-btn' + (classesActive ? ' active' : '') + '" aria-selected="' + (classesActive ? 'true' : 'false') + '" onclick="librarySwitchTab(\'agent_classes\')">Agent Classes</button>'
     + '</div>';
 }
 

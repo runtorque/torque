@@ -52,23 +52,6 @@ body.detached-window #bottom-panel > div:not(.panel-hidden):not(#panel-resize-ha
   color: var(--text-dim);
   font-size: 11px;
 }
-.log-viewer-targets {
-  display: inline-flex;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-.log-viewer-target {
-  padding: 5px 9px;
-  border: 0;
-  border-right: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-dim);
-  font-size: 11px;
-}
-.log-viewer-target:last-child { border-right: 0; }
-.log-viewer-target:hover { color: var(--text); background: var(--bg-hover); }
-.log-viewer-target.active { color: #fff; background: var(--accent); }
 .log-viewer-toolbar label { margin: 0; }
 .log-viewer-toolbar input,
 .log-viewer-toolbar select,
@@ -481,28 +464,11 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 
 /* ---- Agent view toggle (lives in the group-tabs action row) ---- */
 .agent-view-toggle {
-  display: inline-flex;
-  align-items: stretch;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
   margin-right: 0;
-  height: 22px;
 }
 .agent-view-toggle-btn {
-  background: transparent;
-  color: var(--text-dim);
-  border: 0;
-  border-right: 1px solid var(--border);
-  font: inherit;
-  font-size: 11px;
   padding: 0 6px;
-  cursor: pointer;
   letter-spacing: 0.02em;
-  line-height: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   min-width: 24px;
 }
 .agent-view-toggle-btn svg {
@@ -515,14 +481,6 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.agent-view-toggle--grid { height: 24px; }
-.agent-view-toggle-btn:last-child { border-right: 0; }
-.agent-view-toggle-btn:hover { background: var(--bg-hover); color: var(--text); }
-.agent-view-toggle-btn.is-active {
-  background: var(--bg-cell);
-  color: var(--text);
-}
-
 /* ---- Canvas (alternate agents view) ---- */
 .agent-canvas {
   width: 100%;

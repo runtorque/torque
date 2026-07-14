@@ -46,6 +46,9 @@ function _torqueRefreshViewToggleButtons(mode) {
     const target = btn.getAttribute('data-agent-view-toggle');
     if (target === active) btn.classList.add('is-active');
     else btn.classList.remove('is-active');
+    if (typeof btn.setAttribute === 'function') {
+      btn.setAttribute('aria-pressed', target === active ? 'true' : 'false');
+    }
   });
 }
 

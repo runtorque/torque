@@ -150,9 +150,9 @@ function renderTemplatesPanel() {
   html += '<button class="tpled-new-btn" onclick="tplEditorNew()" title="New action">+</button>';
   html += '<button class="tpled-new-btn" onclick="tplEditorLoad()" title="Refresh">&#x21BB;</button>';
   // View toggle
-  html += '<div class="tpled-view-toggle">';
-  html += '<button class="tpled-view-btn' + (_tplPanelView === 'editor' ? ' active' : '') + '" onclick="tplSwitchView(\'editor\')">Editor</button>';
-  html += '<button class="tpled-view-btn' + (_tplPanelView === 'pipelines' ? ' active' : '') + '" onclick="tplSwitchView(\'pipelines\')">DAG</button>';
+  html += '<div class="tpled-view-toggle" role="group" aria-label="Action view">';
+  html += '<button type="button" class="tpled-view-btn' + (_tplPanelView === 'editor' ? ' active' : '') + '" aria-pressed="' + (_tplPanelView === 'editor' ? 'true' : 'false') + '" onclick="tplSwitchView(\'editor\')">Editor</button>';
+  html += '<button type="button" class="tpled-view-btn' + (_tplPanelView === 'pipelines' ? ' active' : '') + '" aria-pressed="' + (_tplPanelView === 'pipelines' ? 'true' : 'false') + '" onclick="tplSwitchView(\'pipelines\')">DAG</button>';
   html += '</div>';
   html += '</div>';
   html += '</div>';

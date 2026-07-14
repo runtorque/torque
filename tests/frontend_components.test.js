@@ -82,3 +82,39 @@ test('feature stylesheets do not redefine shared tab visual primitives', () => {
   assert.doesNotMatch(features, /^\.(planning|thinking)-tab[^\{]*\{[^}]*border-radius:\s*999px/ms);
   assert.doesNotMatch(agent, /^\.agent-panel-events-subtabs?[^\{]*\{[^}]*border-radius:\s*999px/ms);
 });
+
+test('shared segmented controls define one compact selected-state primitive', () => {
+  const css = source('static/styles/components.css');
+
+  assert.match(css, /\.segmented-control,\s*\.agent-view-toggle,\s*\.tpled-view-toggle,\s*\.log-viewer-targets,\s*\.schedule-type-toggle\s*\{[^}]*min-height:\s*var\(--control-height-sm\);[^}]*border:\s*var\(--control-border\);[^}]*border-radius:\s*var\(--radius-sm\);/s);
+  assert.match(css, /\.segmented-control__item,\s*\.agent-view-toggle-btn,\s*\.tpled-view-btn,\s*\.log-viewer-target,\s*\.schedule-type-btn\s*\{[^}]*min-height:\s*calc\(var\(--control-height-sm\) - 2px\);[^}]*border-radius:\s*0;[^}]*font-size:\s*var\(--control-font-size-xs\);/s);
+  assert.match(css, /\.segmented-control__item\.is-active,[\s\S]*?\.schedule-type-btn\[aria-pressed="true"\]\s*\{[^}]*background:\s*var\(--accent-soft\);[^}]*outline:\s*1px solid var\(--accent-muted\);[^}]*outline-offset:\s*-1px;/s);
+});
+
+test('segmented-control consumers expose their selected state', () => {
+  const grid = source('static/js/grid/main.js');
+  const canvas = source('static/js/canvas.js');
+  const actions = source('static/js/actions.js');
+  const templates = source('static/js/templates.js');
+  const schedules = source('static/js/modals/schedules.js');
+  const html = source('webview.html');
+
+  assert.match(grid, /data-agent-view-toggle="grid" aria-pressed="/);
+  assert.match(canvas, /setAttribute\('aria-pressed', target === active/);
+  assert.match(actions, /role="group" aria-label="Action view"/);
+  assert.match(actions, /aria-pressed="' \+ \(_tplPanelView === 'editor'/);
+  assert.match(templates, /role="tablist" aria-label="Library sections"/);
+  assert.match(templates, /role="tab" class="tpled-view-btn[\s\S]*?aria-selected=/);
+  assert.match(html, /class="schedule-type-toggle" role="group" aria-label="Schedule type"/);
+  assert.match(schedules, /setAttribute\('aria-pressed', type === 'recurring'/);
+});
+
+test('segmented-control visual primitives do not drift back into feature styles', () => {
+  const desktop = source('static/styles/desktop-features.css');
+  const board = source('static/styles/board-panels.css');
+
+  assert.doesNotMatch(desktop, /^\.log-viewer-targets?\s*\{/m);
+  assert.doesNotMatch(desktop, /^\.agent-view-toggle-btn\s*\{[^}]*background:/ms);
+  assert.doesNotMatch(board, /^\.tpled-view-btn\s*\{/m);
+  assert.doesNotMatch(board, /^\.schedule-type-btn\s*\{[^}]*background:/ms);
+});

@@ -19,10 +19,10 @@ function _renderAgentGridNewToolbar(groupName, disabled) {
       + '</svg>';
     viewToggle = '<div class="agent-view-toggle agent-view-toggle--grid" role="group" aria-label="Agent view">'
       + '<button type="button" class="agent-view-toggle-btn' + (vm === 'grid' ? ' is-active' : '') + '"'
-      + ' data-agent-view-toggle="grid" onclick="_torqueSetAgentViewMode(\'grid\')"'
+      + ' data-agent-view-toggle="grid" aria-pressed="' + (vm === 'grid' ? 'true' : 'false') + '" onclick="_torqueSetAgentViewMode(\'grid\')"'
       + ' title="Grid view" aria-label="Grid view">' + gridIcon + '</button>'
       + '<button type="button" class="agent-view-toggle-btn' + (vm === 'canvas' ? ' is-active' : '') + '"'
-      + ' data-agent-view-toggle="canvas" onclick="_torqueSetAgentViewMode(\'canvas\')"'
+      + ' data-agent-view-toggle="canvas" aria-pressed="' + (vm === 'canvas' ? 'true' : 'false') + '" onclick="_torqueSetAgentViewMode(\'canvas\')"'
       + ' title="Canvas view" aria-label="Canvas view">' + canvasIcon + '</button>'
       + '</div>';
   }
