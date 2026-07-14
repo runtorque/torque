@@ -69,16 +69,18 @@
 
 <!-- Add Group modal -->
 <div class="overlay" id="modal-group">
-  <div class="modal">
-    <h2>New Group</h2>
-    <div id="modal-group-summary" class="modal-summary hidden"></div>
-    <label>Group name</label>
-    <input id="group-name-input" placeholder="e.g. frontend" autocomplete="off"
-           onkeydown="if(event.key==='Enter')submitGroup();if(event.key==='Escape')closeModals();">
-    <label>Directory <span class="label-hint">(optional)</span></label>
-    <input id="group-directory-input" placeholder="/path/to/project" autocomplete="off"
-           onkeydown="if(event.key==='Enter')submitGroup();if(event.key==='Escape')closeModals();">
-    <div class="modal-actions">
+  <div class="modal ui-modal ui-modal--sm ui-modal--structured" role="dialog" aria-modal="true" aria-labelledby="modal-group-title">
+    <div class="ui-modal__header">
+      <h2 id="modal-group-title" class="ui-modal__title">New Group</h2>
+      <div id="modal-group-summary" class="modal-summary ui-modal__subtitle hidden"></div>
+    </div>
+    <div class="ui-modal__body">
+      <label for="group-name-input">Group name</label>
+      <input id="group-name-input" placeholder="e.g. frontend" autocomplete="off">
+      <label for="group-directory-input">Directory <span class="label-hint">(optional)</span></label>
+      <input id="group-directory-input" placeholder="/path/to/project" autocomplete="off">
+    </div>
+    <div class="modal-actions ui-modal__footer">
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>
       <button class="btn-primary" onclick="submitGroup()">Create</button>
     </div>
@@ -414,24 +416,27 @@
 
 <!-- Edit Agent/Terminal modal -->
 <div class="overlay" id="modal-edit">
-  <div class="modal">
-    <h2 id="edit-title">Edit</h2>
-    <label>Name</label>
-    <input id="edit-name-input" autocomplete="off"
-           onkeydown="if(event.key==='Enter')submitEdit();if(event.key==='Escape')closeModals();">
-    <div id="edit-specializations-row" class="hidden">
-      <label>Specializations
-        <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Ordered list of specialization YAMLs. The first one is the primary focus; each adds a preamble block to the engineer's boot prompt.">?</span>
-      </label>
-      <div id="edit-specializations-picker" class="specializations-picker">
-        <ul id="edit-specializations-selected" class="specializations-selected"></ul>
-        <div class="specializations-controls">
-          <select id="edit-specializations-available"></select>
-          <button type="button" class="btn-secondary" onclick="editEngineerAddSpecialization()">+ Add</button>
+  <div class="modal ui-modal ui-modal--sm ui-modal--structured" role="dialog" aria-modal="true" aria-labelledby="edit-title">
+    <div class="ui-modal__header">
+      <h2 id="edit-title" class="ui-modal__title">Edit</h2>
+    </div>
+    <div class="ui-modal__body">
+      <label for="edit-name-input">Name</label>
+      <input id="edit-name-input" autocomplete="off">
+      <div id="edit-specializations-row" class="hidden">
+        <label>Specializations
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Ordered list of specialization YAMLs. The first one is the primary focus; each adds a preamble block to the engineer's boot prompt.">?</span>
+        </label>
+        <div id="edit-specializations-picker" class="specializations-picker">
+          <ul id="edit-specializations-selected" class="specializations-selected"></ul>
+          <div class="specializations-controls">
+            <select id="edit-specializations-available"></select>
+            <button type="button" class="btn-secondary" onclick="editEngineerAddSpecialization()">+ Add</button>
+          </div>
         </div>
       </div>
     </div>
-    <div class="modal-actions">
+    <div class="modal-actions ui-modal__footer">
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>
       <button class="btn-primary" onclick="submitEdit()">Save</button>
     </div>
@@ -2031,10 +2036,15 @@
 
 <!-- Confirm dialog (replaces window.confirm for WKWebView) -->
 <div class="overlay" id="modal-confirm">
-  <div class="modal" role="alertdialog" aria-modal="true" aria-label="Confirm action" aria-describedby="confirm-message">
-    <p id="confirm-message"></p>
-    <div id="confirm-extras"></div>
-    <div class="modal-actions">
+  <div class="modal ui-modal ui-modal--sm ui-modal--structured" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+    <div class="ui-modal__header">
+      <h2 id="confirm-title" class="ui-modal__title">Confirm action</h2>
+    </div>
+    <div class="ui-modal__body">
+      <p id="confirm-message" class="ui-modal__message"></p>
+      <div id="confirm-extras"></div>
+    </div>
+    <div class="modal-actions ui-modal__footer">
       <button class="btn-cancel" onclick="confirmNo()">Cancel</button>
       <button id="confirm-yes-btn" class="btn-primary btn-danger" onclick="confirmYes()">Delete</button>
     </div>
@@ -2043,12 +2053,16 @@
 
 <!-- Input dialog (replaces window.prompt for routine operator flows) -->
 <div class="overlay" id="modal-input-dialog">
-  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="input-dialog-title">
-    <h2 id="input-dialog-title">Input</h2>
-    <div id="input-dialog-summary" class="modal-summary hidden"></div>
-    <div id="input-dialog-fields"></div>
-    <div id="input-dialog-error" class="modal-error hidden" aria-live="polite"></div>
-    <div class="modal-actions">
+  <div class="modal ui-modal ui-modal--sm ui-modal--structured" role="dialog" aria-modal="true" aria-labelledby="input-dialog-title">
+    <div class="ui-modal__header">
+      <h2 id="input-dialog-title" class="ui-modal__title">Input</h2>
+      <div id="input-dialog-summary" class="modal-summary ui-modal__subtitle hidden"></div>
+    </div>
+    <div class="ui-modal__body">
+      <div id="input-dialog-fields"></div>
+      <div id="input-dialog-error" class="modal-error hidden" aria-live="polite"></div>
+    </div>
+    <div class="modal-actions ui-modal__footer">
       <button class="btn-cancel" onclick="cancelInputDialog()">Cancel</button>
       <button id="input-dialog-submit-btn" class="btn-primary" onclick="submitInputDialog()">OK</button>
     </div>

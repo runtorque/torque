@@ -656,9 +656,18 @@ function openEditCell(id) {
     if (specsRow) specsRow.classList.add('hidden');
   }
 
-  document.getElementById('modal-edit').classList.add('visible');
-  document.getElementById('edit-name-input').focus();
-  document.getElementById('edit-name-input').select();
+  const modal = document.getElementById('modal-edit');
+  const nameInput = document.getElementById('edit-name-input');
+  openModalDialog(modal, {
+    labelledBy: 'edit-title',
+    initialFocus: nameInput,
+    selectInitialFocus: true,
+    submitOnEnter: true,
+    onSubmit: submitEdit,
+    onCancel: function() {
+      closeModalDialog(modal, { restoreFocus: true });
+    },
+  });
 }
 
 function submitEdit() {

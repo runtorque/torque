@@ -232,6 +232,54 @@ test('panel-header geometry does not drift back into feature styles', () => {
   assert.doesNotMatch(agent, /^\.agent-panel-(?:title|subtitle)\s*\{/m);
 });
 
+test('shared modals define raised size variants and structured regions', () => {
+  const css = source('static/styles/components.css');
+
+  assert.match(css, /\.ui-modal,\s*\.modal\s*\{[^}]*max-width:\s*360px;[^}]*border:\s*1px solid var\(--border-strong\);[^}]*border-radius:\s*var\(--radius-lg\);[^}]*background:\s*var\(--bg-raised\);[^}]*box-shadow:\s*var\(--shadow-float\);/s);
+  assert.match(css, /\.ui-modal\.ui-modal--sm\s*\{[^}]*max-width:\s*360px;/s);
+  assert.match(css, /\.ui-modal\.ui-modal--md\s*\{[^}]*max-width:\s*520px;/s);
+  assert.match(css, /\.ui-modal\.ui-modal--lg\s*\{[^}]*max-width:\s*760px;/s);
+  assert.match(css, /\.ui-modal__header\s*\{[^}]*padding:\s*14px 16px 10px;/s);
+  assert.match(css, /\.ui-modal__body\s*\{[^}]*padding:\s*0 16px 16px;[^}]*overflow:\s*auto;/s);
+  assert.match(css, /\.ui-modal--structured > \.ui-modal__footer\s*\{[^}]*padding:\s*12px 16px 14px;[^}]*border-top:\s*1px solid var\(--border\);/s);
+});
+
+test('small modal consumers use canonical regions and visible labels', () => {
+  const html = source('webview.html');
+
+  for (const id of ['modal-group', 'modal-edit', 'modal-confirm', 'modal-input-dialog']) {
+    const start = html.indexOf(`id="${id}"`);
+    assert.notEqual(start, -1, `${id} should exist`);
+    const slice = html.slice(start, start + 1800);
+    assert.match(slice, /class="modal ui-modal ui-modal--sm ui-modal--structured"/);
+    assert.match(slice, /class="ui-modal__header"/);
+    assert.match(slice, /class="ui-modal__body"/);
+    assert.match(slice, /class="modal-actions ui-modal__footer"/);
+  }
+  assert.match(html, /id="modal-confirm"[\s\S]*?aria-labelledby="confirm-title"[\s\S]*?<h2 id="confirm-title"/);
+  assert.doesNotMatch(html, /id="modal-confirm"[\s\S]{0,400}aria-label="Confirm action"/);
+  assert.match(html, /<label for="group-name-input">Group name<\/label>/);
+  assert.match(html, /<label for="edit-name-input">Name<\/label>/);
+});
+
+test('simple modal consumers use the shared focus lifecycle', () => {
+  const core = source('static/js/modals/core.js');
+  const modals = source('static/js/modals.js');
+  const html = source('webview.html');
+
+  assert.match(core, /function openAddGroup\(\)[\s\S]*?openModalDialog\(modal, \{[\s\S]*?labelledBy: 'modal-group-title',[\s\S]*?initialFocus: inp,[\s\S]*?submitOnEnter: true,[\s\S]*?onCancel:/);
+  assert.match(modals, /function openEditCell\(id\)[\s\S]*?openModalDialog\(modal, \{[\s\S]*?labelledBy: 'edit-title',[\s\S]*?initialFocus: nameInput,[\s\S]*?submitOnEnter: true,[\s\S]*?onCancel:/);
+  assert.doesNotMatch(html, /id="group-name-input"[^>]*onkeydown=/);
+  assert.doesNotMatch(html, /id="edit-name-input"[^>]*onkeydown=/);
+});
+
+test('modal surface and footer geometry do not drift back into modal styles', () => {
+  const css = source('static/styles/modals.css');
+
+  assert.doesNotMatch(css, /^\.modal\s*\{[^}]*(?:border-radius|background|box-shadow|max-width):/ms);
+  assert.doesNotMatch(css, /^\.modal-actions\s*\{/m);
+});
+
 test('shared menus define one floating surface and compact item state grammar', () => {
   const css = source('static/styles/components.css');
 

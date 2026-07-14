@@ -105,6 +105,94 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* Modals
+ *
+ * Small dialogs use one raised shell with explicit header, body, and footer
+ * regions. `.modal` remains the compatibility surface for larger legacy
+ * dialogs; structured consumers opt into the canonical region classes.
+ */
+.ui-modal,
+.modal {
+  width: 100%;
+  max-width: 360px;
+  padding: 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-float);
+}
+
+.ui-modal.ui-modal--sm {
+  max-width: 360px;
+}
+
+.ui-modal.ui-modal--md {
+  max-width: 520px;
+}
+
+.ui-modal.ui-modal--lg {
+  max-width: 760px;
+}
+
+.ui-modal--structured {
+  padding: 0;
+  overflow: hidden;
+}
+
+.ui-modal__header {
+  padding: 14px 16px 10px;
+}
+
+.modal h2,
+.ui-modal__title {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.modal h2 {
+  margin-bottom: 12px;
+}
+
+.ui-modal--structured .ui-modal__title {
+  margin: 0;
+}
+
+.ui-modal--structured .ui-modal__subtitle {
+  margin: var(--space-1) 0 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.ui-modal__body {
+  min-height: 0;
+  padding: 0 16px 16px;
+  overflow: auto;
+}
+
+.ui-modal__message {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.modal-actions,
+.ui-modal__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: 14px;
+}
+
+.ui-modal--structured > .ui-modal__footer {
+  margin: 0;
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-cell) 58%, transparent);
+}
+
 /* Menus and popovers
  *
  * Floating surfaces share one boundary and elevation. Menu rows use the

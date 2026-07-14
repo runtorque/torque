@@ -327,6 +327,22 @@ The canonical CSS API lives in `static/styles/components.css`:
 - Escape closes dismissible transient surfaces. Destructive confirmation should
   name the affected object.
 
+Small dialogs use the canonical modal API in `static/styles/components.css`:
+
+- `.ui-modal` defines the raised boundary, 10px corners, shared floating shadow,
+  and 360px default width. `--sm`, `--md`, and `--lg` size variants cap dialogs
+  at 360px, 520px, and 760px.
+- `.ui-modal--structured` separates the shell into `.ui-modal__header`,
+  `.ui-modal__body`, and `.ui-modal__footer`. The footer owns the action boundary
+  and keeps secondary actions before the primary action.
+- `.ui-modal__title`, `__subtitle`, and `__message` establish the small-dialog
+  type hierarchy. Dialog titles are visible and provide the accessible label.
+- Shared confirm and input dialogs, New Group, and Edit Agent/Terminal use the
+  structured shell and shared focus controller. Confirmations focus the explicit
+  commit action; simple editors focus and select their primary field.
+- Task, settings, artifact, diff, and other large or multi-section dialogs retain
+  their specialized layouts until migrated deliberately.
+
 Menus and compact popovers use the canonical API in
 `static/styles/components.css`:
 
@@ -409,7 +425,7 @@ the rule is intentionally global and documented here.
 | Cards | Core variants standardized | Audit grid identity cards and nested contained surfaces |
 | Toolbars and panel headers | Core variants standardized | Migrate remaining Help, Context, Health, and editor toolbars |
 | Menus and popovers | Core variants standardized | Migrate task, terminal, dependency, and editor dropdowns |
-| Modals | Pending | Standardize headers, actions, widths, and destructive flows |
+| Modals | Core variants standardized | Migrate task, settings, artifact, diff, and multi-section dialogs |
 | Badges, tags, and status | Pending | Separate semantic pills from action controls |
 | Empty/loading/error states | Pending | Define reusable patterns and language |
 
@@ -623,6 +639,32 @@ the rule is intentionally global and documented here.
   removal of duplicate feature geometry. Existing Board and group navigation
   suites protect behavior; live checks verify computed surface/item geometry,
   focus entry, Escape restoration, and absence of console errors.
+
+### D-011 — Small dialogs use a structured raised shell
+
+- Date: 2026-07-14
+- Status: accepted
+- Decision: Small dialogs use a 360px raised surface with 10px corners, the
+  shared floating shadow, and explicit header, scrollable body, and bordered
+  action footer regions. The visible title supplies the accessible name, and
+  simple dialog focus is managed by the shared controller.
+- Rationale: The legacy 280px unshadowed shell made routine forms feel cramped,
+  while titles, summaries, fields, and actions relied on incidental whole-panel
+  padding. Confirmations also used an invisible accessible label instead of a
+  visible title. A structured shell gives routine dialogs a predictable reading
+  and keyboard order without forcing large editors into the same layout.
+- Scope: `static/styles/components.css`, shared confirm and input dialogs, New
+  Group, Edit Agent/Terminal, and the shared modal focus controller.
+- Constraints: The destructive commit remains visually explicit and follows the
+  cancel action. Task, group/global settings, artifact, diff, Engineer launch,
+  and other large or multi-section dialogs keep specialized layouts pending
+  deliberate migration. The overlay/backdrop remains modal infrastructure in
+  `static/styles/modals.css`.
+- Verification: `tests/frontend_components.test.js` protects shared geometry,
+  canonical markup, visible labelling, focus-controller adoption, and removal of
+  duplicated shell/footer geometry. Modal helper and edit-popup suites protect
+  focus, Escape, submit, and payload behavior; live checks verify New Group and
+  confirmation geometry, focus restoration, and console cleanliness.
 
 ## Decision entry template
 

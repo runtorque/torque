@@ -162,6 +162,7 @@ function createSandbox() {
   const confirmOverlay = make('div', 'modal-confirm', ['overlay']);
   const confirmPanel = append(confirmOverlay, new FakeElement('div', '', document));
   confirmPanel.classList.add('modal');
+  const confirmTitle = append(confirmPanel, make('h2', 'confirm-title'));
   const confirmMessage = append(confirmPanel, make('p', 'confirm-message'));
   const confirmExtras = append(confirmPanel, make('div', 'confirm-extras'));
   const confirmCancel = append(confirmPanel, make('button', 'confirm-cancel-btn'));
@@ -199,6 +200,7 @@ function createSandbox() {
     trigger,
     confirmOverlay,
     confirmPanel,
+    confirmTitle,
     confirmMessage,
     confirmExtras,
     confirmYes,
@@ -271,8 +273,10 @@ test('showConfirm applies alertdialog ARIA, Escape rejects, and restores focus',
   assert.equal(env.confirmOverlay.classList.contains('visible'), true);
   assert.equal(env.confirmPanel.getAttribute('role'), 'alertdialog');
   assert.equal(env.confirmPanel.getAttribute('aria-modal'), 'true');
-  assert.equal(env.confirmPanel.getAttribute('aria-label'), 'Confirm action');
+  assert.equal(env.confirmPanel.getAttribute('aria-labelledby'), 'confirm-title');
+  assert.equal(env.confirmPanel.getAttribute('aria-label'), '');
   assert.equal(env.confirmPanel.getAttribute('aria-describedby'), 'confirm-message');
+  assert.equal(env.confirmTitle.textContent, 'Confirm action');
   assert.equal(env.sandbox.document.activeElement, env.confirmYes);
 
   env.confirmYes.dispatchEvent(keyEvent('Escape'));

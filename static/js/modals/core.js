@@ -332,11 +332,10 @@ let _addEngineerSpecializationsGroup = null;
 //
 // Keep this helper intentionally small: it owns initial focus, focus restore,
 // Escape/cancel, optional Enter submit for simple flows, Tab containment, and
-// basic dialog ARIA attributes. The first adopters are the custom confirm/input
-// dialogs from the native-prompt replacement work plus the high-use Engineer
-// launch dialog. Larger multi-section modals (task, group settings, artifacts,
-// behavior approval, diff preview) are deferred so each can opt in with its own
-// submit/cancel semantics instead of broadening this slice.
+// basic dialog ARIA attributes. The first adopters are the custom confirm/input,
+// New Group, Edit Agent, and Engineer launch dialogs. Larger multi-section
+// modals (task, group settings, artifacts, behavior approval, diff preview) are
+// deferred so each can opt in with its own submit/cancel semantics.
 let _modalDialogControllers = new Map();
 
 function _modalDialogOverlay(target) {
@@ -709,6 +708,8 @@ function showConfirm(message, opts) {
   return new Promise((resolve) => {
     _confirmResolve = resolve;
     document.getElementById('confirm-message').textContent = message;
+    const title = document.getElementById('confirm-title');
+    if (title) title.textContent = (opts && opts.title) || 'Confirm action';
     const extras = document.getElementById('confirm-extras');
     extras.innerHTML = '';
     if (opts && opts.checkboxes) {
@@ -730,7 +731,7 @@ function showConfirm(message, opts) {
     btn.className = 'btn-primary ' + ((opts && opts.variant) || 'btn-danger');
     openModalDialog('modal-confirm', {
       role: (opts && opts.role) || 'alertdialog',
-      label: (opts && opts.title) || 'Confirm action',
+      labelledBy: 'confirm-title',
       describedBy: 'confirm-message',
       initialFocus: '#confirm-yes-btn',
       cancelOnEscape: true,
@@ -892,7 +893,7 @@ function cancelInputDialog() {
 
 /* -- Add Group -------------------------------------------------------- */
 function openAddGroup() {
-  document.getElementById('modal-group').classList.add('visible');
+  const modal = document.getElementById('modal-group');
   const summary = document.getElementById('modal-group-summary');
   if (summary) {
     const standalone = !!(state && state.runtime && state.runtime.embedded_terminal);
@@ -905,7 +906,16 @@ function openAddGroup() {
   inp.value = '';
   const dir = document.getElementById('group-directory-input');
   if (dir) dir.value = '';
-  inp.focus();
+  openModalDialog(modal, {
+    labelledBy: 'modal-group-title',
+    initialFocus: inp,
+    selectInitialFocus: true,
+    submitOnEnter: true,
+    onSubmit: submitGroup,
+    onCancel: function() {
+      closeModalDialog(modal, { restoreFocus: true });
+    },
+  });
 }
 function submitGroup() {
   const name = document.getElementById('group-name-input').value.trim();

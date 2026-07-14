@@ -13,13 +13,6 @@
  * inside Group Settings) is not occluded by the parent overlay. The
  * stack manager in static/js/modals.js toggles this class. */
 .overlay.modal-nested { z-index: 110; }
-.modal {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 16px; width: 100%; max-width: 280px;
-}
-.modal h2 { font-size: 13px; margin-bottom: 12px; }
 .modal-summary {
   margin: -4px 0 12px;
   font-size: 11px;
@@ -113,9 +106,6 @@
   margin-bottom: 3px; margin-top: 10px;
 }
 .modal label:first-of-type { margin-top: 0; }
-.modal-actions {
-  display: flex; gap: 8px; margin-top: 14px; justify-content: flex-end;
-}
 .system-prompt-preview-row {
   display: flex;
   justify-content: flex-start;
