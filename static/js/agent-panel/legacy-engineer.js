@@ -2055,7 +2055,7 @@ function _agentPanelLegacyRenderJournalEntries(entries, allowContextMenu, alread
   var html = '<div class="agent-panel-journal">';
   for (var i = 0; i < sorted.length; i++) {
     var e = sorted[i];
-    var typeClass = 'agent-panel-badge-' + (e.type || 'observation');
+    var typeClass = _agentPanelJournalBadgeClass(e.type || 'observation');
     var ago = _engineerTimeAgo(e.timestamp);
     var anchorKey = 'journal-' + String(e.id || ('idx-' + i));
     html += '<div class="agent-panel-entry" data-engineer-anchor="' + _esc(anchorKey) + '"'
@@ -2064,7 +2064,7 @@ function _agentPanelLegacyRenderJournalEntries(entries, allowContextMenu, alread
         : '')
       + '>';
     html += '<div class="agent-panel-entry-header">';
-    html += '<span class="agent-panel-badge ' + typeClass + '">' + _esc(e.type || '?') + '</span>';
+    html += '<span class="' + typeClass + '">' + _esc(e.type || '?') + '</span>';
     html += '<span class="agent-panel-entry-time">' + _esc(ago) + '</span>';
     html += '</div>';
     html += '<div class="agent-panel-entry-text">' + _esc(e.entry || '') + '</div>';

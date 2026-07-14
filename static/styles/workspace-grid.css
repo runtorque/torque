@@ -2287,33 +2287,26 @@ body.runtime-embedded .agent-focus-header {
   bottom: 2px;
   right: 3px;
 }
-.cell-engineer-badge {
+.cell-engineer-badge,
+.cell-architect-badge,
+.cell-worker-badge,
+.cell-agent-badge,
+.cell-dismissed-badge {
   position: absolute;
   bottom: 2px;
   right: 3px;
-  font-size: 6.5px;
   letter-spacing: 0;
   font-weight: 700;
+}
+.cell-engineer-badge {
   color: var(--accent);
   background: rgba(88, 166, 255, 0.12);
   border: 1px solid rgba(88, 166, 255, 0.24);
-  border-radius: 999px;
-  padding: 0 4px;
-  line-height: 1.4;
 }
 .cell-architect-badge {
-  position: absolute;
-  bottom: 2px;
-  right: 3px;
-  font-size: 6.5px;
-  letter-spacing: 0;
-  font-weight: 700;
   color: #1f1300;
   background: color-mix(in srgb, var(--amber) 82%, white);
   border: 1px solid color-mix(in srgb, var(--amber) 58%, transparent);
-  border-radius: 999px;
-  padding: 0 4px;
-  line-height: 1.4;
 }
 .cell-agent-class-badge {
   max-width: calc(100% - 8px);
@@ -2322,46 +2315,19 @@ body.runtime-embedded .agent-focus-header {
   white-space: nowrap;
 }
 .cell-worker-badge {
-  position: absolute;
-  bottom: 2px;
-  right: 3px;
-  font-size: 6.5px;
-  letter-spacing: 0;
-  font-weight: 700;
   color: var(--green);
   background: color-mix(in srgb, var(--green) 14%, transparent);
   border: 1px solid color-mix(in srgb, var(--green) 32%, transparent);
-  border-radius: 999px;
-  padding: 0 4px;
-  line-height: 1.4;
 }
 .cell-agent-badge {
-  position: absolute;
-  bottom: 2px;
-  right: 3px;
-  font-size: 6.5px;
-  letter-spacing: 0;
-  font-weight: 700;
   color: var(--text-dim);
   background: color-mix(in srgb, var(--text-dim) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--text-dim) 22%, transparent);
-  border-radius: 999px;
-  padding: 0 4px;
-  line-height: 1.4;
 }
 .cell-dismissed-badge {
-  position: absolute;
-  bottom: 2px;
-  right: 3px;
-  font-size: 6.5px;
-  letter-spacing: 0;
-  font-weight: 700;
   color: var(--text-dim);
   background: color-mix(in srgb, var(--text-dim) 13%, transparent);
   border: 1px solid color-mix(in srgb, var(--text-dim) 24%, transparent);
-  border-radius: 999px;
-  padding: 0 4px;
-  line-height: 1.4;
 }
 .cell-term-count {
   position: absolute; bottom: 16px; right: 3px;

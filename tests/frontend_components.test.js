@@ -333,3 +333,47 @@ test('menu geometry does not drift back into feature styles', () => {
   assert.doesNotMatch(modals, /^#ctx-menu\s*\{[^}]*(?:padding|background|border-radius|box-shadow):/ms);
   assert.doesNotMatch(modals, /^#ctx-menu button\s*\{[^}]*(?:padding|font-size|border-radius|color):/ms);
 });
+
+test('shared semantic badges define density and intent variants', () => {
+  const css = source('static/styles/components.css');
+
+  assert.match(css, /\.ui-badge\s*\{[^}]*display:\s*inline-flex;[^}]*min-height:\s*18px;[^}]*padding:\s*1px 6px;[^}]*border:\s*1px solid var\(--border\);[^}]*border-radius:\s*999px;[^}]*font-size:\s*9px;/s);
+  assert.match(css, /\.ui-badge--compact\s*\{[^}]*min-height:\s*14px;[^}]*font-size:\s*8px;/s);
+  assert.match(css, /\.ui-badge--micro\s*\{[^}]*min-height:\s*12px;[^}]*padding:\s*0 4px;[^}]*font-size:\s*6\.5px;/s);
+  for (const intent of ['neutral', 'accent', 'success', 'warning', 'danger']) {
+    assert.match(css, new RegExp(`\\.ui-badge--${intent}\\s*\\{[^}]*color:`));
+  }
+  assert.match(css, /\.ui-badge--count\s*\{[^}]*min-width:\s*18px;[^}]*font-variant-numeric:\s*tabular-nums;/s);
+});
+
+test('agent identity, journal, and Health badges use the canonical API', () => {
+  const grid = source('static/js/grid/agent-card.js');
+  const agent = source('static/js/agent_panel.js');
+  const architect = source('static/js/agent-panel/architect.js');
+  const engineer = source('static/js/agent-panel/engineer.js');
+  const legacyEngineer = source('static/js/agent-panel/legacy-engineer.js');
+  const health = source('static/js/health.js');
+
+  assert.match(grid, /class="agent-card-kind ui-badge ui-badge--micro /);
+  assert.match(agent, /function _agentPanelJournalBadgeClass\(type\)[\s\S]*?return 'agent-panel-badge ui-badge ui-badge--' \+ intent/);
+  assert.match(architect, /var typeClass = _agentPanelJournalBadgeClass\(entryType\)/);
+  assert.match(engineer, /_agentPanelJournalBadgeClass\(entry\.type \|\| 'note'\)/);
+  assert.match(legacyEngineer, /var typeClass = _agentPanelJournalBadgeClass\(e\.type \|\| 'observation'\)/);
+  assert.match(health, /up: \{ label: 'up', className: 'health-pill ui-badge ui-badge--success' \}/);
+  assert.match(health, /down: \{ label: 'down', className: 'health-pill ui-badge ui-badge--danger' \}/);
+  assert.match(health, /coverage\.partial \? 'ui-badge--warning' : 'ui-badge--success'/);
+  assert.match(health, /class="health-metrics-overhead"[\s\S]*?class="ui-badge ui-badge--neutral"/);
+  assert.match(health, /class="health-metrics-history-meta"[\s\S]*?class="ui-badge ui-badge--neutral"/);
+});
+
+test('badge geometry does not drift back into feature styles', () => {
+  const grid = source('static/styles/workspace-grid.css');
+  const agent = source('static/styles/agent-panel.css');
+  const features = source('static/styles/feature-panels.css');
+
+  assert.doesNotMatch(grid, /^\.cell-(?:engineer|architect|worker|agent|dismissed)-badge\s*\{[^}]*(?:font-size|border-radius|padding|line-height):/ms);
+  assert.doesNotMatch(agent, /^\.agent-panel-badge\s*\{[^}]*(?:font-size|padding|border-radius|font-weight):/ms);
+  assert.doesNotMatch(features, /^\.health-pill\s*\{[^}]*(?:display|border|border-radius|padding|background):/ms);
+  assert.doesNotMatch(features, /^\.health-pill-(?:warn|danger|neutral)\s*\{/m);
+  assert.doesNotMatch(features, /^\.health-metrics-(?:overhead|history-meta) span\s*\{/m);
+});

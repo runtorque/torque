@@ -97,6 +97,22 @@ function _agentPanelEsc(value) {
   return String(value == null ? '' : value);
 }
 
+function _agentPanelJournalBadgeClass(type) {
+  var normalized = String(type || 'observation')
+    .replace(/[^a-z0-9_-]/gi, '')
+    .toLowerCase() || 'observation';
+  var intent = {
+    decision: 'accent',
+    checkpoint: 'success',
+    plan: 'warning',
+    qa: 'neutral',
+    observation: 'neutral',
+    note_dismissed: 'neutral',
+  }[normalized] || 'neutral';
+  return 'agent-panel-badge ui-badge ui-badge--' + intent
+    + ' agent-panel-badge-' + normalized;
+}
+
 function _agentPanelAttr(value) {
   return String(value == null ? '' : value)
     .replace(/&/g, '&amp;')

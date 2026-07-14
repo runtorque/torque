@@ -21680,17 +21680,17 @@ test('renderAgentCell shows per-engineer and architect digest pause controls wit
   assert.match(engineerNamedEngineerHtml, /^<div class="cell engineer"/);
   assert.match(workerHtml, /class="cell-engineer-toggle running"/);
   assert.match(workerHtml, /Pause event delivery/);
-  assert.match(workerHtml, /class="agent-card-kind cell-worker-badge">Worker<\/div>/);
+  assert.match(workerHtml, /class="agent-card-kind ui-badge ui-badge--micro cell-worker-badge">Worker<\/div>/);
   assert.doesNotMatch(workerHtml, /cell-engineer-badge|cell-architect-badge/);
   assert.match(engineerHtml, /^<div class="cell engineer"/);
-  assert.match(engineerHtml, /class="agent-card-kind cell-engineer-badge">Engineer<\/div>/);
+  assert.match(engineerHtml, /class="agent-card-kind ui-badge ui-badge--micro cell-engineer-badge">Engineer<\/div>/);
   assert.match(engineerHtml, /class="cell-engineer-toggle running"/);
   assert.match(engineerHtml, /toggleDigestPauseForAgent\(decodeURIComponent\(&#39;eng-1&#39;\)\)/);
   assert.match(engineerHtml, /Pause event delivery/);
   assert.doesNotMatch(engineerHtml, /Pause Engineer event delivery/);
   assert.match(architectHtml, /^<div class="cell architect"/);
   assert.doesNotMatch(architectHtml, /^<div class="[^"]*\bengineer(?:\b|-)/);
-  assert.match(architectHtml, /class="agent-card-kind cell-architect-badge">Architect<\/div>/);
+  assert.match(architectHtml, /class="agent-card-kind ui-badge ui-badge--micro cell-architect-badge">Architect<\/div>/);
   assert.match(architectHtml, /class="cell-engineer-toggle running"/);
   assert.match(architectHtml, /toggleDigestPauseForAgent\(decodeURIComponent\(&#39;arch-1&#39;\)\)/);
   assert.match(architectHtml, /Pause event delivery/);
@@ -21843,6 +21843,7 @@ test('engineer agent card toggle shares the close control reveal affordances and
 test('agent kind badges render in the bottom-right opposite the provider badge', () => {
   const css = appStylesheetSource();
   const providerRule = css.match(/\.agent-card-provider\s*\{[^}]*\}/)[0];
+  const kindPositionRule = css.match(/\.cell-engineer-badge,\s*\.cell-architect-badge,\s*\.cell-worker-badge,\s*\.cell-agent-badge,\s*\.cell-dismissed-badge\s*\{[^}]*\}/)[0];
   const engineerRule = css.match(/\.cell-engineer-badge\s*\{[^}]*\}/)[0];
   const architectRule = css.match(/\.cell-architect-badge\s*\{[^}]*\}/)[0];
   const workerRule = css.match(/\.cell-worker-badge\s*\{[^}]*\}/)[0];
@@ -21853,15 +21854,11 @@ test('agent kind badges render in the bottom-right opposite the provider badge',
   assert.match(providerRule, /font-weight:\s*500;/);
   assert.doesNotMatch(providerRule, /background:/);
   assert.doesNotMatch(providerRule, /border:/);
-  assert.match(engineerRule, /bottom:\s*2px;/);
-  assert.match(engineerRule, /right:\s*3px;/);
-  assert.doesNotMatch(engineerRule, /left:\s*3px;/);
+  assert.match(kindPositionRule, /bottom:\s*2px;/);
+  assert.match(kindPositionRule, /right:\s*3px;/);
+  assert.doesNotMatch(kindPositionRule, /left:\s*3px;/);
   assert.doesNotMatch(engineerRule, /text-transform:\s*uppercase/);
-  assert.match(architectRule, /bottom:\s*2px;/);
-  assert.match(architectRule, /right:\s*3px;/);
   assert.doesNotMatch(architectRule, /left:\s*3px;/);
-  assert.match(workerRule, /bottom:\s*2px;/);
-  assert.match(workerRule, /right:\s*3px;/);
   assert.doesNotMatch(workerRule, /left:\s*3px;/);
   assert.match(workerRule, /color:\s*var\(--green\);/);
 });
@@ -27273,7 +27270,7 @@ test('stratified grid renders Architects stratum and architect card without inli
   assert.match(main.innerHTML, /data-agent-strata="architects"[\s\S]*data-drag-id="arch-a"[\s\S]*Architect A/);
   assert.doesNotMatch(main.innerHTML, /\+ New Architect|agent-new-architect-card/);
   assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*class="agent-grid-new-icon"[\s\S]*<span>New<\/span>/);
-  assert.match(main.innerHTML, /class="agent-card-kind cell-architect-badge">Architect<\/div>/);
+  assert.match(main.innerHTML, /class="agent-card-kind ui-badge ui-badge--micro cell-architect-badge">Architect<\/div>/);
   assert.doesNotMatch(main.innerHTML, /agent-grid-new-architect-row/);
 
   const css = appStylesheetSource();

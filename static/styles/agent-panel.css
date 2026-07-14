@@ -1212,18 +1212,13 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   margin-bottom: 3px;
 }
 .agent-panel-badge {
-  font-size: 9px;
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-weight: 600;
   text-transform: uppercase;
 }
-.agent-panel-badge-decision    { background: rgba(88,166,255,0.2); color: var(--accent); }
-.agent-panel-badge-observation { background: rgba(139,148,158,0.2); color: var(--text-dim); }
-.agent-panel-badge-checkpoint  { background: rgba(63,185,80,0.2); color: var(--green); }
-.agent-panel-badge-plan        { background: rgba(210,153,34,0.2); color: var(--amber); }
-.agent-panel-badge-note_dismissed { background: rgba(139,148,158,0.16); color: var(--text-dim); }
-.agent-panel-badge-qa          { background: rgba(163,113,247,0.2); color: #a371f7; }
+.agent-panel-badge-qa {
+  color: #a371f7;
+  border-color: rgba(163,113,247,0.34);
+  background: rgba(163,113,247,0.14);
+}
 .agent-panel-entry-time {
   font-size: 9px;
   color: var(--text-dim);

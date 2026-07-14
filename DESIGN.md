@@ -365,6 +365,22 @@ Menus and compact popovers use the canonical API in
   than offer navigation.
 - Keep badges short and visually subordinate to the primary label.
 - Status badges use semantic color tokens and a textual or iconographic cue.
+- Badges are annotations, not controls. Clickable filters, toggles, tabs, and
+  actions use their own component families even when they contain a count.
+
+The canonical CSS API lives in `static/styles/components.css`:
+
+- `.ui-badge` defines the shared pill boundary, compact type, and inline
+  alignment. `--compact` and `--micro` preserve dense task-card and agent-card
+  layouts without inventing new badge geometry.
+- `--neutral`, `--accent`, `--success`, `--warning`, and `--danger` express
+  semantic intent with text, border, and a restrained tint. The nearby label or
+  badge text remains the primary state cue; color is reinforcement.
+- `--count` uses tabular numerals and a stable minimum width for numeric totals.
+- Agent identity badges, Agent-panel journal entry types, and Health runtime and
+  coverage states are the first canonical consumers. Board labels, profile
+  badges, status-bar compounds, history/event markers, and remaining counts are
+  deliberate follow-up migrations.
 
 ### Empty, loading, and error states
 
@@ -426,7 +442,7 @@ the rule is intentionally global and documented here.
 | Toolbars and panel headers | Core variants standardized | Migrate remaining Help, Context, Health, and editor toolbars |
 | Menus and popovers | Core variants standardized | Migrate task, terminal, dependency, and editor dropdowns |
 | Modals | Core variants standardized | Migrate task, settings, artifact, diff, and multi-section dialogs |
-| Badges, tags, and status | Pending | Separate semantic pills from action controls |
+| Badges, tags, and status | Core variants standardized | Migrate Board, profile, status-bar, history/event, and count consumers |
 | Empty/loading/error states | Pending | Define reusable patterns and language |
 
 ## Decision log
@@ -665,6 +681,28 @@ the rule is intentionally global and documented here.
   duplicated shell/footer geometry. Modal helper and edit-popup suites protect
   focus, Escape, submit, and payload behavior; live checks verify New Group and
   confirmation geometry, focus restoration, and console cleanliness.
+
+### D-012 — Semantic metadata uses one badge grammar
+
+- Date: 2026-07-14
+- Status: accepted
+- Decision: Non-interactive metadata badges use a shared pill boundary, compact
+  typography, density variants, and neutral/accent/success/warning/danger intent
+  classes. Status meaning is carried by text and reinforced by border and tint.
+- Rationale: Health states used padded pills, journal types used small rounded
+  rectangles without borders, and agent identity badges repeated the same
+  micro-pill geometry five times. One primitive makes metadata recognizable
+  across surfaces while preserving Torque's dense agent grid.
+- Scope: `static/styles/components.css`, agent-card identity/class badges,
+  Agent-panel journal entry types, and Health supervisor/coverage states.
+- Constraints: Pills remain appropriate for short metadata. Interactive filter
+  chips, presets, tabs, actions, and compound status-bar controls are not badges
+  and retain their own semantics and geometry. Board labels, profile badges,
+  history/events, and remaining count indicators are follow-up migrations.
+- Verification: `tests/frontend_components.test.js` protects shared geometry,
+  semantic variants, canonical consumer markup, and removal of duplicated badge
+  geometry. Existing Agent-panel and Health suites protect rendered content;
+  live checks verify agent-card and Health badge geometry and console cleanliness.
 
 ## Decision entry template
 

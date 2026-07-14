@@ -383,9 +383,9 @@ function _healthMetricsLiveHtml() {
   ].join('');
 
   var overheadHtml = '<div class="health-metrics-overhead">'
-    + '<span>' + _healthEsc(tickDetail) + '</span>'
-    + '<span>meter ' + _healthMetricFormat(overhead.agg_tick_ms, 2, 'ms') + '</span>'
-    + '<span>overhead ' + _healthMetricFormat(overhead.collect_overhead_pct, 2, '%') + '</span>'
+    + '<span class="ui-badge ui-badge--neutral">' + _healthEsc(tickDetail) + '</span>'
+    + '<span class="ui-badge ui-badge--neutral">meter ' + _healthMetricFormat(overhead.agg_tick_ms, 2, 'ms') + '</span>'
+    + '<span class="ui-badge ui-badge--neutral">overhead ' + _healthMetricFormat(overhead.collect_overhead_pct, 2, '%') + '</span>'
     + '</div>';
   return '<div class="health-card-grid health-metrics-grid">' + cards + '</div>' + overheadHtml;
 }
@@ -405,10 +405,10 @@ function _healthMetricsHistoryHtml() {
   var retention = (payload.perf && payload.perf.retention) || {};
   var notes = Array.isArray(payload.notes) ? payload.notes : [];
   var html = '<div class="health-metrics-history-meta">'
-    + '<span>' + _healthEsc(payload.window || healthState.window) + ' · ' + _healthEsc(bucketLabel) + ' metrics history</span>'
-    + '<span>' + _healthEsc(payload.group || 'All groups') + '</span>';
+    + '<span class="ui-badge ui-badge--neutral">' + _healthEsc(payload.window || healthState.window) + ' · ' + _healthEsc(bucketLabel) + ' metrics history</span>'
+    + '<span class="ui-badge ui-badge--neutral">' + _healthEsc(payload.group || 'All groups') + '</span>';
   if (retention.kept_seconds) {
-    html += '<span>retention ' + _healthEsc(_healthFormatDuration(retention.kept_seconds)) + '</span>';
+    html += '<span class="ui-badge ui-badge--neutral">retention ' + _healthEsc(_healthFormatDuration(retention.kept_seconds)) + '</span>';
   }
   html += '</div>';
   if (notes.length) {
@@ -449,14 +449,14 @@ function _healthRuntimeSupervisor() {
 function _healthSupervisorStateInfo(supervisor) {
   var raw = supervisor ? String(supervisor.state || '').trim().toLowerCase() : '';
   var states = {
-    up: { label: 'up', className: 'health-pill' },
-    degraded: { label: 'degraded', className: 'health-pill health-pill-warn' },
-    restarting: { label: 'restarting', className: 'health-pill health-pill-warn' },
-    down: { label: 'down', className: 'health-pill health-pill-danger' },
-    unavailable: { label: 'unavailable', className: 'health-pill health-pill-neutral' },
-    na_profile: { label: 'n/a profile', className: 'health-pill health-pill-neutral' },
+    up: { label: 'up', className: 'health-pill ui-badge ui-badge--success' },
+    degraded: { label: 'degraded', className: 'health-pill ui-badge ui-badge--warning' },
+    restarting: { label: 'restarting', className: 'health-pill ui-badge ui-badge--warning' },
+    down: { label: 'down', className: 'health-pill ui-badge ui-badge--danger' },
+    unavailable: { label: 'unavailable', className: 'health-pill ui-badge ui-badge--neutral' },
+    na_profile: { label: 'n/a profile', className: 'health-pill ui-badge ui-badge--neutral' },
   };
-  return states[raw] || { label: 'unknown', className: 'health-pill health-pill-neutral' };
+  return states[raw] || { label: 'unknown', className: 'health-pill ui-badge ui-badge--neutral' };
 }
 
 function _healthSupervisorStatusText() {
@@ -527,8 +527,8 @@ function _healthSupervisorLiveHtml() {
   ].join('');
   return '<div class="health-metrics-overhead health-supervisor-meta">'
     + '<span class="' + _healthEsc(info.className) + '">' + _healthEsc(info.label) + '</span>'
-    + '<span>' + _healthEsc(supervisor.connected ? 'connected' : 'disconnected') + '</span>'
-    + '<span>pid ' + _healthEsc(supervisor.supervisor_pid == null ? '—' : supervisor.supervisor_pid) + '</span>'
+    + '<span class="ui-badge ui-badge--neutral">' + _healthEsc(supervisor.connected ? 'connected' : 'disconnected') + '</span>'
+    + '<span class="ui-badge ui-badge--neutral">pid ' + _healthEsc(supervisor.supervisor_pid == null ? '—' : supervisor.supervisor_pid) + '</span>'
     + '</div>'
     + '<div class="health-card-grid health-metrics-grid health-supervisor-grid">' + cards + '</div>';
 }
@@ -876,7 +876,7 @@ function _healthCoverageHtml(payload) {
   var notes = Array.isArray(payload && payload.notes) ? payload.notes : [];
   var partial = coverage.partial ? 'Partial' : 'Complete';
   var html = '<div class="health-coverage">'
-    + '<span class="health-pill ' + (coverage.partial ? 'health-pill-warn' : '') + '">'
+    + '<span class="health-pill ui-badge ' + (coverage.partial ? 'ui-badge--warning' : 'ui-badge--success') + '">'
     + _healthEsc(partial) + ' dispatch-shape coverage</span>'
     + '<span>' + _healthEsc(coverage.dispatch_tool_entries || 0) + ' tool entries / '
     + _healthEsc(coverage.dispatch_events || 0) + ' dispatch events</span>'

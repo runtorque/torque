@@ -937,14 +937,14 @@ function _agentPanelArchitectJournalEntryHtml(entry, index) {
   entry = entry || {};
   var anchorKey = 'architect-journal-' + String(entry.id || index);
   var entryType = String(entry.type || 'observation');
-  var typeClass = 'agent-panel-badge-' + entryType.replace(/[^a-z0-9_-]/gi, '').toLowerCase();
+  var typeClass = _agentPanelJournalBadgeClass(entryType);
   var canExpand = _agentPanelJournalTextExpandable(entry.entry);
   var html = '<div class="agent-panel-entry'
     + (canExpand ? ' agent-panel-journal-collapsible' : '')
     + '" data-agent-panel-anchor="'
     + _agentPanelEsc(anchorKey) + '">';
   html += '<div class="agent-panel-entry-header">';
-  html += '<span class="agent-panel-badge ' + _agentPanelEsc(typeClass) + '">'
+  html += '<span class="' + _agentPanelEsc(typeClass) + '">'
     + _agentPanelEsc(entryType) + '</span>';
   html += '<span class="agent-panel-entry-time">'
     + _agentPanelEsc(_agentPanelTimestamp(entry.timestamp)) + '</span>';

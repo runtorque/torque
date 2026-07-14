@@ -1040,7 +1040,7 @@ function renderAgentCell(a, options) {
   h += _renderAgentProviderBadge(a.agent_type, 'cell-provider');
   h += _renderAgentContextMeter(a);
   const badge = _agentCardKindBadge(a, _isDismissed);
-  h += '<div class="agent-card-kind ' + esc(badge.cls) + '"'
+  h += '<div class="agent-card-kind ui-badge ui-badge--micro ' + esc(badge.cls) + '"'
     + (badge.title ? ' title="' + esc(badge.title) + '"' : '')
     + '>' + esc(badge.label) + '</div>';
   if (childCount > 0) {

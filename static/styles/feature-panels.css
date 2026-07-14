@@ -138,25 +138,7 @@
   word-break: break-word;
 }
 .health-pill {
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 3px 8px;
-  color: var(--green);
-  background: color-mix(in srgb, var(--green) 12%, transparent);
-}
-.health-pill-warn {
-  color: var(--amber);
-  background: color-mix(in srgb, var(--amber) 12%, transparent);
-}
-.health-pill-danger {
-  color: var(--red);
-  background: color-mix(in srgb, var(--red) 12%, transparent);
-}
-.health-pill-neutral {
-  color: var(--text-dim);
-  background: color-mix(in srgb, var(--bg-surface) 70%, transparent);
+  text-transform: lowercase;
 }
 .health-notes {
   margin: 8px 0 0;
@@ -230,13 +212,6 @@
   margin-top: 10px;
   color: var(--text-dim);
   font-size: 11px;
-}
-.health-metrics-overhead span,
-.health-metrics-history-meta span {
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 3px 8px;
-  background: color-mix(in srgb, var(--bg-surface) 70%, transparent);
 }
 .health-metrics-history {
   margin-top: 10px;

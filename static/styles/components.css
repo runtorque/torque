@@ -2,6 +2,80 @@
 /* Shared components                                                   */
 /* ------------------------------------------------------------------ */
 
+/* Badges and semantic metadata
+ *
+ * Badges annotate nearby content; they do not behave like buttons or
+ * navigation. The compact variants preserve Torque's dense card geometry
+ * without creating a second color or shape grammar.
+ */
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  min-height: 18px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  background: var(--bg-cell);
+  font-family: var(--font);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.25;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.ui-badge--compact {
+  min-height: 14px;
+  padding: 0 5px;
+  font-size: 8px;
+}
+
+.ui-badge--micro {
+  min-height: 12px;
+  padding: 0 4px;
+  font-size: 6.5px;
+  line-height: 1.4;
+}
+
+.ui-badge--neutral {
+  color: var(--text-dim);
+  border-color: color-mix(in srgb, var(--text-dim) 24%, var(--border));
+  background: color-mix(in srgb, var(--text-dim) 10%, transparent);
+}
+
+.ui-badge--accent {
+  color: var(--accent);
+  border-color: var(--accent-muted);
+  background: var(--accent-soft);
+}
+
+.ui-badge--success {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 32%, var(--border));
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+}
+
+.ui-badge--warning {
+  color: var(--amber);
+  border-color: color-mix(in srgb, var(--amber) 34%, var(--border));
+  background: color-mix(in srgb, var(--amber) 12%, transparent);
+}
+
+.ui-badge--danger {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 34%, var(--border));
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+}
+
+.ui-badge--count {
+  min-width: 18px;
+  padding-inline: 5px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Panel headers and toolbars
  *
  * Headers keep identity copy on the leading edge and local actions on the

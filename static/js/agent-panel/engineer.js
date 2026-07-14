@@ -11,7 +11,8 @@ function _renderEngineerJournal(agent) {
     var entry = entries[i] || {};
     html += '<div class="agent-panel-entry">';
     html += '<div class="agent-panel-entry-header">';
-    html += '<span class="agent-panel-badge">' + _agentPanelEsc(entry.type || 'note') + '</span>';
+    html += '<span class="' + _agentPanelJournalBadgeClass(entry.type || 'note') + '">'
+      + _agentPanelEsc(entry.type || 'note') + '</span>';
     html += '<span class="agent-panel-entry-time">' + _agentPanelEsc(_agentPanelTimeAgo(entry.timestamp)) + '</span>';
     html += '</div>';
     html += '<div class="agent-panel-entry-text">' + _agentPanelEsc(entry.entry || '') + '</div>';
