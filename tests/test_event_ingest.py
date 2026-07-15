@@ -136,6 +136,28 @@ class EventIngestStoreTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_append_many_preserves_order_and_deduplicates_in_one_batch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = EventIngestStore(Path(tmp) / "ingest.db").init()
+            try:
+                first = store.append({"n": 1}, "k1")
+                batched = store.append_many([
+                    {"event": {"n": 2}, "idempotency_key": "k2"},
+                    {"event": {"n": 1}, "idempotency_key": "k1"},
+                    {"event": {"n": 3}, "idempotency_key": "k3"},
+                ])
+                self.assertEqual(
+                    [result["duplicate"] for result in batched],
+                    [False, True, False],
+                )
+                self.assertEqual(batched[1]["cursor"], first["cursor"])
+                self.assertEqual(
+                    [row["event"]["n"] for row in store.drain(limit=10)["events"]],
+                    [1, 2, 3],
+                )
+            finally:
+                store.close()
+
     def test_unacked_events_survive_store_reopen(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "ingest.db"
@@ -542,7 +564,7 @@ class EventIngestProtocolTests(unittest.IsolatedAsyncioTestCase):
         await self.h.stop()
 
     async def test_protocol_version_bumped_for_query_and_configure_ops(self):
-        self.assertGreaterEqual(PROTOCOL_VERSION, 2)
+        self.assertGreaterEqual(PROTOCOL_VERSION, 3)
 
     async def test_ping_append_drain_ack_status(self):
         reader, writer = await _open_client(self.h.socket_path)
@@ -562,6 +584,18 @@ class EventIngestProtocolTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(appended.get("type"), "ok")
             self.assertEqual(appended.get("op"), "append")
 
+            await write_frame(writer, {
+                "op": "append_many",
+                "items": [
+                    {"event": {"payload": "two"}, "idempotency_key": "wire-2"},
+                    {"event": {"payload": "three"}, "idempotency_key": "wire-3"},
+                ],
+            })
+            appended_many = await read_frame(reader)
+            self.assertEqual(appended_many.get("type"), "ok")
+            self.assertEqual(appended_many.get("op"), "append_many")
+            self.assertEqual(len(appended_many.get("results", [])), 2)
+
             await write_frame(writer, {"op": "drain", "since": 0, "limit": 10})
             drained = await read_frame(reader)
             self.assertEqual(drained.get("type"), "drain")
@@ -569,7 +603,7 @@ class EventIngestProtocolTests(unittest.IsolatedAsyncioTestCase):
 
             await write_frame(writer, {
                 "op": "ack",
-                "up_to": drained["events"][0]["cursor"],
+                "up_to": drained["events"][-1]["cursor"],
             })
             acked = await read_frame(reader)
             self.assertEqual(acked.get("type"), "ok")
@@ -733,14 +767,37 @@ class EventIngestClientAndDrainerTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await client.aclose()
 
+    async def test_concurrent_client_appends_share_one_durable_batch(self):
+        client = EventIngestClient(
+            self.h.socket_path,
+            reconnect_delay=0.05,
+            append_batch_window=0.02,
+        )
+        await client.connect()
+        try:
+            with mock.patch.object(
+                self.h.store,
+                "append_many",
+                wraps=self.h.store.append_many,
+            ) as append_many:
+                results = await asyncio.gather(*[
+                    client.append({"payload": index}, idempotency_key=f"batch-{index}")
+                    for index in range(12)
+                ])
+            self.assertEqual(append_many.call_count, 1)
+            self.assertEqual(len({result["cursor"] for result in results}), 12)
+            self.assertTrue(all(result["type"] == "ok" for result in results))
+        finally:
+            await client.aclose()
+
     async def test_immediate_append_during_pending_background_reconnect(self):
-        original_append = self.h.store.append
+        original_append = self.h.store.append_many
 
         def slow_append(*args, **kwargs):
             time.sleep(0.25)
             return original_append(*args, **kwargs)
 
-        self.h.store.append = slow_append
+        self.h.store.append_many = slow_append
         client = EventIngestClient(self.h.socket_path, reconnect_delay=0.05)
         await client.connect()
         try:

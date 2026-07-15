@@ -32,7 +32,7 @@ from .event_ingest_db import (
     EventIngestStore,
 )
 
-PROTOCOL_VERSION = 2
+PROTOCOL_VERSION = 3
 DEFAULT_SOCKET_NAME = "event_ingest.sock"
 DEFAULT_PID_FILE_NAME = "event_ingest.pid"
 DEFAULT_LOG_FILE_NAME = "event_ingest.log"
@@ -45,6 +45,9 @@ MAX_FRAME_BYTES = int(os.environ.get(
     "TORQUE_EVENT_INGEST_MAX_FRAME_BYTES",
     str(4 * 1024 * 1024),
 ))
+MAX_APPEND_BATCH = max(1, int(os.environ.get(
+    "TORQUE_EVENT_INGEST_MAX_APPEND_BATCH", "256"
+)))
 
 log = logging.getLogger("torque.event_ingest_daemon")
 
@@ -144,6 +147,8 @@ class EventIngestDaemon:
             })
         elif op == "append":
             await self._op_append(msg, writer)
+        elif op == "append_many":
+            await self._op_append_many(msg, writer)
         elif op == "drain":
             await self._op_drain(msg, writer)
         elif op == "ack":
@@ -196,6 +201,50 @@ class EventIngestDaemon:
             limit=limit,
         )
         await write_frame(writer, {"type": "drain", **result})
+
+    async def _op_append_many(
+        self,
+        msg: dict,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        items = msg.get("items")
+        if not isinstance(items, list) or not items:
+            await write_frame(writer, {
+                "type": "error",
+                "code": "protocol_error",
+                "message": "append_many requires a non-empty items array",
+            })
+            return
+        if len(items) > MAX_APPEND_BATCH:
+            await write_frame(writer, {
+                "type": "error",
+                "code": "protocol_error",
+                "message": (
+                    f"append_many batch exceeds maximum of {MAX_APPEND_BATCH}"
+                ),
+            })
+            return
+        for item in items:
+            if (
+                not isinstance(item, dict)
+                or not str(item.get("idempotency_key") or "").strip()
+                or not isinstance(item.get("event"), dict)
+            ):
+                await write_frame(writer, {
+                    "type": "error",
+                    "code": "protocol_error",
+                    "message": (
+                        "append_many items require event objects and "
+                        "idempotency_key values"
+                    ),
+                })
+                return
+        results = await asyncio.to_thread(self.store.append_many, items)
+        await write_frame(writer, {
+            "type": "ok",
+            "op": "append_many",
+            "results": results,
+        })
 
     async def _op_ack(
         self,

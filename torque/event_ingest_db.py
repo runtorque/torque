@@ -337,69 +337,85 @@ class EventIngestStore:
         now: float | None = None,
     ) -> dict[str, Any]:
         """Append ``event`` unless ``idempotency_key`` already exists."""
-        key = str(idempotency_key or "").strip()
-        if not key:
-            raise ValueError("idempotency_key is required")
-        if not isinstance(event, dict):
-            raise ValueError("event envelope must be an object")
-        event = redact_event_for_mcp_call_log(
-            event,
-            args_capture=self.args_capture,
-            full_capture_tools=self.full_capture_tools,
-        )
-        raw = event.get("raw") if isinstance(event, dict) else {}
-        if not isinstance(raw, dict):
-            raw = {}
-        headers = event.get("headers") if isinstance(event, dict) else {}
-        if not isinstance(headers, dict):
-            headers = {}
-        cell_id = str(headers.get("X-Torque-Cell-Id") or "")
-        tool_name = str(raw.get("tool_name") or raw.get("name") or "")
-        hook_event_name = str(raw.get("hook_event_name") or raw.get("type") or "")
-        session_id = str(raw.get("session_id") or "")
-        event_json = json.dumps(event, separators=(",", ":"), sort_keys=True)
+        return self.append_many([{
+            "event": event,
+            "idempotency_key": idempotency_key,
+        }], now=now)[0]
+
+    def append_many(
+        self,
+        items: list[dict[str, Any]],
+        *,
+        now: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Durably append a batch in one transaction, preserving input order."""
+        if not isinstance(items, list) or not items:
+            raise ValueError("append batch must contain at least one item")
         appended_at = float(time.time() if now is None else now)
+        prepared: list[tuple[str, str, float, str, str, str, str]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                raise ValueError("append batch items must be objects")
+            key = str(item.get("idempotency_key") or "").strip()
+            event = item.get("event")
+            if not key:
+                raise ValueError("idempotency_key is required")
+            if not isinstance(event, dict):
+                raise ValueError("event envelope must be an object")
+            event = redact_event_for_mcp_call_log(
+                event,
+                args_capture=self.args_capture,
+                full_capture_tools=self.full_capture_tools,
+            )
+            raw = event.get("raw") if isinstance(event, dict) else {}
+            if not isinstance(raw, dict):
+                raw = {}
+            headers = event.get("headers") if isinstance(event, dict) else {}
+            if not isinstance(headers, dict):
+                headers = {}
+            prepared.append((
+                key,
+                json.dumps(event, separators=(",", ":"), sort_keys=True),
+                appended_at,
+                str(headers.get("X-Torque-Cell-Id") or ""),
+                str(raw.get("tool_name") or raw.get("name") or ""),
+                str(raw.get("hook_event_name") or raw.get("type") or ""),
+                str(raw.get("session_id") or ""),
+            ))
+
         with self._lock:
             conn = self.conn
             try:
                 conn.execute("BEGIN IMMEDIATE")
-                row = conn.execute(
-                    "SELECT cursor FROM events WHERE idempotency_key = ?",
-                    (key,),
-                ).fetchone()
-                if row is not None:
-                    conn.execute("COMMIT")
-                    return {
-                        "cursor": int(row["cursor"]),
+                results = []
+                for row_values in prepared:
+                    cur = conn.execute(
+                        "INSERT OR IGNORE INTO events("
+                        "idempotency_key, event_json, appended_at, "
+                        "cell_id, tool_name, hook_event_name, session_id"
+                        ") VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        row_values,
+                    )
+                    if cur.rowcount:
+                        results.append({
+                            "cursor": int(cur.lastrowid),
+                            "duplicate": False,
+                        })
+                        continue
+                    existing = conn.execute(
+                        "SELECT cursor FROM events WHERE idempotency_key = ?",
+                        (row_values[0],),
+                    ).fetchone()
+                    if existing is None:
+                        raise RuntimeError(
+                            "idempotent insert was ignored without an existing row"
+                        )
+                    results.append({
+                        "cursor": int(existing["cursor"]),
                         "duplicate": True,
-                    }
-                cur = conn.execute(
-                    "INSERT INTO events("
-                    "idempotency_key, event_json, appended_at, "
-                    "cell_id, tool_name, hook_event_name, session_id"
-                    ") VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        key,
-                        event_json,
-                        appended_at,
-                        cell_id,
-                        tool_name,
-                        hook_event_name,
-                        session_id,
-                    ),
-                )
-                cursor = int(cur.lastrowid)
+                    })
                 conn.execute("COMMIT")
-                return {"cursor": cursor, "duplicate": False}
-            except sqlite3.IntegrityError:
-                conn.execute("ROLLBACK")
-                row = conn.execute(
-                    "SELECT cursor FROM events WHERE idempotency_key = ?",
-                    (key,),
-                ).fetchone()
-                if row is None:
-                    raise
-                return {"cursor": int(row["cursor"]), "duplicate": True}
+                return results
             except Exception:
                 conn.execute("ROLLBACK")
                 raise

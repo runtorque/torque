@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
+import os
 import uuid
+from collections import deque
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
@@ -19,6 +22,9 @@ from .event_ingest_daemon import (
 log = logging.getLogger("torque.event_ingest_client")
 
 _RESPONSE_TYPES = {"ok", "error", "pong", "drain", "status", "query"}
+_DEFAULT_APPEND_BATCH_WINDOW = 0.002
+_DEFAULT_APPEND_BATCH_SIZE = 64
+_DEFAULT_APPEND_BATCH_BYTES = 3 * 1024 * 1024
 
 
 def _record_trimmed_ack_counter(response: dict) -> None:
@@ -63,6 +69,9 @@ class EventIngestClient:
         data_dir: Path | None = None,
         connect_timeout: float = 2.0,
         reconnect_delay: float = 0.25,
+        append_batch_window: float | None = None,
+        append_batch_size: int | None = None,
+        append_batch_bytes: int | None = None,
         ensure_running_func: Optional[Callable[..., Path]] = None,
     ):
         self.data_dir = Path(data_dir) if data_dir is not None else None
@@ -88,16 +97,58 @@ class EventIngestClient:
         ] = None
         self._last_daemon_pid: Optional[int] = None
         self._connection_generation = 0
+        self._closing = False
+        self._append_batch_window = max(0.0, float(
+            append_batch_window
+            if append_batch_window is not None
+            else os.environ.get(
+                "TORQUE_EVENT_INGEST_BATCH_WINDOW",
+                _DEFAULT_APPEND_BATCH_WINDOW,
+            )
+        ))
+        self._append_batch_size = min(event_ingest_daemon.MAX_APPEND_BATCH, max(1, int(
+            append_batch_size
+            if append_batch_size is not None
+            else os.environ.get(
+                "TORQUE_EVENT_INGEST_BATCH_SIZE",
+                _DEFAULT_APPEND_BATCH_SIZE,
+            )
+        )))
+        self._append_batch_bytes = max(1024, int(
+            append_batch_bytes
+            if append_batch_bytes is not None
+            else os.environ.get(
+                "TORQUE_EVENT_INGEST_BATCH_BYTES",
+                _DEFAULT_APPEND_BATCH_BYTES,
+            )
+        ))
+        self._append_pending: deque[
+            tuple[dict, str, asyncio.Future, int]
+        ] = deque()
+        self._append_flush_handle: Optional[asyncio.TimerHandle] = None
+        self._append_flush_task: Optional[asyncio.Task] = None
 
     async def connect(self) -> dict:
         """Open the socket, verify protocol version, return pong payload."""
         self._closed = False
+        self._closing = False
         async with self._request_lock:
             pong = await self._connect_once()
             self._last_daemon_pid = pong.get("pid")
             return pong
 
     async def aclose(self) -> None:
+        self._closing = True
+        if self._append_flush_handle is not None:
+            self._append_flush_handle.cancel()
+            self._append_flush_handle = None
+        if self._append_pending and (
+            self._append_flush_task is None or self._append_flush_task.done()
+        ):
+            self._start_append_flush()
+        if self._append_flush_task and not self._append_flush_task.done():
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._append_flush_task
         self._closed = True
         self._ready.clear()
         if self._reconnect_task and not self._reconnect_task.done():
@@ -114,6 +165,11 @@ class EventIngestClient:
         if self._pending and not self._pending.done():
             self._pending.set_exception(EventIngestUnavailable("client closed"))
         self._pending = None
+        error = EventIngestUnavailable("client closed")
+        for _event, _key, future, _size in self._append_pending:
+            if not future.done():
+                future.set_exception(error)
+        self._append_pending.clear()
 
     async def append(
         self,
@@ -121,13 +177,125 @@ class EventIngestClient:
         *,
         idempotency_key: str | None = None,
     ) -> dict:
-        """Durably append one event envelope, retrying once after reconnect."""
+        """Durably append one event, sharing a commit with concurrent callers."""
+        if self._closed or self._closing:
+            raise EventIngestUnavailable("client closed")
         key = str(idempotency_key or uuid.uuid4().hex)
-        return await self._call_with_reconnect_retry(
-            "append",
-            event=event,
-            idempotency_key=key,
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        estimated_bytes = len(json.dumps(
+            {"event": event, "idempotency_key": key},
+            separators=(",", ":"),
+        ).encode("utf-8")) + 64
+        self._append_pending.append((event, key, future, estimated_bytes))
+        self._schedule_append_flush()
+        return await asyncio.shield(future)
+
+    def _schedule_append_flush(self) -> None:
+        if self._append_flush_task and not self._append_flush_task.done():
+            return
+        if self._append_flush_handle is not None:
+            if len(self._append_pending) < self._append_batch_size:
+                return
+            self._append_flush_handle.cancel()
+            self._append_flush_handle = None
+        loop = asyncio.get_running_loop()
+        if (
+            len(self._append_pending) >= self._append_batch_size
+            or self._append_batch_window <= 0
+        ):
+            loop.call_soon(self._start_append_flush)
+        else:
+            self._append_flush_handle = loop.call_later(
+                self._append_batch_window,
+                self._start_append_flush,
+            )
+
+    def _start_append_flush(self) -> None:
+        self._append_flush_handle = None
+        if self._closed or not self._append_pending:
+            return
+        if self._append_flush_task and not self._append_flush_task.done():
+            return
+        self._append_flush_task = asyncio.create_task(
+            self._flush_append_batches(),
+            name="event-ingest-append-batch",
         )
+
+    def _take_append_batch(self) -> list[tuple[dict, str, asyncio.Future, int]]:
+        batch = []
+        batch_bytes = 64
+        while self._append_pending and len(batch) < self._append_batch_size:
+            item = self._append_pending[0]
+            if batch and batch_bytes + item[3] > self._append_batch_bytes:
+                break
+            batch.append(self._append_pending.popleft())
+            batch_bytes += item[3]
+        return batch
+
+    async def _flush_append_batches(self) -> None:
+        try:
+            while self._append_pending:
+                batch = self._take_append_batch()
+                if not batch:
+                    break
+                try:
+                    items = [{
+                            "event": event,
+                            "idempotency_key": key,
+                        } for event, key, _future, _size in batch]
+                    oversized_single = (
+                        len(batch) == 1
+                        and batch[0][3] > self._append_batch_bytes
+                    )
+                    if oversized_single:
+                        response = await self._call_with_reconnect_retry(
+                            "append",
+                            **items[0],
+                        )
+                        results = [{
+                            "cursor": response.get("cursor"),
+                            "duplicate": bool(response.get("duplicate")),
+                        }]
+                    else:
+                        response = await self._call_with_reconnect_retry(
+                            "append_many",
+                            items=items,
+                        )
+                    if (
+                        response.get("type") != "ok"
+                        or response.get("op")
+                        != ("append" if oversized_single else "append_many")
+                    ):
+                        raise EventIngestProtocolError(
+                            response.get("message")
+                            or f"invalid append_many response: {response!r}"
+                        )
+                    if not oversized_single:
+                        results = list(response.get("results") or [])
+                    if len(results) != len(batch):
+                        raise EventIngestProtocolError(
+                            "append_many result count does not match request"
+                        )
+                    profiling.recorder().observe(
+                        "event_ingest_batch_size", len(batch)
+                    )
+                except Exception as exc:
+                    for _event, _key, future, _size in batch:
+                        if not future.done():
+                            future.set_exception(exc)
+                    continue
+                for result, (_event, _key, future, _size) in zip(results, batch):
+                    if not future.done():
+                        future.set_result({
+                            "type": "ok",
+                            "op": "append",
+                            **dict(result or {}),
+                        })
+        finally:
+            self._append_flush_task = None
+            if self._append_pending and not self._closed:
+                self._schedule_append_flush()
 
     async def drain(self, *, since: int = 0, limit: int = 100) -> dict:
         return await self._call_with_reconnect_retry(
