@@ -30,6 +30,52 @@ class BehaviorOverlayService:
     def __init__(self, state: Any):
         self._state = state
 
+    def snapshot(self) -> tuple[dict, dict]:
+        """Return pending proposal summaries and active pointers for agents."""
+        proposals = {}
+        active_by_agent = {}
+        db = self._state.db
+        if not db:
+            return proposals, active_by_agent
+        try:
+            proposals = {
+                proposal["id"]: proposal_summary(proposal)
+                for proposal in self.list_behavior_overlay_proposals(limit=500)
+                if proposal.get("status") in {"proposed", "approved"}
+            }
+            load_all = getattr(db, "load_all_behavior_overlay_active", None)
+            if not callable(load_all):
+                for agent_id in self._state.agents:
+                    active = self.load_behavior_overlay_active(agent_id)
+                    if active:
+                        active_by_agent[agent_id] = dict(active)
+                return proposals, active_by_agent
+
+            active_rows = load_all(scope_kind="agent")
+            by_scope = {}
+            newest_by_agent = {}
+            for active in active_rows:
+                agent_id = str(
+                    active.get("scope_key", "")
+                    or active.get("agent_id", "")
+                    or ""
+                ).strip()
+                if not agent_id:
+                    continue
+                group = str(active.get("scope_group", "") or "").strip()
+                by_scope[(group, agent_id)] = active
+                newest_by_agent.setdefault(agent_id, active)
+            for agent_id, cell in self._state.agents.items():
+                active = (
+                    by_scope.get((str(cell.group or "").strip(), agent_id))
+                    or newest_by_agent.get(agent_id)
+                )
+                if active:
+                    active_by_agent[agent_id] = dict(active)
+        except Exception:
+            log.exception("Failed to load behavior overlay snapshot")
+        return proposals, active_by_agent
+
     def _behavior_scope_for_agent(self, agent_id: str) -> BehaviorOverlayScope:
         agent_id = str(agent_id or "").strip()
         cell = self._state.agents.get(agent_id)

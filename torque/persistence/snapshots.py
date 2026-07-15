@@ -8,6 +8,7 @@ from torque.db_board import (
     decode_auto_dispatch_queue_rows,
     decode_board_task_row,
 )
+from torque import profiling
 from torque.persistence.common import (
     GROUP_SETTINGS_BOOL_FIELDS as _GS_BOOL_FIELDS,
     GROUP_SETTINGS_JSON_FIELDS as _GS_JSON_FIELDS,
@@ -18,6 +19,21 @@ from torque.persistence.common import (
 
 class SnapshotPersistenceMixin:
     """Save and restore complete state snapshots at migration/startup boundaries."""
+
+    def save_agents(self, cells) -> None:
+        """Upsert multiple agent snapshots in one SQLite transaction."""
+        snapshots = list(cells or [])
+        if not snapshots:
+            return
+        with profiling.timer("sqlite_write_ms"), \
+                profiling.timer("sqlite_write_save_agents_ms"):
+            try:
+                for cell in snapshots:
+                    self._insert_agent_row(self._conn, cell)
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
 
     def backfill_agent_history(self):
         """Create history records for existing agents that lack them."""

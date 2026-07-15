@@ -543,7 +543,11 @@ class _QueuedAsyncDBWriter:
     def _worker_db_for(self) -> "TorqueDB":
         if self._worker_db is not None:
             return self._worker_db
-        db = TorqueDB(self._owner.db_path)
+        # Preserve the owner's concrete facade identity across importlib reloads
+        # in long-running test/dev processes.  Looking up the module-global
+        # TorqueDB here can otherwise instantiate a newer class than the one
+        # whose methods the caller patched or configured.
+        db = type(self._owner)(self._owner.db_path)
         db._conn = sqlite3.connect(
             str(self._owner.db_path),
             check_same_thread=False,
@@ -788,21 +792,6 @@ class TorqueDB(
                 profiling.timer("sqlite_write_save_agent_ms"):
             self._insert_agent_row(self._conn, cell)
             self._conn.commit()
-
-    def save_agents(self, cells) -> None:
-        """Upsert multiple agent snapshots in one SQLite transaction."""
-        snapshots = list(cells or [])
-        if not snapshots:
-            return
-        with profiling.timer("sqlite_write_ms"), \
-                profiling.timer("sqlite_write_save_agents_ms"):
-            try:
-                for cell in snapshots:
-                    self._insert_agent_row(self._conn, cell)
-                self._conn.commit()
-            except Exception:
-                self._conn.rollback()
-                raise
 
     def save_agent_deferred(self, cell) -> None:
         """Persist an agent off-loop when called from asyncio code.

@@ -42,7 +42,6 @@ from .behavior_overlay import (
     lint_overlay_text,
     overlay_text_bytes,
     overlay_text_sha256,
-    proposal_summary,
     render_behavior_overlay_block,
     validate_overlay_text,
     version_summary,
@@ -3550,56 +3549,11 @@ class MatrixState(
 
     # -- Serialization ------------------------------------------------------
 
-    def _behavior_overlay_snapshot(self) -> tuple[dict, dict]:
-        """Return pending proposal summaries and active pointers for agents."""
-        behavior_overlay_proposals = {}
-        behavior_overlay_active = {}
-        if not self.db:
-            return behavior_overlay_proposals, behavior_overlay_active
-        try:
-            behavior_overlay_proposals = {
-                proposal["id"]: proposal_summary(proposal)
-                for proposal in self.list_behavior_overlay_proposals(limit=500)
-                if proposal.get("status") in {"proposed", "approved"}
-            }
-            load_all = getattr(self.db, "load_all_behavior_overlay_active", None)
-            if not callable(load_all):
-                for agent_id in self.agents:
-                    active = self.load_behavior_overlay_active(agent_id)
-                    if active:
-                        behavior_overlay_active[agent_id] = dict(active)
-                return behavior_overlay_proposals, behavior_overlay_active
-
-            active_rows = load_all(scope_kind="agent")
-            by_scope = {}
-            newest_by_agent = {}
-            for active in active_rows:
-                agent_id = str(
-                    active.get("scope_key", "")
-                    or active.get("agent_id", "")
-                    or ""
-                ).strip()
-                if not agent_id:
-                    continue
-                group = str(active.get("scope_group", "") or "").strip()
-                by_scope[(group, agent_id)] = active
-                newest_by_agent.setdefault(agent_id, active)
-            for agent_id, cell in self.agents.items():
-                active = (
-                    by_scope.get((str(cell.group or "").strip(), agent_id))
-                    or newest_by_agent.get(agent_id)
-                )
-                if active:
-                    behavior_overlay_active[agent_id] = dict(active)
-        except Exception:
-            log.exception("Failed to load behavior overlay snapshot")
-        return behavior_overlay_proposals, behavior_overlay_active
-
     def to_dict(self) -> dict:
         decisions = {}
         pending_hires = {}
         behavior_overlay_proposals, behavior_overlay_active = (
-            self._behavior_overlay_snapshot()
+            self._behavior_overlay_service.snapshot()
         )
         if self.db:
             try:
@@ -3930,7 +3884,7 @@ class MatrixState(
         slices with explicit lazy-load commands after the socket is ready.
         """
         behavior_overlay_proposals, behavior_overlay_active = (
-            self._behavior_overlay_snapshot()
+            self._behavior_overlay_service.snapshot()
         )
         return {
             "snapshot_protocol": COMPACT_SNAPSHOT_PROTOCOL,
