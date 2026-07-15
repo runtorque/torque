@@ -487,6 +487,12 @@ the rule is intentionally global and documented here.
 
 ## Standardization inventory
 
+The first component-standardization pass is complete as of 2026-07-15. Every
+listed family has a canonical primitive or an explicit semantic boundary, direct
+consumer opt-in, focused regression coverage, and live-browser evidence. The
+“Next concern” column is ongoing maintenance guidance, not unfinished migration
+scope.
+
 | Component family | Status | Next concern |
 |---|---|---|
 | Foundations and tokens | Standardized, literal audit complete | Tokenize repeated component semantics; keep feature geometry local |
@@ -1020,6 +1026,36 @@ the rule is intentionally global and documented here.
   tabs, and focus retention across workspace rebuilds. Live checks exercise
   keyboard switching in both dock zones through the server echo, representative
   state surfaces, status priority, and console cleanliness.
+
+### D-022 — The first component-standardization baseline is complete
+
+- Date: 2026-07-15
+- Status: accepted
+- Decision: The standardization inventory is the maintained baseline for new
+  Torque UI work. Every listed family now has a canonical component grammar or
+  an explicit boundary that keeps it outside another family. New consumers opt
+  into those primitives directly; a genuinely new family updates this document,
+  its source contracts, and its live verification path in the same slice.
+- Rationale: Consolidation is only durable when completion means more than a
+  visual pass. The baseline couples documented semantics, direct markup intent,
+  regression contracts, rerender behavior, responsive behavior, and live
+  operator verification so later feature work cannot silently recreate the old
+  drift.
+- Scope: Foundations and tokens; group, panel, and feature navigation; segmented
+  controls; filters and presets; buttons; fields; cards; panel chrome; status
+  segments; menus and popovers; dialogs; badges and counts; content states; and
+  the accessibility and responsive rules in D-001 through D-021.
+- Constraints: “Complete” does not freeze the system or prohibit local feature
+  geometry. It means additions reuse the documented grammar, extend it
+  deliberately when semantics differ, and keep `DESIGN.md` current. Maintenance
+  concerns in the inventory remain active review rules rather than pending
+  migration work.
+- Verification: The closing audit ran all frontend Node contracts, the Python
+  frontend wrappers, and the full 2,447-test regression suite (82 expected
+  skips). Live standalone verification selected all six right-rail and all eight
+  bottom-dock panels, exercised persisted-layout keyboard focus, opened and
+  closed Settings and New Group, confirmed representative async state surfaces
+  and status priority, and finished with an empty browser console.
 
 ## Decision entry template
 

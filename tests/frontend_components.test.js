@@ -359,6 +359,33 @@ test('residual responsive audit preserves compact actions, priority, and direct 
   assert.match(health, /health-loading ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite"/);
 });
 
+test('design inventory records the completed component-standardization baseline', () => {
+  const design = source('DESIGN.md');
+  assert.match(design, /The first component-standardization pass is complete as of 2026-07-15/);
+  assert.match(design, /D-022 — The first component-standardization baseline is complete/);
+  const families = [
+    'Foundations and tokens',
+    'Group tabs',
+    'Panel tabs',
+    'Feature navigation tabs',
+    'Segmented controls',
+    'Filter chips and presets',
+    'Buttons',
+    'Inputs and selectors',
+    'Cards',
+    'Toolbars and panel headers',
+    'Status bar segments',
+    'Menus and popovers',
+    'Modals',
+    'Badges, tags, and status',
+    'Count indicators',
+    'Empty/loading/error states',
+  ];
+  for (const family of families) {
+    assert.ok(design.includes(`| ${family} | Standardized`), `${family} is not recorded as standardized`);
+  }
+});
+
 test('shared segmented controls define one compact selected-state primitive', () => {
   const css = source('static/styles/components.css');
 
