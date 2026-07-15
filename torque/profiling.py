@@ -45,6 +45,16 @@ def is_enabled() -> bool:
     return str(os.environ.get("TORQUE_PROFILE", "")).strip().lower() in _TRUE_VALUES
 
 
+def diagnostic_enabled() -> bool:
+    """Return whether intrusive asyncio/cProfile diagnostics are requested.
+
+    Counter and latency sampling remain available in normal performance runs,
+    but asyncio debug mode and process-wide cProfile materially perturb the
+    event loop they are intended to measure. Keep those tools opt-in.
+    """
+    return _env_truthy("TORQUE_PROFILE_DIAGNOSTIC")
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -164,6 +174,7 @@ class ProfileRecorder:
             }
             return {
                 "enabled": is_enabled(),
+                "diagnostic": diagnostic_enabled(),
                 "started_at": self.started_at_iso,
                 "uptime_sec": max(0.0, time.time() - self.started_at),
                 "counters": dict(sorted(self.counters.items())),
@@ -299,20 +310,28 @@ async def _loop_lag_probe(interval: float) -> None:
 
 
 def configure_asyncio(loop: asyncio.AbstractEventLoop | None = None) -> None:
-    """Enable asyncio debug, slow-callback capture, cProfile, and lag probe."""
+    """Configure low-overhead metrics and optional intrusive diagnostics."""
     global _LOOP_LAG_TASK
     if not is_enabled():
         return
     loop = loop or asyncio.get_running_loop()
-    loop.set_debug(True)
-    slow_ms = float(os.environ.get("TORQUE_PROFILE_SLOW_CALLBACK_MS", "50") or 50)
-    loop.slow_callback_duration = max(0.001, slow_ms / 1000.0)
-    _install_slow_callback_capture()
-    start_cprofile()
+    diagnostic = diagnostic_enabled()
+    if diagnostic:
+        loop.set_debug(True)
+        slow_ms = float(
+            os.environ.get("TORQUE_PROFILE_SLOW_CALLBACK_MS", "50") or 50
+        )
+        loop.slow_callback_duration = max(0.001, slow_ms / 1000.0)
+        _install_slow_callback_capture()
+        start_cprofile()
     if _LOOP_LAG_TASK is None or _LOOP_LAG_TASK.done():
         interval = float(os.environ.get("TORQUE_PROFILE_LOOP_LAG_INTERVAL", "0.05") or 0.05)
         _LOOP_LAG_TASK = loop.create_task(_loop_lag_probe(max(0.005, interval)))
     _RECORDER.event(
-        "asyncio_debug_enabled",
-        slow_callback_duration=loop.slow_callback_duration,
+        "profiling_configured",
+        diagnostic=diagnostic,
+        asyncio_debug=loop.get_debug(),
+        slow_callback_duration=(
+            loop.slow_callback_duration if diagnostic else None
+        ),
     )

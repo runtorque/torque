@@ -1,9 +1,16 @@
 import importlib.util
+import os
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
-from torque.profiling import ProfileRecorder, percentile, summarize
+from torque.profiling import (
+    ProfileRecorder,
+    diagnostic_enabled,
+    percentile,
+    summarize,
+)
 
 
 HARNESS_PATH = Path(__file__).resolve().parents[1] / "scripts" / "profile_harness.py"
@@ -29,6 +36,15 @@ class ProfilingMathTests(unittest.TestCase):
         self.assertIn("samples", snapshot)
         self.assertIn("counters", snapshot)
         self.assertIn("uptime_sec", snapshot)
+        self.assertIn("diagnostic", snapshot)
+
+    def test_intrusive_diagnostics_are_opt_in(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertFalse(diagnostic_enabled())
+        with mock.patch.dict(
+            os.environ, {"TORQUE_PROFILE_DIAGNOSTIC": "1"}, clear=True
+        ):
+            self.assertTrue(diagnostic_enabled())
 
 
 class HarnessReportTests(unittest.TestCase):
@@ -39,6 +55,14 @@ class HarnessReportTests(unittest.TestCase):
 
     def test_compare_reports_flags_regression_and_win(self):
         baseline = {
+            "config": {
+                "measurement_mode": "production",
+                "snapshot_protocol": "compact-v1",
+                "duration_sec": 1.0,
+                "event_rate_per_agent_sec": 2.5,
+                "event_mix": {"heartbeat": 1.0},
+                "python_version": "3.14.3",
+            },
             "runs": [{
                 "n": 10,
                 "hot_path": {
@@ -53,6 +77,7 @@ class HarnessReportTests(unittest.TestCase):
             }]
         }
         current = {
+            "config": dict(baseline["config"]),
             "runs": [{
                 "n": 10,
                 "hot_path": {
@@ -71,6 +96,38 @@ class HarnessReportTests(unittest.TestCase):
         statuses = {row["metric"]: row["status"] for row in comparison["rows"]}
         self.assertEqual(statuses["sqlite_write_p95_ms"], "regression")
         self.assertEqual(statuses["event_loop_lag_p95_ms"], "win")
+
+    def test_compare_reports_rejects_measurement_drift(self):
+        baseline = {
+            "config": {
+                "measurement_mode": "diagnostic",
+                "snapshot_protocol": "legacy",
+            },
+            "runs": [],
+        }
+        current = {
+            "config": {
+                "measurement_mode": "production",
+                "snapshot_protocol": "compact-v1",
+            },
+            "runs": [],
+        }
+        comparison = profile_harness.compare_reports(
+            baseline, current, threshold_pct=20
+        )
+        self.assertFalse(comparison["compatible"])
+        self.assertEqual(comparison["rows"], [])
+        self.assertEqual(
+            {item["key"] for item in comparison["mismatches"]},
+            {"measurement_mode", "snapshot_protocol"},
+        )
+
+    def test_parser_defaults_to_production_compact_measurement(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            args = profile_harness.build_parser().parse_args([])
+        self.assertFalse(args.diagnostic)
+        self.assertFalse(args.py_spy)
+        self.assertEqual(args.snapshot_protocol, "compact-v1")
 
     def test_markdown_contains_acceptance_columns(self):
         report = {

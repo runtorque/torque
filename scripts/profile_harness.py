@@ -12,6 +12,7 @@ import argparse
 import asyncio
 import json
 import os
+import platform
 import random
 import shutil
 import signal
@@ -41,6 +42,7 @@ from torque.profiling import percentile, summarize  # noqa: E402
 
 DEFAULT_MATRIX = "10,20,30"
 DEFAULT_EVENT_RATE = 2.5
+DEFAULT_SNAPSHOT_PROTOCOL = "compact-v1"
 DEFAULT_EVENT_MIX = {
     "heartbeat": 0.26,
     "progress": 0.24,
@@ -159,6 +161,7 @@ class ClientMetrics:
     event_post_latency_ms: list[float] = field(default_factory=list)
     first_ws_seq: int = 0
     last_ws_seq: int = 0
+    snapshot_protocol: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -170,6 +173,7 @@ class ClientMetrics:
             "ws_snapshots": self.ws_snapshots,
             "first_ws_seq": self.first_ws_seq,
             "last_ws_seq": self.last_ws_seq,
+            "snapshot_protocol": self.snapshot_protocol,
             "ws_message_bytes": summarize(self.ws_bytes),
             "ws_connect_latency_ms": summarize(self.ws_connect_latency_ms),
             "event_post_latency_ms": summarize(self.event_post_latency_ms),
@@ -189,7 +193,12 @@ class DaemonHandle:
         return f"http://127.0.0.1:{self.port}"
 
 
-def start_daemon(data_dir: Path, *, port: int | None = None) -> DaemonHandle:
+def start_daemon(
+    data_dir: Path,
+    *,
+    port: int | None = None,
+    diagnostic: bool = False,
+) -> DaemonHandle:
     port = port or free_port()
     data_dir.mkdir(parents=True, exist_ok=True)
     stdout_path = data_dir / "daemon.stdout.log"
@@ -202,6 +211,7 @@ def start_daemon(data_dir: Path, *, port: int | None = None) -> DaemonHandle:
         "TORQUE_PROFILE": "perf-harness",
         "TORQUE_PERF_PROFILE": "1",
         "TORQUE_PROFILE_ENABLED": "1",
+        "TORQUE_PROFILE_DIAGNOSTIC": "1" if diagnostic else "0",
         "TORQUE_PROFILE_SKIP_PTY": "1",
         "TORQUE_PROFILE_SLOW_CALLBACK_MS": env.get(
             "TORQUE_PROFILE_SLOW_CALLBACK_MS", "25"),
@@ -398,9 +408,16 @@ async def run_agent_events(session: aiohttp.ClientSession, base_url: str,
     await emit("session_end")
 
 
-async def collect_ws(base_url: str, stop_event: asyncio.Event,
-                     metrics: ClientMetrics) -> None:
+async def collect_ws(
+    base_url: str,
+    stop_event: asyncio.Event,
+    metrics: ClientMetrics,
+    *,
+    snapshot_protocol: str = DEFAULT_SNAPSHOT_PROTOCOL,
+) -> None:
     ws_url = base_url.replace("http://", "ws://") + "/ws"
+    if snapshot_protocol == DEFAULT_SNAPSHOT_PROTOCOL:
+        ws_url += "?compact=1"
     started = time.perf_counter()
     try:
         async with aiohttp.ClientSession() as session:
@@ -427,6 +444,9 @@ async def collect_ws(base_url: str, stop_event: asyncio.Event,
                             metrics.last_ws_seq = seq
                         if payload.get("type") == "state":
                             metrics.ws_snapshots += 1
+                            metrics.snapshot_protocol = str(
+                                payload.get("snapshot_protocol") or "legacy"
+                            )
                         elif payload.get("type") == "delta":
                             metrics.ws_deltas += 1
                     elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
@@ -524,7 +544,11 @@ async def run_single_n(n: int, args: argparse.Namespace, *, artifact_dir: Path) 
         tmp_ctx = tempfile.TemporaryDirectory(prefix=f"torque-perf-n{n}-")
         data_dir = Path(tmp_ctx.name)
 
-    handle = start_daemon(data_dir, port=args.port if len(args.matrix_values) == 1 else None)
+    handle = start_daemon(
+        data_dir,
+        port=args.port if len(args.matrix_values) == 1 else None,
+        diagnostic=bool(args.diagnostic),
+    )
     pyspy_proc = None
     pyspy_info: dict[str, Any] = {"available": False, "status": "disabled"}
     started_at = utc_now()
@@ -544,7 +568,12 @@ async def run_single_n(n: int, args: argparse.Namespace, *, artifact_dir: Path) 
             await post_json(session, f"{handle.base_url}/api/profile/reset", {})
             client_metrics = ClientMetrics()
             ws_stop = asyncio.Event()
-            ws_task = asyncio.create_task(collect_ws(handle.base_url, ws_stop, client_metrics))
+            ws_task = asyncio.create_task(collect_ws(
+                handle.base_url,
+                ws_stop,
+                client_metrics,
+                snapshot_protocol=args.snapshot_protocol,
+            ))
             await asyncio.sleep(float(args.ws_warmup))
             stop_at = time.monotonic() + duration
             await asyncio.gather(*[
@@ -564,6 +593,12 @@ async def run_single_n(n: int, args: argparse.Namespace, *, artifact_dir: Path) 
             await asyncio.sleep(float(args.broadcast_drain))
             ws_stop.set()
             await ws_task
+            if client_metrics.snapshot_protocol != args.snapshot_protocol:
+                raise RuntimeError(
+                    "snapshot protocol mismatch: requested "
+                    f"{args.snapshot_protocol!r}, received "
+                    f"{client_metrics.snapshot_protocol or 'no snapshot'!r}"
+                )
             profile_response = await get_json(
                 session,
                 f"{handle.base_url}/api/profile?cprofile_limit={int(args.cprofile_limit)}",
@@ -631,6 +666,35 @@ def run_index(report: dict[str, Any]) -> dict[int, dict[str, Any]]:
 
 def compare_reports(baseline: dict[str, Any], current: dict[str, Any],
                     *, threshold_pct: float) -> dict[str, Any]:
+    comparable_keys = (
+        "measurement_mode",
+        "snapshot_protocol",
+        "duration_sec",
+        "event_rate_per_agent_sec",
+        "event_mix",
+        "python_version",
+    )
+    baseline_config = baseline.get("config", {})
+    current_config = current.get("config", {})
+    mismatches = []
+    for key in comparable_keys:
+        baseline_value = baseline_config.get(key)
+        current_value = current_config.get(key)
+        if baseline_value != current_value:
+            mismatches.append({
+                "key": key,
+                "baseline": baseline_value,
+                "current": current_value,
+            })
+    if mismatches:
+        return {
+            "compatible": False,
+            "threshold_pct": threshold_pct,
+            "mismatches": mismatches,
+            "rows": [],
+            "regressions": [],
+            "wins": [],
+        }
     baseline_runs = run_index(baseline)
     current_runs = run_index(current)
     rows = []
@@ -678,17 +742,39 @@ def compare_reports(baseline: dict[str, Any], current: dict[str, Any],
             elif status == "win":
                 wins.append(row)
     return {
+        "compatible": True,
         "threshold_pct": threshold_pct,
+        "mismatches": [],
         "rows": rows,
         "regressions": regressions,
         "wins": wins,
     }
 
 
+def build_report_config(
+    args: argparse.Namespace,
+    runs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "matrix": [run["n"] for run in runs],
+        "duration_sec": float(args.duration),
+        "event_rate_per_agent_sec": float(args.rate),
+        "event_mix": parse_event_mix(args.event_mix),
+        "group": args.group,
+        "startup_timeout_sec": float(args.startup_timeout),
+        "regression_threshold_pct": float(args.regression_threshold),
+        "measurement_mode": "diagnostic" if args.diagnostic else "production",
+        "snapshot_protocol": args.snapshot_protocol,
+        "python_version": platform.python_version(),
+        "python_implementation": platform.python_implementation(),
+        "py_spy_enabled": not args.no_py_spy,
+    }
+
+
 def build_report(args: argparse.Namespace, runs: list[dict[str, Any]],
                  comparison: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "torque-perf-profile",
         "mode": args.mode,
         "generated_at": utc_now(),
@@ -698,15 +784,7 @@ def build_report(args: argparse.Namespace, runs: list[dict[str, Any]],
             "head": run_git(["rev-parse", "HEAD"]),
             "status_short": run_git(["status", "--short"]),
         },
-        "config": {
-            "matrix": [run["n"] for run in runs],
-            "duration_sec": float(args.duration),
-            "event_rate_per_agent_sec": float(args.rate),
-            "group": args.group,
-            "startup_timeout_sec": float(args.startup_timeout),
-            "regression_threshold_pct": float(args.regression_threshold),
-            "py_spy_enabled": not args.no_py_spy,
-        },
+        "config": build_report_config(args, runs),
         "runs": runs,
         "comparison": comparison or {},
     }
@@ -728,6 +806,9 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"- Repo: `{report.get('repo', {}).get('branch', '')}` @ `{report.get('repo', {}).get('head', '')[:12]}`",
         f"- Matrix: `{report.get('config', {}).get('matrix', [])}`",
         f"- Duration: `{report.get('config', {}).get('duration_sec', 0)}` sec/run",
+        f"- Measurement: `{report.get('config', {}).get('measurement_mode', '')}`",
+        f"- Snapshot protocol: `{report.get('config', {}).get('snapshot_protocol', '')}`",
+        f"- Python: `{report.get('config', {}).get('python_version', '')}`",
         "",
         "## Acceptance evidence",
         "",
@@ -756,9 +837,14 @@ def render_markdown(report: dict[str, Any]) -> str:
     for run in report.get("runs", []):
         lines.append(f"### N={run.get('n')}")
         lines.append("")
+        rows = run.get("server", {}).get("cprofile_top", [])[:10]
+        if not rows:
+            lines.append("Disabled in production measurement mode. Run with `--diagnostic` for cProfile and asyncio debug output.")
+            lines.append("")
+            continue
         lines.append("| rank | cumulative sec | total sec | calls | function |")
         lines.append("|---:|---:|---:|---:|---|")
-        for idx, row in enumerate(run.get("server", {}).get("cprofile_top", [])[:10], start=1):
+        for idx, row in enumerate(rows, start=1):
             lines.append(
                 f"| {idx} | {format_num(row.get('cumulative_sec', 0), 4)} | "
                 f"{format_num(row.get('total_sec', 0), 4)} | {row.get('calls', 0)} | "
@@ -766,6 +852,20 @@ def render_markdown(report: dict[str, Any]) -> str:
             )
         lines.append("")
     comparison = report.get("comparison") or {}
+    if comparison and not comparison.get("compatible", True):
+        lines.extend([
+            "## Baseline comparison unavailable",
+            "",
+            "The baseline and current run use different measurement configurations:",
+            "",
+        ])
+        for mismatch in comparison.get("mismatches", []):
+            lines.append(
+                f"- `{mismatch.get('key')}`: baseline "
+                f"`{mismatch.get('baseline')}`; current "
+                f"`{mismatch.get('current')}`"
+            )
+        lines.append("")
     if comparison.get("rows"):
         lines.extend([
             "## Baseline vs current delta",
@@ -820,7 +920,11 @@ async def async_main(args: argparse.Namespace) -> int:
         baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
         comparison = compare_reports(
             baseline,
-            {"runs": runs},
+            {
+                "schema_version": 2,
+                "config": build_report_config(args, runs),
+                "runs": runs,
+            },
             threshold_pct=float(args.regression_threshold),
         )
     report = build_report(args, runs, comparison=comparison)
@@ -829,9 +933,13 @@ async def async_main(args: argparse.Namespace) -> int:
         Path(args.output).expanduser(),
         Path(args.report).expanduser() if args.report else None,
     )
-    if comparison and comparison.get("regressions") and args.fail_on_regression:
-        print(f"[perf] regressions detected: {len(comparison['regressions'])}", file=sys.stderr)
-        return 2
+    if comparison and args.fail_on_regression:
+        if not comparison.get("compatible", True):
+            print("[perf] baseline configuration is not comparable", file=sys.stderr)
+            return 2
+        if comparison.get("regressions"):
+            print(f"[perf] regressions detected: {len(comparison['regressions'])}", file=sys.stderr)
+            return 2
     print(f"[perf] wrote {args.output}", flush=True)
     if args.report:
         print(f"[perf] wrote {args.report}", flush=True)
@@ -857,15 +965,37 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--broadcast-drain", type=float, default=1.4)
     parser.add_argument("--seed", type=int, default=int(os.environ.get("PERF_SEED", "12345")))
     parser.add_argument("--cprofile-limit", type=int, default=30)
+    parser.add_argument(
+        "--snapshot-protocol",
+        choices=[DEFAULT_SNAPSHOT_PROTOCOL, "legacy"],
+        default=os.environ.get(
+            "PERF_SNAPSHOT_PROTOCOL", DEFAULT_SNAPSHOT_PROTOCOL
+        ),
+    )
+    parser.add_argument(
+        "--diagnostic",
+        action="store_true",
+        default=os.environ.get("PERF_DIAGNOSTIC", "").lower()
+        in {"1", "true", "yes"},
+        help="enable intrusive asyncio debug and in-process cProfile output",
+    )
     parser.add_argument("--regression-threshold", type=float, default=float(os.environ.get("PERF_REGRESSION_THRESHOLD", "20")))
     parser.add_argument("--fail-on-regression", action="store_true")
-    parser.add_argument("--no-py-spy", action="store_true", default=os.environ.get("PERF_NO_PY_SPY", "").lower() in {"1", "true", "yes"})
+    parser.add_argument(
+        "--py-spy",
+        action="store_true",
+        default=os.environ.get("PERF_PY_SPY", "").lower()
+        in {"1", "true", "yes"},
+        help="capture an external sampling profile (disabled by default)",
+    )
+    parser.add_argument("--no-py-spy", action="store_true", help=argparse.SUPPRESS)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    args.no_py_spy = bool(args.no_py_spy or not args.py_spy)
     if args.mode == "delta" and not args.baseline:
         parser.error("--baseline is required in delta mode")
     if not args.report:
