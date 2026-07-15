@@ -529,14 +529,14 @@ function _terminalComposeOpenAttachmentPreview(entry) {
   const label = _terminalComposeAttachmentLabel(entry);
   const url = _terminalComposeAttachmentPreviewUrl(entry);
   overlay.innerHTML = ''
-    + '<div class="modal terminal-compose-attachment-preview-modal" role="dialog" aria-modal="true"'
+    + '<div class="modal ui-modal ui-modal--lg ui-modal--structured terminal-compose-attachment-preview-modal" role="dialog" aria-modal="true"'
     + ' aria-label="Attached image preview">'
-    + '  <div class="terminal-compose-attachment-preview-head">'
-    + '    <div class="terminal-compose-attachment-preview-title">' + esc(label) + '</div>'
+    + '  <div class="terminal-compose-attachment-preview-head ui-modal__header ui-modal__header--bordered">'
+    + '    <div class="terminal-compose-attachment-preview-title ui-modal__title">' + esc(label) + '</div>'
     + '    <button type="button" class="terminal-compose-attachment-preview-close"'
     + ' onclick="closeTerminalComposeAttachmentPreview()" aria-label="Close">&times;</button>'
     + '  </div>'
-    + '  <div class="terminal-compose-attachment-preview-body">'
+    + '  <div class="terminal-compose-attachment-preview-body ui-modal__body ui-modal__body--flush">'
     + (url
       ? '<img class="terminal-compose-attachment-preview-image" src="' + esc(url) + '" alt="' + esc(label) + '">'
       : '<div class="terminal-compose-attachment-preview-unavailable">Preview unavailable for this image in the current session.</div>')

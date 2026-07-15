@@ -317,12 +317,12 @@ function renderTaskHistory() {
 
   // Loading state
   if (!_taskHistoryData) {
-    html += '<div class="th-header">';
-    html += '<div class="th-title">Loading\u2026</div>';
+    html += '<div class="th-header ui-modal__header ui-modal__header--bordered">';
+    html += '<div id="task-history-title" class="th-title ui-modal__title">Loading\u2026</div>';
     html += '<button class="th-close" onclick="hideTaskHistory()">\u2715</button>';
     html += '</div>';
-    html += '<div class="th-content"><div class="th-empty">Loading task history\u2026</div></div>';
-    html += '<div class="th-footer">';
+    html += '<div class="th-content ui-modal__body ui-modal__body--flush"><div class="th-empty">Loading task history\u2026</div></div>';
+    html += '<div class="th-footer ui-modal__footer">';
     html += '<button class="btn-cancel" onclick="hideTaskHistory()">Close</button>';
     html += '</div>';
     html += '</div>';
@@ -340,15 +340,15 @@ function renderTaskHistory() {
   if (liveCell) agentName = liveCell.name;
 
   // Header
-  html += '<div class="th-header">';
-  html += '<div class="th-title">' + esc(agentName) + '</div>';
+  html += '<div class="th-header ui-modal__header ui-modal__header--bordered">';
+  html += '<div id="task-history-title" class="th-title ui-modal__title">' + esc(agentName) + '</div>';
   html += '<div class="th-subtitle">'
     + tasks.length + ' task' + (tasks.length !== 1 ? 's' : '') + '</div>';
   html += '<button class="th-close" onclick="hideTaskHistory()">\u2715</button>';
   html += '</div>';
 
   // Content
-  html += '<div class="th-content">';
+  html += '<div class="th-content ui-modal__body ui-modal__body--flush">';
   if (!tasks.length) {
     html += '<div class="th-empty">No tasks recorded for this agent.</div>';
   } else {
@@ -389,7 +389,7 @@ function renderTaskHistory() {
   html += '</div>';
 
   // Footer
-  html += '<div class="th-footer">';
+  html += '<div class="th-footer ui-modal__footer">';
   html += '<button class="btn-cancel" onclick="hideTaskHistory()">Close</button>';
   html += '</div>';
 

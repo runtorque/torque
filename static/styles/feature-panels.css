@@ -465,7 +465,6 @@
 }
 .behavior-overlay-approval-card-title { font-weight: 700; color: var(--amber, #d29922); }
 .behavior-overlay-approval-card-body { color: var(--text-dim); font-size: 11px; }
-.behavior-overlay-approval-modal .modal { max-width: min(980px, 96vw); }
 .behavior-overlay-approval-body {
   display: flex;
   flex-direction: column;
@@ -1138,7 +1137,6 @@
   max-width: min(1040px, calc(100vw - 36px));
   height: min(84vh, 820px);
   min-height: min(560px, calc(100vh - 36px));
-  overflow: hidden;
 }
 .help-topic-browser-head {
   flex: 0 0 auto;
@@ -1147,7 +1145,11 @@
   justify-content: space-between;
   gap: 12px;
 }
-.help-topic-browser-head h2 { margin: 0 0 4px; }
+.help-topic-browser-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
 .help-topic-browser-close { flex: 0 0 auto; }
 .help-topic-browser-body {
   flex: 1 1 auto;
@@ -1199,8 +1201,6 @@
     height: calc(100vh - 16px);
     min-height: 0;
   }
-  .help-topic-browser-head { flex-direction: column; }
-  .help-topic-browser-close { width: 100%; }
   .help-topic-browser-body { grid-template-columns: 1fr; }
   .help-topic-browser-body .help-browser { grid-template-columns: 1fr; }
   .help-topic-browser-modal .help-search-input,

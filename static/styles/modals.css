@@ -119,7 +119,6 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 8px;
 }
 .preview-popup-header h2 {
   margin-bottom: 0;
@@ -320,27 +319,18 @@ body.runtime-embedded #modal-group .modal-summary {
   color: color-mix(in srgb, var(--text-dim) 90%, white);
 }
 
-/* Group settings modal — tabbed layout */
-.modal-tall { max-height: 85vh; display: flex; flex-direction: column; }
-
 /* Settings workspace --------------------------------------------------
    Group and application settings share a stable shell. The primary
    navigation stays put while only the active settings pane scrolls. */
 .settings-dialog {
   position: relative;
   display: grid;
-  grid-template-columns: 176px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr) auto;
   width: min(920px, calc(100vw - 36px));
   max-width: 920px;
   height: min(720px, calc(100vh - 40px));
   max-height: min(720px, calc(100vh - 40px));
-  padding: 0;
-  overflow: hidden;
-  border-color: var(--border-strong);
-  border-radius: var(--radius-lg);
-  background: var(--bg-surface);
-  box-shadow: var(--shadow-float);
 }
 .settings-dialog-header {
   grid-column: 1 / -1;
@@ -407,9 +397,18 @@ body.runtime-embedded #modal-group .modal-summary {
   border-color: var(--border);
   background: var(--bg-hover);
 }
-.settings-dialog > .settings-primary-nav {
+.settings-dialog-workspace {
   grid-column: 1;
   grid-row: 2;
+  display: grid;
+  grid-template-columns: 176px minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.settings-dialog-workspace > .settings-primary-nav {
+  grid-column: 1;
+  grid-row: 1;
   align-self: stretch;
   display: flex;
   flex-direction: column;
@@ -423,7 +422,7 @@ body.runtime-embedded #modal-group .modal-summary {
   border-radius: 0;
   background: color-mix(in srgb, var(--bg-inset) 38%, var(--bg-surface));
 }
-.settings-dialog > .settings-primary-nav .gs-tab {
+.settings-dialog-workspace > .settings-primary-nav .gs-tab {
   position: relative;
   flex: 0 0 auto;
   display: flex;
@@ -438,7 +437,7 @@ body.runtime-embedded #modal-group .modal-summary {
   color: var(--text-secondary);
   text-align: left;
 }
-.settings-dialog > .settings-primary-nav .gs-tab::before {
+.settings-dialog-workspace > .settings-primary-nav .gs-tab::before {
   content: '';
   position: absolute;
   left: 3px;
@@ -448,32 +447,32 @@ body.runtime-embedded #modal-group .modal-summary {
   border-radius: 2px;
   background: transparent;
 }
-.settings-dialog > .settings-primary-nav .gs-tab span {
+.settings-dialog-workspace > .settings-primary-nav .gs-tab span {
   font-size: 11px;
   font-weight: 700;
   line-height: 1.2;
 }
-.settings-dialog > .settings-primary-nav .gs-tab small {
+.settings-dialog-workspace > .settings-primary-nav .gs-tab small {
   color: var(--text-faint);
   font-size: 9px;
   font-weight: 400;
   line-height: 1.25;
 }
-.settings-dialog > .settings-primary-nav .gs-tab:hover {
+.settings-dialog-workspace > .settings-primary-nav .gs-tab:hover {
   color: var(--text);
   background: var(--bg-hover);
 }
-.settings-dialog > .settings-primary-nav .gs-tab.active {
+.settings-dialog-workspace > .settings-primary-nav .gs-tab.active {
   color: var(--text);
   background: var(--accent-soft);
 }
-.settings-dialog > .settings-primary-nav .gs-tab.active::before { background: var(--accent); }
-.settings-dialog > .settings-primary-nav .gs-tab.active small {
+.settings-dialog-workspace > .settings-primary-nav .gs-tab.active::before { background: var(--accent); }
+.settings-dialog-workspace > .settings-primary-nav .gs-tab.active small {
   color: color-mix(in srgb, var(--accent) 64%, var(--text-secondary));
 }
-.settings-dialog > .gs-pane {
+.settings-dialog-workspace > .gs-pane {
   grid-column: 2;
-  grid-row: 2;
+  grid-row: 1;
   min-width: 0;
   min-height: 0;
   max-height: none;
@@ -682,34 +681,37 @@ body.runtime-embedded #modal-group .modal-summary {
 @media (max-width: 680px) {
   .settings-dialog {
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(0, 1fr) auto;
     width: calc(100vw - 16px);
     height: calc(100vh - 16px);
     max-height: calc(100vh - 16px);
   }
   .settings-dialog-header { grid-template-columns: 1fr auto; min-height: 62px; }
   .settings-search { grid-column: 1 / -1; grid-row: 2; }
-  .settings-dialog > .settings-primary-nav {
+  .settings-dialog-workspace {
     grid-column: 1;
     grid-row: 2;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .settings-dialog-workspace > .settings-primary-nav {
+    grid-column: 1;
+    grid-row: 1;
     flex-direction: row;
     padding: 7px;
     overflow-x: auto;
     border-right: 0;
     border-bottom: 1px solid var(--border-subtle);
   }
-  .settings-dialog > .settings-primary-nav .gs-tab { min-width: 116px; min-height: 38px; }
-  .settings-dialog > .settings-primary-nav .gs-tab small { display: none; }
-  .settings-dialog > .gs-pane { grid-column: 1; grid-row: 3; padding-top: 14px; }
-  .settings-dialog-footer { grid-column: 1; grid-row: 4; }
+  .settings-dialog-workspace > .settings-primary-nav .gs-tab { min-width: 116px; min-height: 38px; }
+  .settings-dialog-workspace > .settings-primary-nav .gs-tab small { display: none; }
+  .settings-dialog-workspace > .gs-pane { grid-column: 1; grid-row: 2; padding-top: 14px; }
+  .settings-dialog-footer { grid-column: 1; grid-row: 3; }
   .settings-search-results { top: 94px; right: 12px; width: calc(100% - 24px); }
   .settings-reset-section, .settings-save-state { display: none; }
 }
-#modal-task .modal {
-  overflow: hidden;
-}
 .task-created-by-attribution {
-  margin: -4px 0 10px;
+  margin: var(--space-1) 0 0;
 }
 .task-created-by-chip {
   display: inline-flex;
@@ -748,10 +750,7 @@ body.runtime-embedded #modal-group .modal-summary {
   background: color-mix(in srgb, var(--text-dim) 8%, var(--bg-cell));
 }
 .task-modal-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding-right: 4px;
+  scrollbar-gutter: stable;
 }
 .task-modal-section {
   margin-top: 12px;

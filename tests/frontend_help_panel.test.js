@@ -652,7 +652,7 @@ test('Help Ask submit reads live input, invokes help_query, and renders answer s
   assert.match(html, /Sources/);
   assert.match(html, /AGENTS\.md#worker-dispatch-and-reporting/);
   assert.equal(JSON.stringify(document.getElementById('help-query-result-scroll').scrollIntoViewOptions), JSON.stringify({ block: 'nearest', inline: 'nearest' }));
-  assert.match(html, /<form class="help-query-row" id="help-query-form">/);
+  assert.match(html, /<form class="help-query-row ui-toolbar" id="help-query-form">/);
   assert.match(html, /<button type="button" class="btn-primary" id="help-query-ask-button">Ask<\/button>/);
   assert.match(html, /class="help-query-panel"[\s\S]*<\/section>[\s\S]*class="help-query-result-card help-query-result-scroll" id="help-query-result-scroll" aria-live="polite"/);
 });

@@ -17,12 +17,12 @@ function _diffRendersInModal() {
 
 function _diffShellOpen() {
   return _diffRendersInModal()
-    ? '<div class="modal modal-wide modal-tall diff-view-modal" role="dialog" aria-modal="true"><div class="diff-view">'
+    ? '<div class="modal ui-modal ui-modal--xl ui-modal--viewport ui-modal--structured diff-view-modal diff-view" role="dialog" aria-modal="true" aria-labelledby="diff-view-title">'
     : '<div class="diff-view">';
 }
 
 function _diffShellClose() {
-  return _diffRendersInModal() ? '</div></div>' : '</div>';
+  return '</div>';
 }
 
 function showDiffView(agentId, readOnly) {
@@ -444,7 +444,7 @@ function _renderMergeBanner() {
 }
 
 function _renderDiffFooter() {
-  var html = '<div class="diff-footer">';
+  var html = '<div class="diff-footer ui-modal__footer">';
 
   // Commit message textarea (only when merge is clean)
   if (_diffMergeCheck && _diffMergeCheck.clean) {
@@ -516,12 +516,12 @@ function renderDiffView() {
 
   var html = _diffShellOpen();
   if (!_diffViewData) {
-    html += '<div class="diff-view-header">';
-    html += '<div class="diff-view-title">Loading diff\u2026</div>';
+    html += '<div class="diff-view-header ui-modal__header ui-modal__header--bordered">';
+    html += '<div id="diff-view-title" class="diff-view-title ui-modal__title">Loading diff\u2026</div>';
     html += '</div>';
-    html += '<div class="diff-view-content"><div class="diff-empty">Loading worktree diff\u2026</div></div>';
+    html += '<div class="diff-view-content ui-modal__body ui-modal__body--flush"><div class="diff-empty">Loading worktree diff\u2026</div></div>';
     html += _renderMergeBanner();
-    html += '<div class="diff-footer">';
+    html += '<div class="diff-footer ui-modal__footer">';
     html += '<button class="btn-cancel" onclick="hideDiffView()">Cancel</button>';
     html += '</div>';
     html += _diffShellClose();
@@ -530,11 +530,11 @@ function renderDiffView() {
   }
 
   if (_diffViewData.error) {
-    html += '<div class="diff-view-header">';
-    html += '<div class="diff-view-title">Unable to load diff</div>';
+    html += '<div class="diff-view-header ui-modal__header ui-modal__header--bordered">';
+    html += '<div id="diff-view-title" class="diff-view-title ui-modal__title">Unable to load diff</div>';
     html += '</div>';
-    html += '<div class="diff-view-content"><div class="diff-empty">' + esc(_diffViewData.error) + '</div></div>';
-    html += '<div class="diff-footer">';
+    html += '<div class="diff-view-content ui-modal__body ui-modal__body--flush"><div class="diff-empty">' + esc(_diffViewData.error) + '</div></div>';
+    html += '<div class="diff-footer ui-modal__footer">';
     html += '<button class="btn-cancel" onclick="hideDiffView()">Cancel</button>';
     html += '</div>';
     html += _diffShellClose();
@@ -545,14 +545,14 @@ function renderDiffView() {
   var stats = _diffViewData.stats || {};
   var files = _diffViewData.files || [];
   _syncDiffCollapsedFiles(files);
-  html += '<div class="diff-view-header">';
-  html += '<div class="diff-view-title">' + esc(_diffViewData.agent_name || 'Worktree diff') + '</div>';
+  html += '<div class="diff-view-header ui-modal__header ui-modal__header--bordered">';
+  html += '<div id="diff-view-title" class="diff-view-title ui-modal__title">' + esc(_diffViewData.agent_name || 'Worktree diff') + '</div>';
   html += '<div class="diff-view-branch">' + esc(_diffViewData.branch || '') + ' \u2192 '
     + esc(_diffViewData.base_branch || 'main') + '</div>';
   html += '<div class="diff-view-stats">' + esc(_diffStatsLabel(stats)) + '</div>';
   html += _renderDiffCollapseControls(files);
   html += '</div>';
-  html += '<div class="diff-view-content">';
+  html += '<div class="diff-view-content ui-modal__body ui-modal__body--flush">';
   html += _renderStaleBaseWarning();
   html += _renderBoundarySummary();
   html += _renderDiffArtifacts();
@@ -565,7 +565,7 @@ function renderDiffView() {
   }
   html += '</div>';
   if (_diffReadOnly) {
-    html += '<div class="diff-footer"><div class="diff-footer-buttons">';
+    html += '<div class="diff-footer ui-modal__footer"><div class="diff-footer-buttons">';
     html += '<button class="btn-cancel" onclick="hideDiffView()">Close</button>';
     html += '</div></div>';
   } else {

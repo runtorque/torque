@@ -261,7 +261,7 @@ test('group settings renders system prompt preview controls for Engineer and Arc
     html,
     /<textarea id="gs-architect-custom-instructions"[\s\S]*?<\/textarea>\s*<div class="system-prompt-preview-row">\s*<button type="button" id="gs-architect-view-system-prompt"[^>]*>View system prompt<\/button>/,
   );
-  assert.match(html, /id="modal-system-prompt-preview"[\s\S]*class="modal modal-tall preview-popup"/);
+  assert.match(html, /id="modal-system-prompt-preview"[\s\S]*class="modal ui-modal ui-modal--lg ui-modal--tall ui-modal--structured preview-popup"/);
   assert.match(css, /body\.standalone-mode\s+\.preview-popup\s*{\s*max-width:\s*min\(80vw,\s*1180px\);/);
 });
 

@@ -602,18 +602,19 @@ function _helpRenderAudienceSelect() {
 function _helpRenderTopicBrowserModal() {
   if (!_helpState.browserOpen) return '';
   return '<div id="modal-help-topic-browser" class="overlay help-topic-browser-overlay visible" onclick="if(event.target===this) helpCloseTopicBrowser()" onkeydown="helpTopicBrowserKeydown(event)" tabindex="-1">'
-    + '<div class="modal modal-wide modal-tall help-topic-browser-modal" role="dialog" aria-modal="true" aria-labelledby="help-topic-browser-title">'
-    + '<div class="help-topic-browser-head">'
-    + '<div><h2 id="help-topic-browser-title">Browse Help topics</h2>'
-    + '<div class="modal-summary">Search, filter, and select maintained Torque Help topics. Selecting a card keeps the detail pane inside this browser.</div></div>'
-    + '<button type="button" class="btn-secondary help-topic-browser-close" onclick="helpCloseTopicBrowser()" aria-label="Close Help topic browser">Close</button>'
+    + '<div class="modal ui-modal ui-modal--full ui-modal--tall ui-modal--structured help-topic-browser-modal" role="dialog" aria-modal="true" aria-labelledby="help-topic-browser-title">'
+    + '<div class="help-topic-browser-head ui-modal__header ui-modal__header--bordered">'
+    + '<div><h2 id="help-topic-browser-title" class="ui-modal__title">Browse Help topics</h2>'
+    + '<div class="modal-summary ui-modal__subtitle">Search, filter, and select maintained Torque Help topics. Selecting a card keeps the detail pane inside this browser.</div></div>'
     + '</div>'
+    + '<div class="help-topic-browser-workspace ui-modal__body">'
     + _helpRenderBrowserControls()
     + '<div class="help-topic-browser-body">'
     + '<div class="help-topic-browser-results-pane">' + _helpRenderTopicBrowser() + '</div>'
     + '<div class="help-topic-browser-detail-pane" id="help-topic-browser-detail-pane">' + _helpRenderDetail({ browser: true }) + '</div>'
     + '</div>'
     + '</div>'
+    + '<div class="modal-actions ui-modal__footer"><button type="button" class="btn-cancel help-topic-browser-close" onclick="helpCloseTopicBrowser()">Close</button></div>'
     + '</div>';
 }
 

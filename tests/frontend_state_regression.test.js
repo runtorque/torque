@@ -24898,9 +24898,9 @@ test('task modal keeps a scrollable body separate from its footer actions', () =
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   const css = appStylesheetSource();
 
-  assert.match(html, /<div id="task-modal-body" class="task-modal-body">[\s\S]*<div class="modal-actions">/);
-  assert.match(css, /#modal-task \.modal\s*\{[^}]*overflow:\s*hidden;/);
-  assert.match(css, /\.task-modal-body\s*\{[^}]*flex:\s*1;[^}]*overflow-y:\s*auto;/);
+  assert.match(html, /<div class="modal ui-modal ui-modal--md ui-modal--tall ui-modal--structured"[^>]*>[\s\S]*<div id="task-modal-body" class="task-modal-body ui-modal__body">[\s\S]*<div class="modal-actions ui-modal__footer">/);
+  assert.match(css, /\.ui-modal--structured\s*\{[^}]*overflow:\s*hidden;/);
+  assert.match(css, /\.ui-modal__body\s*\{[^}]*flex:\s*1 1 auto;[^}]*min-height:\s*0;[^}]*overflow:\s*auto;/);
   assert.match(css, /body\[data-torque-mode="standalone"\] #modal-task \.modal,\s*body\[data-torque-mode="desktop"\] #modal-task \.modal\s*\{[^}]*max-width:\s*420px;/);
   assert.match(css, /@media \(min-width:\s*900px\)\s*\{\s*body\[data-torque-mode="standalone"\] #modal-task \.modal,\s*body\[data-torque-mode="desktop"\] #modal-task \.modal\s*\{[^}]*max-width:\s*780px;/);
   assert.doesNotMatch(css, /body\[data-torque-mode="toolbelt"\] #modal-task/);
@@ -25478,7 +25478,10 @@ test('merge diff review opens in a wide tall custom modal without hiding the wor
     renderDiffView();
   `);
 
-  assert.match(root.innerHTML, /modal modal-wide modal-tall diff-view-modal/);
+  assert.match(root.innerHTML, /modal ui-modal ui-modal--xl ui-modal--viewport ui-modal--structured diff-view-modal diff-view/);
+  assert.match(root.innerHTML, /diff-view-header ui-modal__header ui-modal__header--bordered/);
+  assert.match(root.innerHTML, /diff-view-content ui-modal__body ui-modal__body--flush/);
+  assert.match(root.innerHTML, /diff-footer ui-modal__footer/);
   assert.match(root.innerHTML, /Create PR &amp; Merge|Create PR & Merge/);
   assert.equal(root.classList.contains('overlay'), true);
   assert.equal(root.classList.contains('visible'), true);

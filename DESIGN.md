@@ -350,21 +350,28 @@ The canonical CSS API lives in `static/styles/workspace-shell.css`:
 - Escape closes dismissible transient surfaces. Destructive confirmation should
   name the affected object.
 
-Small dialogs use the canonical modal API in `static/styles/components.css`:
+Dialogs use the canonical modal API in `static/styles/components.css`:
 
 - `.ui-modal` defines the raised boundary, 10px corners, shared floating shadow,
-  and 360px default width. `--sm`, `--md`, and `--lg` size variants cap dialogs
-  at 360px, 520px, and 760px.
+  and 360px default width. `--sm`, `--md`, `--lg`, `--xl`, and `--full` cap
+  dialogs at 360px, 520px, 760px, 920px, and 1100px.
+- `--tall` establishes a column shell capped at 85vh; `--viewport` caps
+  workspace-style dialogs against the viewport while feature layout may choose
+  a smaller content height.
 - `.ui-modal--structured` separates the shell into `.ui-modal__header`,
   `.ui-modal__body`, and `.ui-modal__footer`. The footer owns the action boundary
   and keeps secondary actions before the primary action.
-- `.ui-modal__title`, `__subtitle`, and `__message` establish the small-dialog
-  type hierarchy. Dialog titles are visible and provide the accessible label.
+- `__header--bordered`, `__body--flush`, and `__footer--split` cover raised
+  workspaces and content-led viewers without rebuilding the outer shell.
+- `.ui-modal__title`, `__subtitle`, and `__message` establish the dialog type
+  hierarchy. Dialog titles are visible and provide the accessible label.
 - Shared confirm and input dialogs, New Group, and Edit Agent/Terminal use the
   structured shell and shared focus controller. Confirmations focus the explicit
   commit action; simple editors focus and select their primary field.
-- Task, settings, artifact, diff, and other large or multi-section dialogs retain
-  their specialized layouts until migrated deliberately.
+- Task, settings, history, prompt, artifact, diff, Help browser, log viewer, and
+  attachment-preview dialogs use the canonical boundary and explicit size.
+  Structured consumers declare header/body/footer regions directly while their
+  feature styles retain internal grids, diff rows, navigation, and content layout.
 
 Menus and compact popovers use the canonical API in
 `static/styles/components.css`:
@@ -473,7 +480,7 @@ the rule is intentionally global and documented here.
 | Toolbars and panel headers | Standardized | Audit responsive wrapping and narrow panel widths |
 | Status bar segments | Standardized | Audit narrow-width priority |
 | Menus and popovers | Standardized | Audit narrow viewport placement and long localized labels |
-| Modals | Core variants standardized | Migrate task, settings, artifact, diff, and multi-section dialogs |
+| Modals | Standardized | Audit compact viewport fit, nested-dialog focus, and long titles |
 | Badges, tags, and status | Standardized | Audit semantic intent and density at narrow widths |
 | Count indicators | Standardized | Keep prose metrics and countdown text outside the badge grammar |
 | Empty/loading/error states | Pending | Define reusable patterns and language |
@@ -815,7 +822,7 @@ the rule is intentionally global and documented here.
   diff controls, plus the shared header and toolbar definitions.
 - Constraints: Consumer classes continue to own sticky positioning, local
   backgrounds, content-specific widths, and other surface behavior. Modal,
-  artifact, and settings chrome migrates with the large-modal slice.
+  artifact, and settings chrome follows D-017.
 - Verification: Component tests require direct canonical classes across every
   migrated consumer and reject compatibility geometry in shared or feature CSS.
   Focused panel suites protect rendering and interaction; live checks cover
@@ -845,6 +852,34 @@ the rule is intentionally global and documented here.
   surface geometry. Board, task-modal, terminal, Chat, navigation, and context
   menu suites protect selection and lifecycle behavior; live checks verify
   computed geometry, keyboard focus, Escape restoration, and console cleanliness.
+
+### D-017 — Every dialog declares one canonical shell and explicit regions
+
+- Date: 2026-07-15
+- Status: accepted
+- Decision: Every modal shell opts into `.ui-modal`, an explicit size variant,
+  and an accessible dialog name. Large viewers and workspaces use the same raised
+  boundary as small dialogs. Structured dialogs declare canonical header, body,
+  and footer regions; height modifiers describe shell behavior rather than being
+  recreated in feature styles.
+- Rationale: Task, settings, history, prompt, artifact, diff, Help, logs, and
+  attachment previews had compatible-looking but independent shell geometry.
+  Viewport breakpoints could also override every `.modal` indiscriminately,
+  making a declared size unreliable. Direct shell opt-in makes size and structure
+  reviewable while preserving each feature's useful internal layout.
+- Scope: Static dialogs in `webview.html` and dynamically rendered diff, task
+  history, artifact preview, Help browser, log viewer, and attachment-preview
+  shells. The shared API includes `--xl`, `--full`, `--tall`, `--viewport`, and
+  bordered/flush/split region modifiers.
+- Constraints: Feature CSS may own responsive width within the declared size
+  ceiling, content height, internal grids, sticky rows, and scroll behavior. It
+  must not recreate the outer border, corner radius, background, shadow, shell
+  padding reset, or generic tall/wide compatibility classes.
+- Verification: Component tests require canonical shells, accessible names,
+  explicit regions for major multi-section dialogs, and absence of legacy
+  `.modal-tall`, `.modal-wide`, global `.modal` width overrides, and settings
+  boundary duplication. Focused modal/diff/artifact suites and live checks cover
+  layout, scrolling, controls, Escape behavior, and console cleanliness.
 
 ## Decision entry template
 

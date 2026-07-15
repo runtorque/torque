@@ -278,13 +278,62 @@ test('panel-header geometry does not drift back into feature styles', () => {
 test('shared modals define raised size variants and structured regions', () => {
   const css = source('static/styles/components.css');
 
-  assert.match(css, /\.ui-modal,\s*\.modal\s*\{[^}]*max-width:\s*360px;[^}]*border:\s*1px solid var\(--border-strong\);[^}]*border-radius:\s*var\(--radius-lg\);[^}]*background:\s*var\(--bg-raised\);[^}]*box-shadow:\s*var\(--shadow-float\);/s);
+  assert.match(css, /\.ui-modal\s*\{[^}]*max-width:\s*360px;[^}]*border:\s*1px solid var\(--border-strong\);[^}]*border-radius:\s*var\(--radius-lg\);[^}]*background:\s*var\(--bg-raised\);[^}]*box-shadow:\s*var\(--shadow-float\);/s);
+  assert.doesNotMatch(css, /\.ui-modal,\s*\.modal/);
   assert.match(css, /\.ui-modal\.ui-modal--sm\s*\{[^}]*max-width:\s*360px;/s);
   assert.match(css, /\.ui-modal\.ui-modal--md\s*\{[^}]*max-width:\s*520px;/s);
   assert.match(css, /\.ui-modal\.ui-modal--lg\s*\{[^}]*max-width:\s*760px;/s);
+  assert.match(css, /\.ui-modal\.ui-modal--xl\s*\{[^}]*max-width:\s*920px;/s);
+  assert.match(css, /\.ui-modal\.ui-modal--full\s*\{[^}]*max-width:\s*1100px;/s);
+  assert.match(css, /\.ui-modal--tall\s*\{[^}]*max-height:\s*85vh;[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/s);
+  assert.match(css, /\.ui-modal--viewport\s*\{[^}]*max-height:\s*calc\(100vh - 40px\);/s);
   assert.match(css, /\.ui-modal__header\s*\{[^}]*padding:\s*14px 16px 10px;/s);
   assert.match(css, /\.ui-modal__body\s*\{[^}]*padding:\s*0 16px 16px;[^}]*overflow:\s*auto;/s);
-  assert.match(css, /\.ui-modal--structured > \.ui-modal__footer\s*\{[^}]*padding:\s*12px 16px 14px;[^}]*border-top:\s*1px solid var\(--border\);/s);
+  assert.match(css, /\.ui-modal--structured \.ui-modal__footer\s*\{[^}]*padding:\s*12px 16px 14px;[^}]*border-top:\s*1px solid var\(--border\);/s);
+});
+
+test('large and multi-section modal consumers use canonical shells and regions', () => {
+  const html = source('webview.html');
+  const diff = source('static/js/diff.js');
+  const artifacts = source('static/js/modals/task-artifacts.js');
+  const help = source('static/js/help.js');
+  const logs = source('static/js/log_viewer.js');
+  const attachments = source('static/js/terminal/composer-attachments.js');
+
+  for (const id of ['modal-task', 'modal-group-settings', 'modal-global-settings',
+    'modal-task-artifacts', 'modal-system-prompt-preview', 'modal-task-history']) {
+    const start = html.indexOf(`id="${id}"`);
+    assert.notEqual(start, -1, `${id} should exist`);
+    const slice = html.slice(start, start + (id.includes('settings') ? 7000 : 2600));
+    assert.match(slice, /class="modal ui-modal ui-modal--(?:md|lg|xl)/);
+    assert.match(slice, /role="dialog" aria-modal="true" aria-labelledby=/);
+  }
+  assert.match(html, /id="modal-group-settings"[\s\S]*?settings-dialog-workspace ui-modal__body ui-modal__body--flush[\s\S]*?settings-dialog-footer ui-modal__footer/);
+  assert.match(html, /id="modal-global-settings"[\s\S]*?settings-dialog-workspace ui-modal__body ui-modal__body--flush[\s\S]*?settings-dialog-footer ui-modal__footer/);
+  assert.match(html, /id="modal-task"[\s\S]*?ui-modal__header ui-modal__header--bordered[\s\S]*?task-modal-body ui-modal__body[\s\S]*?modal-actions ui-modal__footer/);
+  assert.match(html, /id="modal-task-artifacts"[\s\S]*?ui-modal__header ui-modal__header--bordered[\s\S]*?task-artifacts-browser ui-modal__body[\s\S]*?modal-actions ui-modal__footer/);
+  for (const id of ['modal-add', 'modal-architect-decision', 'modal-schedule',
+    'modal-behavior-approval', 'modal-agent-class']) {
+    assert.match(html, new RegExp(`id="${id}"[\\s\\S]*?ui-modal--structured[\\s\\S]*?ui-modal__header[\\s\\S]*?ui-modal__body[\\s\\S]*?ui-modal__footer`));
+  }
+  assert.match(diff, /ui-modal--xl ui-modal--viewport ui-modal--structured diff-view-modal diff-view/);
+  assert.match(diff, /diff-view-header ui-modal__header ui-modal__header--bordered/);
+  assert.match(diff, /diff-view-content ui-modal__body ui-modal__body--flush/);
+  assert.match(diff, /diff-footer ui-modal__footer/);
+  assert.match(artifacts, /ui-modal--full ui-modal--tall ui-modal--structured artifact-preview-modal/);
+  assert.match(artifacts, /artifact-preview-head ui-modal__header ui-modal__header--bordered/);
+  assert.match(artifacts, /artifact-preview-body ui-modal__body ui-modal__body--flush/);
+  assert.match(help, /ui-modal--full ui-modal--tall ui-modal--structured help-topic-browser-modal/);
+  assert.match(help, /help-topic-browser-head ui-modal__header ui-modal__header--bordered/);
+  assert.match(help, /help-topic-browser-workspace ui-modal__body/);
+  assert.match(help, /modal-actions ui-modal__footer/);
+  assert.match(logs, /ui-modal--xl ui-modal--tall ui-modal--structured log-viewer-modal/);
+  assert.match(logs, /log-viewer-header ui-modal__header ui-modal__header--bordered/);
+  assert.match(logs, /log-viewer-body ui-modal__body/);
+  assert.match(logs, /log-viewer-actions ui-modal__footer/);
+  assert.match(attachments, /ui-modal--lg ui-modal--structured terminal-compose-attachment-preview-modal/);
+  assert.match(attachments, /terminal-compose-attachment-preview-head ui-modal__header ui-modal__header--bordered/);
+  assert.match(attachments, /terminal-compose-attachment-preview-body ui-modal__body ui-modal__body--flush/);
 });
 
 test('small modal consumers use canonical regions and visible labels', () => {
@@ -318,9 +367,14 @@ test('simple modal consumers use the shared focus lifecycle', () => {
 
 test('modal surface and footer geometry do not drift back into modal styles', () => {
   const css = source('static/styles/modals.css');
+  const board = source('static/styles/board-panels.css');
 
   assert.doesNotMatch(css, /^\.modal\s*\{[^}]*(?:border-radius|background|box-shadow|max-width):/ms);
   assert.doesNotMatch(css, /^\.modal-actions\s*\{/m);
+  assert.doesNotMatch(css, /^\.modal-tall\s*\{/m);
+  assert.doesNotMatch(board, /^\.modal-wide\s*\{/m);
+  assert.doesNotMatch(board, /^\s*\.modal(?:\.|\s*\{)[^}]*(?:max-width|border-radius|background|box-shadow):/ms);
+  assert.doesNotMatch(css, /^\.settings-dialog\s*\{[^}]*(?:padding|overflow|border-radius|background|box-shadow):/ms);
 });
 
 test('shared menus define one floating surface and compact item state grammar', () => {

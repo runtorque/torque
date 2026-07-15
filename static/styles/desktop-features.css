@@ -36,13 +36,17 @@ body.detached-window #bottom-panel > div:not(.panel-hidden):not(#panel-resize-ha
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
 }
 .log-viewer-header h2,
 .cheatsheet-header h2,
 .welcome-modal h2 { margin: 0; }
 .log-viewer-actions,
 .welcome-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.log-viewer-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
 .log-viewer-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -64,6 +68,7 @@ body.detached-window #bottom-panel > div:not(.panel-hidden):not(#panel-resize-ha
   font-size: 11px;
 }
 .log-viewer-list {
+  flex: 1 1 auto;
   min-height: 360px;
   max-height: min(62vh, 640px);
   overflow: auto;

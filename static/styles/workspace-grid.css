@@ -713,15 +713,12 @@ body.terminal-compose-resizing * {
 .terminal-compose-attachment-preview-modal {
   width: min(820px, calc(100vw - 32px));
   max-height: min(720px, calc(100vh - 32px));
-  overflow: hidden;
 }
 .terminal-compose-attachment-preview-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 14px;
-  border-bottom: 1px solid rgba(255,255,255,.08);
 }
 .terminal-compose-attachment-preview-title {
   min-width: 0;

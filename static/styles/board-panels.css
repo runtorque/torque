@@ -2833,22 +2833,11 @@ body.runtime-embedded .board-empty-action:focus-visible {
 /* ------------------------------------------------------------------ */
 /* Standalone / wide layout (dual mode or standalone window)           */
 /* ------------------------------------------------------------------ */
-@media (min-width: 400px) {
-  .modal { max-width: 360px; }
-}
 @media (min-width: 600px) {
   html, body { font-size: 12px; }
-  .modal { max-width: 440px; }
-  .modal.modal-wide { max-width: 820px; }
   main { padding: 12px; }
   header { padding: 10px 14px; }
 }
-@media (min-width: 900px) {
-  .modal { max-width: 520px; }
-  .modal.modal-wide { max-width: 920px; }
-}
-
-
 body[data-torque-mode="standalone"] #modal-task .modal,
 body[data-torque-mode="desktop"] #modal-task .modal {
   max-width: 420px;
@@ -2895,13 +2884,9 @@ body.diff-view-open #ctx-menu {
   flex: 1; min-height: 0;
 }
 .diff-view-modal {
-  display: flex;
-  flex-direction: column;
   width: min(calc(100vw - 32px), 336px);
   max-width: min(calc(100vw - 32px), 336px);
   height: min(90vh, 840px);
-  padding: 0;
-  overflow: hidden;
 }
 @media (min-width: 400px) {
   .diff-view-modal {
@@ -2946,12 +2931,6 @@ body[data-torque-mode="desktop"] .diff-view-modal {
     width: min(calc(100vw - 32px), 936px);
     max-width: min(calc(100vw - 32px), 936px);
   }
-}
-.diff-view-header {
-  padding: 10px 12px 8px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-hover);
-  flex-shrink: 0;
 }
 .diff-view-title {
   font-size: 12px; font-weight: 700;
@@ -3091,10 +3070,6 @@ body[data-torque-mode="desktop"] .diff-view-modal {
 }
 .diff-footer {
   display: flex; flex-direction: column; gap: 8px;
-  padding: 8px 10px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-hover);
-  flex-shrink: 0;
 }
 .diff-footer-buttons {
   display: flex;
@@ -3138,8 +3113,6 @@ body[data-torque-mode="desktop"] .diff-view-modal {
 @keyframes diff-spin {
   to { transform: rotate(360deg); }
 }
-.modal-wide { max-width: 760px; }
-
 .board-card-due-soon {
   font-weight: 600;
 }
@@ -3498,15 +3471,12 @@ body[data-torque-mode="desktop"] .diff-view-modal {
 .artifact-preview-modal {
   max-width: min(1100px, calc(100vw - 32px));
   max-height: calc(100vh - 32px);
-  display: flex;
-  flex-direction: column;
 }
 .artifact-preview-head {
   display: flex;
   gap: 12px;
   align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: 12px;
 }
 .artifact-preview-title-wrap {
   min-width: 0;

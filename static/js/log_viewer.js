@@ -21,14 +21,11 @@ function _ensureLogViewerModal() {
   overlay.className = 'overlay';
   overlay.id = 'modal-log-viewer';
   overlay.innerHTML = ''
-    + '<div class="modal modal-wide modal-tall log-viewer-modal">'
-    + '  <div class="log-viewer-header">'
-    + '    <h2>Torque Logs</h2>'
-    + '    <div class="log-viewer-actions">'
-    + '      <button class="btn-secondary" type="button" onclick="nativeApi && nativeApi.revealLogDir && nativeApi.revealLogDir()">Reveal Folder</button>'
-    + '      <button class="btn-cancel" type="button" onclick="closeLogViewer()">Close</button>'
-    + '    </div>'
+    + '<div class="modal ui-modal ui-modal--xl ui-modal--tall ui-modal--structured log-viewer-modal" role="dialog" aria-modal="true" aria-labelledby="log-viewer-title">'
+    + '  <div class="log-viewer-header ui-modal__header ui-modal__header--bordered">'
+    + '    <h2 id="log-viewer-title" class="ui-modal__title">Torque Logs</h2>'
     + '  </div>'
+    + '  <div class="log-viewer-body ui-modal__body">'
     + '  <div class="log-viewer-toolbar">'
     + '    <div class="log-viewer-targets" role="tablist" aria-label="Log target">'
     + '      <button id="log-viewer-target-daemon" class="log-viewer-target active" type="button" role="tab" aria-selected="true" onclick="_logViewerSetTarget(\'daemon\')">Daemon</button>'
@@ -41,6 +38,11 @@ function _ensureLogViewerModal() {
     + '    <label class="log-viewer-follow"><input id="log-viewer-follow" type="checkbox" checked onchange="_logViewerSetFollow(this.checked)"> Follow</label>'
     + '  </div>'
     + '  <div id="log-viewer-list" class="log-viewer-list" role="log" aria-live="polite"></div>'
+    + '  </div>'
+    + '  <div class="log-viewer-actions ui-modal__footer">'
+    + '    <button class="btn-secondary" type="button" onclick="nativeApi && nativeApi.revealLogDir && nativeApi.revealLogDir()">Reveal Folder</button>'
+    + '    <button class="btn-cancel" type="button" onclick="closeLogViewer()">Close</button>'
+    + '  </div>'
     + '</div>';
   overlay.addEventListener('click', function(event) {
     if (event.target === overlay) closeLogViewer();

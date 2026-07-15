@@ -229,16 +229,16 @@ function _artifactPreviewShellHtml(artifact, bodyHtml, url) {
   var metaHtml = meta.length
     ? '<div class="artifact-preview-meta">' + esc(meta.join(' · ')) + '</div>'
     : '';
-  return '<div class="modal modal-tall modal-wide artifact-preview-modal" role="dialog" aria-modal="true">'
-    + '<div class="artifact-preview-head">'
+  return '<div class="modal ui-modal ui-modal--full ui-modal--tall ui-modal--structured artifact-preview-modal" role="dialog" aria-modal="true" aria-labelledby="artifact-preview-title">'
+    + '<div class="artifact-preview-head ui-modal__header ui-modal__header--bordered">'
     + '<div class="artifact-preview-title-wrap">'
-    + '<h2>' + esc(title) + '</h2>'
+    + '<h2 id="artifact-preview-title" class="ui-modal__title">' + esc(title) + '</h2>'
     + metaHtml
     + '</div>'
     + '<button class="artifact-preview-close" type="button" onclick="closeTaskArtifactPreview()" aria-label="Close">&times;</button>'
     + '</div>'
-    + '<div class="artifact-preview-body">' + bodyHtml + '</div>'
-    + '<div class="modal-actions">'
+    + '<div class="artifact-preview-body ui-modal__body ui-modal__body--flush">' + bodyHtml + '</div>'
+    + '<div class="modal-actions ui-modal__footer">'
     + _artifactPreviewDownloadHtml(url)
     + '<button class="btn-cancel" type="button" onclick="closeTaskArtifactPreview()">Close</button>'
     + '</div>'
