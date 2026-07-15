@@ -130,29 +130,36 @@ body.runtime-embedded .taskbar-app.active {
   -ms-overflow-style: none;
 }
 .statusbar-panel-buttons::-webkit-scrollbar { display: none; }
-.statusbar-info > .daemon-connection-status:first-child,
-.statusbar-info .relay-status {
+.statusbar-segment {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+  width: auto;
+  max-width: 150px;
   height: 100%;
   min-height: 24px;
   padding: 0 8px;
   border-left: 1px solid var(--statusbar-divider);
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 0;
+  border-radius: 0;
   background: transparent;
   color: var(--statusbar-muted);
   font-size: 10px;
   line-height: 1;
-}
-.statusbar-info .relay-status {
-  display: inline-flex;
-  justify-content: flex-start;
+  letter-spacing: .01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: inset 2px 0 0 transparent;
 }
 .statusbar-info .relay-status[hidden],
 .statusbar-info .relay-status--hidden {
   display: none;
-}
-body.runtime-embedded .statusbar-info > .daemon-connection-status:first-child,
-body.runtime-embedded .statusbar-info .relay-status {
-  min-height: 24px;
-  font-size: 10px;
 }
 
 .panel-nav-more-button,
@@ -401,76 +408,47 @@ body.runtime-embedded .statusbar-info .relay-status {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.statusbar-chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 4px;
-  flex: 0 1 auto;
-  min-width: 0;
-  width: auto;
-  max-width: 150px;
-  height: 100%;
-  min-height: 24px;
-  padding: 0 8px;
-  border: 0;
-  border-left: 1px solid var(--statusbar-divider);
-  border-radius: 0;
-  background: transparent;
-  color: var(--statusbar-muted);
-  font-size: 10px;
-  line-height: 1;
-  letter-spacing: .01em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  box-shadow: inset 2px 0 0 transparent;
-}
-body.runtime-embedded .statusbar-chip {
+body.runtime-embedded .statusbar-segment {
   min-height: 30px;
   padding: 0 8px;
   font-size: 10px;
 }
-.statusbar-chip[hidden] { display: none !important; }
-.statusbar-chip-button {
+.statusbar-segment[hidden] { display: none !important; }
+.statusbar-segment--passive {
+  cursor: default;
+}
+.statusbar-segment--action {
   font: inherit;
   cursor: pointer;
 }
-.statusbar-chip[role="button"] {
-  cursor: pointer;
-}
-.statusbar-chip-button:hover {
-  color: var(--statusbar-fg);
-  background: var(--statusbar-segment-hover);
-}
-.statusbar-chip[role="button"]:hover,
-.statusbar-chip[role="button"]:focus-visible {
+.statusbar-segment--action:hover,
+.statusbar-segment--action:focus-visible {
   color: var(--statusbar-fg);
   background: var(--statusbar-segment-hover);
   outline: none;
 }
-.statusbar-chip--normal {
+.statusbar-segment--normal {
   color: var(--statusbar-fg);
   box-shadow: inset 2px 0 0 color-mix(in srgb, var(--green) 58%, transparent);
 }
-.statusbar-chip--warn {
+.statusbar-segment--warning {
   color: var(--warn);
   background: color-mix(in srgb, var(--warn) 11%, transparent);
   box-shadow: inset 2px 0 0 var(--warn);
 }
-.statusbar-chip--danger {
+.statusbar-segment--danger {
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 12%, transparent);
   box-shadow: inset 2px 0 0 var(--danger);
 }
-.statusbar-chip--muted,
-.statusbar-chip--unknown {
+.statusbar-segment--muted,
+.statusbar-segment--unknown {
   color: var(--statusbar-muted);
   background: transparent;
   opacity: .86;
 }
-.statusbar-chip-attention.statusbar-chip--warn,
-.statusbar-chip-attention.statusbar-chip--danger {
+.statusbar-chip-attention.statusbar-segment--warning,
+.statusbar-chip-attention.statusbar-segment--danger {
   font-weight: 700;
 }
 .taskbar-aux-btn {

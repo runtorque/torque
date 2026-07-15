@@ -368,7 +368,7 @@ test('Claude usage view is unknown when no Claude agent has available provider_u
   vm.runInContext('refreshStatusBar();', context);
   assert.equal(sandbox.document.getElementById('statusbar-claude-usage').textContent, 'Claude —');
   assert.equal(
-    sandbox.document.getElementById('statusbar-claude-usage').classList.contains('statusbar-chip--unknown'),
+    sandbox.document.getElementById('statusbar-claude-usage').classList.contains('statusbar-segment--unknown'),
     true,
   );
 });
@@ -404,7 +404,7 @@ test('Claude usage view reads per-agent provider_usage in the shipped TORQUE:700
   vm.runInContext(`refreshStatusBar();`, context);
   assert.equal(sandbox.document.getElementById('statusbar-claude-usage').textContent, 'Claude 5h 72% · 7d 41%');
   assert.equal(
-    sandbox.document.getElementById('statusbar-claude-usage').classList.contains('statusbar-chip--warn'),
+    sandbox.document.getElementById('statusbar-claude-usage').classList.contains('statusbar-segment--warning'),
     true,
   );
 });
@@ -438,7 +438,7 @@ test('Codex usage view reads codex provider_usage and paints its own chip', () =
   vm.runInContext(`refreshStatusBar();`, context);
   assert.equal(sandbox.document.getElementById('statusbar-codex-usage').textContent, 'Codex 5h 64% · 7d 34%');
   assert.equal(
-    sandbox.document.getElementById('statusbar-codex-usage').classList.contains('statusbar-chip--normal'),
+    sandbox.document.getElementById('statusbar-codex-usage').classList.contains('statusbar-segment--normal'),
     true,
   );
   assert.equal(sandbox.document.getElementById('statusbar-claude-usage').textContent, 'Claude —');

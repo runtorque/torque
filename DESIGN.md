@@ -316,6 +316,26 @@ The canonical CSS API lives in `static/styles/components.css`:
 - Planning, Thinking, Events, and Agent headers retain compatibility aliases
   while their markup migrates. The Board search/filter row uses the toolbar API.
 
+### Status bar segments
+
+- The bottom status bar is a compact segmented workspace rail, not a collection
+  of badges. Segments keep square shared boundaries and may contain short status
+  text, a presence dot, or a count annotation.
+- Passive runtime/provider/workload metadata uses a non-interactive segment.
+  Navigation, deploy, metrics, task, and attention actions use native buttons.
+- Normal, warning, danger, muted, and unknown states may change text, tint, and
+  the leading status edge, but the segment label remains the primary state cue.
+- Status changes update stable nodes in place so focus and panel navigation are
+  preserved across WebSocket deltas.
+
+The canonical CSS API lives in `static/styles/workspace-shell.css`:
+
+- `.statusbar-segment` owns the shared 24px segment geometry and divider.
+- `--passive` and `--action` distinguish metadata from operable controls.
+- `--normal`, `--warning`, `--danger`, `--muted`, and `--unknown` express state.
+- Consumer classes such as `.statusbar-chip-tasks` own only responsive visibility
+  and surface-specific layout. They do not redefine the segment primitive.
+
 ### Modals, menus, and popovers
 
 - Use Torque's custom overlay, modal, and context-menu patterns rather than
@@ -380,8 +400,8 @@ The canonical CSS API lives in `static/styles/components.css`:
 - Agent identity badges, Agent-panel journal entry types, Health runtime and
   coverage states, Board task metadata, Board count indicators, and Agent Profile
   assignment and preview metadata, History identity/status/outcome markers, and
-  dismissed-event markers are canonical consumers. Status-bar compounds and
-  remaining counts are deliberate follow-up migrations.
+  dismissed-event markers are canonical consumers. Remaining counts are a
+  deliberate follow-up migration.
 - A count may use the badge primitive inside a tab, filter, or menu item without
   changing the parent control's semantics. The count is an annotation; the
   containing tab, filter, or menu item remains the interactive target.
@@ -444,9 +464,10 @@ the rule is intentionally global and documented here.
 | Inputs and selectors | Core variants standardized | Migrate remaining feature-specific aliases and audit field labeling |
 | Cards | Core variants standardized | Audit grid identity cards and nested contained surfaces |
 | Toolbars and panel headers | Core variants standardized | Migrate remaining Help, Context, Health, and editor toolbars |
+| Status bar segments | Standardized | Migrate nested count annotations and audit narrow-width priority |
 | Menus and popovers | Core variants standardized | Migrate task, terminal, dependency, and editor dropdowns |
 | Modals | Core variants standardized | Migrate task, settings, artifact, diff, and multi-section dialogs |
-| Badges, tags, and status | History and event markers standardized | Migrate status-bar and remaining count consumers |
+| Badges, tags, and status | History and event markers standardized | Migrate remaining count consumers |
 | Empty/loading/error states | Pending | Define reusable patterns and language |
 
 ## Decision log
@@ -709,13 +730,36 @@ the rule is intentionally global and documented here.
   GitHub, dependency, and attachment chips remain control chips rather than
   badges. Agent Profile class selectors and assignment actions remain controls;
   History filters, task links, focus actions, and expandable event rows remain
-  controls. Status-bar compounds and remaining count indicators are follow-up
-  migrations.
+  controls. Status-bar segments remain a separate rectangular component family;
+  remaining count indicators are follow-up migrations.
 - Verification: `tests/frontend_components.test.js` protects shared geometry,
   semantic variants, canonical consumer markup, and removal of duplicated badge
   geometry. Existing Agent-panel, Health, and Board suites protect rendered
   content; live checks verify card, profile, History, and event metadata, nested
   counts, control-chip separation, and console cleanliness.
+
+### D-013 — Status metadata and actions use explicit status-bar segments
+
+- Date: 2026-07-14
+- Status: accepted
+- Decision: The bottom workspace rail uses one rectangular status-segment
+  primitive with explicit passive and action variants. Action segments are native
+  buttons; passive segments remain non-interactive metadata. State uses normal,
+  warning, danger, muted, and unknown modifiers without adopting badge geometry.
+- Rationale: Provider/runtime metadata and task/navigation actions previously
+  shared an undifferentiated “chip” class, and Tasks/Attention simulated buttons
+  on spans. Explicit semantics make keyboard behavior native and keep the rail's
+  compact segmented identity distinct from passive pills elsewhere in Torque.
+- Scope: `webview.html`, `static/js/status_bar.js`, `static/js/relay_status.js`,
+  and `static/styles/workspace-shell.css`.
+- Constraints: Stable element ids remain unchanged because status updates patch
+  nodes in place. Presence dots remain circular. Counts may become nested badge
+  annotations later without changing the native button boundary.
+- Verification: Status-bar and metrics suites protect state mapping and stable
+  updates; component and standalone-layout tests protect semantic markup,
+  geometry, responsive behavior, and the passive/action split. Live verification
+  checks connection, runtime, provider, task, and attention segments plus console
+  cleanliness.
 
 ## Decision entry template
 

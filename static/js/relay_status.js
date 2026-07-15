@@ -179,7 +179,7 @@ function _relayStatusBuildEls() {
   }
   var root = document.createElement('div');
   root.id = 'relay-status-indicator';
-  root.className = 'relay-status';
+  root.className = 'relay-status statusbar-segment statusbar-segment--passive';
   var dot = document.createElement('span');
   dot.className = 'relay-status-dot';
   dot.setAttribute('aria-hidden', 'true');

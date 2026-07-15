@@ -29861,18 +29861,18 @@ test('bottom status bar uses dark segmented status-bar styling', () => {
     /#panelbar\s*\{[^}]*gap:\s*0;[^}]*background:\s*var\(--statusbar-bg\);[^}]*border-top:\s*1px solid var\(--statusbar-divider\);[^}]*padding:\s*0 4px;/s,
     /\.statusbar-info\s*\{[^}]*flex-direction:\s*row;[^}]*justify-content:\s*flex-end;[^}]*gap:\s*0;/s,
     /\.statusbar-panel-buttons\s*\{[^}]*gap:\s*2px;[^}]*overflow:\s*hidden;/s,
-    /\.statusbar-info > \.daemon-connection-status:first-child,\s*\.statusbar-info \.relay-status\s*\{[^}]*min-height:\s*24px;[^}]*border-left:\s*1px solid var\(--statusbar-divider\);/s,
-    /\.statusbar-info \.relay-status\s*\{[^}]*display:\s*inline-flex;[^}]*justify-content:\s*flex-start;/s,
-    /\.statusbar-chip\s*\{[^}]*border:\s*0;[^}]*border-left:\s*1px solid var\(--statusbar-divider\);[^}]*border-radius:\s*0;[^}]*background:\s*transparent;[^}]*box-shadow:\s*inset 2px 0 0 transparent;/s,
-    /\.statusbar-chip--warn\s*\{[^}]*box-shadow:\s*inset 2px 0 0 var\(--warn\);/s,
-    /\.statusbar-chip--danger\s*\{[^}]*box-shadow:\s*inset 2px 0 0 var\(--danger\);/s,
+    /\.statusbar-segment\s*\{[^}]*min-height:\s*24px;[^}]*border-left:\s*1px solid var\(--statusbar-divider\);/s,
+    /\.statusbar-segment\s*\{[^}]*display:\s*inline-flex;[^}]*justify-content:\s*flex-start;/s,
+    /\.statusbar-segment\s*\{[^}]*border-left:\s*1px solid var\(--statusbar-divider\);[^}]*border-radius:\s*0;[^}]*background:\s*transparent;[^}]*box-shadow:\s*inset 2px 0 0 transparent;/s,
+    /\.statusbar-segment--warning\s*\{[^}]*box-shadow:\s*inset 2px 0 0 var\(--warn\);/s,
+    /\.statusbar-segment--danger\s*\{[^}]*box-shadow:\s*inset 2px 0 0 var\(--danger\);/s,
     /\.taskbar-app\s*\{[^}]*border-right:\s*0;[^}]*border-radius:\s*4px;/s,
   ].forEach((pattern) => assert.match(css, pattern));
 
-  const chipRule = css.match(/\.statusbar-chip\s*\{[^}]*\}/s);
-  assert.ok(chipRule, '.statusbar-chip rule exists');
-  assert.doesNotMatch(chipRule[0], /border-radius:\s*999px/);
-  assert.doesNotMatch(chipRule[0], /border:\s*1px solid var\(--border\)/);
+  const segmentRule = css.match(/\.statusbar-segment\s*\{[^}]*\}/s);
+  assert.ok(segmentRule, '.statusbar-segment rule exists');
+  assert.doesNotMatch(segmentRule[0], /border-radius:\s*999px/);
+  assert.doesNotMatch(segmentRule[0], /border:\s*1px solid var\(--border\)/);
 });
 
 test('history and supervisor panels fill standalone dock and float bodies', () => {

@@ -430,6 +430,25 @@ test('History and event markers use canonical semantic badges', () => {
   assert.doesNotMatch(css, /^\.events-entry-dismissed-badge\s*\{/m);
 });
 
+test('status bar segments separate passive metadata from native actions', () => {
+  const html = source('webview.html');
+  const css = source('static/styles/workspace-shell.css');
+  const status = source('static/js/status_bar.js');
+  const relay = source('static/js/relay_status.js');
+
+  assert.match(html, /daemon-status-indicator" class="[^"]*statusbar-segment statusbar-segment--passive/);
+  assert.match(html, /statusbar-workload"[\s\S]*?statusbar-segment--passive/);
+  assert.match(html, /<button id="statusbar-tasks"[\s\S]*?statusbar-segment--action[\s\S]*?type="button"/);
+  assert.match(html, /<button id="statusbar-attention"[\s\S]*?statusbar-segment--action[\s\S]*?type="button"/);
+  assert.doesNotMatch(html, /statusBarChipKeydown/);
+  assert.match(relay, /relay-status statusbar-segment statusbar-segment--passive/);
+  assert.match(status, /statusbar-segment--' \+ \(level === 'warn' \? 'warning' : level\)/);
+
+  assert.match(css, /^\.statusbar-segment\s*\{[^}]*min-height:\s*24px;[^}]*border-radius:\s*0;/ms);
+  assert.match(css, /^\.statusbar-segment--action:hover,[\s\S]*?\.statusbar-segment--action:focus-visible/m);
+  assert.doesNotMatch(css, /^\.statusbar-chip\s*\{/m);
+});
+
 test('badge geometry does not drift back into feature styles', () => {
   const grid = source('static/styles/workspace-grid.css');
   const agent = source('static/styles/agent-panel.css');

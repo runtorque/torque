@@ -232,7 +232,7 @@ test('metrics tick updates status-bar indicator and health-panel live cards with
 
   const chip = document.getElementById('statusbar-metrics');
   assert.equal(chip.textContent, 'Lag 12.4ms · Mem 256MB');
-  assert.equal(chip.classList.contains('statusbar-chip--normal'), true);
+  assert.equal(chip.classList.contains('statusbar-segment--normal'), true);
   const liveHtml = document.getElementById('health-metrics-live').innerHTML;
   assert.match(liveHtml, /Event-loop lag/);
   assert.match(liveHtml, /12\.4ms/);
@@ -254,7 +254,7 @@ test('metrics indicator and panel degrade gracefully when metrics are absent or 
   vm.runInContext(`healthMetricsReceiveTick(${JSON.stringify({ type: 'metrics_tick', schema_version: 1, enabled: false })})`, context);
 
   assert.equal(document.getElementById('statusbar-metrics').textContent, 'Metrics off');
-  assert.equal(document.getElementById('statusbar-metrics').classList.contains('statusbar-chip--muted'), true);
+  assert.equal(document.getElementById('statusbar-metrics').classList.contains('statusbar-segment--muted'), true);
   assert.match(document.getElementById('health-metrics-live').innerHTML, /metrics off/);
   assert.doesNotMatch(document.getElementById('health-metrics-live').innerHTML, /0\/s/);
 });

@@ -77,7 +77,7 @@ function _statusBarSetElementVisible(el, visible) {
   if (!el) return;
   if ('hidden' in el) el.hidden = !visible;
   if (el.classList) {
-    el.classList.toggle('statusbar-chip--pref-hidden', !visible);
+    el.classList.toggle('statusbar-segment--pref-hidden', !visible);
   }
 }
 
@@ -648,12 +648,12 @@ function _statusBarSetChip(el, view) {
   if (view.label !== undefined) el.textContent = String(view.label);
   if (view.title !== undefined) el.title = String(view.title || '');
   if (el.classList) {
-    el.classList.remove('statusbar-chip--normal');
-    el.classList.remove('statusbar-chip--warn');
-    el.classList.remove('statusbar-chip--danger');
-    el.classList.remove('statusbar-chip--muted');
-    el.classList.remove('statusbar-chip--unknown');
-    el.classList.add('statusbar-chip--' + level);
+    el.classList.remove('statusbar-segment--normal');
+    el.classList.remove('statusbar-segment--warning');
+    el.classList.remove('statusbar-segment--danger');
+    el.classList.remove('statusbar-segment--muted');
+    el.classList.remove('statusbar-segment--unknown');
+    el.classList.add('statusbar-segment--' + (level === 'warn' ? 'warning' : level));
   }
   if (typeof el.setAttribute === 'function') {
     el.setAttribute('data-statusbar-level', level);
@@ -843,14 +843,6 @@ function statusBarOpenTasks() {
 
 function statusBarOpenAttention() {
   if (typeof togglePanel === 'function') togglePanel('events');
-}
-
-function statusBarChipKeydown(event, handler) {
-  if (!event || typeof handler !== 'function') return;
-  var key = event.key || event.code || '';
-  if (key !== 'Enter' && key !== ' ' && key !== 'Spacebar') return;
-  if (typeof event.preventDefault === 'function') event.preventDefault();
-  handler();
 }
 
 statusBarStartDeployPolling();
