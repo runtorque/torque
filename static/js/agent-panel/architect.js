@@ -860,7 +860,7 @@ function _agentPanelArchitectDecisionsHtml(agent) {
   html += '<span class="agent-panel-worklog-count agent-panel-decisions-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">'
     + counts.active + ' active &middot; ' + counts.archived + ' archived</span>';
   html += '</div>';
-  html += '<button type="button" class="agent-panel-decisions-archive-toggle" aria-pressed="'
+  html += '<button type="button" class="agent-panel-decisions-archive-toggle filter-chip" aria-pressed="'
     + (showArchived ? 'true' : 'false') + '" onclick="'
     + _agentPanelEventAttr('agentPanelToggleArchivedDecisions(event,' + JSON.stringify(architectId) + ')')
     + '">' + (showArchived ? 'Hide archived' : 'Show archived') + '</button>';

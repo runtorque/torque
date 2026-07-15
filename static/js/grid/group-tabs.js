@@ -59,11 +59,17 @@ function _renderAgentGroupTabsHtml() {
     + (active ? '<span class="agent-group-tab-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">' + activeCount + '</span>' : '')
     + '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4.5 3 3 3-3"/></svg>'
     + '</button>';
+  if (active) {
+    const activeArg = _jsStringAttr(active);
+    html += '<button type="button" class="agent-group-compact-menu btn btn-quiet btn-xs" title="Group actions"'
+      + ' aria-label="Group actions for ' + esc(active) + '" aria-haspopup="menu" aria-expanded="false"'
+      + ' onclick="openAgentGroupTabActions(event,' + activeArg + ')">'
+      + '<span aria-hidden="true">&#8943;</span></button>';
+  }
   html += '<div class="agent-group-quick-switcher ui-popover" role="dialog" aria-label="Switch group" hidden'
-    + ' onclick="event.stopPropagation()">'
+    + ' onclick="event.stopPropagation()" onkeydown="agentGroupQuickSwitcherKeydown(event)">'
     + '<input class="agent-group-quick-search" type="search" placeholder="Find a group…"'
-    + ' aria-label="Find a group" oninput="filterAgentGroupQuickSwitcher(this.value)"'
-    + ' onkeydown="agentGroupQuickSwitcherKeydown(event)">'
+    + ' aria-label="Find a group" oninput="filterAgentGroupQuickSwitcher(this.value)">'
     + '<div class="agent-group-quick-results">';
   for (const group of groups) {
     const selected = group === active;
@@ -182,14 +188,24 @@ function agentGroupQuickSwitcherKeydown(event) {
     closeAgentGroupQuickSwitcher(true);
     return;
   }
-  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp'
+      && event.key !== 'Home' && event.key !== 'End') return;
+  if ((event.key === 'Home' || event.key === 'End')
+      && event.target && event.target.classList
+      && event.target.classList.contains('agent-group-quick-search')) return;
   const popover = _agentGroupQuickSwitcher();
   if (!popover || !popover.querySelectorAll) return;
-  const options = Array.prototype.slice.call(popover.querySelectorAll('[data-group-switch-option]'))
+  const options = Array.prototype.slice.call(popover.querySelectorAll('[data-group-switch-option], .agent-group-quick-new'))
     .filter(function(button) { return !button.hidden; });
   if (!options.length) return;
   event.preventDefault();
-  const target = event.key === 'ArrowUp' ? options[options.length - 1] : options[0];
+  const currentIndex = options.indexOf(event.target);
+  let nextIndex = 0;
+  if (event.key === 'Home') nextIndex = 0;
+  else if (event.key === 'End') nextIndex = options.length - 1;
+  else if (currentIndex < 0) nextIndex = event.key === 'ArrowUp' ? options.length - 1 : 0;
+  else nextIndex = (currentIndex + (event.key === 'ArrowUp' ? -1 : 1) + options.length) % options.length;
+  const target = options[nextIndex];
   if (target && typeof target.focus === 'function') target.focus();
 }
 

@@ -1,7 +1,7 @@
 # Torque Design System
 
 Status: living document
-Last updated: 2026-07-14
+Last updated: 2026-07-15
 
 This document is the source of truth for Torque's product design language. It
 records the rules that make the interface feel like one system and the decisions
@@ -27,6 +27,10 @@ Every UI change should:
 
 Avoid one-off values when an existing token expresses the same intent. If a new
 value is genuinely needed, add a semantic token before repeating the literal.
+Feature-specific canvas dimensions, data-visualization geometry, and responsive
+breakpoints may remain local literals when they do not redefine a shared
+component. Repeated control height, padding, radius, type, color, focus, or
+elevation values belong in the token and component layers.
 
 ## Design principles
 
@@ -485,22 +489,22 @@ the rule is intentionally global and documented here.
 
 | Component family | Status | Next concern |
 |---|---|---|
-| Foundations and tokens | Core scale standardized | Migrate component families and audit remaining literals |
-| Group tabs | Standardized | Verify compact switcher parity |
-| Panel tabs | Standardized | Verify all panel zones and narrow widths |
+| Foundations and tokens | Standardized, literal audit complete | Tokenize repeated component semantics; keep feature geometry local |
+| Group tabs | Standardized, compact parity audited | Preserve search, keyboard, create, and group-action access in both modes |
+| Panel tabs | Standardized, all zones audited | Keep dock and rail tab rows roving, scrollable, and action-safe |
 | Feature navigation tabs | Standardized, accessibility audited | Keep long labels reachable without wrapping the panel |
 | Segmented controls | Standardized, accessibility audited | Keep tab-style segments roving and button groups natively operable |
-| Filter chips and presets | Standardized | Audit remaining feature-local toggles and removable values |
+| Filter chips and presets | Standardized, residual toggles audited | New persistent filters opt into `filter-chip`; local modes use segmented controls |
 | Buttons | Standardized, accessibility audited | Keep specialized editor actions explicitly named |
 | Inputs and selectors | Standardized, accessibility audited | Keep new dynamic editors explicitly labelled |
-| Cards | Standardized | Audit grid identity cards and nested contained surfaces |
+| Cards | Standardized, grid identity audited | New nested contained surfaces declare card intent directly |
 | Toolbars and panel headers | Standardized, responsive audited | Preserve action access when identity and controls wrap |
-| Status bar segments | Standardized | Audit narrow-width priority |
+| Status bar segments | Standardized, narrow priority audited | Never hide Attention before passive or redundant status |
 | Menus and popovers | Standardized, responsive audited | Keep anchored placement inside the viewport as labels grow |
 | Modals | Standardized, responsive audited | Keep nested-dialog focus and compact footer actions stable |
-| Badges, tags, and status | Standardized | Audit semantic intent and density at narrow widths |
+| Badges, tags, and status | Standardized, density audited | Keep metadata legible at an 8px minimum and truncate safely |
 | Count indicators | Standardized | Keep prose metrics and countdown text outside the badge grammar |
-| Empty/loading/error states | Standardized | Audit recovery language and live-region timing |
+| Empty/loading/error states | Standardized, recovery semantics audited | New async failures name a recovery path; loading and inserted errors announce once |
 
 ## Decision log
 
@@ -982,6 +986,40 @@ the rule is intentionally global and documented here.
   accessible names, label associations, compact overflow, and compact viewport
   fit. Live desktop checks exercise keyboard selection, focus retention,
   labelled fields, dialog lifecycle, and console cleanliness.
+
+### D-021 — Narrow layouts preserve action priority and component parity
+
+- Date: 2026-07-15
+- Status: accepted
+- Decision: Responsive substitutions preserve the same essential actions and
+  keyboard model as their wide counterpart. Compact group navigation keeps
+  search, group creation, group actions, and full Arrow/Home/End movement. Dock
+  and rail panel rows expose real roving tablists whose tabs scroll inside the
+  header while zone actions remain fixed; workspace rebuilds preserve the
+  focused zone tab across the persisted-layout server echo. Status-bar collapse
+  removes passive workload and redundant detail before active tasks or deploy
+  state, and never hides Attention. Metadata badges truncate within their owner
+  and keep an 8px minimum label size.
+- Rationale: The individual components looked standardized at wide widths, but
+  the audit found that several narrow transitions dropped behavior or reversed
+  information priority. A responsive substitute is part of the same component,
+  not a reduced feature set.
+- Scope: Group tabs and their compact switcher, standalone bottom-dock and
+  right-rail tabs plus their rerender focus lifecycle, History modes, Board
+  filter clearing, archived-decision filters, Grid agent and terminal identity
+  cards, status-bar breakpoints, badge density, and the remaining high-level
+  Actions, Library, Context, History, Chat, Events, Supervisor, Health, AI, and
+  behavior-overlay states.
+- Constraints: Feature-specific layout geometry and breakpoint thresholds may
+  remain local literals. Repeated component semantics use shared tokens and
+  direct canonical classes. Responsive hiding is allowed only when another
+  visible path provides the same action and higher-priority state remains.
+- Verification: Source contracts cover compact action parity, responsive
+  breakpoints, direct filter/card/state opt-in, badge legibility, and status
+  priority. Focused frontend suites exercise the compact switcher, roving zone
+  tabs, and focus retention across workspace rebuilds. Live checks exercise
+  keyboard switching in both dock zones through the server echo, representative
+  state surfaces, status priority, and console cleanliness.
 
 ## Decision entry template
 

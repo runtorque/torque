@@ -960,9 +960,9 @@ function renderAgentCell(a, options) {
   const selected = a.id === selectedAgentId;
   const childCount = (state.children[a.id] || []).length;
   const doneFlourish = _getAgentDoneFlourish(a.id);
-  const cls = ['cell'];
+  const cls = ['cell', 'ui-card', 'ui-card--interactive'];
   if (active) cls.push('active');
-  if (selected) cls.push('selected');
+  if (selected) cls.push('selected', 'is-selected');
   if (a.id === focusedItemId) cls.push('focused');
   if (a.status === 'stopped') cls.push('stopped');
   const _isArchitect = (a.kind || '') === 'architect';

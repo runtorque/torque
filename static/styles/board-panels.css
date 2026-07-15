@@ -1553,7 +1553,6 @@ body.runtime-embedded .board-empty-action:focus-visible {
 .board-lane-tab.empty-filtered { opacity: .4; }
 .board-filter-clear {
   font: 9px/1 var(--font); color: var(--text-dim);
-  background: none; border: none; cursor: pointer;
   padding: 2px 4px; white-space: nowrap;
 }
 .board-filter-clear:hover { color: var(--text); }
@@ -2380,15 +2379,7 @@ body.runtime-embedded .board-empty-action:focus-visible {
   border: 1px solid var(--border); border-radius: var(--radius);
   font: inherit; font-size: 10px;
 }
-.ah-filters { display: flex; gap: 1px; flex-shrink: 0; }
-.ah-filter-btn {
-  font-size: 9px; padding: 2px 6px;
-  background: var(--bg); color: var(--text-dim);
-  border: 1px solid var(--border); cursor: pointer;
-}
-.ah-filter-btn:first-child { border-radius: var(--radius) 0 0 var(--radius); }
-.ah-filter-btn:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
-.ah-filter-btn.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+.ah-filters { display: flex; gap: 0; flex-shrink: 0; }
 .ah-list { display: flex; flex-direction: column; gap: 1px; }
 .ah-row { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .ah-row.expanded { border-color: var(--accent-dim, var(--border)); }

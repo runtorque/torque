@@ -1027,6 +1027,36 @@ function _standalonePanelIconNode(app, className) {
   return icon;
 }
 
+function _standaloneCaptureZoneTabFocus() {
+  if (typeof document === 'undefined') return null;
+  var active = document.activeElement;
+  if (!active || !active.classList
+      || !active.classList.contains('standalone-panel-tab')) return null;
+  var tablist = active.closest ? active.closest('[role="tablist"]') : null;
+  var label = tablist && tablist.getAttribute ? tablist.getAttribute('aria-label') : '';
+  var zoneName = label === 'Bottom dock panels'
+    ? 'bottom'
+    : (label === 'Right rail panels' ? 'right' : '');
+  var app = active.dataset ? active.dataset.app : '';
+  return zoneName && app ? { zone: zoneName, app: app } : null;
+}
+
+function _standaloneRestoreZoneTabFocus(snapshot) {
+  if (!snapshot || typeof document === 'undefined') return;
+  var rootId = snapshot.zone === 'bottom'
+    ? 'standalone-bottom-dock'
+    : (snapshot.zone === 'right' ? 'standalone-right-rail' : '');
+  var root = rootId ? document.getElementById(rootId) : null;
+  if (!root || typeof root.querySelectorAll !== 'function') return;
+  var tabs = root.querySelectorAll('.standalone-panel-tab[data-app]');
+  for (var i = 0; i < tabs.length; i++) {
+    if (!tabs[i].dataset || tabs[i].dataset.app !== snapshot.app) continue;
+    try { tabs[i].focus({ preventScroll: true }); }
+    catch (_) { tabs[i].focus(); }
+    return;
+  }
+}
+
 function _standaloneZoneTab(app, active) {
   var title = _standalonePanelTitle(app);
   var hasIcon = app === 'thinking';
@@ -1035,10 +1065,14 @@ function _standaloneZoneTab(app, active) {
     'standalone-panel-tab' + (active ? ' active' : '') + (hasIcon ? ' standalone-panel-tab-has-icon' : ''),
     hasIcon ? null : title
   );
+  btn.type = 'button';
   btn.dataset.app = app;
   btn.draggable = false;
   btn.title = title;
   btn.setAttribute('aria-label', title);
+  btn.setAttribute('role', 'tab');
+  btn.setAttribute('aria-selected', active ? 'true' : 'false');
+  btn.tabIndex = active ? 0 : -1;
   if (hasIcon) {
     btn.appendChild(_standalonePanelIconNode(app, 'standalone-panel-tab-icon'));
     btn.appendChild(_makeStandaloneNode('span', 'standalone-panel-tab-label', title));
@@ -1071,6 +1105,11 @@ function _standaloneBuildZone(zoneName, rootEl, roots, placed) {
   if (zone.tabs.length || zone.active) {
     var header = _makeStandaloneNode('div', 'standalone-panel-zone-header');
     var tabs = _makeStandaloneNode('div', 'standalone-panel-zone-tabs');
+    tabs.setAttribute('role', 'tablist');
+    tabs.setAttribute('aria-label', zoneName === 'bottom' ? 'Bottom dock panels' : 'Right rail panels');
+    tabs.onkeydown = function(event) {
+      if (typeof uiTablistKeydown === 'function') uiTablistKeydown(event);
+    };
     for (var i = 0; i < zone.tabs.length; i++) {
       tabs.appendChild(_standaloneZoneTab(zone.tabs[i], zone.tabs[i] === zone.active));
     }
@@ -1207,6 +1246,7 @@ function _standaloneRenderPanelWorkspace() {
   var railHandle = document.getElementById('standalone-rail-resize-handle');
   if (!bottomRoot || !rightRoot || !shell || !stack || !layer) return;
 
+  var zoneTabFocus = _standaloneCaptureZoneTabFocus();
   var panelRoots = _standaloneCapturePanelRoots();
   var placedRoots = {};
   var layout = _standalonePanelCurrentLayout();
@@ -1221,6 +1261,7 @@ function _standaloneRenderPanelWorkspace() {
   _standaloneBuildFloats(layer, panelRoots, placedRoots);
   _standaloneParkPanelRoots(panelRoots, placedRoots);
   _standaloneUpdateTaskbarButtons();
+  _standaloneRestoreZoneTabFocus(zoneTabFocus);
 }
 
 function _standaloneUpdateTaskbarButtons() {

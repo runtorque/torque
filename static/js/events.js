@@ -420,7 +420,7 @@ function _eventsBuildShellHtml(grp, attention) {
     + (attCount > 0 ? ' <span class="events-attention-count ui-badge ui-badge--compact ui-badge--danger ui-badge--count">' + attCount + '</span>' : '')
     + '</div>';
   if (attention.length === 0) {
-    html += '<div class="events-attention-empty">No items need attention in this view.</div>';
+    html += '<div class="events-attention-empty ui-state ui-state--empty ui-state--compact">No items need attention in this view.</div>';
   } else {
     for (var i = 0; i < attention.length; i++) {
       html += _renderAttentionCard(attention[i]);
@@ -638,9 +638,9 @@ function _eventsRenderVirtualRow(row) {
     return _renderEventEntry(row.event, row.idx, row.key);
   }
   if (row.type === 'loading') {
-    return '<div class="events-loading" data-events-virtual-key="loading">Loading\u2026</div>';
+    return '<div class="events-loading ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite" data-events-virtual-key="loading">Loading events\u2026</div>';
   }
-  return '<div class="events-log-empty" data-events-virtual-key="empty">No recent events in this view yet.</div>';
+  return '<div class="events-log-empty ui-state ui-state--empty ui-state--compact" data-events-virtual-key="empty">No recent events in this view yet.</div>';
 }
 
 function _eventsSpacerHtml(className, height) {

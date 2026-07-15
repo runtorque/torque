@@ -446,6 +446,9 @@ body.runtime-embedded .statusbar-segment {
 .statusbar-chip-attention.statusbar-segment--danger {
   font-weight: 700;
 }
+.statusbar-chip-attention {
+  flex-shrink: 0;
+}
 .taskbar-aux-btn {
   display: none;
   align-items: center;
@@ -495,22 +498,23 @@ body.runtime-embedded .taskbar-aux-btn {
 }
 
 @media (max-width: 1280px) {
-  .statusbar-chip-tasks { display: none; }
+  .statusbar-chip-agents { display: none; }
 }
 @media (max-width: 1140px) {
-  .statusbar-chip-agents { display: none; }
+  .statusbar-chip-tasks { display: none; }
 }
 @media (max-width: 980px) {
   .statusbar-chip-deploy { display: none; }
 }
 @media (max-width: 860px) {
-  .statusbar-chip-attention { display: none; }
+  #statusbar-claude-usage,
+  #statusbar-codex-usage { display: none; }
 }
 @media (max-width: 760px) {
   .statusbar-chip-deploy,
   .statusbar-chip-agents,
   .statusbar-chip-tasks,
-  .statusbar-chip-attention { display: none; }
+  .statusbar-chip-metrics { display: none; }
   .statusbar-chip { max-width: 120px; padding-inline: 6px; }
 }
 /* ------------------------------------------------------------------ */
@@ -581,8 +585,13 @@ body.runtime-embedded #standalone-right-rail {
   display: flex;
   align-items: center;
   gap: 4px;
+  flex: 1 1 auto;
   min-width: 0;
+  max-width: 100%;
   overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
 }
 .standalone-panel-tab,
 .standalone-panel-zone-btn {
@@ -598,6 +607,7 @@ body.runtime-embedded #standalone-right-rail {
   transition: color .15s, border-color .15s, background .15s, box-shadow .15s;
 }
 .standalone-panel-tab {
+  flex: 0 0 auto;
   border-radius: var(--radius-sm);
 }
 .standalone-panel-tab:hover,

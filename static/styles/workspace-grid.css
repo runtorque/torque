@@ -1160,12 +1160,20 @@ main {
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   opacity: 1;
 }
-.agent-group-compact { display: none; min-width: 0; width: 100%; position: relative; }
+.agent-group-compact {
+  display: none;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  width: 100%;
+  position: relative;
+}
 .agent-group-compact-trigger {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   min-height: 24px;
   padding: 2px 7px;
   border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
@@ -1173,6 +1181,11 @@ main {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   color: var(--text);
   text-align: left;
+}
+.agent-group-compact-menu {
+  flex: 0 0 var(--control-height-sm);
+  width: var(--control-height-sm);
+  padding: 0;
 }
 .agent-group-compact-trigger > svg {
   width: 12px;
@@ -1231,7 +1244,7 @@ main {
 }
 @container agent-group-nav (max-width: 380px) {
   .agent-group-tabs-list { display: none; }
-  .agent-group-compact { display: block; }
+  .agent-group-compact { display: flex; }
 }
 .agent-focus-resizer {
   flex: 0 0 24px;

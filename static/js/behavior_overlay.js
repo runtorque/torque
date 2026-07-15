@@ -608,9 +608,9 @@ function behaviorOverlayGovernanceSelect(architectId, targetAgentId) {
 }
 
 function _behaviorOverlayRenderedDiff(diffPayload) {
-  if (!diffPayload) return '<div class="behavior-overlay-diff-placeholder">Select a diff to inspect.</div>';
+  if (!diffPayload) return '<div class="behavior-overlay-diff-placeholder ui-state ui-state--note ui-state--compact">Select a diff to inspect.</div>';
   if (_behaviorOverlayDiffLoadingByKey[diffPayload]) {
-    return '<div class="behavior-overlay-diff-placeholder">Loading diff…</div>';
+    return '<div class="behavior-overlay-diff-placeholder ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading diff…</div>';
   }
   var diffText = typeof diffPayload === 'string'
     ? String((_behaviorOverlayDiffByKey[diffPayload] || {}).diff || '')
@@ -1650,7 +1650,7 @@ function renderBehaviorOverlayApprovalModal() {
     + _behaviorOverlayLintWarningsHtml(proposal) + '</div>';
   html += '<div class="behavior-overlay-approval-diff-wrap"><div class="behavior-overlay-approval-diff-title">Rendered unified diff</div>';
   if (!diffReady) {
-    html += '<div class="behavior-overlay-diff-placeholder">Loading required diff… Approve/reject is disabled until this renders.</div>';
+    html += '<div class="behavior-overlay-diff-placeholder ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading required diff… Approve/reject is disabled until this renders.</div>';
   } else {
     html += behaviorOverlayRenderUnifiedDiff(diffPayload.diff || '');
   }

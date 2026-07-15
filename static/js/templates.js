@@ -334,14 +334,14 @@ function renderAgentTemplatesEditor() {
   var dataForScope = loadedForScope ? _agentTplData : null;
   var newForScope = loadedForScope ? _agentTplNew : false;
   if (!loadedForScope) {
-    el.innerHTML = '<div class="tpled-empty">Loading roles\u2026</div>';
+    el.innerHTML = '<div class="tpled-empty ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading roles\u2026</div>';
     return;
   }
   if (!dataForScope && !newForScope) {
     if (listForScope.length === 0) {
-      el.innerHTML = '<div class="tpled-empty">No roles found.<br>Click <b>+</b> to save a launch preset,<br>or add <code>.yaml</code> files to <code>.torque/roles/</code>.</div>';
+      el.innerHTML = '<div class="tpled-empty ui-state ui-state--empty ui-state--compact">No roles found.<br>Click <b>+</b> to save a launch preset,<br>or add <code>.yaml</code> files to <code>.torque/roles/</code>.</div>';
     } else {
-      el.innerHTML = '<div class="tpled-empty">Pick a role from the library above.</div>';
+      el.innerHTML = '<div class="tpled-empty ui-state ui-state--empty ui-state--compact">Pick a role from the library above.</div>';
     }
     return;
   }
@@ -766,14 +766,14 @@ function renderSpecializationLibraryEditor(restoreState) {
   var dataForScope = loadedForScope ? _specializationData : null;
   var newForScope = loadedForScope ? _specializationNew : false;
   if (!loadedForScope) {
-    el.innerHTML = '<div class="tpled-empty">Loading specializations\u2026</div>';
+    el.innerHTML = '<div class="tpled-empty ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading specializations\u2026</div>';
     return;
   }
   if (!dataForScope && !newForScope) {
     if (listForScope.length === 0) {
-      el.innerHTML = '<div class="tpled-empty">No specializations found.<br>Click <b>+</b> to create one,<br>or add <code>.yaml</code> files to <code>.torque/specializations/</code>.</div>';
+      el.innerHTML = '<div class="tpled-empty ui-state ui-state--empty ui-state--compact">No specializations found.<br>Click <b>+</b> to create one,<br>or add <code>.yaml</code> files to <code>.torque/specializations/</code>.</div>';
     } else {
-      el.innerHTML = '<div class="tpled-empty">Pick a specialization from the library above.</div>';
+      el.innerHTML = '<div class="tpled-empty ui-state ui-state--empty ui-state--compact">Pick a specialization from the library above.</div>';
     }
     return;
   }
@@ -1586,7 +1586,7 @@ function renderAgentClassManagerEditor(restoreState) {
   var baseDir = _agentClassCurrentBaseDir();
   var loaded = _agentClassLoadedBaseDir === baseDir || (_agentClassLoadedBaseDir == null && _agentClassLoadingBaseDir !== baseDir);
   if (!loaded) {
-    el.innerHTML = '<div class="tpled-empty">Loading Agent Classes…</div>';
+    el.innerHTML = '<div class="tpled-empty ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading Agent Classes…</div>';
     return;
   }
   var html = '';
@@ -1596,7 +1596,7 @@ function renderAgentClassManagerEditor(restoreState) {
   if (_agentClassEditorError) html += '<div class="agent-class-error">' + esc(_agentClassEditorError) + '</div>';
   var preview = _agentClassEditablePreview();
   if (!preview) {
-    html += '<div class="tpled-empty">Pick a class above, or click <b>+</b> to create a trusted project class.</div>';
+    html += '<div class="tpled-empty ui-state ui-state--empty ui-state--compact">Pick a class above, or click <b>+</b> to create a trusted project class.</div>';
     el.innerHTML = html;
     _agentClassRestoreEditorUiState(el, restoreState);
     return;

@@ -206,15 +206,15 @@ function renderTemplatesEditor() {
   var newForScope = loadedForScope ? _tplEditorNew : false;
 
   if (!loadedForScope) {
-    el.innerHTML = '<div class="tpled-empty">Loading actions\u2026</div>';
+    el.innerHTML = '<div class="tpled-empty ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading actions\u2026</div>';
     return;
   }
 
   if (!dataForScope && !newForScope) {
     if (listForScope.length === 0) {
-      el.innerHTML = '<div class="tpled-empty">No actions found.<br>Click <b>+</b> to create one,<br>or add <code>.yaml</code> files to <code>.torque/actions/</code>.</div>';
+      el.innerHTML = '<div class="tpled-empty ui-state ui-state--empty ui-state--compact">No actions found.<br>Click <b>+</b> to create one,<br>or add <code>.yaml</code> files to <code>.torque/actions/</code>.</div>';
     } else {
-      el.innerHTML = '<div class="tpled-empty">'
+      el.innerHTML = '<div class="tpled-empty ui-state ui-state--empty ui-state--compact">'
         + '<b>' + listForScope.length + '</b> action' + (listForScope.length !== 1 ? 's' : '') + ' available.<br>'
         + 'Pick one from the dropdown above to view or edit.'
         + '</div>';
@@ -927,14 +927,14 @@ function renderPipelinesView() {
   if (!el) return;
 
   if (!_tplPipelinesData) {
-    el.innerHTML = '<div class="tpled-pipelines-loading">Loading\u2026</div>';
+    el.innerHTML = '<div class="tpled-pipelines-loading ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading pipelines\u2026</div>';
     send({ cmd: 'discover_pipelines', group: _currentGroup() || '' });
     return;
   }
 
   var pipelines = _tplPipelinesData.pipelines || [];
   if (!pipelines.length) {
-    el.innerHTML = '<div class="tpled-pipelines-empty">'
+    el.innerHTML = '<div class="tpled-pipelines-empty ui-state ui-state--empty ui-state--compact">'
       + 'No pipelines found.<br>'
       + '<span class="dim">Add <code>transitions</code> to your actions.</span></div>';
     return;

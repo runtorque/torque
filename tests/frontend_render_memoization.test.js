@@ -285,7 +285,7 @@ test('TORQUE:264 — render() memoizes empty-state main.innerHTML', () => {
 test('terminal-row extraction keeps row HTML stable and preserves row-control focus through identical rerenders', () => {
   const { context, sandbox, main } = createTerminalRowRerenderHarness();
   const firstRowHtml = context.renderTerminalRow(sandbox.state.agents['term-1']);
-  assert.match(firstRowHtml, /class="term-row active focused"/);
+  assert.match(firstRowHtml, /class="term-row ui-card ui-card--interactive active is-selected focused"/);
   assert.match(firstRowHtml, /class="term-action danger"/);
 
   context.render();
@@ -652,7 +652,7 @@ test('sections extraction preserves section HTML, collapsed groups, scroll, focu
   assert.match(main._torqueLastGridHtml, /data-agent-section="architect:arch-a"/);
   assert.match(main._torqueLastGridHtml, /data-agent-strata="engineers"[\s\S]*User Engineer[\s\S]*User Worker/);
   assert.match(main._torqueLastGridHtml, /data-agent-strata="workers"[\s\S]*Loose Worker/);
-  assert.match(main._torqueLastGridHtml, /class="cell selected focused worker"/,
+  assert.match(main._torqueLastGridHtml, /class="cell ui-card ui-card--interactive selected is-selected focused worker"/,
     'selected/focused worker marker should be present before rerender');
   assert.match(main._torqueLastGridHtml, /class="group collapsed" data-group-name="beta"/,
     'beta starts collapsed from persisted group settings');
@@ -693,7 +693,7 @@ test('sections extraction preserves section HTML, collapsed groups, scroll, focu
   assert.equal(harness.getGridSetCount(), gridSetsBeforeDelta + 1,
     'WS-style section delta should rebuild the grid pane exactly once');
   assert.match(main._torqueLastGridHtml, /Reporting progress/);
-  assert.match(main._torqueLastGridHtml, /class="cell selected focused worker"/,
+  assert.match(main._torqueLastGridHtml, /class="cell ui-card ui-card--interactive selected is-selected focused worker"/,
     'selected/focused worker marker should survive changed section output');
   assert.match(main._torqueLastGridHtml, /class="group" data-group-name="alpha"/);
   assert.match(main._torqueLastGridHtml, /class="group collapsed" data-group-name="beta"/);
@@ -950,7 +950,7 @@ test('agent-card extraction preserves stable card HTML and main-surface focus th
 
   context.render();
   assert.match(main._torqueLastGridHtml, /data-focus-key="agent-digest-toggle:a1"/);
-  assert.match(main._torqueLastGridHtml, /class="cell selected worker"/,
+  assert.match(main._torqueLastGridHtml, /class="cell ui-card ui-card--interactive selected is-selected worker"/,
     'selected card marker should survive the initial grid render');
   const firstControl = harness.getCurrentControl();
   assert.ok(firstControl, 'first render should expose the agent-card inline control');
@@ -973,7 +973,7 @@ test('agent-card extraction preserves stable card HTML and main-surface focus th
   assert.equal(harness.getGridSetCount(), gridSetsBeforeStableRender + 1,
     'changed card html should rebuild only the grid pane');
   assert.match(grid.innerHTML, /Reporting progress/);
-  assert.match(main._torqueLastGridHtml, /class="cell selected worker"/,
+  assert.match(main._torqueLastGridHtml, /class="cell ui-card ui-card--interactive selected is-selected worker"/,
     'selected card marker should survive the WS-style grid rebuild');
   const restoredControl = harness.getCurrentControl();
   assert.notEqual(restoredControl, firstControl,

@@ -191,10 +191,12 @@ function renderAgentHistoryView() {
   var filters = [
     ['', 'All'], ['active', 'Active'], ['removed', 'Removed'], ['merged', 'Merged']
   ];
-  html += '<div class="ah-filters">';
+  html += '<div class="ah-filters segmented-control" role="group" aria-label="History status">';
   for (var i = 0; i < filters.length; i++) {
     var f = filters[i];
-    html += '<button class="ah-filter-btn' + (_agentHistoryFilter === f[0] ? ' active' : '') + '" '
+    var selected = _agentHistoryFilter === f[0];
+    html += '<button type="button" class="ah-filter-btn segmented-control__item' + (selected ? ' is-active' : '') + '"'
+      + ' aria-pressed="' + (selected ? 'true' : 'false') + '" '
       + 'onclick="agentHistorySetFilter(\'' + f[0] + '\')">' + f[1] + '</button>';
   }
   html += '</div>';
@@ -221,7 +223,7 @@ function renderAgentHistoryView() {
     if (_agentHistoryFilter === 'merged') empty = 'No merged agent runs yet.';
     else if (_agentHistoryFilter === 'removed') empty = 'No removed agent runs yet.';
     else if (_agentHistoryFilter === 'active') empty = 'No active agent runs match this filter.';
-    html += '<div class="ah-empty">' + empty + '<br>Live agents stay in the left column.</div>';
+    html += '<div class="ah-empty ui-state ui-state--empty ui-state--compact">' + empty + '<br>Live agents stay in the left column.</div>';
     container.innerHTML = html;
     restoreSurface();
     return;
@@ -266,7 +268,7 @@ function renderAgentHistoryView() {
     if (expanded) {
       html += '<div class="ah-detail" id="ah-detail-' + esc(r.id) + '">';
       if (!_agentHistoryDetail) {
-        html += '<div class="ah-loading">Loading\u2026</div>';
+        html += '<div class="ah-loading ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading agent history\u2026</div>';
       }
       html += '</div>';
     }
@@ -357,7 +359,7 @@ function renderAgentHistoryExpanded() {
   }
 
   if (!tasks.length && !messages.length) {
-    html += '<div class="ah-empty">No activity recorded.</div>';
+    html += '<div class="ah-empty ui-state ui-state--empty ui-state--compact">No activity recorded.</div>';
   }
 
   el.innerHTML = html;

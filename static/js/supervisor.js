@@ -751,10 +751,10 @@ function _supervisorCardHtml(session) {
 
 function _supervisorBodyHtml(rows) {
   if (supervisorState.loading && !rows.length) {
-    return '<div class="supervisor-empty">Loading supervisor sessions…</div>';
+    return '<div class="supervisor-empty ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading supervisor sessions…</div>';
   }
   if (!rows.length) {
-    return '<div class="supervisor-empty">No supervisor sessions reported.</div>';
+    return '<div class="supervisor-empty ui-state ui-state--empty ui-state--compact">No supervisor sessions reported.</div>';
   }
   var table = '<div class="supervisor-table-wrap"><table class="supervisor-table"><thead><tr>'
     + '<th>' + _supervisorSortButton('state', 'State') + '</th>'
@@ -803,7 +803,7 @@ function renderSupervisorPanel(opts) {
       + _supervisorEsc(_supervisorUnavailableBannerText())
       + '</div>';
   } else if (supervisorState.error) {
-    banner = '<div class="supervisor-banner supervisor-banner-error">' + _supervisorEsc(supervisorState.error) + '</div>';
+    banner = '<div class="supervisor-banner supervisor-banner-error" role="alert">' + _supervisorEsc(supervisorState.error) + ' Refresh Supervisor to try again.</div>';
   }
 
   root.innerHTML = '<div class="supervisor-panel">'

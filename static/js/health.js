@@ -392,14 +392,14 @@ function _healthMetricsLiveHtml() {
 
 function _healthMetricsHistoryHtml() {
   if (healthMetricsState.historyError) {
-    return '<div class="health-error">' + _healthEsc(healthMetricsState.historyError) + '</div>';
+    return '<div class="health-error ui-state ui-state--error ui-state--compact" role="alert">' + _healthEsc(healthMetricsState.historyError) + ' Refresh Health to try again.</div>';
   }
   if (healthMetricsState.historyLoading && !healthMetricsState.historyPayload) {
-    return '<div class="health-loading">Loading metrics history…</div>';
+    return '<div class="health-loading ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading metrics history…</div>';
   }
   var payload = healthMetricsState.historyPayload;
   if (!payload) {
-    return '<div class="health-empty">Open the panel to load over-time metrics history.</div>';
+    return '<div class="health-empty ui-state ui-state--empty ui-state--compact">Open the panel to load over-time metrics history.</div>';
   }
   var bucketLabel = (payload.bucket_seconds || 0) < 86400 ? 'hourly' : 'daily';
   var retention = (payload.perf && payload.perf.retention) || {};
@@ -471,7 +471,7 @@ function _healthSupervisorStatusText() {
 function _healthSupervisorLiveHtml() {
   var supervisor = _healthRuntimeSupervisor();
   if (!supervisor) {
-    return '<div class="health-empty">Supervisor health projection has not arrived yet.</div>';
+    return '<div class="health-empty ui-state ui-state--empty ui-state--compact">Supervisor health projection has not arrived yet.</div>';
   }
   var metrics = (supervisor.metrics && typeof supervisor.metrics === 'object')
     ? supervisor.metrics
@@ -849,7 +849,7 @@ function _healthAgeTable(payload) {
   var lanes = (payload && payload.distributions && payload.distributions.task_age_by_lane) || {};
   var names = Object.keys(lanes).sort();
   if (!names.length) {
-    return '<div class="health-empty">No current task age data for this scope.</div>';
+    return '<div class="health-empty ui-state ui-state--empty ui-state--compact">No current task age data for this scope.</div>';
   }
   var rows = names.map(function(lane) {
     var item = lanes[lane] || {};
@@ -892,15 +892,15 @@ function _healthCoverageHtml(payload) {
 function _healthResultsHtml(payload) {
   var bottomSectionsHtml = _healthBottomSectionsHtml();
   if (healthState.error) {
-    return '<div class="health-error">' + _healthEsc(healthState.error) + '</div>'
+    return '<div class="health-error ui-state ui-state--error ui-state--compact" role="alert">' + _healthEsc(healthState.error) + ' Refresh Health to try again.</div>'
       + bottomSectionsHtml;
   }
   if (healthState.loading && !payload) {
-    return '<div class="health-loading">Loading health metrics…</div>'
+    return '<div class="health-loading ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading health metrics…</div>'
       + bottomSectionsHtml;
   }
   if (!payload) {
-    return '<div class="health-empty">Open the panel to load health metrics.</div>'
+    return '<div class="health-empty ui-state ui-state--empty ui-state--compact">Open the panel to load health metrics.</div>'
       + bottomSectionsHtml;
   }
   var summary = payload.summary || {};

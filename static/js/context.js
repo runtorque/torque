@@ -401,13 +401,13 @@ function _contextVirtualSpacer(height) {
 
 function _renderContextList() {
   if (_contextListLoading && !_contextEntries.length) {
-    return '<div class="context-empty">Loading shared context…</div>';
+    return '<div class="context-empty ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading shared context…</div>';
   }
   if (_contextListError && !_contextEntries.length) {
-    return '<div class="context-empty">' + esc(_contextListError) + '</div>';
+    return '<div class="context-empty ui-state ui-state--error ui-state--compact" role="alert">' + esc(_contextListError) + ' Refresh Context to try again.</div>';
   }
   if (!_contextEntries.length) {
-    return '<div class="context-empty">No shared context matches the current filter.</div>';
+    return '<div class="context-empty ui-state ui-state--empty ui-state--compact">No shared context matches the current filter.</div>';
   }
   var html = '';
   var range = _contextVirtualRange(_contextEntries.length);
@@ -424,7 +424,7 @@ function _renderContextList() {
 
 function _contextRenderLinks(entry) {
   var links = Array.isArray(entry.links) ? entry.links : [];
-  if (!links.length) return '<div class="context-detail-empty">No linked tasks or agents.</div>';
+  if (!links.length) return '<div class="context-detail-empty ui-state ui-state--empty ui-state--compact">No linked tasks or agents.</div>';
   var html = '<div class="context-link-list">';
   for (var i = 0; i < links.length; i++) {
     var link = links[i];
@@ -446,7 +446,7 @@ function _contextRenderLinks(entry) {
 function _renderContextDetail(entry) {
   if (_contextEditor) return _renderContextEditor();
   if (!entry) {
-    return '<div class="context-detail-empty">Select an entry or create a note.</div>';
+    return '<div class="context-detail-empty ui-state ui-state--empty ui-state--compact">Select an entry or create a note.</div>';
   }
   var title = entry.title || 'Untitled note';
   var sourceLabel = entry.source_kind === 'manual'

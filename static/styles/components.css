@@ -25,6 +25,9 @@
   line-height: 1.25;
   vertical-align: middle;
   white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .ui-badge--compact {
@@ -36,7 +39,7 @@
 .ui-badge--micro {
   min-height: 12px;
   padding: 0 4px;
-  font-size: 6.5px;
+  font-size: 8px;
   line-height: 1.4;
 }
 

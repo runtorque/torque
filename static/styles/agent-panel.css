@@ -837,18 +837,7 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   min-width: 0;
 }
 .agent-panel-decisions-archive-toggle {
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text-dim);
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 10px;
-  padding: 3px 6px;
-}
-.agent-panel-decisions-archive-toggle[aria-pressed="true"] {
-  color: var(--text);
-  border-color: var(--accent);
+  flex: 0 0 auto;
 }
 .agent-panel-panel[data-agent-panel-kind="architect"][data-agent-panel-tab="journal"] .agent-panel-worklog-header {
   justify-content: flex-start;

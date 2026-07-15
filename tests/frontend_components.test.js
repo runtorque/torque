@@ -309,6 +309,56 @@ test('compact dialogs, icon actions, and primary fields retain accessible afford
   }
 });
 
+test('residual responsive audit preserves compact actions, priority, and direct component intent', () => {
+  const design = source('DESIGN.md');
+  const components = source('static/styles/components.css');
+  const gridCss = source('static/styles/workspace-grid.css');
+  const shellCss = source('static/styles/workspace-shell.css');
+  const groupTabs = source('static/js/grid/group-tabs.js');
+  const panelManager = source('static/js/panel_manager.js');
+  const history = source('static/js/history.js');
+  const architect = source('static/js/agent-panel/architect.js');
+  const board = source('static/js/board/rendering.js');
+  const agentCard = source('static/js/grid/agent-card.js');
+  const terminalRow = source('static/js/grid/terminal-row.js');
+  const context = source('static/js/context.js');
+  const health = source('static/js/health.js');
+
+  assert.match(design, /D-021 — Narrow layouts preserve action priority and component parity/);
+  assert.match(groupTabs, /agent-group-compact-menu btn btn-quiet btn-xs/);
+  assert.match(groupTabs, /agent-group-quick-switcher ui-popover[\s\S]*?onkeydown="agentGroupQuickSwitcherKeydown\(event\)"/);
+  assert.match(groupTabs, /\[data-group-switch-option\], \.agent-group-quick-new/);
+  assert.match(groupTabs, /event\.key !== 'Home' && event\.key !== 'End'/);
+  assert.match(gridCss, /@container agent-group-nav \(max-width:\s*380px\)[\s\S]*?\.agent-group-compact\s*\{\s*display:\s*flex;/s);
+
+  assert.match(panelManager, /btn\.setAttribute\('role', 'tab'\)/);
+  assert.match(panelManager, /btn\.setAttribute\('aria-selected', active \? 'true' : 'false'\)/);
+  assert.match(panelManager, /tabs\.setAttribute\('role', 'tablist'\)/);
+  assert.match(panelManager, /uiTablistKeydown\(event\)/);
+  assert.match(panelManager, /function _standaloneCaptureZoneTabFocus\(\)[\s\S]*?standalone-panel-tab[\s\S]*?Right rail panels/);
+  assert.match(panelManager, /function _standaloneRestoreZoneTabFocus\(snapshot\)[\s\S]*?preventScroll/);
+  assert.match(panelManager, /var zoneTabFocus = _standaloneCaptureZoneTabFocus\(\)[\s\S]*?_standaloneRestoreZoneTabFocus\(zoneTabFocus\)/);
+  assert.match(shellCss, /\.standalone-panel-zone-tabs\s*\{[^}]*flex:\s*1 1 auto;[^}]*max-width:\s*100%;[^}]*overflow-x:\s*auto;[^}]*overscroll-behavior-inline:\s*contain;[^}]*scrollbar-width:\s*thin;/s);
+
+  assert.match(history, /ah-filters segmented-control" role="group" aria-label="History status"/);
+  assert.match(history, /ah-filter-btn segmented-control__item/);
+  assert.match(architect, /agent-panel-decisions-archive-toggle filter-chip/);
+  assert.match(board, /board-filter-clear btn-link[^>]*>Clear filters</);
+  assert.match(agentCard, /const cls = \['cell', 'ui-card', 'ui-card--interactive'\]/);
+  assert.match(terminalRow, /const cls = \['term-row', 'ui-card', 'ui-card--interactive'\]/);
+
+  assert.match(components, /\.ui-badge--micro\s*\{[^}]*font-size:\s*8px;/s);
+  assert.match(shellCss, /\.statusbar-chip-attention\s*\{[^}]*flex-shrink:\s*0;/s);
+  assert.match(shellCss, /@media \(max-width:\s*1280px\)\s*\{\s*\.statusbar-chip-agents \{ display: none; \}/s);
+  assert.match(shellCss, /@media \(max-width:\s*860px\)[\s\S]*?#statusbar-claude-usage,[\s\S]*?#statusbar-codex-usage \{ display: none; \}/s);
+  assert.doesNotMatch(shellCss, /\.statusbar-chip-attention\s*\{\s*display:\s*none;/s);
+
+  assert.match(context, /context-empty ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite"/);
+  assert.match(context, /context-empty ui-state ui-state--error ui-state--compact" role="alert"[^\n]*Refresh Context to try again/);
+  assert.match(health, /health-error ui-state ui-state--error ui-state--compact" role="alert"[^\n]*Refresh Health to try again/);
+  assert.match(health, /health-loading ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite"/);
+});
+
 test('shared segmented controls define one compact selected-state primitive', () => {
   const css = source('static/styles/components.css');
 
@@ -719,9 +769,9 @@ test('menu geometry does not drift back into feature styles', () => {
 test('shared semantic badges define density and intent variants', () => {
   const css = source('static/styles/components.css');
 
-  assert.match(css, /\.ui-badge\s*\{[^}]*display:\s*inline-flex;[^}]*min-height:\s*18px;[^}]*padding:\s*1px 6px;[^}]*border:\s*1px solid var\(--border\);[^}]*border-radius:\s*999px;[^}]*font-size:\s*9px;/s);
+  assert.match(css, /\.ui-badge\s*\{[^}]*display:\s*inline-flex;[^}]*min-height:\s*18px;[^}]*padding:\s*1px 6px;[^}]*border:\s*1px solid var\(--border\);[^}]*border-radius:\s*999px;[^}]*font-size:\s*9px;[^}]*max-width:\s*100%;[^}]*text-overflow:\s*ellipsis;/s);
   assert.match(css, /\.ui-badge--compact\s*\{[^}]*min-height:\s*14px;[^}]*font-size:\s*8px;/s);
-  assert.match(css, /\.ui-badge--micro\s*\{[^}]*min-height:\s*12px;[^}]*padding:\s*0 4px;[^}]*font-size:\s*6\.5px;/s);
+  assert.match(css, /\.ui-badge--micro\s*\{[^}]*min-height:\s*12px;[^}]*padding:\s*0 4px;[^}]*font-size:\s*8px;/s);
   for (const intent of ['neutral', 'accent', 'success', 'warning', 'danger']) {
     assert.match(css, new RegExp(`\\.ui-badge--${intent}\\s*\\{[^}]*color:`));
   }

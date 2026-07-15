@@ -574,7 +574,7 @@ function renderBoard() {
       html += '</div>';
     }
     if (filtersActive) {
-      html += '<button class="board-filter-clear" onclick="boardClearFilters()">Clear</button>';
+      html += '<button type="button" class="board-filter-clear btn-link" onclick="boardClearFilters()">Clear filters</button>';
     }
   }
   html += '<div class="board-search-spacer"></div>';

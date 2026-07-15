@@ -131,8 +131,8 @@ function renderTermAddBtn(gname, parentId) {
 
 function renderTerminalRow(t) {
   const active = t.session_id && t.session_id === state.active_session_id;
-  const cls = ['term-row'];
-  if (active) cls.push('active');
+  const cls = ['term-row', 'ui-card', 'ui-card--interactive'];
+  if (active) cls.push('active', 'is-selected');
   if (t.id === focusedItemId) cls.push('focused');
   if (t.status === 'stopped') cls.push('stopped');
 

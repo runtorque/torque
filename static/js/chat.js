@@ -852,7 +852,7 @@ function _chatThreadRowHtml(item, selectedId) {
 
 function _chatThreadListHtml(items, selectedId) {
   if (!items.length) {
-    return '<div class="chat-empty-state">No architect or engineer peer messages yet.</div>';
+    return '<div class="chat-empty-state ui-state ui-state--empty ui-state--compact">No architect or engineer peer messages yet.</div>';
   }
   var html = '';
   for (var i = 0; i < items.length; i++) {
@@ -910,7 +910,7 @@ function _chatSelectedHeaderHtml(thread) {
 
 function _chatMessagesHtml(thread) {
   if (!thread) {
-    return '<div class="chat-empty-state chat-empty-state-wide">No thread selected.</div>';
+    return '<div class="chat-empty-state chat-empty-state-wide ui-state ui-state--empty ui-state--compact">No thread selected.</div>';
   }
   var messages = Array.isArray(thread.messages) ? thread.messages : [];
   var threadId = _chatThreadId(thread, _chatSelectedThreadId);
@@ -925,7 +925,7 @@ function _chatMessagesHtml(thread) {
     html += '<div class="chat-older-affordance">Older messages exist outside this loaded tail.</div>';
   }
   if (!messages.length) {
-    html += '<div class="chat-empty-state chat-empty-state-wide">No messages in this thread yet.</div>';
+    html += '<div class="chat-empty-state chat-empty-state-wide ui-state ui-state--empty ui-state--compact">No messages in this thread yet.</div>';
     return html;
   }
   for (var i = start; i < messages.length; i++) {

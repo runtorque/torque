@@ -21722,23 +21722,23 @@ test('renderAgentCell shows per-engineer and architect digest pause controls wit
     status: 'running',
   });
 
-  assert.match(runningHtml, /^<div class="cell selected"/);
+  assert.match(runningHtml, /^<div class="cell ui-card ui-card--interactive selected is-selected"/);
   assert.doesNotMatch(runningHtml, /^<div class="[^"]*\bengineer(?:\b|-)/);
   assert.match(runningHtml, /class="cell-header-controls">/);
   assert.match(runningHtml, /class="cell-engineer-toggle running"/);
   assert.match(runningHtml, /Pause Engineer event delivery/);
-  assert.match(engineerNamedEngineerHtml, /^<div class="cell engineer"/);
+  assert.match(engineerNamedEngineerHtml, /^<div class="cell ui-card ui-card--interactive engineer"/);
   assert.match(workerHtml, /class="cell-engineer-toggle running"/);
   assert.match(workerHtml, /Pause event delivery/);
   assert.match(workerHtml, /class="agent-card-kind ui-badge ui-badge--micro cell-worker-badge">Worker<\/div>/);
   assert.doesNotMatch(workerHtml, /cell-engineer-badge|cell-architect-badge/);
-  assert.match(engineerHtml, /^<div class="cell engineer"/);
+  assert.match(engineerHtml, /^<div class="cell ui-card ui-card--interactive engineer"/);
   assert.match(engineerHtml, /class="agent-card-kind ui-badge ui-badge--micro cell-engineer-badge">Engineer<\/div>/);
   assert.match(engineerHtml, /class="cell-engineer-toggle running"/);
   assert.match(engineerHtml, /toggleDigestPauseForAgent\(decodeURIComponent\(&#39;eng-1&#39;\)\)/);
   assert.match(engineerHtml, /Pause event delivery/);
   assert.doesNotMatch(engineerHtml, /Pause Engineer event delivery/);
-  assert.match(architectHtml, /^<div class="cell architect"/);
+  assert.match(architectHtml, /^<div class="cell ui-card ui-card--interactive architect"/);
   assert.doesNotMatch(architectHtml, /^<div class="[^"]*\bengineer(?:\b|-)/);
   assert.match(architectHtml, /class="agent-card-kind ui-badge ui-badge--micro cell-architect-badge">Architect<\/div>/);
   assert.match(architectHtml, /class="cell-engineer-toggle running"/);
@@ -21763,7 +21763,7 @@ test('renderAgentCell shows per-engineer and architect digest pause controls wit
     status: 'running',
   });
 
-  assert.match(pausedHtml, /^<div class="cell selected"/);
+  assert.match(pausedHtml, /^<div class="cell ui-card ui-card--interactive selected is-selected"/);
   assert.doesNotMatch(pausedHtml, /^<div class="[^"]*\bengineer(?:\b|-)/);
   assert.match(pausedHtml, /class="cell-engineer-toggle paused"/);
   assert.match(pausedHtml, /Resume Engineer event delivery/);
@@ -21788,10 +21788,10 @@ test('renderAgentCell shows per-engineer and architect digest pause controls wit
     cell_type: 'agent',
     status: 'running',
   });
-  assert.match(pausedEngineerHtml, /^<div class="cell engineer"/);
+  assert.match(pausedEngineerHtml, /^<div class="cell ui-card ui-card--interactive engineer"/);
   assert.match(pausedEngineerHtml, /class="cell-engineer-toggle paused"/);
   assert.match(pausedEngineerHtml, /Resume event delivery/);
-  assert.match(pausedArchitectHtml, /^<div class="cell architect"/);
+  assert.match(pausedArchitectHtml, /^<div class="cell ui-card ui-card--interactive architect"/);
   assert.doesNotMatch(pausedArchitectHtml, /^<div class="[^"]*\bengineer(?:\b|-)/);
   assert.match(pausedArchitectHtml, /class="cell-engineer-toggle paused"/);
   assert.match(pausedArchitectHtml, /Resume event delivery/);
@@ -21809,7 +21809,7 @@ test('renderAgentCell shows per-engineer and architect digest pause controls wit
     status: 'running',
   });
 
-  assert.match(askingHtml, /^<div class="cell selected"/);
+  assert.match(askingHtml, /^<div class="cell ui-card ui-card--interactive selected is-selected"/);
   assert.doesNotMatch(askingHtml, /^<div class="[^"]*\bengineer(?:\b|-)/);
   assert.match(askingHtml, /awaiting input/);
 });
@@ -22835,7 +22835,7 @@ test('History renders as a separate panel with the merged filter selected', () =
 
   assert.match(panel.innerHTML, /<span class="tpled-header-title ui-panel-header__title">History<\/span>/);
   assert.match(panel.innerHTML, /agent-history-container/);
-  assert.match(container.innerHTML, /ah-filter-btn active[^>]*>Merged<\/button>/);
+  assert.match(container.innerHTML, /ah-filter-btn segmented-control__item is-active[^>]*aria-pressed="true"[^>]*>Merged<\/button>/);
   assert.doesNotMatch(panel.innerHTML, /Role Library/);
 });
 
@@ -26855,7 +26855,9 @@ test('agent grid group tabs render standalone controls and switch active group',
   assert.match(tabsHtml, /title="beta"[\s\S]*beta/);
   assert.match(tabsHtml, /class="agent-group-tab-menu"[\s\S]*openAgentGroupTabActions/);
   assert.match(tabsHtml, /class="agent-group-compact-trigger"/);
+  assert.match(tabsHtml, /class="agent-group-compact-menu btn btn-quiet btn-xs"[\s\S]*aria-label="Group actions for alpha"/);
   assert.match(tabsHtml, /class="agent-group-quick-search"/);
+  assert.match(tabsHtml, /agent-group-quick-switcher ui-popover[\s\S]*onkeydown="agentGroupQuickSwitcherKeydown\(event\)"/);
   assert.match(tabsHtml, />\+<\/span> New group/);
   assert.match(tabsHtml, /&#8943;/);
   assert.doesNotMatch(tabsHtml, /agent-view-toggle|agent-group-tab-actions|<select|Delete group/);
@@ -26886,6 +26888,69 @@ test('agent grid group tabs render standalone controls and switch active group',
   tabsHtml = runInContext(context, `_renderAgentGroupTabsHtml()`);
   assert.equal(jsonValue(context, `state.active_group`), 'gamma');
   assert.match(tabsHtml, /class="agent-group-tab active"[\s\S]*title="gamma"[\s\S]*gamma/);
+});
+
+test('compact group switcher arrows traverse visible options and the create action', () => {
+  const options = [0, 1, 2].map(() => ({
+    hidden: false,
+    focused: false,
+    focus() { this.focused = true; },
+  }));
+  const popover = {
+    querySelectorAll(selector) {
+      assert.equal(selector, '[data-group-switch-option], .agent-group-quick-new');
+      return options;
+    },
+  };
+  const context = vm.createContext({
+    console,
+    document: { querySelector() { return popover; } },
+  });
+  loadScript(context, 'static/js/grid/group-tabs.js');
+
+  let prevented = false;
+  context.agentGroupQuickSwitcherKeydown({
+    key: 'ArrowDown',
+    target: options[0],
+    preventDefault() { prevented = true; },
+  });
+  assert.equal(prevented, true);
+  assert.equal(options[1].focused, true);
+
+  options.forEach((option) => { option.focused = false; });
+  context.agentGroupQuickSwitcherKeydown({
+    key: 'End',
+    target: {},
+    preventDefault() {},
+  });
+  assert.equal(options[2].focused, true, 'End reaches the compact New group action');
+
+  options.forEach((option) => { option.focused = false; });
+  let searchPrevented = false;
+  context.agentGroupQuickSwitcherKeydown({
+    key: 'End',
+    target: { classList: { contains(name) { return name === 'agent-group-quick-search'; } } },
+    preventDefault() { searchPrevented = true; },
+  });
+  assert.equal(searchPrevented, false, 'Home and End retain native search-input cursor behavior');
+  assert.equal(options.some((option) => option.focused), false);
+
+  const trigger = {
+    focused: false,
+    setAttribute() {},
+    focus() { this.focused = true; },
+  };
+  popover.hidden = false;
+  popover.parentNode = { querySelector() { return trigger; } };
+  let escapePrevented = false;
+  context.agentGroupQuickSwitcherKeydown({
+    key: 'Escape',
+    target: options[0],
+    preventDefault() { escapePrevented = true; },
+  });
+  assert.equal(escapePrevented, true);
+  assert.equal(popover.hidden, true);
+  assert.equal(trigger.focused, true, 'Escape restores the compact switcher trigger');
 });
 
 test('group tab context menu offers settings for the clicked group', () => {
@@ -29901,6 +29966,7 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
   assert.match(css, /\.agent-group-tabs-host\s*\{[^}]*container:\s*agent-group-nav\s*\/\s*inline-size;[^}]*padding:\s*3px 6px;[^}]*border-bottom:\s*1px solid var\(--border\);/s);
   assert.match(css, /\.agent-group-tabs-list\s*\{[^}]*overflow-x:\s*auto;[^}]*overflow-y:\s*hidden;/s);
   assert.match(css, /@container agent-group-nav \(max-width:\s*380px\)\s*\{[^}]*\.agent-group-tabs-list\s*\{\s*display:\s*none;/s);
+  assert.match(css, /@container agent-group-nav \(max-width:\s*380px\)[\s\S]*?\.agent-group-compact\s*\{\s*display:\s*flex;/s);
   assert.doesNotMatch(css, /\.agent-group-tab-actions\s*\{/s);
 });
 
@@ -30461,6 +30527,52 @@ test('standalone startup restore keeps panel roots attached across the first dou
     standaloneZoneBodyPanelIds(document, 'standalone-right-rail'),
     ['panel-actions', 'panel-templates', 'panel-history', 'panel-context', 'panel-events']
   );
+});
+
+test('standalone workspace rerenders preserve the focused dock or rail tab', () => {
+  const { context, document } = createPanelHarness();
+  const oldTablist = new FakeElement('old-right-tablist');
+  oldTablist.setAttribute('role', 'tablist');
+  oldTablist.setAttribute('aria-label', 'Right rail panels');
+  const oldTab = new FakeElement('old-events-tab');
+  oldTab.classList.add('standalone-panel-tab');
+  oldTab.dataset.app = 'events';
+  oldTablist.appendChild(oldTab);
+  document.activeElement = oldTab;
+
+  assert.deepEqual(jsonValue(context, `_standaloneCaptureZoneTabFocus()`), {
+    zone: 'right',
+    app: 'events',
+  });
+
+  const nextTab = new FakeElement('next-events-tab');
+  nextTab.classList.add('standalone-panel-tab');
+  nextTab.dataset.app = 'events';
+  nextTab.focus = function() { document.activeElement = this; };
+  document.getElementById('standalone-right-rail').setQuerySelectorAll(
+    '.standalone-panel-tab[data-app]',
+    [nextTab],
+  );
+  context._standaloneRestoreZoneTabFocus({ zone: 'right', app: 'events' });
+  assert.equal(document.activeElement, nextTab);
+
+  runInContext(context, `
+    var zoneFocusCaptureCalls = 0;
+    var zoneFocusRestoreSnapshot = null;
+    _standaloneCaptureZoneTabFocus = function() {
+      zoneFocusCaptureCalls++;
+      return { zone: 'bottom', app: 'thinking' };
+    };
+    _standaloneRestoreZoneTabFocus = function(snapshot) {
+      zoneFocusRestoreSnapshot = snapshot;
+    };
+    _standaloneRenderPanelWorkspace();
+  `);
+  assert.equal(jsonValue(context, `zoneFocusCaptureCalls`), 1);
+  assert.deepEqual(jsonValue(context, `zoneFocusRestoreSnapshot`), {
+    zone: 'bottom',
+    app: 'thinking',
+  });
 });
 
 test('standalone detach removes Board from the docked layout instead of re-adding the default board tab', async () => {

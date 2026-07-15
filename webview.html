@@ -1319,7 +1319,7 @@
     <!-- AI tab -->
     <div class="gs-pane" data-pane="gls-ai">
       <div id="gls-ai-settings" class="ai-settings-tab" aria-live="polite">
-        <div class="ai-settings-loading">Loading AI settings…</div>
+        <div class="ai-settings-loading ui-state ui-state--loading" role="status" aria-live="polite">Loading AI settings…</div>
       </div>
     </div>
 
@@ -2110,7 +2110,7 @@
     </div>
     <div class="ui-modal__body">
     <div id="behavior-approval-body" class="behavior-overlay-approval-body">
-      <div class="behavior-overlay-diff-placeholder">Loading required diff…</div>
+      <div class="behavior-overlay-diff-placeholder ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading required diff…</div>
     </div>
     <label for="behavior-approval-note">Note (optional)</label>
     <textarea id="behavior-approval-note" rows="2" placeholder="Optional approval/rejection note"></textarea>
@@ -2131,7 +2131,7 @@
       <div id="agent-class-modal-summary" class="modal-summary ui-modal__subtitle"></div>
     </div>
     <div id="agent-class-modal-body" class="agent-class-modal-body ui-modal__body">
-      <div class="agent-panel-empty">Loading Agent Class assignment…</div>
+      <div class="agent-panel-empty ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading Agent Class assignment…</div>
     </div>
     <div class="modal-actions ui-modal__footer">
       <button class="btn-cancel" onclick="agentPanelCloseClassAssignmentModal(event)">Close</button>
