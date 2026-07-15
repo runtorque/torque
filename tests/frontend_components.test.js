@@ -412,6 +412,24 @@ test('Agent Profile assignment and preview metadata use canonical badges', () =>
   assert.doesNotMatch(css, /^\.agent-class-compact-chips span\s*\{/m);
 });
 
+test('History and event markers use canonical semantic badges', () => {
+  const history = source('static/js/history.js');
+  const events = source('static/js/events.js');
+  const css = source('static/styles/board-panels.css');
+
+  assert.match(history, /function _ahMetadataBadgeClass[\s\S]*?ui-badge ui-badge--compact ui-badge--/);
+  assert.match(history, /_ahStatusBadgeIntent\(status\)/);
+  assert.match(history, /_ahOutcomeBadgeIntent\(outcome\)/);
+  assert.match(history, /_ahMetadataBadgeClass\('ah-type-badge', 'neutral'\)/);
+  assert.match(events, /events-entry-dismissed-badge ui-badge ui-badge--compact ui-badge--neutral/);
+
+  assert.doesNotMatch(css, /^\.ah-type-badge\s*\{[^}]*(?:font-size|padding|border-radius|background|color):/ms);
+  assert.doesNotMatch(css, /^\.ah-badge-(?:active|removed|merged)\s*\{/m);
+  assert.doesNotMatch(css, /^\.ah-outcome-(?:done|ready|answered|blocked|error)\s*\{/m);
+  assert.doesNotMatch(css, /^\.events-entry-badge\s*\{[^}]*(?:padding|border-radius|font-size|line-height):/ms);
+  assert.doesNotMatch(css, /^\.events-entry-dismissed-badge\s*\{/m);
+});
+
 test('badge geometry does not drift back into feature styles', () => {
   const grid = source('static/styles/workspace-grid.css');
   const agent = source('static/styles/agent-panel.css');

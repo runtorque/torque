@@ -2534,16 +2534,12 @@ body.runtime-embedded .board-empty-action:focus-visible {
 .ah-expand-arrow { font-size: 8px; color: var(--text-dim); width: 10px; flex-shrink: 0; }
 .ah-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
 .ah-type-badge {
-  font-size: 8px; padding: 1px 4px; border-radius: 3px;
-  background: var(--border); color: var(--text-dim); flex-shrink: 0;
+  flex-shrink: 0;
 }
 .ah-group { font-size: 9px; color: var(--text-dim); flex-shrink: 0; }
 .ah-badge {
-  font-size: 8px; padding: 1px 5px; border-radius: 3px; flex-shrink: 0;
+  flex-shrink: 0;
 }
-.ah-badge-active { background: #238636; color: #fff; }
-.ah-badge-removed { background: var(--border); color: var(--text-dim); }
-.ah-badge-merged { background: #1f6feb; color: #fff; }
 .ah-meta { font-size: 9px; color: var(--text-dim); flex-shrink: 0; white-space: nowrap; }
 .ah-tokens { font-family: var(--font-mono, monospace); }
 .ah-focus-btn {
@@ -2566,14 +2562,9 @@ body.runtime-embedded .board-empty-action:focus-visible {
 .ah-tasks { display: flex; flex-direction: column; gap: 1px; }
 .ah-task-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
 .ah-task-outcome {
-  font-size: 8px; padding: 1px 4px; border-radius: 3px;
-  background: var(--border); color: var(--text-dim); flex-shrink: 0; min-width: 60px; text-align: center;
+  flex-shrink: 0;
+  min-width: 60px;
 }
-.ah-outcome-done { background: #238636; color: #fff; }
-.ah-outcome-ready { background: #238636; color: #fff; }
-.ah-outcome-answered { background: #1f6feb; color: #fff; }
-.ah-outcome-blocked { background: #d29922; color: #000; }
-.ah-outcome-error { background: #da3633; color: #fff; }
 .ah-task-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ah-task-row.ah-clickable { cursor: pointer; border-radius: 3px; padding: 2px 4px; }
 .ah-task-row.ah-clickable:hover { background: var(--hover); }
@@ -2802,17 +2793,8 @@ body.runtime-embedded .board-empty-action:focus-visible {
 }
 .events-entry-badge {
   flex-shrink: 0;
-  padding: 0 4px;
-  border-radius: 999px;
-  font-size: 8px;
-  line-height: 13px;
   text-transform: uppercase;
   letter-spacing: .02em;
-}
-.events-entry-dismissed-badge {
-  color: var(--text-dim);
-  border: 1px solid rgba(139,148,158,.35);
-  background: rgba(139,148,158,.12);
 }
 .events-entry-text {
   color: var(--text-dim);

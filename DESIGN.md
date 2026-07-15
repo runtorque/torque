@@ -379,8 +379,9 @@ The canonical CSS API lives in `static/styles/components.css`:
 - `--count` uses tabular numerals and a stable minimum width for numeric totals.
 - Agent identity badges, Agent-panel journal entry types, Health runtime and
   coverage states, Board task metadata, Board count indicators, and Agent Profile
-  assignment and preview metadata are canonical consumers. Status-bar compounds,
-  history/event markers, and remaining counts are deliberate follow-up migrations.
+  assignment and preview metadata, History identity/status/outcome markers, and
+  dismissed-event markers are canonical consumers. Status-bar compounds and
+  remaining counts are deliberate follow-up migrations.
 - A count may use the badge primitive inside a tab, filter, or menu item without
   changing the parent control's semantics. The count is an annotation; the
   containing tab, filter, or menu item remains the interactive target.
@@ -445,7 +446,7 @@ the rule is intentionally global and documented here.
 | Toolbars and panel headers | Core variants standardized | Migrate remaining Help, Context, Health, and editor toolbars |
 | Menus and popovers | Core variants standardized | Migrate task, terminal, dependency, and editor dropdowns |
 | Modals | Core variants standardized | Migrate task, settings, artifact, diff, and multi-section dialogs |
-| Badges, tags, and status | Agent Profile metadata standardized | Migrate status-bar, history/event, and remaining count consumers |
+| Badges, tags, and status | History and event markers standardized | Migrate status-bar and remaining count consumers |
 | Empty/loading/error states | Pending | Define reusable patterns and language |
 
 ## Decision log
@@ -699,19 +700,22 @@ the rule is intentionally global and documented here.
 - Scope: `static/styles/components.css`, agent-card identity/class badges,
   Agent-panel journal entry types, Health supervisor/coverage states, Board task
   metadata labels, Board lane/filter/selection count indicators, and Agent Profile
-  assignment/status/lifecycle preview badges.
+  assignment/status/lifecycle preview badges, History identity/status/outcome
+  markers, and dismissed-event markers.
 - Constraints: Pills remain appropriate for short metadata. Interactive filter
   chips, presets, tabs, actions, and compound status-bar controls are not badges
   and retain their own semantics and geometry. A nested count badge annotates a
   control without replacing its control boundary. Clickable Board engineer,
   GitHub, dependency, and attachment chips remain control chips rather than
   badges. Agent Profile class selectors and assignment actions remain controls;
-  history/events and remaining count indicators are follow-up migrations.
+  History filters, task links, focus actions, and expandable event rows remain
+  controls. Status-bar compounds and remaining count indicators are follow-up
+  migrations.
 - Verification: `tests/frontend_components.test.js` protects shared geometry,
   semantic variants, canonical consumer markup, and removal of duplicated badge
   geometry. Existing Agent-panel, Health, and Board suites protect rendered
-  content; live checks verify card and profile metadata, nested counts,
-  control-chip separation, and console cleanliness.
+  content; live checks verify card, profile, History, and event metadata, nested
+  counts, control-chip separation, and console cleanliness.
 
 ## Decision entry template
 

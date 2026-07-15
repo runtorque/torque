@@ -81,11 +81,36 @@ function _ahFmtTokens(n) {
   return '' + n;
 }
 
+function _ahMetadataBadgeClass(localClass, intent) {
+  var classes = String(localClass || '').trim();
+  if (classes) classes += ' ';
+  return classes + 'ui-badge ui-badge--compact ui-badge--' + (intent || 'neutral');
+}
+
+function _ahStatusBadgeIntent(status) {
+  status = String(status || '').trim().toLowerCase();
+  if (status === 'active') return 'success';
+  if (status === 'merged') return 'accent';
+  return 'neutral';
+}
+
+function _ahOutcomeBadgeIntent(outcome) {
+  outcome = String(outcome || '').trim().toLowerCase();
+  if (outcome === 'done' || outcome === 'ready') return 'success';
+  if (outcome === 'answered') return 'accent';
+  if (outcome === 'blocked' || outcome === 'ask') return 'warning';
+  if (outcome === 'error' || outcome === 'failed' || outcome === 'failure') return 'danger';
+  return 'neutral';
+}
+
 function _ahStatusBadge(status) {
   var cls = 'ah-badge-removed';
   if (status === 'active') cls = 'ah-badge-active';
   else if (status === 'merged') cls = 'ah-badge-merged';
-  return '<span class="ah-badge ' + cls + '">' + esc(status) + '</span>';
+  return '<span class="' + _ahMetadataBadgeClass(
+    'ah-badge ' + cls,
+    _ahStatusBadgeIntent(status)
+  ) + '">' + esc(status) + '</span>';
 }
 
 function _ahActionIcon(action) {
@@ -215,9 +240,13 @@ function renderAgentHistoryView() {
     if (r.agent_type) {
       var typeInfo = (typeof AGENT_TYPE_LABELS !== 'undefined' && AGENT_TYPE_LABELS[r.agent_type]) || null;
       var typeLabel = (typeInfo && typeInfo.label) || r.agent_type;
-      html += '<span class="ah-type-badge">' + esc(typeLabel) + '</span>';
+      html += '<span class="' + _ahMetadataBadgeClass('ah-type-badge', 'neutral') + '">'
+        + esc(typeLabel) + '</span>';
     }
-    if (r.kind) html += '<span class="ah-type-badge">' + esc(_ahKindLabel(r.kind)) + '</span>';
+    if (r.kind) {
+      html += '<span class="' + _ahMetadataBadgeClass('ah-type-badge', 'neutral') + '">'
+        + esc(_ahKindLabel(r.kind)) + '</span>';
+    }
     if (r.group) html += '<span class="ah-group">' + esc(r.group) + '</span>';
     html += _ahStatusBadge(r.status);
     html += '<span class="ah-meta">' + _ahFmtTs(r.created_at) + '</span>';
@@ -287,7 +316,10 @@ function renderAgentHistoryExpanded() {
       var hasTask = t.task_id && (state.board_tasks || {})[t.task_id];
       html += '<div class="ah-task-row' + (hasTask ? ' ah-clickable' : '') + '"'
         + (hasTask ? ' onclick="agentHistoryOpenTask(\'' + esc(t.task_id) + '\')"' : '') + '>';
-      html += '<span class="ah-task-outcome ' + outClass + '">' + esc(outcome) + '</span>';
+      html += '<span class="' + _ahMetadataBadgeClass(
+        'ah-task-outcome ' + outClass,
+        _ahOutcomeBadgeIntent(outcome)
+      ) + '">' + esc(outcome) + '</span>';
       html += '<span class="ah-task-title">' + esc(t.task_title) + '</span>';
       html += '<span class="ah-meta">' + _ahFmtTs(t.started_at) + '</span>';
       if (hasTask) html += '<span class="ah-task-link" title="View on board">\u2192</span>';

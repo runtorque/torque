@@ -10106,6 +10106,47 @@ test('agent history renders answered outcomes for engineer follow-up tasks', () 
   assert.match(detail.innerHTML, /answered/);
 });
 
+test('agent history maps identity, run status, and task outcomes to semantic badges', () => {
+  const { context, document } = createAgentHistoryHarness();
+  const container = document.register('agent-history-container');
+  const detail = document.register('ah-detail-agent-1');
+
+  assert.equal(runInContext(context, `_ahStatusBadgeIntent('active')`), 'success');
+  assert.equal(runInContext(context, `_ahStatusBadgeIntent('merged')`), 'accent');
+  assert.equal(runInContext(context, `_ahStatusBadgeIntent('removed')`), 'neutral');
+  assert.equal(runInContext(context, `_ahOutcomeBadgeIntent('blocked')`), 'warning');
+  assert.equal(runInContext(context, `_ahOutcomeBadgeIntent('error')`), 'danger');
+
+  runInContext(context, `
+    _agentHistoryFilter = 'active';
+    _agentHistoryRecords = [{
+      id: 'agent-1',
+      name: 'Historian',
+      group: 'alpha',
+      agent_type: 'codex',
+      kind: 'engineer',
+      status: 'active',
+      created_at: 1,
+      total_tasks: 1,
+    }];
+    renderAgentHistoryView();
+  `);
+
+  assert.match(container.innerHTML, /ah-type-badge ui-badge ui-badge--compact ui-badge--neutral/);
+  assert.match(container.innerHTML, /ah-badge ah-badge-active ui-badge ui-badge--compact ui-badge--success/);
+
+  runInContext(context, `
+    _agentHistoryDetail = {
+      record: { id: 'agent-1', template: '', worktree_branch: '', created_at: 1 },
+      tasks: [{ task_id: '', task_title: 'Waiting on operator', outcome: 'blocked', started_at: 1 }],
+      messages: [],
+    };
+    renderAgentHistoryExpanded();
+  `);
+
+  assert.match(detail.innerHTML, /ah-task-outcome ah-outcome-blocked ui-badge ui-badge--compact ui-badge--warning/);
+});
+
 test('renderEvents restores focused search input value and caret across rerenders', () => {
   const { context, document } = createEventsHarness();
   const panel = document.register('panel-events');
@@ -10283,6 +10324,7 @@ test('dismissed engineer note events render with a dismissed badge', () => {
 
   assert.match(noteHtml, /events-kind-dismissed-note/);
   assert.match(noteHtml, /events-entry-dismissed-badge/);
+  assert.match(noteHtml, /ui-badge ui-badge--compact ui-badge--neutral/);
   assert.match(noteHtml, />dismissed</);
   assert.match(noteHtml, /FYI: release branch is ready/);
   assert.match(questionHtml, />dismissed question</);

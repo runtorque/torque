@@ -934,7 +934,8 @@ function _renderEventEntry(evt, idx, virtualKey) {
     var badge = evt.kind === 'engineer_question_dismissed'
       ? 'dismissed question'
       : 'dismissed';
-    html += '<span class="events-entry-badge events-entry-dismissed-badge">' + badge + '</span>';
+    html += '<span class="events-entry-badge events-entry-dismissed-badge ui-badge ui-badge--compact ui-badge--neutral">'
+      + badge + '</span>';
   }
   if (isExpanded && isError) {
     html += '<span class="events-entry-text events-entry-error-detail">'
