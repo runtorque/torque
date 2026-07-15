@@ -972,7 +972,7 @@ function _renderBoardQuickEdit(t) {
       for (var i = 0; i < labels.length; i++) {
         var label = labels[i];
         html += '<span class="board-card-quick-chip">' + esc(label)
-          + '<button class="board-card-quick-chip-remove" onclick="event.stopPropagation();boardQuickRemoveLabel(\'' + t.id + '\',\'' + esc(label).replace(/'/g, "\\'") + '\')">&times;</button></span>';
+          + '<button type="button" class="board-card-quick-chip-remove" aria-label="Remove label ' + esc(label) + '" onclick="event.stopPropagation();boardQuickRemoveLabel(\'' + t.id + '\',\'' + esc(label).replace(/'/g, "\\'") + '\')">&times;</button></span>';
       }
     } else {
       html += '<span class="board-card-quick-empty">No labels</span>';

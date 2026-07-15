@@ -765,13 +765,16 @@ function _agentPanelMessageCardHtml(agent, message, index, options) {
 function _agentPanelRenderTabs(kind, activeTab) {
   var tabs = _agentPanelTabSpec(kind);
   if (!tabs.length) return '';
-  var html = '<div class="agent-panel-tabs">';
+  var html = '<div class="agent-panel-tabs ui-tablist" role="tablist" aria-label="Agent details" onkeydown="uiTablistKeydown(event)">';
   for (var i = 0; i < tabs.length; i++) {
     var tab = tabs[i];
     html += '<button type="button"'
       + ' id="agent-panel-tab-' + _agentPanelEsc(tab.key) + '"'
       + ' class="ui-tab ui-tab--underline agent-panel-tab' + (activeTab === tab.key ? ' active' : '') + '"'
       + ' data-agent-panel-tab-key="' + _agentPanelEsc(tab.key) + '"'
+      + ' role="tab"'
+      + ' aria-selected="' + (activeTab === tab.key ? 'true' : 'false') + '"'
+      + ' tabindex="' + (activeTab === tab.key ? '0' : '-1') + '"'
       + ' onclick="agentPanelSelectTab(\'' + _agentPanelEsc(tab.key) + '\')">'
       + _agentPanelEsc(tab.label)
       + '</button>';

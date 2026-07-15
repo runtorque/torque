@@ -230,7 +230,7 @@ test('architect settings markup renders provider then command override', () => {
   assert.ok(match, 'architect general subpane should be present');
   assert.match(
     match[1],
-    /<label>Provider<\/label>\s*<select id="gs-architect-provider"[^>]*><\/select>\s*<label>Command override<\/label>\s*<input id="gs-architect-boot-cmd"/,
+    /<label for="gs-architect-provider">Provider<\/label>\s*<select id="gs-architect-provider"[^>]*><\/select>\s*<label for="gs-architect-boot-cmd">Command override<\/label>\s*<input id="gs-architect-boot-cmd"/,
   );
   assert.doesNotMatch(match[1], /Boot command/);
 });
@@ -241,7 +241,7 @@ test('architect settings markup removes paused control and renders checkpoint dr
 
   assert.doesNotMatch(html, /gs-architect-paused|Event delivery paused/);
   assert.doesNotMatch(modalJs, /gs-architect-paused|architect_paused/);
-  assert.match(html, /<label>Journal checkpoint cadence\s*<span class="hint-btn"/);
+  assert.match(html, /<label for="gs-architect-journal-checkpoint">Journal checkpoint cadence\s*<span class="hint-btn"/);
   assert.match(
     html,
     /data-hint="How often Torque reminds the architect to write a `checkpoint` journal entry summarizing active engineers, open scope, pending hires, open decisions, and planned next moves\."/,
@@ -304,7 +304,7 @@ test('group settings drops leftover Option A implementation-choice comment', () 
 test('group settings renders engineer merge mode selector', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
 
-  assert.match(html, /<label>Engineer merge mode[\s\S]*<select id="gs-engineer-merge-mode">/);
+  assert.match(html, /<label for="gs-engineer-merge-mode">Engineer merge mode[\s\S]*<select id="gs-engineer-merge-mode">/);
   assert.match(html, /<option value="pr">Pull request \(default\)<\/option>/);
   assert.match(html, /<option value="direct">Direct local<\/option>/);
   assert.match(html, /<option value="engineer-choice">Engineer choice<\/option>/);
@@ -314,7 +314,7 @@ test('group settings renders engineer merge mode selector', () => {
 test('group settings renders opt-in auto-sweep cleanup mode', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
 
-  assert.match(html, /<label>Default post-merge cleanup[\s\S]*<select id="gs-wt-merge-cleanup">/);
+  assert.match(html, /<label for="gs-wt-merge-cleanup">Default post-merge cleanup[\s\S]*<select id="gs-wt-merge-cleanup">/);
   assert.match(html, /<option value="keep">Keep worker and worktree \(default \/ warm\)<\/option>/);
   assert.match(html, /<option value="auto_sweep">Auto-sweep merged branch and worktree<\/option>/);
   assert.match(html, /Auto-sweep is opt-in and runs only after the branch is actually merged/);
@@ -816,7 +816,7 @@ test('group settings uses Group/Workers split plus scoped Engineer and Architect
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   const modals = fs.readFileSync(path.join(repoRoot, 'static/js/modals/group-settings.js'), 'utf8');
   const topStrip = html.slice(
-    html.indexOf('<div class="gs-tabs settings-primary-nav" role="tablist" aria-label="Group settings sections">'),
+    html.indexOf('<div class="gs-tabs settings-primary-nav" role="tablist" aria-label="Group settings sections"'),
     html.indexOf('    <!-- Group tab -->'),
   );
   const topTabs = Array.from(topStrip.matchAll(/data-tab="([^"]+)"/g), (match) => match[1]);
@@ -1158,10 +1158,10 @@ test('group settings sub-tab CSS remains reusable in narrow embedded layouts', (
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   const css = appStylesheetSource();
 
-  assert.match(html, /<div class="gs-pane active" data-pane="group">\s*<div class="gs-subtabs">/);
-  assert.match(html, /<div class="gs-pane" data-pane="workers">\s*<div class="gs-subtabs">/);
-  assert.match(html, /<div class="gs-pane" data-pane="engineer">\s*<div class="gs-subtabs">/);
-  assert.match(html, /<div class="gs-pane" data-pane="architect">\s*<div class="gs-subtabs">/);
+  assert.match(html, /<div class="gs-pane active" data-pane="group">\s*<div class="gs-subtabs ui-tablist" role="tablist"/);
+  assert.match(html, /<div class="gs-pane" data-pane="workers">\s*<div class="gs-subtabs ui-tablist" role="tablist"/);
+  assert.match(html, /<div class="gs-pane" data-pane="engineer">\s*<div class="gs-subtabs ui-tablist" role="tablist"/);
+  assert.match(html, /<div class="gs-pane" data-pane="architect">\s*<div class="gs-subtabs ui-tablist" role="tablist"/);
   assert.match(css, /\.gs-subtabs\s*\{[^}]*display:\s*flex;[^}]*border-bottom:\s*1px solid var\(--border\);/s);
   assert.match(css, /\.gs-subpane\s*\{\s*display:\s*none;\s*\}/);
   assert.match(css, /\.gs-subpane\.active\s*\{\s*display:\s*block;\s*\}/);

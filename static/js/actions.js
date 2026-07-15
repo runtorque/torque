@@ -148,8 +148,8 @@ function renderTemplatesPanel() {
     html += '</optgroup>';
   }
   html += '</select>';
-  html += '<button class="tpled-new-btn" onclick="tplEditorNew()" title="New action">+</button>';
-  html += '<button class="tpled-new-btn" onclick="tplEditorLoad()" title="Refresh">&#x21BB;</button>';
+  html += '<button class="tpled-new-btn" onclick="tplEditorNew()" title="New action" aria-label="New action">+</button>';
+  html += '<button class="tpled-new-btn" onclick="tplEditorLoad()" title="Refresh" aria-label="Refresh actions">&#x21BB;</button>';
   // View toggle
   html += '<div class="segmented-control tpled-view-toggle" role="group" aria-label="Action view">';
   html += '<button type="button" class="segmented-control__item tpled-view-btn' + (_tplPanelView === 'editor' ? ' active' : '') + '" aria-pressed="' + (_tplPanelView === 'editor' ? 'true' : 'false') + '" onclick="tplSwitchView(\'editor\')">Editor</button>';

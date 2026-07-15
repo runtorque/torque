@@ -850,12 +850,12 @@ function _renderAgentCardControls(a, opts) {
   html += '<button class="cell-close" draggable="false"'
     + ' data-focus-key="agent-close:' + esc(id) + '"'
     + ' onclick="event.stopPropagation();removeAgent(\'' + esc(id) + '\')"'
-    + ' title="' + esc(closeTitle) + '">\u2715</button>';
+    + ' title="' + esc(closeTitle) + '" aria-label="' + esc(closeTitle + ' ' + ((a && a.name) || 'agent')) + '">\u2715</button>';
   html += '<button class="cell-engineer-toggle ' + (paused ? 'paused' : 'running') + '"'
     + ' draggable="false"'
     + ' data-focus-key="agent-digest-toggle:' + esc(id) + '"'
     + ' onclick="' + esc(opts.pauseOnclick || '') + '"'
-    + ' title="' + esc(pauseTitle) + '">' + pauseIcon + '</button>';
+    + ' title="' + esc(pauseTitle) + '" aria-label="' + esc(pauseTitle + ' for ' + ((a && a.name) || 'agent')) + '">' + pauseIcon + '</button>';
   html += '</div>';
   return html;
 }

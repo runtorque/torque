@@ -1033,7 +1033,7 @@ function _renderTaskLabelChips() {
   for (var i = 0; i < _taskLabels.length; i++) {
     var lc = labelColor(_taskLabels[i]);
     html += '<span class="label-chip" style="background:' + lc + '22;color:' + lc + '">' + esc(_taskLabels[i])
-      + '<button onclick="taskRemoveLabel(' + i + ')">&times;</button></span>';
+      + '<button type="button" aria-label="Remove label ' + esc(_taskLabels[i]) + '" onclick="taskRemoveLabel(' + i + ')">&times;</button></span>';
   }
   if (_taskSystemLabels.length) {
     for (var i = 0; i < _taskSystemLabels.length; i++) {
@@ -1187,7 +1187,7 @@ function _renderTaskDepChips() {
         + esc(t.lane || '') + '</span>'
       : '';
     html += '<span class="label-chip">' + esc(label) + laneBadge
-      + '<button onclick="taskRemoveDep(' + i + ')">&times;</button></span>';
+      + '<button type="button" aria-label="Remove dependency ' + esc(label) + '" onclick="taskRemoveDep(' + i + ')">&times;</button></span>';
   }
   container.innerHTML = html;
 }

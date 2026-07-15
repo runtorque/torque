@@ -51,10 +51,10 @@ function _libraryTabsHtml() {
   var rolesActive = _libraryActiveTab === 'roles';
   var specsActive = _libraryActiveTab === 'specializations';
   var classesActive = _libraryActiveTab === 'agent_classes';
-  return '<div class="segmented-control tpled-view-toggle library-tab-toggle" role="tablist" aria-label="Library sections">'
-    + '<button type="button" role="tab" class="segmented-control__item tpled-view-btn' + (rolesActive ? ' active' : '') + '" aria-selected="' + (rolesActive ? 'true' : 'false') + '" onclick="librarySwitchTab(\'roles\')">Roles</button>'
-    + '<button type="button" role="tab" class="segmented-control__item tpled-view-btn' + (specsActive ? ' active' : '') + '" aria-selected="' + (specsActive ? 'true' : 'false') + '" onclick="librarySwitchTab(\'specializations\')">Specializations</button>'
-    + '<button type="button" role="tab" class="segmented-control__item tpled-view-btn' + (classesActive ? ' active' : '') + '" aria-selected="' + (classesActive ? 'true' : 'false') + '" onclick="librarySwitchTab(\'agent_classes\')">Agent Classes</button>'
+  return '<div class="segmented-control ui-tablist tpled-view-toggle library-tab-toggle" role="tablist" aria-label="Library sections" onkeydown="uiTablistKeydown(event)">'
+    + '<button type="button" role="tab" class="segmented-control__item tpled-view-btn' + (rolesActive ? ' active' : '') + '" aria-selected="' + (rolesActive ? 'true' : 'false') + '" tabindex="' + (rolesActive ? '0' : '-1') + '" onclick="librarySwitchTab(\'roles\')">Roles</button>'
+    + '<button type="button" role="tab" class="segmented-control__item tpled-view-btn' + (specsActive ? ' active' : '') + '" aria-selected="' + (specsActive ? 'true' : 'false') + '" tabindex="' + (specsActive ? '0' : '-1') + '" onclick="librarySwitchTab(\'specializations\')">Specializations</button>'
+    + '<button type="button" role="tab" class="segmented-control__item tpled-view-btn' + (classesActive ? ' active' : '') + '" aria-selected="' + (classesActive ? 'true' : 'false') + '" tabindex="' + (classesActive ? '0' : '-1') + '" onclick="librarySwitchTab(\'agent_classes\')">Agent Classes</button>'
     + '</div>';
 }
 
@@ -255,8 +255,8 @@ function renderAgentTemplatesPanel() {
     html += '</optgroup>';
   }
   html += '</select>';
-  html += '<button class="tpled-new-btn" onclick="agentTemplateNew()" title="New role">+</button>';
-  html += '<button class="tpled-new-btn" onclick="agentTemplateEditorLoad()" title="Refresh">&#x21BB;</button>';
+  html += '<button class="tpled-new-btn" onclick="agentTemplateNew()" title="New role" aria-label="New role">+</button>';
+  html += '<button class="tpled-new-btn" onclick="agentTemplateEditorLoad()" title="Refresh" aria-label="Refresh roles">&#x21BB;</button>';
   html += '</div>';
   html += '<div class="tpled-editor" id="agent-tpl-editor"></div>';
 
@@ -710,8 +710,8 @@ function renderSpecializationLibraryPanel() {
     html += '</optgroup>';
   }
   html += '</select>';
-  html += '<button class="tpled-new-btn" onclick="specializationLibraryNew()" title="New specialization">+</button>';
-  html += '<button class="tpled-new-btn" onclick="specializationLibraryLoad()" title="Refresh">&#x21BB;</button>';
+  html += '<button class="tpled-new-btn" onclick="specializationLibraryNew()" title="New specialization" aria-label="New specialization">+</button>';
+  html += '<button class="tpled-new-btn" onclick="specializationLibraryLoad()" title="Refresh" aria-label="Refresh specializations">&#x21BB;</button>';
   html += '</div>';
   html += '<div class="tpled-editor" id="specialization-editor"></div>';
 
@@ -1481,8 +1481,8 @@ function renderAgentClassesPanel() {
   html += _agentClassSelectGroupHtml('Project/custom', customs, selected);
   html += _agentClassSelectGroupHtml('Archived/disabled', archived, selected);
   html += '</select>';
-  html += '<button class="tpled-new-btn" onclick="agentClassManagerNew()" title="New Agent Class">+</button>';
-  html += '<button class="tpled-new-btn" onclick="agentClassManagerLoad(true)" title="Refresh">&#x21BB;</button>';
+  html += '<button class="tpled-new-btn" onclick="agentClassManagerNew()" title="New Agent Class" aria-label="New Agent Class">+</button>';
+  html += '<button class="tpled-new-btn" onclick="agentClassManagerLoad(true)" title="Refresh" aria-label="Refresh Agent Classes">&#x21BB;</button>';
   html += '</div>';
   html += '<div class="tpled-editor agent-class-editor" id="agent-class-editor"></div>';
   panel.innerHTML = html;

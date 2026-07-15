@@ -557,7 +557,7 @@ function _renderMainGrid(opts, renderMode) {
     if (renderGroupChrome) {
       html += `<div class="group${collapsed ? ' collapsed' : ''}" data-group-name="${esc(gname)}">`;
       html += `<div class="group-hdr" draggable="true" data-drag-id="${esc(gname)}" data-drag-type="group">`;
-      html += `  <button class="group-toggle" draggable="false" onclick="event.stopPropagation();toggleGroup('${esc(gname)}')">\u25BE</button>`;
+      html += `  <button class="group-toggle" draggable="false" aria-label="${collapsed ? 'Expand' : 'Collapse'} ${esc(gname)} group" aria-expanded="${collapsed ? 'false' : 'true'}" onclick="event.stopPropagation();toggleGroup('${esc(gname)}')">\u25BE</button>`;
       html += `  <span class="group-name" title="${esc(gname)}">${esc(gname)}</span>`;
       html += `  <span class="group-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">${agents.length}</span>`;
       html += `  <button class="group-btn" draggable="false" title="Group settings" aria-label="Group settings" onclick="event.stopPropagation();openGroupSettings('${esc(gname)}')">\u2699</button>`;

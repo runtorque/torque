@@ -1221,19 +1221,19 @@ function _engineerMarkSessionMapStale(groups) {
 
 function _agentPanelLegacyRenderTabs(group, activeTab) {
   if (!group) return '';
-  var html = '<div class="agent-panel-tabs">';
+  var html = '<div class="agent-panel-tabs ui-tablist" role="tablist" aria-label="Engineer details" onkeydown="uiTablistKeydown(event)">';
   html += '<button id="engineer-tab-journal" class="ui-tab ui-tab--underline agent-panel-tab'
     + (activeTab === 'journal' ? ' active' : '')
-    + '" onclick="engineerSelectTab(\'journal\')">Journal</button>';
+    + '" role="tab" aria-selected="' + (activeTab === 'journal' ? 'true' : 'false') + '" tabindex="' + (activeTab === 'journal' ? '0' : '-1') + '" onclick="engineerSelectTab(\'journal\')">Journal</button>';
   html += '<button id="engineer-tab-events" class="ui-tab ui-tab--underline agent-panel-tab'
     + (activeTab === 'events' ? ' active' : '')
-    + '" onclick="engineerSelectTab(\'events\')">Events</button>';
+    + '" role="tab" aria-selected="' + (activeTab === 'events' ? 'true' : 'false') + '" tabindex="' + (activeTab === 'events' ? '0' : '-1') + '" onclick="engineerSelectTab(\'events\')">Events</button>';
   html += '<button id="engineer-tab-queued" class="ui-tab ui-tab--underline agent-panel-tab'
     + (activeTab === 'queued' ? ' active' : '')
-    + '" onclick="engineerSelectTab(\'queued\')">Queued</button>';
+    + '" role="tab" aria-selected="' + (activeTab === 'queued' ? 'true' : 'false') + '" tabindex="' + (activeTab === 'queued' ? '0' : '-1') + '" onclick="engineerSelectTab(\'queued\')">Queued</button>';
   html += '<button id="engineer-tab-worklog" class="ui-tab ui-tab--underline agent-panel-tab'
     + (activeTab === 'worklog' ? ' active' : '')
-    + '" onclick="engineerSelectTab(\'worklog\')">Completed</button>';
+    + '" role="tab" aria-selected="' + (activeTab === 'worklog' ? 'true' : 'false') + '" tabindex="' + (activeTab === 'worklog' ? '0' : '-1') + '" onclick="engineerSelectTab(\'worklog\')">Completed</button>';
   html += '</div>';
   return html;
 }

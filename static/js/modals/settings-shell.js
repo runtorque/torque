@@ -249,9 +249,35 @@ function _settingsShellTabLabel(tab) {
   return String(label ? label.textContent : tab.textContent || '').trim();
 }
 
+function _settingsShellSyncTablist(tablist) {
+  if (!tablist || !tablist.querySelectorAll) return;
+  var tabs = Array.prototype.slice.call(tablist.querySelectorAll('[role="tab"]')).filter(function(tab) {
+    return !tab.closest || tab.closest('[role="tablist"]') === tablist;
+  });
+  var active = tabs.find(function(tab) {
+    return tab.classList && tab.classList.contains('active');
+  }) || tabs[0] || null;
+  tabs.forEach(function(tab) {
+    tab.setAttribute('aria-selected', tab === active ? 'true' : 'false');
+    tab.setAttribute('tabindex', tab === active ? '0' : '-1');
+  });
+}
+
+function _settingsShellSyncTabOrientation(modal) {
+  if (!modal || !modal.querySelector) return;
+  var primary = modal.querySelector('.settings-primary-nav[role="tablist"]');
+  if (!primary) return;
+  var compact = typeof window !== 'undefined'
+    && window.matchMedia
+    && window.matchMedia('(max-width: 680px)').matches;
+  primary.setAttribute('aria-orientation', compact ? 'horizontal' : 'vertical');
+}
+
 function settingsShellSyncView(modalOrId) {
   var modal = _settingsShellModal(modalOrId);
   if (!modal || !modal.querySelectorAll) return;
+  _settingsShellSyncTabOrientation(modal);
+  modal.querySelectorAll('[role="tablist"]').forEach(_settingsShellSyncTablist);
   var activeTab = modal.querySelector('.settings-primary-nav .gs-tab.active');
   modal.querySelectorAll('.settings-primary-nav .gs-tab').forEach(function(tab) {
     tab.setAttribute('aria-selected', tab === activeTab ? 'true' : 'false');
@@ -456,6 +482,7 @@ function settingsAppearancePreview() {
     var active = button.dataset && button.dataset.accent === value.accent;
     button.classList.toggle('active', active);
     button.setAttribute('aria-checked', active ? 'true' : 'false');
+    button.setAttribute('tabindex', active ? '0' : '-1');
   });
 }
 

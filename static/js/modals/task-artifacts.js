@@ -906,7 +906,7 @@ function _renderTaskAttachments() {
     var src = '/attachments/' + encodeURIComponent(tid) + '/' + encodeURIComponent(a.filename);
     html += '<div class="attachment-thumb">'
       + '<img src="' + src + '" alt="' + esc(a.filename) + '" title="' + esc(a.filename) + '">'
-      + '<button class="attachment-remove" onclick="taskAttRemove(' + i + ')">&times;</button>'
+      + '<button type="button" class="attachment-remove" aria-label="Remove attachment ' + esc(a.filename) + '" onclick="taskAttRemove(' + i + ')">&times;</button>'
       + '</div>';
   }
   container.innerHTML = html;

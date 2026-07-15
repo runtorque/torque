@@ -96,18 +96,18 @@
     </div>
     <div class="ui-modal__body">
     <div class="gs-pane active" style="display:block">
-      <label>Name</label>
+      <label for="add-name-input">Name</label>
       <input id="add-name-input" placeholder="e.g. Claude 1" autocomplete="off">
-      <label>Group</label>
+      <label for="add-group-select">Group</label>
       <select id="add-group-select"></select>
       <div id="add-template-row" class="hidden">
-        <label>Role</label>
+        <label for="add-template-select">Role</label>
         <select id="add-template-select" onchange="onAddTemplateChange()">
           <option value="">None</option>
         </select>
       </div>
       <div id="add-agent-class-row" class="hidden agent-class-picker-row">
-        <label>Agent Class</label>
+        <label for="add-agent-class-select">Agent Class</label>
         <select id="add-agent-class-select"></select>
         <div id="add-agent-class-hint" class="label-hint agent-class-picker-hint"></div>
       </div>
@@ -119,52 +119,52 @@
             <div class="icon-picker" id="add-icon-picker"></div>
           </div>
           <div id="add-provider-row" class="hidden">
-            <label>Agent CLI</label>
+            <label for="add-provider-select">Agent CLI</label>
             <select id="add-provider-select" onchange="onAddProviderChange()"></select>
           </div>
           <div id="add-cmd-row" class="hidden">
-            <label>Boot command</label>
+            <label for="add-cmd-input">Boot command</label>
             <input id="add-cmd-input" placeholder="e.g. npm run dev" autocomplete="off">
           </div>
           <div id="add-model-row" class="hidden">
-            <label>Model</label>
+            <label for="add-model-input">Model</label>
             <input id="add-model-input" placeholder="Use provider default" autocomplete="off">
           </div>
           <div id="add-reasoning-row" class="hidden">
-            <label>Reasoning effort</label>
+            <label for="add-reasoning-effort">Reasoning effort</label>
             <select id="add-reasoning-effort"></select>
           </div>
           <div id="add-args-row" class="hidden">
-            <label>Arguments</label>
+            <label for="add-args-input">Arguments</label>
             <input id="add-args-input" placeholder="e.g. --watch" autocomplete="off">
           </div>
           <div id="add-init-row" class="hidden">
-            <label>Init script</label>
+            <label for="add-init-input">Init script</label>
             <input id="add-init-input" placeholder="/path/to/script.sh" autocomplete="off">
           </div>
-          <label>Directory</label>
+          <label for="add-dir-select">Directory</label>
           <select id="add-dir-select" onchange="onDirChange()"></select>
           <input id="add-dir-input" class="hidden" placeholder="Same as group"
                  autocomplete="off" style="margin-top:4px">
-          <label>Shell</label>
+          <label for="add-shell-select">Shell</label>
           <select id="add-shell-select">
             <option value="">Same as group</option>
             <option value="zsh">zsh</option>
             <option value="bash">bash</option>
             <option value="fish">fish</option>
           </select>
-          <label>Additional environment <span class="label-hint">KEY=VALUE per line</span></label>
+          <label for="add-env-vars">Additional environment <span class="label-hint">KEY=VALUE per line</span></label>
           <textarea id="add-env-vars" rows="2" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
           <div id="add-wt-section" class="add-wt-section">
             <label class="gs-checkbox">
               <input id="add-wt-enabled" type="checkbox" onchange="_toggleAddWorktreeFields()"> Git worktree
             </label>
             <div id="add-wt-fields" style="display:none;padding-left:20px">
-              <label>Base directory <span class="label-hint">relative to repo root</span></label>
+              <label for="add-wt-base-dir">Base directory <span class="label-hint">relative to repo root</span></label>
               <input id="add-wt-base-dir" placeholder=".torque/worktrees" autocomplete="off">
-              <label>Base branch <span class="label-hint">empty = current HEAD</span></label>
+              <label for="add-wt-base-branch">Base branch <span class="label-hint">empty = current HEAD</span></label>
               <input id="add-wt-base-branch" placeholder="main" autocomplete="off">
-              <label>Worktree name <span class="label-hint">optional; used for both folder name and branch suffix</span></label>
+              <label for="add-wt-name">Worktree name <span class="label-hint">optional; used for both folder name and branch suffix</span></label>
               <input id="add-wt-name" placeholder="e.g. feature-api-v2" autocomplete="off">
               <label class="gs-checkbox">
                 <input id="add-wt-auto-checkpoint" type="checkbox"> Auto-checkpoint on stop
@@ -193,12 +193,12 @@
   <div class="modal ui-modal ui-modal--sm" role="dialog" aria-modal="true" aria-labelledby="modal-engineer-title">
     <h2 id="modal-engineer-title" class="ui-modal__title">Add Engineer</h2>
     <div id="modal-engineer-summary" class="modal-summary hidden"></div>
-    <label>Name</label>
+    <label for="engineer-name-input">Name</label>
     <input id="engineer-name-input" placeholder="e.g. Alice" autocomplete="off">
-    <label>Boot command <span class="label-hint">(optional)</span></label>
+    <label for="engineer-command-input">Boot command <span class="label-hint">(optional)</span></label>
     <input id="engineer-command-input" placeholder="Use default engineer command" autocomplete="off">
     <div id="engineer-agent-class-row" class="hidden agent-class-picker-row">
-      <label>Agent Class</label>
+      <label for="engineer-agent-class-select">Agent Class</label>
       <select id="engineer-agent-class-select"></select>
       <div id="engineer-agent-class-hint" class="label-hint agent-class-picker-hint"></div>
     </div>
@@ -226,14 +226,14 @@
   <div class="modal ui-modal ui-modal--sm" role="dialog" aria-modal="true" aria-labelledby="modal-architect-title">
     <h2 id="modal-architect-title" class="ui-modal__title">Add Architect</h2>
     <div id="modal-architect-summary" class="modal-summary hidden"></div>
-    <label>Name</label>
+    <label for="architect-name-input">Name</label>
     <input id="architect-name-input" placeholder="e.g. Productmind" autocomplete="off"
            onkeydown="if(event.key==='Enter')submitAddArchitect();if(event.key==='Escape')closeModals();">
-    <label>Boot command <span class="label-hint">(optional)</span></label>
+    <label for="architect-command-input">Boot command <span class="label-hint">(optional)</span></label>
     <input id="architect-command-input" placeholder="Use default architect command" autocomplete="off"
            onkeydown="if(event.key==='Enter')submitAddArchitect();if(event.key==='Escape')closeModals();">
     <div id="architect-agent-class-row" class="hidden agent-class-picker-row">
-      <label>Agent Class</label>
+      <label for="architect-agent-class-select">Agent Class</label>
       <select id="architect-agent-class-select"></select>
       <div id="architect-agent-class-hint" class="label-hint agent-class-picker-hint"></div>
     </div>
@@ -249,7 +249,7 @@
   <div class="modal ui-modal ui-modal--sm" role="dialog" aria-modal="true" aria-labelledby="pending-hire-reject-title">
     <h2 id="pending-hire-reject-title" class="ui-modal__title">Reject Hire Request</h2>
     <div id="pending-hire-reject-summary" class="modal-summary hidden"></div>
-    <label>Optional note</label>
+    <label for="pending-hire-reject-note">Optional note</label>
     <textarea id="pending-hire-reject-note" rows="4" placeholder="Add context for the architect (optional)"
               onkeydown="if(event.key==='Escape')closeModals();"></textarea>
     <div class="modal-actions ui-modal__footer">
@@ -267,15 +267,15 @@
       <div id="architect-decision-modal-summary" class="modal-summary ui-modal__subtitle hidden"></div>
     </div>
     <div class="ui-modal__body">
-    <label>Title</label>
+    <label for="architect-decision-title-input">Title</label>
     <input id="architect-decision-title-input" placeholder="e.g. Define API cut line" autocomplete="off"
            onkeydown="if(event.key==='Enter')submitArchitectDecision();if(event.key==='Escape')closeModals();">
-    <label>Rationale</label>
+    <label for="architect-decision-rationale-input">Rationale</label>
     <textarea id="architect-decision-rationale-input" rows="6" placeholder="Capture the why behind this decision..."
               onkeydown="if(event.key==='Escape')closeModals();"></textarea>
-    <label>Linked tasks <span class="label-hint">(optional)</span></label>
+    <label for="architect-decision-task-select">Linked tasks <span class="label-hint">(optional)</span></label>
     <select id="architect-decision-task-select" multiple size="6"></select>
-    <label>Linked engineers <span class="label-hint">(optional)</span></label>
+    <label for="architect-decision-engineer-select">Linked engineers <span class="label-hint">(optional)</span></label>
     <select id="architect-decision-engineer-select" multiple size="6"></select>
     </div>
     <div class="modal-actions ui-modal__footer">
@@ -301,19 +301,19 @@
     <div class="task-modal-section">
       <div class="task-modal-section-body">
         <div id="engineer-launch-agent-class-row" class="hidden agent-class-picker-row">
-          <label>Agent Class</label>
+          <label for="engineer-launch-agent-class-select">Agent Class</label>
           <select id="engineer-launch-agent-class-select"></select>
           <div id="engineer-launch-agent-class-hint" class="label-hint agent-class-picker-hint"></div>
         </div>
-        <label>Provider</label>
+        <label for="engineer-launch-provider">Provider</label>
         <select id="engineer-launch-provider" onchange="onEngineerLaunchProviderChange()"></select>
-        <label>Boot command</label>
+        <label for="engineer-launch-boot-cmd">Boot command</label>
         <input id="engineer-launch-boot-cmd" placeholder="Use provider default" autocomplete="off">
-        <label>Model</label>
+        <label for="engineer-launch-model">Model</label>
         <input id="engineer-launch-model" placeholder="Use provider default" autocomplete="off">
-        <label>Reasoning effort</label>
+        <label for="engineer-launch-reasoning-effort">Reasoning effort</label>
         <select id="engineer-launch-reasoning-effort"></select>
-        <label>Custom instructions</label>
+        <label for="engineer-launch-custom-instructions">Custom instructions</label>
         <textarea id="engineer-launch-custom-instructions" rows="5" placeholder="Instructions appended after Torque's built-in Engineer policy..."></textarea>
         <label>Specializations
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Ordered list of specialization YAMLs. The first one is the primary focus; each adds a preamble block to the engineer's boot prompt.">?</span>
@@ -342,7 +342,7 @@
           <option value="dispatch_when_clear">Dispatch when clear</option>
           <option value="aggressive_auto_continue">Aggressive auto-continue</option>
         </select>
-        <label>Default worker concurrency</label>
+        <label for="engineer-launch-default-worker-concurrency">Default worker concurrency</label>
         <select id="engineer-launch-default-worker-concurrency">
           <option value="1">1 worker</option>
           <option value="2">2 workers</option>
@@ -356,19 +356,19 @@
     </div>
     <div class="task-modal-section">
       <div class="task-modal-section-body">
-        <label>Wave size preference</label>
+        <label for="engineer-launch-wave-size-preference">Wave size preference</label>
         <select id="engineer-launch-wave-size-preference">
           <option value="small">Small reviewable waves</option>
           <option value="balanced">Balanced waves</option>
           <option value="large">Fill available capacity</option>
         </select>
-        <label>Same-agent follow-up preference</label>
+        <label for="engineer-launch-same-agent-follow-up-preference">Same-agent follow-up preference</label>
         <select id="engineer-launch-same-agent-follow-up-preference">
           <option value="balanced">Balanced</option>
           <option value="prefer_same_agent">Prefer same agent</option>
           <option value="prefer_fresh_agent">Prefer fresh agent</option>
         </select>
-        <label>Notification noise
+        <label for="engineer-launch-notification-preset">Notification noise
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Quick presets for how chatty Engineer digests should be. You can fine-tune the detailed notification controls later in Group Settings.">?</span>
         </label>
         <select id="engineer-launch-notification-preset" onchange="onEngineerLaunchNotificationPresetChange()">
@@ -378,13 +378,13 @@
           <option value="custom">Custom</option>
         </select>
         <div id="engineer-launch-notification-preset-hint" class="label-hint task-modal-section-intro"></div>
-        <label>Digest verbosity</label>
+        <label for="engineer-launch-digest-verbosity">Digest verbosity</label>
         <select id="engineer-launch-digest-verbosity" onchange="syncEngineerLaunchNotificationPreset()">
           <option value="compact">Compact</option>
           <option value="balanced">Balanced</option>
           <option value="detailed">Detailed</option>
         </select>
-        <label>Escalation style</label>
+        <label for="engineer-launch-escalation-style">Escalation style</label>
         <select id="engineer-launch-escalation-style">
           <option value="ask_early">Ask early</option>
           <option value="note_then_ask">Note first, ask when blocked</option>
@@ -404,15 +404,15 @@
 <div class="overlay" id="modal-new-specialization">
   <div class="modal ui-modal ui-modal--sm" role="dialog" aria-modal="true" aria-labelledby="new-specialization-title">
     <h2 id="new-specialization-title" class="ui-modal__title">New specialization</h2>
-    <label>Name</label>
+    <label for="new-specialization-name">Name</label>
     <input id="new-specialization-name" placeholder="e.g. ui-ux" autocomplete="off">
-    <label>Description</label>
+    <label for="new-specialization-description">Description</label>
     <input id="new-specialization-description" placeholder="One-line summary" autocomplete="off">
-    <label>Preamble</label>
+    <label for="new-specialization-preamble">Preamble</label>
     <textarea id="new-specialization-preamble" rows="4" placeholder="You are a &lt;focus&gt; engineer..."></textarea>
-    <label>Priorities <span class="label-hint">one per line</span></label>
+    <label for="new-specialization-priorities">Priorities <span class="label-hint">one per line</span></label>
     <textarea id="new-specialization-priorities" rows="4" placeholder="Priority 1&#10;Priority 2"></textarea>
-    <label>Scope</label>
+    <label for="new-specialization-scope">Scope</label>
     <select id="new-specialization-scope">
       <option value="project">Project</option>
       <option value="user">User (~/.torque)</option>
@@ -470,17 +470,17 @@
               onclick="settingsShellRequestClose('modal-group-settings')">×</button>
     </div>
     <div class="settings-dialog-workspace ui-modal__body ui-modal__body--flush">
-    <div class="gs-tabs settings-primary-nav" role="tablist" aria-label="Group settings sections">
-      <button class="ui-tab gs-tab active" data-tab="group" onclick="switchGsTab('group')" role="tab">
+    <div class="gs-tabs settings-primary-nav" role="tablist" aria-label="Group settings sections" aria-orientation="vertical" onkeydown="uiTablistKeydown(event)">
+      <button type="button" class="ui-tab gs-tab active" data-tab="group" onclick="switchGsTab('group')" role="tab" aria-selected="true" tabindex="0">
         <span>Group</span><small>Workspace defaults</small>
       </button>
-      <button class="ui-tab gs-tab" data-tab="workers" onclick="switchGsTab('workers')" role="tab">
+      <button type="button" class="ui-tab gs-tab" data-tab="workers" onclick="switchGsTab('workers')" role="tab" aria-selected="false" tabindex="-1">
         <span>Workers</span><small>Runtime and worktrees</small>
       </button>
-      <button class="ui-tab gs-tab" data-tab="engineer" onclick="switchGsTab('engineer')" role="tab">
+      <button type="button" class="ui-tab gs-tab" data-tab="engineer" onclick="switchGsTab('engineer')" role="tab" aria-selected="false" tabindex="-1">
         <span>Engineers</span><small>Autonomy and digests</small>
       </button>
-      <button class="ui-tab gs-tab" data-tab="architect" onclick="switchGsTab('architect')" role="tab">
+      <button type="button" class="ui-tab gs-tab" data-tab="architect" onclick="switchGsTab('architect')" role="tab" aria-selected="false" tabindex="-1">
         <span>Architects</span><small>Guidance and journals</small>
       </button>
     </div>
@@ -488,29 +488,29 @@
 
     <!-- Group tab -->
     <div class="gs-pane active" data-pane="group">
-      <div class="gs-subtabs">
-        <button class="ui-tab ui-tab--underline gs-subtab active" data-subtab="group-general" onclick="switchGsSubTab('group',this)">General</button>
-        <button class="ui-tab ui-tab--underline gs-subtab" data-subtab="group-worker-defaults" onclick="switchGsSubTab('group',this)">Agents</button>
-        <button class="ui-tab ui-tab--underline gs-subtab" data-subtab="group-sync" onclick="switchGsSubTab('group',this)">Sync provider</button>
-        <button class="ui-tab ui-tab--underline gs-subtab" data-subtab="group-advanced" onclick="switchGsSubTab('group',this)">Advanced</button>
+      <div class="gs-subtabs ui-tablist" role="tablist" aria-label="Group settings views" onkeydown="uiTablistKeydown(event)">
+        <button type="button" role="tab" aria-selected="true" tabindex="0" class="ui-tab ui-tab--underline gs-subtab active" data-subtab="group-general" onclick="switchGsSubTab('group',this)">General</button>
+        <button type="button" role="tab" aria-selected="false" tabindex="-1" class="ui-tab ui-tab--underline gs-subtab" data-subtab="group-worker-defaults" onclick="switchGsSubTab('group',this)">Agents</button>
+        <button type="button" role="tab" aria-selected="false" tabindex="-1" class="ui-tab ui-tab--underline gs-subtab" data-subtab="group-sync" onclick="switchGsSubTab('group',this)">Sync provider</button>
+        <button type="button" role="tab" aria-selected="false" tabindex="-1" class="ui-tab ui-tab--underline gs-subtab" data-subtab="group-advanced" onclick="switchGsSubTab('group',this)">Advanced</button>
       </div>
 
       <!-- General sub-tab -->
       <div class="gs-subpane active" data-subpane="group-general">
-      <label>Directory</label>
+      <label for="gs-directory">Directory</label>
       <input id="gs-directory" placeholder="/path/to/project" autocomplete="off">
-      <label>Shell</label>
+      <label for="gs-shell">Shell</label>
       <select id="gs-shell">
         <option value="">Default</option>
         <option value="zsh">zsh</option>
         <option value="bash">bash</option>
         <option value="fish">fish</option>
       </select>
-      <label>Environment <span class="label-hint">KEY=VALUE per line</span></label>
+      <label for="gs-env-vars">Environment <span class="label-hint">KEY=VALUE per line</span></label>
       <textarea id="gs-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
-      <label>Env file <span class="label-hint">sourced on session start</span></label>
+      <label for="gs-env-file">Env file <span class="label-hint">sourced on session start</span></label>
       <input id="gs-env-file" placeholder=".env" autocomplete="off">
-      <label>Max workers <span class="label-hint">0 = unlimited</span></label>
+      <label for="gs-max-agents">Max workers <span class="label-hint">0 = unlimited</span></label>
       <input id="gs-max-agents" type="number" min="0" max="100" value="0">
       <label class="gs-checkbox">
         <input id="gs-collapsed" type="checkbox"> Start collapsed on load
@@ -525,24 +525,24 @@
       <!-- Agents (all-kinds defaults) sub-tab -->
       <div class="gs-subpane" data-subpane="group-worker-defaults">
         <div class="label-hint task-modal-section-intro">Group-wide defaults for all agents — workers, engineers, and architects — unless overridden per-kind.</div>
-        <label>Default provider</label>
+        <label for="gs-agent-provider">Default provider</label>
         <select id="gs-agent-provider" onchange="onGsProviderChange()"></select>
-        <label>Default role</label>
+        <label for="gs-default-agent-template">Default role</label>
         <select id="gs-default-agent-template"></select>
         <div id="gs-agent-boot-cmd-row" class="hidden">
-          <label>Default boot command</label>
+          <label for="gs-agent-boot-cmd">Default boot command</label>
           <input id="gs-agent-boot-cmd" placeholder="e.g. my-agent-cli" autocomplete="off" oninput="refreshGsInheritedLaunchPlaceholders()">
         </div>
-        <label>Default model</label>
+        <label for="gs-agent-model">Default model</label>
         <input id="gs-agent-model" placeholder="Use provider default" autocomplete="off" oninput="refreshGsInheritedLaunchPlaceholders()">
-        <label>Default reasoning effort</label>
+        <label for="gs-agent-reasoning-effort">Default reasoning effort</label>
         <select id="gs-agent-reasoning-effort"></select>
       </div>
 
       <!-- Sync provider sub-tab -->
       <div class="gs-subpane" data-subpane="group-sync">
         <div class="label-hint task-modal-section-intro">Configure external board sync for this group. V1 supports GitHub Issues + Projects; additional providers can occupy this selector later.</div>
-        <label>Board sync provider</label>
+        <label for="gs-board-sync-provider">Board sync provider</label>
         <select id="gs-board-sync-provider" onchange="onGsBoardSyncProviderChange()">
           <option value="none">None</option>
           <option value="github">GitHub</option>
@@ -555,12 +555,12 @@
           <div class="gs-settings-section">
             <div class="gs-settings-section-title">GitHub repository and project</div>
             <div class="gs-settings-section-body">
-              <label>Repository <span class="label-hint">owner/repo</span></label>
+              <label for="gs-board-sync-github-repo">Repository <span class="label-hint">owner/repo</span></label>
               <div class="board-sync-inline-row">
                 <input id="gs-board-sync-github-repo" autocomplete="off" placeholder="owner/repo">
                 <button type="button" class="btn-secondary" id="gs-board-sync-use-current-repo" onclick="gsBoardSyncUseCurrentRepo()">Use current repo</button>
               </div>
-              <label>Project</label>
+              <label for="gs-board-sync-github-project-select">Project</label>
               <div class="board-sync-inline-row">
                 <select id="gs-board-sync-github-project-select" onchange="onGsBoardSyncProjectSelect()"></select>
                 <button type="button" class="btn-secondary" id="gs-board-sync-reload-projects" onclick="gsBoardSyncReloadProjects()">Reload projects</button>
@@ -569,19 +569,19 @@
               <input id="gs-board-sync-github-project-id" type="hidden">
               <details class="board-sync-manual-project">
                 <summary>Other owner…</summary>
-                <label>Project owner <span class="label-hint">optional advanced fallback</span></label>
+                <label for="gs-board-sync-github-project-owner">Project owner <span class="label-hint">optional advanced fallback</span></label>
                 <input id="gs-board-sync-github-project-owner" autocomplete="off" placeholder="org or user login">
-                <label>Project number</label>
+                <label for="gs-board-sync-github-project-number">Project number</label>
                 <input id="gs-board-sync-github-project-number" type="number" min="0" step="1" placeholder="e.g. 12">
               </details>
-              <label>Project Status field name</label>
+              <label for="gs-board-sync-github-status-field">Project Status field name</label>
               <input id="gs-board-sync-github-status-field" autocomplete="off" placeholder="Status">
             </div>
           </div>
           <div class="gs-settings-section">
             <div class="gs-settings-section-title">GitHub mapping and behavior</div>
             <div class="gs-settings-section-body">
-              <label>Lane → status mapping</label>
+              <label for="gs-board-sync-github-lane-map">Lane → status mapping</label>
               <div id="gs-board-sync-lane-map-editor" class="settings-map-editor" aria-label="Lane to GitHub status mapping"></div>
               <button type="button" class="btn-secondary settings-map-add" onclick="gsBoardSyncMapAddRow('lane')">+ Add mapping</button>
               <details class="settings-raw-config">
@@ -596,7 +596,7 @@
               <label class="gs-checkbox">
                 <input id="gs-board-sync-github-create-labels" type="checkbox"> Create missing labels in GitHub (recommended)
               </label>
-              <label>Assignee mapping <span class="label-hint">Torque agent → GitHub login</span></label>
+              <label for="gs-board-sync-github-assignee-map">Assignee mapping <span class="label-hint">Torque agent → GitHub login</span></label>
               <div id="gs-board-sync-assignee-map-editor" class="settings-map-editor" aria-label="Torque agent to GitHub assignee mapping"></div>
               <button type="button" class="btn-secondary settings-map-add" onclick="gsBoardSyncMapAddRow('assignee')">+ Add assignee</button>
               <details class="settings-raw-config">
@@ -619,7 +619,7 @@
         <div class="gs-settings-section">
           <div class="gs-settings-section-title">Guidance hints</div>
           <div class="gs-settings-section-body">
-            <label>Guidance hint cadence</label>
+            <label for="gs-guidance-hint-cadence">Guidance hint cadence</label>
             <input id="gs-guidance-hint-cadence" type="number" min="0" max="100" step="1" value="4">
             <div class="label-hint task-modal-section-intro">Recurring guidance hints (for example the user-message reply-tool hint and the engineer identity anchor) show on the 1st occurrence, then every N agent messages. 0 = every message.</div>
           </div>
@@ -636,42 +636,42 @@
 
     <!-- Workers tab -->
     <div class="gs-pane" data-pane="workers">
-      <div class="gs-subtabs">
-        <button class="ui-tab ui-tab--underline gs-subtab active" data-subtab="worker-execution" onclick="switchGsSubTab('workers',this)">General</button>
-        <button class="ui-tab ui-tab--underline gs-subtab" data-subtab="worker-worktree" onclick="switchGsSubTab('workers',this)">Worktree</button>
-        <button class="ui-tab ui-tab--underline gs-subtab" data-subtab="worker-notifications" onclick="switchGsSubTab('workers',this)">Notifications</button>
+      <div class="gs-subtabs ui-tablist" role="tablist" aria-label="Worker settings views" onkeydown="uiTablistKeydown(event)">
+        <button type="button" role="tab" aria-selected="true" tabindex="0" class="ui-tab ui-tab--underline gs-subtab active" data-subtab="worker-execution" onclick="switchGsSubTab('workers',this)">General</button>
+        <button type="button" role="tab" aria-selected="false" tabindex="-1" class="ui-tab ui-tab--underline gs-subtab" data-subtab="worker-worktree" onclick="switchGsSubTab('workers',this)">Worktree</button>
+        <button type="button" role="tab" aria-selected="false" tabindex="-1" class="ui-tab ui-tab--underline gs-subtab" data-subtab="worker-notifications" onclick="switchGsSubTab('workers',this)">Notifications</button>
       </div>
 
       <!-- Execution sub-tab -->
       <div class="gs-subpane active" data-subpane="worker-execution">
         <div class="label-hint task-modal-section-intro">Worker defaults can override the group-wide Agents defaults here. Leave provider, command, model, or reasoning effort blank to inherit Group → Agents.</div>
-        <label>Provider</label>
+        <label for="gs-worker-provider">Provider</label>
         <select id="gs-worker-provider" onchange="onGsWorkerProviderChange()"></select>
-        <label>Command override</label>
+        <label for="gs-worker-boot-command">Command override</label>
         <input id="gs-worker-boot-command" placeholder="Group default" autocomplete="off">
-        <label>Model</label>
+        <label for="gs-worker-model">Model</label>
         <input id="gs-worker-model" placeholder="Group default" autocomplete="off">
-        <label>Reasoning effort</label>
+        <label for="gs-worker-reasoning-effort">Reasoning effort</label>
         <select id="gs-worker-reasoning-effort"></select>
         <div class="label-hint task-modal-section-intro">Execution context defaults for worker sessions.</div>
-        <label>Directory</label>
+        <label for="gs-agent-directory">Directory</label>
         <input id="gs-agent-directory" placeholder="Same as group" autocomplete="off">
-        <label>Shell</label>
+        <label for="gs-agent-shell">Shell</label>
         <select id="gs-agent-shell">
           <option value="">Same as group</option>
           <option value="zsh">zsh</option>
           <option value="bash">bash</option>
           <option value="fish">fish</option>
         </select>
-        <label>Additional environment <span class="label-hint">KEY=VALUE per line</span></label>
+        <label for="gs-agent-env-vars">Additional environment <span class="label-hint">KEY=VALUE per line</span></label>
         <textarea id="gs-agent-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
-        <label>Env file</label>
+        <label for="gs-agent-env-file">Env file</label>
         <input id="gs-agent-env-file" placeholder="Inherits from group" autocomplete="off">
         <label class="gs-checkbox">
           <input id="gs-session-resume" type="checkbox" checked> Resume session on relaunch
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When relaunching a worker, resume the previous conversation instead of starting fresh. Currently supported for Claude Code.">?</span>
         </label>
-        <label>Idle timeout <span class="label-hint">minutes, 0 = disable</span></label>
+        <label for="gs-agent-idle-timeout">Idle timeout <span class="label-hint">minutes, 0 = disable</span></label>
         <input id="gs-agent-idle-timeout" type="number" min="0" max="60" value="5">
       </div>
 
@@ -682,9 +682,9 @@
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Create a new git worktree and branch for each worker, so they can work on the same repo in parallel without conflicts.">?</span>
         </label>
         <div id="gs-wt-fields" style="display:none;padding-left:20px">
-          <label>Worktree directory <span class="label-hint">relative to repo root</span></label>
+          <label for="gs-wt-base-dir">Worktree directory <span class="label-hint">relative to repo root</span></label>
           <input id="gs-wt-base-dir" placeholder=".torque/worktrees" autocomplete="off">
-          <label>Base branch <span class="label-hint">empty = current HEAD</span></label>
+          <label for="gs-wt-base-branch">Base branch <span class="label-hint">empty = current HEAD</span></label>
           <input id="gs-wt-base-branch" placeholder="main" autocomplete="off">
           <label class="gs-checkbox">
             <input id="gs-wt-auto-checkpoint" type="checkbox"> Auto-checkpoint on stop
@@ -698,7 +698,7 @@
             <input id="gs-wt-merge-squash" type="checkbox" checked> Squash commits on merge
             <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Squash all worktree commits into a single commit when merging to main. Keeps the main branch history clean.">?</span>
           </label>
-          <label>Engineer merge mode
+          <label for="gs-engineer-merge-mode">Engineer merge mode
             <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Locks engineer_merge to Pull request, Direct local, or Engineer choice. Lock overrides and disallowed attempts are recorded as workflow-breach audit events.">?</span>
           </label>
           <select id="gs-engineer-merge-mode">
@@ -711,11 +711,11 @@
             PR path. Engineer choice keeps the current default-PR plus
             force_direct escape hatch.
           </div>
-          <label>Additional merge instructions
+          <label for="gs-wt-merge-instructions">Additional merge instructions
             <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Extra instructions appended to the merge prompt sent to Claude. Use this to customize merge behavior, e.g. 'Use a conventional commit message' or 'Run tests after merging'.">?</span>
           </label>
           <textarea id="gs-wt-merge-instructions" rows="2" placeholder="e.g. Use a conventional commit message"></textarea>
-          <label>Default post-merge cleanup
+          <label for="gs-wt-merge-cleanup">Default post-merge cleanup
             <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="What Torque should do by default after a successful merge when no explicit cleanup choice is provided. Keep worker and worktree preserves warm continuity by default. Auto-sweep is opt-in and runs only after the branch is actually merged; same-worker queued follow-up tasks still keep the worker and worktree alive.">?</span>
           </label>
           <select id="gs-wt-merge-cleanup">
@@ -776,27 +776,27 @@
 
     <!-- Engineer tab -->
     <div class="gs-pane" data-pane="engineer">
-      <div class="gs-subtabs">
-        <button class="ui-tab ui-tab--underline gs-subtab active" data-subtab="engineer-general" onclick="switchGsSubTab('engineer',this)">General</button>
-        <button class="ui-tab ui-tab--underline gs-subtab" data-subtab="engineer-behavior" onclick="switchGsSubTab('engineer',this)">Behavior</button>
-        <button class="ui-tab ui-tab--underline gs-subtab" data-subtab="engineer-system" onclick="switchGsSubTab('engineer',this)">System</button>
+      <div class="gs-subtabs ui-tablist" role="tablist" aria-label="Engineer settings views" onkeydown="uiTablistKeydown(event)">
+        <button type="button" role="tab" aria-selected="true" tabindex="0" class="ui-tab ui-tab--underline gs-subtab active" data-subtab="engineer-general" onclick="switchGsSubTab('engineer',this)">General</button>
+        <button type="button" role="tab" aria-selected="false" tabindex="-1" class="ui-tab ui-tab--underline gs-subtab" data-subtab="engineer-behavior" onclick="switchGsSubTab('engineer',this)">Behavior</button>
+        <button type="button" role="tab" aria-selected="false" tabindex="-1" class="ui-tab ui-tab--underline gs-subtab" data-subtab="engineer-system" onclick="switchGsSubTab('engineer',this)">System</button>
       </div>
 
       <!-- General sub-tab -->
       <div class="gs-subpane active" data-subpane="engineer-general">
-        <label>Provider</label>
+        <label for="gs-engineer-provider">Provider</label>
         <select id="gs-engineer-provider" onchange="onGsEngineerProviderChange()"></select>
-        <label>Command override</label>
+        <label for="gs-engineer-boot-cmd">Command override</label>
         <input id="gs-engineer-boot-cmd" placeholder="Use provider default" autocomplete="off">
-        <label>Model</label>
+        <label for="gs-engineer-model">Model</label>
         <input id="gs-engineer-model" placeholder="Use provider default" autocomplete="off">
-        <label>Reasoning effort</label>
+        <label for="gs-engineer-reasoning-effort">Reasoning effort</label>
         <select id="gs-engineer-reasoning-effort"></select>
         <label>Terminal overrides</label>
         <div class="label-hint task-modal-section-intro">Optional launch overrides for the designated Engineer only. Leave blank to inherit the usual agent/group defaults.</div>
-        <label>Directory</label>
+        <label for="gs-engineer-directory">Directory</label>
         <input id="gs-engineer-directory" placeholder="Same as agent/group" autocomplete="off">
-        <label>Shell</label>
+        <label for="gs-engineer-shell">Shell</label>
         <select id="gs-engineer-shell">
           <option value="">Same as agent/group</option>
           <option value="zsh">zsh</option>
@@ -807,7 +807,7 @@
 
       <!-- Behavior sub-tab -->
       <div class="gs-subpane" data-subpane="engineer-behavior">
-        <label>Default Specializations
+        <label for="gs-engineer-specializations-available">Default Specializations
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Ordered list of specialization YAMLs applied to new engineers at creation. Each engineer can override this default after creation.">?</span>
         </label>
         <div class="label-hint task-modal-section-intro">Applied to new engineers at creation.</div>
@@ -822,7 +822,7 @@
           </div>
         </div>
 
-        <label>Autonomy mode
+        <label for="gs-engineer-autonomy-mode">Autonomy mode
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="How proactively the Engineer should continue work without waiting for you. Use a preset instead of writing custom instructions for common behavior.">?</span>
         </label>
         <select id="gs-engineer-autonomy-mode">
@@ -830,7 +830,7 @@
           <option value="dispatch_when_clear">Dispatch when clear</option>
           <option value="aggressive_auto_continue">Aggressive auto-continue</option>
         </select>
-        <label>Default worker concurrency
+        <label for="gs-engineer-default-worker-concurrency">Default worker concurrency
             <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Used as the default max_concurrent value when the Engineer dispatches a wave without specifying one explicitly. Counts non-Engineer workers only.">?</span>
         </label>
         <select id="gs-engineer-default-worker-concurrency">
@@ -842,13 +842,13 @@
           <option value="6">6 workers</option>
           <option value="8">8 workers</option>
         </select>
-        <label>Wave size preference</label>
+        <label for="gs-engineer-wave-size-preference">Wave size preference</label>
         <select id="gs-engineer-wave-size-preference">
           <option value="small">Small reviewable waves</option>
           <option value="balanced">Balanced waves</option>
           <option value="large">Fill available capacity</option>
         </select>
-        <label>Same-worker follow-up preference</label>
+        <label for="gs-engineer-same-agent-follow-up-preference">Same-worker follow-up preference</label>
         <select id="gs-engineer-same-agent-follow-up-preference">
           <option value="balanced">Balanced</option>
           <option value="prefer_same_agent">Prefer same worker</option>
@@ -859,7 +859,7 @@
           Require user approval for per-agent Engineer behavior overlays
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Per-agent Engineer overlays only. Role overlays are stricter and always require user approval regardless of this setting.">?</span>
         </label>
-        <label>Notification noise
+        <label for="gs-engineer-notification-preset">Notification noise
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Quick presets for how much digest noise Engineer should send. Detailed changes in System → Digest settings switch the preset to Custom.">?</span>
         </label>
         <select id="gs-engineer-notification-preset" onchange="onGsEngineerNotificationPresetChange()">
@@ -869,13 +869,13 @@
           <option value="custom">Custom</option>
         </select>
         <div id="gs-engineer-notification-preset-hint" class="label-hint task-modal-section-intro"></div>
-        <label>Escalation style</label>
+        <label for="gs-engineer-escalation-style">Escalation style</label>
         <select id="gs-engineer-escalation-style">
           <option value="ask_early">Ask early</option>
           <option value="note_then_ask">Note first, ask when blocked</option>
           <option value="keep_moving">Keep moving unless blocked</option>
         </select>
-        <label>Custom instructions <span class="label-hint">expert override</span></label>
+        <label for="gs-engineer-custom-instructions">Custom instructions <span class="label-hint">expert override</span></label>
         <textarea id="gs-engineer-custom-instructions" rows="5" placeholder="Instructions appended after Torque's built-in Engineer policy..."></textarea>
         <div class="system-prompt-preview-row">
           <button type="button" id="gs-engineer-view-system-prompt" class="btn-secondary system-prompt-preview-btn" onclick="openGroupSystemPromptPreview('engineer')">View system prompt</button>
@@ -903,7 +903,7 @@
           <div class="gs-settings-section-title">Digest settings</div>
           <div class="gs-settings-section-body">
             <div class="label-hint task-modal-section-intro">Advanced notification controls. Heartbeats and optional event types affect digest noise, not the Engineer's orchestration policy presets.</div>
-            <label>Digest verbosity
+            <label for="gs-engineer-digest-verbosity">Digest verbosity
               <span id="gs-engineer-digest-verbosity-hint" class="hint-btn" onclick="event.preventDefault();toggleHint(this)">?</span>
             </label>
             <select id="gs-engineer-digest-verbosity" onchange="syncGsEngineerNotificationPreset()">
@@ -911,7 +911,7 @@
               <option value="balanced">Balanced</option>
               <option value="detailed">Detailed</option>
             </select>
-            <label>Push interval</label>
+            <label for="gs-engineer-push-interval">Push interval</label>
             <select id="gs-engineer-push-interval" onchange="syncGsEngineerNotificationPreset()">
               <option value="10">10s</option>
               <option value="30">30s</option>
@@ -919,14 +919,14 @@
               <option value="120">120s</option>
               <option value="300">300s</option>
             </select>
-            <label>Max interval</label>
+            <label for="gs-engineer-max-interval">Max interval</label>
             <select id="gs-engineer-max-interval" onchange="syncGsEngineerNotificationPreset()">
               <option value="60">60s</option>
               <option value="120">120s</option>
               <option value="300">300s</option>
               <option value="600">600s</option>
             </select>
-            <label>Idle heartbeat</label>
+            <label for="gs-engineer-heartbeat-interval">Idle heartbeat</label>
             <select id="gs-engineer-heartbeat-interval" onchange="syncGsEngineerNotificationPreset()">
               <option value="0">Off</option>
               <option value="60">1 min</option>
@@ -955,39 +955,39 @@
 
     <!-- Architect tab -->
     <div class="gs-pane" data-pane="architect">
-      <div class="gs-subtabs">
-        <button class="ui-tab ui-tab--underline gs-subtab active" data-subtab="architect-general" onclick="switchGsSubTab('architect',this)">General</button>
-        <button class="ui-tab ui-tab--underline gs-subtab" data-subtab="architect-behavior" onclick="switchGsSubTab('architect',this)">Behavior</button>
-        <button class="ui-tab ui-tab--underline gs-subtab" data-subtab="architect-system" onclick="switchGsSubTab('architect',this)">System</button>
+      <div class="gs-subtabs ui-tablist" role="tablist" aria-label="Architect settings views" onkeydown="uiTablistKeydown(event)">
+        <button type="button" role="tab" aria-selected="true" tabindex="0" class="ui-tab ui-tab--underline gs-subtab active" data-subtab="architect-general" onclick="switchGsSubTab('architect',this)">General</button>
+        <button type="button" role="tab" aria-selected="false" tabindex="-1" class="ui-tab ui-tab--underline gs-subtab" data-subtab="architect-behavior" onclick="switchGsSubTab('architect',this)">Behavior</button>
+        <button type="button" role="tab" aria-selected="false" tabindex="-1" class="ui-tab ui-tab--underline gs-subtab" data-subtab="architect-system" onclick="switchGsSubTab('architect',this)">System</button>
       </div>
 
       <!-- General sub-tab -->
       <div class="gs-subpane active" data-subpane="architect-general">
-        <label>Provider</label>
+        <label for="gs-architect-provider">Provider</label>
         <select id="gs-architect-provider" onchange="onGsArchitectProviderChange()"></select>
-        <label>Command override</label>
+        <label for="gs-architect-boot-cmd">Command override</label>
         <input id="gs-architect-boot-cmd" placeholder="Use provider default" autocomplete="off">
-        <label>Model</label>
+        <label for="gs-architect-model">Model</label>
         <input id="gs-architect-model" placeholder="Use provider default" autocomplete="off">
-        <label>Reasoning effort</label>
+        <label for="gs-architect-reasoning-effort">Reasoning effort</label>
         <select id="gs-architect-reasoning-effort"></select>
       </div>
 
       <!-- Behavior sub-tab -->
       <div class="gs-subpane" data-subpane="architect-behavior">
-        <label>Autonomy</label>
+        <label for="gs-architect-autonomy-mode">Autonomy</label>
         <select id="gs-architect-autonomy-mode">
           <option value="dispatch_freely">Dispatch freely</option>
           <option value="dispatch_after_confirm">Dispatch after confirm</option>
           <option value="ask_always">Ask always</option>
         </select>
-        <label>Custom instructions</label>
+        <label for="gs-architect-custom-instructions">Custom instructions</label>
         <textarea id="gs-architect-custom-instructions" rows="6" class="gs-autogrow" oninput="_autoGrowTextArea('gs-architect-custom-instructions')" placeholder="Instructions appended after Torque's built-in Architect policy..."></textarea>
         <div class="system-prompt-preview-row">
           <button type="button" id="gs-architect-view-system-prompt" class="btn-secondary system-prompt-preview-btn" onclick="openGroupSystemPromptPreview('architect')">View system prompt</button>
         </div>
         <div class="label-hint task-modal-section-intro">Configure architect checkpoint policy.</div>
-        <label>Journal checkpoint cadence
+        <label for="gs-architect-journal-checkpoint">Journal checkpoint cadence
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="How often Torque reminds the architect to write a `checkpoint` journal entry summarizing active engineers, open scope, pending hires, open decisions, and planned next moves.">?</span>
         </label>
         <select id="gs-architect-journal-checkpoint"></select>
@@ -999,9 +999,9 @@
           <div class="gs-settings-section-title">Terminal overrides</div>
           <div class="gs-settings-section-body">
             <div class="label-hint task-modal-section-intro">Optional launch overrides for Architect agents only. Leave blank to inherit the usual agent/group defaults.</div>
-            <label>Directory</label>
+            <label for="gs-architect-directory">Directory</label>
             <input id="gs-architect-directory" placeholder="Same as agent/group" autocomplete="off">
-            <label>Shell</label>
+            <label for="gs-architect-shell">Shell</label>
             <select id="gs-architect-shell">
               <option value="">Same as agent/group</option>
               <option value="zsh">zsh</option>
@@ -1014,7 +1014,7 @@
           <div class="gs-settings-section-title">Digest settings</div>
           <div class="gs-settings-section-body">
             <div class="label-hint task-modal-section-intro">Throttle digest delivery to architect agents in this group. Defaults are tuned to suppress empty-window heartbeats.</div>
-            <label>Digest verbosity
+            <label for="gs-architect-digest-verbosity">Digest verbosity
               <span id="gs-architect-digest-verbosity-hint" class="hint-btn" onclick="event.preventDefault();toggleHint(this)">?</span>
             </label>
             <select id="gs-architect-digest-verbosity">
@@ -1022,7 +1022,7 @@
               <option value="balanced">Balanced</option>
               <option value="verbose">Verbose</option>
             </select>
-            <label>Push interval</label>
+            <label for="gs-architect-push-interval">Push interval</label>
             <select id="gs-architect-push-interval">
               <option value="60">60s</option>
               <option value="120">120s</option>
@@ -1030,7 +1030,7 @@
               <option value="600">600s</option>
               <option value="900">900s</option>
             </select>
-            <label>Max interval</label>
+            <label for="gs-architect-max-interval">Max interval</label>
             <select id="gs-architect-max-interval">
               <option value="120">120s</option>
               <option value="300">300s</option>
@@ -1038,7 +1038,7 @@
               <option value="1200">1200s</option>
               <option value="1800">1800s</option>
             </select>
-            <label>Idle heartbeat</label>
+            <label for="gs-architect-heartbeat-interval">Idle heartbeat</label>
             <select id="gs-architect-heartbeat-interval">
               <option value="0">Off</option>
               <option value="300">5 min</option>
@@ -1105,23 +1105,23 @@
               onclick="settingsShellRequestClose('modal-global-settings')">×</button>
     </div>
     <div class="settings-dialog-workspace ui-modal__body ui-modal__body--flush">
-    <div class="gs-tabs settings-primary-nav" role="tablist" aria-label="Application settings sections">
-      <button class="ui-tab gs-tab active" data-tab="gls-appearance" onclick="switchGlsTab('gls-appearance')" role="tab">
+    <div class="gs-tabs settings-primary-nav" role="tablist" aria-label="Application settings sections" aria-orientation="vertical" onkeydown="uiTablistKeydown(event)">
+      <button type="button" class="ui-tab gs-tab active" data-tab="gls-appearance" onclick="switchGlsTab('gls-appearance')" role="tab" aria-selected="true" tabindex="0">
         <span>Appearance</span><small>Theme and density</small>
       </button>
-      <button class="ui-tab gs-tab" data-tab="gls-general" onclick="switchGlsTab('gls-general')" role="tab">
+      <button type="button" class="ui-tab gs-tab" data-tab="gls-general" onclick="switchGlsTab('gls-general')" role="tab" aria-selected="false" tabindex="-1">
         <span>General</span><small>Runtime and Board</small>
       </button>
-      <button class="ui-tab gs-tab" data-tab="gls-ai" onclick="switchGlsTab('gls-ai')" role="tab">
+      <button type="button" class="ui-tab gs-tab" data-tab="gls-ai" onclick="switchGlsTab('gls-ai')" role="tab" aria-selected="false" tabindex="-1">
         <span>AI</span><small>Providers and recall</small>
       </button>
-      <button class="ui-tab gs-tab" data-tab="gls-statusbar" onclick="switchGlsTab('gls-statusbar')" role="tab">
+      <button type="button" class="ui-tab gs-tab" data-tab="gls-statusbar" onclick="switchGlsTab('gls-statusbar')" role="tab" aria-selected="false" tabindex="-1">
         <span>Status bar</span><small>Visible indicators</small>
       </button>
-      <button class="ui-tab gs-tab" data-tab="gls-keybindings" onclick="switchGlsTab('gls-keybindings')" role="tab">
+      <button type="button" class="ui-tab gs-tab" data-tab="gls-keybindings" onclick="switchGlsTab('gls-keybindings')" role="tab" aria-selected="false" tabindex="-1">
         <span>Shortcuts</span><small>Keyboard controls</small>
       </button>
-      <button class="ui-tab gs-tab" data-tab="gls-system" onclick="switchGlsTab('gls-system')" role="tab">
+      <button type="button" class="ui-tab gs-tab" data-tab="gls-system" onclick="switchGlsTab('gls-system')" role="tab" aria-selected="false" tabindex="-1">
         <span>System</span><small>Daemon and Relay</small>
       </button>
     </div>
@@ -1136,24 +1136,24 @@
       <section class="gs-settings-section settings-control-list">
         <div class="gs-settings-section-title">Interface</div>
         <div class="gs-settings-section-body">
-          <label>Contrast</label>
+          <label for="gls-appearance-contrast">Contrast</label>
           <select id="gls-appearance-contrast" onchange="settingsAppearancePreview()">
             <option value="balanced">Balanced</option>
             <option value="high">High contrast</option>
             <option value="soft">Soft</option>
           </select>
-          <label>Accent</label>
-          <div class="settings-accent-options" id="gls-appearance-accent-options" role="radiogroup" aria-label="Accent color">
-            <button type="button" class="settings-accent-swatch" data-accent="blue" aria-label="Blue" onclick="settingsAppearanceSetAccent('blue')"></button>
-            <button type="button" class="settings-accent-swatch" data-accent="violet" aria-label="Violet" onclick="settingsAppearanceSetAccent('violet')"></button>
-            <button type="button" class="settings-accent-swatch" data-accent="teal" aria-label="Teal" onclick="settingsAppearanceSetAccent('teal')"></button>
-            <button type="button" class="settings-accent-swatch" data-accent="amber" aria-label="Amber" onclick="settingsAppearanceSetAccent('amber')"></button>
+          <label id="gls-appearance-accent-label">Accent</label>
+          <div class="settings-accent-options" id="gls-appearance-accent-options" role="radiogroup" aria-labelledby="gls-appearance-accent-label" onkeydown="uiRadioGroupKeydown(event)">
+            <button type="button" role="radio" class="settings-accent-swatch" data-accent="blue" aria-label="Blue" aria-checked="true" tabindex="0" onclick="settingsAppearanceSetAccent('blue')"></button>
+            <button type="button" role="radio" class="settings-accent-swatch" data-accent="violet" aria-label="Violet" aria-checked="false" tabindex="-1" onclick="settingsAppearanceSetAccent('violet')"></button>
+            <button type="button" role="radio" class="settings-accent-swatch" data-accent="teal" aria-label="Teal" aria-checked="false" tabindex="-1" onclick="settingsAppearanceSetAccent('teal')"></button>
+            <button type="button" role="radio" class="settings-accent-swatch" data-accent="amber" aria-label="Amber" aria-checked="false" tabindex="-1" onclick="settingsAppearanceSetAccent('amber')"></button>
           </div>
-          <label>UI scale <span class="label-hint" id="gls-appearance-scale-value">100%</span></label>
+          <label for="gls-appearance-scale">UI scale <span class="label-hint" id="gls-appearance-scale-value">100%</span></label>
           <input id="gls-appearance-scale" type="range" min="90" max="115" step="5" value="100" oninput="settingsAppearancePreview()">
-          <label>Terminal font size <span class="label-hint" id="gls-appearance-terminal-font-value">12px</span></label>
+          <label for="gls-appearance-terminal-font">Terminal font size <span class="label-hint" id="gls-appearance-terminal-font-value">12px</span></label>
           <input id="gls-appearance-terminal-font" type="range" min="10" max="18" step="1" value="12" oninput="settingsAppearancePreview()">
-          <label>Density</label>
+          <label for="gls-appearance-density">Density</label>
           <select id="gls-appearance-density" onchange="settingsAppearancePreview()">
             <option value="compact">Compact</option>
             <option value="comfortable">Comfortable</option>
@@ -1168,14 +1168,14 @@
 
     <!-- General tab -->
     <div class="gs-pane" data-pane="gls-general">
-      <div class="gs-subtabs">
-        <button class="ui-tab ui-tab--underline gs-subtab active" data-subtab="gls-server" onclick="switchGlsSubTab(this)">Server</button>
-        <button class="ui-tab ui-tab--underline gs-subtab" data-subtab="gls-board" onclick="switchGlsSubTab(this)">Board</button>
+      <div class="gs-subtabs ui-tablist" role="tablist" aria-label="General settings views" onkeydown="uiTablistKeydown(event)">
+        <button type="button" role="tab" aria-selected="true" tabindex="0" class="ui-tab ui-tab--underline gs-subtab active" data-subtab="gls-server" onclick="switchGlsSubTab(this)">Server</button>
+        <button type="button" role="tab" aria-selected="false" tabindex="-1" class="ui-tab ui-tab--underline gs-subtab" data-subtab="gls-board" onclick="switchGlsSubTab(this)">Board</button>
       </div>
 
       <!-- Server sub-tab -->
       <div class="gs-subpane active" data-subpane="gls-server">
-        <label>Default boot command
+        <label for="gls-default-cmd">Default boot command
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)"
             data-hint="The command used when creating new agents without a custom boot command. Overrides the TORQUE_DEFAULT_CMD environment variable.">?</span>
         </label>
@@ -1195,17 +1195,17 @@
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)"
             data-hint="When enabled, clicking an agent or terminal also focuses its terminal session. When disabled, single click only selects (double click to focus).">?</span>
         </label>
-        <label>Max event log entries
+        <label for="gls-max-event-log">Max event log entries
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)"
             data-hint="Maximum number of panel events persisted to SQLite. Older events are trimmed automatically.">?</span>
         </label>
         <input type="number" id="gls-max-event-log" min="50" max="10000" value="500" style="width:80px">
-        <label>Terminal scrollback lines
+        <label for="gls-xterm-scrollback">Terminal scrollback lines
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)"
             data-hint="How many lines of xterm.js terminal history to preserve in embedded standalone terminals. Applies immediately to open terminals.">?</span>
         </label>
         <input type="number" id="gls-xterm-scrollback" min="100" max="100000" value="2000" style="width:100px">
-        <label>MCP call args capture
+        <label for="gls-mcp-call-log-args-capture">MCP call args capture
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)"
             data-hint="Controls future event-ingest storage for tool args/results. Metadata stores only arg keys and byte sizes; full stores values; off drops args/results.">?</span>
         </label>
@@ -1214,20 +1214,20 @@
           <option value="metadata">Metadata</option>
           <option value="full">Full</option>
         </select>
-        <label>Full-capture tool allowlist <span class="label-hint">one glob/regex per line</span></label>
+        <label for="gls-mcp-call-log-full-capture-tools">Full-capture tool allowlist <span class="label-hint">one glob/regex per line</span></label>
         <textarea id="gls-mcp-call-log-full-capture-tools" rows="3" placeholder="mcp__torque__torque_context"></textarea>
-        <label>Event ingest retention</label>
-        <div class="inline-fields">
-          <input type="number" id="gls-event-ingest-max-rows" min="1" value="100000" style="width:110px">
+        <label id="gls-event-ingest-retention-label">Event ingest retention</label>
+        <div class="inline-fields" role="group" aria-labelledby="gls-event-ingest-retention-label">
+          <input type="number" id="gls-event-ingest-max-rows" min="1" value="100000" style="width:110px" aria-label="Maximum retained rows">
           <span class="label-hint">rows</span>
-          <input type="number" id="gls-event-ingest-max-days" min="0" value="14" style="width:70px">
+          <input type="number" id="gls-event-ingest-max-days" min="0" value="14" style="width:70px" aria-label="Maximum retention days">
           <span class="label-hint">days</span>
         </div>
       </div>
 
       <!-- Board sub-tab -->
       <div class="gs-subpane" data-subpane="gls-board">
-        <label>Max pipeline depth <span class="label-hint">0 = unlimited</span></label>
+        <label for="gls-max-pipeline-depth">Max pipeline depth <span class="label-hint">0 = unlimited</span></label>
         <input type="number" id="gls-max-pipeline-depth" min="0" value="10" style="width:60px">
       </div>
     </div>
@@ -1325,9 +1325,9 @@
 
     <!-- System tab -->
     <div class="gs-pane" data-pane="gls-system">
-      <div class="gs-subtabs">
-        <button class="ui-tab ui-tab--underline gs-subtab active" data-subtab="gls-daemon" onclick="switchGlsSubTab(this)">Daemon</button>
-        <button class="ui-tab ui-tab--underline gs-subtab" data-subtab="gls-relay" onclick="switchGlsSubTab(this)">Relay</button>
+      <div class="gs-subtabs ui-tablist" role="tablist" aria-label="System settings views" onkeydown="uiTablistKeydown(event)">
+        <button type="button" role="tab" aria-selected="true" tabindex="0" class="ui-tab ui-tab--underline gs-subtab active" data-subtab="gls-daemon" onclick="switchGlsSubTab(this)">Daemon</button>
+        <button type="button" role="tab" aria-selected="false" tabindex="-1" class="ui-tab ui-tab--underline gs-subtab" data-subtab="gls-relay" onclick="switchGlsSubTab(this)">Relay</button>
       </div>
 
       <div class="gs-subpane active" data-subpane="gls-daemon">
@@ -1591,7 +1591,7 @@
       <div id="task-created-by-attribution" class="task-created-by-attribution hidden"></div>
     </div>
     <div id="task-modal-body" class="task-modal-body ui-modal__body">
-    <label>Task <span class="label-req">*</span>
+    <label for="task-task-input">Task <span class="label-req">*</span>
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="An actionable task description, e.g. 'Create a summary of last week's deploys' instead of 'Weekly deploy report'.">?</span>
     </label>
     <div class="task-title-label-wrap">
@@ -1603,12 +1603,12 @@
       <div id="task-title-label-dropdown" class="deps-dropdown ui-popover" role="listbox"
            aria-label="Matching labels" style="display:none"></div>
     </div>
-    <label>Description</label>
+    <label for="task-description-input">Description</label>
     <textarea id="task-description-input" rows="2" autocomplete="off"
               placeholder="Optional longer context or details..."
               oninput="taskAutoResize(this);taskPersistDraft()"
               onkeydown="if(event.key==='Escape')closeModals();"></textarea>
-    <label>Labels
+    <label for="task-labels-input">Labels
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Type a label and press Enter to add it.">?</span>
     </label>
     <div style="position:relative">
@@ -1619,7 +1619,7 @@
     </div>
     <div id="task-labels-chips" class="label-chips"></div>
     <div id="task-specialization-hint" class="label-hint" style="display:none"></div>
-    <label>Dependencies
+    <label for="task-deps-input">Dependencies
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)"
             data-hint="Tasks that must be Done before this task can be dispatched. Type to search.">?</span>
     </label>
@@ -1630,7 +1630,7 @@
            aria-label="Matching dependencies" style="display:none"></div>
     </div>
     <div id="task-deps-chips" class="label-chips"></div>
-    <label>Schedule dispatch
+    <label for="task-scheduled-input">Schedule dispatch
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Set a date/time to auto-dispatch this task. Leave empty to dispatch manually.">?</span>
     </label>
     <input type="datetime-local" id="task-scheduled-input"
@@ -1660,18 +1660,18 @@
     </div>
     <div id="task-artifacts-list" class="task-artifacts-list"></div>
     <div id="task-artifact-editor" class="task-artifact-editor"></div>
-    <label>Group <span class="label-req">*</span></label>
+    <label for="task-group-select">Group <span class="label-req">*</span></label>
     <select id="task-group-select"
             onchange="_taskGroupChanged()"
             onkeydown="if(event.key==='Escape')closeModals();"></select>
-    <label>Action
+    <label for="task-action-select">Action
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Optionally attach an action. The action's prompt wraps the task text with instructions and context.">?</span>
     </label>
     <select id="task-action-select" onchange="taskActionChanged()"
             onkeydown="if(event.key==='Escape')closeModals();">
       <option value="">None</option>
     </select>
-    <label>Role
+    <label for="task-template-select">Role
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Optional role used when this task creates a new agent during dispatch.">?</span>
     </label>
     <select id="task-template-select"
@@ -1685,17 +1685,17 @@
         <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Optional provider and link metadata for syncing this task with another system.">?</span>
       </summary>
       <div class="task-modal-section-body">
-        <label>External provider</label>
+        <label for="task-external-provider-input">External provider</label>
         <input id="task-external-provider-input" autocomplete="off"
                placeholder="e.g. github, jira, linear"
                oninput="_taskExternalFieldsChanged()"
                onkeydown="if(event.key==='Escape')closeModals();">
-        <label>External ID</label>
+        <label for="task-external-id-input">External ID</label>
         <input id="task-external-id-input" autocomplete="off"
                placeholder="e.g. owner/repo#123 or PROJ-123"
                oninput="_taskExternalFieldsChanged()"
                onkeydown="if(event.key==='Escape')closeModals();">
-        <label>External URL</label>
+        <label for="task-external-url-input">External URL</label>
         <input id="task-external-url-input" autocomplete="off"
                placeholder="https://…"
                oninput="_taskExternalFieldsChanged()"
@@ -1710,7 +1710,7 @@
       <div class="task-modal-section-body">
         <div class="task-modal-grid">
           <div>
-            <label>Mode</label>
+            <label for="task-verification-mode-input">Mode</label>
             <select id="task-verification-mode-input"
                     onchange="taskPersistDraft()"
                     onkeydown="if(event.key==='Escape')closeModals();">
@@ -1720,7 +1720,7 @@
             </select>
           </div>
           <div>
-            <label>State</label>
+            <label for="task-verification-state-input">State</label>
             <select id="task-verification-state-input"
                     onchange="taskPersistDraft()"
                     onkeydown="if(event.key==='Escape')closeModals();">
@@ -1732,7 +1732,7 @@
             </select>
           </div>
         </div>
-        <label>Tests run</label>
+        <label for="task-verification-tests-input">Tests run</label>
         <input id="task-verification-tests-input" autocomplete="off"
                placeholder="Tests run summary"
                oninput="taskPersistDraft()"
@@ -1754,12 +1754,12 @@
             <span>Deploy/restart attempted</span>
           </label>
         </div>
-        <label>Human validation pending</label>
+        <label for="task-verification-human-input">Human validation pending</label>
         <textarea id="task-verification-human-input" rows="2" autocomplete="off"
                   placeholder="What still needs human validation?"
                   oninput="taskAutoResize(this);taskPersistDraft()"
                   onkeydown="if(event.key==='Escape')closeModals();"></textarea>
-        <label>Notes</label>
+        <label for="task-verification-notes-input">Notes</label>
         <textarea id="task-verification-notes-input" rows="2" autocomplete="off"
                   placeholder="Verification notes..."
                   oninput="taskAutoResize(this);taskPersistDraft()"
@@ -2001,33 +2001,33 @@
       <h2 id="schedule-modal-title" class="ui-modal__title">New Schedule</h2>
     </div>
     <div class="ui-modal__body">
-    <label>Name <span class="label-req">*</span></label>
+    <label for="schedule-name-input">Name <span class="label-req">*</span></label>
     <input id="schedule-name-input" autocomplete="off" placeholder="e.g. Daily standup review"
            onkeydown="if(event.key==='Escape')closeModals();">
-    <label>Task template
+    <label for="schedule-task-input">Task template
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Task title created each time the schedule fires. Use {date}, {time}, or {datetime} for dynamic values.">?</span>
     </label>
     <textarea id="schedule-task-input" rows="1" autocomplete="off"
               placeholder="e.g. Code review — {date}"
               oninput="taskAutoResize(this)"
               onkeydown="if(event.key==='Escape')closeModals();"></textarea>
-    <label>Description</label>
+    <label for="schedule-desc-input">Description</label>
     <textarea id="schedule-desc-input" rows="2" autocomplete="off"
               placeholder="Optional longer context..."
               oninput="taskAutoResize(this)"
               onkeydown="if(event.key==='Escape')closeModals();"></textarea>
-    <label>Group <span class="label-req">*</span></label>
+    <label for="schedule-group-select">Group <span class="label-req">*</span></label>
     <select id="schedule-group-select"
             onkeydown="if(event.key==='Escape')closeModals();"></select>
-    <label>Schedule type</label>
-    <div class="segmented-control schedule-type-toggle" role="group" aria-label="Schedule type">
+    <label id="schedule-type-label">Schedule type</label>
+    <div class="segmented-control schedule-type-toggle" role="group" aria-labelledby="schedule-type-label">
       <button type="button" class="segmented-control__item schedule-type-btn active" id="schedule-type-recurring" aria-pressed="true"
               onclick="scheduleSetType('recurring')">Recurring</button>
       <button type="button" class="segmented-control__item schedule-type-btn" id="schedule-type-oneshot" aria-pressed="false"
               onclick="scheduleSetType('oneshot')">One-time</button>
     </div>
     <div id="schedule-cron-section">
-      <label>Cron expression <span class="label-req">*</span>
+      <label for="schedule-cron-input">Cron expression <span class="label-req">*</span>
         <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Standard 5-field cron: minute hour day-of-month month day-of-week. Examples: '0 9 * * 1-5' (weekdays 9am), '*/30 * * * *' (every 30 min).">?</span>
       </label>
       <input id="schedule-cron-input" autocomplete="off" placeholder="0 9 * * *"
@@ -2042,20 +2042,20 @@
       </div>
     </div>
     <div id="schedule-at-section" style="display:none">
-      <label>Date & time <span class="label-req">*</span></label>
+      <label for="schedule-at-input">Date & time <span class="label-req">*</span></label>
       <input type="datetime-local" id="schedule-at-input"
              onkeydown="if(event.key==='Escape')closeModals();">
     </div>
-    <label>Timezone</label>
+    <label for="schedule-tz-input">Timezone</label>
     <input id="schedule-tz-input" autocomplete="off" placeholder="e.g. America/New_York (empty = UTC)"
            onkeydown="if(event.key==='Escape')closeModals();">
-    <label>Action</label>
+    <label for="schedule-action-select">Action</label>
     <select id="schedule-action-select" onchange="scheduleActionChanged()"
             onkeydown="if(event.key==='Escape')closeModals();">
       <option value="">None</option>
     </select>
     <div id="schedule-action-vars"></div>
-    <label>Labels</label>
+    <label for="schedule-labels-input">Labels</label>
     <input id="schedule-labels-input" autocomplete="off" placeholder="Type and press Enter"
            onkeydown="scheduleLabelsKeydown(event)">
     <div id="schedule-labels-chips" class="label-chips"></div>

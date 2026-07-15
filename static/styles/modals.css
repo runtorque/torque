@@ -92,6 +92,9 @@
   color: var(--text-dim);
   text-align: center;
 }
+@media (max-width: 600px), (max-height: 520px) {
+  .overlay { padding: 8px; }
+}
 @media (max-width: 600px) {
   .board-pull-preview-row {
     grid-template-columns: auto minmax(0, 1fr);

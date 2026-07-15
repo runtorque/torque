@@ -25,6 +25,102 @@ function esc(s) {
     .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
+function _uiRefocusRovingChoice(group, groupRole, choiceRole, choiceIndex, choice) {
+  if (typeof document === 'undefined' || !group) return;
+  var groupId = group.id || '';
+  var groupLabel = group.getAttribute ? (group.getAttribute('aria-label') || '') : '';
+  var choiceId = choice && choice.id ? choice.id : '';
+  var dataKeys = ['data-tab', 'data-subtab', 'data-lane', 'data-view', 'data-value'];
+  var choiceData = {};
+  dataKeys.forEach(function(key) {
+    var value = choice && choice.getAttribute ? choice.getAttribute(key) : null;
+    if (value != null) choiceData[key] = value;
+  });
+
+  var refocus = function() {
+    var groups = Array.prototype.slice.call(document.querySelectorAll('[role="' + groupRole + '"]'));
+    var liveGroup = groups.find(function(candidate) {
+      if (groupId && candidate.id === groupId) return true;
+      return !groupId && groupLabel && candidate.getAttribute('aria-label') === groupLabel;
+    });
+    if (!liveGroup) return;
+    var choices = Array.prototype.slice.call(liveGroup.querySelectorAll('[role="' + choiceRole + '"]')).filter(function(candidate) {
+      return !candidate.closest || candidate.closest('[role="' + groupRole + '"]') === liveGroup;
+    });
+    var liveChoice = choices.find(function(candidate) {
+      if (choiceId && candidate.id === choiceId) return true;
+      var keys = Object.keys(choiceData);
+      return !choiceId && keys.length && keys.every(function(key) {
+        return candidate.getAttribute(key) === choiceData[key];
+      });
+    }) || choices[choiceIndex];
+    if (!liveChoice || typeof liveChoice.focus !== 'function') return;
+    try { liveChoice.focus({ preventScroll: true }); }
+    catch (_) { liveChoice.focus(); }
+  };
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(refocus);
+  else if (typeof setTimeout === 'function') setTimeout(refocus, 0);
+}
+
+function uiTablistKeydown(event) {
+  if (!event || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+  var list = event.currentTarget;
+  if (!list || typeof list.querySelectorAll !== 'function') return;
+  var key = event.key;
+  var vertical = list.getAttribute && list.getAttribute('aria-orientation') === 'vertical';
+  var delta = 0;
+  if ((!vertical && key === 'ArrowLeft') || (vertical && key === 'ArrowUp')) delta = -1;
+  else if ((!vertical && key === 'ArrowRight') || (vertical && key === 'ArrowDown')) delta = 1;
+  else if (key !== 'Home' && key !== 'End') return;
+
+  var tabs = Array.prototype.slice.call(list.querySelectorAll('[role="tab"]')).filter(function(tab) {
+    if (!tab || tab.disabled || (tab.getAttribute && tab.getAttribute('aria-disabled') === 'true')) return false;
+    return !tab.closest || tab.closest('[role="tablist"]') === list;
+  });
+  if (!tabs.length) return;
+  var current = event.target && event.target.closest
+    ? event.target.closest('[role="tab"]')
+    : event.target;
+  var index = tabs.indexOf(current);
+  if (key === 'Home') index = 0;
+  else if (key === 'End') index = tabs.length - 1;
+  else index = (Math.max(0, index) + delta + tabs.length) % tabs.length;
+  var next = tabs[index];
+  if (!next) return;
+  if (typeof event.preventDefault === 'function') event.preventDefault();
+  if (typeof next.focus === 'function') next.focus();
+  if (typeof next.click === 'function') next.click();
+  _uiRefocusRovingChoice(list, 'tablist', 'tab', index, next);
+}
+
+function uiRadioGroupKeydown(event) {
+  if (!event || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+  var group = event.currentTarget;
+  if (!group || typeof group.querySelectorAll !== 'function') return;
+  var key = event.key;
+  var delta = 0;
+  if (key === 'ArrowLeft' || key === 'ArrowUp') delta = -1;
+  else if (key === 'ArrowRight' || key === 'ArrowDown') delta = 1;
+  else if (key !== 'Home' && key !== 'End') return;
+  var choices = Array.prototype.slice.call(group.querySelectorAll('[role="radio"]')).filter(function(choice) {
+    return choice && !choice.disabled && (!choice.getAttribute || choice.getAttribute('aria-disabled') !== 'true');
+  });
+  if (!choices.length) return;
+  var current = event.target && event.target.closest
+    ? event.target.closest('[role="radio"]')
+    : event.target;
+  var index = choices.indexOf(current);
+  if (key === 'Home') index = 0;
+  else if (key === 'End') index = choices.length - 1;
+  else index = (Math.max(0, index) + delta + choices.length) % choices.length;
+  var next = choices[index];
+  if (!next) return;
+  if (typeof event.preventDefault === 'function') event.preventDefault();
+  if (typeof next.focus === 'function') next.focus();
+  if (typeof next.click === 'function') next.click();
+  _uiRefocusRovingChoice(group, 'radiogroup', 'radio', index, next);
+}
+
 function formatCode(s) {
   return esc(s).replace(/`([^`]+)`/g, '<span class="code-inline">$1</span>');
 }

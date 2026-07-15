@@ -452,8 +452,12 @@ The canonical CSS API lives in `static/styles/components.css`:
 ## Accessibility baseline
 
 - Interactive controls are reachable and operable by keyboard.
+- Tab interfaces keep only the selected tab in the sequential focus order and
+  support Arrow, Home, and End navigation with automatic activation.
 - Use semantic roles and native controls before adding ARIA.
 - Icon-only controls have explicit `aria-label` text.
+- Visible field labels are programmatically associated with their control;
+  placeholders supplement labels instead of replacing them.
 - Focus remains visible in every theme.
 - Text and meaningful boundaries maintain sufficient contrast.
 - State is not communicated by color alone.
@@ -484,16 +488,16 @@ the rule is intentionally global and documented here.
 | Foundations and tokens | Core scale standardized | Migrate component families and audit remaining literals |
 | Group tabs | Standardized | Verify compact switcher parity |
 | Panel tabs | Standardized | Verify all panel zones and narrow widths |
-| Feature navigation tabs | Standardized | Audit keyboard behavior and narrow labels |
-| Segmented controls | Standardized | Audit keyboard behavior and long option labels |
+| Feature navigation tabs | Standardized, accessibility audited | Keep long labels reachable without wrapping the panel |
+| Segmented controls | Standardized, accessibility audited | Keep tab-style segments roving and button groups natively operable |
 | Filter chips and presets | Standardized | Audit remaining feature-local toggles and removable values |
-| Buttons | Standardized | Audit icon-only controls and specialized editor actions |
-| Inputs and selectors | Standardized | Audit field labeling and specialized controls |
+| Buttons | Standardized, accessibility audited | Keep specialized editor actions explicitly named |
+| Inputs and selectors | Standardized, accessibility audited | Keep new dynamic editors explicitly labelled |
 | Cards | Standardized | Audit grid identity cards and nested contained surfaces |
-| Toolbars and panel headers | Standardized | Audit responsive wrapping and narrow panel widths |
+| Toolbars and panel headers | Standardized, responsive audited | Preserve action access when identity and controls wrap |
 | Status bar segments | Standardized | Audit narrow-width priority |
-| Menus and popovers | Standardized | Audit narrow viewport placement and long localized labels |
-| Modals | Standardized | Audit compact viewport fit, nested-dialog focus, and long titles |
+| Menus and popovers | Standardized, responsive audited | Keep anchored placement inside the viewport as labels grow |
+| Modals | Standardized, responsive audited | Keep nested-dialog focus and compact footer actions stable |
 | Badges, tags, and status | Standardized | Audit semantic intent and density at narrow widths |
 | Count indicators | Standardized | Keep prose metrics and countdown text outside the badge grammar |
 | Empty/loading/error states | Standardized | Audit recovery language and live-region timing |
@@ -951,6 +955,33 @@ the rule is intentionally global and documented here.
   Focused navigation, settings, Board, Agent, Actions, Library, and log-viewer
   suites protect behavior; live checks compare geometry and selected states
   before committing.
+
+### D-020 — Compact navigation remains fully keyboard reachable
+
+- Date: 2026-07-15
+- Status: accepted
+- Decision: Every `tablist` exposes one selected tab in the sequential focus
+  order, uses explicit selected state, and supports Arrow, Home, and End keys
+  through `uiTablistKeydown`. Radio-style button groups use the same roving
+  focus model through `uiRadioGroupKeydown`. Horizontal tablists opt into
+  `.ui-tablist` so long labels scroll within their own navigation row instead
+  of clipping or forcing the surrounding panel wider.
+- Rationale: Native buttons made every tab reachable with repeated Tab presses,
+  but did not provide the keyboard model promised by the ARIA roles. Several
+  narrow surfaces also clipped later choices. The shared behavior keeps focus,
+  selection, and compact geometry aligned without a framework.
+- Scope: Planning, Thinking, Agent and behavior tabs, Board lane tabs, Library,
+  log targets, Group and application Settings tabs, Settings accent choices,
+  shared tab/modal/popover CSS, icon-only panel and card actions, and primary
+  modal/toolbar field labels.
+- Constraints: Plain segmented button groups continue using native button and
+  `aria-pressed` behavior. Group tabs retain their purpose-built keyboard and
+  compact-switcher implementation. Feature renderers still own selection state
+  and rerendering; the shared handler only moves focus and activates a choice.
+- Verification: Component and focused frontend suites protect roving state,
+  accessible names, label associations, compact overflow, and compact viewport
+  fit. Live desktop checks exercise keyboard selection, focus retention,
+  labelled fields, dialog lifecycle, and console cleanliness.
 
 ## Decision entry template
 

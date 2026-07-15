@@ -640,7 +640,7 @@ test('area detail preserves active tab, selected area, drafts, caret, filters, s
   assert.equal(document.getElementById('areas-list-scroll').scrollTop, 61);
   assert.equal(document.getElementById('area-detail-drawer').scrollTop, 120);
   const html = document.getElementById('panel-initiatives').innerHTML;
-  assert.match(html, /class="ui-tab ui-tab--contained planning-tab active" aria-selected="true" onclick="planningSetTab\('areas'\)"/);
+  assert.match(html, /class="ui-tab ui-tab--contained planning-tab active" aria-selected="true" tabindex="0" onclick="planningSetTab\('areas'\)"/);
   assert.match(html, /TORQUE-A:1/);
   assert.doesNotMatch(html, /No linked tasks/);
 });

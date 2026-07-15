@@ -193,7 +193,7 @@ function _boardRenderAddTaskSection(lane) {
       html += '<div class="inline-att-chips">';
       for (var ai = 0; ai < _boardInlineAttachments.length; ai++) {
         html += '<span class="inline-att-chip">[Image #' + (ai + 1) + ']'
-          + '<button class="inline-att-chip-remove" onmousedown="event.preventDefault();boardInlineRemoveAtt(' + ai + ')">&times;</button>'
+          + '<button type="button" class="inline-att-chip-remove" aria-label="Remove image ' + (ai + 1) + '" onmousedown="event.preventDefault();boardInlineRemoveAtt(' + ai + ')">&times;</button>'
           + '</span>';
       }
       html += '</div>';
@@ -523,6 +523,7 @@ function renderBoard() {
   html += '<div class="board-search-input-wrap">';
   html += '<input type="text" class="board-search-input" id="board-search-input"'
     + ' placeholder="Search tasks..." value="' + esc(_boardSearchQuery) + '"'
+    + ' aria-label="Search Board tasks"'
     + ' title="' + esc(searchHint) + '"'
     + ' oninput="boardUpdateSearch(this.value)">';
   html += '</div>';
@@ -689,8 +690,8 @@ function renderBoard() {
   // headers inside each column instead.
   if (!_boardShowSchedules && !wideShell) {
     html += '<div class="board-lane-bar">';
-    html += '<button class="board-lane-scroll-btn" id="board-scroll-left" onclick="boardScrollLanes(-1)" title="Scroll left">&#9664;</button>';
-    html += '<div class="board-lane-tabs" id="board-lane-tabs">';
+    html += '<button class="board-lane-scroll-btn" id="board-scroll-left" onclick="boardScrollLanes(-1)" title="Scroll left" aria-label="Scroll Board lanes left">&#9664;</button>';
+    html += '<div class="board-lane-tabs ui-tablist" id="board-lane-tabs" role="tablist" aria-label="Board lanes" onkeydown="uiTablistKeydown(event)">';
     for (var i = 0; i < lanes.length; i++) {
       var l = lanes[i];
       var cnt = _boardLaneCount(l, renderModel);
@@ -699,6 +700,7 @@ function renderBoard() {
       var escLane = esc(l).replace(/'/g, "\\'");
       html += '<button class="ui-tab ui-tab--underline board-lane-tab board-lane-drop-target' + cls + '"'
         + ' data-lane="' + esc(l) + '"'
+        + ' role="tab" aria-selected="' + (l === _boardSelectedLane ? 'true' : 'false') + '" tabindex="' + (l === _boardSelectedLane ? '0' : '-1') + '"'
         + ' onclick="boardSelectLane(\'' + escLane + '\')"'
         + ' ondragover="boardLaneTabDragOver(event)"'
         + ' ondragleave="boardLaneTabDragLeave(event)"'
@@ -707,7 +709,7 @@ function renderBoard() {
         + '</button>';
     }
     html += '</div>';
-    html += '<button class="board-lane-scroll-btn" id="board-scroll-right" onclick="boardScrollLanes(1)" title="Scroll right">&#9654;</button>';
+    html += '<button class="board-lane-scroll-btn" id="board-scroll-right" onclick="boardScrollLanes(1)" title="Scroll right" aria-label="Scroll Board lanes right">&#9654;</button>';
     html += '</div>';
   }
 

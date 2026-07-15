@@ -36,7 +36,7 @@ function renderHistoryPanel() {
   html += '<div class="tpled-header-subtitle ui-panel-header__subtitle">Historical agent runs and their recorded activity.</div>';
   html += '</div>';
   html += '<div class="tpled-header-controls ui-panel-header__actions">';
-  html += '<button class="tpled-new-btn" onclick="agentHistoryLoad()" title="Refresh">&#x21BB;</button>';
+  html += '<button class="tpled-new-btn" onclick="agentHistoryLoad()" title="Refresh" aria-label="Refresh agent history">&#x21BB;</button>';
   html += '</div>';
   html += '</div>';
   html += '<div class="agent-history-container" id="agent-history-container"></div>';
@@ -185,7 +185,7 @@ function renderAgentHistoryView() {
 
   // Search + filter bar
   html += '<div class="ah-toolbar ui-toolbar ui-toolbar--bordered">';
-  html += '<input id="agent-history-search" class="ah-search" type="text" placeholder="Search agents\u2026" '
+  html += '<input id="agent-history-search" class="ah-search" type="text" placeholder="Search agents\u2026" aria-label="Search agent history" '
     + 'value="' + esc(_agentHistorySearch) + '" '
     + 'oninput="agentHistoryOnSearch(this.value)">';
   var filters = [
@@ -258,7 +258,7 @@ function renderAgentHistoryView() {
         + _ahFmtTokens(tokIn) + '/' + _ahFmtTokens(tokOut) + '</span>';
     }
     if (isActive) {
-      html += '<button class="ah-focus-btn" onclick="event.stopPropagation();agentHistoryFocusAgent(\'' + esc(r.id) + '\')" title="Focus agent">\u2192</button>';
+      html += '<button class="ah-focus-btn" onclick="event.stopPropagation();agentHistoryFocusAgent(\'' + esc(r.id) + '\')" title="Focus agent" aria-label="Focus ' + esc(r.name || r.id || 'agent') + '">\u2192</button>';
     }
     html += '</div>';  // ah-row-header
 

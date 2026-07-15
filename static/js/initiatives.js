@@ -789,7 +789,7 @@ function _renderInitiativeDetail() {
   html += '<div class="initiative-detail-head">';
   html += '<div><div class="initiative-detail-kicker">Initiative</div><h2>' + esc(detail.title || _initiativesSelectedId) + '</h2>';
   html += '<div class="initiative-detail-id">' + esc(_initiativesSelectedId) + '</div></div>';
-  html += '<button type="button" class="initiative-close" onclick="initiativesCloseDetail()" title="Close">×</button>';
+  html += '<button type="button" class="initiative-close" onclick="initiativesCloseDetail()" title="Close" aria-label="Close initiative details">×</button>';
   html += '</div>';
   if (loading) html += '<div class="initiative-loading ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading initiative detail…</div>';
   var taskCreateStatus = _initiativesTaskCreateStatusById[_initiativesSelectedId];
@@ -1361,14 +1361,14 @@ function _renderAreaCard(item) {
 function _renderAreasFilters(group, total, filtered) {
   var typeOptions = _areasTypeOptions(group);
   var html = '<div class="areas-filters">';
-  html += '<input id="areas-search" class="areas-search-input" value="' + esc(_areasSearch || '') + '" placeholder="Search areas" oninput="areasSetSearch(this.value)" autocomplete="off">';
-  html += '<select id="areas-lifecycle-filter" onchange="areasSetLifecycleFilter(this.value)">';
+  html += '<input id="areas-search" class="areas-search-input" value="' + esc(_areasSearch || '') + '" placeholder="Search areas" aria-label="Search areas" oninput="areasSetSearch(this.value)" autocomplete="off">';
+  html += '<select id="areas-lifecycle-filter" aria-label="Filter areas by lifecycle" onchange="areasSetLifecycleFilter(this.value)">';
   html += '<option value="">All lifecycles</option>';
   AREA_LIFECYCLES.forEach(function(lifecycle) {
     html += '<option value="' + esc(lifecycle) + '"' + (_areasLifecycleFilter === lifecycle ? ' selected' : '') + '>' + esc(_areaLifecycleLabel(lifecycle)) + '</option>';
   });
   html += '</select>';
-  html += '<select id="areas-type-filter" onchange="areasSetTypeFilter(this.value)">';
+  html += '<select id="areas-type-filter" aria-label="Filter areas by type" onchange="areasSetTypeFilter(this.value)">';
   html += '<option value="">All types</option>';
   typeOptions.forEach(function(type) {
     html += '<option value="' + esc(type) + '"' + (_areasTypeFilter === type ? ' selected' : '') + '>' + esc(type) + '</option>';
@@ -1527,7 +1527,7 @@ function _renderAreaDetail() {
   html += '<div class="initiative-detail-head">';
   html += '<div><div class="initiative-detail-kicker">Area</div><h2>' + esc(detail.title || _areasSelectedId) + '</h2>';
   html += '<div class="initiative-detail-id">' + esc(_areasSelectedId) + '</div></div>';
-  html += '<button type="button" class="initiative-close" onclick="areasCloseDetail()" title="Close">×</button>';
+  html += '<button type="button" class="initiative-close" onclick="areasCloseDetail()" title="Close" aria-label="Close area details">×</button>';
   html += '</div>';
   if (loading) html += '<div class="initiative-loading ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading area detail…</div>';
   html += '<div class="initiative-form area-form">';
@@ -1568,9 +1568,9 @@ function _renderAreasWorkspace(group) {
 
 function _renderPlanningTabs(initiativeTotal, areaTotal) {
   var active = String(_planningActiveTab || 'initiatives');
-  var html = '<div class="planning-tabs" role="tablist" aria-label="Planning sections">';
-  html += '<button type="button" role="tab" class="ui-tab ui-tab--contained planning-tab' + (active === 'initiatives' ? ' active' : '') + '" aria-selected="' + (active === 'initiatives' ? 'true' : 'false') + '" onclick="planningSetTab(\'initiatives\')">Initiatives <span class="planning-tab-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">' + esc(initiativeTotal) + '</span></button>';
-  html += '<button type="button" role="tab" class="ui-tab ui-tab--contained planning-tab' + (active === 'areas' ? ' active' : '') + '" aria-selected="' + (active === 'areas' ? 'true' : 'false') + '" onclick="planningSetTab(\'areas\')">Areas <span class="planning-tab-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">' + esc(areaTotal) + '</span></button>';
+  var html = '<div class="planning-tabs ui-tablist" role="tablist" aria-label="Planning sections" onkeydown="uiTablistKeydown(event)">';
+  html += '<button type="button" role="tab" class="ui-tab ui-tab--contained planning-tab' + (active === 'initiatives' ? ' active' : '') + '" aria-selected="' + (active === 'initiatives' ? 'true' : 'false') + '" tabindex="' + (active === 'initiatives' ? '0' : '-1') + '" onclick="planningSetTab(\'initiatives\')">Initiatives <span class="planning-tab-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">' + esc(initiativeTotal) + '</span></button>';
+  html += '<button type="button" role="tab" class="ui-tab ui-tab--contained planning-tab' + (active === 'areas' ? ' active' : '') + '" aria-selected="' + (active === 'areas' ? 'true' : 'false') + '" tabindex="' + (active === 'areas' ? '0' : '-1') + '" onclick="planningSetTab(\'areas\')">Areas <span class="planning-tab-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">' + esc(areaTotal) + '</span></button>';
   html += '</div>';
   return html;
 }
@@ -1624,7 +1624,7 @@ function renderInitiativesPanel() {
     : 'Initiatives grouped by roadmap bucket for ' + esc(group || 'all groups') + '. Linked execution stays on Board tasks.') + '</div></div>';
   html += '<div class="tpled-header-controls ui-panel-header__actions">';
   html += '<span class="initiative-total ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + esc(activeTab === 'areas' ? _areaCountLabel(areaTotal) : _initiativeCountLabel(initiativeTotal)) + '</span>';
-  html += '<button class="tpled-new-btn" onclick="planningRefresh()" title="Refresh planning data">&#x21BB;</button>';
+  html += '<button class="tpled-new-btn" onclick="planningRefresh()" title="Refresh planning data" aria-label="Refresh planning data">&#x21BB;</button>';
   html += '</div></div>';
   html += _renderPlanningTabs(initiativeTotal, areaTotal);
   if (activeTab === 'areas') {

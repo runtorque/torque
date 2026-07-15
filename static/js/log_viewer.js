@@ -27,9 +27,9 @@ function _ensureLogViewerModal() {
     + '  </div>'
     + '  <div class="log-viewer-body ui-modal__body">'
     + '  <div class="log-viewer-toolbar">'
-    + '    <div class="segmented-control log-viewer-targets" role="tablist" aria-label="Log target">'
-    + '      <button id="log-viewer-target-daemon" class="segmented-control__item log-viewer-target active" type="button" role="tab" aria-selected="true" onclick="_logViewerSetTarget(\'daemon\')">Daemon</button>'
-    + '      <button id="log-viewer-target-supervisor" class="segmented-control__item log-viewer-target" type="button" role="tab" aria-selected="false" onclick="_logViewerSetTarget(\'supervisor\')">Supervisor</button>'
+    + '    <div class="segmented-control ui-tablist log-viewer-targets" role="tablist" aria-label="Log target" onkeydown="uiTablistKeydown(event)">'
+    + '      <button id="log-viewer-target-daemon" class="segmented-control__item log-viewer-target active" type="button" role="tab" aria-selected="true" tabindex="0" onclick="_logViewerSetTarget(\'daemon\')">Daemon</button>'
+    + '      <button id="log-viewer-target-supervisor" class="segmented-control__item log-viewer-target" type="button" role="tab" aria-selected="false" tabindex="-1" onclick="_logViewerSetTarget(\'supervisor\')">Supervisor</button>'
     + '    </div>'
     + '    <label>Level <select id="log-viewer-level" onchange="_logViewerSetLevel(this.value)">'
     + '      <option value="">All</option><option>DEBUG</option><option>INFO</option><option>WARNING</option><option>ERROR</option>'
@@ -60,6 +60,7 @@ function _logViewerSyncTargetControls() {
     var active = name === target;
     if (el.classList) el.classList.toggle('active', active);
     if (typeof el.setAttribute === 'function') el.setAttribute('aria-selected', active ? 'true' : 'false');
+    if (typeof el.setAttribute === 'function') el.setAttribute('tabindex', active ? '0' : '-1');
   });
 }
 

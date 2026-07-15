@@ -884,7 +884,7 @@ function _behaviorOverlayRenderInnerTabs(agent) {
   var tabs = _behaviorOverlayInnerTabs(agent);
   if (!tabs.length) return '';
   var active = _behaviorOverlayInnerTab(agent);
-  var html = '<div class="ui-tabs--contained agent-panel-events-subtabs behavior-overlay-subtabs" role="tablist" aria-label="Behavior overlay scopes">';
+  var html = '<div class="ui-tabs--contained ui-tablist agent-panel-events-subtabs behavior-overlay-subtabs" role="tablist" aria-label="Behavior overlay scopes" onkeydown="uiTablistKeydown(event)">';
   for (var i = 0; i < tabs.length; i++) {
     var tab = tabs[i];
     html += '<button type="button"'
@@ -893,6 +893,7 @@ function _behaviorOverlayRenderInnerTabs(agent) {
       + ' data-agent-panel-behavior-inner-tab="' + _behaviorOverlayAttr(tab.key) + '"'
       + ' role="tab"'
       + ' aria-selected="' + (active === tab.key ? 'true' : 'false') + '"'
+      + ' tabindex="' + (active === tab.key ? '0' : '-1') + '"'
       + ' onclick="behaviorOverlaySelectInnerTab(' + _behaviorOverlayJs(tab.key) + ')">'
       + _behaviorOverlayEsc(tab.label)
       + '</button>';

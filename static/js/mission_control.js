@@ -411,7 +411,7 @@ function _missionControlShellHtml(summary) {
   html += '<div class="tpled-header-controls mc-controls ui-toolbar ui-toolbar--bordered">';
   html += '<input id="mission-control-filter" class="mc-filter" value="' + esc(_missionControlFilter) + '" oninput="missionControlSetFilter(this.value)" placeholder="Filter cards…" />';
   html += '<span class="mc-total ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + esc(String(total)) + ' cards</span>';
-  html += '<button class="tpled-new-btn" onclick="missionControlRefresh()" title="Refresh read-only summary">&#x21BB;</button>';
+  html += '<button class="tpled-new-btn" onclick="missionControlRefresh()" title="Refresh read-only summary" aria-label="Refresh Mission Control summary">&#x21BB;</button>';
   html += '</div>';
   if (_missionControlLastError) html += '<div class="mc-error ui-state ui-state--error ui-state--compact" role="alert">' + esc(_missionControlLastError) + ' Refresh Mission Control to try again.</div>';
   html += '<div class="mc-workspace" id="mission-control-workspace">';
@@ -452,7 +452,7 @@ function renderMissionControlPanel() {
     html = '<div class="mission-control-panel"><div class="tpled-header mc-header ui-panel-header ui-panel-header--surface">'
       + '<div class="tpled-header-copy ui-panel-header__copy"><div class="tpled-header-title-row ui-panel-header__title-row"><span class="tpled-header-title ui-panel-header__title">Mission Control</span></div>'
       + '<div class="tpled-header-subtitle ui-panel-header__subtitle">Read-only readiness summary could not be loaded.</div></div>'
-      + '<div class="tpled-header-controls ui-panel-header__actions"><button class="tpled-new-btn" onclick="missionControlRefresh()" title="Retry">&#x21BB;</button></div>'
+      + '<div class="tpled-header-controls ui-panel-header__actions"><button class="tpled-new-btn" onclick="missionControlRefresh()" title="Retry" aria-label="Retry Mission Control">&#x21BB;</button></div>'
       + '</div><div class="mc-error ui-state ui-state--error" role="alert">' + esc(_missionControlLastError) + ' Use Refresh to try again.</div></div>';
   } else if (summary) {
     html = _missionControlShellHtml(summary);

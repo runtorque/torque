@@ -330,6 +330,7 @@
   color: var(--text);
   font-size: 13px;
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .ui-modal:not(.ui-modal--structured) > .ui-modal__title {
@@ -369,6 +370,7 @@
   align-items: center;
   justify-content: flex-end;
   gap: var(--space-2);
+  flex-wrap: wrap;
   margin-top: 14px;
 }
 
@@ -381,6 +383,28 @@
 
 .ui-modal__footer--split {
   justify-content: space-between;
+}
+
+@media (max-width: 600px), (max-height: 520px) {
+  .ui-modal {
+    max-width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
+  }
+
+  .ui-modal--structured {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .ui-modal__header,
+  .ui-modal__body,
+  .ui-modal__footer {
+    min-width: 0;
+  }
+
+  .ui-modal--structured .ui-modal__footer > button {
+    flex: 1 1 auto;
+  }
 }
 
 /* Menus and popovers
@@ -396,7 +420,9 @@
   background: var(--bg-raised);
   box-shadow: var(--shadow-float);
   max-height: min(360px, calc(100vh - 8px));
+  max-width: calc(100vw - 16px);
   color: var(--text);
+  overflow-wrap: anywhere;
 }
 
 .ui-menu-item {
@@ -833,6 +859,19 @@ textarea[aria-invalid="true"] {
   background: var(--bg-cell);
 }
 
+.ui-tablist {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
+}
+
+.ui-tablist > [role="tab"] {
+  flex: 0 0 auto;
+}
+
 /* Segmented controls
  *
  * Segmented controls choose one mutually exclusive mode inside a compact
@@ -846,6 +885,11 @@ textarea[aria-invalid="true"] {
   border: var(--control-border);
   border-radius: var(--radius-sm);
   background: var(--bg-inset);
+}
+
+.segmented-control.ui-tablist {
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .segmented-control__item {

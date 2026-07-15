@@ -20141,7 +20141,7 @@ test('engineer Events inner Lifecycle tab survives outer tab switches and rerend
   runInContext(context, `_agentPanelLastSelectedTabByKind.engineer = 'events';`);
 
   context.renderAgentPanel();
-  assert.match(panel.innerHTML, /class="ui-tabs--contained agent-panel-events-subtabs" role="tablist"/);
+  assert.match(panel.innerHTML, /class="ui-tabs--contained ui-tablist agent-panel-events-subtabs" role="tablist"/);
   assert.match(
     panel.innerHTML,
     /id="agent-panel-events-subtab-inbox" class="ui-tab ui-tab--contained agent-panel-events-subtab active"[^>]*data-agent-panel-events-inner-tab="inbox"[^>]*aria-selected="true"/,
@@ -23173,9 +23173,9 @@ test('Library Specializations list refresh preserves unsaved editor draft and ca
 
 test('task modal and add-agent labels rename template UI to role UI', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  assert.match(html, /<label>Role<\/label>\s*<select id="add-template-select"/);
-  assert.match(html, /<label>Default role<\/label>\s*<select id="gs-default-agent-template"/);
-  assert.match(html, /<label>Role[\s\S]*Optional role used when this task creates a new agent during dispatch\./);
+  assert.match(html, /<label for="add-template-select">Role<\/label>\s*<select id="add-template-select"/);
+  assert.match(html, /<label for="gs-default-agent-template">Default role<\/label>\s*<select id="gs-default-agent-template"/);
+  assert.match(html, /<label for="task-template-select">Role[\s\S]*Optional role used when this task creates a new agent during dispatch\./);
 });
 
 test('standalone panel titles use current operator-facing names', () => {
@@ -24908,10 +24908,10 @@ test('task modal keeps a scrollable body separate from its footer actions', () =
 
 test('task modal prioritizes labels, dependencies, and schedule before lower-frequency sections', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  const descriptionIndex = html.indexOf('<label>Description</label>');
-  const labelsIndex = html.indexOf('<label>Labels');
-  const depsIndex = html.indexOf('<label>Dependencies');
-  const scheduleIndex = html.indexOf('<label>Schedule dispatch');
+  const descriptionIndex = html.indexOf('<label for="task-description-input">Description</label>');
+  const labelsIndex = html.indexOf('<label for="task-labels-input">Labels');
+  const depsIndex = html.indexOf('<label for="task-deps-input">Dependencies');
+  const scheduleIndex = html.indexOf('<label for="task-scheduled-input">Schedule dispatch');
   const imagesIndex = html.indexOf('<label>Images');
   const externalIndex = html.indexOf('<summary>External');
   const verificationIndex = html.indexOf('<summary>Verification');

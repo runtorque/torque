@@ -154,7 +154,7 @@ function renderTerminalRow(t) {
   h += `</div>`;
   h += `<div class="term-status ${t.status}"></div>`;
   h += `<div class="term-actions">`;
-  h += `<button class="term-action danger" onclick="event.stopPropagation();removeAgent('${t.id}')" title="Delete">\u2715</button>`;
+  h += `<button class="term-action danger" onclick="event.stopPropagation();removeAgent('${t.id}')" title="Delete" aria-label="Delete ${esc(t.name || 'terminal')}">\u2715</button>`;
   h += `</div>`;
   h += `</div>`;
   return h;

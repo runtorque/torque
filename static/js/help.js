@@ -621,7 +621,7 @@ function _helpRenderTopicBrowserModal() {
 function _helpRenderBrowserControls() {
   return '<form class="help-toolbar help-browser-toolbar ui-toolbar ui-toolbar--bordered" onsubmit="return helpSearchSubmit(event)">'
     + '<input id="help-search-input" class="help-search-input" value="' + _helpEsc(_helpState.searchDraft) + '" '
-    + 'placeholder="Search maintained docs…" autocomplete="off" '
+    + 'placeholder="Search maintained docs…" aria-label="Search maintained documentation" autocomplete="off" '
     + 'oninput="helpSearchInputChanged(this.value)" onkeydown="helpSearchKeydown(event)">'
     + '<button type="submit" class="btn-primary">Search</button>'
     + '<button type="button" class="btn-secondary" onclick="helpClearSearch()">Clear</button>'

@@ -87,9 +87,11 @@ function _agentPanelDigestPauseButton(agent) {
   if (!agentId) return '';
   var settings = _agentPanelDigestSettings(agent);
   var paused = !!(settings && settings.paused);
+  var actionLabel = paused ? 'Resume event delivery' : 'Pause event delivery';
   return '<button id="agent-panel-pause-btn" class="agent-panel-pause-btn'
     + (paused ? ' paused' : '')
-    + '" onclick="agentPanelTogglePauseForAgent(\'' + _agentPanelEsc(agentId) + '\')">'
+    + '" title="' + actionLabel + '" aria-label="' + actionLabel + ' for ' + _agentPanelEsc((agent && agent.name) || 'agent') + '"'
+    + ' onclick="agentPanelTogglePauseForAgent(\'' + _agentPanelEsc(agentId) + '\')">'
     + (paused ? '&#x25B6;' : '&#x23F8;')
     + '</button>';
 }
@@ -159,7 +161,7 @@ function _agentPanelRenderEventsInnerTabs(agent) {
     { key: 'lifecycle', label: 'Lifecycle' },
     { key: 'mcp', label: 'MCP' },
   ];
-  var html = '<div class="ui-tabs--contained agent-panel-events-subtabs" role="tablist" aria-label="Events views">';
+  var html = '<div class="ui-tabs--contained ui-tablist agent-panel-events-subtabs" role="tablist" aria-label="Events views" onkeydown="uiTablistKeydown(event)">';
   for (var i = 0; i < tabs.length; i++) {
     var tab = tabs[i];
     html += '<button type="button"'
@@ -168,6 +170,7 @@ function _agentPanelRenderEventsInnerTabs(agent) {
       + ' data-agent-panel-events-inner-tab="' + _agentPanelEsc(tab.key) + '"'
       + ' role="tab"'
       + ' aria-selected="' + (active === tab.key ? 'true' : 'false') + '"'
+      + ' tabindex="' + (active === tab.key ? '0' : '-1') + '"'
       + ' onclick="agentPanelSelectEventsInnerTab(\'' + _agentPanelEsc(tab.key) + '\')">'
       + _agentPanelEsc(tab.label)
       + '</button>';

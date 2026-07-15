@@ -400,7 +400,7 @@ function _eventsBuildShellHtml(grp, attention) {
   html += '<div class="events-header-subtitle ui-panel-header__subtitle">' + esc(scopeLabel) + '</div>';
   html += '</div>';
   html += '<div class="events-header-actions ui-panel-header__actions">';
-  html += '<select class="events-kind-filter" onchange="eventsSetKindFilter(this.value)">';
+  html += '<select class="events-kind-filter" aria-label="Filter events by type" onchange="eventsSetKindFilter(this.value)">';
   html += '<option value="all"' + (_eventsKindFilter === 'all' ? ' selected' : '') + '>All</option>';
   html += '<option value="errors"' + (_eventsKindFilter === 'errors' ? ' selected' : '') + '>Errors</option>';
   html += '<option value="tasks"' + (_eventsKindFilter === 'tasks' ? ' selected' : '') + '>Tasks</option>';
@@ -409,7 +409,7 @@ function _eventsBuildShellHtml(grp, attention) {
   html += '</div>';
   html += '</div>';
   html += '<div class="events-search-row ui-toolbar ui-toolbar--bordered">';
-  html += '<input class="events-search-input" type="text" placeholder="Search events\u2026"'
+  html += '<input class="events-search-input" type="text" placeholder="Search events\u2026" aria-label="Search events"'
     + ' value="' + esc(_eventsSearchQuery) + '"'
     + ' oninput="eventsOnSearchInput(this.value)">';
   html += '</div>';

@@ -351,16 +351,16 @@ function _agentPanelEngineerSpecializationsEditorHtml(agent) {
       + '</span>';
     html += '<span class="specialization-controls-row">';
     if (i > 0) {
-      html += '<button type="button" title="Move up" onclick="'
+      html += '<button type="button" title="Move up" aria-label="Move ' + _agentPanelAttr(selected[i]) + ' up" onclick="'
         + _agentPanelEventAttr('agentPanelMoveEngineerSpecialization(' + engineerIdJs + ',' + i + ',-1)')
         + '">↑</button>';
     }
     if (i < selected.length - 1) {
-      html += '<button type="button" title="Move down" onclick="'
+      html += '<button type="button" title="Move down" aria-label="Move ' + _agentPanelAttr(selected[i]) + ' down" onclick="'
         + _agentPanelEventAttr('agentPanelMoveEngineerSpecialization(' + engineerIdJs + ',' + i + ',1)')
         + '">↓</button>';
     }
-    html += '<button type="button" title="Remove" onclick="'
+    html += '<button type="button" title="Remove" aria-label="Remove ' + _agentPanelAttr(selected[i]) + '" onclick="'
       + _agentPanelEventAttr('agentPanelRemoveEngineerSpecialization(' + engineerIdJs + ',' + i + ')')
       + '">×</button>';
     html += '</span></li>';

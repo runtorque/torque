@@ -335,7 +335,7 @@ function _renderContextEntryCard(entry) {
   if (_contextCanMutate(entry)) {
     html += '<button class="context-pin-btn' + (entry.pinned ? ' pinned' : '')
       + '" onclick="event.stopPropagation();contextTogglePin(\'' + entry.id + '\',' + (entry.pinned ? 'false' : 'true') + ')"'
-      + ' title="' + (entry.pinned ? 'Unpin entry' : 'Pin entry') + '">'
+      + ' title="' + (entry.pinned ? 'Unpin entry' : 'Pin entry') + '" aria-label="' + (entry.pinned ? 'Unpin entry' : 'Pin entry') + '">'
       + (entry.pinned ? '&#9733;' : '&#9734;')
       + '</button>';
   }
@@ -465,7 +465,7 @@ function _renderContextDetail(entry) {
   if (_contextCanMutate(entry)) {
     html += '<button class="context-pin-btn' + (entry.pinned ? ' pinned' : '')
       + '" onclick="contextTogglePin(\'' + entry.id + '\',' + (entry.pinned ? 'false' : 'true') + ')"'
-      + ' title="' + (entry.pinned ? 'Unpin entry' : 'Pin entry') + '">'
+      + ' title="' + (entry.pinned ? 'Unpin entry' : 'Pin entry') + '" aria-label="' + (entry.pinned ? 'Unpin entry' : 'Pin entry') + '">'
       + (entry.pinned ? '&#9733;' : '&#9734;')
       + '</button>';
   }
@@ -597,8 +597,8 @@ function renderContextPanel() {
   html += '</div>';
   html += '<div class="context-toolbar ui-toolbar ui-toolbar--bordered">';
   html += '<input id="context-search-input" class="context-search-input" type="text" placeholder="Search shared context…"'
-    + ' value="' + esc(_contextSearchQuery) + '" oninput="contextSearchInput(this.value)">';
-  html += '<select class="context-filter-select" onchange="contextSetEntryType(this.value)">';
+    + ' aria-label="Search shared context" value="' + esc(_contextSearchQuery) + '" oninput="contextSearchInput(this.value)">';
+  html += '<select class="context-filter-select" aria-label="Filter shared context by type" onchange="contextSetEntryType(this.value)">';
   html += '<option value="">All types</option>';
   html += '<option value="finding"' + (_contextEntryType === 'finding' ? ' selected' : '') + '>Finding</option>';
   html += '<option value="decision"' + (_contextEntryType === 'decision' ? ' selected' : '') + '>Decision</option>';

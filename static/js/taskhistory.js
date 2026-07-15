@@ -319,7 +319,7 @@ function renderTaskHistory() {
   if (!_taskHistoryData) {
     html += '<div class="th-header ui-modal__header ui-modal__header--bordered">';
     html += '<div id="task-history-title" class="th-title ui-modal__title">Loading\u2026</div>';
-    html += '<button class="th-close" onclick="hideTaskHistory()">\u2715</button>';
+    html += '<button class="th-close" onclick="hideTaskHistory()" aria-label="Close task history">\u2715</button>';
     html += '</div>';
     html += '<div class="th-content ui-modal__body ui-modal__body--flush"><div class="th-empty ui-state ui-state--loading ui-state--fill" role="status" aria-live="polite">Loading task history\u2026</div></div>';
     html += '<div class="th-footer ui-modal__footer">';
@@ -344,7 +344,7 @@ function renderTaskHistory() {
   html += '<div id="task-history-title" class="th-title ui-modal__title">' + esc(agentName) + '</div>';
   html += '<div class="th-subtitle">'
     + tasks.length + ' task' + (tasks.length !== 1 ? 's' : '') + '</div>';
-  html += '<button class="th-close" onclick="hideTaskHistory()">\u2715</button>';
+  html += '<button class="th-close" onclick="hideTaskHistory()" aria-label="Close task history">\u2715</button>';
   html += '</div>';
 
   // Content

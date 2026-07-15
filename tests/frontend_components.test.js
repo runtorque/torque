@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const repoRoot = path.resolve(__dirname, '..');
 
@@ -171,11 +172,141 @@ test('feature stylesheets do not redefine shared tab visual primitives', () => {
   assert.match(initiatives, /ui-tab ui-tab--contained planning-tab/);
   assert.match(thinking, /ui-tab ui-tab--contained thinking-tab/);
   assert.match(agentPanel, /ui-tab ui-tab--underline agent-panel-tab/);
-  assert.match(agentEvents, /ui-tabs--contained agent-panel-events-subtabs/);
+  assert.match(agentEvents, /ui-tabs--contained ui-tablist agent-panel-events-subtabs/);
   assert.match(agentEvents, /ui-tab ui-tab--contained agent-panel-events-subtab/);
   assert.match(boardRender, /ui-tab ui-tab--underline board-lane-tab/);
   assert.match(html, /ui-tab gs-tab/);
   assert.match(html, /ui-tab ui-tab--underline gs-subtab/);
+});
+
+test('tablists expose roving keyboard navigation and compact overflow', () => {
+  const core = source('static/js/render.js');
+  const css = source('static/styles/components.css');
+  const initiatives = source('static/js/initiatives.js');
+  const thinking = source('static/js/thinking.js');
+  const agent = source('static/js/agent_panel.js');
+  const events = source('static/js/agent-panel/events.js');
+  const templates = source('static/js/templates.js');
+  const logs = source('static/js/log_viewer.js');
+  const board = source('static/js/board/rendering.js');
+  const html = source('webview.html');
+
+  assert.match(core, /function uiTablistKeydown\(event\)[\s\S]*?ArrowLeft[\s\S]*?ArrowRight[\s\S]*?Home[\s\S]*?End[\s\S]*?next\.focus\(\)[\s\S]*?next\.click\(\)/);
+  assert.match(core, /function uiRadioGroupKeydown\(event\)[\s\S]*?\[role="radio"\][\s\S]*?next\.click\(\)/);
+  assert.match(css, /\.ui-tablist\s*\{[^}]*max-width:\s*100%;[^}]*overflow-x:\s*auto;[^}]*overscroll-behavior-inline:\s*contain;/s);
+  for (const consumer of [initiatives, thinking, agent, events, templates, logs, board]) {
+    assert.match(consumer, /ui-tablist/);
+    assert.match(consumer, /uiTablistKeydown\(event\)/);
+    assert.match(consumer, /tabindex=/);
+  }
+  assert.match(html, /settings-primary-nav[^>]*onkeydown="uiTablistKeydown\(event\)"/);
+  assert.match(html, /gs-subtabs ui-tablist[^>]*role="tablist"/);
+  assert.match(html, /role="radiogroup"[^>]*onkeydown="uiRadioGroupKeydown\(event\)"/);
+  assert.match(html, /role="radio"[^>]*aria-checked="true" tabindex="0"/);
+});
+
+test('shared roving-focus handlers activate the expected choice', () => {
+  const sandbox = { state: {}, AGENT_ICONS: [], PROCESS_MAP: {}, console };
+  vm.createContext(sandbox);
+  vm.runInContext(source('static/js/render.js'), sandbox);
+
+  function choice(role, options = {}) {
+    return {
+      disabled: !!options.disabled,
+      focused: false,
+      clicked: false,
+      getAttribute(name) {
+        if (name === 'aria-disabled') return options.ariaDisabled ? 'true' : null;
+        if (name === 'role') return role;
+        return null;
+      },
+      closest(selector) {
+        if (selector === `[role="${role}"]`) return this;
+        if (selector === '[role="tablist"]') return options.list || null;
+        return null;
+      },
+      focus() { this.focused = true; },
+      click() { this.clicked = true; },
+    };
+  }
+
+  const list = {
+    getAttribute() { return null; },
+    querySelectorAll() { return this.tabs; },
+  };
+  list.tabs = [choice('tab', { list }), choice('tab', { list }), choice('tab', { list })];
+  let prevented = false;
+  sandbox.uiTablistKeydown({
+    key: 'ArrowRight', currentTarget: list, target: list.tabs[0],
+    preventDefault() { prevented = true; },
+  });
+  assert.equal(prevented, true);
+  assert.equal(list.tabs[1].focused, true);
+  assert.equal(list.tabs[1].clicked, true);
+
+  const group = { querySelectorAll() { return this.choices; } };
+  group.choices = [choice('radio'), choice('radio'), choice('radio')];
+  sandbox.uiRadioGroupKeydown({
+    key: 'End', currentTarget: group, target: group.choices[0], preventDefault() {},
+  });
+  assert.equal(group.choices[2].focused, true);
+  assert.equal(group.choices[2].clicked, true);
+
+  const liveTabs = [choice('tab'), choice('tab')];
+  const liveList = {
+    getAttribute(name) { return name === 'aria-label' ? 'Planning sections' : null; },
+    querySelectorAll() { return liveTabs; },
+  };
+  liveTabs.forEach((tab) => { tab.closest = () => liveList; });
+  const oldList = {
+    getAttribute(name) { return name === 'aria-label' ? 'Planning sections' : null; },
+    querySelectorAll() { return this.tabs; },
+  };
+  oldList.tabs = [choice('tab', { list: oldList }), choice('tab', { list: oldList })];
+  oldList.tabs[1].click = function() { this.clicked = true; };
+  sandbox.document = { querySelectorAll() { return [liveList]; } };
+  sandbox.requestAnimationFrame = (callback) => callback();
+  sandbox.uiTablistKeydown({
+    key: 'ArrowRight', currentTarget: oldList, target: oldList.tabs[0], preventDefault() {},
+  });
+  assert.equal(liveTabs[1].focused, true, 'focus follows a synchronously rerendered active tab');
+});
+
+test('compact dialogs, icon actions, and primary fields retain accessible affordances', () => {
+  const css = source('static/styles/components.css');
+  const modals = source('static/styles/modals.css');
+  const html = source('webview.html');
+  const grid = source('static/js/grid/agent-card.js');
+  const initiatives = source('static/js/initiatives.js');
+  const thinking = source('static/js/thinking.js');
+  const taskArtifacts = source('static/js/modals/task-artifacts.js');
+  const taskModal = source('static/js/modals/task-modal.js');
+  const boardCards = source('static/js/board/card-rendering.js');
+  const board = source('static/js/board/rendering.js');
+
+  assert.match(css, /@media \(max-width: 600px\), \(max-height: 520px\)[\s\S]*?\.ui-modal\s*\{[^}]*max-width:\s*calc\(100vw - 16px\);[^}]*max-height:\s*calc\(100dvh - 16px\);/s);
+  assert.match(css, /\.ui-modal__footer\s*\{[^}]*flex-wrap:\s*wrap;/s);
+  assert.match(css, /\.ui-popover\s*\{[^}]*max-width:\s*calc\(100vw - 16px\);/s);
+  assert.match(modals, /@media \(max-width: 600px\), \(max-height: 520px\)\s*\{\s*\.overlay \{ padding: 8px; \}/s);
+  assert.match(grid, /aria-label="' \+ esc\(closeTitle \+ ' ' \+ \(\(a && a\.name\) \|\| 'agent'\)\)/);
+  assert.match(initiatives, /aria-label="Refresh planning data"/);
+  assert.match(thinking, /aria-label="Close Mind Map details"/);
+  assert.match(thinking, /aria-label="Move node left"/);
+  assert.match(thinking, /aria-label="Move node right"/);
+  assert.match(taskArtifacts, /aria-label="Remove attachment /);
+  assert.match(taskModal, /aria-label="Remove label /);
+  assert.match(taskModal, /aria-label="Remove dependency /);
+  assert.match(boardCards, /aria-label="Remove label /);
+  assert.match(board, /aria-label="Remove image /);
+  for (const pair of [
+    ['add-name-input', 'Name'],
+    ['gs-engineer-autonomy-mode', 'Autonomy mode'],
+    ['gls-appearance-contrast', 'Contrast'],
+    ['task-task-input', 'Task'],
+    ['schedule-name-input', 'Name'],
+  ]) {
+    assert.match(html, new RegExp(`<label for="${pair[0]}">${pair[1]}`));
+  }
 });
 
 test('shared segmented controls define one compact selected-state primitive', () => {
@@ -201,9 +332,9 @@ test('segmented-control consumers expose their selected state', () => {
   assert.match(actions, /role="group" aria-label="Action view"/);
   assert.match(actions, /segmented-control tpled-view-toggle/);
   assert.match(actions, /aria-pressed="' \+ \(_tplPanelView === 'editor'/);
-  assert.match(templates, /role="tablist" aria-label="Library sections"/);
+  assert.match(templates, /role="tablist" aria-label="Library sections" onkeydown="uiTablistKeydown\(event\)"/);
   assert.match(templates, /role="tab" class="segmented-control__item tpled-view-btn[\s\S]*?aria-selected=/);
-  assert.match(html, /class="segmented-control schedule-type-toggle" role="group" aria-label="Schedule type"/);
+  assert.match(html, /class="segmented-control schedule-type-toggle" role="group" aria-labelledby="schedule-type-label"/);
   assert.match(schedules, /setAttribute\('aria-pressed', type === 'recurring'/);
 });
 
