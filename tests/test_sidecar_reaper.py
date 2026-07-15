@@ -155,11 +155,23 @@ class EndToEndReapTests(unittest.TestCase):
         cleaned = False
         try:
             pid = pty_supervisor.spawn_detached(tmp)
-            # Wait for the detached child to come alive.
+            # Wait until the detached child has actually initialized its
+            # listener. A PID can be observable before ``_serve`` binds the
+            # socket; deleting the data dir in that window makes the child
+            # fail startup and become a zombie that ``kill(pid, 0)`` still
+            # reports as alive.
+            socket_path = tmp / pty_supervisor.DEFAULT_SOCKET_NAME
             deadline = time.monotonic() + 3.0
-            while time.monotonic() < deadline and not _alive(pid):
+            ready = False
+            while time.monotonic() < deadline:
+                pong = pty_supervisor._ping_socket(socket_path, timeout=0.1)
+                if pong and int(pong.get("pid") or 0) == pid:
+                    ready = True
+                    break
+                if not _alive(pid):
+                    break
                 time.sleep(0.05)
-            if not _alive(pid):
+            if not ready:
                 self.skipTest("sidecar did not start in this environment")
 
             # While the data dir exists it is not an orphan.
