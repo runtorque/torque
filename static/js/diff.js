@@ -5,11 +5,17 @@ var _diffViewAgentId = '';
 var _diffViewData = null;
 var _diffCollapsedFiles = {};  // path -> 'collapsed' | 'expanded' override
 var _diffCollapseAllFiles = false;
+var _diffCollapseInitialized = false;
+var _diffRenderedLineLimits = {}; // path -> visible line budget
 var _diffMergeCheck = null;   // null = loading, {clean, dirty, conflicts}
 var _diffCommitMsg = '';       // editable commit message
 var _diffMerging = false;      // true while merge request in flight
 var _diffMergeProgress = null; // {phase, message} while create+merge runs
 var _diffReadOnly = false;     // true when opened from "View Diff" (no merge controls)
+var DIFF_AUTO_COLLAPSE_FILE_THRESHOLD = 12;
+var DIFF_AUTO_COLLAPSE_LINE_THRESHOLD = 1500;
+var DIFF_AUTO_COLLAPSE_SINGLE_FILE_LINE_THRESHOLD = 800;
+var DIFF_FILE_LINE_CHUNK = 400;
 
 function _diffRendersInModal() {
   return true;
@@ -32,6 +38,8 @@ function showDiffView(agentId, readOnly) {
   _diffViewData = null;
   _diffCollapsedFiles = {};
   _diffCollapseAllFiles = false;
+  _diffCollapseInitialized = false;
+  _diffRenderedLineLimits = {};
   _diffMergeCheck = null;
   _diffCommitMsg = '';
   _diffMerging = false;
@@ -48,6 +56,8 @@ function hideDiffView() {
   _diffViewData = null;
   _diffCollapsedFiles = {};
   _diffCollapseAllFiles = false;
+  _diffCollapseInitialized = false;
+  _diffRenderedLineLimits = {};
   _diffMergeCheck = null;
   _diffCommitMsg = '';
   _diffMerging = false;
@@ -59,6 +69,7 @@ function hideDiffView() {
 function diffReceiveFull(msg) {
   if (!_diffViewOpen || !_diffViewAgentId || msg.id !== _diffViewAgentId) return;
   _diffViewData = msg;
+  _initializeDiffProgressiveDisclosure(msg.files || []);
   renderDiffView();
 }
 
@@ -140,6 +151,54 @@ function _setDiffFileCollapsed(path, collapsed) {
   _diffCollapsedFiles[path] = collapsed ? 'collapsed' : 'expanded';
 }
 
+function _diffFileLineCount(file) {
+  var count = 0;
+  var hunks = (file && file.hunks) || [];
+  for (var i = 0; i < hunks.length; i++) {
+    count += ((hunks[i] && hunks[i].lines) || []).length;
+  }
+  return count;
+}
+
+function _diffShouldAutoCollapse(files) {
+  files = files || [];
+  if (files.length > DIFF_AUTO_COLLAPSE_FILE_THRESHOLD) return true;
+  var totalLines = 0;
+  for (var i = 0; i < files.length; i++) {
+    var fileLines = _diffFileLineCount(files[i]);
+    if (files.length === 1
+        && fileLines > DIFF_AUTO_COLLAPSE_SINGLE_FILE_LINE_THRESHOLD) {
+      return true;
+    }
+    totalLines += fileLines;
+    if (totalLines > DIFF_AUTO_COLLAPSE_LINE_THRESHOLD) return true;
+  }
+  return false;
+}
+
+function _initializeDiffProgressiveDisclosure(files) {
+  if (_diffCollapseInitialized) return;
+  _diffCollapseInitialized = true;
+  files = files || [];
+  if (!_diffShouldAutoCollapse(files)) return;
+  _diffCollapseAllFiles = true;
+  for (var i = 0; i < files.length; i++) {
+    var file = files[i] || {};
+    var path = file.path || '';
+    if (path && _diffFileLineCount(file) <= DIFF_FILE_LINE_CHUNK) {
+      _diffCollapsedFiles[path] = 'expanded';
+      break;
+    }
+  }
+}
+
+function diffShowMoreLines(path) {
+  if (!path) return;
+  var current = Number(_diffRenderedLineLimits[path] || DIFF_FILE_LINE_CHUNK);
+  _diffRenderedLineLimits[path] = current + DIFF_FILE_LINE_CHUNK;
+  renderDiffView();
+}
+
 function diffSetAllFilesCollapsed(collapsed) {
   _diffCollapseAllFiles = !!collapsed;
   _diffCollapsedFiles = {};
@@ -154,6 +213,9 @@ function _syncDiffCollapsedFiles(files) {
   }
   for (var key in _diffCollapsedFiles) {
     if (!active[key]) delete _diffCollapsedFiles[key];
+  }
+  for (var limitPath in _diffRenderedLineLimits) {
+    if (!active[limitPath]) delete _diffRenderedLineLimits[limitPath];
   }
 }
 
@@ -351,12 +413,32 @@ function _renderDiffFile(file) {
     } else if (!file.hunks || !file.hunks.length) {
       html += '<div class="diff-binary">No line-by-line diff for this file</div>';
     } else {
+      var totalLines = _diffFileLineCount(file);
+      var lineLimit = Number(
+        _diffRenderedLineLimits[path] || DIFF_FILE_LINE_CHUNK
+      );
+      var renderedLines = 0;
       for (var i = 0; i < file.hunks.length; i++) {
+        if (renderedLines >= lineLimit) break;
         var hunk = file.hunks[i];
+        var hunkLines = hunk.lines || [];
+        var visibleLines = hunkLines.slice(
+          0,
+          Math.max(0, lineLimit - renderedLines)
+        );
         html += '<div class="diff-hunk">';
         html += '<div class="diff-hunk-header">' + esc(hunk.header || '') + '</div>';
-        html += '<div class="diff-hunk-body">' + _renderDiffLines(hunk.lines || []) + '</div>';
+        html += '<div class="diff-hunk-body">' + _renderDiffLines(visibleLines) + '</div>';
         html += '</div>';
+        renderedLines += visibleLines.length;
+        if (visibleLines.length < hunkLines.length) break;
+      }
+      if (renderedLines < totalLines) {
+        html += '<button class="diff-file-load-more diff-collapse-btn" data-path="'
+          + esc(path) + '" onclick="diffShowMoreLines(this.dataset.path)">Show '
+          + Math.min(DIFF_FILE_LINE_CHUNK, totalLines - renderedLines)
+          + ' more lines <span class="diff-collapse-summary">'
+          + (totalLines - renderedLines) + ' remaining</span></button>';
       }
     }
     html += '</div>';
