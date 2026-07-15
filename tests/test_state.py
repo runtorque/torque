@@ -210,6 +210,34 @@ class MatrixStateCleanupTests(unittest.TestCase):
 
         self.assertEqual(state.global_settings.xterm_scrollback, 4096)
 
+    def test_delta_observer_filters_unrelated_operations(self):
+        state = self.state_mod.MatrixState()
+        observed = []
+        unregister = state.register_delta_observer(
+            observed.append,
+            ops={"task_upsert"},
+        )
+
+        state._emit("agent_upsert", id="agent-1", value={"status": "working"})
+        state._emit("task_upsert", id="task-1", value={"task": "Work"})
+
+        self.assertEqual(
+            observed,
+            [{"op": "task_upsert", "id": "task-1", "value": {"task": "Work"}}],
+        )
+        unregister()
+        state._emit("task_upsert", id="task-2", value={"task": "More"})
+        self.assertEqual(len(observed), 1)
+
+    def test_unfiltered_delta_observer_keeps_legacy_behavior(self):
+        state = self.state_mod.MatrixState()
+        observed = []
+        state.register_delta_observer(observed.append)
+
+        state._emit("agent_remove", id="agent-1")
+
+        self.assertEqual(observed, [{"op": "agent_remove", "id": "agent-1"}])
+
     def test_update_global_settings_normalizes_relay_fields(self):
         state = self.state_mod.MatrixState()
         state.update_global_settings(

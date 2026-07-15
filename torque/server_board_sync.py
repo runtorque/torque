@@ -447,7 +447,10 @@ class BoardSyncManager:
             self._observer_unregister = registrar(self._on_task_upsert)
         delta_registrar = getattr(self.state, "register_delta_observer", None)
         if callable(delta_registrar) and self._delta_observer_unregister is None:
-            self._delta_observer_unregister = delta_registrar(self._on_delta)
+            self._delta_observer_unregister = delta_registrar(
+                self._on_delta,
+                ops={"group_settings_update"},
+            )
         self._recover_durable_queue()
         self._worker = asyncio.create_task(self._run(), name="board-sync-manager")
 

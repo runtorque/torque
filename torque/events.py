@@ -835,9 +835,9 @@ class EventBus:
         self._log.append(event)
         if event.event_type == "session_start":
             self._schedule_worker_boot_doa_check(cell, event.timestamp)
-        log.info("Event: cell='%s' type=%s activity='%s' detail='%s'",
-                 cell.name, event.event_type, cell.activity,
-                 cell.activity_detail[:50] if cell.activity_detail else "")
+        log.debug("Event: cell='%s' type=%s activity='%s' detail='%s'",
+                  cell.name, event.event_type, cell.activity,
+                  cell.activity_detail[:50] if cell.activity_detail else "")
         if self._notifier:
             self._notifier.on_event(event)
         # Notify engineer buffer of activity change (for idle-gated delivery)

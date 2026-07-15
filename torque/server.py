@@ -3200,19 +3200,20 @@ async def main(connection=None):
                 )
         except Exception:
             log.exception("Failed to schedule startup AI jobs")
+    ai_index_delta_ops = {
+        "architect_journal_append",
+        "journal_append",
+        "decision_upsert",
+        "decision_remove",
+        "task_upsert",
+        "task_remove",
+        "agent_peer_thread_upsert",
+        "agent_peer_thread_remove",
+    }
+
     def _schedule_ai_index_from_delta(delta: dict) -> None:
         op = str((delta or {}).get("op", "") or "")
-        if op in {
-            "architect_journal_append",
-            "journal_append",
-            "decision_upsert",
-            "decision_remove",
-            "task_upsert",
-            "task_remove",
-            "agent_peer_thread_upsert",
-            "agent_peer_thread_remove",
-        }:
-            ai_index_service.schedule_incremental(op)
+        ai_index_service.schedule_incremental(op)
         if op in {
             "architect_journal_append",
             "journal_append",
@@ -3221,7 +3222,10 @@ async def main(connection=None):
         }:
             ai_summary_service.schedule_for_delta(delta)
 
-    state.register_delta_observer(_schedule_ai_index_from_delta)
+    state.register_delta_observer(
+        _schedule_ai_index_from_delta,
+        ops=ai_index_delta_ops,
+    )
     capture_deploy_boot_state(state, torque_config.SCRIPT_DIR)
     log.info("State loaded: %d agents, %d groups",
              len(state.agents), len(state.groups))

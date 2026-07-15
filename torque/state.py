@@ -2495,7 +2495,9 @@ class MatrixState(
         self.board_lanes: list[str] = list(_DEFAULT_LANES)
         self.board_tasks: dict[str, BoardTask] = {}
         self._task_upsert_observers: list[Callable[[dict], None]] = []
-        self._delta_observers: list[Callable[[dict], None]] = []
+        self._delta_observers: list[
+            tuple[Callable[[dict], None], frozenset[str] | None]
+        ] = []
         # Secondary task indexes. Maintained incrementally by
         # `_index_task` / `_unindex_task`; hot-path consumers should not
         # have to scan the full board when they already know the relevant
@@ -2817,14 +2819,27 @@ class MatrixState(
     def register_delta_observer(
             self,
             observer: Callable[[dict], None],
+            *,
+            ops: set[str] | frozenset[str] | None = None,
     ) -> Callable[[], None]:
-        """Register a best-effort observer for emitted delta operations."""
-        if observer not in self._delta_observers:
-            self._delta_observers.append(observer)
+        """Register a best-effort observer for selected delta operations.
+
+        ``ops=None`` preserves the legacy subscribe-to-all behavior.  A
+        filtered observer avoids both callback dispatch and the defensive
+        deep copy for unrelated high-frequency state deltas.
+        """
+        normalized_ops = (
+            frozenset(str(op) for op in ops if str(op))
+            if ops is not None
+            else None
+        )
+        entry = (observer, normalized_ops)
+        if not any(existing[0] == observer for existing in self._delta_observers):
+            self._delta_observers.append(entry)
 
         def unregister() -> None:
             try:
-                self._delta_observers.remove(observer)
+                self._delta_observers.remove(entry)
             except ValueError:
                 pass
 
@@ -2833,8 +2848,16 @@ class MatrixState(
     def _notify_delta_observers(self, delta: dict) -> None:
         if not self._delta_observers:
             return
+        op = str((delta or {}).get("op", "") or "")
+        observers = [
+            observer
+            for observer, observed_ops in list(self._delta_observers)
+            if observed_ops is None or op in observed_ops
+        ]
+        if not observers:
+            return
         snapshot = copy.deepcopy(delta or {})
-        for observer in list(self._delta_observers):
+        for observer in observers:
             try:
                 observer(snapshot)
             except Exception:
