@@ -271,7 +271,7 @@ body.runtime-embedded .taskbar-app.active {
   stroke: currentColor;
   stroke-width: 1.5;
 }
-.panel-nav-more-empty { padding: 20px 8px; color: var(--text-faint); text-align: center; }
+.panel-nav-more-empty { margin: 4px; }
 
 @container panel-launcher (max-width: 1180px) {
   .taskbar-app:not(.active) .taskbar-app-label { display: none; }
@@ -381,7 +381,7 @@ body.runtime-embedded .taskbar-app.active {
 .navigation-palette-result-copy strong { font-size: 10px; }
 .navigation-palette-result-copy small { color: var(--text-faint); font-size: 9px; }
 .navigation-palette-current { color: var(--accent); font-size: 8px; text-transform: uppercase; }
-.navigation-palette-empty { padding: 38px 12px; color: var(--text-faint); text-align: center; }
+.navigation-palette-empty { margin: 6px; }
 .navigation-palette-footer {
   display: flex;
   align-items: center;

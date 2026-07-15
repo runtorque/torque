@@ -422,11 +422,24 @@ The canonical CSS API lives in `static/styles/components.css`:
 
 ### Empty, loading, and error states
 
+- Operator-facing absence, progress, failure, and informational notes use the
+  `.ui-state` primitive. `.ui-state--empty`, `--loading`, `--error`, and `--note`
+  communicate intent; `--compact`, `--inline`, and `--fill` describe placement.
 - Empty states explain what is absent and provide one clear next action when one
-  exists.
-- Loading states preserve layout geometry where practical.
-- Errors state what failed and what the operator can do next. Do not replace
-  useful content with a generic error if stale content can remain safely visible.
+  exists. Actions live in `.ui-state__actions` and use the shared button family.
+- Loading states preserve layout geometry where practical, use `role="status"`
+  with polite announcements for asynchronous panel content, and respect reduced
+  motion.
+- Errors state what failed and what the operator can do next, and use
+  `role="alert"` when newly inserted after an operation. Do not replace useful
+  content with a generic error if stale content can remain safely visible.
+- Optional `.ui-state__title`, `__message`, and `__meta` regions establish a
+  consistent hierarchy for full states. Compact one-line states may omit them.
+- Feature classes may own placement, width, and minimum height. They must not
+  rebuild state boundaries, semantic colors, type hierarchy, or loading motion.
+- Metadata such as “no assignment,” disabled explanations, validation text
+  beside a field, and specialized canvas instructions remain local when they do
+  not replace a content surface.
 
 ## Responsive and embedded behavior
 
@@ -483,7 +496,7 @@ the rule is intentionally global and documented here.
 | Modals | Standardized | Audit compact viewport fit, nested-dialog focus, and long titles |
 | Badges, tags, and status | Standardized | Audit semantic intent and density at narrow widths |
 | Count indicators | Standardized | Keep prose metrics and countdown text outside the badge grammar |
-| Empty/loading/error states | Pending | Define reusable patterns and language |
+| Empty/loading/error states | Standardized | Audit recovery language and live-region timing |
 
 ## Decision log
 
@@ -880,6 +893,34 @@ the rule is intentionally global and documented here.
   `.modal-tall`, `.modal-wide`, global `.modal` width overrides, and settings
   boundary duplication. Focused modal/diff/artifact suites and live checks cover
   layout, scrolling, controls, Escape behavior, and console cleanliness.
+
+### D-018 — Content states share one semantic surface grammar
+
+- Date: 2026-07-15
+- Status: accepted
+- Decision: Operator-facing empty, loading, error, and informational states use
+  `.ui-state` with an explicit semantic modifier and an explicit placement
+  variant where needed. Full states may declare title, message, metadata, and
+  recovery-action regions; compact states may remain one line.
+- Rationale: Board, Terminal, Help, Planning, Thinking, Agent, history, diff,
+  artifact, settings, and navigation surfaces independently rebuilt dashed
+  boundaries, muted text, error tints, loading copy, and vertical centering.
+  One grammar makes state meaning immediately recognizable and gives recovery
+  copy, announcements, and reduced motion a consistent baseline.
+- Scope: `static/styles/components.css`, the primary workspace empty state,
+  Board, Terminal, Help, Mission Control, Planning, Thinking, Agent and behavior
+  panels, task history, worktree diff/history, artifacts, logs, Settings search
+  and mappings, and navigation search surfaces.
+- Constraints: Feature classes retain placement and content-specific minimum
+  height. Field validation, passive metadata, empty select options, disabled
+  explanations, specialized canvas guidance, and stale-content notices that do
+  not replace a surface remain local. Loading states added asynchronously expose
+  polite status semantics; failures added after an operation expose alerts.
+- Verification: Component tests protect the shared API, semantic consumer
+  markup, reduced-motion behavior, and removal of duplicate feature geometry.
+  Focused frontend suites protect rendering and interactions; live checks cover
+  representative empty, loading, error, and recovery states plus console
+  cleanliness.
 
 ## Decision entry template
 

@@ -95,7 +95,6 @@ body.detached-window #bottom-panel > div:not(.panel-hidden):not(#panel-resize-ha
 .log-level-info .log-line-level { color: var(--accent); }
 .log-level-debug .log-line-level { color: var(--text-dim); }
 .log-line-message { min-width: 0; overflow-wrap: anywhere; }
-.log-viewer-empty,
 .cheatsheet-empty { color: var(--text-dim); padding: 16px; text-align: center; }
 
 .cheatsheet-content {

@@ -237,7 +237,8 @@ function gsBoardSyncMapRender(kind, options) {
   }
   if (!valid) {
     const error = document.createElement('div');
-    error.className = 'settings-map-empty settings-map-error';
+    error.className = 'settings-map-empty settings-map-error ui-state ui-state--error ui-state--compact';
+    error.setAttribute('role', 'alert');
     error.textContent = 'Raw JSON is invalid. Fix it in Advanced to restore the visual editor.';
     host.appendChild(error);
     return;
@@ -251,7 +252,7 @@ function gsBoardSyncMapRender(kind, options) {
   }
   if (!host.querySelector('.settings-map-row')) {
     const empty = document.createElement('div');
-    empty.className = 'settings-map-empty';
+    empty.className = 'settings-map-empty ui-state ui-state--empty ui-state--compact';
     empty.textContent = config.empty;
     host.appendChild(empty);
   }

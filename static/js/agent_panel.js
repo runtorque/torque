@@ -1117,7 +1117,7 @@ function renderAgentPanel() {
 
   if (!agent) {
     html = '<div class="agent-panel">'
-      + '<div class="agent-panel-empty">Select an agent from the grid to see its context.</div>'
+      + '<div class="agent-panel-empty ui-state ui-state--empty ui-state--fill">Select an agent from the grid to see its context.</div>'
       + '</div>';
   } else {
     switch (_agentPanelKind(agent)) {

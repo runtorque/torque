@@ -321,7 +321,7 @@ function renderTaskHistory() {
     html += '<div id="task-history-title" class="th-title ui-modal__title">Loading\u2026</div>';
     html += '<button class="th-close" onclick="hideTaskHistory()">\u2715</button>';
     html += '</div>';
-    html += '<div class="th-content ui-modal__body ui-modal__body--flush"><div class="th-empty">Loading task history\u2026</div></div>';
+    html += '<div class="th-content ui-modal__body ui-modal__body--flush"><div class="th-empty ui-state ui-state--loading ui-state--fill" role="status" aria-live="polite">Loading task history\u2026</div></div>';
     html += '<div class="th-footer ui-modal__footer">';
     html += '<button class="btn-cancel" onclick="hideTaskHistory()">Close</button>';
     html += '</div>';
@@ -350,7 +350,7 @@ function renderTaskHistory() {
   // Content
   html += '<div class="th-content ui-modal__body ui-modal__body--flush">';
   if (!tasks.length) {
-    html += '<div class="th-empty">No tasks recorded for this agent.</div>';
+    html += '<div class="th-empty ui-state ui-state--empty ui-state--fill">No tasks recorded for this agent.</div>';
   } else {
     var range = _thVirtualRange(tasks);
     html += '<div class="th-virtual-list" data-th-virtualized="'

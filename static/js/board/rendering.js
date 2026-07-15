@@ -451,7 +451,7 @@ function renderBoard() {
     _boardSyncSelectedLaneForCurrentGroup(lanes);
   }
   if (!lanes.length) {
-    panel.innerHTML = '<div class="board-empty">No lanes configured</div>';
+    panel.innerHTML = '<div class="board-empty ui-state ui-state--empty">No lanes are configured for this group.</div>';
     _boardLastRenderShellKey = '';
     _boardLastToolbarShapeKey = '';
     return;

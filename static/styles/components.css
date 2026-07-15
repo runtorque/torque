@@ -148,6 +148,123 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* Empty, loading, and error states
+ *
+ * State surfaces keep absence, progress, and failure visually distinct while
+ * preserving the same content hierarchy and optional recovery-action region.
+ * Feature classes may set placement and minimum height; the shared component
+ * owns the boundary, type hierarchy, semantic color, and loading indicator.
+ */
+.ui-state {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: var(--space-2);
+  min-height: 96px;
+  padding: var(--space-4);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg);
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--bg-cell) 92%, transparent);
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.ui-state--empty {
+  border-style: dashed;
+}
+
+.ui-state--compact {
+  min-height: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  font-size: 10px;
+}
+
+.ui-state--inline {
+  display: inline-flex;
+  min-height: 0;
+  justify-items: initial;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.ui-state--fill {
+  width: 100%;
+  height: 100%;
+  min-height: 180px;
+}
+
+.ui-state--note {
+  justify-items: start;
+  border-style: solid;
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-cell));
+  text-align: left;
+}
+
+.ui-state--loading {
+  border-style: solid;
+  color: var(--accent);
+}
+
+.ui-state--loading::before {
+  content: '';
+  width: 12px;
+  height: 12px;
+  border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: ui-state-spin 700ms linear infinite;
+}
+
+.ui-state--error {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--red) 52%, var(--border));
+  color: color-mix(in srgb, var(--red) 76%, var(--text));
+  background: color-mix(in srgb, var(--red) 10%, var(--bg-cell));
+}
+
+.ui-state__title {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.ui-state__message {
+  max-width: 52ch;
+}
+
+.ui-state__meta {
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+.ui-state__actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.ui-state--note .ui-state__actions {
+  justify-content: flex-start;
+}
+
+@keyframes ui-state-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-state--loading::before { animation: none; }
+}
+
 /* Modals
  *
  * Dialogs use one raised shell with explicit size, height, and region

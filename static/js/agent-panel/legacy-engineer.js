@@ -959,7 +959,7 @@ function renderLegacyGroupPanel() {
   html += _agentPanelLegacyRenderArchitectRoster(group);
   html += _agentPanelLegacyRenderEngineerRoster(group);
   if (emptyMessage) {
-    html += '<div class="agent-panel-empty">' + _esc(emptyMessage) + '</div>';
+    html += '<div class="agent-panel-empty ui-state ui-state--empty ui-state--compact">' + _esc(emptyMessage) + '</div>';
   } else if (activeTab === 'events') {
     html += _agentPanelLegacyRenderEvents(group, ws, engineer, bstats);
   } else if (activeTab === 'queued') {
@@ -1240,7 +1240,7 @@ function _agentPanelLegacyRenderTabs(group, activeTab) {
 
 function _agentPanelLegacyRenderEvents(group, ws, engineer, bstats) {
   if (!group) {
-    return '<div class="agent-panel-empty">No engineer configured for any group.</div>';
+    return '<div class="agent-panel-empty ui-state ui-state--empty ui-state--compact">No engineer configured for any group.</div>';
   }
   var digestSettings = engineer ? _agentPanelDigestSettings(engineer) : null;
   var paused = engineer ? !!(digestSettings && digestSettings.paused) : !!(ws && ws.paused);
@@ -1266,7 +1266,7 @@ function _agentPanelLegacyRenderEventSection(title, events, mode, emptyText) {
   html += '<span class="agent-panel-event-section-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + events.length + '</span>';
   html += '</div>';
   if (!events.length) {
-    html += '<div class="agent-panel-event-empty">' + _esc(emptyText) + '</div>';
+    html += '<div class="agent-panel-event-empty ui-state ui-state--empty ui-state--compact">' + _esc(emptyText) + '</div>';
     html += '</div>';
     return html;
   }
@@ -1536,7 +1536,7 @@ function _engineerRestoreScrollAnchor(container, snapshot) {
 
 function _agentPanelLegacyRenderQueuedTasks(group, engineer) {
   if (!group) {
-    return '<div class="agent-panel-empty">No engineer configured for any group.</div>';
+    return '<div class="agent-panel-empty ui-state ui-state--empty ui-state--compact">No engineer configured for any group.</div>';
   }
   var focusedEngineer = engineer || _engineerGetAgent(group);
   if (!focusedEngineer) {
@@ -1545,7 +1545,7 @@ function _agentPanelLegacyRenderQueuedTasks(group, engineer) {
       + '<span class="agent-panel-worklog-title">Queued tasks</span>'
       + '<span class="agent-panel-worklog-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">0</span>'
       + '</div>'
-      + '<div class="agent-panel-event-empty">No engineer selected for this group.</div>'
+      + '<div class="agent-panel-event-empty ui-state ui-state--empty ui-state--compact">No engineer selected for this group.</div>'
       + '</div>';
   }
   return _renderEngineerQueuedTasks(focusedEngineer);
@@ -1553,7 +1553,7 @@ function _agentPanelLegacyRenderQueuedTasks(group, engineer) {
 
 function _agentPanelLegacyRenderWorklog(group, ws) {
   if (!group) {
-    return '<div class="agent-panel-empty">No engineer configured for any group.</div>';
+    return '<div class="agent-panel-empty ui-state ui-state--empty ui-state--compact">No engineer configured for any group.</div>';
   }
 
   var entries = (state.engineer_worklog && state.engineer_worklog[group])
@@ -1582,7 +1582,7 @@ function _agentPanelLegacyRenderWorklog(group, ws) {
   }
 
   if (!entries.length) {
-    html += '<div class="agent-panel-event-empty">No completed tasks yet.</div>';
+    html += '<div class="agent-panel-event-empty ui-state ui-state--empty ui-state--compact">No completed tasks yet.</div>';
     html += '</div>';
     return html;
   }
@@ -1650,7 +1650,7 @@ function _engineerWorklogAgentLabel(entry, task) {
 
 function _agentPanelLegacyRenderJournal(group, agent) {
   if (!group) {
-    return '<div class="agent-panel-empty">No engineer configured for any group.</div>';
+    return '<div class="agent-panel-empty ui-state ui-state--empty ui-state--compact">No engineer configured for any group.</div>';
   }
 
   var html = '';
@@ -1708,7 +1708,7 @@ function _agentPanelLegacyRenderJournal(group, agent) {
     html += _agentPanelLegacyRenderJournalEntries(page.events, true, true);
     html += _agentPanelRenderSectionLoadMore(page, { singular: 'entry', plural: 'entries' });
   } else {
-    html += '<div class="agent-panel-empty">No journal entries yet.</div>';
+    html += '<div class="agent-panel-empty ui-state ui-state--empty ui-state--compact">No journal entries yet.</div>';
   }
   return html;
 }

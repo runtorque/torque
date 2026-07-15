@@ -10,7 +10,7 @@ function _agentPanelWorkerEvents(agent) {
   html += '<span class="agent-panel-event-section-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + _agentPanelEventSectionCount(page) + '</span>';
   html += '</div>';
   if (!events.length) {
-    html += '<div class="agent-panel-event-empty">No worker events yet.</div>';
+    html += '<div class="agent-panel-event-empty ui-state ui-state--empty ui-state--compact">No worker events yet.</div>';
     html += '</div>';
     return html;
   }
@@ -137,7 +137,7 @@ function _agentPanelWorkerWorklog(agent) {
   html += '</div>';
   html += '<div class="agent-panel-worklog-note">Tasks assigned to this worker.</div>';
   if (!tasks.length) {
-    html += '<div class="agent-panel-event-empty">No tasks yet.</div>';
+    html += '<div class="agent-panel-event-empty ui-state ui-state--empty ui-state--compact">No tasks yet.</div>';
     html += '</div>';
     return html;
   }

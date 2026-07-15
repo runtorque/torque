@@ -5,7 +5,7 @@ function _renderEngineerJournal(agent) {
   if (typeof _agentPanelLegacyRenderJournal === 'function') return _agentPanelLegacyRenderJournal(group, agent);
   var entries = _agentPanelEngineerJournalEntries(group, agent);
   if (typeof _agentPanelLegacyRenderJournalEntries === 'function') return _agentPanelLegacyRenderJournalEntries(entries, true);
-  if (!entries.length) return '<div class="agent-panel-empty">No journal entries yet.</div>';
+  if (!entries.length) return '<div class="agent-panel-empty ui-state ui-state--empty ui-state--compact">No journal entries yet.</div>';
   var html = '<div class="agent-panel-journal">';
   for (var i = 0; i < entries.length; i++) {
     var entry = entries[i] || {};
@@ -149,7 +149,7 @@ function _renderEngineerQueuedTasks(agent) {
     + _agentPanelEsc(agentName)
     + ' in Backlog, To Do, or In Progress.</div>';
   if (!tasks.length) {
-    html += '<div class="agent-panel-event-empty">No queued tasks for this engineer.</div>';
+    html += '<div class="agent-panel-event-empty ui-state ui-state--empty ui-state--compact">No queued tasks for this engineer.</div>';
     html += '</div>';
     return html;
   }
@@ -166,7 +166,7 @@ function _renderEngineerWorklog(agent) {
   var group = String((agent && agent.group) || '');
   var ws = _agentPanelEngineerSettings(group);
   if (typeof _agentPanelLegacyRenderWorklog === 'function') return _agentPanelLegacyRenderWorklog(group, ws);
-  return '<div class="agent-panel-empty">No completed tasks yet.</div>';
+  return '<div class="agent-panel-empty ui-state ui-state--empty ui-state--compact">No completed tasks yet.</div>';
 }
 
 function _agentPanelSpecializationsListMatchesGroup(group) {
@@ -575,7 +575,7 @@ function _agentPanelTabRenderParts(agent, kind, activeTab) {
     if (activeTab === 'behavior') {
       parts.bodyHtml = typeof renderBehaviorOverlayTab === 'function'
         ? renderBehaviorOverlayTab(agent)
-        : '<div class="agent-panel-empty">Behavior overlay UI is unavailable.</div>';
+        : '<div class="agent-panel-empty ui-state ui-state--error ui-state--compact" role="alert">Behavior overlay UI is unavailable. Refresh the Agent panel to try again.</div>';
     } else if (activeTab === 'events') {
       parts.headerRightHtml = _agentPanelDigestHeaderRight(agent);
       parts.bodyHtml += _renderEngineerEvents(agent);
@@ -600,7 +600,7 @@ function _agentPanelTabRenderParts(agent, kind, activeTab) {
     if (activeTab === 'behavior') {
       parts.bodyHtml = typeof renderBehaviorOverlayTab === 'function'
         ? renderBehaviorOverlayTab(agent)
-        : '<div class="agent-panel-empty">Behavior overlay UI is unavailable.</div>';
+        : '<div class="agent-panel-empty ui-state ui-state--error ui-state--compact" role="alert">Behavior overlay UI is unavailable. Refresh the Agent panel to try again.</div>';
     } else if (activeTab === 'messages') {
       parts.bodyHtml = _agentPanelArchitectMessages(agent);
     } else if (activeTab === 'events') {

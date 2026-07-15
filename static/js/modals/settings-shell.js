@@ -342,7 +342,7 @@ function settingsShellSearch(modalOrId, query) {
   }).slice(0, 12);
   if (!matches.length) {
     var empty = document.createElement('div');
-    empty.className = 'settings-search-empty';
+    empty.className = 'settings-search-empty ui-state ui-state--empty ui-state--compact';
     empty.textContent = 'No settings found for “' + query + '”';
     host.appendChild(empty);
     return;

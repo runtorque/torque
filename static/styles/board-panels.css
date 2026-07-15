@@ -1356,61 +1356,8 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
 }
 .board-add-input:focus { outline: none; }
 
-/* Empty lane */
-.board-empty {
-  text-align: center;
-  color: var(--text-dim);
-  font-size: 10px;
-  padding: 16px 12px;
-  border: 1px dashed var(--border);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--bg-cell) 92%, transparent);
-}
-body.runtime-embedded .board-empty {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  min-height: 96px;
-  padding: 22px 16px;
-  border-radius: 10px;
-}
-.board-empty-note {
-  text-align: left;
-  padding: 10px 12px;
-  border-style: solid;
-  background: color-mix(in srgb, var(--accent) 6%, var(--bg-cell));
-}
-.board-empty-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text);
-}
-.board-empty-body {
-  margin-top: 4px;
-  line-height: 1.45;
-}
-.board-empty-actions {
-  display: flex;
-  justify-content: center;
-  gap: 6px;
-  margin-top: 10px;
-  flex-wrap: wrap;
-}
-.board-empty-note .board-empty-actions {
-  justify-content: flex-start;
-}
-.board-empty-action {
-  font: 9px/1 var(--font);
-  color: var(--text);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 4px 8px;
-  cursor: pointer;
-}
-.board-empty-action:hover {
-  background: var(--bg-hover);
-}
+/* Empty lanes use the shared state surface; Board classes retain identity for
+   lane-specific tests and focus handling. */
 .board-load-more {
   text-align: center; color: var(--dim);
   font-size: 10px; padding: 10px 8px;
@@ -3357,10 +3304,6 @@ body[data-torque-mode="desktop"] .diff-view-modal {
   resize: vertical;
 }
 .artifact-empty {
-  padding: 10px 12px;
-  border: 1px dashed var(--border);
-  border-radius: 8px;
-  color: var(--text-dim);
   font-size: 11px;
 }
 .artifact-collection {
@@ -3529,8 +3472,6 @@ body[data-torque-mode="desktop"] .diff-view-modal {
 }
 .artifact-preview-loading,
 .artifact-preview-unsupported {
-  padding: 18px;
-  color: var(--text-dim);
   font-size: 11px;
 }
 .artifact-preview-download {

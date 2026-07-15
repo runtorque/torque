@@ -110,7 +110,7 @@ function _renderLogViewerLines() {
   var scrollTop = Number(list.scrollTop || 0);
   var filtered = _logViewerState.lines.filter(_logViewerMatches);
   if (!filtered.length) {
-    list.innerHTML = '<div class="log-viewer-empty">No log lines match.</div>';
+    list.innerHTML = '<div class="log-viewer-empty ui-state ui-state--empty ui-state--compact">No log lines match the current filters.</div>';
     if (!_logViewerState.follow) list.scrollTop = scrollTop;
     return;
   }

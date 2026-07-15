@@ -1336,8 +1336,8 @@ function _renderThinkingTabs(noteTotal, mapTotal, briefTotal) {
 }
 
 function _renderThinkingListEmpty(kind) {
-  if (kind === 'map') return '<div class="thinking-empty">No active Mind Maps yet. Create one to sketch durable relationships.</div>';
-  return '<div class="thinking-empty">No active rough notes yet. Create a scratchpad note for loose thinking.</div>';
+  if (kind === 'map') return '<div class="thinking-empty ui-state ui-state--empty ui-state--compact">No active Mind Maps yet. Create one to sketch durable relationships.</div>';
+  return '<div class="thinking-empty ui-state ui-state--empty ui-state--compact">No active rough notes yet. Create a scratchpad note for loose thinking.</div>';
 }
 
 function _renderScratchpadList(group) {
@@ -1352,7 +1352,7 @@ function _renderScratchpadList(group) {
   var html = '<aside class="thinking-list-pane thinking-scratch-list-pane">';
   html += '<div class="thinking-list-toolbar ui-toolbar ui-toolbar--bordered"><div><strong>Scratchpad</strong><span>Rough, group-scoped notes</span></div><button type="button" class="btn-primary" onclick="thinkingScratchNew()">New note</button></div>';
   if (_thinkingScratchLoadingGroup === group && _thinkingScratchLoadedGroup !== group) {
-    html += '<div class="thinking-loading">Loading scratchpad notes…</div>';
+    html += '<div class="thinking-loading ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading scratchpad notes…</div>';
   }
   html += '<div class="thinking-list" id="thinking-scratch-list">';
   if (_thinkingScratchSelectedId === THINKING_NEW_NOTE_ID) {
@@ -1376,11 +1376,11 @@ function _renderScratchpadList(group) {
 function _renderScratchpadEditor() {
   var noteId = String(_thinkingScratchSelectedId || '');
   if (!noteId) {
-    return '<section class="thinking-editor thinking-editor-empty"><div class="thinking-empty-detail">Select or create a scratchpad note. Notes stay informal and do not become tasks, decisions, journals, or Planning records.</div></section>';
+    return '<section class="thinking-editor thinking-editor-empty"><div class="thinking-empty-detail ui-state ui-state--empty ui-state--fill">Select or create a scratchpad note. Notes stay informal and do not become tasks, decisions, journals, or Planning records.</div></section>';
   }
   var note = noteId === THINKING_NEW_NOTE_ID ? null : state.thinking.scratchpad_notes[noteId];
   if (noteId !== THINKING_NEW_NOTE_ID && (!note || !_thinkingIsActive(note))) {
-    return '<section class="thinking-editor thinking-editor-empty"><div class="thinking-empty-detail">This scratchpad note is no longer active.</div></section>';
+    return '<section class="thinking-editor thinking-editor-empty"><div class="thinking-empty-detail ui-state ui-state--note ui-state--fill">This scratchpad note is no longer active.</div></section>';
   }
   var draft = _thinkingScratchDraft(noteId);
   var dirty = _thinkingScratchIsDirty(noteId, draft);
@@ -1427,7 +1427,7 @@ function _renderMapList(group) {
   var html = '<aside class="thinking-list-pane thinking-map-list-pane">';
   html += '<div class="thinking-list-toolbar ui-toolbar ui-toolbar--bordered"><div><strong>Mind Maps</strong><span>Durable node/link sketches</span></div><button type="button" class="btn-primary" onclick="thinkingMindNew()">New map</button></div>';
   if (_thinkingMindLoadingGroup === group && _thinkingMindLoadedGroup !== group) {
-    html += '<div class="thinking-loading">Loading Mind Maps…</div>';
+    html += '<div class="thinking-loading ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading Mind Maps…</div>';
   }
   html += '<div class="thinking-list" id="thinking-map-list-scroll">';
   if (_thinkingMindSelectedId === THINKING_NEW_MAP_ID) {
@@ -1532,7 +1532,7 @@ function _renderNodeTools(detail) {
   html += '</div><div class="thinking-tool-actions"><button type="button" class="btn-primary" onclick="thinkingMindAddNode()">Add node</button></div></section>';
   html += '<section class="thinking-map-tool-card"><h3>Selected node</h3>';
   if (!selectedNode) {
-    html += '<div class="thinking-empty compact">Select a node to edit. Drag nodes, or focus a node and use arrow keys to move it.</div>';
+    html += '<div class="thinking-empty ui-state ui-state--note ui-state--compact">Select a node to edit. Drag nodes, or focus a node and use arrow keys to move it.</div>';
   } else {
     html += '<div class="thinking-form thinking-inline-form">';
     html += '<label for="thinking-node-edit-label">Label</label><input id="thinking-node-edit-label" data-thinking-field="node-edit-label:' + _thinkingAttr(selectedNode.id) + '" value="' + _thinkingAttr(editDraft.label || '') + '" oninput="thinkingMindNodeChanged()" autocomplete="off">';
@@ -1562,7 +1562,7 @@ function _renderLinkTools(detail) {
   }) : null;
   var html = '<section class="thinking-map-tool-card"><h3>Links</h3>';
   html += '<div class="thinking-link-list">';
-  if (!links.length) html += '<div class="thinking-empty compact">No active links.</div>';
+  if (!links.length) html += '<div class="thinking-empty ui-state ui-state--empty ui-state--compact">No active links.</div>';
   links.forEach(function(link) {
     var linkId = String(link.id || '');
     var source = _thinkingNodeById(detail, link.source_node_id) || {};
@@ -1581,7 +1581,7 @@ function _renderLinkTools(detail) {
   html += '</div><div class="thinking-tool-actions"><button type="button" class="btn-primary" onclick="thinkingMindAddLink()"' + (nodes.length < 2 ? ' disabled' : '') + '>Add link</button></div></section>';
   html += '<section class="thinking-map-tool-card"><h3>Selected link</h3>';
   if (!selectedLink) {
-    html += '<div class="thinking-empty compact">Select a link to edit or delete.</div>';
+    html += '<div class="thinking-empty ui-state ui-state--note ui-state--compact">Select a link to edit or delete.</div>';
   } else {
     html += '<div class="thinking-form thinking-inline-form thinking-link-form">';
     html += '<label for="thinking-link-edit-source">Source</label><select id="thinking-link-edit-source" data-thinking-field="link-edit-source:' + _thinkingAttr(selectedLink.id) + '" onchange="thinkingMindLinkChanged()">' + _renderNodeOptions(nodes, editDraft.source_node_id) + '</select>';
@@ -1597,21 +1597,21 @@ function _renderLinkTools(detail) {
 function _renderMapDetail() {
   var mapId = String(_thinkingMindSelectedId || '');
   if (!mapId) {
-    return '<section class="thinking-map-detail thinking-editor-empty"><div class="thinking-empty-detail">Select or create a Mind Map. Maps are durable group-scoped sketches, not a full whiteboard.</div></section>';
+    return '<section class="thinking-map-detail thinking-editor-empty"><div class="thinking-empty-detail ui-state ui-state--empty ui-state--fill">Select or create a Mind Map. Maps are durable group-scoped sketches, not a full whiteboard.</div></section>';
   }
   if (mapId === THINKING_NEW_MAP_ID) {
-    return '<section class="thinking-map-detail" id="thinking-map-detail">' + _renderMapEditorHeader(mapId, null) + '<div class="thinking-empty-detail padded">Create the map shell first, then add nodes and links.</div></section>';
+    return '<section class="thinking-map-detail" id="thinking-map-detail">' + _renderMapEditorHeader(mapId, null) + '<div class="thinking-empty-detail padded ui-state ui-state--note">Create the map shell first, then add nodes and links.</div></section>';
   }
   thinkingMindLoadDetail(mapId);
   var detail = _thinkingMapDetail(mapId);
   var map = (state.thinking.mind_maps && state.thinking.mind_maps[mapId]) || detail;
   if (!map || !_thinkingIsActive(map)) {
-    return '<section class="thinking-map-detail thinking-editor-empty"><div class="thinking-empty-detail">This Mind Map is no longer active.</div></section>';
+    return '<section class="thinking-map-detail thinking-editor-empty"><div class="thinking-empty-detail ui-state ui-state--note ui-state--fill">This Mind Map is no longer active.</div></section>';
   }
   var html = '<section class="thinking-map-detail" id="thinking-map-detail">';
   html += _renderMapEditorHeader(mapId, detail || map);
   if (_thinkingMindDetailLoadingId === mapId && !detail) {
-    html += '<div class="thinking-loading">Loading map nodes and links…</div>';
+    html += '<div class="thinking-loading ui-state ui-state--loading" role="status" aria-live="polite">Loading map nodes and links…</div>';
     html += '</section>';
     return html;
   }
@@ -2405,13 +2405,13 @@ function _renderIdeaBriefList(group) {
   html += '<div class="thinking-list-toolbar idea-brief-list-toolbar ui-toolbar ui-toolbar--bordered"><div><strong>Idea Briefs</strong><span>Opportunity proposals linked to Thinking</span></div><button type="button" class="btn-primary" onclick="ideaBriefNew()">New brief</button></div>';
   html += '<div class="idea-brief-filter-row"><button type="button" class="filter-chip' + (_ideaBriefIncludeArchived ? ' active' : '') + '" aria-pressed="' + (_ideaBriefIncludeArchived ? 'true' : 'false') + '" onclick="ideaBriefToggleArchived()">' + (_ideaBriefIncludeArchived ? 'Hide archived' : 'Show archived') + '</button><button type="button" class="btn btn-secondary btn-sm" onclick="ideaBriefRefresh()">Refresh</button></div>';
   if (_ideaBriefLoadingGroup === loadKey && _ideaBriefLoadedGroup !== loadKey) {
-    html += '<div class="thinking-loading">Loading Idea Briefs…</div>';
+    html += '<div class="thinking-loading ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading Idea Briefs…</div>';
   }
   html += '<div class="thinking-list idea-brief-list" id="thinking-idea-list">';
   if (_ideaBriefSelectedId === THINKING_NEW_IDEA_BRIEF_ID) {
     html += '<button type="button" class="thinking-list-card idea-brief-card selected draft" onclick="ideaBriefSelect(\'' + _thinkingJs(THINKING_NEW_IDEA_BRIEF_ID) + '\')"><span class="thinking-list-title">New Idea Brief</span><span class="thinking-list-meta">Draft · not saved yet</span></button>';
   }
-  if (!briefs.length) html += '<div class="thinking-empty">No Idea Briefs yet. Create one from a problem, opportunity, or linked Thinking artifact.</div>';
+  if (!briefs.length) html += '<div class="thinking-empty ui-state ui-state--empty ui-state--compact">No Idea Briefs yet. Create one from a problem, opportunity, or linked Thinking artifact.</div>';
   briefs.forEach(function(brief) {
     var briefId = String(brief.id || '');
     var selected = _ideaBriefSelectedId === briefId;
@@ -2479,7 +2479,7 @@ function _renderIdeaBriefLinks(draft) {
   var selectedSource = _ideaBriefSelectedLinkSourceKey(draft);
   var html = '<section class="idea-brief-link-section"><div class="idea-brief-section-title"><h3>Linked Thinking</h3><span>Trace the brief back to scratchpad notes and Mind Map artifacts.</span></div>';
   html += '<div class="idea-brief-link-list">';
-  if (!links.length) html += '<div class="thinking-empty compact">No linked Thinking yet. Add a Scratchpad note, Mind Map, node, or link for traceability.</div>';
+  if (!links.length) html += '<div class="thinking-empty ui-state ui-state--empty ui-state--compact">No linked Thinking yet. Add a Scratchpad note, Mind Map, node, or link for traceability.</div>';
   links.forEach(function(link, index) {
     var key = _ideaBriefLinkKey(link, index);
     var selected = _ideaBriefSelectedLinkKey === key;
@@ -2520,12 +2520,12 @@ function _renderIdeaBriefLinks(draft) {
 function _renderIdeaBriefDetail() {
   var briefId = String(_ideaBriefSelectedId || '');
   if (!briefId) {
-    return '<section class="thinking-editor idea-brief-detail thinking-editor-empty"><div class="thinking-empty-detail">Select or create an Idea Brief. Briefs are proposal-only review artifacts; they do not create tasks or authorize execution.</div></section>';
+    return '<section class="thinking-editor idea-brief-detail thinking-editor-empty"><div class="thinking-empty-detail ui-state ui-state--empty ui-state--fill">Select or create an Idea Brief. Briefs are proposal-only review artifacts; they do not create tasks or authorize execution.</div></section>';
   }
   var isNew = briefId === THINKING_NEW_IDEA_BRIEF_ID;
   var brief = isNew ? null : (state.idea_briefs && state.idea_briefs[briefId]);
   if (!isNew && (!brief || !_ideaBriefIsVisible(brief, _ideaBriefIncludeArchived))) {
-    return '<section class="thinking-editor idea-brief-detail thinking-editor-empty"><div class="thinking-empty-detail">This Idea Brief is not visible in the current list.</div></section>';
+    return '<section class="thinking-editor idea-brief-detail thinking-editor-empty"><div class="thinking-empty-detail ui-state ui-state--note ui-state--fill">This Idea Brief is not visible in the current list.</div></section>';
   }
   var draft = _ideaBriefDraft(briefId);
   var dirty = _ideaBriefDraftIsDirty(briefId, draft);
@@ -2613,8 +2613,8 @@ function renderThinkingPanel() {
   html += '<div class="tpled-header-subtitle ui-panel-header__subtitle">Scratchpad, Mind Map, and Idea Briefs are group-scoped thinking tools for ' + _thinkingEsc(group || 'all groups') + '; they stay separate from Planning execution.</div></div>';
   html += '<div class="tpled-header-controls ui-panel-header__actions"><span class="thinking-total ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + _thinkingEsc(notes.length + ' notes · ' + maps.length + ' maps · ' + briefs.length + ' briefs') + '</span><button class="tpled-new-btn" onclick="thinkingRefresh()" title="Refresh Thinking data">&#x21BB;</button></div></div>';
   html += _renderThinkingTabs(notes.length, maps.length, briefs.length);
-  if (_thinkingLastError) html += '<div class="thinking-error">' + _thinkingEsc(_thinkingLastError) + '</div>';
-  if (_ideaBriefLastError && activeTab === 'idea-briefs') html += '<div class="thinking-error">' + _thinkingEsc(_ideaBriefLastError) + '</div>';
+  if (_thinkingLastError) html += '<div class="thinking-error ui-state ui-state--error ui-state--compact" role="alert">' + _thinkingEsc(_thinkingLastError) + ' Refresh Thinking to try again.</div>';
+  if (_ideaBriefLastError && activeTab === 'idea-briefs') html += '<div class="thinking-error ui-state ui-state--error ui-state--compact" role="alert">' + _thinkingEsc(_ideaBriefLastError) + ' Refresh Thinking to try again.</div>';
   if (_ideaBriefLastStatus && activeTab === 'idea-briefs') html += '<div class="idea-brief-status-message">' + _thinkingEsc(_ideaBriefLastStatus) + '</div>';
   if (activeTab === 'idea-briefs') html += _renderThinkingIdeaBriefs(group);
   else if (activeTab === 'mind-map') html += _renderThinkingMindMap(group);

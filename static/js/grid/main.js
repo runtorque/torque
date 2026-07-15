@@ -470,12 +470,12 @@ function _renderMainGrid(opts, renderMode) {
 
   if (groupNames.length === 0) {
     const action = _singleGroupModeEnabled()
-      ? '<br><button type="button" class="empty-action" onclick="openAddGroup()">+ New group</button>'
+      ? '<div class="ui-state__actions"><button type="button" class="btn-secondary btn-sm" onclick="openAddGroup()">+ New group</button></div>'
       : '';
     const emptyHtml = `
-      <div class="empty">
-        <div class="empty-icon">\u2B22</div>
-        No groups yet.<br>Create one to get started.
+      <div class="empty ui-state ui-state--empty ui-state--fill">
+        <div class="ui-state__title">No groups yet</div>
+        <div class="ui-state__message">Create a group to start organizing agents and tasks.</div>
         ${action}
       </div>`;
     const emptyState = _captureSurfaceState(main, { scrollSelectors: [':root', '.agents-grid-pane'] });

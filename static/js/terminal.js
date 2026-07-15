@@ -446,10 +446,10 @@ function renderTerminalWorkspace(opts) {
     _renderTerminalDirectMessages(dom.directMessages, null);
     _renderTerminalCompose(dom.compose, null);
     const emptyHtml = ''
-      + '<div class="terminal-empty">'
-      + '  <div class="terminal-empty-title">Select an agent</div>'
-      + '  <div class="terminal-empty-body">Choose an agent, worker, engineer, architect, or legacy terminal from the grid to view its session here.</div>'
-      + '  <div class="terminal-empty-meta">Manual terminal creation has moved out of the operator UI.</div>'
+      + '<div class="terminal-empty ui-state ui-state--empty ui-state--fill">'
+      + '  <div class="terminal-empty-title ui-state__title">Select an agent</div>'
+      + '  <div class="terminal-empty-body ui-state__message">Choose an agent, worker, engineer, architect, or legacy terminal from the grid to view its session here.</div>'
+      + '  <div class="terminal-empty-meta ui-state__meta">Manual terminal creation has moved out of the operator UI.</div>'
       + '</div>';
     if (dom.stage._torqueLastHtml !== emptyHtml) {
       dom.stage.innerHTML = emptyHtml;
@@ -469,14 +469,14 @@ function renderTerminalWorkspace(opts) {
     _renderTerminalCompose(dom.compose, cell);
     const stoppedHtml = cell.cell_type === 'terminal'
       ? ''
-        + '  <div class="terminal-empty-title">' + esc(cell.name) + ' is stopped</div>'
-        + '  <div class="terminal-empty-body">This legacy terminal remains available in the grid so you can inspect or delete it, but manual terminal relaunch is no longer available from the UI.</div>'
-        + '  <div class="terminal-empty-meta">Select an agent card to switch the workspace to an active session.</div>'
+        + '  <div class="terminal-empty-title ui-state__title">' + esc(cell.name) + ' is stopped</div>'
+        + '  <div class="terminal-empty-body ui-state__message">This legacy terminal remains available in the grid so you can inspect or delete it, but manual terminal relaunch is no longer available from the UI.</div>'
+        + '  <div class="terminal-empty-meta ui-state__meta">Select an agent card to switch the workspace to an active session.</div>'
       : ''
-        + '  <div class="terminal-empty-title">' + esc(cell.name) + ' is stopped</div>'
-        + '  <div class="terminal-empty-body">Relaunch this session to put it back in the workspace and return keyboard focus to the shell.</div>'
-        + '  <button class="terminal-empty-btn" onclick="relaunchAgent(\'' + esc(cell.id) + '\')">Relaunch</button>'
-        + '  <div class="terminal-empty-meta">When it comes back, Torque will focus the terminal automatically.</div>';
+        + '  <div class="terminal-empty-title ui-state__title">' + esc(cell.name) + ' is stopped</div>'
+        + '  <div class="terminal-empty-body ui-state__message">Relaunch this session to put it back in the workspace and return keyboard focus to the shell.</div>'
+        + '  <div class="ui-state__actions"><button class="terminal-empty-btn btn-secondary" onclick="relaunchAgent(\'' + esc(cell.id) + '\')">Relaunch</button></div>'
+        + '  <div class="terminal-empty-meta ui-state__meta">When it comes back, Torque will focus the terminal automatically.</div>';
     const stoppedEntry = _findEmbeddedTerminalEntryForCell(cell.id);
     if (stoppedEntry) {
       _activateEmbeddedTerminalSurface(dom.stage, stoppedEntry.sessionKey);

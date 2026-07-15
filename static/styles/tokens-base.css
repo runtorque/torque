@@ -442,28 +442,6 @@ body.runtime-embedded #standalone-float-layer {
 }
 
 /* ------------------------------------------------------------------ */
-/* Empty state                                                         */
-/* ------------------------------------------------------------------ */
-.empty {
-  text-align: center; color: var(--text-dim);
-  padding: 32px 12px; font-size: 11px; line-height: 1.6;
-}
-.empty-icon { font-size: 28px; margin-bottom: 8px; opacity: .5; }
-.empty-action {
-  display: inline-flex;
-  margin-top: 10px;
-  padding: 5px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text);
-  background: var(--bg-cell);
-}
-.empty-action:hover {
-  border-color: var(--text-dim);
-  background: var(--bg-hover);
-}
-
-/* ------------------------------------------------------------------ */
 /* Group card                                                          */
 /* ------------------------------------------------------------------ */
 .group {

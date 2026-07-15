@@ -58,7 +58,7 @@ function _showWorktreeHistory(data) {
 
   const list = document.getElementById('hist-list');
   if (!data.commits || data.commits.length === 0) {
-    list.innerHTML = '<div class="hist-empty">No commits on this branch yet.</div>';
+    list.innerHTML = '<div class="hist-empty ui-state ui-state--empty ui-state--compact">No commits on this branch yet.</div>';
   } else {
     let html = '';
     for (let i = 0; i < data.commits.length; i++) {

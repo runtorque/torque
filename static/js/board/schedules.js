@@ -29,7 +29,7 @@ function _renderSchedulesView() {
   });
 
   if (!list.length) {
-    html += '<div class="board-empty">No schedules</div>';
+    html += '<div class="board-empty ui-state ui-state--empty ui-state--compact">No schedules yet.</div>';
   }
 
   for (var i = 0; i < list.length; i++) {

@@ -9,6 +9,76 @@ function source(file) {
   return fs.readFileSync(path.join(repoRoot, file), 'utf8');
 }
 
+test('shared content states define semantic, placement, hierarchy, and motion variants', () => {
+  const css = source('static/styles/components.css');
+
+  assert.match(css, /\.ui-state\s*\{[^}]*display:\s*grid;[^}]*min-height:\s*96px;[^}]*border:\s*1px dashed var\(--border\);[^}]*border-radius:\s*var\(--radius-lg\);[^}]*background:/s);
+  assert.match(css, /\.ui-state--empty\s*\{[^}]*border-style:\s*dashed;/s);
+  assert.match(css, /\.ui-state--compact\s*\{[^}]*min-height:\s*0;[^}]*padding:\s*var\(--space-2\) var\(--space-3\);/s);
+  assert.match(css, /\.ui-state--inline\s*\{[^}]*display:\s*inline-flex;[^}]*border:\s*0;[^}]*background:\s*transparent;/s);
+  assert.match(css, /\.ui-state--fill\s*\{[^}]*width:\s*100%;[^}]*height:\s*100%;/s);
+  assert.match(css, /\.ui-state--note\s*\{[^}]*justify-items:\s*start;[^}]*border-style:\s*solid;/s);
+  assert.match(css, /\.ui-state--loading\s*\{[^}]*border-style:\s*solid;[^}]*color:\s*var\(--accent\);/s);
+  assert.match(css, /\.ui-state--loading::before\s*\{[^}]*border-radius:\s*50%;[^}]*animation:\s*ui-state-spin 700ms linear infinite;/s);
+  assert.match(css, /\.ui-state--error\s*\{[^}]*border-color:[^}]*var\(--red\)[^}]*background:/s);
+  assert.match(css, /\.ui-state__title\s*\{[^}]*font-weight:\s*700;/s);
+  assert.match(css, /\.ui-state__actions\s*\{[^}]*display:\s*flex;[^}]*flex-wrap:\s*wrap;/s);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.ui-state--loading::before\s*\{\s*animation:\s*none;/s);
+});
+
+test('operator-facing content states opt into the canonical API and announcement semantics', () => {
+  const board = source('static/js/board/model.js');
+  const grid = source('static/js/grid/main.js');
+  const terminal = source('static/js/terminal.js');
+  const help = source('static/js/help.js');
+  const mission = source('static/js/mission_control.js');
+  const initiatives = source('static/js/initiatives.js');
+  const thinking = source('static/js/thinking.js');
+  const agent = source('static/js/agent_panel.js');
+  const agentEvents = source('static/js/agent-panel/events.js');
+  const diff = source('static/js/diff.js');
+  const history = source('static/js/taskhistory.js');
+  const artifacts = source('static/js/modals/task-artifacts.js');
+  const settings = source('static/js/modals/group-settings.js');
+  const navigation = source('static/js/navigation/palette.js');
+
+  assert.match(board, /board-empty ui-state ui-state--empty/);
+  assert.match(grid, /empty ui-state ui-state--empty ui-state--fill/);
+  assert.match(grid, /ui-state__title">No groups yet/);
+  assert.match(grid, /ui-state__actions.*?btn-secondary btn-sm/s);
+  assert.match(terminal, /terminal-empty ui-state ui-state--empty ui-state--fill/);
+  assert.match(help, /ui-state--loading.*?role="status" aria-live="polite"/s);
+  assert.match(help, /ui-state--error.*?role="alert"/s);
+  assert.match(mission, /mc-error ui-state ui-state--error/);
+  assert.match(initiatives, /initiative-loading ui-state ui-state--loading/);
+  assert.match(thinking, /thinking-error ui-state ui-state--error ui-state--compact/);
+  assert.match(agent, /agent-panel-empty ui-state ui-state--empty ui-state--fill/);
+  assert.match(agentEvents, /ui-state--loading ui-state--compact" role="status" aria-live="polite"/);
+  assert.match(diff, /diff-empty ui-state ui-state--error ui-state--fill" role="alert"/);
+  assert.match(history, /th-empty ui-state ui-state--loading ui-state--fill" role="status"/);
+  assert.match(artifacts, /artifact-preview-loading ui-state ui-state--loading" role="status"/);
+  assert.match(settings, /settings-map-error ui-state ui-state--error ui-state--compact/);
+  assert.match(settings, /setAttribute\('role', 'alert'\)/);
+  assert.match(navigation, /navigation-palette-empty ui-state ui-state--empty ui-state--compact/);
+});
+
+test('feature styles no longer rebuild canonical content-state geometry or intent', () => {
+  const tokens = source('static/styles/tokens-base.css');
+  const grid = source('static/styles/workspace-grid.css');
+  const board = source('static/styles/board-panels.css');
+  const agent = source('static/styles/agent-panel.css');
+  const modals = source('static/styles/modals.css');
+  const features = source('static/styles/feature-panels.css');
+
+  assert.doesNotMatch(tokens, /^\.empty(?:-action|-icon)?\s*\{/m);
+  assert.doesNotMatch(grid, /^\.terminal-empty\s*\{[^}]*(?:padding|border|border-radius|background|color):/ms);
+  assert.doesNotMatch(board, /^\.(?:board-empty|artifact-empty)\s*\{[^}]*(?:padding|border|border-radius|background|color):/ms);
+  assert.doesNotMatch(agent, /^\.agent-panel-(?:empty|event-empty)\s*\{[^}]*(?:padding|border|border-radius|background|color):/ms);
+  assert.doesNotMatch(agent, /^\.th-empty\s*\{[^}]*(?:padding|border|border-radius|background|color):/ms);
+  assert.doesNotMatch(modals, /^\.settings-map-empty\s*\{[^}]*(?:padding|border|border-radius|background|color):/ms);
+  assert.doesNotMatch(features, /^\.(?:initiative|thinking)-(?:empty|loading|error)\s*\{[^}]*(?:padding|border|border-radius|background|color):/ms);
+});
+
 test('shared form controls define default, compact, and invalid states', () => {
   const css = source('static/styles/components.css');
 

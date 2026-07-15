@@ -321,7 +321,7 @@ function _artifactOpenPreview(taskId, artifact) {
         token
       );
     };
-    _artifactPreviewRender(artifact, '<div class="artifact-preview-loading">Loading preview...</div>', url, token);
+    _artifactPreviewRender(artifact, '<div class="artifact-preview-loading ui-state ui-state--loading" role="status" aria-live="polite">Loading preview\u2026</div>', url, token);
     if (url && typeof fetch === 'function') {
       fetch(url)
         .then(function(response) {
@@ -429,7 +429,7 @@ function _renderArtifactCard(artifact, opts) {
 function _renderArtifactCollection(artifacts, opts) {
   opts = opts || {};
   if (!artifacts || !artifacts.length) {
-    return '<div class="artifact-empty">' + esc(opts.empty || 'No artifacts attached.') + '</div>';
+    return '<div class="artifact-empty ui-state ui-state--empty ui-state--compact">' + esc(opts.empty || 'No artifacts attached.') + '</div>';
   }
   var html = '<div class="artifact-collection">';
   for (var i = 0; i < artifacts.length; i++) {
@@ -548,7 +548,7 @@ function _renderTaskArtifacts() {
     artifacts.push(item);
   }
   if (!artifacts.length) {
-    container.innerHTML = '<div class="artifact-empty">No logs, reports, diffs, or references yet.</div>';
+    container.innerHTML = '<div class="artifact-empty ui-state ui-state--empty ui-state--compact">No logs, reports, diffs, or references yet.</div>';
     return;
   }
   var html = '<div class="artifact-collection">';

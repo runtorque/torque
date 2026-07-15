@@ -206,7 +206,7 @@ function _agentPanelRenderPagedEventSection(title, page, mode, emptyText) {
     + _agentPanelEventSectionCount(page) + '</span>';
   html += '</div>';
   if (!total) {
-    html += '<div class="agent-panel-event-empty">' + _esc(emptyText) + '</div>';
+    html += '<div class="agent-panel-event-empty ui-state ui-state--empty ui-state--compact">' + _esc(emptyText) + '</div>';
     html += '</div>';
     return html;
   }
@@ -557,9 +557,9 @@ function _renderAgentMcpTab(agent) {
   html += '</select>';
   html += '</div>';
   if (loading && !calls.length) {
-    html += '<div class="agent-panel-event-empty">Loading MCP calls…</div>';
+    html += '<div class="agent-panel-event-empty ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading MCP calls…</div>';
   } else if (!calls.length) {
-    html += '<div class="agent-panel-event-empty">No MCP calls found.</div>';
+    html += '<div class="agent-panel-event-empty ui-state ui-state--empty ui-state--compact">No MCP calls found.</div>';
   } else {
     if (loading) html += '<div class="agent-panel-worklog-note">Refreshing MCP calls…</div>';
     html += '<div class="agent-panel-mcp-list">';
@@ -582,7 +582,7 @@ function _renderAgentDigestEvents(agent) {
   var sentEvents = _agentPanelDigestSentEvents(agent);
   var settings = _agentPanelDigestSettings(agent);
   var paused = !!(settings && settings.paused);
-  if (!group) return '<div class="agent-panel-empty">No group events yet.</div>';
+  if (!group) return '<div class="agent-panel-empty ui-state ui-state--empty ui-state--compact">No group events yet.</div>';
   return _agentPanelRenderEventsTab(
     bstats,
     sentEvents,
@@ -686,12 +686,12 @@ function _renderPersistentCellEvents(agent) {
   html += '<span class="agent-panel-event-section-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + _agentPanelEventSectionCount(page) + '</span>';
   html += '</div>';
   if (loading && !events.length) {
-    html += '<div class="agent-panel-event-empty">Loading cell events…</div>';
+    html += '<div class="agent-panel-event-empty ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading cell events…</div>';
     html += '</div>';
     return html;
   }
   if (!events.length) {
-    html += '<div class="agent-panel-event-empty">No cell events yet.</div>';
+    html += '<div class="agent-panel-event-empty ui-state ui-state--empty ui-state--compact">No cell events yet.</div>';
     html += '</div>';
     return html;
   }

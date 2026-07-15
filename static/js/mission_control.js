@@ -335,7 +335,7 @@ function _missionControlSectionHtml(summary, sectionKey) {
   if (!collapsed) {
     html += '<div class="mc-card-list">';
     if (!filtered.length) {
-      html += '<div class="mc-empty-inline">' + esc(_missionControlFilter ? 'No cards match the current filter.' : meta.empty) + '</div>';
+      html += '<div class="mc-empty-inline ui-state ui-state--empty ui-state--compact">' + esc(_missionControlFilter ? 'No cards match the current filter. Clear the filter to restore all cards.' : meta.empty) + '</div>';
     } else {
       filtered.forEach(function(card) { html += _missionControlCardHtml(card, sectionKey); });
     }
@@ -413,11 +413,11 @@ function _missionControlShellHtml(summary) {
   html += '<span class="mc-total ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + esc(String(total)) + ' cards</span>';
   html += '<button class="tpled-new-btn" onclick="missionControlRefresh()" title="Refresh read-only summary">&#x21BB;</button>';
   html += '</div>';
-  if (_missionControlLastError) html += '<div class="mc-error">' + esc(_missionControlLastError) + '</div>';
+  if (_missionControlLastError) html += '<div class="mc-error ui-state ui-state--error ui-state--compact" role="alert">' + esc(_missionControlLastError) + ' Refresh Mission Control to try again.</div>';
   html += '<div class="mc-workspace" id="mission-control-workspace">';
   html += '<main class="mc-main" id="mission-control-main">';
   if (total <= 0) {
-    html += '<div class="mc-empty-state">Mission Control is clear for this group. No operator gates, watchlist risks, in-flight cards, or recent completions were returned.</div>';
+    html += '<div class="mc-empty-state ui-state ui-state--empty">Mission Control is clear for this group. No operator gates, watchlist risks, in-flight cards, or recent completions were returned.</div>';
   }
   MISSION_CONTROL_SECTION_ORDER.forEach(function(key) { html += _missionControlSectionHtml(summary, key); });
   html += '</main>';
@@ -447,17 +447,17 @@ function renderMissionControlPanel() {
     html = '<div class="mission-control-panel"><div class="tpled-header mc-header ui-panel-header ui-panel-header--surface">'
       + '<div class="tpled-header-copy ui-panel-header__copy"><div class="tpled-header-title-row ui-panel-header__title-row"><span class="tpled-header-title ui-panel-header__title">Mission Control</span></div>'
       + '<div class="tpled-header-subtitle ui-panel-header__subtitle">Loading read-only readiness summary for ' + esc(group || 'all groups') + '…</div></div>'
-      + '</div><div class="mc-loading">Loading Mission Control…</div></div>';
+      + '</div><div class="mc-loading ui-state ui-state--loading" role="status" aria-live="polite">Loading Mission Control…</div></div>';
   } else if (!summary && _missionControlLastError) {
     html = '<div class="mission-control-panel"><div class="tpled-header mc-header ui-panel-header ui-panel-header--surface">'
       + '<div class="tpled-header-copy ui-panel-header__copy"><div class="tpled-header-title-row ui-panel-header__title-row"><span class="tpled-header-title ui-panel-header__title">Mission Control</span></div>'
       + '<div class="tpled-header-subtitle ui-panel-header__subtitle">Read-only readiness summary could not be loaded.</div></div>'
       + '<div class="tpled-header-controls ui-panel-header__actions"><button class="tpled-new-btn" onclick="missionControlRefresh()" title="Retry">&#x21BB;</button></div>'
-      + '</div><div class="mc-error">' + esc(_missionControlLastError) + '</div></div>';
+      + '</div><div class="mc-error ui-state ui-state--error" role="alert">' + esc(_missionControlLastError) + ' Use Refresh to try again.</div></div>';
   } else if (summary) {
     html = _missionControlShellHtml(summary);
   } else {
-    html = '<div class="mission-control-panel"><div class="mc-empty-state">Mission Control has not loaded yet.</div></div>';
+    html = '<div class="mission-control-panel"><div class="mc-empty-state ui-state ui-state--empty">Mission Control has not loaded yet. Refresh to load its readiness summary.</div></div>';
   }
   panel.innerHTML = html;
   if (typeof _restoreSurfaceState === 'function') {

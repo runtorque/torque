@@ -246,7 +246,7 @@ function panelNavRenderMore(filter) {
     return !wanted || (item.label + ' ' + item.keywords).toLowerCase().indexOf(wanted) >= 0;
   });
   if (!items.length) {
-    root.innerHTML = '<div class="panel-nav-more-empty">No panels match “' + esc(filter || '') + '”.</div>';
+    root.innerHTML = '<div class="panel-nav-more-empty ui-state ui-state--empty ui-state--compact">No panels match “' + esc(filter || '') + '”.</div>';
     return;
   }
   root.innerHTML = items.map(function(item) {

@@ -664,7 +664,7 @@ function _renderInitiativeColumn(status, items, secondary) {
   html += '</div>';
   html += '<div class="initiative-column-body" id="initiative-col-' + esc(status) + '">';
   if (!items.length) {
-    html += '<div class="initiative-empty">No initiatives.</div>';
+    html += '<div class="initiative-empty ui-state ui-state--empty">No initiatives yet. Create one to organize related planning work.</div>';
   } else {
     items.forEach(function(item) { html += _renderInitiativeCard(item); });
   }
@@ -722,7 +722,7 @@ function _renderInitiativeLinkedTasks(detail) {
   var items = linked.items || [];
   var html = '<div class="initiative-links-list">';
   if (!items.length) {
-    html += '<div class="initiative-empty compact">No linked tasks.</div>';
+    html += '<div class="initiative-empty compact ui-state ui-state--empty ui-state--compact">No linked tasks.</div>';
   }
   items.forEach(function(task) {
     var id = String(task.id || '');
@@ -735,7 +735,7 @@ function _renderInitiativeLinkedTasks(detail) {
     html += '</div>';
   });
   if (linked.hidden_count) {
-    html += '<div class="initiative-empty compact">' + esc(linked.hidden_count + ' linked task(s) hidden by scope.') + '</div>';
+    html += '<div class="initiative-empty compact ui-state ui-state--note ui-state--compact">' + esc(linked.hidden_count + ' linked task(s) hidden by scope.') + '</div>';
   }
   html += '</div>';
   html += '<div class="initiative-link-add">';
@@ -756,7 +756,7 @@ function _renderInitiativeLinkedDecisions(detail) {
   var ids = (linked.items || []).slice();
   var html = '<div class="initiative-links-list">';
   if (!ids.length) {
-    html += '<div class="initiative-empty compact">No linked decisions.</div>';
+    html += '<div class="initiative-empty compact ui-state ui-state--empty ui-state--compact">No linked decisions.</div>';
   }
   ids.forEach(function(decisionId) {
     decisionId = String(decisionId || '');
@@ -769,7 +769,7 @@ function _renderInitiativeLinkedDecisions(detail) {
     html += '</div>';
   });
   if (linked.hidden_count) {
-    html += '<div class="initiative-empty compact">' + esc(linked.hidden_count + ' linked decision(s) hidden by scope.') + '</div>';
+    html += '<div class="initiative-empty compact ui-state ui-state--note ui-state--compact">' + esc(linked.hidden_count + ' linked decision(s) hidden by scope.') + '</div>';
   }
   html += '</div>';
   html += '<div class="initiative-link-add">';
@@ -781,7 +781,7 @@ function _renderInitiativeLinkedDecisions(detail) {
 
 function _renderInitiativeDetail() {
   if (!_initiativesSelectedId) {
-    return '<aside class="initiative-detail empty"><div class="initiative-empty-detail">Select an initiative to inspect scope and links.</div></aside>';
+    return '<aside class="initiative-detail empty"><div class="initiative-empty-detail ui-state ui-state--empty ui-state--fill">Select an initiative to inspect scope and links.</div></aside>';
   }
   var loading = _initiativesDetailLoadingId === _initiativesSelectedId && !_initiativesDetail;
   var detail = _initiativeDetailBase();
@@ -791,7 +791,7 @@ function _renderInitiativeDetail() {
   html += '<div class="initiative-detail-id">' + esc(_initiativesSelectedId) + '</div></div>';
   html += '<button type="button" class="initiative-close" onclick="initiativesCloseDetail()" title="Close">×</button>';
   html += '</div>';
-  if (loading) html += '<div class="initiative-loading">Loading detail...</div>';
+  if (loading) html += '<div class="initiative-loading ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading initiative detail…</div>';
   var taskCreateStatus = _initiativesTaskCreateStatusById[_initiativesSelectedId];
   if (taskCreateStatus && taskCreateStatus.message) {
     html += '<div class="initiative-status initiative-status-' + esc(taskCreateStatus.kind || 'info') + '">' + esc(taskCreateStatus.message) + '</div>';
@@ -1387,7 +1387,7 @@ function _renderAreasList(group) {
   html += '<div class="areas-list-scroll" id="areas-list-scroll">';
   if (!items.length) {
     var empty = all.length ? 'No areas match the current search/filter.' : 'No areas yet.';
-    html += '<div class="initiative-empty area-empty">' + esc(empty) + '</div>';
+    html += '<div class="initiative-empty area-empty ui-state ui-state--empty">' + esc(empty) + '</div>';
   } else {
     items.forEach(function(item) { html += _renderAreaCard(item); });
   }
@@ -1412,7 +1412,7 @@ function _renderAreaLinkRows(detail, linkType) {
   else if (linkType === 'decision') ids = ((detail && detail.linked_decisions && (detail.linked_decisions.ids || detail.linked_decisions.items)) || []).map(function(item) { return typeof item === 'string' ? item : (item.id || ''); });
   else if (linkType === 'initiative') ids = (links.initiatives || []).slice();
   var html = '<div class="initiative-links-list">';
-  if (!ids.length) html += '<div class="initiative-empty compact">No linked ' + esc(linkType === 'initiative' ? 'initiatives' : linkType + 's') + '.</div>';
+  if (!ids.length) html += '<div class="initiative-empty compact ui-state ui-state--empty ui-state--compact">No linked ' + esc(linkType === 'initiative' ? 'initiatives' : linkType + 's') + '.</div>';
   ids.forEach(function(id) {
     id = String(id || '');
     var title = id;
@@ -1434,7 +1434,7 @@ function _renderAreaLinkRows(detail, linkType) {
   });
   var hidden = (detail && detail.hidden_link_counts) || {};
   var hiddenCount = hidden[linkType + 's'] || 0;
-  if (hiddenCount) html += '<div class="initiative-empty compact">' + esc(hiddenCount + ' hidden by scope.') + '</div>';
+  if (hiddenCount) html += '<div class="initiative-empty compact ui-state ui-state--note ui-state--compact">' + esc(hiddenCount + ' hidden by scope.') + '</div>';
   html += '</div><div class="initiative-link-add">';
   html += '<input id="area-link-' + esc(linkType) + '-input" placeholder="Existing ' + esc(linkType) + ' id or slug" autocomplete="off" onkeydown="if(event.key===\'Enter\')areasLinkTarget(\'' + esc(linkType) + '\')">';
   html += '<button type="button" onclick="areasLinkTarget(\'' + esc(linkType) + '\')">Link</button>';
@@ -1445,7 +1445,7 @@ function _renderAreaLinkRows(detail, linkType) {
 function _renderAreaRelatedAreas(detail) {
   var links = (detail && detail.links && detail.links.areas) || [];
   var html = '<div class="initiative-links-list">';
-  if (!links.length) html += '<div class="initiative-empty compact">No related areas.</div>';
+  if (!links.length) html += '<div class="initiative-empty compact ui-state ui-state--empty ui-state--compact">No related areas.</div>';
   links.forEach(function(link) {
     var id = String((link && (link.area_id || link.target_id || link.id)) || '');
     var relation = String((link && link.relation) || 'related');
@@ -1490,7 +1490,7 @@ function _renderAreaNoteEditor(prefix, draft, submitLabel, submitCall, cancelCal
 function _renderAreaNotes(detail) {
   var notes = (detail && detail.notes) || [];
   var html = '<div class="area-notes-list">';
-  if (!notes.length) html += '<div class="initiative-empty compact">No active notes.</div>';
+  if (!notes.length) html += '<div class="initiative-empty compact ui-state ui-state--empty ui-state--compact">No active notes.</div>';
   notes.forEach(function(note) {
     var noteId = String(note.id || '');
     var editing = noteId && String(_areasEditingNoteId || '') === noteId;
@@ -1519,7 +1519,7 @@ function _renderAreaNotes(detail) {
 
 function _renderAreaDetail() {
   if (!_areasSelectedId) {
-    return '<aside class="initiative-detail area-detail empty"><div class="initiative-empty-detail">Select an area to inspect its brief, links, and typed notes.</div></aside>';
+    return '<aside class="initiative-detail area-detail empty"><div class="initiative-empty-detail ui-state ui-state--empty ui-state--fill">Select an area to inspect its brief, links, and typed notes.</div></aside>';
   }
   var loading = _areasDetailLoadingId === _areasSelectedId && !_areasDetail;
   var detail = _areaDetailBase();
@@ -1529,7 +1529,7 @@ function _renderAreaDetail() {
   html += '<div class="initiative-detail-id">' + esc(_areasSelectedId) + '</div></div>';
   html += '<button type="button" class="initiative-close" onclick="areasCloseDetail()" title="Close">×</button>';
   html += '</div>';
-  if (loading) html += '<div class="initiative-loading">Loading area detail...</div>';
+  if (loading) html += '<div class="initiative-loading ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading area detail…</div>';
   html += '<div class="initiative-form area-form">';
   html += _areaInput('title', 'Title', detail.title || '');
   html += '<div class="initiative-form-grid">';
@@ -1555,9 +1555,9 @@ function _renderAreaDetail() {
 function _renderAreasWorkspace(group) {
   areasEnsureLoaded();
   var html = '';
-  if (_areasLastError) html += '<div class="initiative-error">' + esc(_areasLastError) + '</div>';
+  if (_areasLastError) html += '<div class="initiative-error ui-state ui-state--error ui-state--compact" role="alert">' + esc(_areasLastError) + ' Refresh Planning to try again.</div>';
   if (_areasLoadingGroup === group && _areasLoadedGroup !== group) {
-    html += '<div class="initiative-loading">Loading areas...</div>';
+    html += '<div class="initiative-loading ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading areas…</div>';
   }
   html += '<div class="areas-workspace" id="areas-workspace">';
   html += _renderAreasList(group);
@@ -1631,9 +1631,9 @@ function renderInitiativesPanel() {
     html += _renderAreasWorkspace(group);
   } else {
     var buckets = _initiativesByStatus(group);
-    if (_initiativesLastError) html += '<div class="initiative-error">' + esc(_initiativesLastError) + '</div>';
+    if (_initiativesLastError) html += '<div class="initiative-error ui-state ui-state--error ui-state--compact" role="alert">' + esc(_initiativesLastError) + ' Refresh Planning to try again.</div>';
     if (_initiativesLoadingGroup === group && _initiativesLoadedGroup !== group) {
-      html += '<div class="initiative-loading">Loading initiatives...</div>';
+      html += '<div class="initiative-loading ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading initiatives…</div>';
     }
     html += '<div class="initiatives-workspace" id="initiatives-workspace">';
     html += _renderInitiativesRoadmap(group, buckets);

@@ -389,17 +389,17 @@ function _boardLanePoolTasks(lane, model) {
 }
 
 function _renderBoardMessageState(state, noteOnly) {
-  var cls = 'board-empty';
-  if (noteOnly) cls += ' board-empty-note';
+  var cls = 'board-empty ui-state ui-state--empty';
+  if (noteOnly) cls += ' board-empty-note ui-state--note ui-state--compact';
   var html = '<div class="' + cls + '">';
-  html += '<div class="board-empty-title">' + esc(state.title) + '</div>';
+  html += '<div class="board-empty-title ui-state__title">' + esc(state.title) + '</div>';
   if (state.body) {
-    html += '<div class="board-empty-body">' + esc(state.body) + '</div>';
+    html += '<div class="board-empty-body ui-state__message">' + esc(state.body) + '</div>';
   }
   if (state.actions && state.actions.length) {
-    html += '<div class="board-empty-actions">';
+    html += '<div class="board-empty-actions ui-state__actions">';
     for (var i = 0; i < state.actions.length; i++) {
-      html += '<button class="board-empty-action" onclick="' + state.actions[i].onclick + '">'
+      html += '<button class="board-empty-action btn-secondary btn-sm" onclick="' + state.actions[i].onclick + '">'
         + esc(state.actions[i].label) + '</button>';
     }
     html += '</div>';

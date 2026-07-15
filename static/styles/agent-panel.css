@@ -632,7 +632,6 @@ button.agent-panel-hierarchy-crumb:focus-visible {
 }
 .agent-panel-event-empty {
   font-size: 10px;
-  color: var(--text-dim);
 }
 .agent-panel-event-list {
   display: flex;
@@ -1888,9 +1887,6 @@ button.agent-panel-hierarchy-crumb:focus-visible {
 
 .agent-panel-empty {
   font-size: 10px;
-  color: var(--text-dim);
-  text-align: center;
-  padding: 20px;
 }
 .agent-panel-create-row {
   display: flex;
@@ -1953,9 +1949,6 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   padding: 0;
 }
 .th-empty {
-  padding: 24px 12px;
-  color: var(--text-dim);
-  text-align: center;
   font-size: 11px;
 }
 .th-task { border-bottom: 1px solid var(--border); }

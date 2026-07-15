@@ -1003,21 +1003,8 @@
 }
 .help-state {
   margin: 8px;
-  padding: 9px 10px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  color: var(--text-dim);
-  background: rgba(255,255,255,.03);
   font-size: 12px;
-  line-height: 1.4;
 }
-.help-error {
-  border-color: var(--danger, #9f3a3a);
-  color: var(--danger-fg, #ffb4b4);
-  background: rgba(160,48,48,.12);
-}
-.help-loading { color: var(--accent); }
-.help-empty,
 .help-muted { color: var(--text-dim); }
 .help-truncated { margin-left: 0; margin-right: 0; }
 .help-section-index { display: grid; gap: 6px; margin-top: 7px; }
@@ -1260,18 +1247,7 @@
 .mc-loading,
 .mc-empty-state {
   margin: 10px 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--muted);
-  background: rgba(255, 255, 255, 0.03);
   font-size: 12px;
-  line-height: 1.4;
-}
-.mc-error {
-  border-color: var(--danger, #9f3a3a);
-  color: var(--danger-fg, #ffb4b4);
-  background: rgba(160, 48, 48, 0.12);
 }
 .mc-workspace {
   width: 100%;
@@ -1444,9 +1420,7 @@
 .mc-card-links { margin-top: 7px; }
 .mc-deeplink { border-style: dashed; }
 .mc-deeplink-empty,
-.mc-empty-inline,
 .mc-muted { color: var(--muted); font-size: 11px; }
-.mc-empty-inline { padding: 10px; }
 .mc-rail-title {
   color: var(--fg);
   font-size: 12px;
@@ -1554,14 +1528,9 @@
 .initiative-total { white-space: nowrap; }
 .initiative-error {
   margin: 8px 12px 0;
-  padding: 7px 9px;
-  border: 1px solid var(--danger, #9f3a3a);
-  color: var(--danger-fg, #ffb4b4);
-  background: rgba(160, 48, 48, 0.12);
-  border-radius: 6px;
   font-size: 11px;
 }
-.initiative-loading { padding: 9px 12px; color: var(--muted); font-size: 11px; }
+.initiative-loading { margin: 0; }
 .initiative-status {
   margin: 7px 0 9px;
   padding: 7px 9px;
@@ -1666,8 +1635,7 @@
 }
 .initiative-card-summary { margin-top: 5px; color: var(--muted); font-size: 11px; line-height: 1.35; }
 .initiative-card-linked { margin-top: 7px; color: var(--muted); font-size: 10px; }
-.initiative-empty { color: var(--muted); font-size: 11px; padding: 9px; border: 1px dashed var(--border); border-radius: 7px; }
-.initiative-empty.compact { padding: 7px; }
+.initiative-empty { font-size: 11px; }
 
 .initiative-secondary-wrap {
   border: 1px solid var(--border);
@@ -1689,7 +1657,7 @@
   padding: 10px;
 }
 .initiative-detail.empty { display: flex; align-items: center; justify-content: center; }
-.initiative-empty-detail { color: var(--muted); text-align: center; max-width: 240px; line-height: 1.4; }
+.initiative-empty-detail { max-width: 240px; }
 .initiative-detail-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; margin-bottom: 9px; }
 .initiative-detail-kicker { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
 .initiative-detail h2 { margin: 2px 0 2px; font-size: 14px; line-height: 1.25; }
@@ -2026,13 +1994,8 @@
 .thinking-total { white-space: nowrap; }
 .thinking-error {
   margin: 8px 12px 0;
-  padding: 7px 9px;
-  border: 1px solid var(--danger, #9f3a3a);
-  color: var(--danger-fg, #ffb4b4);
-  background: rgba(160, 48, 48, 0.12);
-  border-radius: 6px;
 }
-.thinking-loading { padding: 9px 10px; color: var(--muted); }
+.thinking-loading { margin: 0; }
 .thinking-tabs {
   flex: 0 0 auto;
   display: flex;
@@ -2104,14 +2067,7 @@
 .thinking-list-title { display: block; font-weight: 700; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .thinking-list-body { display: block; margin-top: 5px; color: var(--muted); font-size: 11px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .thinking-list-meta { display: block; margin-top: 6px; color: var(--muted); font-size: 10px; }
-.thinking-empty {
-  color: var(--muted);
-  font-size: 11px;
-  padding: 9px;
-  border: 1px dashed var(--border);
-  border-radius: 7px;
-}
-.thinking-empty.compact { padding: 7px; }
+.thinking-empty { font-size: 11px; }
 .thinking-editor,
 .thinking-map-detail {
   overflow: auto;
@@ -2123,10 +2079,7 @@
   justify-content: center;
 }
 .thinking-empty-detail {
-  color: var(--muted);
-  text-align: center;
   max-width: 360px;
-  line-height: 1.45;
 }
 .thinking-empty-detail.padded { margin: 24px auto; }
 .thinking-detail-head {

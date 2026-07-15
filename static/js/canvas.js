@@ -188,10 +188,10 @@ function _torqueRenderAgentCanvas(opts) {
   const groups = (state && state.groups) || {};
   let canvasHtml;
   if (Object.keys(groups).length === 0) {
-    canvasHtml = '<div class="empty">'
-      + '<div class="empty-icon">⬢</div>'
-      + 'No groups yet.<br>Create one to get started.'
-      + '<br><button type="button" class="empty-action" onclick="openAddGroup()">+ New group</button>'
+    canvasHtml = '<div class="empty ui-state ui-state--empty ui-state--fill">'
+      + '<div class="ui-state__title">No groups yet</div>'
+      + '<div class="ui-state__message">Create a group to start organizing agents and tasks.</div>'
+      + '<div class="ui-state__actions"><button type="button" class="btn-secondary btn-sm" onclick="openAddGroup()">+ New group</button></div>'
       + '</div>';
   } else {
     const model = _canvasBuildTrees(groupName);

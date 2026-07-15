@@ -869,7 +869,7 @@ function _agentPanelArchitectDecisionsHtml(agent) {
     var emptyText = counts.archived > 0 && !showArchived
       ? ('No active decisions. ' + counts.archived + ' archived hidden.')
       : 'No decisions yet.';
-    html += '<div class="agent-panel-event-empty">' + _agentPanelEsc(emptyText) + '</div>';
+    html += '<div class="agent-panel-event-empty ui-state ui-state--empty ui-state--compact">' + _agentPanelEsc(emptyText) + '</div>';
     html += '</div>';
     return html;
   }
@@ -906,7 +906,7 @@ function _agentPanelMessagesHtml(agent, messages, note, options) {
   html += '</div>';
   if (options.composeHtml) html += options.composeHtml;
   if (!messages.length) {
-    html += '<div class="agent-panel-event-empty">No messages yet.</div>';
+    html += '<div class="agent-panel-event-empty ui-state ui-state--empty ui-state--compact">No messages yet.</div>';
     html += '</div>';
     return html;
   }
@@ -1029,12 +1029,12 @@ function _agentPanelArchitectJournalHtml(agent) {
   }
 
   if (loading && !entries.length) {
-    html += '<div class="agent-panel-empty">Loading architect journal…</div>';
+    html += '<div class="agent-panel-empty ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading architect journal…</div>';
     html += '</div>';
     return html;
   }
   if (!entries.length) {
-    html += '<div class="agent-panel-empty">No journal entries yet.</div>';
+    html += '<div class="agent-panel-empty ui-state ui-state--empty ui-state--compact">No journal entries yet.</div>';
     html += '</div>';
     return html;
   }

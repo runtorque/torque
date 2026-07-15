@@ -519,7 +519,7 @@ function renderDiffView() {
     html += '<div class="diff-view-header ui-modal__header ui-modal__header--bordered">';
     html += '<div id="diff-view-title" class="diff-view-title ui-modal__title">Loading diff\u2026</div>';
     html += '</div>';
-    html += '<div class="diff-view-content ui-modal__body ui-modal__body--flush"><div class="diff-empty">Loading worktree diff\u2026</div></div>';
+    html += '<div class="diff-view-content ui-modal__body ui-modal__body--flush"><div class="diff-empty ui-state ui-state--loading ui-state--fill" role="status" aria-live="polite">Loading worktree diff\u2026</div></div>';
     html += _renderMergeBanner();
     html += '<div class="diff-footer ui-modal__footer">';
     html += '<button class="btn-cancel" onclick="hideDiffView()">Cancel</button>';
@@ -533,7 +533,7 @@ function renderDiffView() {
     html += '<div class="diff-view-header ui-modal__header ui-modal__header--bordered">';
     html += '<div id="diff-view-title" class="diff-view-title ui-modal__title">Unable to load diff</div>';
     html += '</div>';
-    html += '<div class="diff-view-content ui-modal__body ui-modal__body--flush"><div class="diff-empty">' + esc(_diffViewData.error) + '</div></div>';
+    html += '<div class="diff-view-content ui-modal__body ui-modal__body--flush"><div class="diff-empty ui-state ui-state--error ui-state--fill" role="alert">' + esc(_diffViewData.error) + ' Close the viewer and try again.</div></div>';
     html += '<div class="diff-footer ui-modal__footer">';
     html += '<button class="btn-cancel" onclick="hideDiffView()">Cancel</button>';
     html += '</div>';
@@ -557,7 +557,7 @@ function renderDiffView() {
   html += _renderBoundarySummary();
   html += _renderDiffArtifacts();
   if (!files.length) {
-    html += '<div class="diff-empty">No changes to review.</div>';
+    html += '<div class="diff-empty ui-state ui-state--empty ui-state--fill">No changes to review.</div>';
   } else {
     for (var i = 0; i < files.length; i++) {
       html += _renderDiffFile(files[i]);

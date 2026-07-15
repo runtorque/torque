@@ -234,40 +234,7 @@
   pointer-events: none;
 }
 .terminal-empty {
-  height: 100%;
   min-height: 240px;
-  border: 1px dashed rgba(255,255,255,.12);
-  border-radius: 14px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  gap: 10px;
-  text-align: center;
-  color: var(--text-dim);
-  padding: 18px;
-}
-.terminal-empty-title {
-  font-size: 14px;
-  color: var(--text);
-  font-weight: 700;
-}
-.terminal-empty-body {
-  max-width: 440px;
-  line-height: 1.5;
-}
-.terminal-empty-meta {
-  font-size: 10px;
-  color: var(--text-dim);
-}
-.terminal-empty-btn {
-  padding: 7px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-}
-.terminal-empty-btn:hover {
-  border-color: var(--accent);
-  color: var(--text);
 }
 .terminal-direct-messages-slot {
   display: none;
@@ -997,8 +964,6 @@ body.runtime-embedded .terminal-statusbar.terminal-drop-target {
 }
 body.runtime-embedded .terminal-empty {
   min-height: 280px;
-  border-radius: 16px;
-  background: rgba(13,17,23,.28);
 }
 
 /* ------------------------------------------------------------------ */

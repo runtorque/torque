@@ -548,11 +548,11 @@ function _helpRenderTopicBrowser() {
   html += '<section class="help-browser-section">'
     + '<div class="help-section-heading">Topics</div>';
   if (_helpState.listStatus === 'loading') {
-    html += '<div class="help-state help-loading">Loading Help topics…</div>';
+    html += '<div class="help-state help-loading ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading Help topics…</div>';
   } else if (_helpState.listStatus === 'error') {
-    html += '<div class="help-state help-error">' + _helpEsc(_helpState.listError || 'Failed to load Help topics.') + '</div>';
+    html += '<div class="help-state help-error ui-state ui-state--error ui-state--compact" role="alert">' + _helpEsc(_helpState.listError || 'Failed to load Help topics. Refresh Help to try again.') + '</div>';
   } else if (!_helpState.topics.length) {
-    html += '<div class="help-state help-empty">No maintained Torque Help topics matched this audience filter.</div>';
+    html += '<div class="help-state help-empty ui-state ui-state--empty ui-state--compact">No maintained Torque Help topics matched this audience filter.</div>';
   } else {
     html += '<div class="help-topic-list" id="help-topic-list-scroll">';
     for (var i = 0; i < _helpState.topics.length; i++) {
@@ -565,15 +565,15 @@ function _helpRenderTopicBrowser() {
   html += '<section class="help-browser-section help-search-results">'
     + '<div class="help-section-heading">Search results</div>';
   if (_helpState.searchStatus === 'idle') {
-    html += '<div class="help-state help-empty">Search results appear here in the order returned by Help.</div>';
+    html += '<div class="help-state help-empty ui-state ui-state--empty ui-state--compact">Search results appear here in the order returned by Help.</div>';
   } else if (_helpState.searchStatus === 'loading') {
-    html += '<div class="help-state help-loading">Searching maintained docs…</div>';
+    html += '<div class="help-state help-loading ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Searching maintained docs…</div>';
   } else if (_helpState.searchStatus === 'error') {
-    html += '<div class="help-state help-error">' + _helpEsc(_helpState.searchError || 'Help search failed.') + '</div>';
+    html += '<div class="help-state help-error ui-state ui-state--error ui-state--compact" role="alert">' + _helpEsc(_helpState.searchError || 'Help search failed. Adjust the query or try again.') + '</div>';
   } else if (_helpState.searchStatus === 'no_query') {
-    html += '<div class="help-state help-empty">' + _helpEsc(_helpState.searchMessage || 'Enter search terms to search maintained Torque Help docs.') + '</div>';
+    html += '<div class="help-state help-empty ui-state ui-state--empty ui-state--compact">' + _helpEsc(_helpState.searchMessage || 'Enter search terms to search maintained Torque Help docs.') + '</div>';
   } else if (!_helpState.searchResults.length) {
-    html += '<div class="help-state help-empty">' + _helpEsc(_helpState.searchMessage || 'No maintained Torque Help docs matched. Try broader terms or inspect topics.') + '</div>';
+    html += '<div class="help-state help-empty ui-state ui-state--empty ui-state--compact">' + _helpEsc(_helpState.searchMessage || 'No maintained Torque Help docs matched. Try broader terms or inspect topics.') + '</div>';
   } else {
     html += '<div class="help-search-meta">' + _helpEsc(_helpState.searchResults.length) + ' result(s) for “' + _helpEsc(_helpState.searchQuery) + '”</div>';
     html += '<div class="help-topic-list" id="help-search-results-scroll">';
@@ -708,24 +708,24 @@ function _helpRenderDetail(opts) {
   var anchorId = opts.browser ? 'help-browser-selected-detail-anchor' : 'help-selected-detail-anchor';
   var html = '<div class="help-detail" id="' + detailId + '">';
   if (!_helpState.selectedRef) {
-    html += '<div class="help-state help-empty">Select a Help topic or search result to read maintained docs.</div>';
+    html += '<div class="help-state help-empty ui-state ui-state--empty ui-state--compact">Select a Help topic or search result to read maintained docs.</div>';
     return html + '</div>';
   }
   if (_helpState.detailStatus === 'loading') {
-    html += '<div class="help-state help-loading">Loading Help topic…</div>';
+    html += '<div class="help-state help-loading ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading Help topic…</div>';
     return html + '</div>';
   }
   if (_helpState.detailStatus === 'error') {
-    html += '<div class="help-state help-error">' + _helpEsc(_helpState.detailError || 'Failed to load Help topic.') + '</div>';
+    html += '<div class="help-state help-error ui-state ui-state--error ui-state--compact" role="alert">' + _helpEsc(_helpState.detailError || 'Failed to load Help topic. Select it again to retry.') + '</div>';
     return html + '</div>';
   }
   if (_helpState.detailStatus === 'not_found') {
-    html += '<div class="help-state help-empty">' + _helpEsc(_helpState.detailError || 'No Torque Help topic matched this reference.') + '</div>';
+    html += '<div class="help-state help-empty ui-state ui-state--empty ui-state--compact">' + _helpEsc(_helpState.detailError || 'No Torque Help topic matched this reference.') + '</div>';
     return html + '</div>';
   }
   var topic = _helpState.detail || null;
   if (!topic) {
-    html += '<div class="help-state help-empty">Select a Help topic or search result to read maintained docs.</div>';
+    html += '<div class="help-state help-empty ui-state ui-state--empty ui-state--compact">Select a Help topic or search result to read maintained docs.</div>';
     return html + '</div>';
   }
   html += '<article class="help-topic-detail" id="' + anchorId + '" tabindex="-1">'
@@ -738,7 +738,7 @@ function _helpRenderDetail(opts) {
     html += '<p class="help-detail-summary">' + _helpEsc(_helpTopicSummary(topic)) + '</p>';
   }
   if (topic.truncated) {
-    html += '<div class="help-state help-empty help-truncated">Showing a bounded excerpt from this source. Search or open a section for narrower context.</div>';
+    html += '<div class="help-state help-empty help-truncated ui-state ui-state--note ui-state--compact">Showing a bounded excerpt from this source. Search or open a section for narrower context.</div>';
   }
   html += '<section class="help-detail-block">'
     + '<div class="help-detail-block-title">Excerpt</div>'
@@ -760,13 +760,13 @@ function _helpRenderDetail(opts) {
 function _helpRenderQueryResultBody() {
   var body = '';
   if (_helpState.queryStatus === 'idle') {
-    body += '<div class="help-state help-empty">Ask Help returns extractive answers with visible sources.</div>';
+    body += '<div class="help-state help-empty ui-state ui-state--empty ui-state--compact">Ask Help returns extractive answers with visible sources.</div>';
   } else if (_helpState.queryStatus === 'loading') {
-    body += '<div class="help-state help-loading">Looking up maintained docs…</div>';
+    body += '<div class="help-state help-loading ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Looking up maintained docs…</div>';
   } else if (_helpState.queryStatus === 'error') {
-    body += '<div class="help-state help-error">' + _helpEsc(_helpState.queryError || 'Help query failed.') + '</div>';
+    body += '<div class="help-state help-error ui-state ui-state--error ui-state--compact" role="alert">' + _helpEsc(_helpState.queryError || 'Help query failed. Adjust the question or try again.') + '</div>';
   } else if (_helpState.queryStatus === 'no_query') {
-    body += '<div class="help-state help-empty">' + _helpEsc(_helpState.queryMessage || 'Ask a question to run Help lookup.') + '</div>';
+    body += '<div class="help-state help-empty ui-state ui-state--empty ui-state--compact">' + _helpEsc(_helpState.queryMessage || 'Ask a question to run Help lookup.') + '</div>';
   } else {
     var result = _helpState.queryResult || {};
     var noAnswer = _helpState.queryStatus === 'no_answer';
@@ -786,7 +786,7 @@ function _helpRenderQueryResultBody() {
       }
       body += '</div>';
     } else if (noAnswer) {
-      body += '<div class="help-state help-empty">Try broader search terms or inspect the topic browser.</div>';
+      body += '<div class="help-state help-empty ui-state ui-state--empty ui-state--compact">Try broader search terms or inspect the topic browser.</div>';
     }
     body += '</div>';
   }

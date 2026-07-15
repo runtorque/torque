@@ -1071,9 +1071,9 @@ function _renderEmbeddedTerminalStagePlaceholder(stage, html) {
   if (stage._torqueLastHtml === html && hasPlaceholder) return;
   _clearEmbeddedTerminalStagePlaceholders(stage);
   const placeholder = document.createElement('div');
-  placeholder.className = 'terminal-empty';
+  placeholder.className = 'terminal-empty ui-state ui-state--empty ui-state--fill';
   if (placeholder.classList && typeof placeholder.classList.add === 'function') {
-    placeholder.classList.add('terminal-empty');
+    placeholder.classList.add('terminal-empty', 'ui-state', 'ui-state--empty', 'ui-state--fill');
   }
   placeholder.innerHTML = html;
   if (typeof stage.appendChild === 'function') stage.appendChild(placeholder);

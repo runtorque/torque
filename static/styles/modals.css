@@ -512,8 +512,7 @@ body.runtime-embedded #modal-group .modal-summary {
   background: var(--bg-raised);
   box-shadow: var(--shadow-float);
 }
-.settings-search-result,
-.settings-search-empty {
+.settings-search-result {
   display: block;
   width: 100%;
   padding: 9px 10px;
@@ -523,7 +522,6 @@ body.runtime-embedded #modal-group .modal-summary {
 .settings-search-result:hover { background: var(--bg-hover); }
 .settings-search-result strong { display: block; color: var(--text); font-size: 10px; }
 .settings-search-result small { color: var(--text-faint); font-size: 9px; }
-.settings-search-empty { color: var(--text-dim); }
 .settings-pane-intro { margin-bottom: 14px; }
 .settings-pane-intro h3 { font-size: 14px; }
 .settings-pane-intro p { margin-top: 3px; color: var(--text-dim); font-size: 10px; }
@@ -595,13 +593,8 @@ body.runtime-embedded #modal-group .modal-summary {
 }
 .settings-map-remove:hover { color: var(--red); background: color-mix(in srgb, var(--red) 11%, transparent); }
 .settings-map-empty {
-  padding: 10px;
-  border: 1px dashed var(--border);
-  border-radius: var(--radius);
-  color: var(--text-faint);
-  text-align: center;
+  margin: 0;
 }
-.settings-map-error { color: var(--red); border-color: color-mix(in srgb, var(--red) 46%, var(--border)); }
 .settings-map-add { padding: 5px 8px; }
 .settings-raw-config {
   margin-top: 8px;
@@ -1437,8 +1430,7 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   padding-right: 4px;
 }
 .hist-empty {
-  color: var(--text-dim); font-size: 11px;
-  text-align: center; padding: 24px 8px;
+  font-size: 11px;
 }
 .hist-row {
   display: flex; align-items: flex-start; gap: 8px;

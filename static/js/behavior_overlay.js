@@ -621,7 +621,7 @@ function _behaviorOverlayRenderedDiff(diffPayload) {
 function behaviorOverlayRenderUnifiedDiff(diffText) {
   diffText = String(diffText || '');
   if (!diffText.trim()) {
-    return '<div class="diff-empty behavior-overlay-diff-empty">No behavior text changes.</div>';
+    return '<div class="diff-empty behavior-overlay-diff-empty ui-state ui-state--empty ui-state--compact">No behavior text changes.</div>';
   }
   var lines = diffText.replace(/\n$/, '').split('\n');
   var html = '<div class="behavior-overlay-diff diff-hunk-body" data-behavior-overlay-diff="1">';
@@ -722,7 +722,7 @@ function _behaviorOverlayProposalsSection(agent, proposals, title, opts) {
     + _behaviorOverlayEsc(title || 'Open proposals') + '</span><span class="detail-task-status">'
     + _behaviorOverlayEsc(String(proposals.length)) + '</span></div>';
   if (!proposals.length) {
-    html += '<div class="agent-panel-empty">No open behavior proposals.</div>';
+    html += '<div class="agent-panel-empty ui-state ui-state--empty ui-state--compact">No open behavior proposals.</div>';
   } else {
     for (var i = 0; i < proposals.length; i++) {
       html += _behaviorOverlayProposalCard(proposals[i], agent, opts);
@@ -740,9 +740,9 @@ function _behaviorOverlayTimeline(agent, targetAgentId, viewerId, viewerKind, di
   html += '<div class="detail-section-card-head"><span class="detail-section-primary">Version timeline</span>';
   html += '<span class="behavior-overlay-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + _behaviorOverlayEsc(String(versions.length)) + '</span></div>';
   if (_behaviorOverlayVersionsLoadingByAgent[targetAgentId] && !versions.length) {
-    html += '<div class="agent-panel-empty">Loading versions…</div>';
+    html += '<div class="agent-panel-empty ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Loading versions…</div>';
   } else if (!versions.length) {
-    html += '<div class="agent-panel-empty">No versions yet.</div>';
+    html += '<div class="agent-panel-empty ui-state ui-state--empty ui-state--compact">No versions yet.</div>';
   } else {
     html += '<div class="behavior-overlay-timeline">';
     for (var i = 0; i < versions.length; i++) {
@@ -930,13 +930,13 @@ function _behaviorOverlayRolePaneForAgent(group, roleKind) {
   roleKind = _behaviorOverlayNormalizeRoleKind(roleKind);
   group = String(group || '').trim();
   if (!roleKind || !group) {
-    return '<div class="agent-panel-empty">Role behavior overlays require a group and role kind.</div>';
+    return '<div class="agent-panel-empty ui-state ui-state--note ui-state--compact">Role behavior overlays require a group and role kind.</div>';
   }
   var title = _behaviorOverlayRoleScopeTitle(roleKind);
   var target = _behaviorOverlayRoleTarget(group, roleKind);
   var targetKey = target ? target.id : '';
   if (!target || !targetKey) {
-    return '<div class="agent-panel-empty">Role behavior overlays require a group and role kind.</div>';
+    return '<div class="agent-panel-empty ui-state ui-state--note ui-state--compact">Role behavior overlays require a group and role kind.</div>';
   }
   _behaviorOverlayRequestRead(targetKey, true, false);
   _behaviorOverlayRequestVersions(targetKey, false);
@@ -975,9 +975,9 @@ function _behaviorOverlayRolePaneForAgent(group, roleKind) {
   html += '</div>';
   html += '<label>Current inherited role text</label>';
   if (loading) {
-    html += '<div class="agent-panel-empty">Refreshing inherited role overlay text…</div>';
+    html += '<div class="agent-panel-empty ui-state ui-state--loading ui-state--compact" role="status" aria-live="polite">Refreshing inherited role overlay text…</div>';
   } else if (!text) {
-    html += '<div class="agent-panel-empty">No inherited role overlay text is active.</div>';
+    html += '<div class="agent-panel-empty ui-state ui-state--empty ui-state--compact">No inherited role overlay text is active.</div>';
   } else {
     html += '<pre class="behavior-overlay-readonly-text">' + _behaviorOverlayEsc(text) + '</pre>';
   }
@@ -1097,7 +1097,7 @@ function _behaviorOverlayHiredGovernance(agent) {
   html += '<div class="detail-section-card-head"><span class="detail-section-primary">Hired engineer governance</span>';
   html += '<span class="behavior-overlay-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + _behaviorOverlayEsc(String(hired.length)) + '</span></div>';
   if (!hired.length) {
-    html += '<div class="agent-panel-empty">No hired engineers for this architect.</div></section>';
+    html += '<div class="agent-panel-empty ui-state ui-state--empty ui-state--compact">No hired engineers for this architect.</div></section>';
     return html;
   }
   html += '<label>Target engineer</label><select class="behavior-overlay-target-select" onchange="behaviorOverlayGovernanceSelect('
@@ -1127,10 +1127,10 @@ function _behaviorOverlayHiredGovernance(agent) {
 
 function renderBehaviorOverlayTab(agent) {
   behaviorOverlayNormalizeState();
-  if (!agent) return '<div class="agent-panel-empty">Select an agent to inspect behavior overlays.</div>';
+  if (!agent) return '<div class="agent-panel-empty ui-state ui-state--empty ui-state--compact">Select an agent to inspect behavior overlays.</div>';
   var kind = _behaviorOverlayKind(agent);
   if (kind !== 'engineer' && kind !== 'architect') {
-    return '<div class="agent-panel-empty">Behavior overlays are supported for engineers and architects.</div>';
+    return '<div class="agent-panel-empty ui-state ui-state--note ui-state--compact">Behavior overlays are supported for engineers and architects.</div>';
   }
   var activeInner = _behaviorOverlayInnerTab(agent);
   var html = '<div class="behavior-overlay-tab" data-agent-panel-anchor="behavior-overlay-root" data-agent-panel-behavior-view="'
@@ -1166,7 +1166,7 @@ function _behaviorOverlayRolePaneHtml(group, roleKind, opts) {
   opts = opts || {};
   var target = _behaviorOverlayRoleTarget(group, roleKind);
   if (!target) {
-    return '<div class="agent-panel-empty">Role behavior overlays require a group and role kind.</div>';
+    return '<div class="agent-panel-empty ui-state ui-state--note ui-state--compact">Role behavior overlays require a group and role kind.</div>';
   }
   var targetKey = target.id;
   _behaviorOverlayRequestRead(targetKey, true, false);

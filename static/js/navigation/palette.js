@@ -90,7 +90,7 @@ function _navigationPaletteRender() {
   var root = document.getElementById('navigation-palette-results');
   if (!root) return;
   if (!_navigationPaletteFiltered.length) {
-    root.innerHTML = '<div class="navigation-palette-empty">No matching groups, agents, or panels.</div>';
+    root.innerHTML = '<div class="navigation-palette-empty ui-state ui-state--empty ui-state--compact">No matching groups, agents, or panels.</div>';
     return;
   }
   if (_navigationPaletteIndex >= _navigationPaletteFiltered.length) _navigationPaletteIndex = 0;

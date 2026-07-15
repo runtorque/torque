@@ -566,7 +566,7 @@ function _renderKeybindingList() {
     });
   }
   if (!actions.length) {
-    html += '<div class="settings-list-empty">No shortcuts match “' + esc(_glsKeybindingFilter) + '”.</div>';
+    html += '<div class="settings-list-empty ui-state ui-state--empty ui-state--compact">No shortcuts match “' + esc(_glsKeybindingFilter) + '”.</div>';
   }
   for (var ai = 0; ai < actions.length; ai++) {
     var action = actions[ai];
