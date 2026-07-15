@@ -651,7 +651,11 @@ function terminalDirectMessageContextMenu(event, agentId, messageId) {
   const x = (event && Number.isFinite(Number(event.clientX))) ? Number(event.clientX) : 0;
   const viewportWidth = (typeof window !== 'undefined' && window) ? Number(window.innerWidth || 0) : 0;
   menu.style.left = Math.max(0, viewportWidth ? Math.min(x, viewportWidth - 140) : x) + 'px';
-  if (menu.classList) menu.classList.add('open');
+  if (typeof openContextMenuSurface === 'function') {
+    openContextMenuSurface(menu, { invoker: event && event.currentTarget });
+  } else if (menu.classList) {
+    menu.classList.add('open');
+  }
   _terminalDirectMessageAdjustContextMenu(menu);
   return false;
 }

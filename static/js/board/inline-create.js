@@ -179,7 +179,8 @@ function boardAddTaskInput(el) {
   _boardLabelDropdownIdx = -1;
   var html = '';
   for (var i = 0; i < filtered.length; i++) {
-    html += '<div class="deps-option" onmousedown="boardPickInlineLabel(\'' + esc(filtered[i]) + '\')">' + esc(filtered[i]) + '</div>';
+    html += '<div class="deps-option ui-menu-item" role="option" aria-selected="false"'
+      + ' onmousedown="boardPickInlineLabel(\'' + esc(filtered[i]) + '\')">' + esc(filtered[i]) + '</div>';
   }
   dropdown.innerHTML = html;
   dropdown.style.display = '';
@@ -293,14 +294,67 @@ function boardAddTaskKeydown(e) {
 
 function _boardHighlightLabelOpt(opts) {
   for (var i = 0; i < opts.length; i++) {
-    opts[i].classList.toggle('active', i === _boardLabelDropdownIdx);
+    var selected = i === _boardLabelDropdownIdx;
+    opts[i].classList.toggle('active', selected);
+    opts[i].setAttribute('aria-selected', selected ? 'true' : 'false');
   }
+}
+
+function _boardInlineMenuFocusFirst(listEl) {
+  if (!listEl) return;
+  var focusFirst = function() {
+    var first = listEl.querySelector && listEl.querySelector('.ui-menu-item:not(:disabled)');
+    if (first && typeof first.focus === 'function') first.focus();
+  };
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(focusFirst);
+  else focusFirst();
+}
+
+function _boardCloseInlineDropdown(kind, focusTrigger) {
+  var wrapId = kind === 'lane' ? 'board-add-lane-wrap' : 'board-add-agent-wrap';
+  var triggerId = kind === 'lane' ? 'board-add-lane-trigger' : 'board-add-agent-trigger';
+  var wrap = document.getElementById(wrapId);
+  var list = wrap ? wrap.querySelector('.board-add-agent-list') : null;
+  if (list) list.remove();
+  var trigger = document.getElementById(triggerId);
+  if (trigger) {
+    trigger.setAttribute('aria-expanded', 'false');
+    if (focusTrigger && typeof trigger.focus === 'function') trigger.focus();
+  }
+}
+
+function boardCloseInlineMenus() {
+  _boardCloseInlineDropdown('agent', false);
+  _boardCloseInlineDropdown('lane', false);
+}
+
+function boardInlineMenuKeydown(event, kind) {
+  if (!event) return;
+  var list = event.currentTarget || event.target;
+  var items = list && list.querySelectorAll
+    ? Array.prototype.slice.call(list.querySelectorAll('.ui-menu-item:not(:disabled)'))
+    : [];
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
+    _boardCloseInlineDropdown(kind, true);
+    return;
+  }
+  if (!items.length || ['ArrowDown', 'ArrowUp', 'Home', 'End'].indexOf(event.key) < 0) return;
+  var index = items.indexOf(document.activeElement);
+  if (event.key === 'Home') index = 0;
+  else if (event.key === 'End') index = items.length - 1;
+  else if (event.key === 'ArrowDown') index = index < 0 ? 0 : (index + 1) % items.length;
+  else index = index < 0 ? items.length - 1 : (index - 1 + items.length) % items.length;
+  event.preventDefault();
+  items[index].focus();
 }
 
 function boardToggleAgentDropdown() {
   var wrap = document.getElementById('board-add-agent-wrap');
   var existing = wrap ? wrap.querySelector('.board-add-agent-list') : null;
-  if (existing) { existing.remove(); return; }
+  if (existing) { _boardCloseInlineDropdown('agent', true); return; }
+  _boardCloseInlineDropdown('lane', false);
   var grp = _currentGroup();
   var agents = [];
   if (state && state.groups && state.groups[grp]) {
@@ -311,9 +365,15 @@ function boardToggleAgentDropdown() {
     }
   }
   var listEl = document.createElement('div');
-  listEl.className = 'board-add-agent-list';
+  listEl.className = 'board-add-agent-list ui-popover ui-menu';
+  listEl.setAttribute('role', 'menu');
+  listEl.setAttribute('aria-label', 'Assign task agent');
+  listEl.setAttribute('onkeydown', "boardInlineMenuKeydown(event, 'agent')");
   var noBtn = document.createElement('button');
-  noBtn.className = 'board-add-menu-item' + (!_boardAddingTaskAgent ? ' selected' : '');
+  noBtn.className = 'board-add-menu-item ui-menu-item' + (!_boardAddingTaskAgent ? ' selected is-selected' : '');
+  noBtn.type = 'button';
+  noBtn.setAttribute('role', 'menuitemradio');
+  noBtn.setAttribute('aria-checked', !_boardAddingTaskAgent ? 'true' : 'false');
   noBtn.textContent = 'No agent';
   noBtn.onmousedown = function(e) { e.preventDefault(); };
   noBtn.onclick = function() { _boardAddingTaskAgent = ''; listEl.remove(); renderBoard(); };
@@ -321,7 +381,11 @@ function boardToggleAgentDropdown() {
   for (var j = 0; j < agents.length; j++) {
     (function(ag) {
       var btn = document.createElement('button');
-      btn.className = 'board-add-menu-item' + (ag.id === _boardAddingTaskAgent ? ' selected' : '');
+      var selected = ag.id === _boardAddingTaskAgent;
+      btn.className = 'board-add-menu-item ui-menu-item' + (selected ? ' selected is-selected' : '');
+      btn.type = 'button';
+      btn.setAttribute('role', 'menuitemradio');
+      btn.setAttribute('aria-checked', selected ? 'true' : 'false');
       btn.textContent = ag.name;
       btn.onmousedown = function(e) { e.preventDefault(); };
       btn.onclick = function() { _boardAddingTaskAgent = ag.id; listEl.remove(); renderBoard(); };
@@ -329,19 +393,30 @@ function boardToggleAgentDropdown() {
     })(agents[j]);
   }
   wrap.appendChild(listEl);
+  var trigger = document.getElementById('board-add-agent-trigger');
+  if (trigger) trigger.setAttribute('aria-expanded', 'true');
+  _boardInlineMenuFocusFirst(listEl);
 }
 
 function boardToggleLaneDropdown() {
   var wrap = document.getElementById('board-add-lane-wrap');
   var existing = wrap ? wrap.querySelector('.board-add-agent-list') : null;
-  if (existing) { existing.remove(); return; }
+  if (existing) { _boardCloseInlineDropdown('lane', true); return; }
+  _boardCloseInlineDropdown('agent', false);
   var lanes = _boardAddTaskLaneOptions();
   var listEl = document.createElement('div');
-  listEl.className = 'board-add-agent-list board-add-lane-list';
+  listEl.className = 'board-add-agent-list board-add-lane-list ui-popover ui-menu';
+  listEl.setAttribute('role', 'menu');
+  listEl.setAttribute('aria-label', 'Choose task lane');
+  listEl.setAttribute('onkeydown', "boardInlineMenuKeydown(event, 'lane')");
   for (var i = 0; i < lanes.length; i++) {
     (function(nextLane) {
       var btn = document.createElement('button');
-      btn.className = 'board-add-menu-item' + (nextLane === _boardAddingTaskLane ? ' selected' : '');
+      var selected = nextLane === _boardAddingTaskLane;
+      btn.className = 'board-add-menu-item ui-menu-item' + (selected ? ' selected is-selected' : '');
+      btn.type = 'button';
+      btn.setAttribute('role', 'menuitemradio');
+      btn.setAttribute('aria-checked', selected ? 'true' : 'false');
       btn.textContent = nextLane;
       btn.onmousedown = function(e) { e.preventDefault(); };
       btn.onclick = function() {
@@ -353,6 +428,9 @@ function boardToggleLaneDropdown() {
     })(lanes[i]);
   }
   wrap.appendChild(listEl);
+  var trigger = document.getElementById('board-add-lane-trigger');
+  if (trigger) trigger.setAttribute('aria-expanded', 'true');
+  _boardInlineMenuFocusFirst(listEl);
 }
 
 function boardAddTaskAutoResize(el) {

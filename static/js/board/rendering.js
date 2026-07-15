@@ -186,7 +186,8 @@ function _boardRenderAddTaskSection(lane) {
       + ' onkeydown="boardAddTaskKeydown(event)"'
       + ' oninput="boardAddTaskInput(this)"'
       + ' onblur="boardCancelAddTask()">' + esc(_boardAddingTaskDraft) + '</textarea>';
-    html += '<div id="board-add-label-dropdown" class="deps-dropdown" style="display:none"></div>';
+    html += '<div id="board-add-label-dropdown" class="deps-dropdown ui-popover" role="listbox"'
+      + ' aria-label="Matching labels" style="display:none"></div>';
     html += '</div>';
     if (_boardInlineAttachments.length) {
       html += '<div class="inline-att-chips">';
@@ -202,11 +203,15 @@ function _boardRenderAddTaskSection(lane) {
     html += '<div class="board-add-toolbar-right">';
     html += '<div class="board-add-dropdown" id="board-add-agent-wrap">';
     var agentLabel = _boardAddingTaskAgent ? _boardAgentName(_boardAddingTaskAgent) : 'No agent';
-    html += '<button class="board-add-toolbar-btn" onmousedown="event.preventDefault();boardToggleAgentDropdown()">'
+    html += '<button type="button" id="board-add-agent-trigger" class="board-add-toolbar-btn"'
+      + ' aria-haspopup="menu" aria-expanded="false"'
+      + ' onclick="event.stopPropagation();boardToggleAgentDropdown(event)">'
       + esc(agentLabel) + ' &#9662;</button>';
     html += '</div>';
     html += '<div class="board-add-dropdown" id="board-add-lane-wrap">';
-    html += '<button class="board-add-toolbar-btn" onmousedown="event.preventDefault();boardToggleLaneDropdown()">'
+    html += '<button type="button" id="board-add-lane-trigger" class="board-add-toolbar-btn"'
+      + ' aria-haspopup="menu" aria-expanded="false"'
+      + ' onclick="event.stopPropagation();boardToggleLaneDropdown(event)">'
       + esc(_boardAddingTaskLane) + ' &#9662;</button>';
     html += '</div>';
     html += '<button class="board-add-toolbar-btn board-add-submit-btn" onmousedown="event.preventDefault();boardSubmitAddTask()">Submit &#10132;</button>';

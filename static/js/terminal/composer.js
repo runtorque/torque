@@ -728,7 +728,7 @@ function _terminalComposeHistoryRenderMenu(cellId) {
   if (!menu) return;
   const entries = _terminalMessageHistoryEntries(id).slice(0, 12);
   let html = ''
-    + '<div class="terminal-compose-history-title">Recent messages</div>';
+    + '<div class="terminal-compose-history-title ui-menu-label">Recent messages</div>';
   if (!entries.length) {
     html += '<div class="terminal-compose-history-empty">'
       + 'No sent messages yet.'
@@ -737,7 +737,7 @@ function _terminalComposeHistoryRenderMenu(cellId) {
     html += '<div class="terminal-compose-history-list">';
     for (let i = 0; i < entries.length; i++) {
       const preview = _terminalComposeHistoryPreview(entries[i].message);
-      html += '<button type="button" class="terminal-compose-history-item"'
+      html += '<button type="button" class="terminal-compose-history-item ui-menu-item"'
         + ' role="option" data-cell-id="' + esc(id) + '" data-history-index="' + i + '"'
         + ' onclick="return terminalComposeHistoryPick(event)"'
         + ' title="' + esc(preview) + '">'
@@ -784,6 +784,8 @@ function _terminalComposeHistoryOpen(cellId) {
     button.setAttribute('aria-expanded', 'true');
   }
   _terminalComposeHistoryOpenCellId = id;
+  const firstItem = menu.querySelector && menu.querySelector('.terminal-compose-history-item');
+  if (firstItem && typeof firstItem.focus === 'function') firstItem.focus();
 }
 
 function _terminalComposeHistoryHandleDocumentClick(evt) {
@@ -802,10 +804,25 @@ function _terminalComposeHistoryHandleDocumentClick(evt) {
 }
 
 function _terminalComposeHistoryHandleDocumentKeydown(evt) {
-  if (!_terminalComposeHistoryOpenCellId || !evt || evt.key !== 'Escape') return;
-  _terminalComposeHistoryClose(_terminalComposeHistoryOpenCellId, true);
+  if (!_terminalComposeHistoryOpenCellId || !evt) return;
+  const menu = _terminalComposeHistoryMenuFor(_terminalComposeHistoryOpenCellId);
+  const items = menu && menu.querySelectorAll
+    ? Array.prototype.slice.call(menu.querySelectorAll('.terminal-compose-history-item'))
+    : [];
+  if (evt.key === 'Escape') {
+    _terminalComposeHistoryClose(_terminalComposeHistoryOpenCellId, true);
+    if (typeof evt.preventDefault === 'function') evt.preventDefault();
+    if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+    return;
+  }
+  if (!items.length || ['ArrowDown', 'ArrowUp', 'Home', 'End'].indexOf(evt.key) < 0) return;
+  let index = items.indexOf(document.activeElement);
+  if (evt.key === 'Home') index = 0;
+  else if (evt.key === 'End') index = items.length - 1;
+  else if (evt.key === 'ArrowDown') index = index < 0 ? 0 : (index + 1) % items.length;
+  else index = index < 0 ? items.length - 1 : (index - 1 + items.length) % items.length;
   if (typeof evt.preventDefault === 'function') evt.preventDefault();
-  if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  items[index].focus();
 }
 
 if (typeof document !== 'undefined' && document.addEventListener) {
@@ -924,7 +941,9 @@ function _terminalComposeSlashDropdownVisible(cellId) {
 
 function _terminalComposeHighlightSlashOpt(opts) {
   for (var i = 0; i < opts.length; i++) {
-    opts[i].classList.toggle('active', i === _terminalComposeSlashDropdownIdx);
+    var selected = i === _terminalComposeSlashDropdownIdx;
+    opts[i].classList.toggle('active', selected);
+    opts[i].setAttribute('aria-selected', selected ? 'true' : 'false');
   }
 }
 
@@ -952,8 +971,8 @@ function _terminalComposeUpdateSlashDropdown(input) {
   var html = '';
   for (var i = 0; i < results.length; i++) {
     var item = results[i] || {};
-    html += '<div class="deps-option terminal-compose-slash-option"'
-      + ' role="option" data-slash-command="' + esc(item.id || '') + '"'
+    html += '<div class="deps-option terminal-compose-slash-option ui-menu-item"'
+      + ' role="option" aria-selected="false" data-slash-command="' + esc(item.id || '') + '"'
       + ' onmousedown="return terminalComposePickSlashCommand(event, \''
       + esc(cellId).replace(/'/g, "\\'") + '\', ' + i + ')">'
       + '<div class="terminal-compose-slash-main">'
@@ -1145,7 +1164,9 @@ function _terminalComposeTaskDropdownVisible(cellId) {
 
 function _terminalComposeHighlightTaskOpt(opts) {
   for (var i = 0; i < opts.length; i++) {
-    opts[i].classList.toggle('active', i === _terminalComposeTaskDropdownIdx);
+    var selected = i === _terminalComposeTaskDropdownIdx;
+    opts[i].classList.toggle('active', selected);
+    opts[i].setAttribute('aria-selected', selected ? 'true' : 'false');
   }
 }
 
@@ -1172,8 +1193,8 @@ function _terminalComposeUpdateTaskDropdown(input) {
     var taskId = String(results[i].id || '');
     var title = String(results[i].title || '');
     var jsTaskId = esc(taskId).replace(/'/g, "\\'");
-    html += '<div class="deps-option terminal-compose-task-option"'
-      + ' role="option" data-task-id="' + esc(taskId) + '"'
+    html += '<div class="deps-option terminal-compose-task-option ui-menu-item"'
+      + ' role="option" aria-selected="false" data-task-id="' + esc(taskId) + '"'
       + ' onmousedown="return terminalComposePickTaskRef(event, \''
       + esc(cellId).replace(/'/g, "\\'") + '\', \'' + jsTaskId + '\')">'
       + '<span class="terminal-compose-task-ref-id">' + esc(taskId) + '</span>'
@@ -1540,10 +1561,10 @@ function _renderTerminalCompose(root, cell) {
     + ' ondrop="terminalComposeDrop(event, \'' + esc(cellId) + '\')"></div>'
     + '  <div class="terminal-compose-error" aria-live="polite">' + esc(error) + '</div>'
     + '  <div id="' + esc(taskDropdownId) + '"'
-    + ' class="deps-dropdown terminal-compose-task-dropdown"'
+    + ' class="deps-dropdown terminal-compose-task-dropdown ui-popover"'
     + ' role="listbox" aria-label="Matching tickets" style="display:none"></div>'
     + '  <div id="' + esc(slashDropdownId) + '"'
-    + ' class="deps-dropdown terminal-compose-slash-dropdown"'
+    + ' class="deps-dropdown terminal-compose-slash-dropdown ui-popover"'
     + ' role="listbox" aria-label="Slash commands" style="display:none"></div>'
     + '  </div>'
     + '  <button id="' + esc(buttonId) + '" class="terminal-compose-submit" type="submit"'
@@ -1555,7 +1576,7 @@ function _renderTerminalCompose(root, cell) {
     + ' title="Message history (use \u2191/\u2193 to recall)" aria-label="Message history"'
     + ' aria-haspopup="listbox" aria-expanded="false" aria-controls="' + esc(historyMenuId) + '">'
     + '<span class="terminal-compose-history-icon" aria-hidden="true">\u21ba</span></button>'
-    + '    <div id="' + esc(historyMenuId) + '" class="terminal-compose-history-menu"'
+    + '    <div id="' + esc(historyMenuId) + '" class="terminal-compose-history-menu ui-popover"'
     + ' role="listbox" aria-label="Recent messages" hidden></div>'
     + '  </div>'
     + '</form>';

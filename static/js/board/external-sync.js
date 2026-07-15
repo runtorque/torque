@@ -178,7 +178,8 @@ function boardLinkAgent(taskId) {
   }
 
   menu.innerHTML = html;
-  menu.classList.add('open');
+  if (typeof openContextMenuSurface === 'function') openContextMenuSurface(menu);
+  else menu.classList.add('open');
   _adjustCtxMenuOverflow();
 }
 
@@ -554,7 +555,8 @@ function boardDispatchTask(taskId) {
   }
 
   menu.innerHTML = html;
-  menu.classList.add('open');
+  if (typeof openContextMenuSurface === 'function') openContextMenuSurface(menu);
+  else menu.classList.add('open');
   _adjustCtxMenuOverflow();
 }
 

@@ -130,7 +130,7 @@ function _boardCanMarkTaskVerified(task) {
   return verificationState === 'pending' || verificationState === 'attempted';
 }
 
-function _boardRenderCardMenu(taskId) {
+function _boardRenderCardMenu(taskId, invoker) {
   var tasks = _boardTasks();
   var task = tasks[taskId];
   var menu = document.getElementById('ctx-menu');
@@ -254,7 +254,11 @@ function _boardRenderCardMenu(taskId) {
 
   menu.innerHTML = html;
   menu.onclick = _boardHandleCardMenuClick;
-  menu.classList.add('open');
+  if (typeof openContextMenuSurface === 'function') {
+    openContextMenuSurface(menu, { invoker: invoker });
+  } else {
+    menu.classList.add('open');
+  }
   _adjustCtxMenuOverflow();
 }
 
@@ -264,7 +268,7 @@ function boardCardMenu(evt, taskId) {
   if (!menu) return;
   menu.style.top = evt.clientY + 'px';
   menu.style.left = Math.min(evt.clientX, window.innerWidth - 140) + 'px';
-  _boardRenderCardMenu(taskId);
+  _boardRenderCardMenu(taskId, evt.currentTarget || evt.target || null);
 }
 
 function _boardCopyTextToClipboard(text, onDone) {
@@ -308,7 +312,8 @@ function boardShowDependencyPicker(taskId) {
     }
   }
   menu.innerHTML = html;
-  menu.classList.add('open');
+  if (typeof openContextMenuSurface === 'function') openContextMenuSurface(menu);
+  else menu.classList.add('open');
   _adjustCtxMenuOverflow();
 }
 

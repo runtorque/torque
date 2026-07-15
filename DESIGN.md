@@ -379,8 +379,12 @@ Menus and compact popovers use the canonical API in
   grouping.
 - Opening a menu focuses its first working control. Escape returns focus to the
   invoker; outside-pointer dismissal does not steal focus from the new target.
-- Group actions, the compact group switcher, Board filters, and Board View use
-  the shared API. Large dialogs remain governed by the modal family.
+- Autocomplete listboxes are the deliberate focus exception: their editor keeps
+  focus while Arrow keys update `aria-selected` on canonical option rows.
+- Group actions, the compact group switcher, Board filters and View, task label
+  and dependency suggestions, inline Board editors, terminal completion and
+  history surfaces, the panel switcher, and context menus use the shared API.
+  Large dialogs remain governed by the modal family.
 
 ### Badges, tags, and counts
 
@@ -468,7 +472,7 @@ the rule is intentionally global and documented here.
 | Cards | Core variants standardized | Audit grid identity cards and nested contained surfaces |
 | Toolbars and panel headers | Standardized | Audit responsive wrapping and narrow panel widths |
 | Status bar segments | Standardized | Audit narrow-width priority |
-| Menus and popovers | Core variants standardized | Migrate task, terminal, dependency, and editor dropdowns |
+| Menus and popovers | Standardized | Audit narrow viewport placement and long localized labels |
 | Modals | Core variants standardized | Migrate task, settings, artifact, diff, and multi-section dialogs |
 | Badges, tags, and status | Standardized | Audit semantic intent and density at narrow widths |
 | Count indicators | Standardized | Keep prose metrics and countdown text outside the badge grammar |
@@ -674,12 +678,15 @@ the rule is intentionally global and documented here.
   it. One primitive makes transient controls predictable visually and
   operationally.
 - Scope: `static/styles/components.css`, the shared context menu used by group
-  actions, the compact group switcher, Board filter popovers, and Board View.
+  actions, the compact group switcher, Board filter popovers and View, task
+  label/dependency suggestions, inline Board assignment/lane/batch editors,
+  terminal task/slash/history surfaces, the panel switcher, and all context-menu
+  producers.
 - Constraints: Searchable filters and View controls use dialog semantics because
   they contain inputs and selects, not only commands. Outside-pointer dismissal
-  must preserve the pointer's new focus target. Task dependency pickers,
-  terminal completion dropdowns, nested editor popovers, and full modals remain
-  follow-up migrations.
+  must preserve the pointer's new focus target. Autocomplete listboxes keep focus
+  in their owning editor and expose the active option through `aria-selected`.
+  Full modals remain governed by the modal family.
 - Verification: `tests/frontend_components.test.js` protects shared geometry,
   canonical markup, semantics, keyboard traversal, Escape restoration, and
   removal of duplicate feature geometry. Existing Board and group navigation
@@ -813,6 +820,31 @@ the rule is intentionally global and documented here.
   migrated consumer and reject compatibility geometry in shared or feature CSS.
   Focused panel suites protect rendering and interaction; live checks cover
   representative panels, working controls, focus, and console cleanliness.
+
+### D-016 — Transient choices use one surface with two focus models
+
+- Date: 2026-07-14
+- Status: accepted
+- Decision: Command menus, searchable popovers, and editor suggestions share the
+  canonical raised surface and row grammar. Command menus move focus into the
+  first working row and support Arrow/Home/End plus Escape restoration.
+  Autocomplete listboxes keep focus in their input while their canonical option
+  rows expose `aria-selected` as keyboard selection changes.
+- Rationale: Task suggestions, terminal completions, message history, inline
+  Board menus, and context-menu subflows had independently rebuilt surface,
+  option, selected, and focus behavior. One visual grammar plus two explicit
+  interaction models avoids both styling drift and the accessibility error of
+  moving focus out of a live text editor.
+- Scope: Shared context-menu normalization, task title/label/dependency
+  listboxes, inline Board label/agent/lane and bulk-editor popovers, terminal
+  task/slash/history surfaces, and the panel switcher.
+- Constraints: Multi-section dialogs remain modals even when visually compact.
+  Feature CSS may own placement, width, overflow, and content-specific inner
+  layout, but not floating-surface or menu-row geometry.
+- Verification: Component tests require canonical opt-in and reject duplicate
+  surface geometry. Board, task-modal, terminal, Chat, navigation, and context
+  menu suites protect selection and lifecycle behavior; live checks verify
+  computed geometry, keyboard focus, Escape restoration, and console cleanliness.
 
 ## Decision entry template
 

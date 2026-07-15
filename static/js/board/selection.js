@@ -207,18 +207,23 @@ function _renderBoardSelectionBar() {
     + count + ' selected</span>';
   // Move to lane dropdown
   html += '<div class="board-selection-dropdown-wrap">';
-  html += '<button class="board-selection-btn" onclick="boardBulkToggleMove(event)">Move to &#9662;</button>';
-  html += '<div class="board-selection-dropdown" id="board-bulk-move-menu" style="display:none">';
+  html += '<button type="button" id="board-bulk-move-trigger" class="board-selection-btn"'
+    + ' aria-haspopup="menu" aria-expanded="false" onclick="boardBulkToggleMove(event)">Move to &#9662;</button>';
+  html += '<div class="board-selection-dropdown ui-popover ui-menu" id="board-bulk-move-menu"'
+    + ' role="menu" aria-label="Move selected tasks" onkeydown="boardBulkMoveMenuKeydown(event)" style="display:none">';
   for (var i = 0; i < lanes.length; i++) {
     var escLane = esc(lanes[i]).replace(/'/g, "\\'");
-    html += '<button class="board-selection-dropdown-item" onclick="boardBulkMove(\'' + escLane + '\')">' + esc(lanes[i]) + '</button>';
+    html += '<button type="button" role="menuitem" class="board-selection-dropdown-item ui-menu-item"'
+      + ' onclick="boardBulkMove(\'' + escLane + '\')">' + esc(lanes[i]) + '</button>';
   }
   html += '</div></div>';
   // Batch edit
   html += '<div class="board-selection-dropdown-wrap">';
-  html += '<button class="board-selection-btn" onclick="boardToggleBatchEdit(event)">Batch edit</button>';
+  html += '<button type="button" class="board-selection-btn" aria-haspopup="dialog" aria-expanded="'
+    + (_boardBatchEditOpen ? 'true' : 'false') + '" onclick="boardToggleBatchEdit(event)">Batch edit</button>';
   if (_boardBatchEditOpen) {
-    html += '<div class="board-selection-dropdown board-selection-batch-panel" id="board-batch-edit-panel">';
+    html += '<div class="board-selection-dropdown board-selection-batch-panel ui-popover"'
+      + ' id="board-batch-edit-panel" role="dialog" aria-label="Batch edit selected tasks">';
     html += '<div class="board-selection-batch-grid">';
     html += '<label class="board-selection-batch-label">Add label</label>';
     html += '<input type="text" class="board-selection-label-input" id="board-batch-label-input"'
@@ -321,7 +326,51 @@ function boardBulkToggleMove(evt) {
     renderBoard();
     return;
   }
-  if (menu) menu.style.display = menu.style.display === 'none' ? '' : 'none';
+  if (!menu) return;
+  var opening = menu.style.display === 'none';
+  menu.style.display = opening ? '' : 'none';
+  var trigger = document.getElementById('board-bulk-move-trigger');
+  if (trigger) trigger.setAttribute('aria-expanded', opening ? 'true' : 'false');
+  if (opening) {
+    var focusFirst = function() {
+      var first = menu.querySelector && menu.querySelector('.ui-menu-item:not(:disabled)');
+      if (first && typeof first.focus === 'function') first.focus();
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(focusFirst);
+    else focusFirst();
+  }
+}
+
+function boardCloseSelectionMenus(focusTrigger) {
+  var menu = document.getElementById('board-bulk-move-menu');
+  if (menu) menu.style.display = 'none';
+  var trigger = document.getElementById('board-bulk-move-trigger');
+  if (trigger) {
+    trigger.setAttribute('aria-expanded', 'false');
+    if (focusTrigger && typeof trigger.focus === 'function') trigger.focus();
+  }
+}
+
+function boardBulkMoveMenuKeydown(evt) {
+  if (!evt) return;
+  var menu = document.getElementById('board-bulk-move-menu');
+  var items = menu && menu.querySelectorAll
+    ? Array.prototype.slice.call(menu.querySelectorAll('.ui-menu-item:not(:disabled)'))
+    : [];
+  if (evt.key === 'Escape') {
+    evt.preventDefault();
+    evt.stopPropagation();
+    boardCloseSelectionMenus(true);
+    return;
+  }
+  if (!items.length || ['ArrowDown', 'ArrowUp', 'Home', 'End'].indexOf(evt.key) < 0) return;
+  var index = items.indexOf(document.activeElement);
+  if (evt.key === 'Home') index = 0;
+  else if (evt.key === 'End') index = items.length - 1;
+  else if (evt.key === 'ArrowDown') index = index < 0 ? 0 : (index + 1) % items.length;
+  else index = index < 0 ? items.length - 1 : (index - 1 + items.length) % items.length;
+  evt.preventDefault();
+  items[index].focus();
 }
 
 function boardBulkMove(lane) {

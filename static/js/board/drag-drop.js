@@ -13,8 +13,15 @@ function _adjustCtxMenuOverflow() {
 }
 
 function _closeCtxMenu() {
+  if (typeof closeContextMenu === 'function') {
+    closeContextMenu({ restoreFocus: false });
+    return;
+  }
   var m = document.getElementById('ctx-menu');
-  if (m) m.classList.remove('open');
+  if (m) {
+    m.classList.remove('open');
+    m.setAttribute('aria-hidden', 'true');
+  }
 }
 
 /* ---- Card drag and drop --------------------------------------------- */

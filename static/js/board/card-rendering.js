@@ -1335,7 +1335,9 @@ function _renderBoardCard(t, childrenOf, depth, renderState) {
     cardHtml += '<div class="' + msgClass + ' board-card-activity-clickable" onclick="event.stopPropagation();showTaskMessages(\'' + t.id + '\')">' + esc(msgText) + '</div>';
   }
   cardHtml += '</div>';
-  cardHtml += '<button class="board-card-menu-btn" onclick="event.stopPropagation();boardCardMenu(event,\'' + t.id + '\')" title="Actions">&#8942;</button>';
+  cardHtml += '<button type="button" id="board-task-actions-' + t.id + '" class="board-card-menu-btn"'
+    + ' aria-label="Task actions" aria-haspopup="menu" aria-expanded="false"'
+    + ' onclick="event.stopPropagation();boardCardMenu(event,\'' + t.id + '\')" title="Actions">&#8942;</button>';
   cardHtml += '</div>';
 
   // Render children if expanded

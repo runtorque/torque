@@ -766,19 +766,76 @@ function _nextDragSibling(el) {
 /* Context menu (right-click) */
 
 let _contextMenuInvoker = null;
+let _contextMenuInvokerId = '';
+
+function normalizeContextMenuMarkup(menu) {
+  if (!menu || !menu.querySelectorAll) return menu;
+  const buttons = menu.querySelectorAll('button');
+  for (let i = 0; i < buttons.length; i++) {
+    const button = buttons[i];
+    if (button.classList && button.classList.contains('ctx-label')) {
+      button.classList.add('ui-menu-label');
+      continue;
+    }
+    if (button.classList) {
+      button.classList.add('ui-menu-item');
+      if (button.classList.contains('danger')) button.classList.add('ui-menu-item--danger');
+    }
+    if (button.setAttribute) {
+      button.setAttribute('type', 'button');
+      button.setAttribute('role', 'menuitem');
+    }
+  }
+  const separators = menu.querySelectorAll('.ctx-sep');
+  for (let j = 0; j < separators.length; j++) {
+    if (separators[j].classList) separators[j].classList.add('ui-menu-separator');
+    if (separators[j].setAttribute) separators[j].setAttribute('role', 'separator');
+  }
+  return menu;
+}
+
+function openContextMenuSurface(menu, options) {
+  options = options || {};
+  if (!menu) return;
+  normalizeContextMenuMarkup(menu);
+  if (options.invoker) _contextMenuInvoker = options.invoker;
+  else if (!_contextMenuInvoker) _contextMenuInvoker = document.activeElement || null;
+  if (_contextMenuInvoker && _contextMenuInvoker.id) {
+    _contextMenuInvokerId = _contextMenuInvoker.id;
+  }
+  menu.setAttribute('aria-hidden', 'false');
+  menu.classList.add('open');
+  if (_contextMenuInvoker && typeof _contextMenuInvoker.setAttribute === 'function'
+      && _contextMenuInvoker.getAttribute('aria-haspopup')) {
+    _contextMenuInvoker.setAttribute('aria-expanded', 'true');
+  }
+  requestAnimationFrame(function() {
+    if (typeof menu.getBoundingClientRect === 'function') {
+      const rect = menu.getBoundingClientRect();
+      if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 4) + 'px';
+      if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 4) + 'px';
+    }
+    const firstItem = menu.querySelector('button:not(:disabled):not(.ui-menu-label)');
+    if (firstItem && typeof firstItem.focus === 'function') firstItem.focus();
+  });
+}
 
 function closeContextMenu(options) {
   options = options || {};
   const menu = document.getElementById('ctx-menu');
   const invoker = _contextMenuInvoker;
+  const invokerId = _contextMenuInvokerId;
+  const currentInvoker = invokerId ? document.getElementById(invokerId) : null;
+  const focusTarget = currentInvoker || invoker;
   menu.classList.remove('open');
   menu.setAttribute('aria-hidden', 'true');
-  if (invoker && typeof invoker.setAttribute === 'function') {
-    invoker.setAttribute('aria-expanded', 'false');
+  if (focusTarget && typeof focusTarget.setAttribute === 'function') {
+    focusTarget.setAttribute('aria-expanded', 'false');
   }
   _contextMenuInvoker = null;
-  if (options.restoreFocus !== false && invoker && typeof invoker.focus === 'function') {
-    invoker.focus();
+  _contextMenuInvokerId = '';
+  if (options.restoreFocus !== false && focusTarget && typeof focusTarget.focus === 'function') {
+    focusTarget.focus();
   }
 }
 
@@ -801,21 +858,7 @@ function showContextMenu(x, y, items, options) {
   menu.innerHTML = html;
   menu.style.left = x + 'px';
   menu.style.top = y + 'px';
-  menu.setAttribute('aria-hidden', 'false');
-  menu.classList.add('open');
-  if (_contextMenuInvoker && typeof _contextMenuInvoker.setAttribute === 'function'
-      && _contextMenuInvoker.getAttribute('aria-haspopup')) {
-    _contextMenuInvoker.setAttribute('aria-expanded', 'true');
-  }
-
-  // Adjust if menu overflows viewport
-  requestAnimationFrame(() => {
-    const rect = menu.getBoundingClientRect();
-    if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 4) + 'px';
-    if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 4) + 'px';
-    const firstItem = menu.querySelector('button:not(:disabled)');
-    if (firstItem && typeof firstItem.focus === 'function') firstItem.focus();
-  });
+  openContextMenuSurface(menu, { invoker: _contextMenuInvoker });
 }
 
 function contextMenuKeydown(event) {
@@ -854,6 +897,7 @@ function _showWorktreeSubmenu(id) {
   html += `<div class="ctx-sep ui-menu-separator" role="separator"></div>`;
   html += `<button type="button" role="menuitem" class="ui-menu-item ui-menu-item--danger danger" onclick="closeContextMenu();worktreeRemove('${id}')">Delete Worktree</button>`;
   menu.innerHTML = html;
+  openContextMenuSurface(menu);
 }
 
 async function worktreeCreate(id) {

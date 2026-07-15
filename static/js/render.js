@@ -698,6 +698,8 @@ function toggleMenu(chevron) {
 }
 function closeMenus() {
   document.querySelectorAll('.split-menu.open').forEach(m => m.classList.remove('open'));
+  if (typeof boardCloseInlineMenus === 'function') boardCloseInlineMenus();
+  if (typeof boardCloseSelectionMenus === 'function') boardCloseSelectionMenus(false);
 }
 
 /* Group collapse/expand */

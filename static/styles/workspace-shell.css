@@ -199,12 +199,7 @@ body.runtime-embedded .taskbar-app.active {
   z-index: 150;
   width: min(360px, calc(100vw - 16px));
   max-height: min(540px, calc(100vh - 60px));
-  padding: 8px;
   overflow: hidden;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-lg);
-  background: var(--bg-raised);
-  box-shadow: var(--shadow-float);
 }
 .panel-nav-more-header {
   display: flex;

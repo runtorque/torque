@@ -9846,7 +9846,7 @@ test('renderBoard shows the inline add-task lane picker with Backlog as the defa
 
   context.renderBoard();
 
-  assert.match(panel.innerHTML, /boardToggleLaneDropdown\(\)/);
+  assert.match(panel.innerHTML, /boardToggleLaneDropdown\(event\)/);
   assert.match(panel.innerHTML, />Backlog &#9662;<\/button>/);
 });
 
@@ -9886,7 +9886,7 @@ test('renderBoard keeps the inline add-task composer in the shared wide strip', 
   assert.match(panel.innerHTML, /board-wide-add-task-wrap/);
   assert.equal((panel.innerHTML.match(/board-add-task-active/g) || []).length, 1);
   assert.match(panel.innerHTML, /board-add-task-input/);
-  assert.match(panel.innerHTML, /boardToggleLaneDropdown\(\)/);
+  assert.match(panel.innerHTML, /boardToggleLaneDropdown\(event\)/);
   assert.match(panel.innerHTML, />Backlog &#9662;<\/button>/);
   assert.equal(
     panel.innerHTML.indexOf('board-wide-add-task-wrap') < panel.innerHTML.indexOf('board-wide-grid'),
@@ -24519,6 +24519,55 @@ test('task label suggestions exclude labels that only exist on archived tasks', 
   };
 
   assert.deepEqual(jsonValue(context, '_getAllLabels().sort()'), ['fresh', 'shared']);
+});
+
+test('task dependency suggestions keep editor focus and expose keyboard selection', () => {
+  const { context, document } = createModalHarness();
+  const input = document.register('task-deps-input');
+  const dropdown = document.register('task-deps-dropdown');
+  dropdown.style.display = 'none';
+  context.state.board_tasks = {
+    'TORQUE:1': { id: 'TORQUE:1', task: 'First dependency', lane: 'Backlog' },
+    'TORQUE:2': { id: 'TORQUE:2', task: 'Second dependency', lane: 'In Progress' },
+  };
+  input.value = 'dependency';
+  input.focus();
+  context.taskDepsSearch({ target: input });
+  assert.equal(dropdown.style.display, '');
+  assert.match(dropdown.innerHTML, /deps-option ui-menu-item/);
+  assert.match(dropdown.innerHTML, /role="option" aria-selected="false"/);
+
+  const first = new FakeElement('dependency-option-1');
+  const second = new FakeElement('dependency-option-2');
+  first.classList.add('deps-option');
+  second.classList.add('deps-option');
+  dropdown.setQuerySelectorAll('.deps-option', [first, second]);
+  const down = {
+    key: 'ArrowDown',
+    preventDefaultCalled: false,
+    stopPropagationCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+    stopPropagation() { this.stopPropagationCalled = true; },
+  };
+  context.taskDepsKeydown(down);
+  assert.equal(down.preventDefaultCalled, true);
+  assert.equal(down.stopPropagationCalled, true);
+  assert.equal(first.classList.contains('active'), true);
+  assert.equal(first.getAttribute('aria-selected'), 'true');
+  assert.equal(second.getAttribute('aria-selected'), 'false');
+  assert.equal(input.focused, true);
+
+  let escapePrevented = false;
+  let escapeStopped = false;
+  context.taskDepsKeydown({
+    key: 'Escape',
+    preventDefault() { escapePrevented = true; },
+    stopPropagation() { escapeStopped = true; },
+  });
+  assert.equal(dropdown.style.display, 'none');
+  assert.equal(escapePrevented, true);
+  assert.equal(escapeStopped, true);
+  assert.equal(input.focused, true);
 });
 
 test('openEditTask clears past scheduled times instead of showing stale dispatch state', () => {

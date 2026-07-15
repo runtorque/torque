@@ -276,13 +276,14 @@ function panelNavFilterMore(query) {
   panelNavRenderMore(_panelNavFilter);
 }
 
-function closePanelNavMore() {
+function closePanelNavMore(restoreFocus) {
   var menu = document.getElementById('panel-nav-more-menu');
   var button = document.getElementById('panel-nav-more-button');
   if (menu) menu.hidden = true;
   if (button) {
     button.classList.remove('active');
     button.setAttribute('aria-expanded', 'false');
+    if (restoreFocus && typeof button.focus === 'function') button.focus();
   }
 }
 
@@ -318,7 +319,8 @@ function panelNavMoreKeydown(event) {
   if (!event) return;
   if (event.key === 'Escape') {
     event.preventDefault();
-    closePanelNavMore();
+    event.stopPropagation();
+    closePanelNavMore(true);
     return;
   }
   if (event.key !== 'ArrowDown') return;

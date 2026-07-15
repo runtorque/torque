@@ -260,7 +260,7 @@ function _taskSyncTitleLabelDropdown(el) {
     var key = String(label || '').toLowerCase();
     if (existing[key]) continue;
     if (key.indexOf(prefix) < 0) continue;
-    html += '<div class="deps-option" onmousedown="event.preventDefault()" onclick="taskPickTitleLabel(\''
+    html += '<div class="deps-option ui-menu-item" role="option" aria-selected="false" onmousedown="event.preventDefault()" onclick="taskPickTitleLabel(\''
       + esc(label).replace(/'/g, "\\'") + '\')">' + esc(label) + '</div>';
     count++;
     if (count >= 8) break;
@@ -273,7 +273,11 @@ function _taskSyncTitleLabelDropdown(el) {
 function _highlightTitleLabelOption(idx) {
   var dropdown = _taskTitleLabelDropdown();
   var opts = dropdown ? dropdown.querySelectorAll('.deps-option') : [];
-  for (var i = 0; i < opts.length; i++) opts[i].classList.toggle('active', i === idx);
+  for (var i = 0; i < opts.length; i++) {
+    var selected = i === idx;
+    opts[i].classList.toggle('active', selected);
+    opts[i].setAttribute('aria-selected', selected ? 'true' : 'false');
+  }
   _taskTitleLabelDropdownIdx = idx;
 }
 
@@ -937,7 +941,7 @@ function taskLabelsSearch(e) {
   for (var i = 0; i < all.length; i++) {
     if (_taskLabels.indexOf(all[i]) >= 0) continue;
     if (all[i].toLowerCase().indexOf(val) < 0) continue;
-    html += '<div class="deps-option" onmousedown="event.preventDefault()" onclick="taskPickLabel(\'' + esc(all[i]).replace(/'/g, "\\'") + '\')">'
+    html += '<div class="deps-option ui-menu-item" role="option" aria-selected="false" onmousedown="event.preventDefault()" onclick="taskPickLabel(\'' + esc(all[i]).replace(/'/g, "\\'") + '\')">'
       + esc(all[i]) + '</div>';
     count++;
     if (count >= 8) break;
@@ -961,7 +965,11 @@ function taskPickLabel(label) {
 function _highlightLabelOption(idx) {
   var dropdown = document.getElementById('task-labels-dropdown');
   var opts = dropdown.querySelectorAll('.deps-option');
-  for (var i = 0; i < opts.length; i++) opts[i].classList.toggle('active', i === idx);
+  for (var i = 0; i < opts.length; i++) {
+    var selected = i === idx;
+    opts[i].classList.toggle('active', selected);
+    opts[i].setAttribute('aria-selected', selected ? 'true' : 'false');
+  }
   _labelDropdownIdx = idx;
 }
 
@@ -1091,11 +1099,12 @@ function _setTaskLabels(labels) {
 /* -- Task modal: dependency picker ---------------------------------------- */
 
 var _taskDeps = [];
+var _taskDepsDropdownIdx = -1;
 
 function taskDepsSearch(e) {
   var val = e.target.value.trim().toLowerCase();
   var dropdown = document.getElementById('task-deps-dropdown');
-  if (!val) { dropdown.style.display = 'none'; return; }
+  if (!val) { dropdown.style.display = 'none'; _taskDepsDropdownIdx = -1; return; }
   var tasks = (state && state.board_tasks) || {};
   var html = '';
   var count = 0;
@@ -1107,7 +1116,7 @@ function taskDepsSearch(e) {
     if (title.indexOf(val) >= 0 || id.indexOf(val) >= 0) {
       var laneBadge = '<span class="board-card-lane-badge ui-badge ui-badge--compact ui-badge--accent">'
         + esc(t.lane || '') + '</span>';
-      html += '<div class="deps-option" onmousedown="event.preventDefault()" onclick="taskAddDep(\'' + id + '\')">'
+      html += '<div class="deps-option ui-menu-item" role="option" aria-selected="false" onmousedown="event.preventDefault()" onclick="taskAddDep(\'' + id + '\')">'
         + esc((t.task || '').substring(0, 50)) + ' ' + laneBadge + '</div>';
       count++;
       if (count >= 8) break;
@@ -1115,11 +1124,38 @@ function taskDepsSearch(e) {
   }
   dropdown.innerHTML = html;
   dropdown.style.display = count ? '' : 'none';
+  _taskDepsDropdownIdx = -1;
 }
 
 function taskDepsKeydown(e) {
-  if (e.key === 'Escape') {
-    document.getElementById('task-deps-dropdown').style.display = 'none';
+  var dropdown = document.getElementById('task-deps-dropdown');
+  var visible = dropdown && dropdown.style.display !== 'none';
+  var opts = visible ? dropdown.querySelectorAll('.deps-option') : [];
+  if (visible && opts.length && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+    e.preventDefault();
+    e.stopPropagation();
+    _taskDepsDropdownIdx = e.key === 'ArrowDown'
+      ? (_taskDepsDropdownIdx + 1) % opts.length
+      : (_taskDepsDropdownIdx - 1 + opts.length) % opts.length;
+    for (var i = 0; i < opts.length; i++) {
+      var selected = i === _taskDepsDropdownIdx;
+      opts[i].classList.toggle('active', selected);
+      opts[i].setAttribute('aria-selected', selected ? 'true' : 'false');
+    }
+    return;
+  }
+  if (visible && opts.length && e.key === 'Enter') {
+    e.preventDefault();
+    e.stopPropagation();
+    var idx = _taskDepsDropdownIdx >= 0 ? _taskDepsDropdownIdx : 0;
+    if (opts[idx]) opts[idx].click();
+    return;
+  }
+  if (visible && e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    dropdown.style.display = 'none';
+    _taskDepsDropdownIdx = -1;
   }
 }
 
@@ -1127,6 +1163,7 @@ function taskAddDep(id) {
   if (_taskDeps.indexOf(id) < 0) _taskDeps.push(id);
   document.getElementById('task-deps-input').value = '';
   document.getElementById('task-deps-dropdown').style.display = 'none';
+  _taskDepsDropdownIdx = -1;
   _renderTaskDepChips();
   taskPersistDraft();
 }

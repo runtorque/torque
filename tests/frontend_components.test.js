@@ -326,10 +326,11 @@ test('modal surface and footer geometry do not drift back into modal styles', ()
 test('shared menus define one floating surface and compact item state grammar', () => {
   const css = source('static/styles/components.css');
 
-  assert.match(css, /\.ui-popover,\s*#ctx-menu,\s*\.agent-group-quick-switcher,\s*\.board-filter-dropdown,\s*\.board-view-menu\s*\{[^}]*padding:\s*var\(--space-1\);[^}]*border:\s*1px solid var\(--border-strong\);[^}]*border-radius:\s*var\(--radius-lg\);[^}]*background:\s*var\(--bg-raised\);[^}]*box-shadow:\s*var\(--shadow-float\);[^}]*max-height:/s);
-  assert.match(css, /\.ui-menu-item,\s*#ctx-menu button:not\(\.ctx-label\),[\s\S]*?\.board-view-menu-toggle\s*\{[^}]*min-height:\s*var\(--control-height-md\);[^}]*padding:\s*var\(--space-1\) var\(--space-2\);[^}]*border-radius:\s*var\(--radius\);[^}]*font-size:\s*var\(--control-font-size-xs\);/s);
-  assert.match(css, /\.ui-menu-item\.is-selected,[\s\S]*?\.board-view-menu-toggle\.active\s*\{[^}]*border-color:\s*var\(--accent-muted\);[^}]*color:\s*var\(--accent\);[^}]*background:\s*var\(--accent-soft\);/s);
-  assert.match(css, /\.ui-menu-item--danger:hover,[\s\S]*?#ctx-menu button\.danger:focus-visible\s*\{[^}]*color:\s*var\(--red\);[^}]*background:\s*color-mix\(in srgb, var\(--red\) 12%, var\(--bg-hover\)\);/s);
+  assert.match(css, /\.ui-popover\s*\{[^}]*padding:\s*var\(--space-1\);[^}]*border:\s*1px solid var\(--border-strong\);[^}]*border-radius:\s*var\(--radius-lg\);[^}]*background:\s*var\(--bg-raised\);[^}]*box-shadow:\s*var\(--shadow-float\);[^}]*max-height:/s);
+  assert.match(css, /\.ui-menu-item\s*\{[^}]*min-height:\s*var\(--control-height-md\);[^}]*padding:\s*var\(--space-1\) var\(--space-2\);[^}]*border-radius:\s*var\(--radius\);[^}]*font-size:\s*var\(--control-font-size-xs\);/s);
+  assert.match(css, /\.ui-menu-item\.is-selected,[\s\S]*?\.ui-menu-item\[aria-selected="true"\]\s*\{[^}]*border-color:\s*var\(--accent-muted\);[^}]*color:\s*var\(--accent\);[^}]*background:\s*var\(--accent-soft\);/s);
+  assert.match(css, /\.ui-menu-item--danger:hover,[\s\S]*?\.ui-menu-item--danger:focus-visible\s*\{[^}]*color:\s*var\(--red\);[^}]*background:\s*color-mix\(in srgb, var\(--red\) 12%, var\(--bg-hover\)\);/s);
+  assert.doesNotMatch(css, /#ctx-menu|agent-group-quick-switcher|board-filter-dropdown|board-view-menu/);
 });
 
 test('group and Board popovers opt into canonical markup and semantics', () => {
@@ -352,17 +353,56 @@ test('group and Board popovers opt into canonical markup and semantics', () => {
   assert.match(view, /class="board-view-menu-toggle ui-menu-item/);
 });
 
+test('remaining task, terminal, Board editor, and panel popovers use the canonical API', () => {
+  const html = source('webview.html');
+  const task = source('static/js/modals/task-modal.js');
+  const terminal = source('static/js/terminal/composer.js');
+  const board = source('static/js/board/rendering.js');
+  const inline = source('static/js/board/inline-create.js');
+  const selection = source('static/js/board/selection.js');
+  const commands = source('static/js/commands.js');
+
+  assert.match(html, /id="task-title-label-dropdown" class="deps-dropdown ui-popover" role="listbox"/);
+  assert.match(html, /id="task-labels-dropdown" class="deps-dropdown ui-popover" role="listbox"/);
+  assert.match(html, /id="task-deps-dropdown" class="deps-dropdown ui-popover" role="listbox"/);
+  assert.match(html, /id="panel-nav-more-menu" class="panel-nav-more-menu ui-popover" role="dialog"/);
+  assert.match(task, /class="deps-option ui-menu-item" role="option" aria-selected="false"/);
+  assert.match(terminal, /class="deps-dropdown terminal-compose-task-dropdown ui-popover"/);
+  assert.match(terminal, /class="deps-dropdown terminal-compose-slash-dropdown ui-popover"/);
+  assert.match(terminal, /class="terminal-compose-history-menu ui-popover"/);
+  assert.match(terminal, /class="terminal-compose-history-item ui-menu-item"/);
+  assert.match(board, /class="deps-dropdown ui-popover" role="listbox"/);
+  assert.match(inline, /board-add-agent-list ui-popover ui-menu/);
+  assert.match(inline, /board-add-menu-item ui-menu-item/);
+  assert.match(selection, /board-selection-dropdown ui-popover ui-menu/);
+  assert.match(selection, /board-selection-dropdown-item ui-menu-item/);
+  assert.match(selection, /board-selection-batch-panel ui-popover/);
+  assert.match(commands, /function normalizeContextMenuMarkup\(menu\)[\s\S]*?button\.classList\.add\('ui-menu-item'\)/);
+});
+
 test('transient menus restore focus on Escape and support keyboard traversal', () => {
   const groups = source('static/js/grid/group-tabs.js');
   const commands = source('static/js/commands.js');
   const filters = source('static/js/board/filters.js');
   const view = source('static/js/board/view-state.js');
+  const terminal = source('static/js/terminal/composer.js');
+  const inline = source('static/js/board/inline-create.js');
+  const selection = source('static/js/board/selection.js');
+  const task = source('static/js/modals/task-modal.js');
+  const panelLauncher = source('static/js/navigation/panel-launcher.js');
 
   assert.match(groups, /event\.key === 'Escape'[\s\S]*?closeAgentGroupQuickSwitcher\(true\)/);
-  assert.match(commands, /function closeContextMenu\(options\)[\s\S]*?options\.restoreFocus !== false[\s\S]*?invoker\.focus\(\)/);
+  assert.match(commands, /function closeContextMenu\(options\)[\s\S]*?document\.getElementById\(invokerId\)[\s\S]*?options\.restoreFocus !== false[\s\S]*?focusTarget\.focus\(\)/);
   assert.match(commands, /function contextMenuKeydown\(event\)[\s\S]*?ArrowDown[\s\S]*?ArrowUp[\s\S]*?items\[index\]\.focus\(\)/);
+  assert.match(source('static/js/board/card-rendering.js'), /id="board-task-actions-' \+ t\.id \+ '" class="board-card-menu-btn"/);
   assert.match(filters, /dd\.addEventListener\('keydown'[\s\S]*?e\.key !== 'Escape'[\s\S]*?_boardCloseFilterDropdown\(\{ restoreFocus: true \}\)/);
   assert.match(view, /menu\.addEventListener\('keydown'[\s\S]*?e\.key !== 'Escape'[\s\S]*?currentTrigger\.focus\(\)/);
+  assert.match(terminal, /_terminalComposeHistoryHandleDocumentKeydown\(evt\)[\s\S]*?ArrowDown[\s\S]*?items\[index\]\.focus\(\)/);
+  assert.match(inline, /function boardInlineMenuKeydown\(event, kind\)[\s\S]*?Escape[\s\S]*?_boardCloseInlineDropdown\(kind, true\)[\s\S]*?ArrowDown/);
+  assert.match(selection, /function boardBulkMoveMenuKeydown\(evt\)[\s\S]*?Escape[\s\S]*?boardCloseSelectionMenus\(true\)[\s\S]*?ArrowDown/);
+  assert.match(task, /function taskDepsKeydown\(e\)[\s\S]*?ArrowDown[\s\S]*?ArrowUp[\s\S]*?Enter[\s\S]*?Escape/);
+  assert.match(panelLauncher, /function closePanelNavMore\(restoreFocus\)[\s\S]*?restoreFocus[\s\S]*?button\.focus\(\)/);
+  assert.match(panelLauncher, /function panelNavMoreKeydown\(event\)[\s\S]*?Escape[\s\S]*?closePanelNavMore\(true\)/);
 });
 
 test('menu geometry does not drift back into feature styles', () => {
@@ -373,6 +413,10 @@ test('menu geometry does not drift back into feature styles', () => {
   assert.doesNotMatch(grid, /^\.agent-group-quick-switcher\s*\{[^}]*(?:padding|border-radius|background|box-shadow):/ms);
   assert.doesNotMatch(board, /^\.board-filter-dropdown\s*\{[^}]*(?:background|border-radius|box-shadow):/ms);
   assert.doesNotMatch(board, /^\.board-view-menu\s*\{[^}]*(?:padding|background|border-radius|box-shadow):/ms);
+  assert.doesNotMatch(board, /^\.deps-dropdown\s*\{[^}]*(?:padding|background|border|border-radius|box-shadow):/ms);
+  assert.doesNotMatch(board, /^\.board-selection-dropdown\s*\{[^}]*(?:padding|background|border|border-radius|box-shadow):/ms);
+  assert.doesNotMatch(board, /^\.board-add-agent-list\s*\{[^}]*(?:padding|background|border|border-radius|box-shadow):/ms);
+  assert.doesNotMatch(grid, /^\.terminal-compose-history-menu\s*\{[^}]*(?:padding|background|border|border-radius|box-shadow):/ms);
   assert.doesNotMatch(modals, /^#ctx-menu\s*\{[^}]*(?:padding|background|border-radius|box-shadow):/ms);
   assert.doesNotMatch(modals, /^#ctx-menu button\s*\{[^}]*(?:padding|font-size|border-radius|color):/ms);
 });

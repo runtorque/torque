@@ -1195,18 +1195,12 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
 .board-selection-dropdown {
   position: absolute; bottom: 100%; left: 0;
   margin-bottom: 4px;
-  background: var(--bg-cell); border: 1px solid var(--border);
-  border-radius: var(--radius);
   min-width: 120px; max-height: 200px; overflow-y: auto;
   z-index: 20;
 }
 .board-selection-dropdown-item {
-  display: block; width: 100%;
-  text-align: left; padding: 4px 10px;
-  font-size: 10px; background: none; border: none;
-  color: var(--text); cursor: pointer;
+  white-space: nowrap;
 }
-.board-selection-dropdown-item:hover { background: var(--bg-hover); }
 .board-selection-label-input {
   width: calc(100% - 12px); margin: 4px 6px;
   font-size: 10px; padding: 3px 6px;
@@ -1345,19 +1339,13 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
 .board-add-agent-list {
   position: absolute; bottom: 100%; left: 0; z-index: 50;
   min-width: 140px; max-height: 200px; overflow-y: auto;
-  background: var(--bg-cell); border: 1px solid var(--border);
-  border-radius: var(--radius); margin-bottom: 2px;
-  display: flex; flex-direction: column;
+  margin-bottom: 2px;
+  display: flex; flex-direction: column; gap: 2px;
 }
-.board-add-agent-list .board-add-menu-item.selected { color: var(--accent); }
 .board-add-menu-item {
-  display: flex; flex-direction: column; align-items: flex-start;
-  padding: 5px 8px; font-size: 10px; color: var(--text);
-  background: none; border: none; border-bottom: 1px solid var(--border);
-  cursor: pointer; text-align: left; width: 100%;
+  flex-direction: column;
+  align-items: flex-start;
 }
-.board-add-menu-item:last-child { border-bottom: none; }
-.board-add-menu-item:hover { background: var(--bg); }
 .board-add-input {
   width: 100%; font-size: 10px;
   padding: 5px 8px;
@@ -3188,19 +3176,11 @@ body[data-torque-mode="desktop"] .diff-view-modal {
 }
 .deps-dropdown {
   position: absolute; left: 0; right: 0; z-index: 20;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
   max-height: 200px; overflow-y: auto;
   margin-top: 2px;
 }
 .deps-option {
-  padding: 4px 8px;
-  cursor: pointer;
-  font-size: 11px;
-}
-.deps-option:hover, .deps-option.active {
-  background: var(--bg-hover);
+  min-width: 0;
 }
 
 /* -- Schedule UI ------------------------------------------------------ */
