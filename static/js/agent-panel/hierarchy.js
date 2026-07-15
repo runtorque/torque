@@ -48,7 +48,7 @@ function _agentPanelHierarchyBreadcrumb(items) {
     }
     html += '<span class="agent-panel-hierarchy-name">' + _agentPanelEsc(item.label || '') + '</span>';
     if (item.count !== '' && typeof item.count !== 'undefined' && item.count !== null) {
-      html += '<span class="agent-panel-hierarchy-count">' + _agentPanelEsc(String(item.count)) + '</span>';
+      html += '<span class="agent-panel-hierarchy-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">' + _agentPanelEsc(String(item.count)) + '</span>';
     }
     html += '</' + tag + '>';
   }

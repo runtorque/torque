@@ -400,8 +400,8 @@ The canonical CSS API lives in `static/styles/components.css`:
 - Agent identity badges, Agent-panel journal entry types, Health runtime and
   coverage states, Board task metadata, Board count indicators, and Agent Profile
   assignment and preview metadata, History identity/status/outcome markers, and
-  dismissed-event markers are canonical consumers. Remaining counts are a
-  deliberate follow-up migration.
+  dismissed-event markers are canonical consumers. Workspace, Agent-panel, Chat,
+  Events, Actions, Mission Control, and Initiatives counts use the same primitive.
 - A count may use the badge primitive inside a tab, filter, or menu item without
   changing the parent control's semantics. The count is an annotation; the
   containing tab, filter, or menu item remains the interactive target.
@@ -464,10 +464,11 @@ the rule is intentionally global and documented here.
 | Inputs and selectors | Core variants standardized | Migrate remaining feature-specific aliases and audit field labeling |
 | Cards | Core variants standardized | Audit grid identity cards and nested contained surfaces |
 | Toolbars and panel headers | Core variants standardized | Migrate remaining Help, Context, Health, and editor toolbars |
-| Status bar segments | Standardized | Migrate nested count annotations and audit narrow-width priority |
+| Status bar segments | Standardized | Audit narrow-width priority |
 | Menus and popovers | Core variants standardized | Migrate task, terminal, dependency, and editor dropdowns |
 | Modals | Core variants standardized | Migrate task, settings, artifact, diff, and multi-section dialogs |
-| Badges, tags, and status | History and event markers standardized | Migrate remaining count consumers |
+| Badges, tags, and status | Standardized | Audit semantic intent and density at narrow widths |
+| Count indicators | Standardized | Keep prose metrics and countdown text outside the badge grammar |
 | Empty/loading/error states | Pending | Define reusable patterns and language |
 
 ## Decision log
@@ -730,8 +731,7 @@ the rule is intentionally global and documented here.
   GitHub, dependency, and attachment chips remain control chips rather than
   badges. Agent Profile class selectors and assignment actions remain controls;
   History filters, task links, focus actions, and expandable event rows remain
-  controls. Status-bar segments remain a separate rectangular component family;
-  remaining count indicators are follow-up migrations.
+  controls. Status-bar segments remain a separate rectangular component family.
 - Verification: `tests/frontend_components.test.js` protects shared geometry,
   semantic variants, canonical consumer markup, and removal of duplicated badge
   geometry. Existing Agent-panel, Health, and Board suites protect rendered
@@ -753,13 +753,39 @@ the rule is intentionally global and documented here.
 - Scope: `webview.html`, `static/js/status_bar.js`, `static/js/relay_status.js`,
   and `static/styles/workspace-shell.css`.
 - Constraints: Stable element ids remain unchanged because status updates patch
-  nodes in place. Presence dots remain circular. Counts may become nested badge
-  annotations later without changing the native button boundary.
+  nodes in place. Presence dots remain circular. Count text within an action does
+  not change the native button boundary.
 - Verification: Status-bar and metrics suites protect state mapping and stable
   updates; component and standalone-layout tests protect semantic markup,
   geometry, responsive behavior, and the passive/action split. Live verification
   checks connection, runtime, provider, task, and attention segments plus console
   cleanliness.
+
+### D-014 — Counts are passive badge annotations
+
+- Date: 2026-07-14
+- Status: accepted
+- Decision: Passive totals use `.ui-badge`, a density variant, semantic intent,
+  and `.ui-badge--count`. Dense grid annotations use `--micro`; panel and feature
+  annotations use `--compact`. Neutral is the default, while attention, pending,
+  acknowledgement, and delivery counts use danger, warning, or accent intent.
+- Rationale: Group, terminal, Chat, Events, Mission Control, Initiatives, and
+  Agent-panel totals repeated slightly different padding, radius, typography,
+  and color rules despite serving the same annotation role.
+- Scope: Group headers and tabs, terminal drawers and agent cards, pending hires,
+  Chat thread/message state, action transitions, Events attention, Mission
+  Control sections, Planning and Thinking tabs and summaries, Board schedule
+  runs, Behavior collection totals, Initiative and Area summaries, Agent
+  hierarchy, worklog, event, message, journal, roster, stream, task-health, and
+  verification counts.
+- Constraints: A count inside a tab, filter, disclosure, or menu does not become
+  a separate control. Prose metrics, time-based countdowns, and values in data
+  tables remain text. Count labels may include a short noun when the number alone
+  would be ambiguous.
+- Verification: Component tests require canonical count classes across every
+  consumer family and reject reintroduced feature-local count geometry. Focused
+  frontend suites protect rendered labels; live checks cover grid, panel, and
+  feature counts plus console cleanliness.
 
 ## Decision entry template
 

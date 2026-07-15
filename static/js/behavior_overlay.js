@@ -738,7 +738,7 @@ function _behaviorOverlayTimeline(agent, targetAgentId, viewerId, viewerKind, di
   var versions = _behaviorOverlayVersionList(targetAgentId);
   var html = '<section class="detail-section-card behavior-overlay-section">';
   html += '<div class="detail-section-card-head"><span class="detail-section-primary">Version timeline</span>';
-  html += '<span class="detail-task-status">' + _behaviorOverlayEsc(String(versions.length)) + '</span></div>';
+  html += '<span class="behavior-overlay-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + _behaviorOverlayEsc(String(versions.length)) + '</span></div>';
   if (_behaviorOverlayVersionsLoadingByAgent[targetAgentId] && !versions.length) {
     html += '<div class="agent-panel-empty">Loading versions…</div>';
   } else if (!versions.length) {
@@ -1095,7 +1095,7 @@ function _behaviorOverlayHiredGovernance(agent) {
 
   var html = '<section class="detail-section-card behavior-overlay-section behavior-overlay-governance">';
   html += '<div class="detail-section-card-head"><span class="detail-section-primary">Hired engineer governance</span>';
-  html += '<span class="detail-task-status">' + _behaviorOverlayEsc(String(hired.length)) + '</span></div>';
+  html += '<span class="behavior-overlay-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + _behaviorOverlayEsc(String(hired.length)) + '</span></div>';
   if (!hired.length) {
     html += '<div class="agent-panel-empty">No hired engineers for this architect.</div></section>';
     return html;

@@ -559,7 +559,7 @@ function _renderMainGrid(opts, renderMode) {
       html += `<div class="group-hdr" draggable="true" data-drag-id="${esc(gname)}" data-drag-type="group">`;
       html += `  <button class="group-toggle" draggable="false" onclick="event.stopPropagation();toggleGroup('${esc(gname)}')">\u25BE</button>`;
       html += `  <span class="group-name" title="${esc(gname)}">${esc(gname)}</span>`;
-      html += `  <span class="group-count">${agents.length}</span>`;
+      html += `  <span class="group-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">${agents.length}</span>`;
       html += `  <button class="group-btn" draggable="false" title="Group settings" aria-label="Group settings" onclick="event.stopPropagation();openGroupSettings('${esc(gname)}')">\u2699</button>`;
       html += `</div>`;
 
@@ -587,7 +587,7 @@ function _renderMainGrid(opts, renderMode) {
       html += `<div class="terminal-drawer">`;
       html += `<div class="drawer-hdr">`;
       html += `  <span class="drawer-label">Group terminals</span>`;
-      html += `  <span class="drawer-count">${standaloneTerms.length}</span>`;
+      html += `  <span class="drawer-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">${standaloneTerms.length}</span>`;
       html += `</div>`;
       html += `<div class="term-list">`;
       for (const t of standaloneTerms) html += renderTerminalRow(t);

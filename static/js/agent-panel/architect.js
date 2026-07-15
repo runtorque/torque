@@ -857,7 +857,7 @@ function _agentPanelArchitectDecisionsHtml(agent) {
   html += '<div class="agent-panel-worklog-header agent-panel-decisions-header">';
   html += '<div class="agent-panel-decisions-heading">';
   html += '<span class="agent-panel-worklog-title">Decisions</span>';
-  html += '<span class="agent-panel-worklog-count agent-panel-decisions-count">'
+  html += '<span class="agent-panel-worklog-count agent-panel-decisions-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">'
     + counts.active + ' active &middot; ' + counts.archived + ' archived</span>';
   html += '</div>';
   html += '<button type="button" class="agent-panel-decisions-archive-toggle" aria-pressed="'
@@ -898,7 +898,7 @@ function _agentPanelMessagesHtml(agent, messages, note, options) {
   html += '<div class="agent-panel-message-header">';
   html += '<div class="agent-panel-message-heading">';
   html += '<span class="agent-panel-message-title">Messages</span>';
-  html += '<span class="agent-panel-message-count">' + messages.length + '</span>';
+  html += '<span class="agent-panel-message-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + messages.length + '</span>';
   html += '</div>';
   if (note) {
     html += '<div class="agent-panel-message-note">' + _agentPanelEsc(note) + '</div>';
@@ -1005,7 +1005,7 @@ function _agentPanelArchitectJournalHtml(agent) {
   var html = '<div class="agent-panel-worklog-tab">';
   html += '<div class="agent-panel-worklog-header">';
   html += '<span class="agent-panel-worklog-title">Journal</span>';
-  html += '<span class="agent-panel-worklog-count" data-agent-panel-journal-count>'
+  html += '<span class="agent-panel-worklog-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count" data-agent-panel-journal-count>'
     + _agentPanelEsc(countText) + '</span>';
   html += '<span class="agent-panel-worklog-note"> · '
     + _agentPanelEsc(decisionCount + ' decision' + (decisionCount === 1 ? '' : 's'))

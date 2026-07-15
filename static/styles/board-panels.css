@@ -235,29 +235,6 @@
   margin-top: 6px;
   font-size: 9px;
 }
-.chat-badge {
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--bg);
-  color: var(--text-dim);
-  font-size: 9px;
-  line-height: 1.45;
-  padding: 1px 6px;
-  white-space: nowrap;
-}
-.chat-badge-ack {
-  border-color: color-mix(in srgb, var(--amber) 32%, var(--border));
-  background: color-mix(in srgb, var(--amber) 12%, transparent);
-  color: var(--amber);
-  font-weight: 700;
-}
-.chat-badge-pending {
-  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  color: var(--accent);
-}
 .chat-participant-list {
   display: flex;
   justify-content: flex-end;
@@ -2283,8 +2260,6 @@ body.runtime-embedded .board-empty-action:focus-visible {
 /* Transitions editor */
 .tpled-transitions-section { margin-top: 10px !important; }
 .tpled-transitions-count {
-  font-size: 9px; color: var(--text-dim); font-weight: 400;
-  background: var(--bg-hover); padding: 1px 5px; border-radius: 8px;
   margin-left: 2px;
 }
 .tpled-transition-entry {
@@ -2653,14 +2628,6 @@ body.runtime-embedded .board-empty-action:focus-visible {
   font-size: 9px; font-weight: 700;
   color: var(--text-dim); text-transform: uppercase;
   letter-spacing: 0.5px;
-}
-.events-attention-count {
-  display: inline-block;
-  background: var(--status-red, #f85149);
-  color: #fff; font-size: 9px; font-weight: 700;
-  padding: 0 5px; border-radius: 8px;
-  min-width: 14px; text-align: center;
-  line-height: 14px; vertical-align: middle;
 }
 .events-attention-empty {
   padding: 6px 12px 10px;

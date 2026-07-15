@@ -103,7 +103,6 @@
   letter-spacing: 0.03em;
   text-transform: uppercase;
 }
-.engineers-roster-count,
 .engineers-roster-empty {
   font-size: 10px;
   color: var(--text-dim);
@@ -170,19 +169,6 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 10px;
-  font-weight: 700;
-}
-.agent-panel-hierarchy-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 5px;
-  border-radius: 999px;
-  color: var(--text);
-  background: color-mix(in srgb, var(--border) 58%, transparent);
-  font-size: 9px;
   font-weight: 700;
 }
 .agent-panel-hierarchy-arrow {
@@ -356,11 +342,6 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   color: var(--text);
   letter-spacing: 0.03em;
   text-transform: uppercase;
-}
-.architect-roster-section-count,
-.architect-decision-group-count {
-  font-size: 9px;
-  color: var(--text-dim);
 }
 .architect-roster-section-actions {
   display: inline-flex;
@@ -655,10 +636,6 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   font-weight: 600;
   color: var(--text);
 }
-.agent-panel-event-section-count {
-  font-size: 9px;
-  color: var(--text-dim);
-}
 .agent-panel-event-empty {
   font-size: 10px;
   color: var(--text-dim);
@@ -888,7 +865,6 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   font-weight: 600;
   color: var(--text);
 }
-.agent-panel-worklog-count,
 .agent-panel-worklog-note {
   font-size: 10px;
   color: var(--text-dim);
@@ -981,7 +957,6 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   letter-spacing: 0.03em;
   text-transform: uppercase;
 }
-.agent-panel-message-count,
 .agent-panel-message-note {
   font-size: 10px;
   color: var(--text-dim);
@@ -1411,7 +1386,6 @@ button.agent-panel-hierarchy-crumb:focus-visible {
 .agent-panel-stream-section-label-workflow { color: var(--amber); }
 .agent-panel-stream-section-label-context { color: var(--text-dim); }
 .agent-panel-stream-section-label-merge { color: var(--text-dim); }
-.agent-panel-stream-summary-count,
 .agent-panel-stream-visibility-more,
 .agent-panel-stream-empty {
   font-size: 9px;
@@ -1608,10 +1582,6 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   font-weight: 600;
   color: var(--text);
 }
-.agent-panel-health-total {
-  font-size: 9px;
-  color: var(--text-dim);
-}
 .agent-panel-health-counts {
   display: flex;
   flex-wrap: wrap;
@@ -1619,10 +1589,7 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   margin-bottom: 6px;
 }
 .agent-panel-health-pill {
-  font-size: 8px;
-  font-weight: 600;
-  border-radius: 999px;
-  padding: 1px 6px;
+  flex: 0 0 auto;
 }
 .agent-panel-health-pill-blocked {
   color: var(--amber);

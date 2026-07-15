@@ -40,7 +40,7 @@ function _renderAgentGroupTabsHtml() {
       + ' onkeydown="agentGroupTabKeydown(event,' + groupArg + ')"'
       + ' oncontextmenu="onGroupTabContextMenu(event, ' + groupArg + ')">'
       + '<span class="agent-group-tab-name">' + esc(group) + '</span>'
-      + '<span class="agent-group-tab-count" aria-label="' + count + ' agents">' + count + '</span>'
+      + '<span class="agent-group-tab-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count" aria-label="' + count + ' agents">' + count + '</span>'
       + (selected
         ? '<button type="button" class="agent-group-tab-menu" title="Group actions" aria-label="Group actions for ' + esc(group) + '"'
           + ' aria-haspopup="menu" aria-expanded="false"'
@@ -56,7 +56,7 @@ function _renderAgentGroupTabsHtml() {
   html += '<button type="button" class="agent-group-compact-trigger" aria-haspopup="dialog" aria-expanded="false"'
     + ' title="Switch group (⌘G / Ctrl+G)" onclick="toggleAgentGroupQuickSwitcher(event)">'
     + '<span class="agent-group-compact-name">' + esc(active || 'Choose group') + '</span>'
-    + (active ? '<span class="agent-group-tab-count">' + activeCount + '</span>' : '')
+    + (active ? '<span class="agent-group-tab-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">' + activeCount + '</span>' : '')
     + '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4.5 3 3 3-3"/></svg>'
     + '</button>';
   html += '<div class="agent-group-quick-switcher ui-popover" role="dialog" aria-label="Switch group" hidden'
@@ -72,7 +72,7 @@ function _renderAgentGroupTabsHtml() {
     html += '<button type="button" class="agent-group-quick-option ui-menu-item' + (selected ? ' active is-selected' : '') + '"'
       + ' data-group-switch-option data-search="' + esc(group.toLowerCase()) + '"'
       + ' onclick="selectAgentGroupFromQuickSwitcher(' + groupArg + ')">'
-      + '<span>' + esc(group) + '</span><small>' + count + ' agents</small>'
+      + '<span>' + esc(group) + '</span><span class="agent-group-quick-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + count + ' agents</span>'
       + (selected ? '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2.5 6.2 2.1 2.1 4.9-5"/></svg>' : '')
       + '</button>';
   }

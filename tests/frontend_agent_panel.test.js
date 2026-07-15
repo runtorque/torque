@@ -1797,7 +1797,7 @@ test('architect Journal header keeps entry and decision counts grouped', () => {
   assert.match(panel.innerHTML, /data-agent-panel-kind="architect" data-agent-panel-tab="journal"/);
   assert.match(
     panel.innerHTML,
-    /<span class="agent-panel-worklog-title">Journal<\/span><span class="agent-panel-worklog-count" data-agent-panel-journal-count>2<\/span><span class="agent-panel-worklog-note"> · 1 decision<\/span>/
+    /<span class="agent-panel-worklog-title">Journal<\/span><span class="agent-panel-worklog-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count" data-agent-panel-journal-count>2<\/span><span class="agent-panel-worklog-note"> · 1 decision<\/span>/
   );
 
   const css = appStylesheetSource();

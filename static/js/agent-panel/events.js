@@ -202,7 +202,7 @@ function _agentPanelRenderPagedEventSection(title, page, mode, emptyText) {
   var html = '<div class="agent-panel-event-section">';
   html += '<div class="agent-panel-event-section-header">';
   html += '<span class="agent-panel-event-section-title">' + _esc(title) + '</span>';
-  html += '<span class="agent-panel-event-section-count">'
+  html += '<span class="agent-panel-event-section-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">'
     + _agentPanelEventSectionCount(page) + '</span>';
   html += '</div>';
   if (!total) {
@@ -683,7 +683,7 @@ function _renderPersistentCellEvents(agent) {
   var html = '<div class="agent-panel-event-section">';
   html += '<div class="agent-panel-event-section-header">';
   html += '<span class="agent-panel-event-section-title">Cell events</span>';
-  html += '<span class="agent-panel-event-section-count">' + _agentPanelEventSectionCount(page) + '</span>';
+  html += '<span class="agent-panel-event-section-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + _agentPanelEventSectionCount(page) + '</span>';
   html += '</div>';
   if (loading && !events.length) {
     html += '<div class="agent-panel-event-empty">Loading cell events…</div>';

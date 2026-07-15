@@ -306,7 +306,7 @@ test('Planning panel groups initiatives into primary roadmap columns and seconda
   assert.match(html, /Next item/);
   assert.match(html, /Later item/);
   assert.match(html, /Secondary buckets/);
-  assert.match(html, /parked <span>1<\/span>/);
+  assert.match(html, /parked <span class="initiative-secondary-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">1<\/span>/);
   assert.doesNotMatch(html, /Parked item/);
 
   vm.runInContext("initiativesToggleSecondary('parked')", sandbox);
@@ -590,7 +590,7 @@ test('Planning Areas tab renders list, search, lifecycle/type filters, loading a
     ],
   })})`, sandbox);
   html = document.getElementById('panel-initiatives').innerHTML;
-  assert.match(html, /Areas <span>2<\/span>/);
+  assert.match(html, /Areas <span class="planning-tab-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">2<\/span>/);
   assert.match(html, /Operator console/);
   assert.match(html, /Runtime platform/);
   assert.match(html, /Active Investment/);
@@ -736,7 +736,7 @@ test('area websocket responses and deltas update Planning surface without breaki
   vm.runInContext(`initiativesReceiveList(${JSON.stringify({ type: 'initiative_list', group: 'Torque', initiatives: [sampleInitiative()] })}); areasReceiveList(${JSON.stringify({ type: 'area_list', group: 'Torque', areas: [sampleArea()] })});`, sandbox);
   let html = document.getElementById('panel-initiatives').innerHTML;
   assert.match(html, /Ship initiatives UI/);
-  assert.match(html, /Areas <span>1<\/span>/);
+  assert.match(html, /Areas <span class="planning-tab-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">1<\/span>/);
 
   vm.runInContext("planningSetTab('areas')", sandbox);
   vm.runInContext(`areasReceiveMutation(${JSON.stringify({ type: 'area_updated', area: sampleArea({ title: 'Updated operator console' }) })})`, sandbox);

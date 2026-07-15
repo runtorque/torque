@@ -475,7 +475,10 @@ function _chatFirstLine(value, limit) {
 function _chatCountBadge(label, value, cls) {
   value = Number(value || 0);
   if (!Number.isFinite(value) || value <= 0) return '';
-  return '<span class="chat-badge ' + _chatAttr(cls || '') + '">'
+  var intent = cls === 'chat-badge-ack' ? 'ui-badge--warning'
+    : (cls === 'chat-badge-pending' ? 'ui-badge--accent' : 'ui-badge--neutral');
+  return '<span class="chat-badge ui-badge ui-badge--compact ui-badge--count '
+    + intent + ' ' + _chatAttr(cls || '') + '">'
     + _chatEsc(label) + (value > 1 ? ' ' + value : '') + '</span>';
 }
 
@@ -835,7 +838,7 @@ function _chatThreadRowHtml(item, selectedId) {
   if (participants) html += '<div class="chat-thread-participants">' + _chatEsc(participants) + '</div>';
   html += '<div class="chat-thread-last">' + _chatEsc(lastText) + '</div>';
   html += '<div class="chat-thread-badges">'
-    + '<span class="chat-badge chat-badge-count">' + _chatEsc(count + ' msg' + (count === 1 ? '' : 's')) + '</span>'
+    + '<span class="chat-badge chat-badge-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + _chatEsc(count + ' msg' + (count === 1 ? '' : 's')) + '</span>'
     + _chatCountBadge('Ack required', thread.ack_required_count, 'chat-badge-ack')
     + _chatCountBadge('Pending', thread.pending_delivery_count, 'chat-badge-pending')
     + '</div>';
@@ -867,7 +870,7 @@ function _chatThreadHeaderHtml(items) {
     + '<div class="chat-panel-subtitle">Read-only peer inbox</div>'
     + '</div>'
     + '<div class="chat-panel-summary">'
-    + '<span class="chat-badge chat-badge-count">' + _chatEsc(total + ' thread' + (total === 1 ? '' : 's')) + '</span>'
+    + '<span class="chat-badge chat-badge-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + _chatEsc(total + ' thread' + (total === 1 ? '' : 's')) + '</span>'
     + _chatCountBadge('Ack required', ackTotal, 'chat-badge-ack')
     + _chatCountBadge('Pending', pendingTotal, 'chat-badge-pending')
     + '</div>';
@@ -895,7 +898,7 @@ function _chatSelectedHeaderHtml(thread) {
     + '<div class="chat-message-header-meta">'
     + '<div class="chat-participant-list">' + chips + '</div>'
     + '<div class="chat-thread-badges">'
-    + '<span class="chat-badge chat-badge-count">' + _chatEsc(count + ' msg' + (count === 1 ? '' : 's')) + '</span>'
+    + '<span class="chat-badge chat-badge-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + _chatEsc(count + ' msg' + (count === 1 ? '' : 's')) + '</span>'
     + _chatCountBadge('Ack required', thread.ack_required_count, 'chat-badge-ack')
     + _chatCountBadge('Pending', thread.pending_delivery_count, 'chat-badge-pending')
     + '</div></div>';

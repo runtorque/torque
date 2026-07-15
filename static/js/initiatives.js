@@ -660,7 +660,7 @@ function _renderInitiativeColumn(status, items, secondary) {
   html += '<section class="initiative-column' + (secondary ? ' initiative-column-secondary' : '') + '" data-status="' + esc(status) + '">';
   html += '<div class="initiative-column-head">';
   html += '<div><div class="initiative-column-title">' + esc(label) + '</div>';
-  html += '<div class="initiative-column-count">' + esc(_initiativeCountLabel(items.length)) + '</div></div>';
+  html += '<div class="initiative-column-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + esc(_initiativeCountLabel(items.length)) + '</div></div>';
   html += '</div>';
   html += '<div class="initiative-column-body" id="initiative-col-' + esc(status) + '">';
   if (!items.length) {
@@ -687,7 +687,7 @@ function _renderInitiativesRoadmap(group, buckets) {
     var open = !!_initiativesSecondaryExpanded[status];
     var count = (buckets[status] || []).length;
     html += '<button type="button" class="filter-chip initiative-secondary-toggle' + (open ? ' active' : '') + '" aria-pressed="' + (open ? 'true' : 'false') + '" onclick="initiativesToggleSecondary(\'' + esc(status) + '\')">';
-    html += esc(status) + ' <span>' + count + '</span></button>';
+    html += esc(status) + ' <span class="initiative-secondary-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">' + count + '</span></button>';
   });
   html += '</div>';
   INITIATIVE_SECONDARY_STATUSES.forEach(function(status) {
@@ -1374,7 +1374,7 @@ function _renderAreasFilters(group, total, filtered) {
     html += '<option value="' + esc(type) + '"' + (_areasTypeFilter === type ? ' selected' : '') + '>' + esc(type) + '</option>';
   });
   html += '</select>';
-  html += '<span class="area-filter-count">' + esc(filtered + ' / ' + total) + '</span>';
+  html += '<span class="area-filter-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + esc(filtered + ' / ' + total) + '</span>';
   html += '</div>';
   return html;
 }
@@ -1569,8 +1569,8 @@ function _renderAreasWorkspace(group) {
 function _renderPlanningTabs(initiativeTotal, areaTotal) {
   var active = String(_planningActiveTab || 'initiatives');
   var html = '<div class="planning-tabs" role="tablist" aria-label="Planning sections">';
-  html += '<button type="button" role="tab" class="planning-tab' + (active === 'initiatives' ? ' active' : '') + '" aria-selected="' + (active === 'initiatives' ? 'true' : 'false') + '" onclick="planningSetTab(\'initiatives\')">Initiatives <span>' + esc(initiativeTotal) + '</span></button>';
-  html += '<button type="button" role="tab" class="planning-tab' + (active === 'areas' ? ' active' : '') + '" aria-selected="' + (active === 'areas' ? 'true' : 'false') + '" onclick="planningSetTab(\'areas\')">Areas <span>' + esc(areaTotal) + '</span></button>';
+  html += '<button type="button" role="tab" class="planning-tab' + (active === 'initiatives' ? ' active' : '') + '" aria-selected="' + (active === 'initiatives' ? 'true' : 'false') + '" onclick="planningSetTab(\'initiatives\')">Initiatives <span class="planning-tab-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">' + esc(initiativeTotal) + '</span></button>';
+  html += '<button type="button" role="tab" class="planning-tab' + (active === 'areas' ? ' active' : '') + '" aria-selected="' + (active === 'areas' ? 'true' : 'false') + '" onclick="planningSetTab(\'areas\')">Areas <span class="planning-tab-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">' + esc(areaTotal) + '</span></button>';
   html += '</div>';
   return html;
 }
@@ -1623,7 +1623,7 @@ function renderInitiativesPanel() {
     ? 'Areas capture compact product/system briefs, links, and typed notes for ' + esc(group || 'all groups') + '.'
     : 'Initiatives grouped by roadmap bucket for ' + esc(group || 'all groups') + '. Linked execution stays on Board tasks.') + '</div></div>';
   html += '<div class="tpled-header-controls ui-panel-header__actions">';
-  html += '<span class="initiative-total">' + esc(activeTab === 'areas' ? _areaCountLabel(areaTotal) : _initiativeCountLabel(initiativeTotal)) + '</span>';
+  html += '<span class="initiative-total ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + esc(activeTab === 'areas' ? _areaCountLabel(areaTotal) : _initiativeCountLabel(initiativeTotal)) + '</span>';
   html += '<button class="tpled-new-btn" onclick="planningRefresh()" title="Refresh planning data">&#x21BB;</button>';
   html += '</div></div>';
   html += _renderPlanningTabs(initiativeTotal, areaTotal);

@@ -327,7 +327,7 @@ function _missionControlSectionHtml(summary, sectionKey) {
   html += '<button type="button" class="mc-section-toggle" onclick="missionControlToggleSection(\'' + esc(sectionKey) + '\')" aria-expanded="' + (collapsed ? 'false' : 'true') + '">'
     + '<span class="mc-section-caret">' + (collapsed ? '&#9656;' : '&#9662;') + '</span>'
     + '<span class="mc-section-title">' + esc(meta.title) + '</span>'
-    + '<span class="mc-section-count">' + esc(String(section.count)) + '</span>'
+    + '<span class="mc-section-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + esc(String(section.count)) + '</span>'
     + '</button>';
   if (section.truncated) html += '<span class="mc-section-truncated">truncated</span>';
   html += '</div>';
@@ -409,7 +409,7 @@ function _missionControlShellHtml(summary) {
   html += '<div class="tpled-header-subtitle">Read-only readiness console for ' + esc(group || 'all groups') + '. Actions stay on existing surfaces.</div></div>';
   html += '<div class="tpled-header-controls mc-controls">';
   html += '<input id="mission-control-filter" class="mc-filter" value="' + esc(_missionControlFilter) + '" oninput="missionControlSetFilter(this.value)" placeholder="Filter cards…" />';
-  html += '<span class="mc-total">' + esc(String(total)) + ' cards</span>';
+  html += '<span class="mc-total ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + esc(String(total)) + ' cards</span>';
   html += '<button class="tpled-new-btn" onclick="missionControlRefresh()" title="Refresh read-only summary">&#x21BB;</button>';
   html += '</div></div>';
   if (_missionControlLastError) html += '<div class="mc-error">' + esc(_missionControlLastError) + '</div>';

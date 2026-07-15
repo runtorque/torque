@@ -29,6 +29,17 @@ var _engineerHealthSeverity = {
   'blocked': 5,
 };
 
+function _agentPanelHealthBadgeIntent(stateName) {
+  stateName = String(stateName || '').trim();
+  if (stateName === 'passed') return 'ui-badge--success';
+  if (stateName === 'stalled' || stateName === 'thrashing'
+      || stateName === 'failed' || stateName === 'conflict') {
+    return 'ui-badge--danger';
+  }
+  if (stateName === 'notice' || stateName === 'healthy') return 'ui-badge--neutral';
+  return 'ui-badge--warning';
+}
+
 function _engineerCreatedSortValue(cell) {
   if (!cell) return '';
   return String(cell.created_at || cell.updated_at || cell.id || '');
@@ -558,7 +569,7 @@ function _agentPanelLegacyRenderArchitectRoster(group) {
   var html = '<section class="engineers-roster architects-roster">';
   html += '<div class="engineers-roster-header">';
   html += '<span class="engineers-roster-title">Architects</span>';
-  html += '<span class="engineers-roster-count">' + architects.length + ' total</span>';
+  html += '<span class="engineers-roster-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + architects.length + ' total</span>';
   html += '</div>';
   if (!architects.length) {
     html += '<div class="engineers-roster-empty">No architects yet. Add one to launch a dedicated architect session.</div>';
@@ -600,7 +611,7 @@ function _agentPanelLegacyRenderArchitectRoster(group) {
       var decisions = _architectDecisionsForAgent(architect.id);
       var grouped = _engineerDecisionGroups(decisions);
       html += '<div class="architect-row-body">';
-      html += '<div class="architect-roster-section-head"><span class="architect-roster-section-title">Hired engineers</span><span class="architect-roster-section-count">' + hiredEngineers.length + '</span></div>';
+      html += '<div class="architect-roster-section-head"><span class="architect-roster-section-title">Hired engineers</span><span class="architect-roster-section-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + hiredEngineers.length + '</span></div>';
       if (hiredEngineers.length) {
         html += '<div class="agent-panel-hierarchy-list agent-panel-hierarchy-list-architect architect-roster-subtree">';
         html += _agentPanelLegacyRenderEngineerTreeRows(
@@ -613,7 +624,7 @@ function _agentPanelLegacyRenderArchitectRoster(group) {
       } else {
         html += '<div class="engineers-roster-empty architect-roster-empty">No hired engineers yet.</div>';
       }
-      html += '<div class="architect-roster-section-head"><span class="architect-roster-section-title">Decision log</span><span class="architect-roster-section-actions"><span class="architect-roster-section-count">' + decisions.length + '</span>';
+      html += '<div class="architect-roster-section-head"><span class="architect-roster-section-title">Decision log</span><span class="architect-roster-section-actions"><span class="architect-roster-section-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + decisions.length + '</span>';
       if (dismissed) {
         html += '<button type="button" class="engineer-row-btn" disabled title="Rehire architect to add decisions">+ New decision</button>';
       } else {
@@ -629,7 +640,7 @@ function _agentPanelLegacyRenderArchitectRoster(group) {
         if (!rows.length) continue;
         hasDecisionRows = true;
         html += '<div class="architect-decision-group">';
-        html += '<div class="architect-decision-group-title">' + _esc(statusName) + ' <span class="architect-decision-group-count">' + rows.length + '</span></div>';
+        html += '<div class="architect-decision-group-title">' + _esc(statusName) + ' <span class="architect-decision-group-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + rows.length + '</span></div>';
         for (var decisionIndex = 0; decisionIndex < rows.length; decisionIndex++) {
           html += _agentPanelLegacyRenderDecisionRow(architect.id, rows[decisionIndex]);
         }
@@ -652,7 +663,7 @@ function _agentPanelLegacyRenderEngineerRoster(group) {
   var html = '<section class="engineers-roster">';
   html += '<div class="engineers-roster-header">';
   html += '<span class="engineers-roster-title">Engineers</span>';
-  html += '<span class="engineers-roster-count">' + engineers.length + ' user-owned</span>';
+  html += '<span class="engineers-roster-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + engineers.length + ' user-owned</span>';
   html += '</div>';
   if (!engineers.length) {
     html += '<div class="engineers-roster-empty">No user-owned engineers yet. Add one to launch a dedicated engineer session.</div>';
@@ -1252,7 +1263,7 @@ function _agentPanelLegacyRenderEventSection(title, events, mode, emptyText) {
   var html = '<div class="agent-panel-event-section">';
   html += '<div class="agent-panel-event-section-header">';
   html += '<span class="agent-panel-event-section-title">' + _esc(title) + '</span>';
-  html += '<span class="agent-panel-event-section-count">' + events.length + '</span>';
+  html += '<span class="agent-panel-event-section-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + events.length + '</span>';
   html += '</div>';
   if (!events.length) {
     html += '<div class="agent-panel-event-empty">' + _esc(emptyText) + '</div>';
@@ -1532,7 +1543,7 @@ function _agentPanelLegacyRenderQueuedTasks(group, engineer) {
     return '<div class="agent-panel-worklog-tab agent-panel-queued-tab">'
       + '<div class="agent-panel-worklog-header">'
       + '<span class="agent-panel-worklog-title">Queued tasks</span>'
-      + '<span class="agent-panel-worklog-count">0</span>'
+      + '<span class="agent-panel-worklog-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">0</span>'
       + '</div>'
       + '<div class="agent-panel-event-empty">No engineer selected for this group.</div>'
       + '</div>';
@@ -1562,7 +1573,7 @@ function _agentPanelLegacyRenderWorklog(group, ws) {
   var html = '<div class="agent-panel-worklog-tab">';
   html += '<div class="agent-panel-worklog-header">';
   html += '<span class="agent-panel-worklog-title">Completed tasks</span>';
-  html += '<span class="agent-panel-worklog-count">' + entries.length + '</span>';
+  html += '<span class="agent-panel-worklog-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + entries.length + '</span>';
   html += '</div>';
   if (ws && ws.restrict_to_created_agents) {
     html += '<div class="agent-panel-worklog-note">Showing completed work sent to Engineer-created agents.</div>';
@@ -1789,14 +1800,14 @@ function _agentPanelLegacyRenderSessionMapHints(summary) {
   var html = '<div class="agent-panel-health-summary">';
   html += '<div class="agent-panel-health-header">';
   html += '<span class="agent-panel-health-title">Hints</span>';
-  html += '<span class="agent-panel-health-total">' + items.length + ' current hint'
+  html += '<span class="agent-panel-health-total ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + items.length + ' current hint'
     + (items.length === 1 ? '' : 's') + '</span>';
   html += '</div>';
   html += '<div class="agent-panel-health-list">';
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
     html += '<div class="agent-panel-session-map-list-item">';
-    html += '<span class="agent-panel-health-pill agent-panel-health-pill-notice">'
+    html += '<span class="agent-panel-health-pill agent-panel-health-pill-notice ui-badge ui-badge--compact ui-badge--neutral">'
       + _esc(_engineerHumanizeToken(item.kind || 'hint')) + '</span>';
     html += '<span class="agent-panel-session-map-item-text">' + _esc(item.message || '') + '</span>';
     html += '</div>';
@@ -1812,7 +1823,7 @@ function _agentPanelLegacyRenderSessionMapStreams(summary) {
   var html = '<div class="agent-panel-streams-summary">';
   html += '<div class="agent-panel-health-header">';
   html += '<span class="agent-panel-health-title">Active streams</span>';
-  html += '<span class="agent-panel-health-total">' + streams.length + ' active stream'
+  html += '<span class="agent-panel-health-total ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + streams.length + ' active stream'
     + (streams.length === 1 ? '' : 's') + '</span>';
   html += '</div>';
   html += '<div class="agent-panel-stream-list">';
@@ -1830,13 +1841,13 @@ function _agentPanelLegacyRenderSessionMapAsks(title, summary, pillLabel) {
   var html = '<div class="agent-panel-health-summary">';
   html += '<div class="agent-panel-health-header">';
   html += '<span class="agent-panel-health-title">' + _esc(title) + '</span>';
-  html += '<span class="agent-panel-health-total">' + items.length + ' open</span>';
+  html += '<span class="agent-panel-health-total ui-badge ui-badge--compact ui-badge--warning ui-badge--count">' + items.length + ' open</span>';
   html += '</div>';
   html += '<div class="agent-panel-health-list">';
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
     html += '<div class="agent-panel-session-map-list-item">';
-    html += '<span class="agent-panel-health-pill agent-panel-health-pill-warning">' + _esc(pillLabel) + '</span>';
+    html += '<span class="agent-panel-health-pill agent-panel-health-pill-warning ui-badge ui-badge--compact ui-badge--warning">' + _esc(pillLabel) + '</span>';
     html += '<span class="agent-panel-session-map-item-text">' + _esc(item.title || '') + '</span>';
     if (item.parent_task_id) {
       html += '<span class="agent-panel-session-map-item-meta">via ' + _esc(item.parent_task_id) + '</span>';
@@ -1854,13 +1865,13 @@ function _agentPanelLegacyRenderSessionMapHumanGates(summary) {
   var html = '<div class="agent-panel-health-summary">';
   html += '<div class="agent-panel-health-header">';
   html += '<span class="agent-panel-health-title">Human gates</span>';
-  html += '<span class="agent-panel-health-total">' + items.length + ' waiting</span>';
+  html += '<span class="agent-panel-health-total ui-badge ui-badge--compact ui-badge--warning ui-badge--count">' + items.length + ' waiting</span>';
   html += '</div>';
   html += '<div class="agent-panel-health-list">';
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
     html += '<div class="agent-panel-session-map-list-item">';
-    html += '<span class="agent-panel-health-pill agent-panel-health-pill-warning">Validation gate</span>';
+    html += '<span class="agent-panel-health-pill agent-panel-health-pill-warning ui-badge ui-badge--compact ui-badge--warning">Validation gate</span>';
     html += '<span class="agent-panel-session-map-item-text">'
       + _esc(item.stream_title || item.branch || '') + '</span>';
     if (item.branch) {
@@ -1883,13 +1894,14 @@ function _agentPanelLegacyRenderSessionMapTaskHealth(summary) {
   var html = '<div class="agent-panel-health-summary">';
   html += '<div class="agent-panel-health-header">';
   html += '<span class="agent-panel-health-title">Task health</span>';
-  html += '<span class="agent-panel-health-total">' + items.length + ' unhealthy</span>';
+  html += '<span class="agent-panel-health-total ui-badge ui-badge--compact ui-badge--danger ui-badge--count">' + items.length + ' unhealthy</span>';
   html += '</div>';
   html += '<div class="agent-panel-health-list">';
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
     html += '<div class="agent-panel-health-item">';
-    html += '<span class="agent-panel-health-item-state agent-panel-health-pill-' + _esc(item.health_state || 'blocked') + '">'
+    html += '<span class="agent-panel-health-item-state agent-panel-health-pill-' + _esc(item.health_state || 'blocked')
+      + ' ui-badge ui-badge--compact ' + _agentPanelHealthBadgeIntent(item.health_state || 'blocked') + '">'
       + _esc(_engineerHealthLabels[item.health_state] || item.health_state || 'Unhealthy') + '</span>';
     html += '<span class="agent-panel-health-item-title">' + _esc(item.title || '') + '</span>';
     if (item.via) {
@@ -1908,13 +1920,14 @@ function _agentPanelLegacyRenderSessionMapVerification(summary) {
   var html = '<div class="agent-panel-verification-summary">';
   html += '<div class="agent-panel-health-header">';
   html += '<span class="agent-panel-health-title">Verification</span>';
-  html += '<span class="agent-panel-health-total">' + items.length + ' open checkpoint'
+  html += '<span class="agent-panel-health-total ui-badge ui-badge--compact ui-badge--warning ui-badge--count">' + items.length + ' open checkpoint'
     + (items.length === 1 ? '' : 's') + '</span>';
   html += '</div>';
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
     html += '<div class="agent-panel-verification-item">';
-    html += '<span class="agent-panel-health-pill agent-panel-health-pill-' + _esc(item.verification_state || 'pending') + '">'
+    html += '<span class="agent-panel-health-pill agent-panel-health-pill-' + _esc(item.verification_state || 'pending')
+      + ' ui-badge ui-badge--compact ' + _agentPanelHealthBadgeIntent(item.verification_state || 'pending') + '">'
       + _esc(_engineerVerificationLabels[item.verification_state] || item.verification_state || 'Verification') + '</span>';
     html += '<span class="agent-panel-verification-item-title">' + _esc(item.title || '') + '</span>';
     if (item.verification_mode) {
@@ -1935,7 +1948,7 @@ function _agentPanelLegacyRenderSessionMapBoundaries(summary) {
   var html = '<div class="agent-panel-health-summary">';
   html += '<div class="agent-panel-health-header">';
   html += '<span class="agent-panel-health-title">Branch review points</span>';
-  html += '<span class="agent-panel-health-total">' + items.length + ' branch'
+  html += '<span class="agent-panel-health-total ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + items.length + ' branch'
     + (items.length === 1 ? '' : 'es') + '</span>';
   html += '</div>';
   for (var i = 0; i < items.length; i++) {
@@ -1943,7 +1956,8 @@ function _agentPanelLegacyRenderSessionMapBoundaries(summary) {
     var pillState = item.partial_review_safe ? 'passed' : 'failed';
     var pillLabel = item.partial_review_safe ? 'Safe for partial review' : 'Branch advanced';
     html += '<div class="agent-panel-verification-item">';
-    html += '<span class="agent-panel-health-pill agent-panel-health-pill-' + _esc(pillState) + '">'
+    html += '<span class="agent-panel-health-pill agent-panel-health-pill-' + _esc(pillState)
+      + ' ui-badge ui-badge--compact ' + _agentPanelHealthBadgeIntent(pillState) + '">'
       + _esc(pillLabel) + '</span>';
     html += '<span class="agent-panel-verification-item-title">'
       + _esc(item.latest_boundary_task || item.stream_title || '') + '</span>';
@@ -1980,13 +1994,13 @@ function _agentPanelLegacyRenderSessionMapAgents(summary) {
   var html = '<div class="agent-panel-health-summary">';
   html += '<div class="agent-panel-health-header">';
   html += '<span class="agent-panel-health-title">Active agents</span>';
-  html += '<span class="agent-panel-health-total">' + items.length + ' active</span>';
+  html += '<span class="agent-panel-health-total ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + items.length + ' active</span>';
   html += '</div>';
   html += '<div class="agent-panel-health-list">';
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
     html += '<div class="agent-panel-session-map-list-item">';
-    html += '<span class="agent-panel-health-pill agent-panel-health-pill-notice">' + _esc(item.status || 'agent') + '</span>';
+    html += '<span class="agent-panel-health-pill agent-panel-health-pill-notice ui-badge ui-badge--compact ui-badge--neutral">' + _esc(item.status || 'agent') + '</span>';
     html += '<span class="agent-panel-session-map-item-text">' + _esc(item.name || item.slug || item.id || '') + '</span>';
     if (item.current_task) {
       html += '<span class="agent-panel-session-map-item-meta">' + _esc(item.current_task) + '</span>';
@@ -2007,7 +2021,7 @@ function _agentPanelLegacyRenderSessionMapQueuedFollowUp(summary) {
   var html = '<div class="agent-panel-health-summary">';
   html += '<div class="agent-panel-health-header">';
   html += '<span class="agent-panel-health-title">Queued follow-up</span>';
-  html += '<span class="agent-panel-health-total">' + items.length + ' queued item'
+  html += '<span class="agent-panel-health-total ui-badge ui-badge--compact ui-badge--warning ui-badge--count">' + items.length + ' queued item'
     + (items.length === 1 ? '' : 's') + '</span>';
   html += '</div>';
   html += '<div class="agent-panel-health-list">';
@@ -2015,7 +2029,7 @@ function _agentPanelLegacyRenderSessionMapQueuedFollowUp(summary) {
     var item = items[i];
     var pill = item.source === 'dispatch_queue' ? 'Dispatch queue' : _engineerHumanizeToken(item.queue_state || 'Stream queue');
     html += '<div class="agent-panel-session-map-list-item">';
-    html += '<span class="agent-panel-health-pill agent-panel-health-pill-notice">' + _esc(pill) + '</span>';
+    html += '<span class="agent-panel-health-pill agent-panel-health-pill-notice ui-badge ui-badge--compact ui-badge--neutral">' + _esc(pill) + '</span>';
     html += '<span class="agent-panel-session-map-item-text">' + _esc(item.task_title || item.task_id || '') + '</span>';
     if (item.branch) {
       html += '<span class="agent-panel-session-map-item-meta">' + _esc(item.branch.replace(/^torque\//, '')) + '</span>';
@@ -2038,7 +2052,7 @@ function _agentPanelLegacyRenderSessionMapJournal(summary) {
   var html = '<div class="agent-panel-health-summary">';
   html += '<div class="agent-panel-health-header">';
   html += '<span class="agent-panel-health-title">Recent decisions, plans, and checkpoints</span>';
-  html += '<span class="agent-panel-health-total">' + items.length + ' item'
+  html += '<span class="agent-panel-health-total ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + items.length + ' item'
     + (items.length === 1 ? '' : 's') + '</span>';
   html += '</div>';
   html += _agentPanelLegacyRenderJournalEntries(items, false);
@@ -2088,7 +2102,7 @@ function _agentPanelLegacyRenderOpenStreams(group) {
   var html = '<div class="agent-panel-streams-summary">';
   html += '<div class="agent-panel-health-header">';
   html += '<span class="agent-panel-health-title">Open Streams</span>';
-  html += '<span class="agent-panel-health-total">' + summary.streams.length + ' open stream'
+  html += '<span class="agent-panel-health-total ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + summary.streams.length + ' open stream'
     + (summary.streams.length === 1 ? '' : 's') + '</span>';
   html += '</div>';
 
@@ -2458,7 +2472,7 @@ function _agentPanelLegacyRenderStreamTaskGroup(title, kind, tasks, summarizeOnl
   html += '<div class="agent-panel-stream-task-group-header">';
   html += '<span class="agent-panel-stream-section-label agent-panel-stream-section-label-' + _esc(kind)
     + '">' + _esc(title) + '</span>';
-  html += '<span class="agent-panel-stream-summary-count">' + _esc(summary) + '</span>';
+  html += '<span class="agent-panel-stream-summary-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + _esc(summary) + '</span>';
   html += '</div>';
   html += '<div class="agent-panel-stream-task-list">';
   var limit = summarizeOnly ? 2 : 3;
@@ -2483,7 +2497,7 @@ function _agentPanelLegacyRenderStreamVisibilityGroup(items) {
   html += '<div class="agent-panel-stream-task-group-header">';
   html += '<span class="agent-panel-stream-section-label agent-panel-stream-section-label-context">'
     + 'Recent context</span>';
-  html += '<span class="agent-panel-stream-summary-count">' + items.length + ' item'
+  html += '<span class="agent-panel-stream-summary-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + items.length + ' item'
     + (items.length === 1 ? '' : 's') + '</span>';
   html += '</div>';
   html += '<div class="agent-panel-stream-visibility-list">';
@@ -2772,14 +2786,15 @@ function _agentPanelLegacyRenderTaskHealth(group) {
   var html = '<div class="agent-panel-health-summary">';
   html += '<div class="agent-panel-health-header">';
   html += '<span class="agent-panel-health-title">Task health</span>';
-  html += '<span class="agent-panel-health-total">' + summary.total + ' unhealthy</span>';
+  html += '<span class="agent-panel-health-total ui-badge ui-badge--compact ui-badge--danger ui-badge--count">' + summary.total + ' unhealthy</span>';
   html += '</div>';
   html += '<div class="agent-panel-health-counts">';
   for (var i = 0; i < _engineerHealthOrder.length; i++) {
     var stateName = _engineerHealthOrder[i];
     var count = summary.counts[stateName] || 0;
     if (!count) continue;
-    html += '<span class="agent-panel-health-pill agent-panel-health-pill-' + _esc(stateName) + '">'
+    html += '<span class="agent-panel-health-pill agent-panel-health-pill-' + _esc(stateName)
+      + ' ui-badge ui-badge--compact ui-badge--count ' + _agentPanelHealthBadgeIntent(stateName) + '">'
       + count + ' ' + _esc(_engineerHealthLabels[stateName]) + '</span>';
   }
   html += '</div>';
@@ -2788,7 +2803,8 @@ function _agentPanelLegacyRenderTaskHealth(group) {
     for (var j = 0; j < summary.items.length; j++) {
       var item = summary.items[j];
       html += '<div class="agent-panel-health-item">';
-      html += '<span class="agent-panel-health-item-state agent-panel-health-pill-' + _esc(item.health_state) + '">'
+      html += '<span class="agent-panel-health-item-state agent-panel-health-pill-' + _esc(item.health_state)
+        + ' ui-badge ui-badge--compact ' + _agentPanelHealthBadgeIntent(item.health_state) + '">'
         + _esc(_engineerHealthLabels[item.health_state] || item.health_state) + '</span>';
       html += '<span class="agent-panel-health-item-title">' + _esc(item.title) + '</span>';
       if (item.via) {
@@ -2809,21 +2825,23 @@ function _agentPanelLegacyRenderVerificationSummary(group) {
   var html = '<div class="agent-panel-verification-summary">';
   html += '<div class="agent-panel-health-header">';
   html += '<span class="agent-panel-health-title">Verification</span>';
-  html += '<span class="agent-panel-health-total">' + summary.total + ' open checkpoint' + (summary.total === 1 ? '' : 's') + '</span>';
+  html += '<span class="agent-panel-health-total ui-badge ui-badge--compact ui-badge--warning ui-badge--count">' + summary.total + ' open checkpoint' + (summary.total === 1 ? '' : 's') + '</span>';
   html += '</div>';
   html += '<div class="agent-panel-health-counts">';
   for (var i = 0; i < summary.order.length; i++) {
     var stateName = summary.order[i];
     var count = summary.counts[stateName] || 0;
     if (!count) continue;
-    html += '<span class="agent-panel-health-pill agent-panel-health-pill-' + _esc(stateName) + '">'
+    html += '<span class="agent-panel-health-pill agent-panel-health-pill-' + _esc(stateName)
+      + ' ui-badge ui-badge--compact ui-badge--count ' + _agentPanelHealthBadgeIntent(stateName) + '">'
       + count + ' ' + _esc(_engineerVerificationLabels[stateName] || stateName) + '</span>';
   }
   html += '</div>';
   for (var j = 0; j < summary.items.length; j++) {
     var item = summary.items[j];
     html += '<div class="agent-panel-verification-item">';
-    html += '<span class="agent-panel-health-pill agent-panel-health-pill-' + _esc(item.verification_state) + '">'
+      html += '<span class="agent-panel-health-pill agent-panel-health-pill-' + _esc(item.verification_state)
+        + ' ui-badge ui-badge--compact ' + _agentPanelHealthBadgeIntent(item.verification_state) + '">'
       + _esc(_engineerVerificationLabels[item.verification_state] || item.verification_state) + '</span>';
     html += '<span class="agent-panel-verification-item-title">' + _esc(item.title) + '</span>';
     if (item.verification_mode) {
@@ -2881,7 +2899,7 @@ function _agentPanelLegacyRenderBoundarySummary(group) {
   var html = '<div class="agent-panel-health-summary">';
   html += '<div class="agent-panel-health-header">';
   html += '<span class="agent-panel-health-title">Branch review points</span>';
-  html += '<span class="agent-panel-health-total">' + items.length + ' branch'
+  html += '<span class="agent-panel-health-total ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + items.length + ' branch'
     + (items.length === 1 ? '' : 'es') + '</span>';
   html += '</div>';
   for (var i = 0; i < items.length; i++) {
@@ -2889,7 +2907,8 @@ function _agentPanelLegacyRenderBoundarySummary(group) {
     var pillState = item.partial_review_safe ? 'passed' : 'failed';
     var pillLabel = item.partial_review_safe ? 'Safe for partial review' : 'Branch advanced';
     html += '<div class="agent-panel-verification-item">';
-    html += '<span class="agent-panel-health-pill agent-panel-health-pill-' + _esc(pillState) + '">'
+    html += '<span class="agent-panel-health-pill agent-panel-health-pill-' + _esc(pillState)
+      + ' ui-badge ui-badge--compact ' + _agentPanelHealthBadgeIntent(pillState) + '">'
       + _esc(pillLabel) + '</span>';
     html += '<span class="agent-panel-verification-item-title">' + _esc(item.latest_boundary_task) + '</span>';
     if (item.branch) {

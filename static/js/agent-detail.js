@@ -443,7 +443,7 @@ function renderAgentDetails(a) {
   if (isArchitect) {
     const pendingHires = _architectPendingHiresForAgent(a.id);
     if (pendingHires.length) {
-      h += `<div class="detail-section"><div class="detail-section-head"><span class="detail-section-title">Pending hires</span><span class="detail-section-count">${pendingHires.length}</span></div><div class="detail-section-list">`;
+      h += `<div class="detail-section"><div class="detail-section-head"><span class="detail-section-title">Pending hires</span><span class="detail-section-count ui-badge ui-badge--micro ui-badge--warning ui-badge--count">${pendingHires.length}</span></div><div class="detail-section-list">`;
       for (let i = 0; i < pendingHires.length; i++) {
         const hire = pendingHires[i] || {};
         const hireIdJs = JSON.stringify(String(hire.id || ''));

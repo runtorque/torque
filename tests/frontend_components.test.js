@@ -430,6 +430,77 @@ test('History and event markers use canonical semantic badges', () => {
   assert.doesNotMatch(css, /^\.events-entry-dismissed-badge\s*\{/m);
 });
 
+test('remaining count annotations use canonical density and semantic intent', () => {
+  const gridMain = source('static/js/grid/main.js');
+  const groupTabs = source('static/js/grid/group-tabs.js');
+  const agentCard = source('static/js/grid/agent-card.js');
+  const render = source('static/js/render.js');
+  const detail = source('static/js/agent-detail.js');
+  const chat = source('static/js/chat.js');
+  const actions = source('static/js/actions.js');
+  const events = source('static/js/events.js');
+  const mission = source('static/js/mission_control.js');
+  const initiatives = source('static/js/initiatives.js');
+  const hierarchy = source('static/js/agent-panel/hierarchy.js');
+  const engineer = source('static/js/agent-panel/engineer.js');
+  const worker = source('static/js/agent-panel/worker.js');
+  const agentEvents = source('static/js/agent-panel/events.js');
+  const architect = source('static/js/agent-panel/architect.js');
+  const legacy = source('static/js/agent-panel/legacy-engineer.js');
+  const thinking = source('static/js/thinking.js');
+  const schedules = source('static/js/board/schedules.js');
+  const behavior = source('static/js/behavior_overlay.js');
+
+  assert.match(gridMain, /group-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count/);
+  assert.match(gridMain, /drawer-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count/);
+  assert.match(groupTabs, /agent-group-tab-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count/);
+  assert.match(groupTabs, /agent-group-quick-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count/);
+  assert.match(agentCard, /agent-card-state-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count/);
+  assert.match(agentCard, /agent-card-state-more ui-badge ui-badge--micro ui-badge--neutral ui-badge--count/);
+  assert.match(agentCard, /cell-term-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count/);
+  assert.match(render, /drawer-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count/);
+  assert.match(detail, /detail-section-count ui-badge ui-badge--micro ui-badge--warning ui-badge--count/);
+  assert.match(chat, /chat-badge-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count/);
+  assert.match(chat, /chat-badge-ack' \? 'ui-badge--warning'/);
+  assert.match(chat, /chat-badge-pending' \? 'ui-badge--accent'/);
+  assert.match(actions, /tpled-transitions-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count/);
+  assert.match(events, /events-attention-count ui-badge ui-badge--compact ui-badge--danger ui-badge--count/);
+  assert.match(mission, /mc-section-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count/);
+  assert.match(initiatives, /initiative-column-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count/);
+  assert.match(initiatives, /initiative-secondary-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count/);
+  assert.match(initiatives, /area-filter-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count/);
+  assert.match(initiatives, /planning-tab-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count/);
+  assert.match(initiatives, /initiative-total ui-badge ui-badge--compact ui-badge--neutral ui-badge--count/);
+  assert.match(thinking, /thinking-tab-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count/);
+  assert.match(thinking, /thinking-total ui-badge ui-badge--compact ui-badge--neutral ui-badge--count/);
+  assert.match(mission, /mc-total ui-badge ui-badge--compact ui-badge--neutral ui-badge--count/);
+  assert.match(schedules, /board-schedule-runs ui-badge ui-badge--compact ui-badge--neutral ui-badge--count/);
+  assert.match(behavior, /behavior-overlay-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count/);
+  assert.match(hierarchy, /agent-panel-hierarchy-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count/);
+  assert.match(engineer, /agent-panel-worklog-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count/);
+  assert.match(worker, /agent-panel-event-section-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count/);
+  assert.match(agentEvents, /agent-panel-event-section-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count/);
+  assert.match(architect, /agent-panel-message-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count/);
+  assert.match(legacy, /engineers-roster-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count/);
+  assert.match(legacy, /agent-panel-health-total ui-badge ui-badge--compact ui-badge--danger ui-badge--count/);
+  assert.match(legacy, /ui-badge ui-badge--compact ui-badge--count ' \+ _agentPanelHealthBadgeIntent/);
+});
+
+test('count geometry does not drift back into feature styles', () => {
+  const tokens = source('static/styles/tokens-base.css');
+  const grid = source('static/styles/workspace-grid.css');
+  const board = source('static/styles/board-panels.css');
+  const agent = source('static/styles/agent-panel.css');
+  const features = source('static/styles/feature-panels.css');
+
+  assert.doesNotMatch(tokens, /^\.group-count\s*\{/m);
+  assert.doesNotMatch(grid, /^\.(?:agent-group-tab-count|cell-term-count|detail-section-count|drawer-count)\s*\{[^}]*(?:font-size|padding|border-radius|background|color):/ms);
+  assert.doesNotMatch(board, /^\.(?:chat-badge|tpled-transitions-count|events-attention-count)\s*\{[^}]*(?:font-size|padding|border-radius|background|color):/ms);
+  assert.doesNotMatch(agent, /^\.(?:engineers-roster-count|agent-panel-hierarchy-count|architect-roster-section-count|architect-decision-group-count|agent-panel-event-section-count|agent-panel-worklog-count|agent-panel-message-count|agent-panel-stream-summary-count|agent-panel-health-total)\s*\{/m);
+  assert.doesNotMatch(agent, /^\.agent-panel-health-pill\s*\{[^}]*(?:font-size|padding|border-radius|background|color):/ms);
+  assert.doesNotMatch(features, /^\.(?:mc-section-count|mc-total|initiative-column-count|initiative-total|area-filter-count|planning-tab-count|thinking-tab-count|thinking-total)\s*\{[^}]*(?:font-size|padding|border-radius|background|color):/ms);
+});
+
 test('status bar segments separate passive metadata from native actions', () => {
   const html = source('webview.html');
   const css = source('static/styles/workspace-shell.css');

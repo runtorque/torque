@@ -307,7 +307,7 @@ function renderTemplatesEditor() {
   var transitions = d.transitions || [];
   html += '<details class="tpled-section tpled-transitions-section"' + (transitions.length ? ' open' : '') + '>';
   html += '<summary>Transitions'
-    + (transitions.length ? ' <span class="tpled-transitions-count">' + transitions.length + '</span>' : '')
+    + (transitions.length ? ' <span class="tpled-transitions-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + transitions.length + '</span>' : '')
     + ' <span class="hint-btn" onclick="event.preventDefault();event.stopPropagation();toggleHint(this)"'
     + ' data-hint="Defines which actions this one can derive into. Agents can only hand off to actions listed here. Leave empty for terminal pipeline stages.">?</span>'
     + '</summary>';

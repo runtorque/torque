@@ -176,7 +176,7 @@ test('expanded architect roster section still nests hired engineers and workers 
 
   const html = vm.runInContext(`_agentPanelLegacyRenderArchitectRoster('torque')`, context);
 
-  assert.match(html, /Hired engineers<\/span><span class="architect-roster-section-count">1<\/span>/);
+  assert.match(html, /Hired engineers<\/span><span class="architect-roster-section-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">1<\/span>/);
   assert.match(html, /agent-panel-hierarchy-list agent-panel-hierarchy-list-architect architect-roster-subtree/);
   assert.match(html, /Alice/);
   assert.match(html, /Worker A/);

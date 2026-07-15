@@ -1222,7 +1222,7 @@ function _renderSelectedAgentTerminalDrawer(agent) {
   let html = `<div class="terminal-drawer agent-focus-terminals">`;
   html += `<div class="drawer-hdr">`;
   html += `  <span class="drawer-label">${esc(agent.name)} terminals</span>`;
-  html += `  <span class="drawer-count">${childTerms.length}</span>`;
+  html += `  <span class="drawer-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">${childTerms.length}</span>`;
   html += `</div>`;
   html += `<div class="term-list">`;
   for (const t of childTerms) html += renderTerminalRow(t);

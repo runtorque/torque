@@ -481,11 +481,6 @@ body.runtime-embedded #standalone-float-layer {
   font-weight: 600; font-size: 11px; flex: 1;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.group-count {
-  font-size: 10px; color: var(--text-dim);
-  background: var(--bg); padding: 1px 5px;
-  border-radius: 8px;
-}
 .group-toggle {
   font-size: 10px; color: var(--text-dim);
   width: 16px; height: 16px;

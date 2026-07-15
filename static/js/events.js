@@ -417,7 +417,7 @@ function _eventsBuildShellHtml(grp, attention) {
   var attCount = attention.length;
   html += '<div class="events-attention">';
   html += '<div class="events-attention-heading">Attention inbox'
-    + (attCount > 0 ? ' <span class="events-attention-count">' + attCount + '</span>' : '')
+    + (attCount > 0 ? ' <span class="events-attention-count ui-badge ui-badge--compact ui-badge--danger ui-badge--count">' + attCount + '</span>' : '')
     + '</div>';
   if (attention.length === 0) {
     html += '<div class="events-attention-empty">No items need attention in this view.</div>';

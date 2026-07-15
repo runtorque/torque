@@ -1328,9 +1328,9 @@ function thinkingMindDeleteLink(linkId) {
 function _renderThinkingTabs(noteTotal, mapTotal, briefTotal) {
   var active = String(_thinkingActiveTab || 'scratchpad');
   var html = '<div class="thinking-tabs" role="tablist" aria-label="Thinking surfaces">';
-  html += '<button type="button" role="tab" class="thinking-tab' + (active === 'scratchpad' ? ' active' : '') + '" aria-selected="' + (active === 'scratchpad' ? 'true' : 'false') + '" onclick="thinkingSetTab(\'scratchpad\')">Scratchpad <span>' + _thinkingEsc(noteTotal) + '</span></button>';
-  html += '<button type="button" role="tab" class="thinking-tab' + (active === 'mind-map' ? ' active' : '') + '" aria-selected="' + (active === 'mind-map' ? 'true' : 'false') + '" onclick="thinkingSetTab(\'mind-map\')">Mind Map <span>' + _thinkingEsc(mapTotal) + '</span></button>';
-  html += '<button type="button" role="tab" class="thinking-tab' + (active === 'idea-briefs' ? ' active' : '') + '" aria-selected="' + (active === 'idea-briefs' ? 'true' : 'false') + '" onclick="thinkingSetTab(\'idea-briefs\')">Idea Briefs <span>' + _thinkingEsc(briefTotal || 0) + '</span></button>';
+  html += '<button type="button" role="tab" class="thinking-tab' + (active === 'scratchpad' ? ' active' : '') + '" aria-selected="' + (active === 'scratchpad' ? 'true' : 'false') + '" onclick="thinkingSetTab(\'scratchpad\')">Scratchpad <span class="thinking-tab-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">' + _thinkingEsc(noteTotal) + '</span></button>';
+  html += '<button type="button" role="tab" class="thinking-tab' + (active === 'mind-map' ? ' active' : '') + '" aria-selected="' + (active === 'mind-map' ? 'true' : 'false') + '" onclick="thinkingSetTab(\'mind-map\')">Mind Map <span class="thinking-tab-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">' + _thinkingEsc(mapTotal) + '</span></button>';
+  html += '<button type="button" role="tab" class="thinking-tab' + (active === 'idea-briefs' ? ' active' : '') + '" aria-selected="' + (active === 'idea-briefs' ? 'true' : 'false') + '" onclick="thinkingSetTab(\'idea-briefs\')">Idea Briefs <span class="thinking-tab-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">' + _thinkingEsc(briefTotal || 0) + '</span></button>';
   html += '</div>';
   return html;
 }
@@ -2611,7 +2611,7 @@ function renderThinkingPanel() {
   var html = '<div class="thinking-panel">';
   html += '<div class="tpled-header thinking-header ui-panel-header ui-panel-header--surface"><div class="tpled-header-copy ui-panel-header__copy"><div class="tpled-header-title-row ui-panel-header__title-row">' + _thinkingConnectedNodesIcon('thinking-header-icon') + '<span class="tpled-header-title ui-panel-header__title">Thinking</span></div>';
   html += '<div class="tpled-header-subtitle ui-panel-header__subtitle">Scratchpad, Mind Map, and Idea Briefs are group-scoped thinking tools for ' + _thinkingEsc(group || 'all groups') + '; they stay separate from Planning execution.</div></div>';
-  html += '<div class="tpled-header-controls ui-panel-header__actions"><span class="thinking-total">' + _thinkingEsc(notes.length + ' notes · ' + maps.length + ' maps · ' + briefs.length + ' briefs') + '</span><button class="tpled-new-btn" onclick="thinkingRefresh()" title="Refresh Thinking data">&#x21BB;</button></div></div>';
+  html += '<div class="tpled-header-controls ui-panel-header__actions"><span class="thinking-total ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + _thinkingEsc(notes.length + ' notes · ' + maps.length + ' maps · ' + briefs.length + ' briefs') + '</span><button class="tpled-new-btn" onclick="thinkingRefresh()" title="Refresh Thinking data">&#x21BB;</button></div></div>';
   html += _renderThinkingTabs(notes.length, maps.length, briefs.length);
   if (_thinkingLastError) html += '<div class="thinking-error">' + _thinkingEsc(_thinkingLastError) + '</div>';
   if (_ideaBriefLastError && activeTab === 'idea-briefs') html += '<div class="thinking-error">' + _thinkingEsc(_ideaBriefLastError) + '</div>';

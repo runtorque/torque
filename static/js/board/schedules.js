@@ -70,7 +70,7 @@ function _renderSchedulesView() {
       html += '<span class="board-schedule-next">Next: ' + _schedFormatTime(s.next_run_at) + '</span>';
     }
     if (s.run_count) {
-      html += '<span class="board-schedule-runs">' + s.run_count + ' run' + (s.run_count === 1 ? '' : 's') + '</span>';
+      html += '<span class="board-schedule-runs ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + s.run_count + ' run' + (s.run_count === 1 ? '' : 's') + '</span>';
     }
     html += '</div>';
 

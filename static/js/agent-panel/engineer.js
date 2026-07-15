@@ -143,7 +143,7 @@ function _renderEngineerQueuedTasks(agent) {
   var html = '<div class="agent-panel-worklog-tab agent-panel-queued-tab">';
   html += '<div class="agent-panel-worklog-header">';
   html += '<span class="agent-panel-worklog-title">Queued tasks</span>';
-  html += '<span class="agent-panel-worklog-count">' + tasks.length + '</span>';
+  html += '<span class="agent-panel-worklog-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + tasks.length + '</span>';
   html += '</div>';
   html += '<div class="agent-panel-worklog-note">Tasks assigned to '
     + _agentPanelEsc(agentName)

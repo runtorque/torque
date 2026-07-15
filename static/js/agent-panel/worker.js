@@ -7,7 +7,7 @@ function _agentPanelWorkerEvents(agent) {
   var html = '<div class="agent-panel-event-section">';
   html += '<div class="agent-panel-event-section-header">';
   html += '<span class="agent-panel-event-section-title">Worker events</span>';
-  html += '<span class="agent-panel-event-section-count">' + _agentPanelEventSectionCount(page) + '</span>';
+  html += '<span class="agent-panel-event-section-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + _agentPanelEventSectionCount(page) + '</span>';
   html += '</div>';
   if (!events.length) {
     html += '<div class="agent-panel-event-empty">No worker events yet.</div>';
@@ -133,7 +133,7 @@ function _agentPanelWorkerWorklog(agent) {
   var html = '<div class="agent-panel-worklog-tab">';
   html += '<div class="agent-panel-worklog-header">';
   html += '<span class="agent-panel-worklog-title">Task history</span>';
-  html += '<span class="agent-panel-worklog-count">' + tasks.length + '</span>';
+  html += '<span class="agent-panel-worklog-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + tasks.length + '</span>';
   html += '</div>';
   html += '<div class="agent-panel-worklog-note">Tasks assigned to this worker.</div>';
   if (!tasks.length) {

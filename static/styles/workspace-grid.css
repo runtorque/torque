@@ -1203,13 +1203,6 @@ main {
 }
 .agent-group-tab-count {
   flex: 0 0 auto;
-  min-width: 14px;
-  padding: 1px 4px;
-  border-radius: 999px;
-  color: var(--text-dim);
-  background: var(--bg-surface);
-  font-size: 9px;
-  text-align: center;
 }
 .agent-group-tab-menu {
   display: inline-grid;
@@ -1283,7 +1276,6 @@ main {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
 }
-.agent-group-quick-option small { color: var(--text-faint); font-size: 9px; }
 .agent-group-quick-option svg {
   width: 12px;
   height: 12px;
@@ -1299,11 +1291,6 @@ main {
 }
 @container agent-group-nav (max-width: 420px) {
   .agent-group-tab { max-width: 118px; padding-inline: 6px; }
-  .agent-group-tab-count {
-    min-width: auto;
-    padding: 0;
-    background: transparent;
-  }
 }
 @container agent-group-nav (max-width: 380px) {
   .agent-group-tabs-list { display: none; }
@@ -1963,12 +1950,6 @@ body.runtime-embedded .agent-focus-header {
 .agent-card-state-dot--idle,
 .agent-card-state-dot--empty { background: color-mix(in srgb, var(--text-dim) 74%, transparent); }
 .agent-card-state-dot--error { background: var(--red); }
-.agent-card-state-more {
-  color: var(--text-dim);
-  font-size: 7px;
-  font-weight: 700;
-  line-height: 1;
-}
 /* ------------------------------------------------------------------ */
 /* Menu popovers                                                       */
 /* ------------------------------------------------------------------ */
@@ -2331,9 +2312,6 @@ body.runtime-embedded .agent-focus-header {
 }
 .cell-term-count {
   position: absolute; bottom: 16px; right: 3px;
-  font-size: 8px; color: var(--text-dim);
-  background: var(--bg); padding: 0 3px;
-  border-radius: 3px; line-height: 1.4;
 }
 
 /* Visual polish: agent cards keep their existing grid geometry while making
@@ -2744,14 +2722,6 @@ body.runtime-embedded .agent-focus-header {
   letter-spacing: .04em;
   font-weight: 700;
 }
-.detail-section-count {
-  font-size: 8px;
-  color: var(--text-dim);
-  background: var(--bg);
-  border-radius: 999px;
-  padding: 0 5px;
-  line-height: 1.5;
-}
 .detail-section-list {
   display: flex;
   flex-direction: column;
@@ -2863,12 +2833,6 @@ body.runtime-embedded .agent-focus-header {
   text-transform: uppercase; letter-spacing: .06em;
   flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.drawer-count {
-  font-size: 9px; color: var(--text-dim);
-  background: var(--bg); padding: 0 4px;
-  border-radius: 8px;
-}
-
 /* ------------------------------------------------------------------ */
 /* Terminal rows                                                       */
 /* ------------------------------------------------------------------ */

@@ -795,7 +795,7 @@ function _agentStatusMixDots(agents) {
     html += '<span class="agent-card-state-dot agent-card-state-dot--' + esc(mix) + '"></span>';
   }
   if (list.length > shown.length) {
-    html += '<span class="agent-card-state-more">+' + esc(list.length - shown.length) + '</span>';
+    html += '<span class="agent-card-state-more ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">+' + esc(list.length - shown.length) + '</span>';
   }
   return html;
 }
@@ -905,7 +905,7 @@ function _renderEngineerCardBody(a, askingText) {
     + '>' + esc(_agentCardPrimaryDisplayName(a)) + '</div>';
   html += '<div class="agent-card-line cell-engineer-workers">'
     + '<span class="agent-card-state-mix">' + _agentStatusMixDots(workers) + '</span>'
-    + '<span class="agent-card-state-count">' + esc(String(workers.length) + ' ' + workerLabel) + '</span>'
+    + '<span class="agent-card-state-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">' + esc(String(workers.length) + ' ' + workerLabel) + '</span>'
     + '</div>';
   html += '<div class="agent-card-line cell-engineer-queue">'
     + esc('queue: ' + queueDepth)
@@ -1044,7 +1044,7 @@ function renderAgentCell(a, options) {
     + (badge.title ? ' title="' + esc(badge.title) + '"' : '')
     + '>' + esc(badge.label) + '</div>';
   if (childCount > 0) {
-    h += `<div class="cell-term-count">${childCount}</div>`;
+    h += `<div class="cell-term-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">${childCount}</div>`;
   }
   if (_isDismissed) {
     const rehireAction = _isArchitect ? 'rehireArchitect' : 'rehireEngineer';
