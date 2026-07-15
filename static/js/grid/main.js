@@ -17,11 +17,11 @@ function _renderAgentGridNewToolbar(groupName, disabled) {
       + '<circle cx="2" cy="2.2" r="1.2"/><circle cx="6" cy="6" r="1.2"/><circle cx="10" cy="9.8" r="1.2"/>'
       + '<path d="m3 2.9 2.1 2.2M7 6.9 9.1 9"/>'
       + '</svg>';
-    viewToggle = '<div class="agent-view-toggle agent-view-toggle--grid" role="group" aria-label="Agent view">'
-      + '<button type="button" class="agent-view-toggle-btn' + (vm === 'grid' ? ' is-active' : '') + '"'
+    viewToggle = '<div class="segmented-control agent-view-toggle agent-view-toggle--grid" role="group" aria-label="Agent view">'
+      + '<button type="button" class="segmented-control__item agent-view-toggle-btn' + (vm === 'grid' ? ' is-active' : '') + '"'
       + ' data-agent-view-toggle="grid" aria-pressed="' + (vm === 'grid' ? 'true' : 'false') + '" onclick="_torqueSetAgentViewMode(\'grid\')"'
       + ' title="Grid view" aria-label="Grid view">' + gridIcon + '</button>'
-      + '<button type="button" class="agent-view-toggle-btn' + (vm === 'canvas' ? ' is-active' : '') + '"'
+      + '<button type="button" class="segmented-control__item agent-view-toggle-btn' + (vm === 'canvas' ? ' is-active' : '') + '"'
       + ' data-agent-view-toggle="canvas" aria-pressed="' + (vm === 'canvas' ? 'true' : 'false') + '" onclick="_torqueSetAgentViewMode(\'canvas\')"'
       + ' title="Canvas view" aria-label="Canvas view">' + canvasIcon + '</button>'
       + '</div>';

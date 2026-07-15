@@ -609,7 +609,7 @@ function _renderTaskArtifactEditor() {
   html += '<textarea rows="6" oninput="taskArtifactDraftChange(\'content\', this.value);taskAutoResize(this)" placeholder="Paste a useful excerpt, command output, or report summary...">'
     + esc(draft.content || '') + '</textarea>';
   html += '</div>';
-  html += '<div class="modal-actions">';
+  html += '<div class="modal-actions ui-modal__footer">';
   html += '<button class="btn-cancel" type="button" onclick="taskArtifactCancelEdit()">Cancel</button>';
   html += '<button class="btn-primary" type="button" onclick="taskArtifactSave()">Save Artifact</button>';
   html += '</div></div>';

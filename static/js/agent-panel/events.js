@@ -159,12 +159,12 @@ function _agentPanelRenderEventsInnerTabs(agent) {
     { key: 'lifecycle', label: 'Lifecycle' },
     { key: 'mcp', label: 'MCP' },
   ];
-  var html = '<div class="agent-panel-events-subtabs" role="tablist" aria-label="Events views">';
+  var html = '<div class="ui-tabs--contained agent-panel-events-subtabs" role="tablist" aria-label="Events views">';
   for (var i = 0; i < tabs.length; i++) {
     var tab = tabs[i];
     html += '<button type="button"'
       + ' id="agent-panel-events-subtab-' + _agentPanelEsc(tab.key) + '"'
-      + ' class="agent-panel-events-subtab' + (active === tab.key ? ' active' : '') + '"'
+      + ' class="ui-tab ui-tab--contained agent-panel-events-subtab' + (active === tab.key ? ' active' : '') + '"'
       + ' data-agent-panel-events-inner-tab="' + _agentPanelEsc(tab.key) + '"'
       + ' role="tab"'
       + ' aria-selected="' + (active === tab.key ? 'true' : 'false') + '"'
@@ -530,7 +530,7 @@ function _renderAgentMcpTab(agent) {
   var visibleCalls = calls.slice(0, visibleLimit);
   var loading = !!_agentPanelMcpCallsLoadingByAgent[agentId];
   var html = '<div class="agent-panel-mcp-tab">';
-  html += '<div class="agent-panel-mcp-filters">';
+  html += '<div class="agent-panel-mcp-filters form-control-group-sm">';
   html += '<input class="agent-panel-mcp-filter-tool" placeholder="Filter tool" value="'
     + _agentPanelAttr(filters.tool || '')
     + '" oninput="agentPanelMcpFilterChange(\'tool\', this.value)">';

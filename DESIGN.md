@@ -484,12 +484,12 @@ the rule is intentionally global and documented here.
 | Foundations and tokens | Core scale standardized | Migrate component families and audit remaining literals |
 | Group tabs | Standardized | Verify compact switcher parity |
 | Panel tabs | Standardized | Verify all panel zones and narrow widths |
-| Feature navigation tabs | Core variants standardized | Migrate compatibility aliases to the canonical API |
-| Segmented controls | Core variant standardized | Migrate compatibility aliases and audit keyboard behavior |
-| Filter chips and presets | Core variants standardized | Audit remaining feature-local toggles and removable values |
-| Buttons | Core variants standardized | Migrate feature-specific aliases and audit icon buttons |
-| Inputs and selectors | Core variants standardized | Migrate remaining feature-specific aliases and audit field labeling |
-| Cards | Core variants standardized | Audit grid identity cards and nested contained surfaces |
+| Feature navigation tabs | Standardized | Audit keyboard behavior and narrow labels |
+| Segmented controls | Standardized | Audit keyboard behavior and long option labels |
+| Filter chips and presets | Standardized | Audit remaining feature-local toggles and removable values |
+| Buttons | Standardized | Audit icon-only controls and specialized editor actions |
+| Inputs and selectors | Standardized | Audit field labeling and specialized controls |
+| Cards | Standardized | Audit grid identity cards and nested contained surfaces |
 | Toolbars and panel headers | Standardized | Audit responsive wrapping and narrow panel widths |
 | Status bar segments | Standardized | Audit narrow-width priority |
 | Menus and popovers | Standardized | Audit narrow viewport placement and long localized labels |
@@ -921,6 +921,36 @@ the rule is intentionally global and documented here.
   Focused frontend suites protect rendering and interactions; live checks cover
   representative empty, loading, error, and recovery states plus console
   cleanliness.
+
+### D-019 — Shared visual primitives require direct markup opt-in
+
+- Date: 2026-07-15
+- Status: accepted
+- Decision: Consumers declare canonical component classes in their markup.
+  Shared CSS selectors target `.ui-tab`, `.segmented-control`, `.filter-chip`,
+  `.preset-button`, `.ui-card`, `.form-control-sm`, and their documented
+  variants—not feature class names. A compact form may opt in once through
+  `.form-control-group-sm` when every text-like control shares the same density.
+- Rationale: Grouped compatibility selectors made a feature look standardized
+  without exposing that intent in its markup. They also coupled the shared
+  stylesheet to Planning, Thinking, Board, Agent, Settings, Actions, Library,
+  and log-viewer implementation names, so renaming or adding a consumer could
+  silently drop the shared behavior.
+- Scope: Feature and settings tabs, Agent event subtabs, Board lane tabs,
+  Grid/Canvas, Actions/Library, log-target and schedule segmented controls,
+  Board and Planning filters, schedule presets, compact Actions/Library/Events
+  fields, Board/Context/Agent cards, canonical success/warning actions, and
+  `static/styles/components.css`.
+- Constraints: Feature classes remain stable hooks for behavior, tests, local
+  layout, and content-specific states. Button intent classes such as
+  `.btn-primary` and badge intent classes are themselves canonical public API,
+  not compatibility aliases. Native text-like controls continue to receive the
+  default field primitive automatically.
+- Verification: Component tests require direct canonical classes on every
+  migrated consumer and reject feature selectors in shared component rules.
+  Focused navigation, settings, Board, Agent, Actions, Library, and log-viewer
+  suites protect behavior; live checks compare geometry and selected states
+  before committing.
 
 ## Decision entry template
 

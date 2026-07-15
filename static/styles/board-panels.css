@@ -3053,7 +3053,7 @@ body[data-torque-mode="desktop"] .diff-view-modal {
   align-items: center;
   gap: 6px;
 }
-.btn-green.diff-merge-button[disabled] {
+.btn-success.diff-merge-button[disabled] {
   opacity: 0.85;
   pointer-events: none;
 }

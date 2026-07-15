@@ -51,10 +51,10 @@ function _libraryTabsHtml() {
   var rolesActive = _libraryActiveTab === 'roles';
   var specsActive = _libraryActiveTab === 'specializations';
   var classesActive = _libraryActiveTab === 'agent_classes';
-  return '<div class="tpled-view-toggle library-tab-toggle" role="tablist" aria-label="Library sections">'
-    + '<button type="button" role="tab" class="tpled-view-btn' + (rolesActive ? ' active' : '') + '" aria-selected="' + (rolesActive ? 'true' : 'false') + '" onclick="librarySwitchTab(\'roles\')">Roles</button>'
-    + '<button type="button" role="tab" class="tpled-view-btn' + (specsActive ? ' active' : '') + '" aria-selected="' + (specsActive ? 'true' : 'false') + '" onclick="librarySwitchTab(\'specializations\')">Specializations</button>'
-    + '<button type="button" role="tab" class="tpled-view-btn' + (classesActive ? ' active' : '') + '" aria-selected="' + (classesActive ? 'true' : 'false') + '" onclick="librarySwitchTab(\'agent_classes\')">Agent Classes</button>'
+  return '<div class="segmented-control tpled-view-toggle library-tab-toggle" role="tablist" aria-label="Library sections">'
+    + '<button type="button" role="tab" class="segmented-control__item tpled-view-btn' + (rolesActive ? ' active' : '') + '" aria-selected="' + (rolesActive ? 'true' : 'false') + '" onclick="librarySwitchTab(\'roles\')">Roles</button>'
+    + '<button type="button" role="tab" class="segmented-control__item tpled-view-btn' + (specsActive ? ' active' : '') + '" aria-selected="' + (specsActive ? 'true' : 'false') + '" onclick="librarySwitchTab(\'specializations\')">Specializations</button>'
+    + '<button type="button" role="tab" class="segmented-control__item tpled-view-btn' + (classesActive ? ' active' : '') + '" aria-selected="' + (classesActive ? 'true' : 'false') + '" onclick="librarySwitchTab(\'agent_classes\')">Agent Classes</button>'
     + '</div>';
 }
 
@@ -347,7 +347,7 @@ function renderAgentTemplatesEditor() {
   }
 
   var d = dataForScope || {};
-  var html = '<div class="tpled-form">';
+  var html = '<div class="tpled-form form-control-group-sm">';
   html += '<label>Name <span class="label-req">*</span></label>';
   html += '<input id="agent-template-name" value="' + esc(d.name || '') + '" onchange="agentTemplateMarkDirty()" autocomplete="off">';
   html += '<label>Scope</label>';
@@ -781,7 +781,7 @@ function renderSpecializationLibraryEditor(restoreState) {
   var d = dataForScope || {};
   var sourcePath = _specializationSourcePath();
   var priorities = (d.priorities || []).join('\n');
-  var html = '<div class="tpled-form">';
+  var html = '<div class="tpled-form form-control-group-sm">';
   html += '<label>Name <span class="label-req">*</span></label>';
   html += '<input id="specialization-name" value="' + esc(d.name || '') + '" oninput="specializationLibraryMarkDirty()" onchange="specializationLibraryMarkDirty()" autocomplete="off">';
   html += '<label>Scope</label>';
@@ -1789,7 +1789,7 @@ function _agentClassEditorFormHtml(preview) {
   var draft = preview.draft && typeof preview.draft === 'object' ? preview.draft : {};
   var kind = String(preview.base_kind || (preview.runtime && preview.runtime.base_kind) || 'worker').trim() || 'worker';
   var title = _agentClassEditorNew ? 'Create project Agent Class' : (isBuiltin ? 'Built-in Agent Class' : (archived ? 'Archived Agent Class' : 'Edit project Agent Class'));
-  var html = '<div class="agent-class-form tpled-form">';
+  var html = '<div class="agent-class-form tpled-form form-control-group-sm">';
   html += '<div class="agent-class-form-head"><div><div class="agent-class-form-title">' + esc(title) + '</div>';
   html += '<div class="agent-class-form-subtitle">Class-first authoring: describe the purpose, then choose what this class can do and what it cannot do. Troubleshooting details stay in Advanced/Internal.</div></div></div>';
   if (readOnly) {

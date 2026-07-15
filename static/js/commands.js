@@ -922,7 +922,7 @@ async function worktreeCreatePR(id) {
   const base = cell.worktree_base_branch || 'main';
   if (!await showConfirm(
     `Create a pull request from "${branch}" into ${base}? The branch will be pushed to origin first.`,
-    { label: 'Create PR', variant: 'btn-green' }
+    { label: 'Create PR', variant: 'btn-success' }
   )) return;
   send({ cmd: 'worktree_create_pr', id });
 }
@@ -934,7 +934,7 @@ function _showWorktreePR(msg) {
   }
   // Show PR URL in confirm dialog — reuse showConfirm flow
   var label = (msg.message || 'PR created') + ': ' + msg.url;
-  showConfirm(label, { label: 'Open in browser', variant: 'btn-green' }).then(function(ok) {
+  showConfirm(label, { label: 'Open in browser', variant: 'btn-success' }).then(function(ok) {
     if (ok) window.open(msg.url);
   });
 }
@@ -956,7 +956,7 @@ async function _confirmWorktreeMerge(id, message) {
   const result = await showConfirm(
     `Create PR and squash-merge "${cell.name}" into ${base}? Cleanup options run only after the PR merges, not when the PR is created.`,
     {
-      label: 'Create PR + Merge', variant: 'btn-green',
+      label: 'Create PR + Merge', variant: 'btn-success',
       checkboxes: [
         { key: 'close_agent_on_merge', label: 'Close agent after PR merge', checked: mergeDefaults.close },
         { key: 'remove_worktree_on_merge', label: 'Delete worktree after PR merge', checked: mergeDefaults.remove },

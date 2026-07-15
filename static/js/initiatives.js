@@ -1569,8 +1569,8 @@ function _renderAreasWorkspace(group) {
 function _renderPlanningTabs(initiativeTotal, areaTotal) {
   var active = String(_planningActiveTab || 'initiatives');
   var html = '<div class="planning-tabs" role="tablist" aria-label="Planning sections">';
-  html += '<button type="button" role="tab" class="planning-tab' + (active === 'initiatives' ? ' active' : '') + '" aria-selected="' + (active === 'initiatives' ? 'true' : 'false') + '" onclick="planningSetTab(\'initiatives\')">Initiatives <span class="planning-tab-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">' + esc(initiativeTotal) + '</span></button>';
-  html += '<button type="button" role="tab" class="planning-tab' + (active === 'areas' ? ' active' : '') + '" aria-selected="' + (active === 'areas' ? 'true' : 'false') + '" onclick="planningSetTab(\'areas\')">Areas <span class="planning-tab-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">' + esc(areaTotal) + '</span></button>';
+  html += '<button type="button" role="tab" class="ui-tab ui-tab--contained planning-tab' + (active === 'initiatives' ? ' active' : '') + '" aria-selected="' + (active === 'initiatives' ? 'true' : 'false') + '" onclick="planningSetTab(\'initiatives\')">Initiatives <span class="planning-tab-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">' + esc(initiativeTotal) + '</span></button>';
+  html += '<button type="button" role="tab" class="ui-tab ui-tab--contained planning-tab' + (active === 'areas' ? ' active' : '') + '" aria-selected="' + (active === 'areas' ? 'true' : 'false') + '" onclick="planningSetTab(\'areas\')">Areas <span class="planning-tab-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">' + esc(areaTotal) + '</span></button>';
   html += '</div>';
   return html;
 }

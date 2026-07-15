@@ -214,10 +214,12 @@ test('Planning Areas toolbar CSS keeps search and filters contained by wrapping 
 
 test('Planning CSS uses compact panel typography and control density', () => {
   const css = appStylesheetSource();
+  const components = fs.readFileSync(path.join(repoRoot, 'static/styles/components.css'), 'utf8');
 
   assert.match(css, /\.planning-panel\s*\{[^}]*font-size:\s*11px;[^}]*line-height:\s*1\.35;/s);
   assert.match(css, /\.planning-panel \.tpled-new-btn\s*\{[^}]*font-size:\s*12px;[^}]*padding:\s*1px\s+7px;/s);
-  assert.match(css, /\.ui-tab--contained,\s*\.planning-tab,\s*\.thinking-tab,\s*\.agent-panel-events-subtab\s*\{[^}]*min-height:\s*var\(--control-height-sm\);[^}]*padding:\s*0 var\(--control-padding-x-sm\);/s);
+  assert.match(css, /\.ui-tab--contained\s*\{[^}]*min-height:\s*var\(--control-height-sm\);[^}]*padding:\s*0 var\(--control-padding-x-sm\);/s);
+  assert.doesNotMatch(components, /\.(?:planning-tab|thinking-tab|agent-panel-events-subtab)(?:,|\s*\{)/);
   assert.match(css, /\.initiative-column-title\s*\{[^}]*font-size:\s*12px;/s);
   assert.match(css, /\.initiative-detail h2\s*\{[^}]*font-size:\s*14px;/s);
   assert.match(css, /\.form-control,\s*:where\(input:not\([\s\S]*?select,\s*textarea\s*\{[^}]*font-size:\s*var\(--control-font-size-sm\);/s);
@@ -638,7 +640,7 @@ test('area detail preserves active tab, selected area, drafts, caret, filters, s
   assert.equal(document.getElementById('areas-list-scroll').scrollTop, 61);
   assert.equal(document.getElementById('area-detail-drawer').scrollTop, 120);
   const html = document.getElementById('panel-initiatives').innerHTML;
-  assert.match(html, /class="planning-tab active" aria-selected="true" onclick="planningSetTab\('areas'\)"/);
+  assert.match(html, /class="ui-tab ui-tab--contained planning-tab active" aria-selected="true" onclick="planningSetTab\('areas'\)"/);
   assert.match(html, /TORQUE-A:1/);
   assert.doesNotMatch(html, /No linked tasks/);
 });

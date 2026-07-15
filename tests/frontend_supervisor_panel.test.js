@@ -230,7 +230,7 @@ test('supervisor restart confirms with preserved-worker framing and sends restar
   assert.match(sandbox.confirmCalls[0].message, /re-exec the supervisor in place/);
   assert.match(sandbox.confirmCalls[0].message, /live workers are preserved/);
   assert.equal(sandbox.confirmCalls[0].opts.label, 'Restart supervisor');
-  assert.equal(sandbox.confirmCalls[0].opts.variant, 'btn-rebase');
+  assert.equal(sandbox.confirmCalls[0].opts.variant, 'btn-warning');
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls[sandbox.sendCalls.length - 1])), {
     cmd: 'supervisor_restart',
   });

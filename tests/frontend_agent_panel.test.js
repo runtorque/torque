@@ -1526,7 +1526,7 @@ test('agentPanelSelectTab remembers the last selected tab per kind', () => {
 
   assert.equal(vm.runInContext(`_agentPanelLastSelectedTabByKind.engineer`, context), 'worklog');
   assert.match(panel.innerHTML, /data-agent-panel-tab="worklog"/);
-  assert.match(panel.innerHTML, /id="agent-panel-tab-worklog" class="agent-panel-tab active"/);
+  assert.match(panel.innerHTML, /id="agent-panel-tab-worklog" class="ui-tab ui-tab--underline agent-panel-tab active"/);
 });
 
 test('_resolveFocusedAgent returns null when focusedItemId does not resolve', () => {
@@ -1677,7 +1677,7 @@ test('engineer panel renders journal for the focused engineer only', () => {
   assert.match(panel.innerHTML, /Delivered digest item/);
 
   context.agentPanelSelectTab('queued');
-  assert.match(panel.innerHTML, /id="agent-panel-tab-queued" class="agent-panel-tab active"/);
+  assert.match(panel.innerHTML, /id="agent-panel-tab-queued" class="ui-tab ui-tab--underline agent-panel-tab active"/);
   assert.match(panel.innerHTML, /Queued tasks/);
   assert.match(panel.innerHTML, /Queued backlog item/);
   assert.match(panel.innerHTML, /Queued in-progress item/);
@@ -2675,9 +2675,9 @@ test('agent Events MCP subtab fetches calls, filters, and expands redacted detai
 
   context.renderAgentPanel();
 
-  assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="agent-panel-tab active"/);
+  assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="ui-tab ui-tab--underline agent-panel-tab active"/);
   assert.doesNotMatch(panel.innerHTML, /id="agent-panel-tab-mcp"/);
-  assert.match(panel.innerHTML, /id="agent-panel-events-subtab-mcp" class="agent-panel-events-subtab active"/);
+  assert.match(panel.innerHTML, /id="agent-panel-events-subtab-mcp" class="ui-tab ui-tab--contained agent-panel-events-subtab active"/);
   assert.doesNotMatch(panel.innerHTML, /agent-panel-mcp-banner/);
   assert.ok(sendCalls.some((call) => call.cmd === 'mcp_calls'
     && call.cell_id === 'worker-mcp'
@@ -2849,20 +2849,20 @@ test('agentPanelSelectTab mcp redirects to Events MCP subtab and subtab state is
   context.focusedItemId = 'eng-a';
   context.renderAgentPanel();
   context.agentPanelSelectTab('mcp');
-  assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="agent-panel-tab active"/);
-  assert.match(panel.innerHTML, /id="agent-panel-events-subtab-mcp" class="agent-panel-events-subtab active"/);
+  assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="ui-tab ui-tab--underline agent-panel-tab active"/);
+  assert.match(panel.innerHTML, /id="agent-panel-events-subtab-mcp" class="ui-tab ui-tab--contained agent-panel-events-subtab active"/);
 
   context.focusedItemId = 'eng-b';
   context.renderAgentPanel();
-  assert.match(panel.innerHTML, /id="agent-panel-events-subtab-inbox" class="agent-panel-events-subtab active"/);
-  assert.doesNotMatch(panel.innerHTML, /id="agent-panel-events-subtab-mcp" class="agent-panel-events-subtab active"/);
+  assert.match(panel.innerHTML, /id="agent-panel-events-subtab-inbox" class="ui-tab ui-tab--contained agent-panel-events-subtab active"/);
+  assert.doesNotMatch(panel.innerHTML, /id="agent-panel-events-subtab-mcp" class="ui-tab ui-tab--contained agent-panel-events-subtab active"/);
 
   context.agentPanelSelectEventsInnerTab('lifecycle');
-  assert.match(panel.innerHTML, /id="agent-panel-events-subtab-lifecycle" class="agent-panel-events-subtab active"/);
+  assert.match(panel.innerHTML, /id="agent-panel-events-subtab-lifecycle" class="ui-tab ui-tab--contained agent-panel-events-subtab active"/);
 
   context.focusedItemId = 'eng-a';
   context.renderAgentPanel();
-  assert.match(panel.innerHTML, /id="agent-panel-events-subtab-mcp" class="agent-panel-events-subtab active"/);
+  assert.match(panel.innerHTML, /id="agent-panel-events-subtab-mcp" class="ui-tab ui-tab--contained agent-panel-events-subtab active"/);
 });
 
 test('focused engineer pause toggle sends per-agent digest pause and resume commands', () => {
@@ -2924,7 +2924,7 @@ test('focused architect Events tab renders digest data and pause control', () =>
 
   context.renderAgentPanel();
 
-  assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="agent-panel-tab active"/);
+  assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="ui-tab ui-tab--underline agent-panel-tab active"/);
   assert.match(panel.innerHTML, /id="agent-panel-pause-btn"/);
   assert.match(panel.innerHTML, /Architect queued item/);
   assert.match(panel.innerHTML, /Already digested to Planner/);

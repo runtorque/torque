@@ -1066,6 +1066,7 @@ function _renderBoardCard(t, childrenOf, depth, renderState) {
   var focused = t.id === _boardFocusedTask ? ' focused' : '';
   var selected = _boardSelectedTasks[t.id] ? ' board-card-selected' : '';
   var hovered = t.id === _boardHoveredTask ? ' board-card-hovered' : '';
+  var sharedState = (focused || selected ? ' is-selected' : '') + (hovered ? ' is-hovered' : '');
   var quickOpen = _boardQuickEditTask === t.id ? ' board-card-quick-open' : '';
   var subClass = isSubordinate ? ' board-card-subordinate' : '';
   var doneClass = (isSubordinate && isDone) ? ' board-card-done' : '';
@@ -1074,7 +1075,7 @@ function _renderBoardCard(t, childrenOf, depth, renderState) {
       + ' data-indent-level="' + indentLevel + '"'
       + ' style="--board-card-indent-level:' + indentLevel + '"'
     : '';
-  var cardHtml = '<div class="board-card ui-card ui-card--interactive' + focused + selected + hovered + quickOpen + subClass + doneClass + '"'
+  var cardHtml = '<div class="board-card ui-card ui-card--interactive' + sharedState + focused + selected + hovered + quickOpen + subClass + doneClass + '"'
     + ' data-task-id="' + t.id + '"'
     + indentAttrs
     + ' draggable="true"'

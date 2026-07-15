@@ -2831,7 +2831,7 @@ test('wide embedded board lanes can be collapsed and persist locally', () => {
   panel.clientWidth = 820;
   context.boardToggleWideLane(null, 'Backlog');
   assert.doesNotMatch(panel.innerHTML, /board-wide-grid/);
-  assert.match(panel.innerHTML, /class="board-lane-tab board-lane-drop-target/);
+  assert.match(panel.innerHTML, /class="ui-tab ui-tab--underline board-lane-tab board-lane-drop-target/);
 });
 
 test('wide embedded board defaults To Do collapsed only without explicit persisted state', () => {
@@ -2881,7 +2881,7 @@ test('board selected lane hydrates from server state and persists lane clicks', 
   };
 
   context.renderBoard();
-  assert.match(panel.innerHTML, /class="board-lane-tab board-lane-drop-target active"[\s\S]*In Progress/);
+  assert.match(panel.innerHTML, /class="ui-tab ui-tab--underline board-lane-tab board-lane-drop-target active"[\s\S]*In Progress/);
   assert.equal(jsonValue(context, `_boardSelectedLane`), 'In Progress');
 
   context.boardSelectLane('Done');
@@ -2952,7 +2952,7 @@ test('renderBoard places recent, view, and schedules in the top toolbar for wide
     true,
   );
   assert.doesNotMatch(panel.innerHTML, /board-lane-bar/);
-  assert.doesNotMatch(panel.innerHTML, /class="board-lane-tab board-lane-drop-target/);
+  assert.doesNotMatch(panel.innerHTML, /class="ui-tab ui-tab--underline board-lane-tab board-lane-drop-target/);
   assert.doesNotMatch(panel.innerHTML, /id="board-scroll-left"/);
   assert.doesNotMatch(panel.innerHTML, /id="board-scroll-right"/);
   assert.doesNotMatch(panel.innerHTML, /board-lane-tab-schedules/);
@@ -2961,7 +2961,7 @@ test('renderBoard places recent, view, and schedules in the top toolbar for wide
   context.renderBoard();
   assert.doesNotMatch(panel.innerHTML, /board-wide-grid/);
   assert.match(panel.innerHTML, /board-schedules-toggle-wrap/);
-  assert.match(panel.innerHTML, /class="board-lane-tab board-lane-drop-target/);
+  assert.match(panel.innerHTML, /class="ui-tab ui-tab--underline board-lane-tab board-lane-drop-target/);
   assert.match(panel.innerHTML, /id="board-scroll-left"/);
   assert.match(panel.innerHTML, /id="board-scroll-right"/);
   assert.doesNotMatch(panel.innerHTML, /board-lane-tab-schedules/);
@@ -3106,7 +3106,7 @@ test('wide embedded schedules view keeps the display-row toggle and does not res
   assert.match(panel.innerHTML, /board-view-menu-wrap/);
   assert.match(panel.innerHTML, /onclick="boardApplyQuickView\('recent'\)">Recent/);
   assert.doesNotMatch(panel.innerHTML, /board-lane-bar/);
-  assert.doesNotMatch(panel.innerHTML, /class="board-lane-tab board-lane-drop-target/);
+  assert.doesNotMatch(panel.innerHTML, /class="ui-tab ui-tab--underline board-lane-tab board-lane-drop-target/);
   assert.doesNotMatch(panel.innerHTML, /board-lane-tab-schedules/);
   assert.match(panel.innerHTML, /No schedules/);
 });
@@ -20085,12 +20085,12 @@ test('renderAgentPanel preserves the selected Events tab across rerenders', () =
   context.renderAgentPanel();
   runInContext(context, `agentPanelSelectTab('events')`);
 
-  assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="agent-panel-tab active"/);
+  assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="ui-tab ui-tab--underline agent-panel-tab active"/);
   assert.match(panel.innerHTML, /Queued for next digest/);
 
   context.renderAgentPanel();
 
-  assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="agent-panel-tab active"/);
+  assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="ui-tab ui-tab--underline agent-panel-tab active"/);
   assert.match(panel.innerHTML, /Already digested to Engineer One/);
 });
 
@@ -20141,10 +20141,10 @@ test('engineer Events inner Lifecycle tab survives outer tab switches and rerend
   runInContext(context, `_agentPanelLastSelectedTabByKind.engineer = 'events';`);
 
   context.renderAgentPanel();
-  assert.match(panel.innerHTML, /class="agent-panel-events-subtabs" role="tablist"/);
+  assert.match(panel.innerHTML, /class="ui-tabs--contained agent-panel-events-subtabs" role="tablist"/);
   assert.match(
     panel.innerHTML,
-    /id="agent-panel-events-subtab-inbox" class="agent-panel-events-subtab active"[^>]*data-agent-panel-events-inner-tab="inbox"[^>]*aria-selected="true"/,
+    /id="agent-panel-events-subtab-inbox" class="ui-tab ui-tab--contained agent-panel-events-subtab active"[^>]*data-agent-panel-events-inner-tab="inbox"[^>]*aria-selected="true"/,
   );
   assert.ok(
     panel.innerHTML.indexOf('agent-panel-events-subtabs') < panel.innerHTML.indexOf('agent-panel-events-toolbar'),
@@ -20156,22 +20156,22 @@ test('engineer Events inner Lifecycle tab survives outer tab switches and rerend
   runInContext(context, `agentPanelSelectEventsInnerTab('lifecycle')`);
   assert.match(
     panel.innerHTML,
-    /id="agent-panel-events-subtab-lifecycle" class="agent-panel-events-subtab active"[^>]*data-agent-panel-events-inner-tab="lifecycle"[^>]*aria-selected="true"/,
+    /id="agent-panel-events-subtab-lifecycle" class="ui-tab ui-tab--contained agent-panel-events-subtab active"[^>]*data-agent-panel-events-inner-tab="lifecycle"[^>]*aria-selected="true"/,
   );
   assert.match(panel.innerHTML, /Cell events/);
   assert.match(panel.innerHTML, /Engineer lifecycle row/);
   assert.doesNotMatch(panel.innerHTML, /Queued for next digest/);
 
   runInContext(context, `agentPanelSelectTab('worklog')`);
-  assert.match(panel.innerHTML, /id="agent-panel-tab-worklog" class="agent-panel-tab active"/);
+  assert.match(panel.innerHTML, /id="agent-panel-tab-worklog" class="ui-tab ui-tab--underline agent-panel-tab active"/);
   context.renderAgentPanel();
   runInContext(context, `agentPanelSelectTab('events')`);
   context.renderAgentPanel();
 
-  assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="agent-panel-tab active"/);
+  assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="ui-tab ui-tab--underline agent-panel-tab active"/);
   assert.match(
     panel.innerHTML,
-    /id="agent-panel-events-subtab-lifecycle" class="agent-panel-events-subtab active"[^>]*data-agent-panel-events-inner-tab="lifecycle"[^>]*aria-selected="true"/,
+    /id="agent-panel-events-subtab-lifecycle" class="ui-tab ui-tab--contained agent-panel-events-subtab active"[^>]*data-agent-panel-events-inner-tab="lifecycle"[^>]*aria-selected="true"/,
   );
   assert.match(panel.innerHTML, /Engineer lifecycle row/);
   assert.doesNotMatch(panel.innerHTML, /Queued for next digest/);
@@ -20979,12 +20979,12 @@ test('renderAgentPanel preserves the selected architect Events tab across rerend
   context.renderAgentPanel();
   runInContext(context, `agentPanelSelectTab('events')`);
 
-  assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="agent-panel-tab active"/);
+  assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="ui-tab ui-tab--underline agent-panel-tab active"/);
   assert.match(panel.innerHTML, /Queued architect event/);
 
   context.renderAgentPanel();
 
-  assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="agent-panel-tab active"/);
+  assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="ui-tab ui-tab--underline agent-panel-tab active"/);
   assert.match(panel.innerHTML, /Already digested to Architect One/);
 });
 
@@ -21023,12 +21023,12 @@ test('renderAgentPanel preserves the selected Worklog tab across rerenders', () 
   context.renderAgentPanel();
   runInContext(context, `agentPanelSelectTab('worklog')`);
 
-  assert.match(panel.innerHTML, /id="agent-panel-tab-worklog" class="agent-panel-tab active"/);
+  assert.match(panel.innerHTML, /id="agent-panel-tab-worklog" class="ui-tab ui-tab--underline agent-panel-tab active"/);
   assert.match(panel.innerHTML, /Completed tasks/);
 
   context.renderAgentPanel();
 
-  assert.match(panel.innerHTML, /id="agent-panel-tab-worklog" class="agent-panel-tab active"/);
+  assert.match(panel.innerHTML, /id="agent-panel-tab-worklog" class="ui-tab ui-tab--underline agent-panel-tab active"/);
   assert.match(panel.innerHTML, /Awaiting approval/);
 });
 

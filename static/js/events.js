@@ -884,7 +884,7 @@ function _renderAttentionCard(item) {
       html += '<div class="events-attention-context-label">Additional details</div>';
       html += '<div class="events-attention-context">' + esc(item.description) + '</div>';
     }
-    html += '<textarea class="events-resolve-textarea" id="events-resolve-' + item.id + '"'
+    html += '<textarea class="form-control-sm events-resolve-textarea" id="events-resolve-' + item.id + '"'
       + ' placeholder="Type your answer..."'
       + ' oninput="eventsResolveInput(\'' + item.id + '\', this)"'
       + ' onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){event.preventDefault();eventsResolveInline(\'' + item.id + '\')}"'

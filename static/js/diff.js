@@ -462,16 +462,16 @@ function _renderDiffFooter() {
   html += '<button class="btn-cancel" onclick="hideDiffView()">Cancel</button>';
 
   if (_diffMergeCheck && _diffMergeCheck.dirty) {
-    html += '<button class="btn-green" onclick="_diffCheckpointAndRecheck()">Checkpoint</button>';
+    html += '<button class="btn-success" onclick="_diffCheckpointAndRecheck()">Checkpoint</button>';
   } else if (_diffMergeCheck && _diffMergeCheck.stale_base) {
-    html += '<button class="btn-rebase" onclick="_diffRebase()">Rebase onto Main</button>';
+    html += '<button class="btn-warning" onclick="_diffRebase()">Rebase onto Main</button>';
   } else if (_diffMergeCheck && !_diffMergeCheck.clean && !_diffMergeCheck.error) {
-    html += '<button class="btn-rebase" onclick="_diffRebase()">Rebase onto Main</button>';
+    html += '<button class="btn-warning" onclick="_diffRebase()">Rebase onto Main</button>';
   }
 
   var canMerge = _diffMergeCheck && _diffMergeCheck.clean && !_diffMerging;
   var mergeLabel = _diffMerging ? _diffMergeProgressLabel() : 'Create PR & Merge';
-  html += '<button class="btn-green diff-merge-button"' + (canMerge ? '' : ' disabled')
+  html += '<button class="btn-success diff-merge-button"' + (canMerge ? '' : ' disabled')
     + ' onclick="proceedDiffMerge()">'
     + (_diffMerging ? '<span class="diff-spinner diff-spinner-inline" aria-hidden="true"></span>' : '')
     + '<span>' + esc(mergeLabel) + '</span></button>';

@@ -697,7 +697,7 @@ function renderBoard() {
       var cls = (!_boardShowSchedules && l === _boardSelectedLane) ? ' active' : '';
       if (filtersActive && cnt === 0) cls += ' dimmed';
       var escLane = esc(l).replace(/'/g, "\\'");
-      html += '<button class="board-lane-tab board-lane-drop-target' + cls + '"'
+      html += '<button class="ui-tab ui-tab--underline board-lane-tab board-lane-drop-target' + cls + '"'
         + ' data-lane="' + esc(l) + '"'
         + ' onclick="boardSelectLane(\'' + escLane + '\')"'
         + ' ondragover="boardLaneTabDragOver(event)"'

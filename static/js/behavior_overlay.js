@@ -884,12 +884,12 @@ function _behaviorOverlayRenderInnerTabs(agent) {
   var tabs = _behaviorOverlayInnerTabs(agent);
   if (!tabs.length) return '';
   var active = _behaviorOverlayInnerTab(agent);
-  var html = '<div class="agent-panel-events-subtabs behavior-overlay-subtabs" role="tablist" aria-label="Behavior overlay scopes">';
+  var html = '<div class="ui-tabs--contained agent-panel-events-subtabs behavior-overlay-subtabs" role="tablist" aria-label="Behavior overlay scopes">';
   for (var i = 0; i < tabs.length; i++) {
     var tab = tabs[i];
     html += '<button type="button"'
       + ' id="agent-panel-behavior-subtab-' + _behaviorOverlayAttr(tab.key) + '"'
-      + ' class="agent-panel-events-subtab behavior-overlay-subtab' + (active === tab.key ? ' active' : '') + '"'
+      + ' class="ui-tab ui-tab--contained agent-panel-events-subtab behavior-overlay-subtab' + (active === tab.key ? ' active' : '') + '"'
       + ' data-agent-panel-behavior-inner-tab="' + _behaviorOverlayAttr(tab.key) + '"'
       + ' role="tab"'
       + ' aria-selected="' + (active === tab.key ? 'true' : 'false') + '"'

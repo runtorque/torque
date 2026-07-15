@@ -1222,16 +1222,16 @@ function _engineerMarkSessionMapStale(groups) {
 function _agentPanelLegacyRenderTabs(group, activeTab) {
   if (!group) return '';
   var html = '<div class="agent-panel-tabs">';
-  html += '<button id="engineer-tab-journal" class="agent-panel-tab'
+  html += '<button id="engineer-tab-journal" class="ui-tab ui-tab--underline agent-panel-tab'
     + (activeTab === 'journal' ? ' active' : '')
     + '" onclick="engineerSelectTab(\'journal\')">Journal</button>';
-  html += '<button id="engineer-tab-events" class="agent-panel-tab'
+  html += '<button id="engineer-tab-events" class="ui-tab ui-tab--underline agent-panel-tab'
     + (activeTab === 'events' ? ' active' : '')
     + '" onclick="engineerSelectTab(\'events\')">Events</button>';
-  html += '<button id="engineer-tab-queued" class="agent-panel-tab'
+  html += '<button id="engineer-tab-queued" class="ui-tab ui-tab--underline agent-panel-tab'
     + (activeTab === 'queued' ? ' active' : '')
     + '" onclick="engineerSelectTab(\'queued\')">Queued</button>';
-  html += '<button id="engineer-tab-worklog" class="agent-panel-tab'
+  html += '<button id="engineer-tab-worklog" class="ui-tab ui-tab--underline agent-panel-tab'
     + (activeTab === 'worklog' ? ' active' : '')
     + '" onclick="engineerSelectTab(\'worklog\')">Completed</button>';
   html += '</div>';

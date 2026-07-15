@@ -191,7 +191,7 @@
 <!-- Add Engineer modal -->
 <div class="overlay" id="modal-engineer">
   <div class="modal ui-modal ui-modal--sm" role="dialog" aria-modal="true" aria-labelledby="modal-engineer-title">
-    <h2 id="modal-engineer-title">Add Engineer</h2>
+    <h2 id="modal-engineer-title" class="ui-modal__title">Add Engineer</h2>
     <div id="modal-engineer-summary" class="modal-summary hidden"></div>
     <label>Name</label>
     <input id="engineer-name-input" placeholder="e.g. Alice" autocomplete="off">
@@ -214,7 +214,7 @@
         </div>
       </div>
     </div>
-    <div class="modal-actions">
+    <div class="modal-actions ui-modal__footer">
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>
       <button class="btn-primary" id="engineer-submit-btn" onclick="submitAddEngineer()">Create Engineer</button>
     </div>
@@ -224,7 +224,7 @@
 <!-- Add Architect modal -->
 <div class="overlay" id="modal-architect">
   <div class="modal ui-modal ui-modal--sm" role="dialog" aria-modal="true" aria-labelledby="modal-architect-title">
-    <h2 id="modal-architect-title">Add Architect</h2>
+    <h2 id="modal-architect-title" class="ui-modal__title">Add Architect</h2>
     <div id="modal-architect-summary" class="modal-summary hidden"></div>
     <label>Name</label>
     <input id="architect-name-input" placeholder="e.g. Productmind" autocomplete="off"
@@ -237,7 +237,7 @@
       <select id="architect-agent-class-select"></select>
       <div id="architect-agent-class-hint" class="label-hint agent-class-picker-hint"></div>
     </div>
-    <div class="modal-actions">
+    <div class="modal-actions ui-modal__footer">
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>
       <button class="btn-primary" id="architect-submit-btn" onclick="submitAddArchitect()">Create Architect</button>
     </div>
@@ -247,12 +247,12 @@
 <!-- Reject pending hire modal -->
 <div class="overlay" id="modal-pending-hire-reject">
   <div class="modal ui-modal ui-modal--sm" role="dialog" aria-modal="true" aria-labelledby="pending-hire-reject-title">
-    <h2 id="pending-hire-reject-title">Reject Hire Request</h2>
+    <h2 id="pending-hire-reject-title" class="ui-modal__title">Reject Hire Request</h2>
     <div id="pending-hire-reject-summary" class="modal-summary hidden"></div>
     <label>Optional note</label>
     <textarea id="pending-hire-reject-note" rows="4" placeholder="Add context for the architect (optional)"
               onkeydown="if(event.key==='Escape')closeModals();"></textarea>
-    <div class="modal-actions">
+    <div class="modal-actions ui-modal__footer">
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>
       <button class="btn-primary btn-danger" id="pending-hire-reject-submit-btn" onclick="submitPendingHireReject()">Reject</button>
     </div>
@@ -403,7 +403,7 @@
 <!-- New Specialization modal -->
 <div class="overlay" id="modal-new-specialization">
   <div class="modal ui-modal ui-modal--sm" role="dialog" aria-modal="true" aria-labelledby="new-specialization-title">
-    <h2 id="new-specialization-title">New specialization</h2>
+    <h2 id="new-specialization-title" class="ui-modal__title">New specialization</h2>
     <label>Name</label>
     <input id="new-specialization-name" placeholder="e.g. ui-ux" autocomplete="off">
     <label>Description</label>
@@ -417,7 +417,7 @@
       <option value="project">Project</option>
       <option value="user">User (~/.torque)</option>
     </select>
-    <div class="modal-actions">
+    <div class="modal-actions ui-modal__footer">
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>
       <button class="btn-primary" onclick="submitNewSpecializationDialog()">Create</button>
     </div>
@@ -458,7 +458,7 @@
   <div class="modal ui-modal ui-modal--xl ui-modal--viewport ui-modal--structured settings-dialog" role="dialog" aria-modal="true" aria-labelledby="gs-title">
     <div class="settings-dialog-header ui-modal__header ui-modal__header--bordered">
       <div class="settings-dialog-heading">
-        <h2 id="gs-title">Group Settings</h2>
+        <h2 id="gs-title" class="ui-modal__title">Group Settings</h2>
         <p id="gs-scope-subtitle">Defaults and integrations for this workspace</p>
       </div>
       <label class="settings-search">
@@ -471,16 +471,16 @@
     </div>
     <div class="settings-dialog-workspace ui-modal__body ui-modal__body--flush">
     <div class="gs-tabs settings-primary-nav" role="tablist" aria-label="Group settings sections">
-      <button class="gs-tab active" data-tab="group" onclick="switchGsTab('group')" role="tab">
+      <button class="ui-tab gs-tab active" data-tab="group" onclick="switchGsTab('group')" role="tab">
         <span>Group</span><small>Workspace defaults</small>
       </button>
-      <button class="gs-tab" data-tab="workers" onclick="switchGsTab('workers')" role="tab">
+      <button class="ui-tab gs-tab" data-tab="workers" onclick="switchGsTab('workers')" role="tab">
         <span>Workers</span><small>Runtime and worktrees</small>
       </button>
-      <button class="gs-tab" data-tab="engineer" onclick="switchGsTab('engineer')" role="tab">
+      <button class="ui-tab gs-tab" data-tab="engineer" onclick="switchGsTab('engineer')" role="tab">
         <span>Engineers</span><small>Autonomy and digests</small>
       </button>
-      <button class="gs-tab" data-tab="architect" onclick="switchGsTab('architect')" role="tab">
+      <button class="ui-tab gs-tab" data-tab="architect" onclick="switchGsTab('architect')" role="tab">
         <span>Architects</span><small>Guidance and journals</small>
       </button>
     </div>
@@ -489,10 +489,10 @@
     <!-- Group tab -->
     <div class="gs-pane active" data-pane="group">
       <div class="gs-subtabs">
-        <button class="gs-subtab active" data-subtab="group-general" onclick="switchGsSubTab('group',this)">General</button>
-        <button class="gs-subtab" data-subtab="group-worker-defaults" onclick="switchGsSubTab('group',this)">Agents</button>
-        <button class="gs-subtab" data-subtab="group-sync" onclick="switchGsSubTab('group',this)">Sync provider</button>
-        <button class="gs-subtab" data-subtab="group-advanced" onclick="switchGsSubTab('group',this)">Advanced</button>
+        <button class="ui-tab ui-tab--underline gs-subtab active" data-subtab="group-general" onclick="switchGsSubTab('group',this)">General</button>
+        <button class="ui-tab ui-tab--underline gs-subtab" data-subtab="group-worker-defaults" onclick="switchGsSubTab('group',this)">Agents</button>
+        <button class="ui-tab ui-tab--underline gs-subtab" data-subtab="group-sync" onclick="switchGsSubTab('group',this)">Sync provider</button>
+        <button class="ui-tab ui-tab--underline gs-subtab" data-subtab="group-advanced" onclick="switchGsSubTab('group',this)">Advanced</button>
       </div>
 
       <!-- General sub-tab -->
@@ -637,9 +637,9 @@
     <!-- Workers tab -->
     <div class="gs-pane" data-pane="workers">
       <div class="gs-subtabs">
-        <button class="gs-subtab active" data-subtab="worker-execution" onclick="switchGsSubTab('workers',this)">General</button>
-        <button class="gs-subtab" data-subtab="worker-worktree" onclick="switchGsSubTab('workers',this)">Worktree</button>
-        <button class="gs-subtab" data-subtab="worker-notifications" onclick="switchGsSubTab('workers',this)">Notifications</button>
+        <button class="ui-tab ui-tab--underline gs-subtab active" data-subtab="worker-execution" onclick="switchGsSubTab('workers',this)">General</button>
+        <button class="ui-tab ui-tab--underline gs-subtab" data-subtab="worker-worktree" onclick="switchGsSubTab('workers',this)">Worktree</button>
+        <button class="ui-tab ui-tab--underline gs-subtab" data-subtab="worker-notifications" onclick="switchGsSubTab('workers',this)">Notifications</button>
       </div>
 
       <!-- Execution sub-tab -->
@@ -777,9 +777,9 @@
     <!-- Engineer tab -->
     <div class="gs-pane" data-pane="engineer">
       <div class="gs-subtabs">
-        <button class="gs-subtab active" data-subtab="engineer-general" onclick="switchGsSubTab('engineer',this)">General</button>
-        <button class="gs-subtab" data-subtab="engineer-behavior" onclick="switchGsSubTab('engineer',this)">Behavior</button>
-        <button class="gs-subtab" data-subtab="engineer-system" onclick="switchGsSubTab('engineer',this)">System</button>
+        <button class="ui-tab ui-tab--underline gs-subtab active" data-subtab="engineer-general" onclick="switchGsSubTab('engineer',this)">General</button>
+        <button class="ui-tab ui-tab--underline gs-subtab" data-subtab="engineer-behavior" onclick="switchGsSubTab('engineer',this)">Behavior</button>
+        <button class="ui-tab ui-tab--underline gs-subtab" data-subtab="engineer-system" onclick="switchGsSubTab('engineer',this)">System</button>
       </div>
 
       <!-- General sub-tab -->
@@ -956,9 +956,9 @@
     <!-- Architect tab -->
     <div class="gs-pane" data-pane="architect">
       <div class="gs-subtabs">
-        <button class="gs-subtab active" data-subtab="architect-general" onclick="switchGsSubTab('architect',this)">General</button>
-        <button class="gs-subtab" data-subtab="architect-behavior" onclick="switchGsSubTab('architect',this)">Behavior</button>
-        <button class="gs-subtab" data-subtab="architect-system" onclick="switchGsSubTab('architect',this)">System</button>
+        <button class="ui-tab ui-tab--underline gs-subtab active" data-subtab="architect-general" onclick="switchGsSubTab('architect',this)">General</button>
+        <button class="ui-tab ui-tab--underline gs-subtab" data-subtab="architect-behavior" onclick="switchGsSubTab('architect',this)">Behavior</button>
+        <button class="ui-tab ui-tab--underline gs-subtab" data-subtab="architect-system" onclick="switchGsSubTab('architect',this)">System</button>
       </div>
 
       <!-- General sub-tab -->
@@ -1093,7 +1093,7 @@
   <div class="modal ui-modal ui-modal--xl ui-modal--viewport ui-modal--structured settings-dialog" role="dialog" aria-modal="true" aria-labelledby="gls-title">
     <div class="settings-dialog-header ui-modal__header ui-modal__header--bordered">
       <div class="settings-dialog-heading">
-        <h2 id="gls-title">Torque Settings</h2>
+        <h2 id="gls-title" class="ui-modal__title">Torque Settings</h2>
         <p id="gls-scope-subtitle">Application preferences for this profile</p>
       </div>
       <label class="settings-search">
@@ -1106,22 +1106,22 @@
     </div>
     <div class="settings-dialog-workspace ui-modal__body ui-modal__body--flush">
     <div class="gs-tabs settings-primary-nav" role="tablist" aria-label="Application settings sections">
-      <button class="gs-tab active" data-tab="gls-appearance" onclick="switchGlsTab('gls-appearance')" role="tab">
+      <button class="ui-tab gs-tab active" data-tab="gls-appearance" onclick="switchGlsTab('gls-appearance')" role="tab">
         <span>Appearance</span><small>Theme and density</small>
       </button>
-      <button class="gs-tab" data-tab="gls-general" onclick="switchGlsTab('gls-general')" role="tab">
+      <button class="ui-tab gs-tab" data-tab="gls-general" onclick="switchGlsTab('gls-general')" role="tab">
         <span>General</span><small>Runtime and Board</small>
       </button>
-      <button class="gs-tab" data-tab="gls-ai" onclick="switchGlsTab('gls-ai')" role="tab">
+      <button class="ui-tab gs-tab" data-tab="gls-ai" onclick="switchGlsTab('gls-ai')" role="tab">
         <span>AI</span><small>Providers and recall</small>
       </button>
-      <button class="gs-tab" data-tab="gls-statusbar" onclick="switchGlsTab('gls-statusbar')" role="tab">
+      <button class="ui-tab gs-tab" data-tab="gls-statusbar" onclick="switchGlsTab('gls-statusbar')" role="tab">
         <span>Status bar</span><small>Visible indicators</small>
       </button>
-      <button class="gs-tab" data-tab="gls-keybindings" onclick="switchGlsTab('gls-keybindings')" role="tab">
+      <button class="ui-tab gs-tab" data-tab="gls-keybindings" onclick="switchGlsTab('gls-keybindings')" role="tab">
         <span>Shortcuts</span><small>Keyboard controls</small>
       </button>
-      <button class="gs-tab" data-tab="gls-system" onclick="switchGlsTab('gls-system')" role="tab">
+      <button class="ui-tab gs-tab" data-tab="gls-system" onclick="switchGlsTab('gls-system')" role="tab">
         <span>System</span><small>Daemon and Relay</small>
       </button>
     </div>
@@ -1169,8 +1169,8 @@
     <!-- General tab -->
     <div class="gs-pane" data-pane="gls-general">
       <div class="gs-subtabs">
-        <button class="gs-subtab active" data-subtab="gls-server" onclick="switchGlsSubTab(this)">Server</button>
-        <button class="gs-subtab" data-subtab="gls-board" onclick="switchGlsSubTab(this)">Board</button>
+        <button class="ui-tab ui-tab--underline gs-subtab active" data-subtab="gls-server" onclick="switchGlsSubTab(this)">Server</button>
+        <button class="ui-tab ui-tab--underline gs-subtab" data-subtab="gls-board" onclick="switchGlsSubTab(this)">Board</button>
       </div>
 
       <!-- Server sub-tab -->
@@ -1326,8 +1326,8 @@
     <!-- System tab -->
     <div class="gs-pane" data-pane="gls-system">
       <div class="gs-subtabs">
-        <button class="gs-subtab active" data-subtab="gls-daemon" onclick="switchGlsSubTab(this)">Daemon</button>
-        <button class="gs-subtab" data-subtab="gls-relay" onclick="switchGlsSubTab(this)">Relay</button>
+        <button class="ui-tab ui-tab--underline gs-subtab active" data-subtab="gls-daemon" onclick="switchGlsSubTab(this)">Daemon</button>
+        <button class="ui-tab ui-tab--underline gs-subtab" data-subtab="gls-relay" onclick="switchGlsSubTab(this)">Relay</button>
       </div>
 
       <div class="gs-subpane active" data-subpane="gls-daemon">
@@ -1982,12 +1982,12 @@
 <!-- Resolve ask task -->
 <div class="overlay" id="modal-resolve">
   <div class="modal ui-modal ui-modal--sm" role="dialog" aria-modal="true" aria-labelledby="resolve-title">
-    <h3 id="resolve-title">Resolve</h3>
+    <h3 id="resolve-title" class="ui-modal__title">Resolve</h3>
     <p class="resolve-question" id="resolve-question"></p>
     <textarea id="resolve-answer" class="task-input" rows="3" placeholder="Your answer..."
       oninput="taskAutoResize(this)"
       onkeydown="if(event.key==='Escape')closeModals();"></textarea>
-    <div class="modal-actions">
+    <div class="modal-actions ui-modal__footer">
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>
       <button class="btn-primary" onclick="submitResolve()">Resolve</button>
     </div>
@@ -2020,10 +2020,10 @@
     <select id="schedule-group-select"
             onkeydown="if(event.key==='Escape')closeModals();"></select>
     <label>Schedule type</label>
-    <div class="schedule-type-toggle" role="group" aria-label="Schedule type">
-      <button type="button" class="schedule-type-btn active" id="schedule-type-recurring" aria-pressed="true"
+    <div class="segmented-control schedule-type-toggle" role="group" aria-label="Schedule type">
+      <button type="button" class="segmented-control__item schedule-type-btn active" id="schedule-type-recurring" aria-pressed="true"
               onclick="scheduleSetType('recurring')">Recurring</button>
-      <button type="button" class="schedule-type-btn" id="schedule-type-oneshot" aria-pressed="false"
+      <button type="button" class="segmented-control__item schedule-type-btn" id="schedule-type-oneshot" aria-pressed="false"
               onclick="scheduleSetType('oneshot')">One-time</button>
     </div>
     <div id="schedule-cron-section">

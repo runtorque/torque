@@ -321,7 +321,7 @@ function _renderContextEntryCard(entry) {
   var meta = sourceLabel + ' · ' + _contextScopeLabel(entry.scope_kind, entry.scope_ref);
   var links = Array.isArray(entry.links) ? entry.links : [];
   var html = '<div class="context-card ui-card ui-card--comfortable ui-card--interactive'
-    + (selected ? ' selected' : '')
+    + (selected ? ' selected is-selected' : '')
     + (entry.pinned ? ' pinned' : '')
     + '" onclick="contextSelectEntry(\'' + entry.id + '\')">';
   html += '<div class="context-card-head">';

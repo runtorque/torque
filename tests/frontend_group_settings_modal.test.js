@@ -991,7 +991,7 @@ test('engineer System sub-tab groups permissions and digest settings', () => {
 test('architect System sub-tab groups terminal overrides and digest settings', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   const architectStart = html.indexOf('<div class="gs-pane" data-pane="architect">');
-  const footerStart = html.indexOf('<div class="modal-actions">', architectStart);
+  const footerStart = html.indexOf('<div class="modal-actions ui-modal__footer">', architectStart);
   const architectPane = html.slice(architectStart, footerStart);
   const general = architectPane.indexOf('data-subpane="architect-general"');
   const behavior = architectPane.indexOf('data-subpane="architect-behavior"');

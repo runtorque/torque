@@ -563,7 +563,7 @@ function supervisorRestart(event) {
     + 'The panel may briefly show restarting while it completes.';
   return Promise.resolve(confirmFn(message, {
     label: 'Restart supervisor',
-    variant: 'btn-rebase',
+    variant: 'btn-warning',
   })).then(function(ok) {
     if (!ok) return false;
     supervisorState.restartPending = true;

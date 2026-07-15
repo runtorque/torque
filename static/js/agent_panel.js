@@ -770,7 +770,7 @@ function _agentPanelRenderTabs(kind, activeTab) {
     var tab = tabs[i];
     html += '<button type="button"'
       + ' id="agent-panel-tab-' + _agentPanelEsc(tab.key) + '"'
-      + ' class="agent-panel-tab' + (activeTab === tab.key ? ' active' : '') + '"'
+      + ' class="ui-tab ui-tab--underline agent-panel-tab' + (activeTab === tab.key ? ' active' : '') + '"'
       + ' data-agent-panel-tab-key="' + _agentPanelEsc(tab.key) + '"'
       + ' onclick="agentPanelSelectTab(\'' + _agentPanelEsc(tab.key) + '\')">'
       + _agentPanelEsc(tab.label)
