@@ -1350,7 +1350,7 @@ function _renderScratchpadList(group) {
     }
   }
   var html = '<aside class="thinking-list-pane thinking-scratch-list-pane">';
-  html += '<div class="thinking-list-toolbar"><div><strong>Scratchpad</strong><span>Rough, group-scoped notes</span></div><button type="button" class="btn-primary" onclick="thinkingScratchNew()">New note</button></div>';
+  html += '<div class="thinking-list-toolbar ui-toolbar ui-toolbar--bordered"><div><strong>Scratchpad</strong><span>Rough, group-scoped notes</span></div><button type="button" class="btn-primary" onclick="thinkingScratchNew()">New note</button></div>';
   if (_thinkingScratchLoadingGroup === group && _thinkingScratchLoadedGroup !== group) {
     html += '<div class="thinking-loading">Loading scratchpad notes…</div>';
   }
@@ -1425,7 +1425,7 @@ function _renderMapList(group) {
     }
   }
   var html = '<aside class="thinking-list-pane thinking-map-list-pane">';
-  html += '<div class="thinking-list-toolbar"><div><strong>Mind Maps</strong><span>Durable node/link sketches</span></div><button type="button" class="btn-primary" onclick="thinkingMindNew()">New map</button></div>';
+  html += '<div class="thinking-list-toolbar ui-toolbar ui-toolbar--bordered"><div><strong>Mind Maps</strong><span>Durable node/link sketches</span></div><button type="button" class="btn-primary" onclick="thinkingMindNew()">New map</button></div>';
   if (_thinkingMindLoadingGroup === group && _thinkingMindLoadedGroup !== group) {
     html += '<div class="thinking-loading">Loading Mind Maps…</div>';
   }
@@ -2402,7 +2402,7 @@ function _renderIdeaBriefList(group) {
   }
   var loadKey = group + '|' + (_ideaBriefIncludeArchived ? '1' : '0');
   var html = '<aside class="thinking-list-pane idea-brief-list-pane">';
-  html += '<div class="thinking-list-toolbar idea-brief-list-toolbar"><div><strong>Idea Briefs</strong><span>Opportunity proposals linked to Thinking</span></div><button type="button" class="btn-primary" onclick="ideaBriefNew()">New brief</button></div>';
+  html += '<div class="thinking-list-toolbar idea-brief-list-toolbar ui-toolbar ui-toolbar--bordered"><div><strong>Idea Briefs</strong><span>Opportunity proposals linked to Thinking</span></div><button type="button" class="btn-primary" onclick="ideaBriefNew()">New brief</button></div>';
   html += '<div class="idea-brief-filter-row"><button type="button" class="filter-chip' + (_ideaBriefIncludeArchived ? ' active' : '') + '" aria-pressed="' + (_ideaBriefIncludeArchived ? 'true' : 'false') + '" onclick="ideaBriefToggleArchived()">' + (_ideaBriefIncludeArchived ? 'Hide archived' : 'Show archived') + '</button><button type="button" class="btn btn-secondary btn-sm" onclick="ideaBriefRefresh()">Refresh</button></div>';
   if (_ideaBriefLoadingGroup === loadKey && _ideaBriefLoadedGroup !== loadKey) {
     html += '<div class="thinking-loading">Loading Idea Briefs…</div>';

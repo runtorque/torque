@@ -220,15 +220,16 @@ function renderAgentTemplatesPanel() {
   var selectedForScope = loadedForScope ? _agentTplSelected : '';
 
   var html = '';
-  html += '<div class="tpled-header">';
-  html += '<div class="tpled-header-copy">';
-  html += '<div class="tpled-header-title-row">';
-  html += '<span class="tpled-header-title">Role Library</span>';
+  html += '<div class="tpled-header ui-panel-header ui-panel-header--surface">';
+  html += '<div class="tpled-header-copy ui-panel-header__copy">';
+  html += '<div class="tpled-header-title-row ui-panel-header__title-row">';
+  html += '<span class="tpled-header-title ui-panel-header__title">Role Library</span>';
   html += _libraryTabsHtml();
   html += '</div>';
-  html += '<div class="tpled-header-subtitle">Roles for launching agents. Live agents stay in the left column.</div>';
+  html += '<div class="tpled-header-subtitle ui-panel-header__subtitle">Roles for launching agents. Live agents stay in the left column.</div>';
   html += '</div>';
-  html += '<div class="tpled-header-controls">';
+  html += '</div>';
+  html += '<div class="tpled-header-controls ui-toolbar ui-toolbar--bordered">';
 
   html += '<select class="tpled-select" id="agent-tpl-select" onchange="agentTemplateSelect(this.value)">';
   html += '<option value="">Select\u2026</option>';
@@ -256,7 +257,6 @@ function renderAgentTemplatesPanel() {
   html += '</select>';
   html += '<button class="tpled-new-btn" onclick="agentTemplateNew()" title="New role">+</button>';
   html += '<button class="tpled-new-btn" onclick="agentTemplateEditorLoad()" title="Refresh">&#x21BB;</button>';
-  html += '</div>';
   html += '</div>';
   html += '<div class="tpled-editor" id="agent-tpl-editor"></div>';
 
@@ -676,15 +676,16 @@ function renderSpecializationLibraryPanel() {
   var selectedForScope = loadedForScope ? _specializationSelected : '';
 
   var html = '';
-  html += '<div class="tpled-header">';
-  html += '<div class="tpled-header-copy">';
-  html += '<div class="tpled-header-title-row">';
-  html += '<span class="tpled-header-title">Specializations</span>';
+  html += '<div class="tpled-header ui-panel-header ui-panel-header--surface">';
+  html += '<div class="tpled-header-copy ui-panel-header__copy">';
+  html += '<div class="tpled-header-title-row ui-panel-header__title-row">';
+  html += '<span class="tpled-header-title ui-panel-header__title">Specializations</span>';
   html += _libraryTabsHtml();
   html += '</div>';
-  html += '<div class="tpled-header-subtitle">Engineer routing hints and preambles for architect-created tasks.</div>';
+  html += '<div class="tpled-header-subtitle ui-panel-header__subtitle">Engineer routing hints and preambles for architect-created tasks.</div>';
   html += '</div>';
-  html += '<div class="tpled-header-controls">';
+  html += '</div>';
+  html += '<div class="tpled-header-controls ui-toolbar ui-toolbar--bordered">';
   html += '<select class="tpled-select" id="specialization-select" onchange="specializationLibrarySelect(this.value)">';
   html += '<option value="">Select\u2026</option>';
   var project = listForScope.filter(function(s) { return !s.global; });
@@ -711,7 +712,6 @@ function renderSpecializationLibraryPanel() {
   html += '</select>';
   html += '<button class="tpled-new-btn" onclick="specializationLibraryNew()" title="New specialization">+</button>';
   html += '<button class="tpled-new-btn" onclick="specializationLibraryLoad()" title="Refresh">&#x21BB;</button>';
-  html += '</div>';
   html += '</div>';
   html += '<div class="tpled-editor" id="specialization-editor"></div>';
 
@@ -1465,12 +1465,13 @@ function renderAgentClassesPanel() {
   var list = loaded ? _agentClassList : [];
   var selected = loaded ? _agentClassSelected : '';
   var html = '';
-  html += '<div class="tpled-header agent-class-header">';
-  html += '<div class="tpled-header-copy">';
-  html += '<div class="tpled-header-title-row"><span class="tpled-header-title">Agent Classes</span>' + _libraryTabsHtml() + '</div>';
-  html += '<div class="tpled-header-subtitle">Agent Classes are the operator-facing objects for authoring, selection, and launch. Troubleshooting details stay in Advanced/Internal sections.</div>';
+  html += '<div class="tpled-header agent-class-header ui-panel-header ui-panel-header--surface">';
+  html += '<div class="tpled-header-copy ui-panel-header__copy">';
+  html += '<div class="tpled-header-title-row ui-panel-header__title-row"><span class="tpled-header-title ui-panel-header__title">Agent Classes</span>' + _libraryTabsHtml() + '</div>';
+  html += '<div class="tpled-header-subtitle ui-panel-header__subtitle">Agent Classes are the operator-facing objects for authoring, selection, and launch. Troubleshooting details stay in Advanced/Internal sections.</div>';
   html += '</div>';
-  html += '<div class="tpled-header-controls">';
+  html += '</div>';
+  html += '<div class="tpled-header-controls ui-toolbar ui-toolbar--bordered">';
   html += '<select class="tpled-select" id="agent-class-select" onchange="agentClassManagerSelect(this.value)">';
   html += '<option value="">Select…</option>';
   var builtins = list.filter(function(item) { return item && item.builtin; });
@@ -1482,7 +1483,7 @@ function renderAgentClassesPanel() {
   html += '</select>';
   html += '<button class="tpled-new-btn" onclick="agentClassManagerNew()" title="New Agent Class">+</button>';
   html += '<button class="tpled-new-btn" onclick="agentClassManagerLoad(true)" title="Refresh">&#x21BB;</button>';
-  html += '</div></div>';
+  html += '</div>';
   html += '<div class="tpled-editor agent-class-editor" id="agent-class-editor"></div>';
   panel.innerHTML = html;
   renderAgentClassManagerEditor(restoreState);

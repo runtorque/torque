@@ -807,14 +807,14 @@ function renderSupervisorPanel(opts) {
   }
 
   root.innerHTML = '<div class="supervisor-panel">'
-    + '<div class="supervisor-header"><div><h2>Supervisor</h2>'
-    + '<p>PTY sidecar sessions and process controls</p></div>'
-    + '<div class="supervisor-status"><span class="supervisor-dot '
+    + '<div class="supervisor-header ui-panel-header ui-panel-header--surface"><div class="supervisor-header-copy ui-panel-header__copy"><h2 class="ui-panel-header__title">Supervisor</h2>'
+    + '<p class="ui-panel-header__subtitle">PTY sidecar sessions and process controls</p></div>'
+    + '<div class="supervisor-status ui-panel-header__actions"><span class="supervisor-dot '
     + (supervisorState.available === true ? 'connected' : 'offline') + '"></span>'
     + '<span>' + _supervisorEsc(status) + '</span>'
     + '<span>' + _supervisorEsc(sessionCount + ' session' + (sessionCount === 1 ? '' : 's')
       + (hasSupervisorRow ? ' + supervisor' : '')) + '</span></div></div>'
-    + '<div class="supervisor-toolbar"><button type="button" onclick="supervisorRefresh()">⟳ Refresh</button>'
+    + '<div class="supervisor-toolbar ui-toolbar ui-toolbar--bordered"><button type="button" onclick="supervisorRefresh()">⟳ Refresh</button>'
     + _supervisorRestartControlHtml()
     + '<label class="supervisor-auto"><input type="checkbox" onchange="supervisorSetAutoRefresh(this.checked)"'
     + (supervisorState.autoRefresh ? ' checked' : '') + '> Auto</label>'

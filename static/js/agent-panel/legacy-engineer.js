@@ -1715,7 +1715,7 @@ function _agentPanelLegacyRenderJournal(group, agent) {
 
 function _agentPanelLegacyRenderJournalToolbar(group, subview) {
   var groupJs = JSON.stringify(String(group || ''));
-  var html = '<div class="agent-panel-session-map-toolbar">';
+  var html = '<div class="agent-panel-session-map-toolbar ui-toolbar ui-toolbar--bordered">';
   html += '<div class="agent-panel-session-map-actions">';
   if (subview === 'session_map') {
     html += '<button class="agent-panel-session-map-btn" onclick=\'engineerCloseSessionMap('

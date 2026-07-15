@@ -402,16 +402,17 @@ function _missionControlShellHtml(summary) {
   var total = Number(counts.total_cards || 0) || 0;
   var html = '';
   html += '<div class="mission-control-panel' + (hasOperatorNow ? ' has-operator-now' : '') + '">';
-  html += '<div class="tpled-header mc-header">';
-  html += '<div class="tpled-header-copy"><div class="tpled-header-title-row"><span class="tpled-header-title">Mission Control</span>'
-    + (hasOperatorNow ? '<span class="mc-now-badge">operator gates: ' + esc(String(operatorNow)) + '</span>' : '')
+  html += '<div class="tpled-header mc-header ui-panel-header ui-panel-header--surface">';
+  html += '<div class="tpled-header-copy ui-panel-header__copy"><div class="tpled-header-title-row ui-panel-header__title-row"><span class="tpled-header-title ui-panel-header__title">Mission Control</span>'
+    + (hasOperatorNow ? '<span class="mc-now-badge ui-badge ui-badge--compact ui-badge--warning ui-badge--count">operator gates: ' + esc(String(operatorNow)) + '</span>' : '')
     + '</div>';
-  html += '<div class="tpled-header-subtitle">Read-only readiness console for ' + esc(group || 'all groups') + '. Actions stay on existing surfaces.</div></div>';
-  html += '<div class="tpled-header-controls mc-controls">';
+  html += '<div class="tpled-header-subtitle ui-panel-header__subtitle">Read-only readiness console for ' + esc(group || 'all groups') + '. Actions stay on existing surfaces.</div></div>';
+  html += '</div>';
+  html += '<div class="tpled-header-controls mc-controls ui-toolbar ui-toolbar--bordered">';
   html += '<input id="mission-control-filter" class="mc-filter" value="' + esc(_missionControlFilter) + '" oninput="missionControlSetFilter(this.value)" placeholder="Filter cards…" />';
   html += '<span class="mc-total ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + esc(String(total)) + ' cards</span>';
   html += '<button class="tpled-new-btn" onclick="missionControlRefresh()" title="Refresh read-only summary">&#x21BB;</button>';
-  html += '</div></div>';
+  html += '</div>';
   if (_missionControlLastError) html += '<div class="mc-error">' + esc(_missionControlLastError) + '</div>';
   html += '<div class="mc-workspace" id="mission-control-workspace">';
   html += '<main class="mc-main" id="mission-control-main">';
@@ -443,15 +444,15 @@ function renderMissionControlPanel() {
   var summary = _missionControlSummaryForCurrentGroup();
   var html = '';
   if (!summary && _missionControlLoadingGroup === group) {
-    html = '<div class="mission-control-panel"><div class="tpled-header mc-header">'
-      + '<div class="tpled-header-copy"><div class="tpled-header-title-row"><span class="tpled-header-title">Mission Control</span></div>'
-      + '<div class="tpled-header-subtitle">Loading read-only readiness summary for ' + esc(group || 'all groups') + '…</div></div>'
+    html = '<div class="mission-control-panel"><div class="tpled-header mc-header ui-panel-header ui-panel-header--surface">'
+      + '<div class="tpled-header-copy ui-panel-header__copy"><div class="tpled-header-title-row ui-panel-header__title-row"><span class="tpled-header-title ui-panel-header__title">Mission Control</span></div>'
+      + '<div class="tpled-header-subtitle ui-panel-header__subtitle">Loading read-only readiness summary for ' + esc(group || 'all groups') + '…</div></div>'
       + '</div><div class="mc-loading">Loading Mission Control…</div></div>';
   } else if (!summary && _missionControlLastError) {
-    html = '<div class="mission-control-panel"><div class="tpled-header mc-header">'
-      + '<div class="tpled-header-copy"><div class="tpled-header-title-row"><span class="tpled-header-title">Mission Control</span></div>'
-      + '<div class="tpled-header-subtitle">Read-only readiness summary could not be loaded.</div></div>'
-      + '<div class="tpled-header-controls"><button class="tpled-new-btn" onclick="missionControlRefresh()" title="Retry">&#x21BB;</button></div>'
+    html = '<div class="mission-control-panel"><div class="tpled-header mc-header ui-panel-header ui-panel-header--surface">'
+      + '<div class="tpled-header-copy ui-panel-header__copy"><div class="tpled-header-title-row ui-panel-header__title-row"><span class="tpled-header-title ui-panel-header__title">Mission Control</span></div>'
+      + '<div class="tpled-header-subtitle ui-panel-header__subtitle">Read-only readiness summary could not be loaded.</div></div>'
+      + '<div class="tpled-header-controls ui-panel-header__actions"><button class="tpled-new-btn" onclick="missionControlRefresh()" title="Retry">&#x21BB;</button></div>'
       + '</div><div class="mc-error">' + esc(_missionControlLastError) + '</div></div>';
   } else if (summary) {
     html = _missionControlShellHtml(summary);

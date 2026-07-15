@@ -983,8 +983,11 @@ function renderHealthPanel(opts) {
   if (!root) return;
   if (!root.querySelector || !root.querySelector('.health-panel')) {
     root.innerHTML = '<div class="health-panel">'
-      + '<div class="health-toolbar">'
-      + '<div><h2>System Health</h2><p>Read-only orchestration metrics over time.</p></div>'
+      + '<div class="health-chrome">'
+      + '<div class="health-header ui-panel-header ui-panel-header--surface">'
+      + '<div class="health-header-copy ui-panel-header__copy"><h2 class="ui-panel-header__title">System Health</h2><p class="ui-panel-header__subtitle">Read-only orchestration metrics over time.</p></div>'
+      + '</div>'
+      + '<div class="health-toolbar ui-toolbar ui-toolbar--bordered">'
       + '<label>Window <select id="health-window-select" onchange="healthSetWindow(this.value)">'
       + '<option value="24h">24h</option><option value="7d">7d</option><option value="30d">30d</option>'
       + '</select></label>'
@@ -993,6 +996,7 @@ function renderHealthPanel(opts) {
       + '</select></label>'
       + '<span class="health-active-group" id="health-active-group-name"></span>'
       + '<button class="btn-secondary" onclick="healthRefresh()">Refresh</button>'
+      + '</div>'
       + '</div>'
       + '<div id="health-results" class="health-results"></div>'
       + '</div>';

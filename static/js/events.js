@@ -408,7 +408,7 @@ function _eventsBuildShellHtml(grp, attention) {
   html += '</select>';
   html += '</div>';
   html += '</div>';
-  html += '<div class="events-search-row">';
+  html += '<div class="events-search-row ui-toolbar ui-toolbar--bordered">';
   html += '<input class="events-search-input" type="text" placeholder="Search events\u2026"'
     + ' value="' + esc(_eventsSearchQuery) + '"'
     + ' oninput="eventsOnSearchInput(this.value)">';

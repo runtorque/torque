@@ -584,13 +584,7 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   gap: 8px;
 }
 .agent-panel-events-toolbar {
-  display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
   background: var(--bg-cell);
 }
 .agent-panel-events-countdown {
@@ -1106,10 +1100,7 @@ button.agent-panel-hierarchy-crumb:focus-visible {
 
 /* Journal entries */
 .agent-panel-session-map-toolbar {
-  display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 8px;
   margin-bottom: 8px;
 }
 .agent-panel-session-map-actions {

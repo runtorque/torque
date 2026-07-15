@@ -22833,7 +22833,7 @@ test('History renders as a separate panel with the merged filter selected', () =
 
   context.renderHistoryPanel();
 
-  assert.match(panel.innerHTML, /<span class="tpled-header-title">History<\/span>/);
+  assert.match(panel.innerHTML, /<span class="tpled-header-title ui-panel-header__title">History<\/span>/);
   assert.match(panel.innerHTML, /agent-history-container/);
   assert.match(container.innerHTML, /ah-filter-btn active[^>]*>Merged<\/button>/);
   assert.doesNotMatch(panel.innerHTML, /Role Library/);

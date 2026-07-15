@@ -584,18 +584,18 @@ function renderContextPanel() {
   if (agent) summary.push('Agent: ' + (agent.name || agent.id));
 
   var html = '<div class="context-panel">';
-  html += '<div class="context-header">';
-  html += '<div class="context-header-copy"><div class="context-title">Shared Context</div><div class="context-subtitle">Notes and shared memory for the current flow.</div></div>';
-  html += '<div class="context-header-actions">';
+  html += '<div class="context-header ui-panel-header ui-panel-header--surface">';
+  html += '<div class="context-header-copy ui-panel-header__copy"><div class="context-title ui-panel-header__title">Shared Context</div><div class="context-subtitle ui-panel-header__subtitle">Notes and shared memory for the current flow.</div></div>';
+  html += '<div class="context-header-actions ui-panel-header__actions">';
   html += '<button class="btn-primary btn-sm" onclick="contextOpenCreate()">New Note</button>';
   html += '</div></div>';
-  html += '<div class="context-focus-row">';
+  html += '<div class="context-focus-row ui-toolbar">';
   html += _contextRenderFocusButton('group', 'Group', _contextCanFocus('group'));
   html += _contextRenderFocusButton('task', 'Task', _contextCanFocus('task'));
   html += _contextRenderFocusButton('pipeline', 'Pipeline', _contextCanFocus('pipeline'));
   html += _contextRenderFocusButton('agent', 'Agent Links', _contextCanFocus('agent'));
   html += '</div>';
-  html += '<div class="context-toolbar">';
+  html += '<div class="context-toolbar ui-toolbar ui-toolbar--bordered">';
   html += '<input id="context-search-input" class="context-search-input" type="text" placeholder="Search shared context…"'
     + ' value="' + esc(_contextSearchQuery) + '" oninput="contextSearchInput(this.value)">';
   html += '<select class="context-filter-select" onchange="contextSetEntryType(this.value)">';

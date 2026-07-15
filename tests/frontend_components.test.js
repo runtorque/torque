@@ -193,11 +193,13 @@ test('card geometry does not drift back into feature styles', () => {
 test('shared panel headers separate identity, actions, and toolbar rows', () => {
   const css = source('static/styles/components.css');
 
-  assert.match(css, /\.ui-panel-header,\s*\.tpled-header,\s*\.events-header,\s*\.agent-panel-header\s*\{[^}]*display:\s*flex;[^}]*gap:\s*var\(--space-2\) 10px;[^}]*padding:\s*var\(--space-2\) 10px;[^}]*border-bottom:\s*1px solid var\(--border\);/s);
-  assert.match(css, /\.ui-panel-header__actions,[\s\S]*?\.agent-panel-header-right\s*\{[^}]*justify-content:\s*flex-end;[^}]*flex:\s*0 1 auto;[^}]*margin-left:\s*auto;[^}]*flex-wrap:\s*wrap;/s);
-  assert.match(css, /\.tpled-header-controls\.ui-panel-header__actions\s*\{[^}]*flex:\s*0 1 auto;[^}]*justify-content:\s*flex-end;/s);
+  assert.match(css, /\.ui-panel-header\s*\{[^}]*display:\s*flex;[^}]*gap:\s*var\(--space-2\) 10px;[^}]*padding:\s*var\(--space-2\) 10px;[^}]*border-bottom:\s*1px solid var\(--border\);/s);
+  assert.match(css, /\.ui-panel-header__title\s*\{[^}]*margin:\s*0;[^}]*font-size:\s*12px;/s);
+  assert.match(css, /\.ui-panel-header__subtitle\s*\{[^}]*margin:\s*2px 0 0;[^}]*font-size:\s*10px;/s);
+  assert.match(css, /\.ui-panel-header__actions\s*\{[^}]*justify-content:\s*flex-end;[^}]*flex:\s*0 1 auto;[^}]*margin-left:\s*auto;[^}]*flex-wrap:\s*wrap;/s);
   assert.match(css, /\.ui-toolbar\s*\{[^}]*display:\s*flex;[^}]*align-items:\s*center;[^}]*flex-wrap:\s*wrap;[^}]*padding:\s*var\(--space-1\) var\(--space-2\);/s);
   assert.match(css, /\.ui-toolbar--bordered\s*\{[^}]*border-bottom:\s*1px solid var\(--border\);/s);
+  assert.doesNotMatch(css, /\.(?:tpled-header|events-header|agent-panel-header)(?:,|\s*\{)/);
 });
 
 test('core panel-header and toolbar consumers opt into the canonical API', () => {
@@ -207,6 +209,16 @@ test('core panel-header and toolbar consumers opt into the canonical API', () =>
   const thinking = source('static/js/thinking.js');
   const agent = source('static/js/agent_panel.js');
   const engineer = source('static/js/agent-panel/legacy-engineer.js');
+  const actions = source('static/js/actions.js');
+  const templates = source('static/js/templates.js');
+  const history = source('static/js/history.js');
+  const context = source('static/js/context.js');
+  const help = source('static/js/help.js');
+  const health = source('static/js/health.js');
+  const supervisor = source('static/js/supervisor.js');
+  const chat = source('static/js/chat.js');
+  const mission = source('static/js/mission_control.js');
+  const diff = source('static/js/diff.js');
 
   assert.match(board, /class="board-search-bar ui-toolbar ui-toolbar--bordered"/);
   assert.match(events, /class="events-header ui-panel-header ui-panel-header--surface"/);
@@ -218,11 +230,31 @@ test('core panel-header and toolbar consumers opt into the canonical API', () =>
   assert.match(agent, /class="agent-panel-header ui-panel-header"/);
   assert.match(agent, /class="agent-panel-header-right ui-panel-header__actions"/);
   assert.match(engineer, /class="agent-panel-header ui-panel-header"/);
+  assert.match(actions, /class="tpled-header ui-panel-header ui-panel-header--surface"/);
+  assert.match(actions, /class="tpled-header-controls ui-toolbar ui-toolbar--bordered"/);
+  assert.match(templates, /class="tpled-header ui-panel-header ui-panel-header--surface"/);
+  assert.match(templates, /class="tpled-header-controls ui-toolbar ui-toolbar--bordered"/);
+  assert.match(history, /class="tpled-header-controls ui-panel-header__actions"/);
+  assert.match(history, /class="ah-toolbar ui-toolbar ui-toolbar--bordered"/);
+  assert.match(context, /class="context-header ui-panel-header ui-panel-header--surface"/);
+  assert.match(context, /class="context-toolbar ui-toolbar ui-toolbar--bordered"/);
+  assert.match(help, /class="help-header ui-panel-header ui-panel-header--surface"/);
+  assert.match(help, /class="help-toolbar help-browser-toolbar ui-toolbar ui-toolbar--bordered"/);
+  assert.match(health, /class="health-header ui-panel-header ui-panel-header--surface"/);
+  assert.match(health, /class="health-toolbar ui-toolbar ui-toolbar--bordered"/);
+  assert.match(supervisor, /class="supervisor-header ui-panel-header ui-panel-header--surface"/);
+  assert.match(supervisor, /class="supervisor-toolbar ui-toolbar ui-toolbar--bordered"/);
+  assert.match(chat, /listHeader\.className = 'chat-panel-header ui-panel-header ui-panel-header--surface'/);
+  assert.match(mission, /class="tpled-header mc-header ui-panel-header ui-panel-header--surface"/);
+  assert.match(mission, /class="tpled-header-controls mc-controls ui-toolbar ui-toolbar--bordered"/);
+  assert.match(diff, /class="diff-view-toolbar ui-toolbar ui-toolbar--bordered"/);
 });
 
 test('panel-header geometry does not drift back into feature styles', () => {
   const board = source('static/styles/board-panels.css');
   const agent = source('static/styles/agent-panel.css');
+  const features = source('static/styles/feature-panels.css');
+  const desktop = source('static/styles/desktop-features.css');
 
   assert.doesNotMatch(board, /^\.tpled-header\s*\{/m);
   assert.doesNotMatch(board, /^\.events-header\s*\{/m);
@@ -230,6 +262,17 @@ test('panel-header geometry does not drift back into feature styles', () => {
   assert.doesNotMatch(agent, /^\.agent-panel-header\s*\{/m);
   assert.doesNotMatch(agent, /^\.agent-panel-header-(?:copy|right)\s*\{/m);
   assert.doesNotMatch(agent, /^\.agent-panel-(?:title|subtitle)\s*\{/m);
+  assert.doesNotMatch(board, /^\.context-header\s*\{/m);
+  assert.doesNotMatch(board, /^\.context-(?:header-copy|title|subtitle|header-actions|focus-row|toolbar)\s*\{[^}]*(?:display|padding|border-bottom|font-size):/ms);
+  assert.doesNotMatch(board, /^\.chat-panel-header\s*\{/m);
+  assert.doesNotMatch(board, /^\.ah-toolbar\s*\{[^}]*(?:display|padding|gap|flex-wrap):/ms);
+  assert.doesNotMatch(board, /^\.events-search-row\s*\{[^}]*(?:padding|border-bottom):/ms);
+  assert.doesNotMatch(board, /^\.diff-view-toolbar\s*\{[^}]*(?:display|align-items|gap|flex-wrap):/ms);
+  assert.doesNotMatch(agent, /^\.agent-panel-(?:events-toolbar|session-map-toolbar)\s*\{[^}]*(?:display|align-items|gap|padding|border|border-radius):/ms);
+  assert.doesNotMatch(features, /^\.help-header\s*\{[^}]*(?:display|padding|border-bottom):/ms);
+  assert.doesNotMatch(features, /^\.health-toolbar\s*\{[^}]*(?:display|padding|border|border-radius):/ms);
+  assert.doesNotMatch(features, /^\.thinking-list-toolbar\s*\{[^}]*(?:display|align-items|gap|padding|border-bottom):/ms);
+  assert.doesNotMatch(desktop, /^\.supervisor-header\s*\{/m);
 });
 
 test('shared modals define raised size variants and structured regions', () => {

@@ -80,13 +80,10 @@
  *
  * Headers keep identity copy on the leading edge and local actions on the
  * trailing edge. Toolbars are denser rows for search, filters, and editors.
- * Compatibility aliases keep existing feature surfaces aligned while their
- * markup migrates to the canonical API.
+ * Consumers opt into these classes directly so feature styles only retain
+ * surface-specific layout adjustments.
  */
-.ui-panel-header,
-.tpled-header,
-.events-header,
-.agent-panel-header {
+.ui-panel-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -97,50 +94,37 @@
   flex-shrink: 0;
 }
 
-.ui-panel-header--surface,
-.tpled-header,
-.events-header {
+.ui-panel-header--surface {
   background: var(--bg-hover);
 }
 
-.ui-panel-header__copy,
-.tpled-header-copy,
-.events-header-copy,
-.agent-panel-header-copy {
+.ui-panel-header__copy {
   min-width: 0;
   flex: 1 1 180px;
 }
 
-.ui-panel-header__title-row,
-.tpled-header-title-row {
+.ui-panel-header__title-row {
   display: flex;
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
 }
 
-.ui-panel-header__title,
-.tpled-header-title,
-.events-header-title,
-.agent-panel-title {
+.ui-panel-header__title {
+  margin: 0;
   color: var(--text);
   font-size: 12px;
   font-weight: 700;
 }
 
-.ui-panel-header__subtitle,
-.tpled-header-subtitle,
-.events-header-subtitle,
-.agent-panel-subtitle {
-  margin-top: 2px;
+.ui-panel-header__subtitle {
+  margin: 2px 0 0;
   color: var(--text-dim);
   font-size: 10px;
   line-height: 1.35;
 }
 
-.ui-panel-header__actions,
-.events-header-actions,
-.agent-panel-header-right {
+.ui-panel-header__actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -149,21 +133,6 @@
   max-width: 100%;
   margin-left: auto;
   flex-wrap: wrap;
-}
-
-.tpled-header-controls {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 1 1 100%;
-  min-width: 0;
-  flex-wrap: wrap;
-}
-
-.tpled-header-controls.ui-panel-header__actions {
-  flex: 0 1 auto;
-  justify-content: flex-end;
-  margin-left: auto;
 }
 
 .ui-toolbar {

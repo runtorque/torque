@@ -130,7 +130,7 @@ function _agentPanelRenderEventsTab(bstats, sentEvents, paused, recipient, sendN
   var sentPage = _agentPanelSectionPage(recipientId, 'sent', sent);
 
   var html = '<div class="agent-panel-events-inbox" data-agent-panel-events-panel="inbox">';
-  html += '<div class="agent-panel-events-toolbar">';
+  html += '<div class="agent-panel-events-toolbar ui-toolbar ui-toolbar--bordered">';
   html += '<div class="agent-panel-events-countdown">' + _esc(statusText) + '</div>';
   html += '<button id="engineer-send-now-btn" class="agent-panel-send-now-btn"'
     + (sendDisabled ? ' disabled' : '')

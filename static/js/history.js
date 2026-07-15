@@ -28,14 +28,14 @@ function renderHistoryPanel() {
   var panel = document.getElementById('panel-history');
   if (!panel) return;
   var html = '';
-  html += '<div class="tpled-header">';
-  html += '<div class="tpled-header-copy">';
-  html += '<div class="tpled-header-title-row">';
-  html += '<span class="tpled-header-title">History</span>';
+  html += '<div class="tpled-header ui-panel-header ui-panel-header--surface">';
+  html += '<div class="tpled-header-copy ui-panel-header__copy">';
+  html += '<div class="tpled-header-title-row ui-panel-header__title-row">';
+  html += '<span class="tpled-header-title ui-panel-header__title">History</span>';
   html += '</div>';
-  html += '<div class="tpled-header-subtitle">Historical agent runs and their recorded activity.</div>';
+  html += '<div class="tpled-header-subtitle ui-panel-header__subtitle">Historical agent runs and their recorded activity.</div>';
   html += '</div>';
-  html += '<div class="tpled-header-controls">';
+  html += '<div class="tpled-header-controls ui-panel-header__actions">';
   html += '<button class="tpled-new-btn" onclick="agentHistoryLoad()" title="Refresh">&#x21BB;</button>';
   html += '</div>';
   html += '</div>';
@@ -184,7 +184,7 @@ function renderAgentHistoryView() {
   var html = '';
 
   // Search + filter bar
-  html += '<div class="ah-toolbar">';
+  html += '<div class="ah-toolbar ui-toolbar ui-toolbar--bordered">';
   html += '<input id="agent-history-search" class="ah-search" type="text" placeholder="Search agents\u2026" '
     + 'value="' + esc(_agentHistorySearch) + '" '
     + 'oninput="agentHistoryOnSearch(this.value)">';

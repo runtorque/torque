@@ -313,8 +313,11 @@ The canonical CSS API lives in `static/styles/components.css`:
 - `.ui-panel-header__actions` aligns local actions at the trailing edge.
 - `.ui-toolbar` is the compact wrapping row for search, filters, and editors;
   `.ui-toolbar--bordered` separates it from following content.
-- Planning, Thinking, Events, and Agent headers retain compatibility aliases
-  while their markup migrates. The Board search/filter row uses the toolbar API.
+- Top-level panel headers and working-control rows opt into the canonical API
+  directly. Consumer classes may retain layout or surface-specific behavior but
+  must not duplicate the shared geometry.
+- Modal, artifact, and settings headers remain governed by their modal family
+  until those large surfaces migrate deliberately.
 
 ### Status bar segments
 
@@ -463,7 +466,7 @@ the rule is intentionally global and documented here.
 | Buttons | Core variants standardized | Migrate feature-specific aliases and audit icon buttons |
 | Inputs and selectors | Core variants standardized | Migrate remaining feature-specific aliases and audit field labeling |
 | Cards | Core variants standardized | Audit grid identity cards and nested contained surfaces |
-| Toolbars and panel headers | Core variants standardized | Migrate remaining Help, Context, Health, and editor toolbars |
+| Toolbars and panel headers | Standardized | Audit responsive wrapping and narrow panel widths |
 | Status bar segments | Standardized | Audit narrow-width priority |
 | Menus and popovers | Core variants standardized | Migrate task, terminal, dependency, and editor dropdowns |
 | Modals | Core variants standardized | Migrate task, settings, artifact, diff, and multi-section dialogs |
@@ -646,12 +649,13 @@ the rule is intentionally global and documented here.
   Separating identity from working controls keeps headers compact and makes
   responsive wrapping predictable.
 - Scope: `static/styles/components.css`, Planning and Thinking headers, Events
-  header, Agent headers, and the Board search/filter toolbar.
+  header, Agent headers, Board search/filter toolbar, Actions, Library, History,
+  Context, Help, Health, Supervisor, Chat, Mission Control, and nested working
+  toolbars.
 - Constraints: Feature controls that genuinely require a full-width editor row
-  may retain that row through the compatibility control container. Context,
-  Help, Health, modal headers, desktop diagnostics, and nested editor toolbars
-  remain follow-up migrations. Window/layout chrome stays outside panel content
-  headers.
+  may retain that row through `.ui-toolbar`. Modal, artifact, and settings
+  headers remain part of the large-modal family. Window/layout chrome stays
+  outside panel content headers.
 - Verification: `tests/frontend_components.test.js` protects the shared API,
   canonical consumer markup, and removal of duplicated header geometry from
   feature styles. Existing panel suites protect rendering behavior; live checks
@@ -786,6 +790,29 @@ the rule is intentionally global and documented here.
   consumer family and reject reintroduced feature-local count geometry. Focused
   frontend suites protect rendered labels; live checks cover grid, panel, and
   feature counts plus console cleanliness.
+
+### D-015 — Panel chrome opts into canonical structure directly
+
+- Date: 2026-07-14
+- Status: accepted
+- Decision: Every top-level panel uses the canonical header hierarchy directly,
+  and every search, filter, selector, or editor row uses the canonical toolbar
+  primitive. Legacy consumer class names may remain as hooks but no longer act as
+  compatibility aliases for shared geometry.
+- Rationale: Compatibility selectors hid incomplete migrations and allowed a
+  panel to appear standardized without declaring its structure. Direct opt-in
+  makes markup intent reviewable and prevents later consumer rules from quietly
+  rebuilding the same header and toolbar geometry.
+- Scope: Actions, Library, History, Context, Help, Health, Supervisor, Chat,
+  Events, Mission Control, Thinking list views, Agent events/session maps, and
+  diff controls, plus the shared header and toolbar definitions.
+- Constraints: Consumer classes continue to own sticky positioning, local
+  backgrounds, content-specific widths, and other surface behavior. Modal,
+  artifact, and settings chrome migrates with the large-modal slice.
+- Verification: Component tests require direct canonical classes across every
+  migrated consumer and reject compatibility geometry in shared or feature CSS.
+  Focused panel suites protect rendering and interaction; live checks cover
+  representative panels, working controls, focus, and console cleanliness.
 
 ## Decision entry template
 

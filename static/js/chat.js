@@ -572,7 +572,7 @@ function _chatEnsurePanelShell(root) {
   threadPane.className = 'chat-thread-pane';
   threadPane.setAttribute('aria-label', 'Chat threads');
   var listHeader = document.createElement('div');
-  listHeader.className = 'chat-panel-header';
+  listHeader.className = 'chat-panel-header ui-panel-header ui-panel-header--surface';
   listHeader.setAttribute('data-chat-list-header', '1');
   var list = document.createElement('div');
   list.className = 'chat-thread-list';
@@ -865,11 +865,11 @@ function _chatThreadHeaderHtml(items) {
     ackTotal += Number((items[i].thread || {}).ack_required_count || 0);
     pendingTotal += Number((items[i].thread || {}).pending_delivery_count || 0);
   }
-  return '<div class="chat-panel-title-wrap">'
-    + '<div class="chat-panel-title">Chat</div>'
-    + '<div class="chat-panel-subtitle">Read-only peer inbox</div>'
+  return '<div class="chat-panel-title-wrap ui-panel-header__copy">'
+    + '<div class="chat-panel-title ui-panel-header__title">Chat</div>'
+    + '<div class="chat-panel-subtitle ui-panel-header__subtitle">Read-only peer inbox</div>'
     + '</div>'
-    + '<div class="chat-panel-summary">'
+    + '<div class="chat-panel-summary ui-panel-header__actions">'
     + '<span class="chat-badge chat-badge-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">' + _chatEsc(total + ' thread' + (total === 1 ? '' : 's')) + '</span>'
     + _chatCountBadge('Ack required', ackTotal, 'chat-badge-ack')
     + _chatCountBadge('Pending', pendingTotal, 'chat-badge-pending')

@@ -189,25 +189,10 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   padding: 12px;
   color: var(--text);
 }
-.supervisor-header,
-.supervisor-toolbar,
 .supervisor-status {
   display: flex;
   align-items: center;
   gap: 10px;
-}
-.supervisor-header {
-  justify-content: space-between;
-  flex-wrap: wrap;
-}
-.supervisor-header h2 {
-  margin: 0;
-  font-size: 15px;
-}
-.supervisor-header p {
-  margin: 2px 0 0;
-  color: var(--text-dim);
-  font-size: 11px;
 }
 .supervisor-status {
   color: var(--text-dim);
@@ -223,9 +208,6 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 .supervisor-dot.connected {
   background: var(--green);
   box-shadow: 0 0 0 3px rgba(63, 185, 80, .12);
-}
-.supervisor-toolbar {
-  flex-wrap: wrap;
 }
 .supervisor-toolbar button,
 .supervisor-terminate,

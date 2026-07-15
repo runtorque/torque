@@ -368,7 +368,7 @@ function _renderDiffFile(file) {
 function _renderDiffCollapseControls(files) {
   if (!files.length) return '';
   var collapsedCount = _diffCollapsedCount(files);
-  var html = '<div class="diff-view-toolbar">';
+  var html = '<div class="diff-view-toolbar ui-toolbar ui-toolbar--bordered">';
   html += '<button class="diff-collapse-btn"'
     + (_diffCollapseAllFiles ? ' disabled' : '')
     + ' onclick="diffSetAllFilesCollapsed(true)">Collapse all</button>';

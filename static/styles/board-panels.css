@@ -38,7 +38,6 @@
   border-right: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-hover) 46%, var(--bg-surface));
 }
-.chat-panel-header,
 .chat-message-header {
   display: flex;
   align-items: flex-start;
@@ -49,13 +48,11 @@
   background: rgba(255,255,255,.02);
   flex-shrink: 0;
 }
-.chat-panel-title,
 .chat-message-title {
   font-size: 12px;
   font-weight: 700;
   color: var(--text);
 }
-.chat-panel-subtitle,
 .chat-message-subtitle,
 .chat-thread-participants,
 .chat-thread-last,
@@ -63,7 +60,6 @@
   color: var(--text-dim);
   font-size: 10px;
 }
-.chat-panel-summary,
 .chat-thread-badges,
 .chat-message-header-meta {
   display: flex;
@@ -1665,44 +1661,6 @@ body.runtime-embedded .board-empty-action:focus-visible {
   flex-direction: column;
   min-height: 0;
 }
-.context-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px 12px 8px;
-  border-bottom: 1px solid var(--border);
-}
-.context-header-copy {
-  min-width: 0;
-  flex: 1 1 auto;
-}
-.context-title {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--text);
-}
-.context-subtitle {
-  font-size: 10px;
-  color: var(--text-dim);
-  margin-top: 2px;
-}
-.context-header-actions {
-  display: flex;
-  margin-left: auto;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 6px;
-  flex: 0 0 auto;
-}
-.context-focus-row,
-.context-toolbar {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  flex-wrap: wrap;
-  padding: 8px 12px 0;
-}
 .context-focus-btn,
 .context-filter-select,
 .context-search-input,
@@ -2479,8 +2437,7 @@ body.runtime-embedded .board-empty-action:focus-visible {
   padding: 4px 6px;
 }
 .ah-toolbar {
-  display: flex; gap: 6px; align-items: center;
-  padding: 4px 0; margin-bottom: 4px; flex-wrap: wrap;
+  margin-bottom: 4px;
 }
 .ah-search {
   flex: 1; min-width: 100px; padding: 3px 6px;
@@ -2598,9 +2555,7 @@ body.runtime-embedded .board-empty-action:focus-visible {
 }
 .events-kind-filter:focus { outline: none; border-color: var(--accent); }
 .events-search-row {
-  padding: 4px 8px;
   background: var(--bg-hover);
-  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 .events-search-input {
@@ -3025,10 +2980,6 @@ body[data-torque-mode="desktop"] .diff-view-modal {
   margin-top: 4px;
 }
 .diff-view-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
   margin-top: 8px;
 }
 .diff-collapse-btn {

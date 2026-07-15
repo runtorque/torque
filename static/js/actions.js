@@ -110,14 +110,15 @@ function renderTemplatesPanel() {
   var html = '';
 
   // Header bar
-  html += '<div class="tpled-header">';
-  html += '<div class="tpled-header-copy">';
-  html += '<div class="tpled-header-title-row">';
-  html += '<span class="tpled-header-title">Actions</span>';
+  html += '<div class="tpled-header ui-panel-header ui-panel-header--surface">';
+  html += '<div class="tpled-header-copy ui-panel-header__copy">';
+  html += '<div class="tpled-header-title-row ui-panel-header__title-row">';
+  html += '<span class="tpled-header-title ui-panel-header__title">Actions</span>';
   html += '</div>';
-  html += '<div class="tpled-header-subtitle">Prompt templates, pipelines, and dispatch workflows.</div>';
+  html += '<div class="tpled-header-subtitle ui-panel-header__subtitle">Prompt templates, pipelines, and dispatch workflows.</div>';
   html += '</div>';
-  html += '<div class="tpled-header-controls">';
+  html += '</div>';
+  html += '<div class="tpled-header-controls ui-toolbar ui-toolbar--bordered">';
   html += '<select class="tpled-select" id="tpled-select" onchange="tplEditorOnSelect(this.value)">';
   html += '<option value="">Select\u2026</option>';
   var projectTpls = [];
@@ -153,7 +154,6 @@ function renderTemplatesPanel() {
   html += '<div class="tpled-view-toggle" role="group" aria-label="Action view">';
   html += '<button type="button" class="tpled-view-btn' + (_tplPanelView === 'editor' ? ' active' : '') + '" aria-pressed="' + (_tplPanelView === 'editor' ? 'true' : 'false') + '" onclick="tplSwitchView(\'editor\')">Editor</button>';
   html += '<button type="button" class="tpled-view-btn' + (_tplPanelView === 'pipelines' ? ' active' : '') + '" aria-pressed="' + (_tplPanelView === 'pipelines' ? 'true' : 'false') + '" onclick="tplSwitchView(\'pipelines\')">DAG</button>';
-  html += '</div>';
   html += '</div>';
   html += '</div>';
 

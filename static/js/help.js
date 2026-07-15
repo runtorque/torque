@@ -618,7 +618,7 @@ function _helpRenderTopicBrowserModal() {
 }
 
 function _helpRenderBrowserControls() {
-  return '<form class="help-toolbar help-browser-toolbar" onsubmit="return helpSearchSubmit(event)">'
+  return '<form class="help-toolbar help-browser-toolbar ui-toolbar ui-toolbar--bordered" onsubmit="return helpSearchSubmit(event)">'
     + '<input id="help-search-input" class="help-search-input" value="' + _helpEsc(_helpState.searchDraft) + '" '
     + 'placeholder="Search maintained docs…" autocomplete="off" '
     + 'oninput="helpSearchInputChanged(this.value)" onkeydown="helpSearchKeydown(event)">'
@@ -796,7 +796,7 @@ function _helpRenderQueryPanel() {
   return '<section class="help-query-panel" id="help-query-scroll">'
     + '<div class="help-query-title">Ask Help</div>'
     + '<div class="help-query-subtitle">Extractive lookup over maintained Torque docs. Answers cite source paths and do not inspect board, journal, user, or runtime state.</div>'
-    + '<form class="help-query-row" id="help-query-form">'
+    + '<form class="help-query-row ui-toolbar" id="help-query-form">'
     + '<input id="help-query-input" class="help-query-input" value="' + _helpEsc(_helpState.queryDraft) + '" '
     + 'placeholder="Ask a docs question…" autocomplete="off">'
     + '<button type="button" class="btn-primary" id="help-query-ask-button">Ask</button>'
@@ -814,12 +814,12 @@ function _helpRenderQueryResultCard() {
 
 function _helpRenderHeader() {
   var index = _helpState.indexHash ? ('index ' + _helpState.indexHash) : 'index loading';
-  return '<div class="help-header">'
-    + '<div class="help-header-copy">'
-    + '<div class="help-title">Help</div>'
-    + '<div class="help-subtitle">Browse, search, and query maintained Torque documentation.</div>'
+  return '<div class="help-header ui-panel-header ui-panel-header--surface">'
+    + '<div class="help-header-copy ui-panel-header__copy">'
+    + '<div class="help-title ui-panel-header__title">Help</div>'
+    + '<div class="help-subtitle ui-panel-header__subtitle">Browse, search, and query maintained Torque documentation.</div>'
     + '</div>'
-    + '<div class="help-header-actions">'
+    + '<div class="help-header-actions ui-panel-header__actions">'
     + '<span class="help-index-chip">' + _helpEsc(index) + '</span>'
     + '<button type="button" class="btn-secondary" onclick="helpRefresh()">Refresh</button>'
     + '</div>'

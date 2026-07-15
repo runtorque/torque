@@ -7,31 +7,16 @@
 }
 .health-panel {
   min-height: 100%;
-  padding: 14px;
   box-sizing: border-box;
   color: var(--text);
 }
-.health-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--bg-surface) 86%, var(--bg));
+.health-chrome {
   position: sticky;
   top: 0;
   z-index: 2;
 }
-.health-toolbar h2 {
-  margin: 0;
-  font-size: 15px;
-}
-.health-toolbar p {
-  margin: 3px 0 0;
-  color: var(--text-dim);
-  font-size: 11px;
+.health-toolbar {
+  background: color-mix(in srgb, var(--bg-surface) 86%, var(--bg));
 }
 .health-toolbar label {
   display: inline-flex;
@@ -51,7 +36,7 @@
   padding: 3px 8px;
 }
 .health-results {
-  margin-top: 12px;
+  margin: 12px 14px 0;
 }
 .health-meta,
 .health-coverage {
@@ -744,18 +729,7 @@
 }
 .help-header {
   flex: 0 0 auto;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px 12px 8px;
-  border-bottom: 1px solid var(--border);
 }
-.help-header-copy { min-width: 0; }
-.help-title { font-size: 13px; font-weight: 800; color: var(--text); }
-.help-subtitle { margin-top: 2px; color: var(--text-dim); font-size: 10px; line-height: 1.35; }
-.help-header-actions,
-.help-toolbar,
 .help-query-row,
 .help-chip-row,
 .help-source-line,
@@ -767,7 +741,6 @@
   gap: 6px;
   min-width: 0;
 }
-.help-header-actions { justify-content: flex-end; flex: 0 0 auto; }
 .help-index-chip,
 .help-chip,
 .help-score {
@@ -791,11 +764,6 @@
 .help-chip-audience { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 28%, var(--border)); }
 .help-toolbar {
   flex: 0 0 auto;
-  padding: 8px 12px 0;
-}
-.help-browser-toolbar {
-  padding: 0 0 10px;
-  border-bottom: 1px solid var(--border);
 }
 .help-search-input,
 .help-query-input,
@@ -2102,12 +2070,7 @@
 }
 .thinking-list-toolbar {
   flex: 0 0 auto;
-  display: flex;
   justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 9px;
-  border-bottom: 1px solid var(--border);
 }
 .thinking-list-toolbar strong { display: block; font-size: 12px; }
 .thinking-list-toolbar span { display: block; color: var(--muted); font-size: 10px; margin-top: 1px; }
