@@ -157,6 +157,19 @@ function countText(haystack, needle) {
   return String(haystack || '').split(needle).length - 1;
 }
 
+test('Agent Profile class metadata maps state to canonical badge intents', () => {
+  const { context } = createHarness({ loadAgentPanel: true });
+
+  assert.equal(run(context, `_agentPanelClassBadgeIntent('full', false)`), 'success');
+  assert.equal(run(context, `_agentPanelClassBadgeIntent('restricted', false)`), 'warning');
+  assert.equal(run(context, `_agentPanelClassBadgeIntent('error', false)`), 'danger');
+  assert.equal(run(context, `_agentPanelClassBadgeIntent('full', true)`), 'warning');
+  assert.equal(
+    run(context, `_agentPanelClassMetadataBadgeClass('agent-profile-chip', 'neutral')`),
+    'agent-profile-chip ui-badge ui-badge--compact ui-badge--neutral'
+  );
+});
+
 function sampleCapabilityCatalog() {
   function capability(id, label, description, baseKinds, scopes = [], maximumScopes = {}) {
     return {

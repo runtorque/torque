@@ -359,6 +359,21 @@ function _agentPanelClassState(agent) {
   };
 }
 
+function _agentPanelClassBadgeIntent(status, pending) {
+  status = String(status || '').trim().toLowerCase();
+  if (pending) return 'warning';
+  if (status === 'full' || status === 'active') return 'success';
+  if (status === 'draft' || status === 'restricted' || status === 'archived') return 'warning';
+  if (status === 'invalid' || status === 'error') return 'danger';
+  return 'neutral';
+}
+
+function _agentPanelClassMetadataBadgeClass(localClass, intent) {
+  var classes = String(localClass || '').trim();
+  if (classes) classes += ' ';
+  return classes + 'ui-badge ui-badge--compact ui-badge--' + (intent || 'neutral');
+}
+
 function _agentPanelClassBadgeHtml(agent) {
   if (!agent || String(agent.cell_type || 'agent') !== 'agent') return '';
   var state = _agentPanelClassState(agent);
@@ -367,9 +382,13 @@ function _agentPanelClassBadgeHtml(agent) {
   var version = state.effectiveVersion;
   var status = state.status || 'full';
   var statusClass = status.replace(/[^a-z0-9_-]/gi, '-').toLowerCase() || 'full';
-  var classes = 'agent-profile-badge agent-class-badge agent-profile-badge-' + _agentPanelEsc(statusClass);
-  if (state.pending) classes += ' agent-profile-badge-pending';
-  if (status === 'draft' || status === 'restricted' || status === 'archived') classes += ' agent-profile-badge-warning';
+  var localClasses = 'agent-profile-badge agent-class-badge agent-profile-badge-' + _agentPanelEsc(statusClass);
+  if (state.pending) localClasses += ' agent-profile-badge-pending';
+  if (status === 'draft' || status === 'restricted' || status === 'archived') localClasses += ' agent-profile-badge-warning';
+  var classes = _agentPanelClassMetadataBadgeClass(
+    localClasses,
+    _agentPanelClassBadgeIntent(status, state.pending)
+  );
   var label = state.effectiveLabel || effectiveId || state.desiredLabel || 'Agent Class';
   if (version && !_agentPanelClassIsDefault(agent, effectiveId)) label += _agentPanelClassVersionSuffix(version);
   if (state.pending) label += ' (pending)';
@@ -1173,11 +1192,21 @@ function _agentPanelClassPreviewHtml(agent, ui) {
     + _agentPanelEsc(item.purpose || item.description || item.id || '')
     + '</div>';
   html += '</div><div class="agent-profile-preview-chips agent-class-preview-chips">';
-  html += '<span class="agent-profile-chip">' + _agentPanelEsc(_agentPanelClassSecondaryLabel(item, _agentPanelKind(agent))) + '</span>';
-  html += '<span class="agent-profile-chip agent-profile-chip-' + _agentPanelAttr(statusClass) + '">' + _agentPanelEsc(status) + '</span>';
-  html += '<span class="agent-profile-chip">' + _agentPanelEsc(String(item.lifecycle || 'stable')) + '</span>';
+  html += '<span class="' + _agentPanelClassMetadataBadgeClass('agent-profile-chip', 'neutral') + '">'
+    + _agentPanelEsc(_agentPanelClassSecondaryLabel(item, _agentPanelKind(agent))) + '</span>';
+  html += '<span class="' + _agentPanelClassMetadataBadgeClass(
+    'agent-profile-chip agent-profile-chip-' + _agentPanelAttr(statusClass),
+    _agentPanelClassBadgeIntent(status, false)
+  ) + '">' + _agentPanelEsc(status) + '</span>';
+  var lifecycle = String(item.lifecycle || 'stable');
+  var lifecycleIntent = lifecycle.toLowerCase() === 'draft' ? 'warning' : 'neutral';
+  html += '<span class="' + _agentPanelClassMetadataBadgeClass('agent-profile-chip', lifecycleIntent) + '">'
+    + _agentPanelEsc(lifecycle) + '</span>';
   if (item.scratch_only || (item.draft && item.draft.scratch_only)) {
-    html += '<span class="agent-profile-chip agent-profile-chip-draft">scratch-only</span>';
+    html += '<span class="' + _agentPanelClassMetadataBadgeClass(
+      'agent-profile-chip agent-profile-chip-draft',
+      'warning'
+    ) + '">scratch-only</span>';
   }
   html += '</div></div>';
   html += '<div class="agent-profile-next-launch-note">'
@@ -1322,4 +1351,3 @@ function _agentPanelClassModalBodyHtml(agent) {
 function _agentPanelBodyWithClassManager(agent, bodyHtml, includeClassManager) {
   return (includeClassManager ? _agentPanelClassManagerHtml(agent) : '') + (bodyHtml || '');
 }
-

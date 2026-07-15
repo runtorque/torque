@@ -395,6 +395,23 @@ test('Board metadata and count annotations use badges while clickable chips rema
   assert.doesNotMatch(css, /^\.board-(?:filter-btn|filter-dropdown|wide-lane)-count\s*\{[^}]*(?:font-size|padding|border-radius|background):/ms);
 });
 
+test('Agent Profile assignment and preview metadata use canonical badges', () => {
+  const classes = source('static/js/agent-panel/classes.js');
+  const css = source('static/styles/feature-panels.css');
+
+  assert.match(classes, /function _agentPanelClassBadgeIntent\(status, pending\)[\s\S]*?return 'neutral';/);
+  assert.match(classes, /return classes \+ 'ui-badge ui-badge--compact ui-badge--' \+ \(intent \|\| 'neutral'\)/);
+  assert.match(classes, /_agentPanelClassMetadataBadgeClass\([\s\S]*?localClasses,[\s\S]*?_agentPanelClassBadgeIntent\(status, state\.pending\)/);
+  assert.match(classes, /_agentPanelClassMetadataBadgeClass\('agent-profile-chip', 'neutral'\)/);
+  assert.match(classes, /_agentPanelClassBadgeIntent\(status, false\)/);
+  assert.match(classes, /'agent-profile-chip agent-profile-chip-draft',[\s\S]*?'warning'/);
+
+  assert.doesNotMatch(css, /^\.agent-profile-badge\s*\{[^}]*(?:font-size|padding|border-radius|background|color|font-weight|border:)/ms);
+  assert.doesNotMatch(css, /^\.agent-profile-chip(?:,|\s*\{)/m);
+  assert.doesNotMatch(css, /^\.agent-class-badge\s*\{/m);
+  assert.doesNotMatch(css, /^\.agent-class-compact-chips span\s*\{/m);
+});
+
 test('badge geometry does not drift back into feature styles', () => {
   const grid = source('static/styles/workspace-grid.css');
   const agent = source('static/styles/agent-panel.css');

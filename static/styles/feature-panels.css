@@ -2582,29 +2582,9 @@
 }
 
 .agent-profile-badge {
-  font-size: 9px;
-  padding: 2px 6px;
-  border-radius: 999px;
-  font-weight: 700;
-  border: 1px solid var(--border);
-  background: rgba(139, 148, 158, 0.12);
-  color: var(--text-dim);
   max-width: 240px;
-  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.agent-profile-badge-full {
-  background: rgba(63, 185, 80, 0.12);
-  color: var(--green);
-  border-color: rgba(63, 185, 80, 0.35);
-}
-.agent-profile-badge-warning,
-.agent-profile-badge-draft,
-.agent-profile-badge-restricted {
-  background: rgba(210, 153, 34, 0.16);
-  color: var(--amber);
-  border-color: rgba(210, 153, 34, 0.35);
 }
 .agent-profile-badge-pending {
   border-style: dashed;
@@ -2829,30 +2809,6 @@
   align-items: center;
   gap: 5px;
 }
-.agent-profile-chip,
-.agent-profile-denied-chip,
-.agent-profile-denied-more {
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 1px 6px;
-  font-size: 8px;
-  color: var(--text-dim);
-  background: rgba(139, 148, 158, 0.08);
-}
-.agent-profile-chip-draft,
-.agent-profile-chip-restricted,
-.agent-profile-chip-pending {
-  color: var(--amber);
-  border-color: rgba(210, 153, 34, 0.35);
-  background: rgba(210, 153, 34, 0.12);
-}
-.agent-profile-chip-full {
-  color: var(--green);
-  border-color: rgba(63, 185, 80, 0.35);
-  background: rgba(63, 185, 80, 0.12);
-}
 .agent-class-compact-status {
   margin-top: 6px;
   display: grid;
@@ -2865,26 +2821,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
-}
-.agent-class-compact-chips span {
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 1px 6px;
-  font-size: 8px;
-  color: var(--text-dim);
-  background: rgba(139, 148, 158, 0.08);
-}
-.agent-class-compact-chips .agent-profile-chip-full {
-  color: var(--green);
-  border-color: rgba(63, 185, 80, 0.35);
-  background: rgba(63, 185, 80, 0.12);
-}
-.agent-class-compact-chips .agent-profile-chip-pending {
-  color: var(--amber);
-  border-color: rgba(210, 153, 34, 0.35);
-  background: rgba(210, 153, 34, 0.12);
 }
 .agent-class-compact-note,
 .agent-class-compact-caveat {
@@ -3007,11 +2943,6 @@
 /* ------------------------------------------------------------------ */
 .tpled-form select {
   background: var(--bg);
-}
-.agent-class-badge {
-  border-color: rgba(88, 166, 255, 0.35);
-  color: var(--accent);
-  background: rgba(88, 166, 255, 0.10);
 }
 .agent-class-picker-row {
   margin: 6px 0;
