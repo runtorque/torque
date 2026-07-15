@@ -1057,6 +1057,28 @@ scope.
   closed Settings and New Group, confirmed representative async state surfaces
   and status priority, and finished with an empty browser console.
 
+### D-031 — Unbounded review content uses progressive disclosure
+
+- Date: 2026-07-15
+- Status: accepted
+- Decision: Review surfaces whose content can grow with repository or runtime
+  history must bound their initial DOM. The worktree diff viewer keeps small
+  diffs fully expanded, opens large multi-file diffs with one reviewable file
+  visible, leaves very large single files collapsed, and renders expanded file
+  bodies in 400-line chunks with explicit continuation controls.
+- Rationale: Building every file, hunk, and line before the first interaction
+  makes the interface unresponsive precisely when review volume is highest.
+  Progressive disclosure keeps the summary and file inventory immediate while
+  preserving direct access to every line on demand.
+- Scope: Worktree diff rendering in `static/js/diff.js`; the same bounded-first
+  rule applies to future unbounded logs, histories, and review collections.
+- Constraints: Small diffs preserve the established fully expanded behavior.
+  Collapse state and loaded chunks are view-local and are not persisted. No
+  diff content is discarded; chunking only controls browser rendering.
+- Verification: Frontend performance regressions cover automatic large-diff
+  collapse, very-large-file deferral, 400-line chunking, continuation, and the
+  unchanged small-diff path.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:
