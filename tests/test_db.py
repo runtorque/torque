@@ -5295,26 +5295,36 @@ class TorqueDBAsyncWriteTests(unittest.IsolatedAsyncioTestCase):
     async def test_deferred_agent_saves_preserve_fifo_final_state(self):
         cell = AgentCell(id="agent-1", name="Agent", group="g")
 
-        for index in range(100):
-            cell.status = f"state-{index}"
-            cell.last_progress_at = float(index)
-            self.db.save_agent_deferred(cell)
+        original_save_agents = TorqueDB.save_agents
+        batches = []
 
-        await asyncio.wait_for(self.db.flush_async_writes(), timeout=5.0)
+        def tracked_save_agents(db_self, cells):
+            batches.append(list(cells))
+            return original_save_agents(db_self, cells)
+
+        with mock.patch.object(TorqueDB, "save_agents", tracked_save_agents):
+            for index in range(100):
+                cell.status = f"state-{index}"
+                cell.last_progress_at = float(index)
+                self.db.save_agent_deferred(cell)
+
+            await asyncio.wait_for(self.db.flush_async_writes(), timeout=5.0)
 
         loaded = self.db.load_all()["agents"]["agent-1"]
         self.assertEqual(loaded["status"], "state-99")
         self.assertEqual(loaded["last_progress_at"], 99.0)
+        self.assertEqual(len(batches), 1)
+        self.assertEqual(len(batches[0]), 1)
 
     async def test_deferred_agent_save_returns_before_sync_write_runs(self):
         cell = AgentCell(id="agent-1", name="Agent", group="g")
-        original_save_agent = TorqueDB.save_agent
+        original_save_agents = TorqueDB.save_agents
 
-        def slow_save_agent(db_self, saved_cell):
+        def slow_save_agents(db_self, saved_cells):
             time.sleep(0.15)
-            return original_save_agent(db_self, saved_cell)
+            return original_save_agents(db_self, saved_cells)
 
-        with mock.patch.object(TorqueDB, "save_agent", slow_save_agent):
+        with mock.patch.object(TorqueDB, "save_agents", slow_save_agents):
             started = time.monotonic()
             self.db.save_agent_deferred(cell)
             elapsed = time.monotonic() - started
@@ -5341,13 +5351,13 @@ class TorqueDBAsyncWriteTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_delete_agent_is_ordered_after_deferred_save(self):
         cell = AgentCell(id="agent-race", name="Agent", group="g")
-        original_save_agent = TorqueDB.save_agent
+        original_save_agents = TorqueDB.save_agents
 
-        def slow_save_agent(db_self, saved_cell):
+        def slow_save_agents(db_self, saved_cells):
             time.sleep(0.15)
-            return original_save_agent(db_self, saved_cell)
+            return original_save_agents(db_self, saved_cells)
 
-        with mock.patch.object(TorqueDB, "save_agent", slow_save_agent):
+        with mock.patch.object(TorqueDB, "save_agents", slow_save_agents):
             self.db.save_agent_deferred(cell)
             self.db.delete_agent(cell.id)
             await asyncio.wait_for(self.db.flush_async_writes(), timeout=5.0)

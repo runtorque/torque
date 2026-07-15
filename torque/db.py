@@ -19,7 +19,6 @@ import re
 import shutil
 import sqlite3
 import sys
-import threading
 import time
 import uuid
 from dataclasses import asdict
@@ -360,15 +359,20 @@ def _serialize_agent_cell(cell):
 
 
 class _QueuedAsyncDBWriter:
-    """Per-resource FIFO writer that runs synchronous TorqueDB methods off-loop."""
+    """Global FIFO SQLite writer with coalesced agent-state transactions."""
 
     def __init__(self, owner: "TorqueDB", loop: asyncio.AbstractEventLoop):
         self._owner = owner
         self.loop = loop
-        self._queues: dict[str, asyncio.Queue] = {}
-        self._tasks: dict[str, asyncio.Task] = {}
-        self._worker_dbs: dict[str, "TorqueDB"] = {}
-        self._worker_lock = threading.Lock()
+        self._queue: asyncio.Queue = asyncio.Queue()
+        self._task: asyncio.Task | None = None
+        self._worker_db: "TorqueDB" | None = None
+        self._agent_batch_window = max(0.0, float(os.environ.get(
+            "TORQUE_DB_AGENT_BATCH_WINDOW", "0.01"
+        ) or 0.01))
+        self._max_drain_batch = max(1, int(os.environ.get(
+            "TORQUE_DB_WRITE_BATCH_SIZE", "512"
+        ) or 512))
         self.closed = False
 
     def enqueue_nowait(
@@ -380,9 +384,8 @@ class _QueuedAsyncDBWriter:
     ) -> None:
         if self.closed:
             raise RuntimeError("TorqueDB async writer is closed")
-        queue = self._queue_for(bucket)
-        queue.put_nowait((method_name, args, kwargs, None))
-        self._ensure_drainer(bucket)
+        self._queue.put_nowait((bucket, method_name, args, kwargs, None))
+        self._ensure_drainer()
 
     async def enqueue(
         self,
@@ -394,84 +397,134 @@ class _QueuedAsyncDBWriter:
         if self.closed:
             raise RuntimeError("TorqueDB async writer is closed")
         future = self.loop.create_future()
-        queue = self._queue_for(bucket)
-        queue.put_nowait((method_name, args, kwargs, future))
-        self._ensure_drainer(bucket)
+        self._queue.put_nowait((bucket, method_name, args, kwargs, future))
+        self._ensure_drainer()
         return await future
 
     async def flush(self) -> None:
         """Wait until all currently queued/running writes complete."""
-        while True:
-            queues = list(self._queues.values())
-            if queues:
-                await asyncio.gather(*(queue.join() for queue in queues))
-            pending = [
-                task
-                for task in self._tasks.values()
-                if task is not None and not task.done()
-            ]
-            if not any(not queue.empty() for queue in self._queues.values()):
-                # A drainer may still be alive waiting for the next job; that
-                # is fine.  ``Queue.join`` already waited for in-flight work.
-                return
-            if not pending:
-                return
+        await self._queue.join()
 
     async def aclose(self) -> None:
         if self.closed:
             return
         self.closed = True
         await self.flush()
-        for task in list(self._tasks.values()):
-            task.cancel()
-        if self._tasks:
-            await asyncio.gather(*self._tasks.values(), return_exceptions=True)
-        self._tasks.clear()
-        self._queues.clear()
-        await asyncio.to_thread(self._close_worker_dbs)
+        if self._task is not None:
+            self._task.cancel()
+            await asyncio.gather(self._task, return_exceptions=True)
+        self._task = None
+        await asyncio.to_thread(self._close_worker_db)
 
-    def _queue_for(self, bucket: str) -> asyncio.Queue:
-        bucket = str(bucket or "misc")
-        queue = self._queues.get(bucket)
-        if queue is None:
-            queue = asyncio.Queue()
-            self._queues[bucket] = queue
-        return queue
-
-    def _ensure_drainer(self, bucket: str) -> None:
-        task = self._tasks.get(bucket)
-        if task is not None and not task.done():
+    def _ensure_drainer(self) -> None:
+        if self._task is not None and not self._task.done():
             return
-        self._tasks[bucket] = self.loop.create_task(self._drain(bucket))
+        self._task = self.loop.create_task(
+            self._drain(),
+            name="torque-sqlite-writer",
+        )
 
-    async def _drain(self, bucket: str) -> None:
-        queue = self._queue_for(bucket)
+    @staticmethod
+    def _is_coalescible_agent_save(item: tuple) -> bool:
+        bucket, method_name, args, _kwargs, future = item
+        if bucket != "agents" or method_name != "save_agent" or future is not None:
+            return False
+        if not args:
+            return False
+        cell = args[0]
+        agent_id = (
+            str(cell.get("id", "") or "")
+            if isinstance(cell, dict)
+            else str(getattr(cell, "id", "") or "")
+        )
+        return bool(agent_id)
+
+    @staticmethod
+    def _agent_id_from_item(item: tuple) -> str:
+        cell = item[2][0]
+        if isinstance(cell, dict):
+            return str(cell.get("id", "") or "")
+        return str(getattr(cell, "id", "") or "")
+
+    async def _drain(self) -> None:
         try:
             while True:
-                method_name, args, kwargs, future = await queue.get()
-                try:
-                    result = await asyncio.to_thread(
-                        self._run_sync_write,
-                        bucket,
-                        method_name,
-                        args,
-                        kwargs,
-                    )
-                except Exception as exc:
-                    if future is not None and not future.done():
-                        future.set_exception(exc)
-                    log.exception(
-                        "Async SQLite write failed (%s.%s)",
-                        bucket,
-                        method_name,
-                    )
-                else:
-                    if future is not None and not future.done():
-                        future.set_result(result)
-                finally:
-                    queue.task_done()
+                first = await self._queue.get()
+                items = [first]
+                if self._is_coalescible_agent_save(first):
+                    if self._agent_batch_window:
+                        await asyncio.sleep(self._agent_batch_window)
+                    while len(items) < self._max_drain_batch:
+                        try:
+                            items.append(self._queue.get_nowait())
+                        except asyncio.QueueEmpty:
+                            break
+                await self._run_items(items)
         except asyncio.CancelledError:
             raise
+
+    async def _run_items(self, items: list[tuple]) -> None:
+        index = 0
+        while index < len(items):
+            item = items[index]
+            if self._is_coalescible_agent_save(item):
+                end = index + 1
+                while (
+                    end < len(items)
+                    and self._is_coalescible_agent_save(items[end])
+                ):
+                    end += 1
+                run = items[index:end]
+                latest_by_agent: dict[str, tuple] = {}
+                for queued in run:
+                    latest_by_agent[self._agent_id_from_item(queued)] = queued
+                try:
+                    await asyncio.to_thread(
+                        self._run_sync_agent_batch,
+                        [queued[2][0] for queued in latest_by_agent.values()],
+                    )
+                    profiling.recorder().observe(
+                        "sqlite_agent_batch_size", len(latest_by_agent)
+                    )
+                    profiling.recorder().incr(
+                        "sqlite_agent_saves_coalesced",
+                        len(run) - len(latest_by_agent),
+                    )
+                except Exception:
+                    log.exception(
+                        "Async SQLite agent batch failed (%d queued, %d rows)",
+                        len(run),
+                        len(latest_by_agent),
+                    )
+                finally:
+                    for _queued in run:
+                        self._queue.task_done()
+                index = end
+                continue
+
+            bucket, method_name, args, kwargs, future = item
+            try:
+                result = await asyncio.to_thread(
+                    self._run_sync_write,
+                    bucket,
+                    method_name,
+                    args,
+                    kwargs,
+                )
+            except Exception as exc:
+                if future is not None and not future.done():
+                    future.set_exception(exc)
+                log.exception(
+                    "Async SQLite write failed (%s.%s)",
+                    bucket,
+                    method_name,
+                )
+            else:
+                if future is not None and not future.done():
+                    future.set_result(result)
+            finally:
+                self._queue.task_done()
+            index += 1
 
     def _run_sync_write(
         self,
@@ -480,31 +533,30 @@ class _QueuedAsyncDBWriter:
         args: tuple,
         kwargs: dict,
     ):
-        db = self._worker_db_for(bucket)
+        db = self._worker_db_for()
         method = getattr(db, method_name)
         return method(*args, **kwargs)
 
-    def _worker_db_for(self, bucket: str) -> "TorqueDB":
-        bucket = str(bucket or "misc")
-        with self._worker_lock:
-            db = self._worker_dbs.get(bucket)
-            if db is not None:
-                return db
-            db = TorqueDB(self._owner.db_path)
-            db._conn = sqlite3.connect(
-                str(self._owner.db_path),
-                check_same_thread=False,
-            )
-            db._conn.execute("PRAGMA foreign_keys=ON")
-            db._conn.execute("PRAGMA busy_timeout=5000")
-            self._worker_dbs[bucket] = db
-            return db
+    def _run_sync_agent_batch(self, cells: list) -> None:
+        self._worker_db_for().save_agents(cells)
 
-    def _close_worker_dbs(self) -> None:
-        with self._worker_lock:
-            worker_dbs = list(self._worker_dbs.values())
-            self._worker_dbs.clear()
-        for db in worker_dbs:
+    def _worker_db_for(self) -> "TorqueDB":
+        if self._worker_db is not None:
+            return self._worker_db
+        db = TorqueDB(self._owner.db_path)
+        db._conn = sqlite3.connect(
+            str(self._owner.db_path),
+            check_same_thread=False,
+        )
+        db._conn.execute("PRAGMA foreign_keys=ON")
+        db._conn.execute("PRAGMA busy_timeout=5000")
+        self._worker_db = db
+        return db
+
+    def _close_worker_db(self) -> None:
+        db = self._worker_db
+        self._worker_db = None
+        if db is not None:
             with contextlib.suppress(Exception):
                 db.close()
 
@@ -736,6 +788,21 @@ class TorqueDB(
                 profiling.timer("sqlite_write_save_agent_ms"):
             self._insert_agent_row(self._conn, cell)
             self._conn.commit()
+
+    def save_agents(self, cells) -> None:
+        """Upsert multiple agent snapshots in one SQLite transaction."""
+        snapshots = list(cells or [])
+        if not snapshots:
+            return
+        with profiling.timer("sqlite_write_ms"), \
+                profiling.timer("sqlite_write_save_agents_ms"):
+            try:
+                for cell in snapshots:
+                    self._insert_agent_row(self._conn, cell)
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
 
     def save_agent_deferred(self, cell) -> None:
         """Persist an agent off-loop when called from asyncio code.
