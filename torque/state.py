@@ -9,7 +9,7 @@ import os
 import re
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
@@ -324,6 +324,26 @@ XTERM_SCROLLBACK_MAX = 100_000
 HOT_JSON_OFFLOAD_BYTES = 100 * 1024
 HOT_JSON_OFFLOAD_DELTA_OPS = 25
 COMPACT_SNAPSHOT_PROTOCOL = "compact-v1"
+COMPACT_AGENT_MCP_MESSAGE_LIMIT = 20
+COMPACT_AGENT_CHANGED_FILE_LIMIT = 100
+COMPACT_AGENT_CLASS_FIELDS = (
+    "id",
+    "version",
+    "base_kind",
+    "name",
+    "display_name",
+    "primary_display_name",
+    "primary_identity_label",
+    "secondary_base_kind_label",
+    "secondary_base_kind_metadata",
+    "status",
+    "lifecycle",
+    "warnings",
+    "external_connector_caveat",
+    "builtin",
+    "archived",
+    "disabled",
+)
 COMPACT_BOARD_TASK_FIELDS = (
     "id",
     "task",
@@ -1771,6 +1791,65 @@ def board_task_compact(task: BoardTask) -> dict:
     return summary
 
 
+def agent_client_dict(agent: AgentCell) -> dict:
+    """Return the bounded AgentCell projection sent to browser clients.
+
+    Runtime authorization keeps using the complete in-memory AgentCell.  The
+    browser only needs Agent Class identity/lifecycle metadata, its 20 visible
+    MCP entries, and a bounded changed-file preview.
+    """
+    deferred_fields = {
+        "effective_agent_class_snapshot",
+        "mcp_messages",
+        "worktree_changed_files",
+    }
+    payload = {
+        item.name: copy.deepcopy(getattr(agent, item.name))
+        for item in fields(agent)
+        if item.name not in deferred_fields
+    }
+    class_snapshot = getattr(agent, "effective_agent_class_snapshot", None)
+    if isinstance(class_snapshot, dict):
+        class_summary = {
+            key: copy.deepcopy(class_snapshot[key])
+            for key in COMPACT_AGENT_CLASS_FIELDS
+            if key in class_snapshot
+        }
+        metadata = class_snapshot.get("metadata")
+        if isinstance(metadata, dict):
+            metadata_summary = {
+                key: copy.deepcopy(metadata[key])
+                for key in ("archived", "disabled", "archived_at")
+                if key in metadata
+            }
+            if metadata_summary:
+                class_summary["metadata"] = metadata_summary
+        payload["effective_agent_class_snapshot"] = class_summary
+    else:
+        payload["effective_agent_class_snapshot"] = {}
+
+    mcp_messages = getattr(agent, "mcp_messages", None)
+    if isinstance(mcp_messages, list):
+        payload["mcp_messages"] = copy.deepcopy(
+            mcp_messages[:COMPACT_AGENT_MCP_MESSAGE_LIMIT]
+        )
+        if len(mcp_messages) > COMPACT_AGENT_MCP_MESSAGE_LIMIT:
+            payload["mcp_message_count"] = len(mcp_messages)
+    else:
+        payload["mcp_messages"] = []
+
+    changed_files = getattr(agent, "worktree_changed_files", None)
+    if isinstance(changed_files, list):
+        payload["worktree_changed_files"] = copy.deepcopy(
+            changed_files[:COMPACT_AGENT_CHANGED_FILE_LIMIT]
+        )
+        if len(changed_files) > COMPACT_AGENT_CHANGED_FILE_LIMIT:
+            payload["worktree_changed_files_count"] = len(changed_files)
+    else:
+        payload["worktree_changed_files"] = []
+    return payload
+
+
 def _compact_task_messages_preview(messages) -> list[dict]:
     entries = list(messages or [])
     if not entries:
@@ -2874,8 +2953,8 @@ class MatrixState(
                 log.exception("Task-upsert observer failed")
 
     def _emit_agent(self, cell: AgentCell, *, coalesce_ephemeral: bool = False):
-        """Emit an agent_upsert delta with the full agent dict."""
-        payload = asdict(cell)
+        """Emit an agent_upsert delta with the bounded client projection."""
+        payload = agent_client_dict(cell)
         if coalesce_ephemeral and self._coalesce_pending_agent_upsert(payload):
             return
         self._emit("agent_upsert", **payload)
@@ -3471,11 +3550,57 @@ class MatrixState(
 
     # -- Serialization ------------------------------------------------------
 
+    def _behavior_overlay_snapshot(self) -> tuple[dict, dict]:
+        """Return pending proposal summaries and active pointers for agents."""
+        behavior_overlay_proposals = {}
+        behavior_overlay_active = {}
+        if not self.db:
+            return behavior_overlay_proposals, behavior_overlay_active
+        try:
+            behavior_overlay_proposals = {
+                proposal["id"]: proposal_summary(proposal)
+                for proposal in self.list_behavior_overlay_proposals(limit=500)
+                if proposal.get("status") in {"proposed", "approved"}
+            }
+            load_all = getattr(self.db, "load_all_behavior_overlay_active", None)
+            if not callable(load_all):
+                for agent_id in self.agents:
+                    active = self.load_behavior_overlay_active(agent_id)
+                    if active:
+                        behavior_overlay_active[agent_id] = dict(active)
+                return behavior_overlay_proposals, behavior_overlay_active
+
+            active_rows = load_all(scope_kind="agent")
+            by_scope = {}
+            newest_by_agent = {}
+            for active in active_rows:
+                agent_id = str(
+                    active.get("scope_key", "")
+                    or active.get("agent_id", "")
+                    or ""
+                ).strip()
+                if not agent_id:
+                    continue
+                group = str(active.get("scope_group", "") or "").strip()
+                by_scope[(group, agent_id)] = active
+                newest_by_agent.setdefault(agent_id, active)
+            for agent_id, cell in self.agents.items():
+                active = (
+                    by_scope.get((str(cell.group or "").strip(), agent_id))
+                    or newest_by_agent.get(agent_id)
+                )
+                if active:
+                    behavior_overlay_active[agent_id] = dict(active)
+        except Exception:
+            log.exception("Failed to load behavior overlay snapshot")
+        return behavior_overlay_proposals, behavior_overlay_active
+
     def to_dict(self) -> dict:
         decisions = {}
         pending_hires = {}
-        behavior_overlay_proposals = {}
-        behavior_overlay_active = {}
+        behavior_overlay_proposals, behavior_overlay_active = (
+            self._behavior_overlay_snapshot()
+        )
         if self.db:
             try:
                 decisions = {
@@ -3495,20 +3620,6 @@ class MatrixState(
                 }
             except Exception:
                 log.exception("Failed to load pending hires snapshot")
-            try:
-                behavior_overlay_proposals = {
-                    proposal["id"]: proposal_summary(proposal)
-                    for proposal in self.list_behavior_overlay_proposals(
-                        limit=500
-                    )
-                    if proposal.get("status") in {"proposed", "approved"}
-                }
-                for agent_id in self.agents:
-                    active = self.load_behavior_overlay_active(agent_id)
-                    if active:
-                        behavior_overlay_active[agent_id] = dict(active)
-            except Exception:
-                log.exception("Failed to load behavior overlay snapshot")
         return {
             "agents": {aid: asdict(a) for aid, a in self.agents.items()},
             "groups": self.groups,
@@ -3818,26 +3929,15 @@ class MatrixState(
         and expands full BoardTask rows. Compact clients fetch those heavier
         slices with explicit lazy-load commands after the socket is ready.
         """
-        behavior_overlay_proposals = {}
-        behavior_overlay_active = {}
-        if self.db:
-            try:
-                behavior_overlay_proposals = {
-                    proposal["id"]: proposal_summary(proposal)
-                    for proposal in self.list_behavior_overlay_proposals(
-                        limit=500
-                    )
-                    if proposal.get("status") in {"proposed", "approved"}
-                }
-                for agent_id in self.agents:
-                    active = self.load_behavior_overlay_active(agent_id)
-                    if active:
-                        behavior_overlay_active[agent_id] = dict(active)
-            except Exception:
-                log.exception("Failed to load compact behavior overlay snapshot")
+        behavior_overlay_proposals, behavior_overlay_active = (
+            self._behavior_overlay_snapshot()
+        )
         return {
             "snapshot_protocol": COMPACT_SNAPSHOT_PROTOCOL,
-            "agents": {aid: asdict(a) for aid, a in self.agents.items()},
+            "agents": {
+                aid: agent_client_dict(agent)
+                for aid, agent in self.agents.items()
+            },
             "groups": self.groups,
             "group_slugs": dict(self.group_slugs),
             "group_settings": {

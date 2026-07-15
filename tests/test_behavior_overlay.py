@@ -154,6 +154,80 @@ class BehaviorOverlayTests(unittest.TestCase):
             ]
         )
 
+    def test_snapshot_bulk_loads_active_agent_overlays(self):
+        engineer_version = self._apply_overlay(
+            self.engineer.id,
+            "Engineer overlay.",
+        )
+        second_engineer = self.state.add_agent(name="Eng 2", group="g")
+        second_engineer.kind = "engineer"
+        second_engineer.hired_by_architect_id = self.architect.id
+        second_engineer.persistent = True
+        self.state._db_save_agent(second_engineer)
+        second_engineer_version = self._apply_overlay(
+            second_engineer.id,
+            "Second engineer overlay.",
+        )
+        original_bulk_load = self.db.load_all_behavior_overlay_active
+        bulk_calls = []
+
+        def recording_bulk_load(*, scope_kind=""):
+            bulk_calls.append(scope_kind)
+            return original_bulk_load(scope_kind=scope_kind)
+
+        self.db.load_all_behavior_overlay_active = recording_bulk_load
+        self.state.load_behavior_overlay_active = lambda _agent_id: self.fail(
+            "snapshot must not issue per-agent active-overlay reads"
+        )
+
+        compact = self.state.to_dict_compact()
+
+        self.assertEqual(bulk_calls, ["agent"])
+        self.assertEqual(
+            compact["behavior_overlay_active"][self.engineer.id][
+                "active_version_id"
+            ],
+            engineer_version["id"],
+        )
+        self.assertEqual(
+            compact["behavior_overlay_active"][second_engineer.id][
+                "active_version_id"
+            ],
+            second_engineer_version["id"],
+        )
+
+    def test_bulk_active_overlay_load_can_filter_scope_kind(self):
+        self._apply_overlay(self.engineer.id, "Engineer overlay.")
+        role_scope = BehaviorOverlayScope.role("g", "worker")
+        role_version = self.db.save_behavior_overlay_version({
+            "id": "role-version",
+            "scope_kind": role_scope.scope_kind,
+            "scope_group": role_scope.scope_group,
+            "scope_key": role_scope.scope_key,
+            "version_number": 1,
+            "text": "Role overlay.",
+        })
+        self.db.save_behavior_overlay_active({
+            "scope_kind": role_scope.scope_kind,
+            "scope_group": role_scope.scope_group,
+            "scope_key": role_scope.scope_key,
+            "active_version_id": role_version["id"],
+        })
+
+        agent_rows = self.db.load_all_behavior_overlay_active(
+            scope_kind="agent"
+        )
+
+        self.assertTrue(agent_rows)
+        self.assertEqual({row["scope_kind"] for row in agent_rows}, {"agent"})
+        self.assertIn(
+            "role",
+            {
+                row["scope_kind"]
+                for row in self.db.load_all_behavior_overlay_active()
+            },
+        )
+
     def test_route_is_captured_at_creation_when_setting_flips(self):
         self.state.update_group_settings(
             "g",

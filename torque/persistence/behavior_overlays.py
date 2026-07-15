@@ -195,6 +195,27 @@ class BehaviorOverlayPersistenceMixin:
             row, [d[0] for d in cursor.description]
         )
 
+    def load_all_behavior_overlay_active(
+            self, *, scope_kind: str = "") -> list[dict]:
+        """Load active overlay pointers in one query for snapshot assembly."""
+        scope_kind = str(scope_kind or "").strip()
+        sql = (
+            "SELECT scope_kind, scope_group, scope_key, agent_id, "
+            "active_version_id, updated_at, updated_by_kind, updated_by_id, "
+            "reason FROM behavior_overlay_active"
+        )
+        params: tuple = ()
+        if scope_kind:
+            sql += " WHERE scope_kind=?"
+            params = (scope_kind,)
+        sql += " ORDER BY updated_at DESC"
+        cursor = self._conn.execute(sql, params)
+        cols = [d[0] for d in cursor.description]
+        return [
+            _decode_behavior_overlay_active_row(row, cols)
+            for row in cursor.fetchall()
+        ]
+
     def load_behavior_overlay_active_version(
             self, scope=None, **kwargs) -> dict | None:
         active = self.load_behavior_overlay_active(scope, **kwargs)

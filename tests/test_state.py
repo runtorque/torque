@@ -1440,6 +1440,58 @@ class MatrixStateCleanupTests(unittest.TestCase):
             }],
         )
 
+    def test_compact_agent_projection_bounds_heavy_browser_fields(self):
+        state = self.state_mod.MatrixState()
+        agent = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            effective_agent_class_snapshot={
+                "id": "qa-worker",
+                "version": "7",
+                "base_kind": "worker",
+                "primary_identity_label": "QA Worker",
+                "warnings": ["Check configuration"],
+                "prompt": {"job": "x" * 20_000},
+                "effective_authority": {"capabilities": {"secret": True}},
+                "metadata": {
+                    "archived": False,
+                    "private_notes": "x" * 10_000,
+                },
+            },
+            mcp_messages=[
+                {"action": "progress", "message": str(index), "timestamp": index}
+                for index in range(30)
+            ],
+            worktree_changed_files=[f"file-{index}.py" for index in range(150)],
+        )
+        state.agents[agent.id] = agent
+        state.groups["g"] = [agent.id]
+
+        full_agent = state.to_dict()["agents"][agent.id]
+        compact_agent = state.to_dict_compact()["agents"][agent.id]
+        state._delta_ops.clear()
+        state._emit_agent(agent)
+        delta_agent = state._delta_ops[-1]
+
+        self.assertIn("prompt", full_agent["effective_agent_class_snapshot"])
+        for projected in (compact_agent, delta_agent):
+            class_snapshot = projected["effective_agent_class_snapshot"]
+            self.assertEqual(class_snapshot["primary_identity_label"], "QA Worker")
+            self.assertEqual(class_snapshot["warnings"], ["Check configuration"])
+            self.assertNotIn("prompt", class_snapshot)
+            self.assertNotIn("effective_authority", class_snapshot)
+            self.assertEqual(class_snapshot["metadata"], {"archived": False})
+            self.assertEqual(len(projected["mcp_messages"]), 20)
+            self.assertEqual(projected["mcp_message_count"], 30)
+            self.assertEqual(len(projected["worktree_changed_files"]), 100)
+            self.assertEqual(projected["worktree_changed_files_count"], 150)
+
+        self.assertLess(
+            len(self.state_mod.hot_json_dumps_bytes(compact_agent)),
+            len(self.state_mod.hot_json_dumps_bytes(full_agent)) // 3,
+        )
+
     def test_compact_snapshot_uses_task_summaries_and_excludes_archived_tasks(self):
         state = self.state_mod.MatrixState()
         state.groups["g"] = []
