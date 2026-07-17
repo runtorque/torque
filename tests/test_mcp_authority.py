@@ -25,6 +25,7 @@ from torque.mcp_authority import (
     evaluate_capability_acl,
     effective_authority_from_snapshot,
     next_narrower_scope,
+    normalize_capability_acl_rules,
     registry_hash,
     scope_includes,
 )
@@ -140,6 +141,92 @@ class MCPAuthorityPrimitiveTests(unittest.TestCase):
         )
         self.assertFalse(authority.allows("message.engineer", scope="group"))
         self.assertFalse(authority.has("deploy.apply"))
+
+    def test_grouped_scope_rules_expand_to_the_canonical_flat_authority(self):
+        grouped = [
+            {
+                "scope": "self",
+                "capabilities": ["self.read"],
+            },
+            {
+                "scope": "children",
+                "capabilities": ["message.engineer"],
+            },
+            {"capability": "deploy.apply"},
+        ]
+
+        self.assertEqual(
+            normalize_capability_acl_rules(grouped),
+            [
+                {"capability": "self.read", "scope": "self"},
+                {"capability": "message.engineer", "scope": "children"},
+                {"capability": "deploy.apply"},
+            ],
+        )
+        grouped_authority = evaluate_capability_acl(
+            base_kind="architect",
+            mode="allow",
+            rules=grouped,
+            capabilities=self.capabilities,
+        )
+        flat_authority = evaluate_capability_acl(
+            base_kind="architect",
+            mode="allow",
+            rules=[
+                {"capability": "self.read", "scope": "self"},
+                {"capability": "message.engineer", "scope": "children"},
+                {"capability": "deploy.apply"},
+            ],
+            capabilities=self.capabilities,
+        )
+        self.assertEqual(
+            grouped_authority.as_snapshot(),
+            flat_authority.as_snapshot(),
+        )
+
+    def test_grouped_scope_rules_reject_ambiguous_or_malformed_authoring(self):
+        invalid_rules = [
+            [{"scope": "self", "capabilities": []}],
+            [{"scope": "self", "capabilities": "self.read"}],
+            [{"scope": "self", "capabilities": [""]}],
+            [{"capabilities": ["self.read"]}],
+            [{
+                "capability": "self.read",
+                "capabilities": ["self.read"],
+                "scope": "self",
+            }],
+            [{
+                "scope": "self",
+                "capabilities": ["self.read"],
+                "extra": True,
+            }],
+        ]
+
+        for rules in invalid_rules:
+            with self.subTest(rules=rules), self.assertRaises(
+                AuthorityValidationError
+            ):
+                evaluate_capability_acl(
+                    base_kind="architect",
+                    mode="allow",
+                    rules=rules,
+                    capabilities=self.capabilities,
+                )
+
+    def test_duplicate_capability_is_rejected_across_flat_and_grouped_rules(self):
+        with self.assertRaisesRegex(
+            AuthorityValidationError,
+            "duplicate ACL capability rule: self.read",
+        ):
+            evaluate_capability_acl(
+                base_kind="architect",
+                mode="allow",
+                rules=[
+                    {"capability": "self.read", "scope": "self"},
+                    {"scope": "self", "capabilities": ["self.read"]},
+                ],
+                capabilities=self.capabilities,
+            )
 
     def test_deny_mode_starts_full_and_scoped_rule_narrows(self):
         authority = evaluate_capability_acl(

@@ -145,6 +145,22 @@ class AgentClassRegistryTests(unittest.TestCase):
             self.assertEqual(definition.agent_class_schema_version, 5)
             self.assertEqual(definition.base_kind, base_kind)
 
+        for class_id in {
+            "creative-architect",
+            "product-manager",
+            "torque-steward",
+        }:
+            rules = by_id[class_id].acl.get("rules", [])
+            grouped = [
+                rule for rule in rules
+                if isinstance(rule, dict) and "capabilities" in rule
+            ]
+            self.assertGreaterEqual(
+                len(grouped),
+                2,
+                f"{class_id} should author repeated scopes as grouped rules",
+            )
+
     def test_product_manager_preview_is_class_first_capability_acl_with_caveat(self):
         classes, issues = load_agent_classes(base_dir=str(self.project))
         self.assertFalse(issues)
@@ -237,7 +253,7 @@ class AgentClassRegistryTests(unittest.TestCase):
         self.assertIn("conservative operations steward", warnings)
 
 
-    def test_schema_v5_accepts_capability_rules_and_rejects_legacy_acl_shapes(self):
+    def test_schema_v5_accepts_flat_and_grouped_capability_rules(self):
         valid = {
             "agent_class_schema_version": 5,
             "id": "planning-architect",
@@ -249,9 +265,14 @@ class AgentClassRegistryTests(unittest.TestCase):
             "acl": {
                 "mode": "allow",
                 "rules": [
-                    {"capability": "self.read", "scope": "self"},
-                    {"capability": "planning.area.read", "scope": "group"},
-                    {"capability": "message.user", "scope": "self"},
+                    {
+                        "scope": "self",
+                        "capabilities": ["self.read", "message.user"],
+                    },
+                    {
+                        "scope": "group",
+                        "capabilities": ["planning.area.read"],
+                    },
                 ],
             },
             "warnings": ["External connectors are separate."],
@@ -267,6 +288,7 @@ class AgentClassRegistryTests(unittest.TestCase):
             set(preview["effective_authority"]["capabilities"]),
             {"self.read", "planning.area.read", "message.user"},
         )
+        self.assertIn("capabilities", definition.acl["rules"][0])
 
         invalid = dict(valid)
         invalid["id"] = "bad-planning"
@@ -433,6 +455,13 @@ class AgentClassRegistryTests(unittest.TestCase):
         self.assertNotIn("policy", normalized)
         self.assertNotIn("capabilities", normalized)
         self.assertIn("capability_catalog", validation["authoring_contract"])
+        self.assertEqual(
+            validation["authoring_contract"]["acl_rule_variants"],
+            {
+                "single": ["capability", "scope"],
+                "grouped_by_scope": ["scope", "capabilities"],
+            },
+        )
         preview = validation["agent_class"]
         self.assertNotIn("internal_policy", preview)
         self.assertEqual(set(preview["acl"]["capabilities"]), {"self.read", "board.read", "message.user"})
@@ -469,7 +498,7 @@ class AgentClassRegistryTests(unittest.TestCase):
         self.assertIn("agent_cell_profile_confusion", codes)
         self.assertFalse((self.root / "repo" / ".torque" / "agent_classes" / "bad-custom.yaml").exists())
 
-    def test_custom_class_save_persists_acl_authoring_shape(self):
+    def test_custom_class_save_preserves_grouped_acl_authoring_shape(self):
         result = save_custom_agent_class({
             "id": "acl-architect",
             "version": "1",
@@ -479,9 +508,14 @@ class AgentClassRegistryTests(unittest.TestCase):
             "acl": {
                 "mode": "allow",
                 "rules": [
-                    {"capability": "self.read", "scope": "self"},
-                    {"capability": "task.report", "scope": "self"},
-                    {"capability": "message.user", "scope": "self"},
+                    {
+                        "scope": "self",
+                        "capabilities": [
+                            "self.read",
+                            "task.report",
+                            "message.user",
+                        ],
+                    },
                 ],
             },
         }, base_dir=str(self.project), mode="create")
@@ -490,12 +524,19 @@ class AgentClassRegistryTests(unittest.TestCase):
         saved = Path(result["storage"]["path"]).read_text(encoding="utf-8")
         self.assertIn("acl:", saved)
         self.assertIn("mode: allow", saved)
-        self.assertIn("capability: self.read", saved)
-        self.assertIn("capability: message.user", saved)
+        self.assertIn("scope: self", saved)
+        self.assertIn("capabilities:", saved)
+        self.assertIn("- self.read", saved)
+        self.assertIn("- message.user", saved)
+        self.assertNotIn("capability: self.read", saved)
         self.assertNotIn("policy:", saved)
         definition = agent_class_definition_by_id("acl-architect", base_dir=str(self.project))
         self.assertIsNotNone(definition)
         self.assertEqual(definition.acl.get("mode"), "allow")
+        self.assertEqual(
+            definition.acl["rules"][0]["capabilities"],
+            ["self.read", "task.report", "message.user"],
+        )
         preview = enriched_agent_class_preview(definition, base_dir=str(self.project))
         self.assertEqual(
             set(preview["effective_authority"]["capabilities"]),

@@ -55,39 +55,27 @@ metadata:
 acl:
   mode: allow
   rules:
-  - capability: self.read
-    scope: self
+  - scope: self
+    capabilities:
+    - self.read
+    - task.propose
+    - decision.propose
+    - message.user
+    - journal.private
+    - behavior_overlay.read
+    - behavior_overlay.propose
   - capability: help.read
-  - capability: board.read
-    scope: group
-  - capability: task.read
-    scope: group
-  - capability: task.propose
-    scope: self
-  - capability: task.board_sync.read
-    scope: group
-  - capability: planning.area.read
-    scope: group
-  - capability: planning.initiative.read
-    scope: group
-  - capability: decision.read
-    scope: group
-  - capability: decision.propose
-    scope: self
-  - capability: decision.link
-    scope: group
-  - capability: message.user
-    scope: self
-  - capability: message.architect_peer
-    scope: group
-  - capability: message.ack_required
-    scope: group
-  - capability: journal.private
-    scope: self
-  - capability: behavior_overlay.read
-    scope: self
-  - capability: behavior_overlay.propose
-    scope: self
+  - scope: group
+    capabilities:
+    - board.read
+    - task.read
+    - task.board_sync.read
+    - planning.area.read
+    - planning.initiative.read
+    - decision.read
+    - decision.link
+    - message.architect_peer
+    - message.ack_required
 operator_summary:
   bullets:
   - 'Domains: product_planning, areas, initiatives, proposed_decisions, product_task_intake.'

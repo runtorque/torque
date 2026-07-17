@@ -514,6 +514,73 @@ def next_narrower_scope(scope: str, *, supported: Iterable[str] = SCOPE_ORDER) -
     return narrower[-1] if narrower else ""
 
 
+def normalize_capability_acl_rules(
+    rules: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Expand supported ACL authoring forms into canonical capability rules.
+
+    The runtime authority model remains one rule per capability. Agent Class
+    YAML may additionally group scoped capabilities under one shared scope:
+
+    ``{"scope": "group", "capabilities": ["task.read", "event.read"]}``
+    """
+
+    normalized: list[dict[str, Any]] = []
+    for index, raw_rule in enumerate(rules or ()):
+        if not isinstance(raw_rule, Mapping):
+            raise AuthorityValidationError(
+                f"ACL rule {index} must be a mapping"
+            )
+        has_capability = "capability" in raw_rule
+        has_capabilities = "capabilities" in raw_rule
+        if has_capability and has_capabilities:
+            raise AuthorityValidationError(
+                f"ACL rule {index} must use capability or capabilities, not both"
+            )
+
+        if has_capabilities:
+            unknown_fields = sorted(set(raw_rule) - {"capabilities", "scope"})
+            if unknown_fields:
+                raise AuthorityValidationError(
+                    f"ACL rule {index} has unknown fields: "
+                    + ", ".join(unknown_fields)
+                )
+            raw_scope = raw_rule.get("scope", "")
+            if "scope" not in raw_rule or not str(raw_scope or "").strip():
+                raise AuthorityValidationError(
+                    f"grouped ACL rule {index} requires scope"
+                )
+            raw_capabilities = raw_rule.get("capabilities")
+            if not isinstance(raw_capabilities, list):
+                raise AuthorityValidationError(
+                    f"ACL rule {index} capabilities must be a list"
+                )
+            if not raw_capabilities:
+                raise AuthorityValidationError(
+                    f"ACL rule {index} capabilities must not be empty"
+                )
+            for capability_index, raw_capability in enumerate(raw_capabilities):
+                if not isinstance(raw_capability, str) or not raw_capability.strip():
+                    raise AuthorityValidationError(
+                        f"ACL rule {index} capabilities[{capability_index}] "
+                        "must be a non-empty string"
+                    )
+                normalized.append({
+                    "capability": raw_capability.strip(),
+                    "scope": raw_scope,
+                })
+            continue
+
+        unknown_fields = sorted(set(raw_rule) - {"capability", "scope"})
+        if unknown_fields:
+            raise AuthorityValidationError(
+                f"ACL rule {index} has unknown fields: "
+                + ", ".join(unknown_fields)
+            )
+        normalized.append(dict(raw_rule))
+    return normalized
+
+
 def evaluate_capability_acl(
     *,
     base_kind: str,
@@ -546,17 +613,8 @@ def evaluate_capability_acl(
             )
 
     seen: set[str] = set()
-    for index, raw_rule in enumerate(rules or ()):
-        if not isinstance(raw_rule, Mapping):
-            raise AuthorityValidationError(
-                f"ACL rule {index} must be a mapping"
-            )
-        unknown_fields = sorted(set(raw_rule) - {"capability", "scope"})
-        if unknown_fields:
-            raise AuthorityValidationError(
-                f"ACL rule {index} has unknown fields: "
-                + ", ".join(unknown_fields)
-            )
+    normalized_rules = normalize_capability_acl_rules(rules)
+    for index, raw_rule in enumerate(normalized_rules):
         capability_id = str(raw_rule.get("capability", "") or "").strip()
         if not capability_id:
             raise AuthorityValidationError(

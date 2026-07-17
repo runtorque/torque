@@ -65,29 +65,22 @@ metadata:
 acl:
   mode: allow
   rules:
-  - capability: self.read
-    scope: self
+  - scope: self
+    capabilities:
+    - self.read
+    - message.user
+    - journal.private
   - capability: help.read
-  - capability: board.read
-    scope: group
-  - capability: task.read
-    scope: group
-  - capability: event.read
-    scope: group
-  - capability: telemetry.read
-    scope: group
-  - capability: planning.area.read
-    scope: group
-  - capability: planning.initiative.read
-    scope: group
-  - capability: decision.read
-    scope: group
-  - capability: message.user
-    scope: self
-  - capability: message.architect_peer
-    scope: group
-  - capability: journal.private
-    scope: self
+  - scope: group
+    capabilities:
+    - board.read
+    - task.read
+    - event.read
+    - telemetry.read
+    - planning.area.read
+    - planning.initiative.read
+    - decision.read
+    - message.architect_peer
 operator_summary:
   bullets:
   - 'Domains: onboarding, ops_health, anomaly_detection, missed_handoffs, stale_tasks, cleanup_recommendations.'

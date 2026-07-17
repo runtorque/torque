@@ -54,12 +54,14 @@ prompt:
 acl:
   mode: allow
   rules:
-    - capability: self.read
-      scope: self
-    - capability: board.read
-      scope: group
-    - capability: task.propose
-      scope: self
+    - scope: self
+      capabilities:
+        - self.read
+        - task.propose
+    - scope: group
+      capabilities:
+        - board.read
+    - capability: help.read
 ```
 
 The only authority fields are `acl.mode` and `acl.rules`.
@@ -67,16 +69,26 @@ The only authority fields are `acl.mode` and `acl.rules`.
 - `mode: allow` grants only the listed capabilities.
 - `mode: deny` starts from the base-kind ceiling and removes the listed
   capabilities or narrows their maximum scope.
-- A rule has `capability` and, for scoped capabilities, `scope`.
+- A single-capability rule has `capability` and, for scoped capabilities,
+  `scope`.
+- Repeated scoped rules may instead be grouped as `scope` plus a non-empty
+  `capabilities` list. Flat and grouped rules may coexist in one ACL.
+- Grouping is authoring syntax only. Torque expands it to the same canonical
+  one-rule-per-capability representation before validation, snapshots, tool
+  projection, and call-time enforcement.
+- A grouped rule cannot contain `capability`, and a flat rule cannot contain
+  `capabilities`. Duplicate capability IDs are rejected across both forms.
+- Unscoped capabilities use the flat form without `scope`.
 - The scope vocabulary is `self`, `children`, `group`, and `global`.
 - Validation rejects a capability unavailable to the base kind or a scope wider
   than the capability's implemented ceiling.
 
 There is no Agent Class `policy`, generated policy profile, capability bucket,
 restriction bucket, exact-tool grant, tool-family glob, or raw grant/deny atom.
-Obsolete fields such as `policy`, `capabilities`, `capability_buckets`, and
-`restriction_buckets` are rejected rather than normalized into a second
-authority path.
+Obsolete top-level fields such as `policy`, `capabilities`,
+`capability_buckets`, and `restriction_buckets` are rejected rather than
+normalized into a second authority path. The only accepted `capabilities` key
+is the grouped authoring form inside an `acl.rules` item.
 
 Prompt `tool_guidance` selectors use canonical capability IDs. Guidance is
 included only when that capability exists in the frozen effective authority.

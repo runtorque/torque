@@ -312,7 +312,11 @@ function sampleAgentClassListMessage(classes = sampleClasses(), issues = []) {
       normal_authoring_mode: 'capability_acl',
       acl_modes: ['allow', 'deny'],
       acl_shape: 'acl.mode + acl.rules',
-      acl_rule_keys: ['capability', 'scope'],
+      acl_rule_keys: ['capability', 'capabilities', 'scope'],
+      acl_rule_variants: {
+        single: ['capability', 'scope'],
+        grouped_by_scope: ['scope', 'capabilities'],
+      },
       scope_vocabulary: ['self', 'children', 'group', 'global'],
       capability_catalog: sampleCapabilityCatalog(),
     },

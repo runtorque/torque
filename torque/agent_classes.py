@@ -150,7 +150,11 @@ def agent_class_authoring_contract(*, base_kind: str = "") -> dict[str, Any]:
         "normal_authoring_mode": "capability_acl",
         "acl_modes": ["allow", "deny"],
         "acl_shape": "acl.mode + acl.rules",
-        "acl_rule_keys": ["capability", "scope"],
+        "acl_rule_keys": ["capability", "capabilities", "scope"],
+        "acl_rule_variants": {
+            "single": ["capability", "scope"],
+            "grouped_by_scope": ["scope", "capabilities"],
+        },
         "scope_vocabulary": ["self", "children", "group", "global"],
         "capability_catalog": capability_catalog_for_base_kind(base_kind),
         "apply_model": "Agent Class saves/assignments do not mutate running sessions; ACL changes apply at next launch/relaunch.",
