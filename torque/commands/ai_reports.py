@@ -22,6 +22,7 @@ from ..external_tickets import (
     build_completion_comment,
     post_ticket_comment,
 )
+from ..mcp_canonical import canonical_tool_name
 from ..state import task_counts_as_done, task_is_closed
 
 
@@ -30,10 +31,20 @@ TORQUE_AI_MCP_REPORT_ACTIONS = frozenset({
     "progress", "done", "blocked", "error", "ask", "derive",
     "ready", "verify", "name",
 })
-TORQUE_AI_MCP_REPORT_TOOL_NAMES = frozenset(
-    "mcp__torque__torque_" + action
+_CANONICAL_AI_REPORT_TOOL_BY_ACTION = {
+    action: canonical_tool_name("torque_" + action)
     for action in TORQUE_AI_MCP_REPORT_ACTIONS
-)
+}
+TORQUE_AI_MCP_REPORT_TOOL_NAMES = frozenset({
+    *(
+        "mcp__torque__" + tool_name
+        for tool_name in _CANONICAL_AI_REPORT_TOOL_BY_ACTION.values()
+    ),
+    *(
+        "mcp__torque__torque_" + action
+        for action in TORQUE_AI_MCP_REPORT_ACTIONS
+    ),
+})
 # Private compatibility name used by the extracted implementation body.
 _TORQUE_AI_MCP_REPORT_ACTIONS = TORQUE_AI_MCP_REPORT_ACTIONS
 
@@ -192,7 +203,7 @@ async def handle_ai_report_command(
         def _append_mcp(c, act, msg=""):
             _append_mcp_message(c, act, msg)
             # Emit a live `mcp_call_append` delta for the
-            # `mcp__torque__torque_<act>` tool call on the SAME
+            # canonical worker-report tool call on the SAME
             # broadcast that carries this report's
             # event_append + agent_upsert. Without this, the
             # only `mcp_call_append` for worker reports
@@ -219,7 +230,10 @@ async def handle_ai_report_command(
                         "cursor": 0,
                         "idempotency_key": "",
                         "cell_id": c.id,
-                        "tool_name": "mcp__torque__torque_" + act,
+                        "tool_name": (
+                            "mcp__torque__"
+                            + _CANONICAL_AI_REPORT_TOOL_BY_ACTION[act]
+                        ),
                         "hook_event_name": "PostToolUse",
                         "session_id": getattr(
                             c, "session_id", "") or "",

@@ -6,7 +6,8 @@ The Architect is the layer above the Engineer. It plans, hires, and decides — 
 
 ## What an Architect does
 
-An Architect runs in its own managed PTY session, persistent, with the `architect_*` MCP toolkit. It maintains:
+An Architect runs in its own managed PTY session with an Architect-scoped
+projection of Torque's canonical MCP vocabulary. It maintains:
 
 1. **A decision log** — durable record of cross-cutting product decisions, with status (`proposed`, `accepted`, `revised`, `rejected`) and links to the tasks and engineers they affect.
 2. **A private journal** — checkpoints, observations, plans. Same shape as an Engineer's journal but architect-scoped.
@@ -33,13 +34,13 @@ The agent survives daemon restarts, `/clear`, and long pauses. Closing its tab p
 
 When the Architect boots (or recovers after `/clear`), its system prompt walks it through a deterministic orientation sequence:
 
-1. `architect_journal_read` — its prior checkpoints, observations, plans.
-2. `architect_decision_list` — every decision and its current status.
-3. `architect_peer_inbox(requires_reply=true)` — unanswered peer-Architect messages.
-4. `architect_engineer_list` — hired and visible Engineers, with their `dismissed_at` timestamps and current state.
-5. `architect_pending_hire_list` — any hires that haven't been approved yet.
-6. `architect_board_summary` — board state by Engineer, including peer-message counts.
-7. `architect_events_recent` — coarse-grained events from while it was idle.
+1. `journal_list` — its prior checkpoints, observations, plans.
+2. `decision_list` — every decision and its current status.
+3. `peer_inbox(requires_reply=true)` — unanswered peer-Architect messages.
+4. `agent_list` — hired and visible Engineers.
+5. `hire_list` — pending or recently resolved hires.
+6. `board_summary` — board state by Engineer, including peer-message counts.
+7. `event_list` — coarse-grained events from while it was idle.
 
 By the end of step 7, the Architect has reconstructed enough state to make decisions without replaying chat history. This is the Architect equivalent of the Engineer's recovery sequence.
 
@@ -49,7 +50,7 @@ This is the operation Architects spend the most time on, and the one with the st
 
 ```mermaid
 flowchart LR
-    A[architect_engineer_hire] --> B[Pending approval]
+    A[engineer_hire] --> B[Pending approval]
     B --> C{User approves?}
     C -->|Yes| D[Engineer is live<br/>hired_by_architect_id set]
     C -->|No| E[Hire rejected]
@@ -65,11 +66,11 @@ flowchart LR
 
 Concretely:
 
-1. The Architect calls `architect_engineer_hire(name=..., command=..., provider=..., directory=..., specializations=[...])`.
+1. The Architect calls `engineer_hire(name=..., command=..., provider=..., directory=..., specializations=[...])`.
    The hire returns immediately with `status: "pending"`.
 2. A board-visible task appears asking you to approve the hire.
 3. You approve. Torque creates the Engineer agent with `hired_by_architect_id` set to this Architect's ID.
-4. The Architect must **poll** `architect_pending_hire_status(...)` before treating the Engineer as live. Sending tasks to a still-pending Engineer errors.
+4. The Architect must poll `hire_list(hire_id=...)` before treating the Engineer as live. Sending tasks to a still-pending Engineer errors.
 
 The optional `specializations` list is ordered: the first slug is the
 Engineer's primary specialization, and `[]` means a generalist. Hire-time
@@ -85,10 +86,10 @@ Architect-managed Engineer specializations use the project taxonomy from
 `desktop-shell`, `worktree-release`, `prompts-config`, and
 `quality-observability`.
 
-- `architect_engineer_hire(..., specializations=[...])` proposes the ordered
+- `engineer_hire(..., specializations=[...])` proposes the ordered
   list for a new Engineer. Unknown slugs are rejected before a pending hire is
   created, and `[]` explicitly requests a generalist.
-- `architect_engineer_set_specializations(engineer_id, specializations=[...])`
+- `engineer_update(engineer_id, specializations=[...])`
   full-replaces the ordered list for an Engineer this Architect hired. The
   first entry becomes primary; `[]` clears the list/generalist. This is an
   ownership-scoped roster edit and does **not** require a fresh user approval.
@@ -97,12 +98,14 @@ Architect-managed Engineer specializations use the project taxonomy from
 
 Engineers are persistent — you don't dismiss them lightly. But when work in a group winds down, dismissing an Engineer is the right move:
 
-- `architect_engineer_dismiss(engineer_id)` — closes the session, sets `dismissed_at`, preserves history, tasks, decisions, journal. **Reversible.**
-- `architect_engineer_rehire(engineer_id)` — clears `dismissed_at`, reuses the same agent ID, slug, history, and configuration. The Engineer comes back with full context.
+- `engineer_lifecycle(engineer_id, operation="dismiss")` — closes the session, sets `dismissed_at`, and preserves history. **Reversible.**
+- `engineer_lifecycle(engineer_id, operation="rehire")` — clears `dismissed_at` and restores the same Engineer.
 
-Dismissed Engineers still appear in `architect_engineer_list` with their `dismissed_at` timestamp. Trying to assign tasks to a dismissed Engineer fails with `engineer_dismissed`; you must rehire first.
+Dismissed Engineers still appear in `agent_list(include_tombstoned=true)`.
+Trying to assign tasks to one fails until it is rehired.
 
-There's also `architect_engineer_restore` for recovering Engineers within a 7-day soft-delete window. After 7 days the record is purged permanently.
+Use `engineer_lifecycle(operation="restore")` to recover an Engineer within the
+7-day soft-delete window.
 
 ## Decisions vs. journal
 
@@ -136,21 +139,24 @@ The boundary isn't a convention — it's enforced server-side. → [MCP scoping]
 
 Architects and the Engineers they hired have a direct, audited messaging channel:
 
-- `architect_engineer_message(engineer_id, message)` — send to a hired Engineer.
-- `architect_engineer_reply(message_id, ...)` — reply to an existing hired-Engineer thread.
+- `agent_message(agent, message)` — send to a hired Engineer.
+- `agent_reply(message_id, message)` — reply to an existing hired-Engineer thread.
 
-Engineers reply through `engineer_message_architect(...)` (only to their hiring Architect, not to other Architects).
+Engineers reply through `supervisor_message(...)` or `agent_reply(...)`.
 
-When a hired Engineer raises a **blocking** question (its owner-routed ask, surfaced by `architect_engineer_pending_question(engineer_id)`), answer it with `architect_engineer_answer(engineer_id, answer)`. This delivers the answer and resumes the Engineer's event delivery — the Architect-side counterpart to how an Engineer resolves a worker's ask with `engineer_task_resolve`. A plain `architect_engineer_message` does **not** clear the pending question or unpause the Engineer; use `architect_engineer_answer` to actually resolve the block.
+When a hired Engineer raises a blocking question, read it with
+`agent_ask_get(engineer_id)` and answer it with
+`agent_ask_answer(engineer_id, answer)`. A plain `agent_message` does not clear
+the question or resume delivery.
 
 If you message a dismissed Engineer, the message buffers. When you rehire, buffered messages are delivered. This makes async hand-offs safe.
 
 Same-group Architects also have durable peer messaging:
 
-- `architect_peer_list(include_dismissed=false)` — discover other non-tombstoned Architects in the group.
-- `architect_peer_message(architect_id, message, ack_required=false, ...)` — send one named Architect a direct message. Optional context references snapshot visible tasks, visible Engineers, and the sender's own decisions into the message.
-- `architect_peer_inbox(requires_reply=true)` — recover unanswered peer threads after `/clear`, daemon restart, dismissal, or rehire.
-- `architect_peer_reply(message_id, message, ack_required=false)` — continue an Architect ↔ Architect peer thread.
+- `peer_list(include_dismissed=false)` — discover other non-tombstoned Architects in the group.
+- `peer_message(peer, message, ack_required=false, ...)` — message one eligible peer and optionally attach visible context.
+- `peer_inbox(requires_reply=true)` — recover unanswered peer threads.
+- `peer_reply(message_id, message, ack_required=false)` — continue a peer thread.
 
 Use peer messaging for coordination between product surfaces: "does this task belong to your area?", "can you sanity-check this boundary?", "FYI, I am cutting scope X." Use `ack_required=true` only when the other Architect must answer. Do **not** use it for broadcast announcements, formal task handoff, Engineer ownership transfer, or shared decision ownership; those remain deferred/non-goal V1 behaviors. Durable outcomes from the conversation should still be written to the relevant Architect's own decision log.
 
@@ -160,7 +166,8 @@ Messages to a dismissed peer Architect are saved as buffered and replay when tha
 
 Architects have one ask channel:
 
-- `architect_ask(question)` — blocking. Creates a task in the group's Backlog with a `human` label and the question as its body. The board pauses on this task. You reply, and the reply lands in the Architect's unread messages.
+- `user_ask(question)` — blocking. Creates a human-input task and pauses the
+  board until you answer.
 
 Use this for product-level checkpoints: "Should we ship dark mode now or after the API refactor?" — not for orchestration questions, which the Engineer should be handling.
 
@@ -196,9 +203,11 @@ Beyond those, launch settings (provider, boot command, model, reasoning effort, 
 
 A short list of things that will surprise you if you don't know them:
 
-- **Hires are always pending.** `architect_engineer_hire` returns `status: "pending"` immediately, including when it carries a requested specialization list. The hire is not live until you approve. The Architect must poll status — sending tasks to a pending engineer errors.
+- **Hires are always pending.** `engineer_hire` returns `status: "pending"`.
+  The Architect must poll `hire_list` before using the new Engineer.
 - **A dismissed Architect blocks mutations.** If you dismiss the Architect itself (`dismissed_at > 0`), all its mutations (task create, hire, message, decision write, journal write) are rejected with "architect is dismissed". Reads still work. Rehire to unblock.
-- **Decision links append-only.** You can link tasks/engineers to a decision but not unlink. To retire a decision, archive it (`architect_decision_update(archive: true)`).
+- **Decision links append-only.** You can link tasks/Engineers to a decision
+  but not unlink. Retire one with `decision_update(archived=true)`.
 - **Suggested actions don't auto-bind.** When the Architect creates a task with a `suggested_action`, the Engineer is free to choose a different action when dispatching. The suggestion is non-binding.
 - **Review gate thresholds are advisory.** They don't block ship. They're just guidance for the Architect's own reasoning.
 - **Workers are not directly visible.** The Architect sees them through Engineer journals and worklogs. Don't expect direct Worker controls in the Architect toolkit.
@@ -212,19 +221,19 @@ Concrete walkthrough of an Architect's working session, so the toolkit feels les
 **09:00 — Boot.** The Architect's tab opens. Its system prompt has it run the orientation sequence:
 
 ```text
-architect_journal_read()           # last 20 entries — what was I thinking?
-architect_decision_list()          # decisions and their statuses
-architect_peer_inbox(requires_reply=true)  # peer threads I owe
-architect_engineer_list()          # who's hired, who's dismissed
-architect_pending_hire_list()      # any approvals still waiting?
-architect_board_summary()          # board state by Engineer
-architect_events_recent()          # what happened while I was idle?
+journal_list()                     # recent private checkpoints
+decision_list()                    # decisions and their statuses
+peer_inbox(requires_reply=true)    # peer threads I owe
+agent_list(include_tombstoned=true)
+hire_list(status_filter="pending")
+board_summary()
+event_list()
 ```
 
 It writes a checkpoint journal entry summarizing the state it just reconstructed:
 
 ```text
-architect_journal(
+journal_write(
   type="checkpoint",
   text="Resuming. 2 hired engineers (Panelsmith, Courier), 1 dismissed
   (BatchArchive, last week). Board: 18 in flight, 3 blocked. Open decision:
@@ -235,19 +244,20 @@ architect_journal(
 **09:15 — Plan the day.** Reads the user's standing priorities. Drafts a wave: three new tasks, two for Panelsmith (UI work), one for Courier (transport layer). Writes one decision describing the priority shift since yesterday:
 
 ```text
-architect_decision_create(
+decision_create(
   title="Prioritize transport reliability over UI polish this week",
   rationale="Three production reports in two days. Polish backlog can wait.",
   status="accepted",
 )
 ```
 
-**09:25 — Create tasks.** Three `architect_task_create(...)` calls. Each task lands assigned to an Engineer with a `suggested_action` (non-binding) the Engineer can choose to use or override.
+**09:25 — Create tasks.** Three `task_create(...)` calls. Each task lands
+assigned to an Engineer with a non-binding `suggested_action`.
 
 **09:30 — Realize Courier is over-allocated.** The transport work is too much for one Engineer. Decides to hire a second transport-focused Engineer:
 
 ```text
-architect_engineer_hire(
+engineer_hire(
   name="Conductor",
   command="claude",
   provider="claude-code",
@@ -262,15 +272,15 @@ A board task appears asking the User for approval. The Architect waits, doing ot
 **10:05 — Hire approved.** The Architect polls:
 
 ```text
-architect_pending_hire_status(hire_id="...")
+hire_list(hire_id="...")
 # returns {status: "approved", engineer_id: "..."}
 ```
 
 Sends the new Engineer a welcome message:
 
 ```text
-architect_engineer_message(
-  engineer_id="...",
+agent_message(
+  agent="...",
   message="Welcome. You're owning transport reliability. Read the
   hand-off task LOOM:401 first; the Courier journal has your
   predecessor's open thread on retry semantics."
@@ -279,9 +289,12 @@ architect_engineer_message(
 
 Reassigns one of Courier's tasks to Conductor.
 
-**12:00 — Midday checkpoint.** Writes a journal checkpoint, glances at digests for blocked tasks, answers an `architect_engineer_message` thread from Panelsmith asking whether to ship a partial implementation behind a flag.
+**12:00 — Midday checkpoint.** Writes a journal checkpoint, glances at
+digests, and answers an `agent_message` thread.
 
-**16:00 — End of day.** Reads `architect_events_recent` for the afternoon, marks the priority decision (D-20) as `accepted` if it played out, archives an obsolete decision from last week (`architect_decision_update(decision_id="D-12", archive=true)`), writes a final checkpoint with tomorrow's plan.
+**16:00 — End of day.** Reads `event_list`, reviews the priority decision,
+archives an obsolete decision with `decision_update(id="D-12",
+archived=true)`, and writes a final checkpoint.
 
 The Architect's tab closes. State persists in SQLite. Tomorrow's Architect (the same one, after restart) reads the checkpoint and picks up from there.
 
@@ -289,4 +302,5 @@ The Architect's tab closes. State persists in SQLite. Tomorrow's Architect (the 
 
 - [Engineers](engineers.md) — the layer the Architect coordinates with most.
 - [MCP scoping](mcp-scoping.md) — what enforces "this Architect can't read another Architect's decisions."
-- [MCP tools — Architect reference](../reference/mcp-tools.md#architect-tools) — full architect_* tool surface.
+- [MCP tools reference](../reference/mcp-tools.md) — canonical operations and
+  caller-specific behavior.

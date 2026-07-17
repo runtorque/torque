@@ -302,8 +302,8 @@ async def dispatch_proposal(ctx: ScopedDispatchContext):
         ack_required, ack_error = _optional_bool_arg(args, "ack_required")
         if ack_error:
             return ack_error, True
-        if ack_required and not _caller_authority_allows_capability(real_state, caller_id, "message.ack_required"):
-            return "ack_required=true requires comm.product_ack_request", True
+        if ack_required and not _caller_authority_allows_capability(real_state, caller_id, "message.ack_request"):
+            return "ack_required=true requires message.ack_request", True
         context, context_error = _normalize_proposal_context(real_state, caller_id, _engineer_group, args)
         if context_error:
             return context_error, True
@@ -353,8 +353,8 @@ async def dispatch_proposal(ctx: ScopedDispatchContext):
         ack_required, ack_error = _optional_bool_arg(args, "ack_required")
         if ack_error:
             return ack_error, True
-        if ack_required and not _caller_authority_allows_capability(real_state, caller_id, "message.ack_required"):
-            return "ack_required=true requires comm.product_ack_request", True
+        if ack_required and not _caller_authority_allows_capability(real_state, caller_id, "message.ack_request"):
+            return "ack_required=true requires message.ack_request", True
         if _dedupe_strings(args.get("context_engineer_ids", [])):
             context, context_error = _normalize_proposal_context(
                 real_state,

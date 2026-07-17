@@ -47,9 +47,8 @@ prompt:
 warnings:
 - 'Creative Architect is proposal-only: ideas, decisions, tasks, and messages remain non-binding
   until accepted through normal Torque authority.'
-- Use architect_thinking_* wrappers for Scratchpad/Mind Map work, architect_idea_brief_*
-  wrappers for Idea Briefs, and proposal-oriented Architect tools for product proposals and product-anchored
-  communication; raw execution/admin tools are denied.
+- Use the canonical Thinking and Idea Brief tools for durable ideation, and the authority-filtered
+  planning, decision, task, and communication tools for proposals; execution/admin modes are denied.
 metadata:
   proposal_only: true
   approval_decision_id: decision-73da8758bb3d
@@ -84,8 +83,8 @@ acl:
     - event.read
     - thinking.read
     - idea_brief.read
-    - message.architect_peer
-    - message.ack_required
+    - message.peer
+    - message.ack_request
 operator_summary:
   bullets:
   - 'Domains: ideation, product_discovery, thinking_artifacts, idea_briefs, proposed_decisions,

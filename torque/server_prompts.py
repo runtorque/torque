@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from textwrap import dedent
 
+from .mcp_canonical import canonical_tool_name, canonicalize_tool_references
+
 _POSTSCRIPT_MANDATE = (
     "IMPORTANT: Finish this task by calling a Torque MCP tool below. "
     "Do NOT ask the user directly. Use `torque_ask(...)` only for a "
@@ -65,7 +67,7 @@ _SHARED_MEMORY_GUIDANCE = dedent("""\
 
 def build_shared_memory_guidance() -> str:
     """Return the shared-memory adoption guidance used by agent prompts."""
-    return _SHARED_MEMORY_GUIDANCE
+    return canonicalize_tool_references(_SHARED_MEMORY_GUIDANCE)
 
 
 def build_owner_user_message_guidance(message_tool: str) -> str:
@@ -84,6 +86,7 @@ def build_owner_user_message_guidance(message_tool: str) -> str:
     agents whose owner is the user; engineer-owned and architect-hired
     agents must not receive it.
     """
+    message_tool = canonical_tool_name(message_tool)
     return dedent(f"""\
         ## After bootstrap: message the user
 
@@ -159,7 +162,7 @@ def build_torque_system_prompt(*, include_shared_memory: bool = True,
     if owner_is_user:
         sections.append(build_owner_user_message_guidance("torque_message_user"))
 
-    return "\n\n".join(sections) + "\n"
+    return canonicalize_tool_references("\n\n".join(sections) + "\n")
 
 
 def _derive_line(transition: dict) -> str:
@@ -291,7 +294,7 @@ def build_engineer_deliverable_awareness(task) -> str:
         "The `torque_done` / `engineer_task_resolve` gate refuses task "
         "closure until a matching artifact attaches.",
     ]
-    return "\n".join(lines)
+    return canonicalize_tool_references("\n".join(lines))
 
 
 def _build_review_required_block(*,
@@ -451,4 +454,4 @@ def build_dispatch_postscript(*,
         lines.extend(["", normalized_commit_hint])
 
     prefix = "\n\n" if is_clean else "\n\n---\n"
-    return prefix + "\n".join(lines)
+    return canonicalize_tool_references(prefix + "\n".join(lines))

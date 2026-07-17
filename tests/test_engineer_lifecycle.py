@@ -271,7 +271,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("## Message from Alice (engineer)", status_prompt)
         self.assertIn("Status: going quiet.", status_prompt)
         self.assertNotIn("Reply with:", status_prompt)
-        self.assertNotIn("mcp__torque__architect_engineer_reply", status_prompt)
+        self.assertNotIn("mcp__torque__agent_reply", status_prompt)
 
         question_prompt = self.server_mod._format_injected_mcp_message_prompt(
             message="Should I cut scope?",
@@ -282,7 +282,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             ack_required=True,
         )
         self.assertIn(
-            'Reply with: mcp__torque__architect_engineer_reply(message_id="msg-question"',
+            'Reply with: mcp__torque__agent_reply(message_id="msg-question"',
             question_prompt,
         )
 
@@ -294,7 +294,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             message_id="msg-peer-status",
         )
         self.assertIn(
-            'Optional reply: mcp__torque__architect_peer_reply(message_id="msg-peer-status"',
+            'Optional reply: mcp__torque__peer_reply(message_id="msg-peer-status"',
             peer_status_prompt,
         )
 
@@ -307,7 +307,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             ack_required=True,
         )
         self.assertIn(
-            'Ack required. Reply with: mcp__torque__architect_peer_reply(message_id="msg-peer-ack"',
+            'Ack required. Reply with: mcp__torque__peer_reply(message_id="msg-peer-ack"',
             peer_ack_prompt,
         )
 
@@ -319,7 +319,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             message_id="msg-architect",
         )
         self.assertIn(
-            'Reply with: mcp__torque__engineer_reply(message_id="msg-architect"',
+            'Reply with: mcp__torque__agent_reply(message_id="msg-architect"',
             engineer_prompt,
         )
 
@@ -331,14 +331,14 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             message_id="msg-peer-engineer",
         )
         self.assertIn(
-            'Reply with: mcp__torque__engineer_peer_reply(message_id="msg-peer-engineer"',
+            'Reply with: mcp__torque__peer_reply(message_id="msg-peer-engineer"',
             engineer_peer_prompt,
         )
         self.assertIn(
-            'Inspect referenced context with: mcp__torque__engineer_peer_inspect(message_id="msg-peer-engineer"',
+            'Inspect referenced context with: mcp__torque__peer_context(message_id="msg-peer-engineer"',
             engineer_peer_prompt,
         )
-        self.assertNotIn("mcp__torque__engineer_reply", engineer_peer_prompt)
+        self.assertNotIn("mcp__torque__agent_reply", engineer_peer_prompt)
 
     async def test_add_engineer_creates_persistent_engineer_with_binding_and_engineer_mcp_entrypoint(self):
         state = self._make_state()

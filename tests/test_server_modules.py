@@ -2769,7 +2769,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent[0][0], 'session-1')
         self.assertIn(f'Task: {follow_up.id}', sent[0][1])
         self.assertIn(
-            f'torque_reply(task=\"{follow_up.id}\", message=\"your response\")',
+            f'agent_reply(task=\"{follow_up.id}\", message=\"your response\")',
             sent[0][1],
         )
         self.assertEqual(events, [{
@@ -3190,7 +3190,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('Can you summarize your current plan?', prompt)
         self.assertIn(
             (
-                'mcp__torque__torque_message_user('
+                'mcp__torque__user_message('
                 f'message="...", reply_to_id="{result["message_id"]}")'
             ),
             prompt,
@@ -3603,7 +3603,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(sent), 1)
         self.assertIn('This message was sent by a user-scheduled /loop.', sent[0][1])
         self.assertIn('please report progress', sent[0][1])
-        self.assertIn('torque_stop_user_message_loop', sent[0][1])
+        self.assertIn('user_message_loop_stop', sent[0][1])
         updated_loop = state.agent_message_loops[loop['id']]
         self.assertEqual(updated_loop.run_count, 1)
         self.assertGreater(updated_loop.next_run_at, 10.0)
@@ -4195,7 +4195,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
                 sent,
                 expected_reply_to_ids):
             reply_snippet = (
-                'mcp__torque__torque_message_user('
+                'mcp__torque__user_message('
                 f'message="...", reply_to_id="{reply_to_id}")'
             )
             self.assertIn(reply_snippet, prompt)
@@ -4246,7 +4246,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             all('Do not rely on free-text terminal output' in p for p in sent)
         )
         self.assertTrue(
-            all('mcp__torque__torque_message_user(' in p for p in sent)
+            all('mcp__torque__user_message(' in p for p in sent)
         )
 
     async def test_user_agent_message_buffers_down_agent_and_replays_on_wake(self):
@@ -4314,7 +4314,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('Sent:', prompt)
         self.assertIn(
             (
-                'mcp__torque__architect_message_user('
+                'mcp__torque__user_message('
                 f'message="...", reply_to_id="{result["message_id"]}")'
             ),
             prompt,
@@ -4586,7 +4586,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('## Message from Architect A (architect)', sent[0][1])
         self.assertIn('Ack required. Reply with:', sent[0][1])
         self.assertIn(
-            'mcp__torque__architect_peer_reply(message_id="msg-peer-buffered"',
+            'mcp__torque__peer_reply(message_id="msg-peer-buffered"',
             sent[0][1],
         )
         persisted = self.db.load_agent_peer_message('msg-peer-buffered')
@@ -5387,10 +5387,10 @@ class ResolvePendingEngineerSpecializationsTests(unittest.TestCase):
 
 class TorqueAiMcpReportToolNamesTests(unittest.TestCase):
     """TORQUE:238 cutover: workers report exclusively via
-    `mcp__torque__torque_*` MCP tools (no Bash CLI rewrite bridge). The
+    canonical MCP tools (no Bash CLI rewrite bridge). The
     `_TORQUE_AI_MCP_REPORT_TOOL_NAMES` set drives the `/events` capture
-    clause's broadcast-suppression for those specific tool names so
-    the ai_report `_append_mcp` synthesis isn't double-emitted.
+    clause's broadcast suppression for canonical calls and accepted legacy
+    aliases so the ai_report `_append_mcp` synthesis isn't double-emitted.
     """
 
     def setUp(self):
@@ -5401,11 +5401,31 @@ class TorqueAiMcpReportToolNamesTests(unittest.TestCase):
     def test_report_tool_names_match_actions(self):
         actions = self.server_mod._TORQUE_AI_MCP_REPORT_ACTIONS
         tool_names = self.server_mod._TORQUE_AI_MCP_REPORT_TOOL_NAMES
-        # Every whitelisted action must have a corresponding fully-
-        # qualified MCP tool name in the suppression set.
+        canonical_by_action = {
+            "progress": "task_progress",
+            "done": "task_complete",
+            "blocked": "task_blocked",
+            "error": "task_error",
+            "ask": "user_ask",
+            "derive": "task_derive",
+            "ready": "agent_ready",
+            "verify": "task_verify",
+            "name": "agent_rename",
+        }
+        # Every whitelisted action must suppress both the canonical call and
+        # the hidden same-caller compatibility alias.
         self.assertEqual(
             tool_names,
-            frozenset("mcp__torque__torque_" + a for a in actions),
+            frozenset({
+                *(
+                    "mcp__torque__" + canonical_by_action[action]
+                    for action in actions
+                ),
+                *(
+                    "mcp__torque__torque_" + action
+                    for action in actions
+                ),
+            }),
         )
 
     def test_covers_all_nine_worker_reporting_actions(self):
@@ -5425,18 +5445,16 @@ class TorqueAiMcpReportToolNamesTests(unittest.TestCase):
         )
 
     def test_engineer_architect_tool_names_NOT_in_suppression_set(self):
-        # Engineer/architect MCP tools (e.g. `mcp__torque__engineer_*`,
-        # `mcp__torque__architect_*`) MUST NOT appear in the suppression
-        # set — they don't go through `_append_mcp`, so suppressing
-        # the `/events` capture clause for them would lose the live
-        # delta entirely.
+        # Non-report operations MUST NOT appear in the suppression set. They
+        # do not go through `_append_mcp`, so suppressing `/events` capture
+        # would lose the live delta entirely.
         suppressed = self.server_mod._TORQUE_AI_MCP_REPORT_TOOL_NAMES
         for tool in (
             "mcp__torque__engineer_task_create",
             "mcp__torque__engineer_task_dispatch",
             "mcp__torque__architect_message_engineer",
             "mcp__torque__architect_journal",
-            "mcp__torque__torque_reply",  # `reply` is not a worker reporting action
+            "mcp__torque__agent_reply",
         ):
             self.assertNotIn(
                 tool, suppressed,

@@ -1,14 +1,14 @@
 ---
 description: Show details of a Torque task
-allowed-tools: mcp__torque__engineer_task_show, mcp__torque__torque_context
+allowed-tools: mcp__torque__task_get, mcp__torque__context
 argument-hint: [task slug or ID]
 ---
 
 Show full details of a task.
 
-If $ARGUMENTS is provided, use it as the task slug or ID and call engineer_task_show.
+If $ARGUMENTS is provided, use it as the task slug or ID and call task_get.
 
-If $ARGUMENTS is empty, call torque_context to find the current agent's linked task, then call engineer_task_show with that task's slug.
+If $ARGUMENTS is empty, call context to find the current agent's linked task, then call task_get with that task's slug.
 
 Format the output clearly:
 - Title and description

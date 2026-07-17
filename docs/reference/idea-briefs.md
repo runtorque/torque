@@ -9,7 +9,9 @@ Idea Briefs are durable, proposal-only synthesis artifacts for product ideation.
 - `parked` — durable but intentionally paused for later.
 - `archived` — hidden by default; terminal visibility state.
 
-`idea_brief_propose` / `architect_idea_brief_propose` only marks the brief proposed for review. The proposal payload records `auto_dispatch=false`, `auto_assign=false`, and empty `created_task_id` / `created_decision_id`.
+`idea_brief_transition(operation="propose")` only marks the brief proposed for
+review. The proposal payload records `auto_dispatch=false`,
+`auto_assign=false`, and empty `created_task_id` / `created_decision_id`.
 
 ## Durable fields
 
@@ -100,21 +102,21 @@ The current Wave A frontend only keeps `state.idea_briefs` fresh; Wave B owns th
 
 Any Architect-derived class with the required Idea Brief capabilities can use:
 
-- `architect_idea_brief_list`
-- `architect_idea_brief_show`
-- `architect_idea_brief_create`
-- `architect_idea_brief_update`
-- `architect_idea_brief_refine`
-- `architect_idea_brief_park`
-- `architect_idea_brief_archive`
-- `architect_idea_brief_propose`
+- `idea_brief_list`
+- `idea_brief_get`
+- `idea_brief_create`
+- `idea_brief_update`
+- `idea_brief_transition`
 
 Tool rules:
 
 - Group argument, when supplied, must match caller group.
-- List/show are same-group reads and include `caller_owned`.
+- List/get are same-group reads and include `caller_owned`.
 - Create writes caller-owned briefs only.
-- Update/refine/park/archive/propose require caller ownership.
+- `idea_brief_update` uses `operation="update"` or `operation="refine"`.
+- `idea_brief_transition` uses `transition="park"`, `"archive"`, or
+  `"propose"`.
+- Update, refine, park, archive, and propose require caller ownership.
 - Thinking links are validated same-group.
 - Propose is review-only and never creates/dispatches/assigns work.
 - Propose returns `review_scope:"product_safe_review"` plus the persisted `proposal` object.

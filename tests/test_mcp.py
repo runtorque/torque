@@ -1425,16 +1425,16 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             tool["name"]
             for tool in listed_missing_header.payload["result"]["tools"]
         ]
-        self.assertIn("torque_progress", tool_names)
-        self.assertIn("torque_verify", tool_names)
-        self.assertIn("torque_task_upload_artifact", tool_names)
-        self.assertIn("torque_memory_publish", tool_names)
-        self.assertIn("torque_memory_read", tool_names)
-        self.assertIn("torque_memory_link", tool_names)
-        self.assertNotIn("engineer_board_summary", tool_names)
-        self.assertNotIn("engineer_board_summary", tool_names)
-        self.assertNotIn("architect_board_summary", tool_names)
-        self.assertNotIn("architect_tool_search", tool_names)
+        self.assertIn("task_progress", tool_names)
+        self.assertIn("task_verify", tool_names)
+        self.assertIn("task_artifact_upload", tool_names)
+        self.assertIn("memory_publish", tool_names)
+        self.assertIn("memory_get", tool_names)
+        self.assertIn("memory_link", tool_names)
+        self.assertFalse(any(
+            name.startswith(("torque_", "engineer_", "architect_"))
+            for name in tool_names
+        ))
 
         listed_worker = await handler(
             FakeRequest(
@@ -1445,12 +1445,12 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         worker_tool_names = [
             tool["name"] for tool in listed_worker.payload["result"]["tools"]
         ]
-        self.assertIn("torque_progress", worker_tool_names)
-        self.assertIn("torque_message_user", worker_tool_names)
+        self.assertIn("task_progress", worker_tool_names)
+        self.assertIn("user_message", worker_tool_names)
         worker_message_tool = next(
             tool
             for tool in listed_worker.payload["result"]["tools"]
-            if tool["name"] == "torque_message_user"
+            if tool["name"] == "user_message"
         )
         self.assertNotIn(
             "thread_id",
@@ -1460,10 +1460,8 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             "reply_to_id",
             worker_message_tool["inputSchema"]["properties"],
         )
-        self.assertNotIn("engineer_board_summary", worker_tool_names)
-        self.assertNotIn("engineer_board_summary", worker_tool_names)
-        self.assertNotIn("architect_board_summary", worker_tool_names)
-        self.assertNotIn("architect_tool_search", worker_tool_names)
+        self.assertNotIn("board_summary", worker_tool_names)
+        self.assertNotIn("tool_search", worker_tool_names)
 
         listed_architect = await handler(
             FakeRequest(
@@ -1474,42 +1472,23 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         architect_tool_names = [
             tool["name"] for tool in listed_architect.payload["result"]["tools"]
         ]
-        self.assertIn("architect_tool_search", architect_tool_names)
-        self.assertIn("architect_attention_digest", architect_tool_names)
-        self.assertIn("architect_board_summary", architect_tool_names)
-        self.assertIn("architect_events_recent", architect_tool_names)
-        self.assertIn("architect_deploy_state", architect_tool_names)
-        self.assertIn("architect_digest_filter", architect_tool_names)
-        self.assertNotIn("architect_get_architect_settings", architect_tool_names)
-        self.assertNotIn("architect_mcp_calls", architect_tool_names)
-        self.assertNotIn("architect_engineer_dismiss", architect_tool_names)
-        self.assertNotIn("architect_engineer_rehire", architect_tool_names)
-        self.assertNotIn("architect_update_architect_settings", architect_tool_names)
-        self.assertNotIn("architect_workspace_overview", architect_tool_names)
-        self.assertIn("architect_task_list", architect_tool_names)
-        self.assertIn("architect_task_chain", architect_tool_names)
-        self.assertIn("architect_task_update", architect_tool_names)
-        self.assertIn("architect_task_move", architect_tool_names)
-        self.assertIn("architect_task_mark_covered", architect_tool_names)
-        self.assertIn("architect_proposal_root_backlog_hygiene", architect_tool_names)
-        self.assertIn("architect_wave_summary", architect_tool_names)
-        self.assertIn("architect_completion_audit", architect_tool_names)
-        self.assertIn("architect_decision_create", architect_tool_names)
-        self.assertIn("architect_engineer_hire", architect_tool_names)
-        self.assertIn("architect_engineer_set_specializations", architect_tool_names)
-        self.assertIn("architect_engineer_message", architect_tool_names)
-        self.assertIn("architect_engineer_feedback_request", architect_tool_names)
-        self.assertIn("architect_engineer_feedback_status", architect_tool_names)
-        self.assertIn("architect_peer_list", architect_tool_names)
-        self.assertIn("architect_peer_message", architect_tool_names)
-        self.assertIn("architect_peer_inbox", architect_tool_names)
-        self.assertIn("architect_engineer_journal_read", architect_tool_names)
-        self.assertIn("architect_engineer_pending_question", architect_tool_names)
-        self.assertIn("architect_message_user", architect_tool_names)
+        for name in {
+            "tool_search", "board_summary", "boot_summary", "task_list",
+            "task_get", "task_create", "task_update", "task_move",
+            "task_mark_covered", "agent_list", "agent_message", "peer_list",
+            "peer_message", "peer_inbox", "decision_list", "journal_write",
+            "journal_list", "user_message",
+        }:
+            self.assertIn(name, architect_tool_names)
+        self.assertLessEqual(len(architect_tool_names), 30)
+        self.assertFalse(any(
+            name.startswith(("torque_", "engineer_", "architect_"))
+            for name in architect_tool_names
+        ))
         architect_message_tool = next(
             tool
             for tool in listed_architect.payload["result"]["tools"]
-            if tool["name"] == "architect_message_user"
+            if tool["name"] == "user_message"
         )
         self.assertNotIn(
             "thread_id",
@@ -1519,9 +1498,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             "reply_to_id",
             architect_message_tool["inputSchema"]["properties"],
         )
-        self.assertIn("architect_ask", architect_tool_names)
-        self.assertNotIn("engineer_board_summary", architect_tool_names)
-        self.assertNotIn("engineer_board_summary", architect_tool_names)
+        self.assertIn("user_ask", architect_tool_names)
 
         listed_engineer = await handler(
             FakeRequest(
@@ -1532,16 +1509,15 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         engineer_tool_names = [
             tool["name"] for tool in listed_engineer.payload["result"]["tools"]
         ]
-        self.assertIn("engineer_tool_search", engineer_tool_names)
-        self.assertIn("engineer_board_summary", engineer_tool_names)
-        self.assertIn("engineer_task_mark_covered", engineer_tool_names)
-        self.assertIn("engineer_task_verify", engineer_tool_names)
-        self.assertIn("engineer_task_upload_artifact", engineer_tool_names)
-        self.assertIn("engineer_message_user", engineer_tool_names)
+        self.assertIn("tool_search", engineer_tool_names)
+        self.assertIn("board_summary", engineer_tool_names)
+        self.assertIn("task_verify", engineer_tool_names)
+        self.assertIn("task_artifact_upload", engineer_tool_names)
+        self.assertIn("user_message", engineer_tool_names)
         engineer_message_tool = next(
             tool
             for tool in listed_engineer.payload["result"]["tools"]
-            if tool["name"] == "engineer_message_user"
+            if tool["name"] == "user_message"
         )
         self.assertNotIn(
             "thread_id",
@@ -1551,14 +1527,14 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             "reply_to_id",
             engineer_message_tool["inputSchema"]["properties"],
         )
-        self.assertNotIn("engineer_message_architect", engineer_tool_names)
-        self.assertNotIn("engineer_reply", engineer_tool_names)
-        self.assertNotIn("engineer_task_reassign", engineer_tool_names)
-        self.assertNotIn("engineer_launch_settings", engineer_tool_names)
-        self.assertNotIn("engineer_specializations_list", engineer_tool_names)
-        self.assertNotIn("engineer_mcp_calls", engineer_tool_names)
-        self.assertNotIn("architect_workspace_overview", engineer_tool_names)
-        self.assertNotIn("architect_board_summary", engineer_tool_names)
+        self.assertNotIn("supervisor_message", engineer_tool_names)
+        self.assertNotIn("agent_reply", engineer_tool_names)
+        self.assertNotIn("worktree_merge", engineer_tool_names)
+        self.assertLessEqual(len(engineer_tool_names), 30)
+        self.assertFalse(any(
+            name.startswith(("torque_", "engineer_", "architect_"))
+            for name in engineer_tool_names
+        ))
 
         listed_hired_engineer = await handler(
             FakeRequest(
@@ -1570,8 +1546,8 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             tool["name"]
             for tool in listed_hired_engineer.payload["result"]["tools"]
         ]
-        self.assertIn("engineer_message_architect", hired_engineer_tool_names)
-        self.assertIn("engineer_reply", hired_engineer_tool_names)
+        self.assertIn("supervisor_message", hired_engineer_tool_names)
+        self.assertIn("agent_reply", hired_engineer_tool_names)
 
         missing_header = await handler(
             FakeRequest(
@@ -1599,11 +1575,8 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                 }
             )
         )
-        self.assertTrue(removed_alias.payload["result"]["isError"])
-        self.assertIn(
-            "X-Torque-Cell-Id header is required",
-            removed_alias.payload["result"]["content"][0]["text"],
-        )
+        self.assertEqual(removed_alias.payload["error"]["code"], -32602)
+        self.assertIn("Unknown tool", removed_alias.payload["error"]["message"])
 
         denied_architect_summary = await handler(
             FakeRequest(
@@ -1616,10 +1589,13 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                 headers={"X-Torque-Cell-Id": worker.id},
             )
         )
-        self.assertTrue(denied_architect_summary.payload["result"]["isError"])
+        self.assertEqual(
+            denied_architect_summary.payload["error"]["code"],
+            -32602,
+        )
         self.assertIn(
-            "architect tools are only available inside a Torque-managed architect session",
-            denied_architect_summary.payload["result"]["content"][0]["text"],
+            "Unknown tool",
+            denied_architect_summary.payload["error"]["message"],
         )
 
         summary = await handler(
@@ -1755,11 +1731,11 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             tool = next(t for t in tools if t["name"] == tool_name)
             return tool["inputSchema"]["properties"]
 
-        task_dispatch_props = await props_for("engineer_task_dispatch")
-        self.assertIn("agent_type", task_dispatch_props)
+        task_dispatch_props = await props_for("task_dispatch")
+        self.assertNotIn("agent_type", task_dispatch_props)
         self.assertIn("provider", task_dispatch_props)
-        self.assertIn("provider", await props_for("engineer_batch_dispatch"))
-        agent_message_props = await props_for("engineer_agent_message")
+        self.assertIn("entries", task_dispatch_props)
+        agent_message_props = await props_for("agent_message")
         self.assertIn("reply_required", agent_message_props)
         self.assertTrue(agent_message_props["reply_required"]["default"])
 
@@ -1768,20 +1744,18 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             engineer_can_override_worker_provider=False,
         )
 
-        task_dispatch_props = await props_for("engineer_task_dispatch")
+        task_dispatch_props = await props_for("task_dispatch")
         self.assertNotIn("agent_type", task_dispatch_props)
         self.assertNotIn("provider", task_dispatch_props)
-        self.assertNotIn("provider", await props_for("engineer_batch_dispatch"))
 
         state.update_engineer_settings(
             "g",
             engineer_can_override_worker_provider=True,
         )
 
-        task_dispatch_props = await props_for("engineer_task_dispatch")
-        self.assertIn("agent_type", task_dispatch_props)
+        task_dispatch_props = await props_for("task_dispatch")
+        self.assertNotIn("agent_type", task_dispatch_props)
         self.assertIn("provider", task_dispatch_props)
-        self.assertIn("provider", await props_for("engineer_batch_dispatch"))
 
     async def test_architect_engineer_specialization_tool_schemas(self):
         hire_tool = next(
@@ -1860,10 +1834,25 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             state=state,
         )
         self.assertEqual(status, 200)
-        tool = next(
-            t for t in response["result"]["tools"]
-            if t["name"] == "engineer_merge"
+        search, search_status = await self.mcp_mod.dispatch_mcp_rpc_body(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "tool_search",
+                    "arguments": {"query": "select:worktree_merge"},
+                },
+            },
+            cell_id=engineer.id,
+            handle_command=fake_handle_command,
+            state=state,
         )
+        self.assertEqual(search_status, 200)
+        payload = self._parse_functions_block(
+            search["result"]["content"][0]["text"]
+        )
+        tool = payload["tools"][0]
         props = tool["inputSchema"]["properties"]
 
         self.assertIn("pr_title", props)
@@ -2620,8 +2609,8 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
 
         for cell in (user_owned_engineer, legacy_empty_engineer):
             names = await listed_names(cell.id)
-            self.assertNotIn("engineer_message_architect", names)
-            self.assertNotIn("engineer_reply", names)
+            self.assertNotIn("supervisor_message", names)
+            self.assertNotIn("agent_reply", names)
 
             search = await handler(
                 FakeRequest(
@@ -2630,8 +2619,8 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                         "id": f"search-{cell.id}",
                         "method": "tools/call",
                         "params": {
-                            "name": "engineer_tool_search",
-                            "arguments": {"query": "engineer_message_architect"},
+                            "name": "tool_search",
+                            "arguments": {"query": "supervisor message"},
                         },
                     },
                     headers={"X-Torque-Cell-Id": cell.id},
@@ -2658,8 +2647,8 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("Unknown tool", response.payload["error"]["message"])
 
         hired_names = await listed_names(hired_engineer.id)
-        self.assertIn("engineer_message_architect", hired_names)
-        self.assertIn("engineer_reply", hired_names)
+        self.assertIn("supervisor_message", hired_names)
+        self.assertIn("agent_reply", hired_names)
 
     async def test_tool_search_select_and_keyword_return_functions_block(self):
         state = self.state_mod.MatrixState()
@@ -2695,9 +2684,9 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                     "id": 1,
                     "method": "tools/call",
                     "params": {
-                        "name": "engineer_tool_search",
+                        "name": "tool_search",
                         "arguments": {
-                            "query": "select:engineer_mcp_calls",
+                            "query": "select:telemetry_query",
                         },
                     },
                 },
@@ -2710,7 +2699,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             [tool["name"] for tool in exact_payload["tools"]],
-            ["engineer_mcp_calls"],
+            ["telemetry_query"],
         )
         self.assertNotIn("deferred", exact_payload["tools"][0])
 
@@ -2735,7 +2724,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             keyword.payload["result"]["content"][0]["text"]
         )
         self.assertIn(
-            "engineer_mcp_calls",
+            "telemetry_query",
             [tool["name"] for tool in keyword_payload["tools"]],
         )
 
@@ -2746,9 +2735,9 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                     "id": 3,
                     "method": "tools/call",
                     "params": {
-                        "name": "architect_tool_search",
+                        "name": "tool_search",
                         "arguments": {
-                            "query": "select:architect_mcp_calls",
+                            "query": "select:telemetry_query",
                         },
                     },
                 },
@@ -2760,7 +2749,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             [tool["name"] for tool in architect_payload["tools"]],
-            ["architect_mcp_calls"],
+            ["telemetry_query"],
         )
 
     async def test_deferred_tools_remain_callable_after_lazy_registration(self):

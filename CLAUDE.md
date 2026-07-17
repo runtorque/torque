@@ -98,9 +98,9 @@ Action templates can reference the injected `torque` dict: `torque.agent.*`, `to
 
 ## Worker dispatch and reporting
 
-Dispatched workers report through MCP tools only: `torque_progress`, `torque_done`, `torque_blocked`, `torque_error`, `torque_ask`, `torque_derive`, `torque_ready`, `torque_verify`, and related shared-memory/artifact tools. `build_torque_system_prompt()` and `build_dispatch_postscript()` list the current completion paths; `torque_derive` is restricted to the action's declared transitions. The CLI `torque ai *` remains for humans/offline scripts, not worker prompt guidance.
+Dispatched workers report through MCP tools only: `task_progress`, `task_complete`, `task_blocked`, `task_error`, `user_ask`, `task_derive`, `agent_ready`, `task_verify`, and related shared-memory/artifact tools. `build_torque_system_prompt()` and `build_dispatch_postscript()` list the current completion paths; `task_derive` is restricted to the action's declared transitions. The CLI `torque ai *` remains for humans/offline scripts, not worker prompt guidance.
 
-Workers should not ask the user directly. Use `torque_ask` only for blocking human decisions or approvals so Torque can track the request.
+Workers should not ask the user directly. Use `user_ask` only for blocking human decisions or approvals so Torque can track the request.
 
 ## Code conventions
 

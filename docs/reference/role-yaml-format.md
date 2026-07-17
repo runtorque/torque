@@ -57,7 +57,7 @@ group settings, action settings, or provider defaults when omitted.
 | `worktree` | bool | Request a git worktree for agents launched with this role. |
 | `worktree_base_branch` | string | Base branch override for role worktrees. |
 | `worktree_auto_checkpoint` | bool | Auto-checkpoint worktree state on stop when enabled. |
-| `checkpoint_on_progress` | bool | Auto-checkpoint on `torque_progress` when enabled. |
+| `checkpoint_on_progress` | bool | Auto-checkpoint on `task_progress` when enabled. |
 | `worktree_merge_squash` | bool | Prefer squash merge for this role's worktrees. |
 | `env_vars` | mapping | Environment variables injected into the agent process. |
 | `env_file` | string | Environment file path to load for the agent process. |

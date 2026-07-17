@@ -34,13 +34,12 @@ The daemon also exposes trusted read-only API commands on `/api/cmd` for UI clie
 
 ## MCP contract
 
-Read-only MCP wrappers are available by role prefix:
+Help uses the same canonical names for every eligible caller:
 
-| Role | Tools |
-|---|---|
-| Worker/shared | `torque_help_list`, `torque_help_show`, `torque_help_search`, `torque_help_query` |
-| Engineer | `engineer_help_list`, `engineer_help_show`, `engineer_help_search`, `engineer_help_query` |
-| Architect-derived classes whose effective ACL permits self-context reads | `architect_help_list`, `architect_help_show`, `architect_help_search`, `architect_help_query` |
+- `help_search` browses topics when `query` is omitted and searches when it is
+  present.
+- `help_get` reads one topic.
+- `help_query` answers a question from maintained documentation.
 
 Restricted profiles see Help through the same profile projection gate as other MCP tools. The Help tools require only `observe.self_context` because the implementation itself is hard allow-listed to public maintained documentation and does not widen task, journal, decision, worktree, deploy, or secret visibility.
 

@@ -122,7 +122,7 @@ When isolated worktrees are selected, settings are grouped by lifecycle:
 | **Worktree base directory** | Repo-relative directory where Torque stores worktrees. |
 | **Worktree base branch** | Branch to fork from. Leave empty to use the repo's current HEAD. |
 | **Automatic checkpoints** | Choose manual only, checkpoint when the Worker stops, checkpoint on throttled progress updates, or both progress and stop. |
-| **Merge mode** | Locks `engineer_merge` for this group. **Pull request** (default) requires the PR workflow and rejects `force_direct=true`; **Direct local** bypasses the PR path for every Engineer merge; **Engineer choice** keeps PR as the default with `force_direct=true` as an explicit local fallback. |
+| **Merge mode** | Locks `worktree_merge` for this group. **Pull request** (default) requires the PR workflow and rejects `force_direct=true`; **Direct local** bypasses the PR path for every Engineer merge; **Engineer choice** keeps PR as the default with `force_direct=true` as an explicit local fallback. |
 | **Direct-merge history** | For Direct local and Engineer choice, preserve Worker commits or squash them into one local commit. Pull request mode hides this option because GitHub squash is always requested. |
 | **Default post-merge cleanup** | What Torque should do by default after a successful merge when no explicit cleanup choice is provided. The default keeps the worker/worktree warm for same-worker continuity; opt in to auto-sweep to close the worker and delete the merged worktree/branch. For PR merges, cleanup runs after the PR actually merges, not when the PR is created or left pending. |
 | **Preserve merge diff** | Save the full pre-merge patch as a diff artifact on the latest open branch-boundary task. |

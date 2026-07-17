@@ -1983,6 +1983,117 @@ _ARCHITECT_THINKING_TOOL_SPECS = [
     },
 ]
 
+_ARCHITECT_TOOL_SPECS.extend([
+    {
+        "name": "architect_decision_get",
+        "authority": {
+            "requirements": [{
+                "capability": "decision.read",
+                "minimum_scope": "self",
+                "target_argument": "id",
+                "target_kind": "decision",
+            }],
+        },
+        "description": "Read one decision owned by this Architect.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"id": {"type": "string"}},
+            "required": ["id"],
+        },
+    },
+    {
+        "name": "architect_decision_review",
+        "authority": {
+            "requirements": [{
+                "capability": "decision.accept",
+                "minimum_scope": "self",
+                "target_argument": "id",
+                "target_kind": "decision",
+            }],
+        },
+        "description": "Accept, reject, or mark a caller-owned proposed decision as revised.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string"},
+                "decision": {
+                    "type": "string",
+                    "enum": ["accepted", "rejected", "revised"],
+                },
+                "rationale": {"type": "string"},
+            },
+            "required": ["id", "decision"],
+        },
+    },
+])
+
+_ARCHITECT_THINKING_TOOL_SPECS.extend([
+    {
+        "name": "architect_thinking_archive",
+        "authority": {
+            "requirements": [{
+                "capability": "thinking.write",
+                "minimum_scope": "self",
+                "handler_scoped": True,
+            }],
+        },
+        "description": "Archive a caller-owned Thinking artifact.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "artifact_type": {
+                    "type": "string",
+                    "enum": ["scratchpad", "mind_map"],
+                },
+                "artifact": {"type": "string"},
+            },
+            "required": ["artifact_type", "artifact"],
+        },
+    },
+    {
+        "name": "architect_thinking_mind_map_node_delete",
+        "authority": {
+            "requirements": [{
+                "capability": "thinking.write",
+                "minimum_scope": "self",
+                "handler_scoped": True,
+            }],
+        },
+        "description": "Delete a node from a caller-owned Mind Map.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "mind_map": {"type": "string"},
+                "map_id": {"type": "string"},
+                "node": {"type": "string"},
+                "node_id": {"type": "string"},
+            },
+            "required": ["node"],
+        },
+    },
+    {
+        "name": "architect_thinking_mind_map_link_delete",
+        "authority": {
+            "requirements": [{
+                "capability": "thinking.write",
+                "minimum_scope": "self",
+                "handler_scoped": True,
+            }],
+        },
+        "description": "Delete a link from a caller-owned Mind Map.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "mind_map": {"type": "string"},
+                "map_id": {"type": "string"},
+                "link": {"type": "string"},
+                "link_id": {"type": "string"},
+            },
+            "required": ["link"],
+        },
+    },
+])
+
 
 def _copy_tool_spec(tool: dict) -> dict:
     copied = deepcopy(tool)

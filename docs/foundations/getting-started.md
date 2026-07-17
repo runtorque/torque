@@ -67,7 +67,7 @@ This is the whole loop you're going to be doing for the rest of your life with T
     torque task dispatch "Write hello-world.py with a friendly greeting" -g playground
     ```
 
-   Torque renders the dispatch prompt, sends it to the worker's tab, and links the task to the worker on the board. The worker starts working. When it's done it calls `torque_done(...)` (via MCP) and the task moves to Done.
+   Torque renders the dispatch prompt, sends it to the worker's tab, and links the task to the worker on the board. The worker starts working. When it's done it calls `task_complete(...)` (via MCP) and the task moves to Done.
 
 5. **Watch the board.** Open the board panel (++a++ or click the board icon). You'll see your task in In Progress, then in Done.
 

@@ -79,7 +79,7 @@ def _format_mcp_message_prompt(message: str, *,
         prompt += f"Task: {task_id}\n"
     if task_id and reply_required:
         prompt += (
-            f'Reply with: torque_reply(task="{task_id}", '
+            f'Reply with: agent_reply(task="{task_id}", '
             'message="your response")\n'
         )
     prompt += "---\n"
@@ -139,17 +139,14 @@ def _format_injected_mcp_message_prompt(
         and recipient_kind_key == "engineer"
     )
     if engineer_peer_message:
-        reply_tool = "mcp__torque__engineer_peer_reply"
-    elif recipient_kind_key == "architect":
-        reply_tool = (
-            "mcp__torque__architect_peer_reply"
-            if sender_kind_key == "architect"
-            else "mcp__torque__architect_engineer_reply"
-        )
-    elif recipient_kind_key == "engineer":
-        reply_tool = "mcp__torque__engineer_reply"
+        reply_tool = "mcp__torque__peer_reply"
+    elif (
+        sender_kind_key == "architect"
+        and recipient_kind_key == "architect"
+    ):
+        reply_tool = "mcp__torque__peer_reply"
     else:
-        reply_tool = "mcp__torque__torque_reply"
+        reply_tool = "mcp__torque__agent_reply"
     blocks = []
     anchor = str(recipient_anchor or "").strip()
     if anchor:
@@ -177,7 +174,7 @@ def _format_injected_mcp_message_prompt(
     if engineer_peer_message:
         blocks.append(
             "Inspect referenced context with: "
-            f'mcp__torque__engineer_peer_inspect(message_id="{message_id}")'
+            f'mcp__torque__peer_context(message_id="{message_id}")'
         )
     prefix = "" if anchor else "\n"
     return prefix + "\n\n".join(blocks) + "\n---\n"
@@ -346,12 +343,8 @@ def _parse_user_agent_loop_command(message_text: str) -> dict:
     return {"action": "create", "interval_seconds": seconds, "message": message}
 
 def _user_direct_message_reply_tool(recipient_kind: str) -> str:
-    kind = str(recipient_kind or "").strip()
-    if kind == "architect":
-        return "architect_message_user"
-    if kind == "engineer":
-        return "engineer_message_user"
-    return "torque_message_user"
+    del recipient_kind
+    return "user_message"
 
 def _format_user_direct_message_prompt(
         row: dict,
@@ -384,7 +377,7 @@ def _format_user_direct_message_prompt(
         parts.extend([
             "This message was sent by a user-scheduled /loop.",
             "If the loop is no longer actionable, stop it with:",
-            "  mcp__torque__torque_stop_user_message_loop(reason=\"...\")",
+            "  mcp__torque__user_message_loop_stop(reason=\"...\")",
             "",
         ])
     if message:

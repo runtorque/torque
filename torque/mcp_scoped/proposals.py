@@ -57,7 +57,7 @@ def _cell_has_proposal_peer_authority(state, cell) -> bool:
     if not cell_id:
         return False
     return (
-        _caller_authority_allows_capability(state, cell_id, "message.architect_peer")
+        _caller_authority_allows_capability(state, cell_id, "message.peer")
         and _caller_authority_allows_capability(state, cell_id, "task.propose")
     )
 
@@ -117,7 +117,7 @@ def _proposal_peer_scope_reason(state, caller_id: str, peer) -> str:
     if _caller_authority_allows_capability(
             state,
             peer_id,
-            "message.architect_peer"):
+            "message.peer"):
         return "same-group-architect-peer-capable"
     return ""
 
@@ -867,7 +867,7 @@ def _require_product_ack_anchor(ack_required: bool, context: dict) -> str:
         return ""
     if _proposal_context_anchor_count(context) <= 0:
         return (
-            "ack_required=true requires comm.product_ack_request plus at least "
+            "ack_required=true requires message.ack_request plus at least "
             "one product-scope anchor (Idea Brief, decision, task proposal, Area, or Initiative)"
         )
     return ""
@@ -1343,6 +1343,43 @@ async def _architect_thinking_tool(
             "note": _with_thinking_owner_flag(updated, caller_id),
         }), False
 
+    if tool_name == "thinking_archive":
+        actor = {
+            "archived_by_kind": "architect",
+            "archived_by_id": str(caller_id or "").strip(),
+        }
+        if _mind_map_ref_from_args(args):
+            map_id, mind_map, error = _resolve_thinking_mind_map(
+                state, group, args
+            )
+            if error:
+                return error, True
+            owner_error = _require_caller_owned_thinking_item(
+                mind_map, caller_id, "Mind Map"
+            )
+            if owner_error:
+                return owner_error, True
+            archived = await state.archive_mind_map_async(map_id, **actor)
+            return _compact_json({
+                "type": "thinking_mind_map_archived",
+                "mind_map": _with_thinking_owner_flag(archived, caller_id),
+            }), False
+        note_id, note, error = _resolve_thinking_scratchpad_note(
+            state, group, args
+        )
+        if error:
+            return error, True
+        owner_error = _require_caller_owned_thinking_item(
+            note, caller_id, "Scratchpad note"
+        )
+        if owner_error:
+            return owner_error, True
+        archived = await state.archive_scratchpad_note_async(note_id, **actor)
+        return _compact_json({
+            "type": "thinking_scratchpad_archived",
+            "note": _with_thinking_owner_flag(archived, caller_id),
+        }), False
+
     if tool_name == "thinking_mind_map_list":
         mind_maps = [
             _with_thinking_owner_flag(mind_map, caller_id)
@@ -1515,6 +1552,35 @@ async def _architect_thinking_tool(
             "node": updated,
         }), False
 
+    if tool_name == "thinking_mind_map_node_delete":
+        map_id, mind_map, error = _resolve_thinking_mind_map_for_node_or_link(
+            state, group, args, item_kind="node"
+        )
+        if error:
+            return error, True
+        owner_error = _require_caller_owned_thinking_item(
+            mind_map, caller_id, "Mind Map"
+        )
+        if owner_error:
+            return owner_error, True
+        node_id = _mind_map_node_ref_from_args(args)
+        node = state.load_mind_map_node(node_id)
+        if (
+            not node
+            or node.get("deleted")
+            or str(node.get("map_id", "") or "").strip() != map_id
+        ):
+            return "Mind Map node not found", True
+        deleted = await state.delete_mind_map_node_async(
+            node_id,
+            deleted_by_kind="architect",
+            deleted_by_id=str(caller_id or "").strip(),
+        )
+        return _compact_json({
+            "type": "thinking_mind_map_node_deleted",
+            "node": deleted,
+        }), False
+
     if tool_name == "thinking_mind_map_link_create":
         map_id, mind_map, error = _resolve_thinking_mind_map(state, group, args)
         if error:
@@ -1579,6 +1645,35 @@ async def _architect_thinking_tool(
         except (TypeError, ValueError) as exc:
             return str(exc), True
         return _compact_json({"type": "thinking_mind_map_link_updated", "link": updated}), False
+
+    if tool_name == "thinking_mind_map_link_delete":
+        map_id, mind_map, error = _resolve_thinking_mind_map_for_node_or_link(
+            state, group, args, item_kind="link"
+        )
+        if error:
+            return error, True
+        owner_error = _require_caller_owned_thinking_item(
+            mind_map, caller_id, "Mind Map"
+        )
+        if owner_error:
+            return owner_error, True
+        link_id = _mind_map_link_ref_from_args(args)
+        link = state.load_mind_map_link(link_id)
+        if (
+            not link
+            or link.get("deleted")
+            or str(link.get("map_id", "") or "").strip() != map_id
+        ):
+            return "Mind Map link not found", True
+        deleted = await state.delete_mind_map_link_async(
+            link_id,
+            deleted_by_kind="architect",
+            deleted_by_id=str(caller_id or "").strip(),
+        )
+        return _compact_json({
+            "type": "thinking_mind_map_link_deleted",
+            "link": deleted,
+        }), False
 
     return f"Unknown architect thinking tool: {tool_name}", True
 

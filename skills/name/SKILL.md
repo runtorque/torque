@@ -1,10 +1,10 @@
 ---
 description: Rename the current Torque agent
-allowed-tools: mcp__torque__torque_name
+allowed-tools: mcp__torque__agent_rename
 argument-hint: <name>
 ---
 
-Rename the current agent using the torque_name MCP tool.
+Rename the current agent using the agent_rename MCP tool.
 
 $ARGUMENTS is the new name. It should be short and in kebab-case (e.g. "fix-auth-bug").
 

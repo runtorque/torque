@@ -89,6 +89,10 @@ async def dispatch_communications(ctx: ScopedDispatchContext):
         ack_required, ack_error = _optional_bool_arg(args, "ack_required")
         if ack_error:
             return ack_error, True
+        if ack_required and not _caller_authority_allows_capability(
+            real_state, caller_id, "message.ack_request"
+        ):
+            return "ack_required=true requires message.ack_request", True
         context, context_error = _normalize_architect_peer_context(
             real_state,
             caller_id,
@@ -158,6 +162,10 @@ async def dispatch_communications(ctx: ScopedDispatchContext):
         ack_required, ack_error = _optional_bool_arg(args, "ack_required")
         if ack_error:
             return ack_error, True
+        if ack_required and not _caller_authority_allows_capability(
+            real_state, caller_id, "message.ack_request"
+        ):
+            return "ack_required=true requires message.ack_request", True
         delivered = _deliver_architect_engineer_message(
             real_state,
             engineer,
@@ -191,6 +199,10 @@ async def dispatch_communications(ctx: ScopedDispatchContext):
         ack_required, ack_error = _optional_bool_arg(args, "ack_required")
         if ack_error:
             return ack_error, True
+        if ack_required and not _caller_authority_allows_capability(
+            real_state, caller_id, "message.ack_request"
+        ):
+            return "ack_required=true requires message.ack_request", True
         context, context_error = _normalize_engineer_peer_context(
             state,
             caller_id,
@@ -284,6 +296,10 @@ async def dispatch_communications(ctx: ScopedDispatchContext):
         ack_required, ack_error = _optional_bool_arg(args, "ack_required")
         if ack_error:
             return ack_error, True
+        if ack_required and not _caller_authority_allows_capability(
+            real_state, caller_id, "message.ack_request"
+        ):
+            return "ack_required=true requires message.ack_request", True
         length_error = _validate_architect_peer_message_length(message)
         if length_error:
             return length_error, True
@@ -382,6 +398,14 @@ async def dispatch_communications(ctx: ScopedDispatchContext):
             ack_required, ack_error = _optional_bool_arg(args, "ack_required")
             if ack_error:
                 return ack_error, True
+            if (
+                ack_required
+                and action == "architect_peer_reply"
+                and not _caller_authority_allows_capability(
+                    real_state, caller_id, "message.ack_request"
+                )
+            ):
+                return "ack_required=true requires message.ack_request", True
         if caller_kind == "architect" and action == "architect_peer_reply":
             length_error = _validate_architect_peer_message_length(message)
             if length_error:

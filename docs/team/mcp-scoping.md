@@ -4,17 +4,22 @@ Torque's team hierarchy isn't a polite convention. It's a protocol the daemon en
 
 This page explains how that works, why it works that way, and what you can verify if you ever need to convince yourself.
 
-## The tool surfaces, by role
+## The tool surfaces, by caller
 
-Three prefixed tool surfaces exist:
+Torque exposes one canonical vocabulary. Tool names describe operations, not
+roles: a Worker and Engineer can both receive `task_verify`, while Engineers
+and Architects both use `peer_message`. The authenticated caller determines
+the implementation, visible records, and permitted targets.
 
-| Prefix | Tool count | Visible to | Scope of action |
-|---|---|---|---|
-| `torque_*` | 18 | All authenticated agents | Caller's own state — its tasks, its derivations, its replies. |
-| `engineer_*` | ~90 | Engineers only | The Engineer's group only. Engineer in group A cannot read group B. |
-| `architect_*` | ~50 | Architects only | The Architect's group, with further per-Architect scoping on decisions, hires, journal, and peer threads. |
+| Caller | Advertised surface | Scope of action |
+|---|---|---|
+| Worker | 24 eager tools | The Worker's own task, reports, replies, and shared context. |
+| Engineer | At most 30 eager tools plus an authority-filtered deferred catalog | The Engineer's group, owned Workers, assigned tasks, and eligible peers/supervisor. |
+| Architect | At most 30 eager tools plus an authority-filtered deferred catalog | The Architect's group, with per-Architect ownership on decisions, hires, journal, and peer threads. |
 
-The prefix is the role boundary. A Worker calling `engineer_board_summary` doesn't get a permission denied — it gets `Unknown tool`, because the tool isn't visible to it in the first place.
+Historical `torque_*`, `engineer_*`, and `architect_*` names are hidden
+compatibility aliases. They are never advertised and cannot cross the caller's
+projected catalog.
 
 ## How a call gets authenticated
 
@@ -30,9 +35,9 @@ sequenceDiagram
     Agent->>MCP: tools/list (X-Torque-Cell-Id: abc123)
     MCP->>State: authorize_caller(cell_id=abc123)
     State-->>MCP: {cell, group, kind: "worker"}
-    MCP->>MCP: filter tool list by kind
-    MCP-->>Agent: visible tools (torque_* only)
-    Agent->>MCP: call torque_done (X-Torque-Cell-Id: abc123)
+    MCP->>MCP: project canonical tools from kind, authority, and relationships
+    MCP-->>Agent: visible canonical operations
+    Agent->>MCP: call task_complete (X-Torque-Cell-Id: abc123)
     MCP->>Tool: dispatch with scoped state view
     Tool->>State: read/write filtered to caller's scope
     Tool-->>Agent: result
@@ -43,34 +48,39 @@ The header is set automatically by the agent's MCP integration:
 - **Claude Code** populates it from `${TORQUE_CELL_ID}` in `.mcp.json` (Torque writes that file when it boots the agent).
 - **Codex** populates it via `env_http_headers` in `.codex/config.toml`.
 
-When a request hits the daemon, `authorize_caller()` resolves the cell ID to a specific agent in a specific group, identifies the caller's `kind`, and returns either an authorized handle or an error. Without a valid header, the entire `engineer_*` and `architect_*` surfaces refuse to enumerate, with the message "X-Torque-Cell-Id header is required."
+When a request hits the daemon, `authorize_caller()` resolves the cell ID to a
+specific agent in a specific group, identifies the caller's `kind`, and
+returns either an authorized handle or an error. Without a valid header,
+operations that act on agent state refuse to execute.
 
 ## Tool list filtering happens at list time
 
 When an agent's MCP client asks for the available tools, the response is **filtered before it leaves the server**. Hidden tools never appear in the list — there's no way for a Worker to discover the Engineer tools by inspection.
 
-This matters because it means scoping isn't enforced as "see everything, reject some calls." It's enforced as "you only see what you can call." A Worker that's told (in its system prompt) about an `engineer_*` tool will get `Unknown tool` when it tries.
-
-There's one exception, and it's deliberate: `engineer_tool_search` and `architect_tool_search` exist so Engineers and Architects can discover deferred tools that aren't in the initial list. Deferred tools are real tools that ship with `"deferred": true` to keep the initial payload small. The search tool returns their schemas on demand. Workers don't have a `torque_tool_search` because the entire `torque_*` surface fits comfortably in the initial list.
+This means scoping is not implemented as "see everything, reject some calls."
+Each caller sees only its eager canonical operations. `tool_search` lets
+Engineers and Architects discover only deferred operations already allowed by
+their frozen Agent Class authority. Workers need no `tool_search` because
+their entire surface is eager.
 
 ## Caller-aware result filtering
 
 Visibility filtering applies not just to the tool list but to **the data each tool returns**. Two tools with the same name behave differently based on who called them.
 
-| Tool | Worker call | Engineer call | Architect call |
+| Canonical tool | Worker call | Engineer call | Architect call |
 |---|---|---|---|
-| `engineer_board_summary` | not visible | only tasks in caller's group, with caller's assigned tasks highlighted | not visible |
-| `architect_board_summary` | not visible | not visible | only tasks in caller's group, with `created_by` attribution and caller-involved peer-message counts |
-| `engineer_journal_read` | not visible | only this Engineer's journal entries | not visible |
-| `architect_journal_read` | not visible | not visible | only this Architect's own journal |
-| `architect_decision_list` | not visible | not visible | only this Architect's decisions |
-| `architect_engineer_journal_read` | not visible | not visible | only journals of Engineers this Architect hired |
-| `architect_peer_inbox` | not visible | not visible | only same-group Architect peer threads involving this Architect |
-| `architect_peer_message` | not visible | not visible | only one non-self, non-tombstoned Architect in the same group |
-| `engineer_peer_notify` / `engineer_peer_inspect` | not visible | same-group Engineer peers with the same non-empty supervising Architect; read-only context grants only | not visible |
-| `architect_engineer_peer_threads` / `architect_engineer_peer_inspect` | not visible | not visible | Engineer↔Engineer threads where both participants were hired by this Architect |
+| `board_summary` | not visible | group board with caller assignments highlighted | group board with creation attribution and peer-message counts |
+| `journal_list` | not visible | only this Engineer's journal | only this Architect's journal |
+| `decision_list` | not visible | visible only when an Agent Class grants it | this Architect's decisions or a proposal-safe projection |
+| `agent_journal_list` | not visible | not visible | only journals of Engineers this Architect hired |
+| `peer_inbox` | not visible | eligible sibling-Engineer threads | same-group Architect threads involving this Architect |
+| `peer_message` | not visible | sibling Engineer under the same supervising Architect | non-self, non-tombstoned Architect in the same group |
+| `peer_context` | not visible | read-only context attached to an eligible peer thread | not visible |
+| `agent_thread_list` / `agent_thread_get` | not visible | not visible | eligible Engineer↔Engineer threads |
 
-The pattern: every tool builds a **scoped state view** before it does any reading. The scoped view filters by group for the role-prefixed tools, and further by ownership/creation for the per-actor stores like decisions and journals.
+The pattern: every operation builds a **scoped state view** before it does any
+reading. The view filters by group and then by ownership or relationship for
+per-actor stores such as decisions, journals, and message threads.
 
 You can't escape the scoped view. There's no `include_other_groups: true` parameter. There's no admin override. The scope is the contract.
 
@@ -85,7 +95,9 @@ tools are read-only and are not gated by digest notification settings.
 
 Three failure modes:
 
-1. **Wrong-prefix call.** A Worker calls `engineer_*` or `architect_*`. Returns `-32602` (invalid params) with `Unknown tool: <name>`. The tool was never in the visible list; the error is honest about that.
+1. **Unavailable operation.** A caller invokes a canonical operation outside
+   its projected catalog, or tries a hidden legacy alias from another role.
+   Torque returns `-32602` with `Unknown tool: <name>`.
 2. **Cross-group reference.** An Engineer in group A passes a task ID that lives in group B. Returns `not found in scope` from the relevant `_resolve_visible_*` helper. The task exists; it's just not visible to this caller.
 3. **Cross-actor reference.** An Architect tries to update another Architect's decision, or read another Architect's journal. Returns the same kind of "not found in scope" — the decision exists, but it's not yours.
 
@@ -95,11 +107,17 @@ There is no debug mode that reveals what's actually there. There's no capability
 
 Three observable surfaces let you audit:
 
-- **Daemon log** logs every MCP call with the calling cell ID prefix. Tail the active profile log (for example `tail -f ~/.torque/profiles/default/torque.log`, or the legacy Toolbelt log under `~/Library/Application Support/iTerm2/Scripts/torque/torque/` when migrating old data) and dispatch work — you'll see lines like `mcp_call cell=abc12345 kind=worker tool=torque_done`.
-- **`engineer_mcp_calls`** and **`architect_mcp_calls`** return recent MCP call history filtered to the caller's scope. An Engineer calling `engineer_mcp_calls` sees Workers in its group; an Architect sees the same plus its Engineers' calls.
-- **`engineer_board_summary` from a different Engineer** is the easiest direct test. Spin up two Engineers in two groups, call `engineer_board_summary` from each, confirm neither sees the other's tasks.
+- **Daemon log** records each call with the caller ID. Internal compatibility
+  handler names may appear there even though agents see canonical names.
+- **`telemetry_query`** returns recent MCP call history filtered to the
+  caller's scope.
+- **`board_summary` from different Engineers** is the easiest direct test:
+  create Engineers in different groups and confirm neither sees the other's
+  tasks.
 
-If you ever need to convince yourself the Worker boundary is real, the simplest experiment is: open a Worker's terminal, type `mcp__torque__engineer_board_summary` (or whatever your client's tool-call invocation looks like), and watch it fail with `Unknown tool`.
+To verify the Worker boundary, inspect its `tools/list`: orchestration
+operations such as `task_dispatch`, `worktree_merge`, and `engineer_hire` are
+absent. Calling one returns `Unknown tool`.
 
 ## Why this matters in practice
 

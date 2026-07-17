@@ -76,7 +76,9 @@ class MCPAuthorityPrimitiveTests(unittest.TestCase):
 
     def test_canonical_capability_catalog_is_valid_and_class_agnostic(self):
         self.assertEqual(validate_capability_catalog(), [])
-        self.assertIn("message.engineer", CAPABILITY_CATALOG)
+        self.assertIn("message.peer", CAPABILITY_CATALOG)
+        self.assertIn("message.subordinate", CAPABILITY_CATALOG)
+        self.assertIn("message.supervisor", CAPABILITY_CATALOG)
         self.assertIn("task.dispatch", CAPABILITY_CATALOG)
         self.assertNotIn("product-manager", repr(CAPABILITY_CATALOG).lower())
         self.assertNotIn("creative", repr(CAPABILITY_CATALOG).lower())
@@ -94,7 +96,7 @@ class MCPAuthorityPrimitiveTests(unittest.TestCase):
         self.assertEqual(worker["task.read"]["maximum_scope"], "self")
         self.assertNotIn("engineer.hire", worker)
         self.assertEqual(
-            architect["message.engineer"]["maximum_scope"],
+            architect["message.subordinate"]["maximum_scope"],
             "children",
         )
         self.assertNotIn("task.dispatch", architect)
@@ -298,7 +300,7 @@ class MCPAuthorityPrimitiveTests(unittest.TestCase):
         )
         self.assertEqual(
             authority.as_snapshot()["capabilities"],
-            {"help.read": None, "message.engineer": "children"},
+            {"help.read": None, "message.subordinate": "children"},
         )
 
     def test_canonical_acl_rejects_legacy_parallel_rule_lists(self):
@@ -511,13 +513,13 @@ class MCPAuthorityPrimitiveTests(unittest.TestCase):
             mcp_tool_allowed_by_authority("architect_task_chain", group_read)
         )
 
-    def test_projection_distinguishes_child_and_group_engineer_messages(self):
-        children_only = compile_agent_class_acl(
+    def test_projection_distinguishes_subordinate_and_peer_messages(self):
+        subordinate_only = compile_agent_class_acl(
             base_kind="engineer",
             acl={
                 "mode": "allow",
                 "rules": [
-                    {"capability": "message.engineer", "scope": "children"}
+                    {"capability": "message.subordinate", "scope": "children"}
                 ],
             },
             capabilities=CAPABILITY_CATALOG,
@@ -527,17 +529,17 @@ class MCPAuthorityPrimitiveTests(unittest.TestCase):
             acl={
                 "mode": "allow",
                 "rules": [
-                    {"capability": "message.engineer", "scope": "group"}
+                    {"capability": "message.peer", "scope": "group"}
                 ],
             },
             capabilities=CAPABILITY_CATALOG,
         )
 
         self.assertFalse(
-            mcp_tool_allowed_by_authority("engineer_peer_notify", children_only)
+            mcp_tool_allowed_by_authority("peer_message", subordinate_only)
         )
         self.assertTrue(
-            mcp_tool_allowed_by_authority("engineer_peer_notify", group)
+            mcp_tool_allowed_by_authority("peer_message", group)
         )
 
     def test_event_reads_do_not_grant_event_delivery_mutations(self):

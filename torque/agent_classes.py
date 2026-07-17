@@ -28,6 +28,7 @@ from .capability_catalog import (
 )
 from .mcp_authority import (
     AuthorityValidationError,
+    canonical_capability_ids,
     compile_agent_class_acl,
     registry_hash,
 )
@@ -451,7 +452,58 @@ def _normalized_class_data(data: dict[str, Any]) -> dict[str, Any]:
         runtime = dict(runtime)
         runtime["base_kind"] = runtime_base_kind
         out["runtime"] = runtime
+    base_kind = str(out.get("base_kind", "") or runtime_base_kind).strip()
+    if isinstance(out.get("acl"), dict):
+        acl = dict(out.get("acl") or {})
+        migrated_rules = []
+        capability_alias_found = False
+        for rule in list(acl.get("rules") or []):
+            if not isinstance(rule, dict):
+                migrated_rules.append(rule)
+                continue
+            raw_capabilities = (
+                list(rule.get("capabilities") or [])
+                if "capabilities" in rule
+                else [rule.get("capability", "")]
+            )
+            for raw_capability in raw_capabilities:
+                canonical_ids = canonical_capability_ids(
+                    raw_capability,
+                    base_kind=base_kind,
+                )
+                capability_alias_found = capability_alias_found or (
+                    canonical_ids != (str(raw_capability or "").strip(),)
+                )
+                for capability_id in canonical_ids:
+                    migrated = {"capability": capability_id}
+                    if "scope" in rule:
+                        migrated["scope"] = (
+                            "self"
+                            if capability_id == "message.supervisor"
+                            else rule.get("scope")
+                        )
+                    migrated_rules.append(migrated)
+        if capability_alias_found:
+            acl["rules"] = migrated_rules
+        out["acl"] = acl
     out["prompt"] = _normalized_prompt_mapping(out.get("prompt", {}))
+    migrated_guidance = []
+    for guidance in out["prompt"].get(PROMPT_TOOL_GUIDANCE_KEY, []) or []:
+        if not isinstance(guidance, dict):
+            migrated_guidance.append(guidance)
+            continue
+        selector = str(guidance.get("when_capability", "") or "").strip()
+        capability_ids = (
+            canonical_capability_ids(selector, base_kind=base_kind)
+            if selector
+            else ("",)
+        )
+        for capability_id in capability_ids:
+            migrated = dict(guidance)
+            if capability_id:
+                migrated["when_capability"] = capability_id
+            migrated_guidance.append(migrated)
+    out["prompt"][PROMPT_TOOL_GUIDANCE_KEY] = migrated_guidance
     if "runtime" not in out or not isinstance(out.get("runtime"), dict):
         out["runtime"] = {
             "base_kind": str(out.get("base_kind", "") or "").strip(),
@@ -1059,7 +1111,15 @@ def validate_class_data(
                         path=source,
                         class_id=class_id,
                     ))
-                elif str(selector).strip() not in CAPABILITY_CATALOG:
+                elif not all(
+                    capability_id in CAPABILITY_CATALOG
+                    for capability_id in canonical_capability_ids(
+                        str(selector).strip(),
+                        base_kind=str(
+                            normalized.get("base_kind", "") or ""
+                        ).strip(),
+                    )
+                ):
                     issues.append(ValidationIssue(
                         "error",
                         "unknown_prompt_tool_guidance_capability",

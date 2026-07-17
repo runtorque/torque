@@ -187,7 +187,7 @@ prompt: |
 |---|---|---|
 | `torque.task.id` | string | `GROUP:<n>` or `GROUP:<root>:<child>` for derived tasks. |
 | `torque.task.depth` | int | 0 for root, increments per derivation. |
-| `torque.task.is_derived` | bool | `True` for tasks created by `torque_derive`. |
+| `torque.task.is_derived` | bool | `True` for tasks created by `task_derive`. |
 | `torque.task.parent_task_id` | string | Parent task ID, empty for roots. |
 | `torque.task.labels` | list | Labels (`["derived", "feature"]`, etc.). |
 | `torque.task.group` | string | Task's group. |
@@ -323,7 +323,7 @@ prompt: |
 
   Report findings as a short summary plus a list of citations. If you
   uncover sub-questions worth investigating, derive a follow-up
-  research task with `torque_derive(action="research")`.
+  research task with `task_derive(action="research")`.
   {% else %}
   ## Next research question
   {{ TASK }}

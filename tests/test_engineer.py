@@ -1730,7 +1730,7 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("First session", text)
         self.assertIn("do a short reconnaissance pass before dispatching", text)
         self.assertIn("inspect the action catalog", text)
-        self.assertIn("call `engineer_ask`", text)
+        self.assertIn("call `user_ask`", text)
         self.assertNotIn("Don't start dispatching tasks without human guidance.", text)
 
     async def test_idle_heartbeat_surfaces_stale_in_progress_attention(self):

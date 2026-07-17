@@ -79,7 +79,7 @@ class MCPClassAuthorityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["total"], 1)
         self.assertTrue(payload["truncated"])
 
-    async def test_torque_steward_class_hides_tool_search_and_lists_read_observation_tools(self):
+    async def test_torque_steward_class_lists_canonical_observation_tools(self):
         state, architect = self._state_with_architect()
         state.assign_agent_class(
             architect.id,
@@ -104,50 +104,49 @@ class MCPClassAuthorityTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(architect.effective_agent_class_id, "torque-steward")
         for tool_name in {
-            "torque_context",
-            "architect_group_health_brief",
-            "architect_events_recent",
-            "architect_events_recent",
-            "architect_ask",
-            "architect_message_user",
-            "architect_peer_list",
-            "architect_peer_message",
-            "architect_journal",
-            "architect_journal_read",
+            "context",
+            "board_summary",
+            "boot_summary",
+            "task_list",
+            "task_get",
+            "user_ask",
+            "user_message",
+            "peer_list",
+            "peer_message",
+            "journal_write",
+            "journal_list",
+            "tool_search",
         }:
             self.assertIn(tool_name, tool_names)
 
-        # Steward grants telemetry reads, but architect_mcp_calls is deferred
-        # today. With raw tool search denied, it is not part of the Steward
-        # user-facing tools/list surface until a narrower wrapper is designed.
-        self.assertNotIn("architect_mcp_calls", tool_names)
+        # Telemetry reads remain deferred and are discoverable through the
+        # canonical tool_search surface.
+        self.assertNotIn("telemetry_list", tool_names)
 
         denied_tools = {
-            "architect_tool_search",
-            "engineer_tool_search",
-            "architect_engineer_hire",
-            "architect_engineer_set_specializations",
-            "architect_engineer_message",
-            "architect_engineer_answer",
-            "architect_task_create",
-            "architect_task_pickup",
-            "architect_task_update",
-            "architect_task_reassign",
-            "architect_task_move",
-            "architect_task_mark_covered",
-            "architect_proposal_root_backlog_hygiene",
-            "architect_area_create",
-            "architect_initiative_create",
-            "architect_decision_create",
-            "architect_decision_update",
-            "architect_deploy_state",
-            "architect_get_architect_settings",
-            "architect_behavior_overlay_read",
-            "architect_behavior_overlay_versions",
-            "architect_behavior_overlay_diff",
-            "architect_behavior_overlay_proposal_list",
-            "architect_behavior_overlay_propose",
-            "architect_behavior_overlay_rollback",
+            "engineer_hire",
+            "engineer_specializations_update",
+            "agent_message",
+            "agent_ask_answer",
+            "task_create",
+            "task_claim",
+            "task_update",
+            "task_reassign",
+            "task_move",
+            "task_mark_covered",
+            "task_coverage_reconcile",
+            "area_create",
+            "initiative_create",
+            "decision_create",
+            "decision_update",
+            "deploy_get",
+            "settings_get",
+            "behavior_overlay_get",
+            "behavior_overlay_versions",
+            "behavior_overlay_diff",
+            "behavior_overlay_proposal_list",
+            "behavior_overlay_propose",
+            "behavior_overlay_rollback",
         }
         self.assertFalse(denied_tools & tool_names)
 
@@ -213,8 +212,8 @@ class MCPClassAuthorityTests(unittest.IsolatedAsyncioTestCase):
             headers={"X-Torque-Cell-Id": architect.id},
         ))
         names = {tool["name"] for tool in listed.payload["result"]["tools"]}
-        self.assertIn("architect_task_list", names)
-        self.assertIn("architect_task_show", names)
+        self.assertIn("task_list", names)
+        self.assertIn("task_get", names)
 
         task_list = await handler(FakeRequest(
             {
@@ -813,26 +812,26 @@ class MCPClassAuthorityTests(unittest.IsolatedAsyncioTestCase):
                 "schema_version": 1,
                 "base_kind": "architect",
                 "acl_mode": "allow",
-                "capabilities": {"message.architect_peer": "group"},
+                "capabilities": {"message.peer": "group"},
             },
         }
         peer_names = await listed_names()
-        self.assertIn("architect_peer_inbox", peer_names)
-        self.assertIn("architect_peer_reply", peer_names)
-        self.assertNotIn("architect_engineer_reply", peer_names)
+        self.assertIn("peer_inbox", peer_names)
+        self.assertIn("peer_reply", peer_names)
+        self.assertNotIn("agent_reply", peer_names)
 
         architect.effective_agent_class_snapshot = {
             "effective_authority": {
                 "schema_version": 1,
                 "base_kind": "architect",
                 "acl_mode": "allow",
-                "capabilities": {"message.engineer": "children"},
+                "capabilities": {"message.subordinate": "children"},
             },
         }
         engineer_names = await listed_names()
-        self.assertIn("architect_engineer_reply", engineer_names)
-        self.assertNotIn("architect_peer_inbox", engineer_names)
-        self.assertNotIn("architect_peer_reply", engineer_names)
+        self.assertIn("agent_reply", engineer_names)
+        self.assertNotIn("peer_inbox", engineer_names)
+        self.assertNotIn("peer_reply", engineer_names)
 
 
 

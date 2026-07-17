@@ -33,7 +33,11 @@ def make_tool_search_spec(name: str, surface: str) -> dict:
     return {
         "name": name,
         "authority": {
-            "requirements": [{"capability": "tool.search"}],
+            "requirements": [{
+                "capability": "self.read",
+                "minimum_scope": "self",
+                "handler_scoped": True,
+            }],
         },
         "description": (
             f"Search {surface} MCP tools that are available on demand but "
@@ -54,6 +58,9 @@ def public_tool_spec(tool: dict) -> dict:
     spec = deepcopy(tool or {})
     spec.pop("deferred", None)
     spec.pop("authority", None)
+    for key in list(spec):
+        if str(key).startswith("_"):
+            spec.pop(key, None)
     return spec
 
 

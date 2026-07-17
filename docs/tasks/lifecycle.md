@@ -25,10 +25,10 @@ The reserved lanes have specific meanings:
 
 | Lane | What it means |
 |---|---|
-| **Backlog** | Anything not actively in motion. New tasks land here. `torque_ask(...)` puts derived tasks here for human review. |
+| **Backlog** | Anything not actively in motion. New tasks land here. `user_ask(...)` puts derived tasks here for human review. |
 | **To Do** | Planned and ready-to-dispatch. The Engineer's "next wave candidates" usually live here. |
 | **In Progress** | Actively assigned to an agent. Tasks move here on dispatch and stay here until their entire thread closes. |
-| **Done** | Complete. Reached via `torque_done`, `torque_ready`, or cascade completion. |
+| **Done** | Complete. Reached via `task_complete`, `agent_ready`, or cascade completion. |
 
 A task in In Progress means **work is happening on it** — either directly (an agent is in its terminal working on it right now), or indirectly (a derived child task is in flight, with the parent waiting for the chain to resolve).
 
@@ -48,7 +48,7 @@ transitions:
     status: "On Review"
 ```
 
-When the implementing Worker calls `torque_derive(action="feature/review")`, the parent stays in In Progress and its badge becomes **"On Review"**. If `status:` is omitted, the badge defaults to the target action's name (e.g., `feature/review`).
+When the implementing Worker calls `task_derive(action="feature/review")`, the parent stays in In Progress and its badge becomes **"On Review"**. If `status:` is omitted, the badge defaults to the target action's name (e.g., `feature/review`).
 
 A few common badge patterns:
 
@@ -66,7 +66,7 @@ Custom lanes don't get pipeline status semantics. They're for manual organizatio
 
 Two patterns visible there:
 
-1. **Single-task closes.** A simple `torque_done` on a task with no derivations — work that fit in one shot.
+1. **Single-task closes.** A simple `task_complete` on a task with no derivations — work that fit in one shot.
 2. **Thread closes.** A parent that closed via cascade completion when its last child closed. You can see the chain by expanding the card.
 
 Both are equally valid endings. The Engineer or the action's `auto_close_on_done` flag decides whether the agents involved get cleaned up after.
@@ -75,7 +75,7 @@ Both are equally valid endings. The Engineer or the action's `auto_close_on_done
 
 Cascade completion is the rule for closing parent tasks:
 
-> When a task is marked Done (via `torque_done` or `torque_ready`), Torque walks up the parent chain. For each ancestor, check: are all my children Done? If yes, mark me Done too and continue walking up. If no, stop.
+> When a task is marked Done (via `task_complete` or `agent_ready`), Torque walks up the parent chain. For each ancestor, check: are all my children Done? If yes, mark me Done too and continue walking up. If no, stop.
 
 In practice:
 
@@ -83,7 +83,7 @@ In practice:
 - A thread root only closes when the entire subtree is Done.
 - The status badge on intermediate tasks tells you which level is currently active.
 
-`torque_ready` is the variant that **also unlinks the calling agent** from the task, signaling that the agent is available for unrelated work. Use it when the agent is going to be repurposed; use `torque_done` when the agent might still receive a follow-up dispatch.
+`agent_ready` is the variant that **also unlinks the calling agent** from the task, signaling that the agent is available for unrelated work. Use it when the agent is going to be repurposed; use `task_complete` when the agent might still receive a follow-up dispatch.
 
 → [Tasks and threads — Cascade completion](threads.md#cascade-completion-when-does-the-parent-close)
 
@@ -93,9 +93,9 @@ Not every task ends in Done. The other outcomes:
 
 | Outcome | How it gets there | What it means |
 |---|---|---|
-| **Blocked** | `torque_blocked(reason="...")` | Need user input to continue. Adds `blocked` label, flags the agent for attention. Task stays in In Progress. |
-| **Error** | `torque_error(message="...")` | Unrecoverable error. Adds `error` label, agent flagged. Task stays in In Progress. |
-| **Awaiting Input** | `torque_ask(question="...")` | Derived task in Backlog with `human` label; parent stays In Progress with badge "Awaiting Input". |
+| **Blocked** | `task_blocked(reason="...")` | Need user input to continue. Adds `blocked` label, flags the agent for attention. Task stays in In Progress. |
+| **Error** | `task_error(message="...")` | Unrecoverable error. Adds `error` label, agent flagged. Task stays in In Progress. |
+| **Awaiting Input** | `user_ask(question="...")` | Derived task in Backlog with `human` label; parent stays In Progress with badge "Awaiting Input". |
 | **Depth limit** | Worker tried to derive past `max_pipeline_depth` | Task gets `depth-limit` label, agent flagged. The chain didn't run. |
 | **Manual archive** | User moves the task to Archived | The work was abandoned or superseded. |
 
@@ -103,7 +103,7 @@ For Blocked and Error states, the task is "stuck" but not "failed" — you (or t
 
 ## Auto-close behavior
 
-Some actions set `auto_close_on_done: true`. When that flag is set on the action, Torque may close the agent automatically after `torque_done` — but only when:
+Some actions set `auto_close_on_done: true`. When that flag is set on the action, Torque may close the agent automatically after `task_complete` — but only when:
 
 1. The pipeline root task is itself Done (no other children waiting).
 2. The agent has no queued or reply follow-up work.
@@ -112,10 +112,10 @@ This is mostly used for short-lived reviewer agents that should clean themselves
 
 ## Verification gate
 
-Some workflows include a verification step — checking that the merged change actually deployed, that smoke tests passed, that the manual restart didn't break anything. Workers report this through `torque_verify`:
+Some workflows include a verification step — checking that the merged change actually deployed, that smoke tests passed, that the manual restart didn't break anything. Workers report this through `task_verify`:
 
 ```text
-torque_verify(
+task_verify(
   state="passed",
   tests_run="auth integration suite, smoke",
   test_outcome="full_suite_passed",
@@ -125,9 +125,9 @@ torque_verify(
 
 Use `full_suite_attempted=true`, `test_outcome="unrelated_flake_accepted"`, and `isolated_rerun_evidence="..."` when a broad suite hit an unrelated flake but focused/isolated reruns passed. Use `deploy_attempted=false` plus `live_smoke_pending=true` when a worker intentionally did not deploy/restart from inside the live daemon and operator smoke remains.
 
-The CLI equivalents (`torque task verify ...`) and the Engineer tool (`engineer_task_verify(...)`) stamp the same audit fields. They emit a `task_verification_updated` event so failed/pending checkpoints stay visible at the orchestration layer rather than being buried in agent activity.
+The CLI equivalents (`torque task verify ...`) and the Engineer tool (`task_verify(...)`) stamp the same audit fields. They emit a `task_verification_updated` event so failed/pending checkpoints stay visible at the orchestration layer rather than being buried in agent activity.
 
-The verify metadata becomes part of the task's audit trail. It's especially useful for the Engineer's review pass before merging — `engineer_task_show` surfaces it on the task detail.
+The verify metadata becomes part of the task's audit trail. It's especially useful for the Engineer's review pass before merging — `task_get` surfaces it on the task detail.
 
 ## Where to next
 

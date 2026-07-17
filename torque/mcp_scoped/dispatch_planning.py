@@ -330,6 +330,13 @@ async def dispatch_planning(ctx: ScopedDispatchContext):
                 "status must be one of: proposed, accepted, revised, rejected",
                 True,
             )
+        if (
+            status != "proposed"
+            and not _caller_authority_allows_capability(
+                real_state, caller_id, "decision.accept"
+            )
+        ):
+            return "non-proposed decision status requires decision.accept", True
         supersedes = str(args.get("supersedes", "") or "").strip() or None
         if supersedes:
             prior_decision, decision_error = _load_architect_decision(
@@ -363,6 +370,45 @@ async def dispatch_planning(ctx: ScopedDispatchContext):
             "created_at": decision["created_at"],
         }), False
 
+    if tool_name == "decision_get" and caller_kind == "architect":
+        proposal_only = (
+            _caller_authority_allows_capability(
+                real_state, caller_id, "decision.propose"
+            )
+            and not _caller_authority_allows_capability(
+                real_state, caller_id, "decision.create"
+            )
+        )
+        if proposal_only:
+            decision, decision_error = _load_product_decision(
+                real_state, caller_id, args.get("id", "")
+            )
+        else:
+            decision, decision_error = _load_architect_decision(
+                real_state, caller_id, args.get("id", "")
+            )
+        if not decision:
+            return decision_error, True
+        return json.dumps(decision), False
+
+    if tool_name == "decision_review" and caller_kind == "architect":
+        decision, decision_error = _load_architect_decision(
+            real_state, caller_id, args.get("id", "")
+        )
+        if not decision:
+            return decision_error, True
+        status = str(args.get("decision", "") or "").strip()
+        if status not in {"accepted", "rejected", "revised"}:
+            return "decision must be accepted, rejected, or revised", True
+        patch = {"id": decision["id"], "status": status}
+        rationale = str(args.get("rationale", "") or "").strip()
+        if rationale:
+            patch["rationale"] = rationale
+        updated = await real_state.save_decision_async(patch)
+        if not updated:
+            return "Failed to review decision", True
+        return json.dumps(updated), False
+
     if tool_name == "decision_update" and caller_kind == "architect":
         decision, decision_error = _load_architect_decision(
             real_state, caller_id, args.get("id", "")
@@ -387,6 +433,13 @@ async def dispatch_planning(ctx: ScopedDispatchContext):
                     "status must be one of: proposed, accepted, revised, rejected",
                     True,
                 )
+            if (
+                status != str(decision.get("status", "") or "").strip()
+                and not _caller_authority_allows_capability(
+                    real_state, caller_id, "decision.accept"
+                )
+            ):
+                return "decision status changes require decision.accept", True
             patch["status"] = status
         if "supersedes" in args:
             supersedes = str(args.get("supersedes", "") or "").strip() or None

@@ -15,6 +15,7 @@ from .server_prompts import (
     build_owner_user_message_guidance,
     build_shared_memory_guidance,
 )
+from .mcp_canonical import canonicalize_tool_references
 from .state import (
     normalize_architect_autonomy_mode,
     normalize_architect_journal_checkpoint_frequency,
@@ -37,32 +38,24 @@ own implementation and worker orchestration.
 
 ## Available tools
 
-You have access to the architect_* MCP tool surface. Load it at session
-start and use these tools instead of freeform instructions to
-engineers.
+You have access to a caller-scoped set of canonical MCP tools. Load it at
+session start and use these tools instead of freeform instructions to
+Engineers.
 
-**Read**: architect_attention_digest, architect_completion_audit, \
-architect_board_summary, architect_events_recent, architect_deploy_state, \
-architect_task_list, architect_task_show, architect_task_chain, \
-architect_engineer_list, \
-architect_pending_hire_list, architect_pending_hire_status, \
-architect_boot_summary, architect_decision_list, architect_journal_read, \
-architect_engineer_journal_read, architect_engineer_pending_question, \
-architect_peer_list, architect_peer_inbox
-**Scope / routing**: architect_task_create, architect_task_pickup, \
-architect_task_reassign, architect_task_move, architect_task_update, \
-architect_task_mark_covered
-**Hiring / specialization metadata**: architect_engineer_hire (queues a \
+**Read**: attention_digest, completion_audit, board_summary, event_list, \
+deploy_get, task_list, task_get, task_chain, agent_list, hire_list, \
+boot_summary, decision_list, journal_list, agent_journal_list, agent_ask_get, \
+peer_list, peer_inbox
+**Scope / routing**: task_create, task_claim, task_reassign, task_move, \
+task_update, task_mark_covered
+**Hiring / specialization metadata**: engineer_hire (queues a \
 user-approval request; may include an ordered `specializations` list), \
-architect_engineer_set_specializations (full-replace ordered project \
-specializations for an engineer you hired; no fresh approval), always \
-poll architect_pending_hire_status before treating a hire as live
-**Messaging / user asks**: architect_engineer_message, \
-architect_peer_message, architect_peer_reply, architect_engineer_reply, architect_message_user, \
-architect_ask
-**Decisions**: architect_decision_create, architect_decision_update, \
-architect_decision_link
-**Journal**: architect_journal, architect_journal_read
+engineer_update (full-replace ordered project specializations for an Engineer \
+you hired; no fresh approval), always poll hire_list before treating a hire as live
+**Messaging / user asks**: agent_message, peer_message, peer_reply, agent_reply, \
+user_message, user_ask
+**Decisions**: decision_create, decision_update, decision_link
+**Journal**: journal_write, journal_list
 
 ## Core model
 
@@ -676,4 +669,4 @@ def build_architect_system_prompt(group: str,
     if overlay:
         parts.append(overlay)
 
-    return "\n\n".join(parts) + "\n"
+    return canonicalize_tool_references("\n\n".join(parts) + "\n")

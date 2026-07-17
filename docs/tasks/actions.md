@@ -75,7 +75,7 @@ torque action show feature/implement
 | `worktree` | bool | no | Create an isolated git worktree for the agent. → [Worktrees](worktrees.md) |
 | `labels` | list | no | Labels applied to the dispatched task. |
 | `transitions` | list | no | Valid next actions for pipeline chaining. → [Pipelines](pipelines.md) |
-| `auto_close_on_done` | bool | no | Auto-close the agent after `torque_done` when the pipeline root is fully complete. |
+| `auto_close_on_done` | bool | no | Auto-close the agent after `task_complete` when the pipeline root is fully complete. |
 | `implementation_depth` | bool | no | Marks the action as code-mutating. Eligible for the LOC review gate. |
 | `review_required_above_loc` | int | no | Non-test LOC threshold for auto-deriving `feature/review`. Defaults to 150 when `implementation_depth` is true. |
 | `max_depth` | int | no | Override the global `max_pipeline_depth` for this action. |
@@ -161,7 +161,7 @@ torque task dispatch "Fix the flaky test" \
 **From an agent (pipeline derivation)**:
 
 ```text
-torque_derive(
+task_derive(
   description="Review the implementation",
   action="feature/review",
 )

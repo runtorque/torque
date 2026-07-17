@@ -95,6 +95,49 @@ class AuthorityValidationError(ValueError):
     """Raised when an ACL cannot be evaluated safely."""
 
 
+def canonical_capability_ids(
+    capability_id: str,
+    *,
+    base_kind: str,
+) -> tuple[str, ...]:
+    """Expand deprecated recipient-kind capabilities into relationships."""
+
+    capability_id = str(capability_id or "").strip()
+    base_kind = str(base_kind or "").strip()
+    if capability_id == "message.architect_peer":
+        return ("message.peer",)
+    if capability_id == "message.worker":
+        return ("message.subordinate",)
+    if capability_id == "message.engineer":
+        if base_kind == "engineer":
+            return ("message.peer", "message.supervisor")
+        if base_kind == "architect":
+            return ("message.subordinate",)
+    if capability_id == "message.ack_required":
+        return ("message.ack_request",)
+    if capability_id == "settings.admin":
+        return ("settings.read",)
+    return (capability_id,)
+
+
+def _capability_ids_for_registry(
+    capability_id: str,
+    *,
+    base_kind: str,
+    capabilities: Mapping[str, CapabilityDefinition],
+) -> tuple[str, ...]:
+    """Migrate legacy ids only when the supplied registry knows the targets."""
+
+    migrated = canonical_capability_ids(
+        capability_id,
+        base_kind=base_kind,
+    )
+    if all(item in capabilities for item in migrated):
+        return migrated
+    raw = str(capability_id or "").strip()
+    return (raw,) if raw in capabilities else migrated
+
+
 def effective_authority_from_snapshot(
     snapshot: Mapping[str, Any] | None,
     *,
@@ -115,30 +158,36 @@ def effective_authority_from_snapshot(
         )
     effective: dict[str, str | None] = {}
     for raw_id, raw_scope in raw_capabilities.items():
-        capability_id = str(raw_id or "").strip()
-        definition = capabilities.get(capability_id)
-        if not definition or not definition.available_to(base_kind):
-            raise AuthorityValidationError(
-                f"invalid effective capability {capability_id} for {base_kind}"
-            )
-        if definition.scoped:
-            scope = normalize_scope(raw_scope)
-            ceiling = definition.maximum_scope_for(base_kind)
-            if (
-                not scope
-                or scope not in definition.scopes
-                or not scope_includes(ceiling, scope)
-            ):
+        for capability_id in _capability_ids_for_registry(
+            str(raw_id or "").strip(),
+            base_kind=base_kind,
+            capabilities=capabilities,
+        ):
+            definition = capabilities.get(capability_id)
+            if not definition or not definition.available_to(base_kind):
                 raise AuthorityValidationError(
-                    f"invalid effective scope for {capability_id}"
+                    f"invalid effective capability {capability_id} for {base_kind}"
                 )
-            effective[capability_id] = scope
-        else:
-            if raw_scope is not None:
-                raise AuthorityValidationError(
-                    f"unscoped capability {capability_id} must use null scope"
-                )
-            effective[capability_id] = None
+            if definition.scoped:
+                scope = normalize_scope(raw_scope)
+                if capability_id == "message.supervisor":
+                    scope = "self"
+                ceiling = definition.maximum_scope_for(base_kind)
+                if (
+                    not scope
+                    or scope not in definition.scopes
+                    or not scope_includes(ceiling, scope)
+                ):
+                    raise AuthorityValidationError(
+                        f"invalid effective scope for {capability_id}"
+                    )
+                effective[capability_id] = scope
+            else:
+                if raw_scope is not None:
+                    raise AuthorityValidationError(
+                        f"unscoped capability {capability_id} must use null scope"
+                    )
+                effective[capability_id] = None
     return EffectiveAuthority(
         base_kind=base_kind,
         mode=mode,
@@ -613,7 +662,23 @@ def evaluate_capability_acl(
             )
 
     seen: set[str] = set()
-    normalized_rules = normalize_capability_acl_rules(rules)
+    normalized_rules = []
+    for raw_rule in normalize_capability_acl_rules(rules):
+        for capability_id in _capability_ids_for_registry(
+            raw_rule.get("capability", ""),
+            base_kind=base_kind,
+            capabilities=capabilities,
+        ):
+            expanded = dict(raw_rule)
+            expanded["capability"] = capability_id
+            # Legacy Engineer messaging used group scope for peer access and
+            # the same capability for the singular supervisor relationship.
+            if (
+                capability_id == "message.supervisor"
+                and str(expanded.get("scope", "") or "").strip() != "self"
+            ):
+                expanded["scope"] = "self"
+            normalized_rules.append(expanded)
     for index, raw_rule in enumerate(normalized_rules):
         capability_id = str(raw_rule.get("capability", "") or "").strip()
         if not capability_id:

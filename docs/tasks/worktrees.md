@@ -41,7 +41,7 @@ torque group settings backend -s worktree_symlink_gitignored_paths=true
 | **Workspace mode** | Choose a shared group checkout or an isolated worktree for each Worker. |
 | **Base directory** | Where worktrees live, relative to repo root. Default `.torque/worktrees`. |
 | **Base branch** | Branch to fork from. Default current HEAD. |
-| **Automatic checkpoints** | Choose manual only, stop-only, progress-only, or progress-plus-stop checkpointing. Progress checkpoints cover `torque_progress`, `torque_done`, and `torque_ready` and are throttled. |
+| **Automatic checkpoints** | Choose manual only, stop-only, progress-only, or progress-plus-stop checkpointing. Progress checkpoints cover `task_progress`, `task_complete`, and `agent_ready` and are throttled. |
 | **Merge mode** | Require pull requests, require direct local merges, or use pull requests by default while allowing an explicit direct fallback. |
 | **Direct-merge history** | Preserve Worker commits or use `git merge --squash` when a direct local merge occurs. Pull-request merges always request GitHub squash. |
 | **Default post-merge cleanup** | Default cleanup behavior after the branch is actually merged when no explicit choice is given. Defaults to keeping the worker/worktree warm; opt in to auto-sweep to close the worker and delete the merged worktree/branch. |
@@ -105,7 +105,7 @@ Stages all changes (`git add -A`) and commits with the message `torque: checkpoi
 
 When **Auto-checkpoint on stop** is enabled, Torque commits whatever's in the working tree when an agent's session ends. This catches in-progress work if the agent crashes or is stopped unexpectedly.
 
-When **Checkpoint on progress / done** is enabled, Torque also creates checkpoints when the agent reports `torque_progress`, `torque_done`, or `torque_ready`. These are throttled so progress spam doesn't create a commit every few seconds.
+When **Checkpoint on progress / done** is enabled, Torque also creates checkpoints when the agent reports `task_progress`, `task_complete`, or `agent_ready`. These are throttled so progress spam doesn't create a commit every few seconds.
 
 ### Task boundary checkpoints
 
@@ -115,7 +115,7 @@ When the same agent runs sequential tasks on a shared worktree, Torque records a
 - If clean, Torque records a marker against the current `HEAD`.
 - Queued same-agent follow-up tasks point back via `resume_after_boundary_task_id`.
 
-This lets Torque identify the **latest clean mergeable task boundary** on a shared branch instead of treating the whole branch history as one undifferentiated unit. The Engineer's `engineer_agent_show` surfaces these boundaries so it can decide whether to merge now or wait for queued work to finish.
+This lets Torque identify the **latest clean mergeable task boundary** on a shared branch instead of treating the whole branch history as one undifferentiated unit. The Engineer's `agent_get` surfaces these boundaries so it can decide whether to merge now or wait for queued work to finish.
 
 ### Viewing checkpoints
 
@@ -151,11 +151,11 @@ branch and do not create a nested PR.
 
 **UI**: right-click the agent → **Merge Worktree**.
 
-**Engineer / CLI**: `engineer_merge(...)` (or `torque worktree merge ...`).
+**Engineer / CLI**: `worktree_merge(...)` (or `torque worktree merge ...`).
 
 Torque still has an explicit direct-local fallback for repositories or moments
 where the GitHub PR flow is not appropriate. Pass `force_direct=true` to
-`engineer_merge` to bypass PR creation and run the legacy local merge path. That
+`worktree_merge` to bypass PR creation and run the legacy local merge path. That
 fallback still honors the normal clean-worktree, task-boundary, conflict,
 sibling-divergence, and stale-base safety gates unless you also pass the
 separate force flags. For real `ee/` deltas, `force_direct=true` does **not**
@@ -203,28 +203,28 @@ If the branch has queued same-agent follow-up tasks attached, Torque keeps the a
 ### Pending PRs and branch protection
 
 If GitHub blocks the squash merge because required checks, reviews, or branch
-protection are still pending, `engineer_merge` records the PR metadata on the
+protection are still pending, `worktree_merge` records the PR metadata on the
 latest open boundary and returns `pending: true`. Requested cleanup flags are
 stored with that PR metadata, but Torque does not close the worker, remove the
 worktree, move tasks to Done, reset the local branch, or mark the boundary
 merged until an actual merge is confirmed.
 
 V1 intentionally does **not** run background PR polling. Watch GitHub or rerun
-`engineer_merge` after the checks/reviews pass; the rerun reuses the open PR,
+`worktree_merge` after the checks/reviews pass; the rerun reuses the open PR,
 refreshes metadata, and finalizes local base sync plus cleanup only after the
 PR reports a merge commit SHA.
 
 Nested `ee/` PRs are folded into the existing Torque review boundary. A pending
-nested PR blocks parent PR creation/merge and cleanup; rerun `engineer_merge`
+nested PR blocks parent PR creation/merge and cleanup; rerun `worktree_merge`
 after it is mergeable. If the nested PR already merged but the parent did not,
 the rerun detects the merged nested-main SHA, avoids creating a duplicate nested
 PR, refreshes the parent gitlink if needed, and resumes the parent merge.
 
 ### When merges conflict
 
-If `engineer_merge` detects a conflict, it returns conflict context instead of forcing the merge through. The Engineer can then run `engineer_rebase` against the latest base branch and retry. `engineer_rebase` aborts cleanly on conflict and returns enough detail for the Engineer to either fix the conflict (sometimes by re-dispatching to the Worker) or escalate to you.
+If `worktree_merge` detects a conflict, it returns conflict context instead of forcing the merge through. The Engineer can then run `worktree_rebase` against the latest base branch and retry. `worktree_rebase` aborts cleanly on conflict and returns enough detail for the Engineer to either fix the conflict (sometimes by re-dispatching to the Worker) or escalate to you.
 
-For shared sequential branches, both `engineer_merge` and `engineer_rebase` enforce the same merge-readiness checks before they run — the latest task boundary must still be cleanly mergeable.
+For shared sequential branches, both `worktree_merge` and `worktree_rebase` enforce the same merge-readiness checks before they run — the latest task boundary must still be cleanly mergeable.
 
 ## Relaunch and recovery
 

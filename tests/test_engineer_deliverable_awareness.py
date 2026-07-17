@@ -51,14 +51,14 @@ class EngineerDeliverableAwarenessHelperTests(unittest.TestCase):
         )
         block = self._build(task)
         self.assertIn("Deliverable contract on this task", block)
-        self.assertIn("engineer_task_upload_artifact", block)
+        self.assertIn("task_artifact_upload", block)
         self.assertIn('task="TORQUE:99"', block)
         self.assertIn("Audit report", block)
         self.assertIn("report", block)
         self.assertIn("markdown", block)
         # Worker contract reference and gate note both surface.
-        self.assertIn("torque_task_upload_artifact", block)
-        self.assertIn("engineer_task_resolve", block)
+        self.assertIn("task_artifact_upload", block)
+        self.assertIn("agent_ask_answer", block)
         # The artifact upload tool is eager/first-class, so no lazy-load
         # hint should be needed in report handoff guidance.
         self.assertNotIn("engineer_tool_search", block)
@@ -222,7 +222,7 @@ class EngineerDeliverableAwarenessSurfaceTests(unittest.IsolatedAsyncioTestCase)
         self.assertIn("deliverable_awareness", data)
         block = data["deliverable_awareness"]
         self.assertIn("Deliverable contract on this task", block)
-        self.assertIn("engineer_task_upload_artifact", block)
+        self.assertIn("task_artifact_upload", block)
         self.assertIn('task="TORQUE:500"', block)
         self.assertIn("Audit report", block)
         self.assertNotIn("engineer_tool_search", block)
@@ -265,7 +265,7 @@ class EngineerDeliverableAwarenessSurfaceTests(unittest.IsolatedAsyncioTestCase)
         self.assertIn("deliverable_awareness", data)
         block = data["deliverable_awareness"]
         self.assertIn("Deliverable contract on this task", block)
-        self.assertIn("engineer_task_upload_artifact", block)
+        self.assertIn("task_artifact_upload", block)
         self.assertIn("Regression report", block)
         self.assertNotIn("engineer_tool_search", block)
 
@@ -315,7 +315,7 @@ class EngineerDeliverableAwarenessSurfaceTests(unittest.IsolatedAsyncioTestCase)
         recipient_msg = engineer.mcp_messages[0]["message"]
         self.assertIn("TORQUE:600", recipient_msg)
         self.assertIn("Deliverable contract on this task", recipient_msg)
-        self.assertIn("engineer_task_upload_artifact", recipient_msg)
+        self.assertIn("task_artifact_upload", recipient_msg)
         self.assertIn('task="TORQUE:600"', recipient_msg)
         # Sender entry stays clean (no awareness pollution on architect side).
         sender_msg = architect.mcp_messages[0]["message"]

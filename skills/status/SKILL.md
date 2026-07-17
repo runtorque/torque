@@ -1,9 +1,9 @@
 ---
 description: Show current Torque agent context, linked task, and pipeline state
-allowed-tools: mcp__torque__torque_context
+allowed-tools: mcp__torque__context
 ---
 
-Show the current Torque agent context using the torque_context MCP tool.
+Show the current Torque agent context using the context MCP tool.
 
 Format the output clearly:
 - Agent name, group, and status

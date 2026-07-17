@@ -5,8 +5,7 @@ an Engineer or Worker shows that agent's single normalized direct-message
 thread.
 
 ## What appears there
-- Agent messages sent with `architect_message_user`, `engineer_message_user`,
-  or `torque_message_user`.
+- Agent messages sent with the caller-scoped `user_message` operation.
 - User replies sent from the panel.
 - Display mirrors of blocking asks and ask replies, marked with the blocking
   badge when the ask is still a decision gate.

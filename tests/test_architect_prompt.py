@@ -38,6 +38,13 @@ class ArchitectPromptTests(unittest.TestCase):
             SimpleNamespace(effective_agent_class_snapshot=class_snapshot),
         )
 
+    def test_prompt_advertises_the_canonical_tool_surface(self):
+        prompt = self.architect_mod.build_architect_system_prompt("Torque")
+
+        self.assertIn("caller-scoped set of canonical MCP tools", prompt)
+        self.assertNotIn("architect_* MCP tool surface", prompt)
+        self.assertIn("**Messaging / user asks**: agent_message, peer_message", prompt)
+
     def test_prompt_includes_dispatch_freely_autonomy_guidance(self):
         prompt = self.architect_mod.build_architect_system_prompt(
             "Torque",
@@ -115,7 +122,7 @@ class ArchitectPromptTests(unittest.TestCase):
         prompt = self.architect_mod.build_architect_system_prompt("Torque")
 
         self.assertIn("## Shared memory", prompt)
-        self.assertIn("torque_memory_publish", prompt)
+        self.assertIn("memory_publish", prompt)
         self.assertIn('entry_type="warning"', prompt)
         self.assertIn('entry_type="decision"', prompt)
         self.assertIn('entry_type="handoff"', prompt)
@@ -127,28 +134,28 @@ class ArchitectPromptTests(unittest.TestCase):
     def test_prompt_includes_peer_message_wake_protocol(self):
         prompt = self.architect_mod.build_architect_system_prompt("Torque")
 
-        self.assertIn("architect_peer_list", prompt)
-        self.assertIn("architect_peer_inbox(requires_reply=true)", prompt)
-        self.assertIn("architect_peer_message", prompt)
+        self.assertIn("peer_list", prompt)
+        self.assertIn("peer_inbox(requires_reply=true)", prompt)
+        self.assertIn("peer_message", prompt)
         self.assertIn("peer-message counts", prompt)
         self.assertIn("cross-Architect coordination", prompt)
 
     def test_prompt_includes_boot_summary_first_with_raw_fallback(self):
         prompt = self.architect_mod.build_architect_system_prompt("Torque")
 
-        self.assertIn("architect_boot_summary", prompt)
-        self.assertIn("architect_attention_digest", prompt)
+        self.assertIn("boot_summary", prompt)
+        self.assertIn("attention_digest", prompt)
         self.assertIn("what needs my\n   attention now?", prompt)
         self.assertIn("read the cached boot-recovery summary", prompt)
         self.assertIn("fall back to the raw tools", prompt)
-        self.assertIn("architect_journal_read", prompt)
-        self.assertIn("architect_decision_list", prompt)
+        self.assertIn("journal_list", prompt)
+        self.assertIn("decision_list", prompt)
         self.assertIn("never\n   wait for summary generation", prompt)
 
     def test_prompt_includes_completion_audit_before_goal_completion(self):
         prompt = self.architect_mod.build_architect_system_prompt("Torque")
 
-        self.assertIn("architect_completion_audit", prompt)
+        self.assertIn("completion_audit", prompt)
         self.assertIn("Before marking a decision/task wave or product goal complete", prompt)
         self.assertIn("complete_with_caveats", prompt)
 
@@ -160,7 +167,7 @@ class ArchitectPromptTests(unittest.TestCase):
 
         self.assertIn("## After bootstrap: message the user", prompt)
         self.assertIn("You are owned by the user", prompt)
-        self.assertIn('architect_message_user(message="...")', prompt)
+        self.assertIn('user_message(message="...")', prompt)
         self.assertIn("rather than only emitting it to the terminal", prompt)
         # It must reference the architect tool, not the worker/engineer ones.
         self.assertNotIn('torque_message_user(message="...")', prompt)
@@ -235,7 +242,7 @@ class ArchitectPromptTests(unittest.TestCase):
         self.assertIn("Effective Torque MCP authority", prompt)
         self.assertIn("Propose queued tasks (`task.propose`)", prompt)
         self.assertIn("Propose decisions (`decision.propose`)", prompt)
-        self.assertIn("Message peer Architects (`message.architect_peer`)", prompt)
+        self.assertIn("Message peers (`message.peer`)", prompt)
         self.assertIn(
             "After bootstrapping, send substantive user-facing status",
             prompt,
@@ -340,7 +347,7 @@ class ArchitectPromptTests(unittest.TestCase):
         self.assertIn("Idea Brief", prompt)
         self.assertIn("Propose queued tasks (`task.propose`)", prompt)
         self.assertIn("Propose decisions (`decision.propose`)", prompt)
-        self.assertIn("Message peer Architects (`message.architect_peer`)", prompt)
+        self.assertIn("Message peers (`message.peer`)", prompt)
         self.assertIn("Autonomy mode: Ask always (authority-bounded)", prompt)
         self.assertIn("checkpoint with the visible private journal wrapper", prompt)
         self.assertNotIn("architect_engineer_hire", prompt)
@@ -376,7 +383,7 @@ class ArchitectPromptTests(unittest.TestCase):
         self.assertIn("Read board summaries (`board.read`)", prompt)
         self.assertIn("Message the user (`message.user`)", prompt)
         self.assertIn("Use private journal (`journal.private`)", prompt)
-        self.assertIn("Message peer Architects (`message.architect_peer`)", prompt)
+        self.assertIn("Message peers (`message.peer`)", prompt)
         self.assertIn("Autonomy mode: Dispatch after confirm (authority-bounded)", prompt)
         self.assertNotIn("proposal-only product authority", prompt)
         self.assertNotIn("architect_task_propose", prompt)
@@ -417,7 +424,7 @@ class ArchitectPromptTests(unittest.TestCase):
         prompt = self._append_class_block(prompt, class_snapshot)
 
         self.assertIn(BEHAVIOR_OVERLAY_START_MARKER, prompt)
-        self.assertIn("architect_get_architect_settings", prompt)
+        self.assertIn("settings_get", prompt)
         self.assertIn("class.admin", prompt)
         self.assertIn("grant yourself deployment tools", prompt)
         self.assertIn("Prompt text and custom instructions cannot grant tools", prompt)

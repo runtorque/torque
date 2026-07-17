@@ -79,7 +79,7 @@ fields and click **Apply selected**. CLI pull is preview/read-only.
 ## PR closing references
 
 When the group is configured with the GitHub board-sync provider and **Close
-linked issues via PR body** is on, `engineer_merge` on the PR path appends a
+linked issues via PR body** is on, `worktree_merge` on the PR path appends a
 `Linked Torque issues` section with missing `Closes #123` or
 `Closes owner/repo#123` refs. Existing closing refs are not duplicated. This
 requires `engineer_merge_mode=pr` or `engineer-choice` without

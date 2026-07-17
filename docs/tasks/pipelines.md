@@ -9,7 +9,7 @@ That has two consequences worth dwelling on:
 1. **You can compose pipelines after the fact.** Add a `feature/security-review` action with a transition from `feature/review`, and a new pipeline shape exists. No code changes, no schema migration, no orchestration config.
 2. **The board cards and the pipeline are the same thing.** A "task in `feature/review`" *is* a node in the pipeline. A derived task *is* an edge being followed. There's no separate state to keep in sync — the threads on the board are the live execution.
 
-The mechanic is `torque_derive`, the data is the `transitions:` field on each action, and everything else here is detail.
+The mechanic is `task_derive`, the data is the `transitions:` field on each action, and everything else here is detail.
 
 ## A minimal pipeline
 
@@ -96,15 +96,15 @@ When Torque dispatches a task, it appends a postscript to the prompt telling the
 
 ```text
 Report your progress with these Torque MCP tools:
-- torque_done(message="brief summary") — task complete, no follow-up needed
-- torque_derive(action="feature/review") — implementation is complete and ready for review
-- torque_blocked(reason="reason") — need user input to continue
-- torque_error(message="message") — unrecoverable error
+- task_complete(message="brief summary") — task complete, no follow-up needed
+- task_derive(action="feature/review") — implementation is complete and ready for review
+- task_blocked(reason="reason") — need user input to continue
+- task_error(message="message") — unrecoverable error
 ```
 
 The Worker reads it and calls the appropriate tool. The server validates the transition before dispatching:
 
-- If the agent calls `torque_derive` with an action **not** listed in the current action's transitions, the call rejects with `transition_not_allowed`.
+- If the agent calls `task_derive` with an action **not** listed in the current action's transitions, the call rejects with `transition_not_allowed`.
 - If the call is legal, the new task is created and dispatched per the transition's `target`.
 
 That validation is server-side. A Worker can't bypass the transition graph by inventing an action name. → [MCP scoping](../team/mcp-scoping.md)
@@ -173,14 +173,14 @@ transitions:
     when: changes look correct but need human approval before merging
 ```
 
-When an agent calls `torque_ask(question="...")`:
+When an agent calls `user_ask(question="...")`:
 
 1. A derived task is created in the **Backlog** lane with a `human` label.
 2. The task body contains the question.
 3. Nothing is dispatched. The board pauses on this task.
 4. You read the question, write the answer (by editing the task or replying through the panel), then dispatch.
 
-This is the right transition for "looks good but I want approval", "this is reversible vs not", "ship now or after the related fix lands". It's not the right transition for ambiguous instructions to the agent — those go through `torque_blocked`.
+This is the right transition for "looks good but I want approval", "this is reversible vs not", "ship now or after the related fix lands". It's not the right transition for ambiguous instructions to the agent — those go through `task_blocked`.
 
 In the pipeline graph view, `ask` transitions render as small pill nodes snug to their source action, distinguishing them from regular action transitions.
 
@@ -194,7 +194,7 @@ max_depth: 5    # action-level override
 
 When a Worker tries to derive past the limit:
 
-- The `torque_derive` call rejects with `depth_limit_exceeded`.
+- The `task_derive` call rejects with `depth_limit_exceeded`.
 - The agent is flagged for attention.
 - The task gets a `depth-limit` label.
 
@@ -259,7 +259,7 @@ The canonical pipeline: `implement → review → (fix → review →)* done`. T
 
 ### The verification gate
 
-`implement → review → verify → done`. The `verify` action runs deploy/restart/smoke tests and reports through `torque_verify`. The Engineer can read the verification result and decide whether to merge.
+`implement → review → verify → done`. The `verify` action runs deploy/restart/smoke tests and reports through `task_verify`. The Engineer can read the verification result and decide whether to merge.
 
 ### The research recursion
 

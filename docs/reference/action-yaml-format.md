@@ -156,7 +156,7 @@ For reusable setups, put terminal definitions on a role and reference it with `a
 
 ## Transitions
 
-Transitions define the derive surface for an action. If an action has transitions, the worker's dispatch postscript lists only those legal `torque_derive(...)` targets. The server validates the same list when the worker calls the tool and rejects targets outside the declared list. If an action has no transitions, derive is not advertised as a completion path; treat it as a terminal stage.
+Transitions define the derive surface for an action. If an action has transitions, the worker's dispatch postscript lists only those legal `task_derive(...)` targets. The server validates the same list when the worker calls the tool and rejects targets outside the declared list. If an action has no transitions, derive is not advertised as a completion path; treat it as a terminal stage.
 
 Action transition shape:
 
@@ -174,7 +174,7 @@ transitions:
 | `when` | string | recommended | Plain-English guidance shown to the worker. |
 | `status` | string | no | Status badge written to the parent/root task while this transition is active. Defaults to the target action name. |
 | `target` | string | no | Dispatch routing: `self`, `parent`, `root`, or omitted for a fresh agent. |
-| `required` | bool | no | Requires this transition before `torque_done`/`torque_ready` can close the task. |
+| `required` | bool | no | Requires this transition before `task_complete`/`agent_ready` can close the task. |
 | `pre_approved` | bool | no | Marks the derived task as review-preapproved so its closeout gate can be bypassed. |
 | `loc_gate` | object | no | Transition-local non-test LOC review policy. |
 
@@ -186,7 +186,8 @@ transitions:
     when: changes look correct but need human sign-off before merging
 ```
 
-`ask: true` enables `torque_ask(...)` as a completion path instead of deriving another action.
+`ask: true` enables `user_ask(...)` as a completion path instead of deriving
+another action.
 
 ### Transition routing
 
@@ -220,7 +221,7 @@ transitions:
 
 ## Deliverable contract
 
-The `deliverable` block declares that a task must produce a persisted artifact, not just a code change. When `required: true`, Torque hard-gates `torque_done` / `torque_ready`: the worker must first attach a matching artifact with `torque_task_upload_artifact`, or closeout is rejected.
+The `deliverable` block declares that a task must produce a persisted artifact, not just a code change. When `required: true`, Torque hard-gates `task_complete` / `agent_ready`: the worker must first attach a matching artifact with `task_artifact_upload`, or closeout is rejected.
 
 ```yaml
 deliverable:
@@ -232,7 +233,7 @@ deliverable:
 
 | Field | Type | Required | Description |
 |---|---:|:---:|---|
-| `required` | bool | no | When `true`, the worker must upload a matching artifact before `torque_done`/`torque_ready` can close the task. Defaults to `false` (the block is then a no-op contract). |
+| `required` | bool | no | When `true`, the worker must upload a matching artifact before `task_complete`/`agent_ready` can close the task. Defaults to `false` (the block is then a no-op contract). |
 | `type` | string | no | Semantic type identifier such as `plan`, `design`, or `report`. The closeout gate matches leniently: when `type` is empty or `other`, **any** attached artifact satisfies the gate; otherwise an uploaded artifact's `artifact_type` must equal this value. |
 | `format` | string | no | File-format hint such as `markdown` or `yaml`. Advisory — it is surfaced to the worker but not enforced by the gate. |
 | `artifact_title` | string | no | Display title for the uploaded artifact, shown in the task's artifact list. |
@@ -246,7 +247,7 @@ The action's `deliverable` block defines the task's contract. Explicit dispatch-
 The worker satisfies a `type: plan` contract by uploading an artifact whose `artifact_type` matches:
 
 ```text
-torque_task_upload_artifact(
+task_artifact_upload(
   content_text="# Implementation Plan\n\n...",
   filename="plan.md",
   artifact_type="plan",
@@ -254,7 +255,7 @@ torque_task_upload_artifact(
 )
 ```
 
-`content_text` writes inline text (use `local_path` or `content_base64` for files on disk or binary content). Once the matching artifact is attached, `torque_done` / `torque_ready` succeed.
+`content_text` writes inline text (use `local_path` or `content_base64` for files on disk or binary content). Once the matching artifact is attached, `task_complete` / `agent_ready` succeed.
 
 ## Reserved `torque` namespace
 

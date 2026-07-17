@@ -14,10 +14,10 @@ This is a real thread on a real board:
 
 Read it from the top:
 
-- **`LOOM:290`** is the root task: "Architect Dismiss/Rehire parity — match engineer pause/resume lifecycle." It started in Backlog, was dispatched with the `feature/implement` action, and the implementing Worker eventually called `torque_done`.
-- **`LOOM:290:1`** is the first derivation: a review task. The implementing Worker called `torque_derive(action="feature/review")` when it finished, which created this task and dispatched a Reviewer Worker on the same worktree.
-- **`LOOM:290:2`** is the second: a fix task. The Reviewer found issues, called `torque_derive(action="feature/fix-review")`, and the Implementer (or a fresh fix-worker, depending on transition routing) addressed them.
-- **`LOOM:290:3`** is the third: a re-review. The fix-worker called `torque_derive(action="feature/review")` again. The reviewer marked it the latest clean review point.
+- **`LOOM:290`** is the root task: "Architect Dismiss/Rehire parity — match engineer pause/resume lifecycle." It started in Backlog, was dispatched with the `feature/implement` action, and the implementing Worker eventually called `task_complete`.
+- **`LOOM:290:1`** is the first derivation: a review task. The implementing Worker called `task_derive(action="feature/review")` when it finished, which created this task and dispatched a Reviewer Worker on the same worktree.
+- **`LOOM:290:2`** is the second: a fix task. The Reviewer found issues, called `task_derive(action="feature/fix-review")`, and the Implementer (or a fresh fix-worker, depending on transition routing) addressed them.
+- **`LOOM:290:3`** is the third: a re-review. The fix-worker called `task_derive(action="feature/review")` again. The reviewer marked it the latest clean review point.
 
 Every step is its own task with its own agent, its own context, its own audit trail. The whole tree took the work from "Implement this" to "Reviewed, fixed, re-reviewed, ready to merge" in five steps that you can scroll back through any time.
 
@@ -38,7 +38,7 @@ It also means **the board is the audit log**. You don't need separate status rep
 The mechanic is one MCP call. When a Worker is finishing a task and the next step is a different task, it calls:
 
 ```text
-torque_derive(
+task_derive(
   description="Review the implementation",
   action="feature/review",
 )
@@ -93,7 +93,7 @@ That history isn't somewhere you have to remember to look. It's exactly where yo
 
 The cascade rule is simple but worth being explicit about:
 
-> When a task is marked Done (via `torque_done` or `torque_ready`), Torque walks up the parent chain. For each ancestor, it checks: are **all** my children Done? If yes, mark me Done too and continue walking up. If no, stop.
+> When a task is marked Done (via `task_complete` or `agent_ready`), Torque walks up the parent chain. For each ancestor, it checks: are **all** my children Done? If yes, mark me Done too and continue walking up. If no, stop.
 
 This means:
 
@@ -103,7 +103,7 @@ This means:
 
 The status badge on intermediate tasks shows where the work currently lives. If `LOOM:290` shows "On Review" while `LOOM:290:1` is in In Progress, that's the system telling you the action is happening one level deeper.
 
-There's an escape hatch: `torque_ready` is the Worker's way of saying "I'm done and you can also stop tracking my involvement on this thread." It does the cascade *and* unlinks the calling agent from the task. Useful when the agent is going to be repurposed for unrelated work.
+There's an escape hatch: `agent_ready` is the Worker's way of saying "I'm done and you can also stop tracking my involvement on this thread." It does the cascade *and* unlinks the calling agent from the task. Useful when the agent is going to be repurposed for unrelated work.
 
 ## Threads and worktrees
 
@@ -115,10 +115,11 @@ A consequence worth knowing: if you derive into a fresh-worker dispatch (no targ
 
 ## Threads and the human
 
-Sometimes a Worker hits a question only you can answer. The pattern is `torque_ask`:
+Sometimes a Worker hits a question only you can answer. The pattern is
+`user_ask`:
 
 ```text
-torque_ask(question="Should we ship this behind a feature flag?")
+user_ask(question="Should we ship this behind a feature flag?")
 ```
 
 This creates a derived task — same thread, just one extra depth — that lands in **Backlog** with a `human` label, **not dispatched**. The board pauses. You read the question, write the answer (by editing the task body and dispatching it, or by replying through the panel), and the thread continues.

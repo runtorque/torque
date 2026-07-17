@@ -258,7 +258,7 @@ class ReviewRequiredPostscriptTests(unittest.TestCase):
         )
         self.assertIn("Review pre-approved", ps)
         self.assertIn("task-review-42", ps)
-        self.assertIn("torque_done", ps)
+        self.assertIn("task_complete", ps)
         self.assertNotIn("Review required", ps)
 
 

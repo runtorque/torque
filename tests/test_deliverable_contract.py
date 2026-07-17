@@ -200,7 +200,7 @@ class DeliverablePostscriptTests(unittest.TestCase):
             task_title="MCP tool surface audit",
         )
         self.assertIn("Deliverable contract", ps)
-        self.assertIn("torque_task_upload_artifact", ps)
+        self.assertIn("task_artifact_upload", ps)
         self.assertIn("MCP audit report", ps)
         self.assertIn("report", ps)
         self.assertIn("markdown", ps)

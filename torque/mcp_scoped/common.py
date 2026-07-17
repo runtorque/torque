@@ -113,7 +113,8 @@ def _batch_dispatch_shape(valid_entries: list[dict]) -> tuple[str, dict]:
 
 
 def tool_name_with_prefix(tool_prefix: str, suffix: str) -> str:
-    return f"{str(tool_prefix or '').rstrip('_')}_{suffix}"
+    prefix = str(tool_prefix or "").rstrip("_")
+    return f"{prefix}_{suffix}" if prefix else str(suffix or "")
 
 
 def _effective_owner_engineer_id(cell) -> str:

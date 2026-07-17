@@ -17,6 +17,8 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
+from .mcp_canonical import canonical_tool_name
+
 log = logging.getLogger("torque")
 
 IDEMPOTENCY_ARG = "_torque_idempotency_key"
@@ -71,6 +73,7 @@ _SCOPED_WRITE_SUFFIXES = {
     "task_resolve",
     "decision_create",
     "decision_update",
+    "decision_review",
     "decision_link",
     "task_propose",
     "decision_propose",
@@ -89,13 +92,16 @@ _SCOPED_WRITE_SUFFIXES = {
     "proposal_journal",
     "thinking_scratchpad_create",
     "thinking_scratchpad_update",
+    "thinking_archive",
     "thinking_mind_map_create",
     "thinking_mind_map_update",
     "thinking_mind_map_node_create",
     "thinking_mind_map_node_update",
+    "thinking_mind_map_node_delete",
     "thinking_mind_map_node_position",
     "thinking_mind_map_link_create",
     "thinking_mind_map_link_update",
+    "thinking_mind_map_link_delete",
     "area_create",
     "area_update",
     "area_archive",
@@ -147,6 +153,11 @@ _SCOPED_WRITE_SUFFIXES = {
     "behavior_overlay_rollback",
     "behavior_overlay_rollback_role",
 }
+
+_CANONICAL_WRITE_TOOLS = frozenset(
+    canonical_tool_name(name)
+    for name in (*_TORQUE_WRITE_TOOLS, *_SCOPED_WRITE_SUFFIXES)
+)
 
 
 _PR_PHASES = frozenset({
@@ -341,7 +352,9 @@ def is_mcp_write_tool(tool_name: str) -> bool:
         return False
     if name in _TORQUE_WRITE_TOOLS:
         return True
-    return normalize_scoped_tool_name(name) in _SCOPED_WRITE_SUFFIXES
+    if normalize_scoped_tool_name(name) in _SCOPED_WRITE_SUFFIXES:
+        return True
+    return canonical_tool_name(name) in _CANONICAL_WRITE_TOOLS
 
 
 def is_api_write_command(cmd: str) -> bool:

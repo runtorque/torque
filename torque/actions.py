@@ -10,6 +10,7 @@ import os
 import re
 
 from .config import log
+from .mcp_canonical import canonicalize_tool_references
 
 try:
     from jinja2.sandbox import SandboxedEnvironment
@@ -381,7 +382,9 @@ class ActionManager:
         prompt_raw = _migrate_syntax(prompt_raw)
         render_vars = dict(variables)
         render_vars["torque"] = torque_context or TORQUE_CONTEXT_STUB
-        return self._render_str(prompt_raw, render_vars)
+        return canonicalize_tool_references(
+            self._render_str(prompt_raw, render_vars)
+        )
 
     @staticmethod
     def find_actions_dirs(base_dir: str = "") -> list[str]:

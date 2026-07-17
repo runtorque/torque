@@ -161,6 +161,51 @@ class AgentClassRegistryTests(unittest.TestCase):
                 f"{class_id} should author repeated scopes as grouped rules",
             )
 
+    def test_legacy_engineer_message_capability_migrates_acl_and_guidance(self):
+        definition, issues = validate_class_data({
+            "agent_class_schema_version": 5,
+            "id": "legacy-engineer-messaging",
+            "version": "1",
+            "display_name": "Legacy Engineer Messaging",
+            "base_kind": "engineer",
+            "lifecycle": "stable",
+            "prompt": {
+                "identity": "Coordinate engineering work.",
+                "job": "Keep peers and the supervisor aligned.",
+                "tool_guidance": [{
+                    "when_capability": "message.engineer",
+                    "text": "Use the eligible relationship channel.",
+                }],
+            },
+            "acl": {
+                "mode": "allow",
+                "rules": [{
+                    "capability": "message.engineer",
+                    "scope": "group",
+                }],
+            },
+        })
+
+        self.assertEqual(issues, [])
+        self.assertIsNotNone(definition)
+        rules = definition.acl["rules"]
+        self.assertIn(
+            {"capability": "message.peer", "scope": "group"},
+            rules,
+        )
+        self.assertIn(
+            {"capability": "message.supervisor", "scope": "self"},
+            rules,
+        )
+        selectors = {
+            item["when_capability"]
+            for item in definition.prompt["tool_guidance"]
+        }
+        self.assertEqual(
+            selectors,
+            {"message.peer", "message.supervisor"},
+        )
+
     def test_product_manager_preview_is_class_first_capability_acl_with_caveat(self):
         classes, issues = load_agent_classes(base_dir=str(self.project))
         self.assertFalse(issues)
@@ -179,7 +224,7 @@ class AgentClassRegistryTests(unittest.TestCase):
             "self",
         )
         self.assertEqual(
-            preview["effective_authority"]["capabilities"]["message.architect_peer"],
+            preview["effective_authority"]["capabilities"]["message.peer"],
             "group",
         )
         self.assertIn("capability_catalog", preview["authoring_contract"])
@@ -220,8 +265,7 @@ class AgentClassRegistryTests(unittest.TestCase):
             self.assertIn(capability, preview["effective_authority"]["capabilities"])
         warnings = "\n".join(preview["warnings"])
         self.assertIn("proposal-only", warnings)
-        self.assertIn("architect_thinking_*", warnings)
-        self.assertIn("architect_idea_brief_*", warnings)
+        self.assertIn("canonical Thinking and Idea Brief tools", warnings)
 
         self.assertNotIn(
             "class.admin",
@@ -698,9 +742,9 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         self.assertFalse(mcp_tool_allowed_by_authority("architect_idea_brief_create", authority))
         self.assertFalse(mcp_tool_allowed_by_authority("architect_task_create", authority))
         self.assertFalse(mcp_tool_allowed_by_authority("architect_engineer_hire", authority))
-        self.assertFalse(mcp_tool_allowed_by_authority("architect_tool_search", authority))
+        self.assertTrue(mcp_tool_allowed_by_authority("tool_search", authority))
 
-    def test_torque_steward_class_projection_denies_tool_search_and_mutations_but_allows_communication(self):
+    def test_torque_steward_class_projection_allows_discovery_and_denies_mutations(self):
         cell = self._add_agent(kind="architect")
         self.state.assign_agent_class(
             cell.id,
@@ -716,6 +760,7 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         )
 
         for allowed in (
+            "tool_search",
             "architect_board_summary",
             "architect_group_health_brief",
             "architect_events_recent",
@@ -733,7 +778,6 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         ):
             self.assertTrue(mcp_tool_allowed_by_authority(allowed, authority), allowed)
         for denied in (
-            "architect_tool_search",
             "architect_engineer_message",
             "architect_engineer_hire",
             "architect_task_create",
@@ -780,7 +824,7 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         self.assertTrue(mcp_tool_allowed_by_authority("architect_idea_brief_propose", authority))
         self.assertTrue(mcp_tool_allowed_by_authority("architect_task_propose", authority))
         self.assertTrue(mcp_tool_allowed_by_authority("architect_board_summary", authority))
-        self.assertFalse(mcp_tool_allowed_by_authority("architect_tool_search", authority))
+        self.assertTrue(mcp_tool_allowed_by_authority("tool_search", authority))
         self.assertTrue(mcp_tool_allowed_by_authority("architect_peer_message", authority))
         self.assertTrue(mcp_tool_allowed_by_authority("architect_message_user", authority))
         self.assertTrue(mcp_tool_allowed_by_authority("architect_decision_link", authority))

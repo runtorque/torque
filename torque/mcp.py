@@ -41,8 +41,16 @@ from .mcp_engineer import (
     _dispatch_engineer_tool,
     engineer_tools_for_cell,
 )
-from .mcp_tool_search import deferred_tool_specs, eager_tool_specs, public_tool_spec
+from .mcp_tool_search import deferred_tool_specs, public_tool_spec
 from .mcp_tool_search import tool_search_response
+from .mcp_canonical import (
+    authority_is_proposal_only,
+    canonical_tool_name,
+    canonicalize_tool_specs,
+    modernize_tool_authority,
+    select_legacy_tool,
+    translate_canonical_arguments,
+)
 from .help_docs import dispatch_help_tool, help_tool_specs
 from .mcp_tools_shared import (
     _direct_user_message_response,
@@ -840,6 +848,21 @@ TOOLS = [
 
 _TOOL_MAP = {t["name"]: t for t in TOOLS}
 
+# Internal handlers retain historical names, but their authority descriptors
+# use the canonical relationship vocabulary.
+TOOLS = [
+    modernize_tool_authority(tool, caller_kind="worker")
+    for tool in TOOLS
+]
+ENGINEER_TOOLS = [
+    modernize_tool_authority(tool, caller_kind="engineer")
+    for tool in ENGINEER_TOOLS
+]
+ARCHITECT_TOOLS = [
+    modernize_tool_authority(tool, caller_kind="architect")
+    for tool in ARCHITECT_TOOLS
+]
+
 # Combined tool list
 ALL_TOOLS = TOOLS + ARCHITECT_TOOLS + ENGINEER_TOOLS
 _ALL_TOOL_MAP = {t["name"]: t for t in ALL_TOOLS}
@@ -864,6 +887,22 @@ MCP_TOOL_AUTHORITY_DEFINITIONS = authority_definition_map((
     *ENGINEER_TOOL_AUTHORITY_DEFINITIONS,
     *ARCHITECT_TOOL_AUTHORITY_DEFINITIONS,
 ))
+MCP_CANONICAL_AUTHORITY_VARIANTS = {}
+for _kind, _definitions in (
+    ("worker", WORKER_TOOL_AUTHORITY_DEFINITIONS),
+    ("engineer", (*WORKER_TOOL_AUTHORITY_DEFINITIONS, *ENGINEER_TOOL_AUTHORITY_DEFINITIONS)),
+    ("architect", (*WORKER_TOOL_AUTHORITY_DEFINITIONS, *ARCHITECT_TOOL_AUTHORITY_DEFINITIONS)),
+):
+    _by_name = {}
+    for _definition in _definitions:
+        _by_name.setdefault(
+            canonical_tool_name(_definition.name),
+            [],
+        ).append(_definition)
+    MCP_CANONICAL_AUTHORITY_VARIANTS[_kind] = {
+        _name: tuple(_variants)
+        for _name, _variants in _by_name.items()
+    }
 
 # Compatibility/read-model projection. The source of truth is each tool's
 # first-class authority descriptor above, not this derived index.
@@ -905,10 +944,31 @@ for _surface_name, _surface_tools, _surface_definitions in (
     MCP_AUTHORITY_SURFACE_COVERAGE[_surface_name] = _coverage
 
 
-def mcp_tool_capability_requirements(tool_name: str) -> frozenset[str] | None:
+def mcp_tool_capability_requirements(
+    tool_name: str,
+    caller_kind: str = "",
+) -> frozenset[str] | None:
     """Return the capability requirements declared by an MCP surface."""
 
-    return _MCP_TOOL_CAPABILITIES.get(str(tool_name or "").strip())
+    name = str(tool_name or "").strip()
+    direct = _MCP_TOOL_CAPABILITIES.get(name)
+    if direct is not None:
+        return direct
+    kind = str(caller_kind or "").strip()
+    variants = MCP_CANONICAL_AUTHORITY_VARIANTS.get(kind, {}).get(name, ())
+    if not variants:
+        variants = tuple(
+            variant
+            for by_name in MCP_CANONICAL_AUTHORITY_VARIANTS.values()
+            for variant in by_name.get(name, ())
+        )
+    if not variants:
+        return None
+    return frozenset(
+        requirement.capability
+        for variant in variants
+        for requirement in variant.requirements
+    )
 
 
 def mcp_tool_allowed_by_authority(
@@ -918,23 +978,38 @@ def mcp_tool_allowed_by_authority(
     """Project a tool from canonical frozen Agent Class authority."""
 
     tool_name = str(tool_name or "").strip()
-    tool_authority = MCP_TOOL_AUTHORITY_DEFINITIONS.get(tool_name)
-    if not tool_authority:
+    direct = MCP_TOOL_AUTHORITY_DEFINITIONS.get(tool_name)
+    variants = (
+        (direct,)
+        if direct
+        else MCP_CANONICAL_AUTHORITY_VARIANTS.get(
+            str(authority.base_kind or "").strip(),
+            {},
+        ).get(tool_name, ())
+    )
+    if not variants:
         return False
-    for requirement in tool_authority.requirements:
-        definition = CAPABILITY_CATALOG.get(requirement.capability)
-        if not definition:
-            return False
-        if not definition.scoped:
-            if not authority.has(requirement.capability):
-                return False
-            continue
-        if not authority.allows(
-            requirement.capability,
-            scope=requirement.minimum_scope,
-        ):
-            return False
-    return True
+    for tool_authority in variants:
+        allowed = True
+        for requirement in tool_authority.requirements:
+            definition = CAPABILITY_CATALOG.get(requirement.capability)
+            if not definition:
+                allowed = False
+                break
+            if not definition.scoped:
+                if not authority.has(requirement.capability):
+                    allowed = False
+                    break
+                continue
+            if not authority.allows(
+                requirement.capability,
+                scope=requirement.minimum_scope,
+            ):
+                allowed = False
+                break
+        if allowed:
+            return True
+    return False
 
 
 def _effective_class_authority_for_cell(cell) -> EffectiveAuthority | None:
@@ -976,46 +1051,133 @@ def _authority_project_tools(
     ]
 
 
-def _visible_tools(state, cell_id: str):
-    """Return the MCP tool list visible to the caller."""
-    tools = list(TOOLS)
+def _raw_tools_for_caller(state, cell_id: str) -> tuple[list[dict], object, str]:
+    """Return authority-projected internal operations for one caller."""
+
     cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
     if cell and state.agent_is_tombstoned(cell):
-        return []
+        return [], cell, ""
     authority = _effective_class_authority_for_cell(cell)
-    tools = _authority_project_tools(tools, authority)
     caller_kind = str(getattr(cell, "kind", "") or "").strip() if cell else ""
+    base_tools = TOOLS
+    if caller_kind in {"engineer", "architect"}:
+        # Persistent orchestrators share context, help, and memory primitives
+        # with workers, but should not inherit worker lifecycle/reporting
+        # operations such as done, derive, ready, rename, or worker reply.
+        shared_names = {
+            "torque_context",
+            "torque_help_list",
+            "torque_help_show",
+            "torque_help_search",
+            "torque_help_query",
+            "torque_memory_publish",
+            "torque_memory_list",
+            "torque_memory_read",
+            "torque_memory_pin",
+            "torque_memory_unpin",
+            "torque_memory_link",
+        }
+        base_tools = [
+            tool for tool in TOOLS
+            if str(tool.get("name", "") or "").strip() in shared_names
+        ]
+    tools = list(_authority_project_tools(base_tools, authority))
     if caller_kind == "engineer":
-        tools.extend(eager_tool_specs(_authority_project_tools(
+        tools.extend(_authority_project_tools(
             engineer_tools_for_cell(cell, state),
             authority,
-        )))
+        ))
     elif caller_kind == "architect":
-        tools.extend(eager_tool_specs(_authority_project_tools(
+        tools.extend(_authority_project_tools(
             ARCHITECT_TOOLS,
             authority,
-        )))
-    return [public_tool_spec(tool) for tool in tools]
+        ))
+    return tools, cell, caller_kind
+
+
+def _canonical_tools_for_caller(state, cell_id: str) -> list[dict]:
+    tools, _cell, caller_kind = _raw_tools_for_caller(state, cell_id)
+    if not tools:
+        return []
+    canonical = canonicalize_tool_specs(
+        tools,
+        caller_kind=caller_kind or "worker",
+        proposal_only=authority_is_proposal_only(
+            _effective_class_authority_for_cell(_cell)
+        ),
+    )
+    return canonical
+
+
+def _visible_tools(state, cell_id: str):
+    """Return the canonical eager MCP tool list visible to the caller."""
+
+    return [
+        public_tool_spec(tool)
+        for tool in _canonical_tools_for_caller(state, cell_id)
+        if not tool.get("deferred")
+    ]
 
 
 def _deferred_tools_for_caller(state, cell_id: str):
     """Return deferred MCP tool schemas available to the caller."""
-    cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
-    if cell and state.agent_is_tombstoned(cell):
-        return []
+    return deferred_tool_specs(_canonical_tools_for_caller(state, cell_id))
+
+
+def _resolve_public_tool_call(
+    state,
+    cell_id: str,
+    name: str,
+    arguments: dict,
+) -> tuple[str, dict]:
+    """Resolve a canonical public call to an authority-projected operation.
+
+    Historical names are accepted as a hidden migration bridge, but only
+    canonical names are advertised.
+    """
+
+    requested = str(name or "").strip()
+    raw_tools, cell, caller_kind = _raw_tools_for_caller(state, cell_id)
+    raw_names = {
+        str(tool.get("name", "") or "").strip()
+        for tool in raw_tools
+    }
+    if requested in raw_names:
+        return requested, dict(arguments or {})
+    if requested in _ALL_TOOL_MAP:
+        return "", dict(arguments or {})
+
     authority = _effective_class_authority_for_cell(cell)
-    caller_kind = str(getattr(cell, "kind", "") or "").strip() if cell else ""
-    if caller_kind == "engineer":
-        return deferred_tool_specs(_authority_project_tools(
-            engineer_tools_for_cell(cell, state),
-            authority,
-        ))
-    if caller_kind == "architect":
-        return deferred_tool_specs(_authority_project_tools(
-            ARCHITECT_TOOLS,
-            authority,
-        ))
-    return []
+    canonical = canonical_tool_name(requested)
+    candidates = [
+        str(tool.get("name", "") or "").strip()
+        for tool in raw_tools
+        if canonical_tool_name(tool.get("name", "")) == canonical
+    ]
+    selected = select_legacy_tool(
+        canonical,
+        candidates,
+        arguments,
+        caller_kind=caller_kind or "worker",
+        authority=authority,
+    )
+    if not selected:
+        return "", dict(arguments or {})
+    translated = translate_canonical_arguments(
+        canonical,
+        selected,
+        arguments,
+        caller_kind=caller_kind or "worker",
+    )
+    if (
+        canonical == "supervisor_message"
+        and not str(translated.get("architect_id", "") or "").strip()
+        and cell is not None
+    ):
+        translated["architect_id"] = str(
+            getattr(cell, "hired_by_architect_id", "") or ""
+        ).strip()
+    return selected, translated
 
 
 def _tool_hidden_for_caller(tool_name: str, caller_kind: str, caller_cell) -> bool:
@@ -1451,6 +1613,41 @@ def _apply_tool_result_scope_filters(
             }],
             "isError": True,
         }
+
+
+def _apply_inline_field_authority(result: dict, caller_cell) -> dict:
+    """Remove capability-gated inline fields from otherwise visible records."""
+
+    authority = _effective_class_authority_for_cell(caller_cell)
+    if (
+        authority is None
+        or authority.has("task.board_sync.read")
+        or result.get("isError")
+    ):
+        return result
+    content = result.get("content")
+    if not isinstance(content, list):
+        return result
+
+    def strip_board_sync(value):
+        if isinstance(value, dict):
+            value.pop("board_sync", None)
+            for child in value.values():
+                strip_board_sync(child)
+        elif isinstance(value, list):
+            for child in value:
+                strip_board_sync(child)
+
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") != "text":
+            continue
+        try:
+            payload = json.loads(str(block.get("text", "") or ""))
+        except (TypeError, json.JSONDecodeError):
+            continue
+        strip_board_sync(payload)
+        block["text"] = json.dumps(payload, separators=(",", ":"))
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1918,9 +2115,17 @@ async def dispatch_mcp_rpc_body(
 
     if method == "tools/call":
         first_tool_call_ts = time.time()
-        tool_name = params.get("name", "") if isinstance(params, dict) else ""
+        requested_tool_name = (
+            params.get("name", "") if isinstance(params, dict) else ""
+        )
         raw_arguments = params.get("arguments", {}) if isinstance(params, dict) else {}
         arguments = strip_mcp_idempotency_args(raw_arguments)
+        tool_name, arguments = _resolve_public_tool_call(
+            state,
+            cell_id,
+            requested_tool_name,
+            arguments,
+        )
         caller_cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
         caller_kind = str(
             getattr(caller_cell, "kind", "") or ""
@@ -1935,6 +2140,8 @@ async def dispatch_mcp_rpc_body(
             and _claim_session_wake(cell_id, mcp_session_id)
         )
         if (
+            not tool_name
+            or
             _tool_hidden_for_caller(tool_name, caller_kind, caller_cell)
             or _tool_denied_by_effective_authority(tool_name, caller_cell)
             or _tool_argument_scope_denied(
@@ -1952,7 +2159,11 @@ async def dispatch_mcp_rpc_body(
                     first_tool_call_ts=first_tool_call_ts,
                 )
             return (
-                _jsonrpc_error(req_id, -32602, f"Unknown tool: {tool_name}"),
+                _jsonrpc_error(
+                    req_id,
+                    -32602,
+                    f"Unknown tool: {requested_tool_name}",
+                ),
                 200,
             )
         write_tool = is_mcp_write_tool(tool_name)
@@ -2053,10 +2264,7 @@ async def dispatch_mcp_rpc_body(
                     "content": [{
                         "type": "text",
                         "text": tool_search_response(
-                            _authority_project_tools(
-                                engineer_tools_for_cell(caller_cell, state),
-                                _effective_class_authority_for_cell(caller_cell),
-                            ),
+                            _canonical_tools_for_caller(state, cell_id),
                             arguments,
                         ),
                     }],
@@ -2105,10 +2313,7 @@ async def dispatch_mcp_rpc_body(
                     "content": [{
                         "type": "text",
                         "text": tool_search_response(
-                            _authority_project_tools(
-                                ARCHITECT_TOOLS,
-                                _effective_class_authority_for_cell(caller_cell),
-                            ),
+                            _canonical_tools_for_caller(state, cell_id),
                             arguments,
                         ),
                     }],
@@ -2168,6 +2373,7 @@ async def dispatch_mcp_rpc_body(
             result,
             caller_cell,
         )
+        result = _apply_inline_field_authority(result, caller_cell)
 
         if write_tool and idempotency_key and db and cacheable:
             try:

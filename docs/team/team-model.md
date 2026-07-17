@@ -55,35 +55,48 @@ The visual layout matches the authority gradient: leftmost / topmost = highest a
 
 | Kind | Who creates it | Persistent? | What it does |
 |---|---|---|---|
-| **[Worker](workers.md)** | An Engineer (or you) | No — ephemeral | Writes code on a worktree branch, reports through `torque_*` MCP tools, gets closed after merge. |
-| **[Engineer](engineers.md)** | An Architect (or you) | Yes | Coordinates a group's Workers. Dispatches in waves, journals decisions, reviews and merges. Uses `engineer_*` MCP tools for its group only. |
-| **[Architect](architects.md)** | You — user-only | Yes | Plans cross-group work, hires/dismisses Engineers, maintains a decision log. Uses `architect_*` MCP tools for its group only. |
+| **[Worker](workers.md)** | An Engineer (or you) | No — ephemeral | Writes code on a worktree branch, reports through its canonical MCP surface, gets closed after merge. |
+| **[Engineer](engineers.md)** | An Architect (or you) | Yes | Coordinates a group's Workers. Dispatches in waves, journals decisions, reviews and merges through group-scoped canonical operations. |
+| **[Architect](architects.md)** | You — user-only | Yes | Plans work, hires/dismisses Engineers, and maintains an owner-scoped decision log through canonical operations. |
 | **Terminal** | You or an Engineer | Persistent (until closed) | Companion shell session. Not an AI session. → [Sessions](../operate/sessions.md) |
 
 There's no fifth kind. Everything else in Torque (tasks, actions, pipelines, worktrees) is the *work*; agents are the *people*.
 
 ## How they coordinate
 
-The team coordinates through four channels, in decreasing order of formality:
+The team coordinates through five channels, in decreasing order of formality:
 
 1. **Tasks on the board.** Every meaningful piece of work is a task. Architects create tasks for Engineers. Engineers dispatch tasks to Workers. Workers derive follow-up tasks (review, fix, validate) that become the historical thread of the work. → [Tasks and threads](../tasks/threads.md)
 2. **Architect ↔ Engineer messaging.** A direct, audited message channel between an Architect and the Engineers they hired. Used for clarifying scope, escalating blockers, and bidirectional Q&A. Workers don't have access to this — they speak only through tasks.
-3. **Architect ↔ Architect peer messaging.** Same-group Architects can direct-message each other for product coordination. It is not a broadcast channel and does not transfer task, Engineer, journal, or decision ownership. → [Architects](architects.md#messaging)
-4. **Engineer digests.** The Engineer doesn't poll. Torque pushes idle-gated event digests into its terminal so it stays situationally aware without burning context. → [Engineers](engineers.md)
+3. **Engineer ↔ Engineer peer messaging.** Engineers hired by the same
+   Architect can coordinate through `peer_message`; attached task/stream
+   context grants only the narrow read-only inspection needed for that thread.
+4. **Architect ↔ Architect peer messaging.** Same-group Architects can
+   direct-message each other for product coordination. It is not a broadcast
+   channel and does not transfer task, Engineer, journal, or decision
+   ownership. → [Architects](architects.md#messaging)
+5. **Engineer digests.** The Engineer doesn't poll. Torque pushes idle-gated event digests into its terminal so it stays situationally aware without burning context. → [Engineers](engineers.md)
 
-There is **no Engineer ↔ Engineer messaging** and **no cross-group Architect messaging**. Cross-group coordination and formal ownership transfer still go through the User. This is by design — it keeps responsibility scoped and prevents back-channel decisions that don't show up in the journal or decision log.
+There is **no generic Engineer visibility into peer Engineers or their
+Workers**, and **no cross-group Architect messaging**. Engineer peer inspection
+is limited to the context explicitly attached to an eligible thread.
+Cross-group coordination and formal ownership transfer still go through the
+User.
 
 ## What each role can and can't see
 
-The tool surfaces are filtered server-side based on the caller's role. The full enforcement story is on its own page; this is the one-line summary:
+The server projects one canonical vocabulary from the caller's kind, effective
+Agent Class authority, and relationships:
 
-| Role | Sees `torque_*` | Sees `engineer_*` | Sees `architect_*` | Cross-group? |
-|---|---|---|---|---|
-| Worker | ✅ | ❌ | ❌ | No |
-| Engineer | ✅ | ✅ for **own group only** | ❌ | No |
-| Architect | ✅ | ❌ | ✅ for **own decisions only** | No (still scoped to one group) |
+| Caller | Operation scope | Cross-group? |
+|---|---|---|
+| Worker | Own task, reports, replies, and shared context | No |
+| Engineer | Own group, owned Workers, assigned tasks, eligible peers and supervisor | No |
+| Architect | Own group, hired Engineers, owner-scoped decisions and journal, eligible peers | No |
 
-A Worker can't list the Engineer toolkit. An Engineer in group A can't read another Engineer's journal. Two Architects can't see each other's decision logs. → [MCP scoping](mcp-scoping.md)
+A Worker cannot list orchestration operations. An Engineer in group A cannot
+read another group's journal. Two Architects cannot see each other's decision
+logs. → [MCP scoping](mcp-scoping.md)
 
 ## When to add each layer
 

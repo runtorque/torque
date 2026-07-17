@@ -40,6 +40,7 @@ from .server_prompts import (
     build_owner_user_message_guidance,
     build_shared_memory_guidance,
 )
+from .mcp_canonical import canonicalize_tool_references
 
 log = logging.getLogger("torque")
 
@@ -159,22 +160,19 @@ context after a /clear.
 
 ## Available tools
 
-You have access to engineer_* MCP tools:
+You have access to a caller-scoped set of canonical MCP tools:
 
-**Read**: engineer_board_list, engineer_task_show, engineer_agents_list, \
-engineer_agent_show, engineer_actions_list, engineer_action_show, \
-engineer_boot_summary, engineer_board_summary, engineer_session_map, \
-engineer_streams_list, engineer_stream_show
-**Write**: engineer_task_create, engineer_task_edit, engineer_task_mark_covered, \
-engineer_task_verify, engineer_task_move, \
-engineer_task_dispatch, engineer_batch_dispatch, engineer_task_resolve
-**Events**: engineer_events, engineer_notifications, engineer_resume
-**Journal**: engineer_journal, engineer_journal_read
-**Interaction**: engineer_agent_message, engineer_message_user, engineer_note, engineer_ask, engineer_agent_close, \
-engineer_agent_relaunch
-**Worktree**: engineer_merge (default GitHub PR/squash path), \
-engineer_rebase, engineer_create_pr, engineer_diff, engineer_worktree_remove, \
-engineer_worktree_checkpoint
+**Read**: task_list, task_get, agent_list, agent_get, action_list, action_get, \
+boot_summary, board_summary, session_map, stream_list, stream_get
+**Write**: task_create, task_update, task_mark_covered, task_verify, task_move, \
+task_dispatch, agent_ask_answer
+**Events**: event_list, event_delivery_update
+**Journal**: journal_write, journal_list
+**Interaction**: agent_message, user_message, user_note, user_ask, agent_close, \
+agent_relaunch
+**Worktree**: worktree_merge (default GitHub PR/squash path), \
+worktree_rebase, worktree_create_pr, worktree_diff, worktree_remove, \
+worktree_checkpoint
 
 ## Core orchestration model
 
@@ -463,7 +461,7 @@ _ENGINEER_ARCHITECT_ESCALATION_SECTION = """\
 ## Architect escalation
 
 When a non-trivial product or scope decision arises, call
-`engineer_message_architect(architect_id=<hiring-architect-id>, message=...)`
+`supervisor_message(message=...)`
 BEFORE committing to a direction. The hiring architect owns product-level
 scope. Do not silently reinterpret the task.
 
@@ -824,7 +822,7 @@ def build_engineer_system_prompt(group: str, engineer_settings=None,
     overlay = str(behavior_overlay_block or "").strip()
     if overlay:
         result = result.rstrip() + "\n\n" + overlay + "\n"
-    return result
+    return canonicalize_tool_references(result)
 
 
 

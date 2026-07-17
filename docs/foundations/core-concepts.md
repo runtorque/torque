@@ -43,7 +43,7 @@ A multi-step workflow that emerges automatically from the **transitions** declar
 
 ## Thread (task derivation)
 
-When an agent finishes a task and the next step is a different task, the agent **derives** that task with `torque_derive(...)`. The new task is parented to the original — it inherits the worktree, gets a depth-incremented ID like `LOOM:290:1`, and shows up under its parent on the board as a subordinate card. The full chain of derivations is the **thread**: implement → review → fix → review → done. Threads are how Torque represents progress as history instead of as a status field.
+When an agent finishes a task and the next step is a different task, the agent **derives** that task with `task_derive(...)`. The new task is parented to the original — it inherits the worktree, gets a depth-incremented ID like `LOOM:290:1`, and shows up under its parent on the board as a subordinate card. The full chain of derivations is the **thread**: implement → review → fix → review → done. Threads are how Torque represents progress as history instead of as a status field.
 
 → [Tasks and threads](../tasks/threads.md)
 
@@ -91,7 +91,11 @@ The Architect's equivalent of the journal. Records cross-group planning decision
 
 ## MCP
 
-Model Context Protocol. Torque exposes its tools to agents over MCP. **Each agent's tool surface is filtered by its kind** — Workers see `torque_*`, Engineers see `torque_*` plus `engineer_*` for their group, Architects see `architect_*` for their decisions. Server-side enforcement; not a prompt convention.
+Model Context Protocol. Torque exposes one canonical tool vocabulary over MCP.
+**Each agent's surface is projected from its kind, effective Agent Class
+authority, and relationships** — the same operation can route to different
+scoped behavior for a Worker, Engineer, or Architect. Server-side enforcement;
+not a prompt convention.
 
 → [MCP scoping](../team/mcp-scoping.md)
 
@@ -124,7 +128,10 @@ The branch a worktree was forked from (typically `main`). Torque tracks this so 
 Three places the same operations live:
 
 - **`torque ai *` CLI** — for humans and offline scripts. `torque ai done`, `torque ai blocked`, `torque ai derive`, etc.
-- **MCP tools** — what dispatched workers actually call. `mcp__torque__torque_done`, `_derive`, `_progress`, etc. Workers report exclusively through MCP, not through the CLI.
+- **MCP tools** — what dispatched workers actually call:
+  `mcp__torque__task_complete`, `mcp__torque__task_derive`,
+  `mcp__torque__task_progress`, and the rest of their canonical surface.
+  Workers report exclusively through MCP, not through the CLI.
 - **`torque` CLI** — task creation, dispatch, action management, board operations. The general-purpose CLI surface.
 
 → [CLI reference](../reference/cli.md), [MCP tools](../reference/mcp-tools.md)

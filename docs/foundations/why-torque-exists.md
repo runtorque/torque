@@ -84,7 +84,13 @@ The last layer in the story isn't a new role — it's a guarantee about the prev
 
 When you give a Worker an MCP toolkit, you don't want it to be able to dispatch work on its own. When you give an Engineer the orchestration toolkit, you don't want it to peek at another Engineer's journal. When you give an Architect the planning toolkit, you don't want it to be able to override a different Architect's pending decisions.
 
-Torque enforces this at the **MCP server boundary**, not in prompts. Every MCP request carries the agent's `X-Torque-Cell-Id` header. The server resolves that to a specific agent in a specific group with a specific role, and the tool surface it returns is filtered to exactly what that role can do, on exactly the data that role can see. A Worker physically cannot call `engineer_*` tools. An Engineer physically cannot read another group's journal. An Architect physically cannot resolve another Architect's pending hires.
+Torque enforces this at the **MCP server boundary**, not in prompts. Every MCP
+request carries the agent's `X-Torque-Cell-Id` header. The server resolves that
+to a specific agent, group, kind, effective Agent Class authority, and set of
+relationships, then returns only the canonical operations that caller may use.
+A Worker physically cannot call orchestration operations. An Engineer
+physically cannot read another group's journal. An Architect physically cannot
+resolve another Architect's pending hires.
 
 That makes the hierarchy real. It's not a convention — it's a protocol.
 

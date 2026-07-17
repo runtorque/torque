@@ -14,7 +14,10 @@ One Engineer per group. **Persistent** (survives `/clear`, restarts, long pauses
 4. **A live wave plan** — which Workers are running, which tasks are queued, which streams are blocked.
 5. **An ask channel** — the blocking and non-blocking ways to surface questions to you.
 
-Inside Torque the Engineer is just another agent in the grid, with an amber border and a pinned position at the front of its group. Outside Torque it's a `claude` or `codex` process you can talk to like any other agent — except it has the `engineer_*` MCP toolkit and a system prompt that tells it how to use it.
+Inside Torque the Engineer is another agent in the grid, with an amber border
+and a pinned position at the front of its group. Outside Torque it is a
+`claude` or `codex` process with an Engineer-scoped projection of Torque's
+canonical MCP vocabulary.
 
 ## Live, in action
 
@@ -38,9 +41,9 @@ flowchart LR
 
 In practice that loop looks like:
 
-1. `engineer_board_summary` — compact overview of lanes, blocked tasks, pending asks, agent state.
-2. `engineer_task_show` / `engineer_agent_show` only for the tasks or agents that need deeper inspection.
-3. `engineer_task_dispatch` or `engineer_batch_dispatch` for the next wave.
+1. `board_summary` — compact overview of lanes, blocked tasks, pending asks, agent state.
+2. `task_get` / `agent_get` only for the tasks or agents that need deeper inspection.
+3. `task_dispatch` with `task` for one task or `entries` for a wave.
 4. Wait for Torque to push a digest. Don't poll.
 5. When the digest arrives, react to the changed tasks and agents only.
 6. Journal the dispatch decisions.
@@ -98,10 +101,11 @@ The journal belongs to the **group**, not the agent. If you dismiss this Enginee
 The recovery sequence after `/clear` or restart is:
 
 ```text
-engineer_journal_read → engineer_session_map → engineer_events
+journal_list → session_map → event_list
 ```
 
-`engineer_session_map` is the deterministic structured snapshot of streams and active work — it's the Engineer's orientation surface, not the journal.
+`session_map` is the deterministic structured snapshot of streams and active
+work — it is the Engineer's orientation surface, not the journal.
 
 ![The Engineer's session map: streams summary, ask counts, queued follow-ups, and per-stream NEXT/PRODUCT/WORKFLOW context.](../images/session-map.png)
 
@@ -109,10 +113,12 @@ engineer_journal_read → engineer_session_map → engineer_events
 
 Two ways to surface to you:
 
-- **`engineer_note`** — non-blocking. A note, a soft question, a status update, a proposed next wave. Appears in the panel as an informational banner. The Engineer keeps working.
-- **`engineer_ask`** — blocking. The board pauses until you answer. Appears as an amber banner. Use when the next orchestration step shouldn't be guessed.
+- **`user_note`** — non-blocking. A note, soft question, status update, or proposed next wave. The Engineer keeps working.
+- **`user_ask`** — blocking. The board pauses until you answer. Use when the next orchestration step should not be guessed.
 
-A common antipattern is using `engineer_ask` for things that aren't actually blocking. The system prompt encourages `engineer_note` for "I'd like to surface this" and reserves `engineer_ask` for "I cannot continue without your answer." If the board is idle with backlog remaining and you just want a recommendation, `engineer_note` is the right call.
+A common antipattern is using `user_ask` for things that are not actually
+blocking. Use `user_note` for visibility and reserve `user_ask` for decisions
+without which work cannot continue.
 
 When you reply (either through the panel or directly in the terminal), Torque automatically unpauses event delivery.
 
@@ -121,7 +127,8 @@ When you reply (either through the panel or directly in the terminal), Torque au
 You don't need an Engineer until you have parallel Workers or a multi-step pipeline. When you do:
 
 - **Manually**: Group's **+ New** dropdown → Engineer. Configure provider, boot command, model, custom instructions in the Engineer tab of Group Settings.
-- **Architect-hired**: An Architect calls `architect_engineer_hire(...)`. The hire is **pending** until you approve it from the panel. → [Architects](architects.md#hiring-engineers)
+- **Architect-hired**: An Architect calls `engineer_hire(...)`. The hire is
+  **pending** until you approve it from the panel. → [Architects](architects.md#hiring-engineers)
 
 Once created, the Engineer is persistent. Closing its session pauses it; relaunching from the same dialog reuses its journal and configuration. Dismissing or deleting are explicit operations.
 
@@ -156,15 +163,15 @@ Engineer-created Workers and tasks are auto-stamped with that Engineer's ownersh
 Engineers intentionally do **not** get a repo worktree, and
 TORQUE:580-guarded `main` should stay unwritten from the orchestrator session.
 Durable Engineer deliverables should be attached to the scoped task with
-`engineer_task_upload_artifact`; anything that must become a repository file
+`task_artifact_upload`; anything that must become a repository file
 should be handed to a dispatched Worker, which has the worktree and branch.
 
 ## Engineer ↔ Architect messaging
 
 If an Architect hired this Engineer, the two have a direct messaging channel:
 
-- The Architect calls `architect_engineer_message(engineer_id, message)`.
-- The Engineer calls `engineer_message_architect(...)` — but only to its hiring Architect, not to others.
+- The Architect calls `agent_message(agent, message)`.
+- The Engineer calls `supervisor_message(message)` — only its hiring Architect is eligible.
 
 Architects can also peer-message other same-group Architects for product coordination. That does not change the Engineer surface: only your hiring Architect can message you directly, read your journal, or act on your pending questions.
 
@@ -172,15 +179,16 @@ Workers don't have access to this channel. They speak only through tasks.
 
 ## Tool surface
 
-The Engineer's `engineer_*` MCP toolkit is broad — board reads, task dispatch, agent control, journal, diff/merge/PR, messaging. The full tool reference lives in [MCP tools](../reference/mcp-tools.md#engineer-tools). The most important groups:
+The Engineer's caller-scoped MCP surface covers board reads, dispatch, agent
+control, journals, worktrees, and messaging. The most important groups are:
 
-- **Board and planning** — `engineer_board_summary`, `engineer_session_map`, `engineer_task_show`, `engineer_agent_show`, `engineer_actions_list`.
-- **Dispatch** — `engineer_task_dispatch`, `engineer_batch_dispatch`, `engineer_task_resolve`.
-- **Artifacts and reports** — `engineer_task_upload_artifact` attaches markdown/text reports, logs, screenshots, or file references directly to a scoped task (`task` is the preferred identifier; `task_id` is accepted as an alias).
-- **Review and merge** — `engineer_diff`, `engineer_merge` (default GitHub PR + squash merge), `engineer_rebase`, `engineer_create_pr`.
-- **Worktree** — `engineer_worktree_checkpoint`, `engineer_worktree_remove`.
-- **Communication** — `engineer_agent_message`, `engineer_note`, `engineer_ask`, `engineer_resume`.
-- **Recovery** — `engineer_journal`, `engineer_journal_read`, `engineer_events`, `engineer_notifications`.
+- **Board and planning** — `board_summary`, `session_map`, `task_get`, `agent_get`, `action_list`.
+- **Dispatch** — `task_dispatch`, `agent_ask_answer`.
+- **Artifacts and reports** — `task_artifact_upload`.
+- **Review and merge** — `worktree_diff`, `worktree_merge`, `worktree_rebase`, `worktree_create_pr`.
+- **Worktree** — `worktree_checkpoint`, `worktree_remove`.
+- **Communication** — `agent_message`, `user_note`, `user_ask`, `event_delivery_update`.
+- **Recovery** — `journal_write`, `journal_list`, `event_list`.
 
 ## Dispatch philosophy
 
@@ -189,20 +197,20 @@ The Engineer's system prompt steers it toward a few habits worth understanding (
 - **Dispatch in waves, not all at once.** A wave is a deliberate batch with a concurrency cap.
 - **Reuse the same agent when context matters.** Use `target: self` transitions for sequential work in one head.
 - **Separate work across agents when tasks are independent.** Don't pile unrelated work onto one Worker.
-- **Inspect diff stats before deep review.** `engineer_diff(summary_only=true)` first; full diff only if the summary is unclear.
-- **An idle board with backlog is not a steady state.** It's a planning turn. The Engineer either dispatches the next wave or posts an `engineer_note` explaining what's blocking the next wave.
+- **Inspect diff stats before deep review.** `worktree_diff(summary_only=true)` first; full diff only if the summary is unclear.
+- **An idle board with backlog is not a steady state.** It is a planning turn. The Engineer either dispatches the next wave or posts a `user_note` explaining what blocks it.
 - **Clean up worktrees and sessions after merge.** Don't leak them.
 
 These are tuned in Group Settings → Engineer → Operating Style.
 
 ### Merge discipline
 
-`engineer_merge` now defaults to the full GitHub path: push the branch, create
+`worktree_merge` defaults to the full GitHub path: push the branch, create
 or reuse a PR, request a squash merge, fast-forward the local base, then run
-post-merge cleanup. `engineer_create_pr` is create-only; it does not merge or
+post-merge cleanup. `worktree_create_pr` is create-only; it does not merge or
 clean up.
 
-For configured nested `ee/` changes, `engineer_merge` first opens/reuses and
+For configured nested `ee/` changes, `worktree_merge` first opens/reuses and
 merge-commit-merges the `torque-ee` PR, then bumps the parent gitlink to the
 merged `torque-ee` main SHA before the parent Torque PR squash-merges. That ee PR
 is review visibility/history for the same folded review boundary, not a second
@@ -218,18 +226,18 @@ unavailable, the merge fails closed rather than direct-pushing ee main.
 Group Settings → Agents → Worktree can lock the merge mode for the group:
 **Pull request** rejects `force_direct=true`, **Direct local** bypasses the PR
 path even if you omit `force_direct`, and **Engineer choice** leaves the
-fallback available. In normal operation, call `engineer_merge` without
+fallback available. In normal operation, call `worktree_merge` without
 `force_direct` and let the group setting enforce the workflow.
 
-When branch protection or required CI keeps the PR open, `engineer_merge`
+When branch protection or required CI keeps the PR open, `worktree_merge`
 returns `pending: true` and records the PR on the stream boundary. V1 has no
 background PR poller, so the Engineer should not treat that as shipped: wait for
-GitHub, then rerun `engineer_merge` (or inspect the PR) to finalize base sync,
+GitHub, then rerun `worktree_merge` (or inspect the PR) to finalize base sync,
 boundary state, and cleanup. Cleanup is post-merge only, never post-PR-create.
 
 #### Writing PR titles and bodies
 
-When you call `engineer_merge`, write a clear `pr_title` and `pr_body` unless
+When you call `worktree_merge`, write a clear `pr_title` and `pr_body` unless
 the change is a textbook ≤30 LOC fix. The title should be a short imperative
 summary of what landed, for example "Fix history panel search-box focus loss
 and add architect filter"; avoid generic titles like "Merge worker branch" or
@@ -243,8 +251,8 @@ implementation minutiae; reviewers can read those in the diff.
 ### Dispatch-shape affordance
 
 Torque also gives the Engineer a soft batch-affordance hint when its recent
-dispatch shape looks serial-heavy. `engineer_board_summary` and
-`engineer_session_map` include a volatile `dispatch_shapes` summary for the
+dispatch shape looks serial-heavy. `board_summary` and
+`session_map` include a volatile `dispatch_shapes` summary for the
 calling Engineer, split into `serial`, `batch`, and `warm_cluster` counts.
 
 The hint is intentionally narrow. It can appear only when the 20-event window
@@ -252,8 +260,8 @@ contains at least 10 direct dispatches, at least 8 of them are hintable serial
 new-Worker starts, those hintable serial starts are at least 80% of the direct
 dispatch sample, and at least two ready unassigned tasks remain. "Hintable"
 excludes existing-agent recovery, per-task launch overrides, worker
-`torque_derive` handoffs, and batch dispatches. The resulting hint is advisory:
-for the next independent wave, consider `engineer_batch_dispatch`; keep using
+`task_derive` handoffs, and batch dispatches. The resulting hint is advisory:
+for the next independent wave, use `task_dispatch(entries=[...])`; keep using
 serial dispatch when dependencies, review boundaries, risky overlap, or launch
 overrides make it the cleaner shape.
 
@@ -264,7 +272,7 @@ The journal and the session map make recovery deterministic. Here's exactly what
 **Step 1: Read the journal.** The journal is the Engineer's first stop. It contains the decisions and checkpoints that explain *why* the board looks the way it does.
 
 ```text
-engineer_journal_read(limit=20)
+journal_list(tail=20)
 # returns: most recent 20 entries — checkpoints, decisions, observations, plans
 ```
 
@@ -287,7 +295,7 @@ After reading, the Engineer has the *intent* behind the current state.
 **Step 2: Read the session map.** The session map is the deterministic, structured snapshot of streams. It's what tells the Engineer *what's actually live right now*.
 
 ```text
-engineer_session_map()
+session_map()
 # returns: streams summary, active asks, queued follow-ups,
 # per-stream NEXT/PRODUCT/WORKFLOW context
 ```
@@ -304,7 +312,7 @@ The map plus the journal gives the Engineer a complete recovered picture. It has
 **Step 3: Read recent events.** This catches the *changes* since the last checkpoint.
 
 ```text
-engineer_events(limit=50)
+event_list(limit=50)
 # returns: recent panel events — task_completed, agent_error, agent_blocked,
 # ask_created, etc.
 ```
@@ -314,16 +322,17 @@ If the journal said "auth-refactor waiting on review" and the events stream show
 **Step 4: Targeted reads only.** With the journal + map + events combined, the Engineer knows which tasks need deeper inspection. Only then does it call the heavier reads:
 
 ```text
-engineer_task_show(task_id="LOOM:412")     # only this task, the one that changed
-engineer_diff(agent_id="...", summary_only=true)   # only the diff stats
+task_get(task="LOOM:412")                  # only this task, the one that changed
+worktree_diff(agent="...", summary_only=true)      # only the diff stats
 ```
 
-It doesn't load the full board (`engineer_board_list`). It doesn't open every agent. It pulls only what it needs to make the next dispatch decision.
+It does not load the full board (`task_list`) or open every agent. It pulls only
+what it needs to make the next dispatch decision.
 
 **Step 5: Write a recovery checkpoint.** Before doing anything mutative, the Engineer journals what it just reconstructed:
 
 ```text
-engineer_journal(
+journal_write(
   type="checkpoint",
   text="Recovered after /clear. Picked up from yesterday's checkpoint.
   LOOM:412 review completed overnight (1 fix needed, derived to 412:1).

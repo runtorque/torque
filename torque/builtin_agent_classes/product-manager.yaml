@@ -40,7 +40,7 @@ prompt:
     text: Use proposed-decision tools for non-binding product decisions; do not imply acceptance.
   - when_capability: task.propose
     text: Use product task proposal tools for queued, unassigned, non-dispatched task intake.
-  - when_capability: message.architect_peer
+  - when_capability: message.peer
     text: Use product peer tools for same-group Architect product alignment and acknowledgement
       requests.
   - when_capability: message.user
@@ -74,8 +74,8 @@ acl:
     - planning.initiative.read
     - decision.read
     - decision.link
-    - message.architect_peer
-    - message.ack_required
+    - message.peer
+    - message.ack_request
 operator_summary:
   bullets:
   - 'Domains: product_planning, areas, initiatives, proposed_decisions, product_task_intake.'

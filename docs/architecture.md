@@ -20,9 +20,9 @@ The daemon's responsibilities, by module:
 | `actions.py` | Action loading, Jinja2 rendering with `torque` context namespace, transition graph discovery, pipeline detection. |
 | `roles.py` | Worker / engineer / architect role file management. |
 | `worktree.py` | Git worktree lifecycle — create, validate, checkpoint, rollback, diff, merge detection, gitignore management. |
-| `mcp.py` | Worker MCP tools (`torque_*`). |
-| `mcp_engineer.py`, `mcp_engineer_tools/` | Engineer MCP tools (`engineer_*`). |
-| `mcp_architect.py` | Architect MCP tools (`architect_*`). |
+| `mcp.py`, `mcp_canonical.py` | MCP composition, canonical public vocabulary, caller projection, compatibility routing, and Worker-side handlers. |
+| `mcp_engineer.py`, `mcp_engineer_tools/` | Internal Engineer-scoped handler registry and dispatch. |
+| `mcp_architect.py` | Internal Architect-scoped handler registry and dispatch. |
 | `mcp_tools_shared.py` | Authorization (`authorize_caller`), scoped state views, caller-aware result filtering. |
 | `engineer.py`, `architect.py` | Role-specific system prompts, dispatch postscripts, journal/decision plumbing. |
 | `events.py`, `notifications.py`, `digest_routing.py` | Event bus, throttled broadcast, macOS notifications, digest assembly + idle-gated push. |
@@ -99,7 +99,12 @@ During dispatch, Torque resolves all three: the role builds the agent, the actio
 
 ## MCP scoping
 
-Three role-prefixed MCP tool surfaces — `torque_*`, `engineer_*`, `architect_*` — are filtered server-side by the caller's `kind`, resolved from the `X-Torque-Cell-Id` header. Tool list filtering happens at list time (hidden tools never appear); scoped state views filter the data each tool returns by group / by per-actor identity.
+Torque exposes one canonical, role-neutral MCP vocabulary. The daemon projects
+that vocabulary from the caller's kind, effective Agent Class authority, and
+relationships, all resolved from the `X-Torque-Cell-Id` header. Hidden tools
+never appear in list or search results, and scoped state views filter each
+result by group and actor identity. Historical role-prefixed handlers remain
+an internal compatibility boundary rather than a public tool surface.
 
 → [MCP scoping](team/mcp-scoping.md)
 

@@ -158,19 +158,21 @@ For the full dispatch reference, see [Task Board](../tasks/board.md#dispatching)
 
 Once an agent is working on a task, the agent can report back to Torque with MCP tools:
 
-- `torque_progress(message="message")` updates the activity detail
-- `torque_blocked(reason="reason")` marks the task as blocked
-- `torque_error(message="message")` marks the task as failed and needing attention
-- `torque_done(message="summary")` completes the current task
-- `torque_ready()` completes the task and releases the agent for future work
-- `torque_verify(state="passed", tests_run="...", notes="...")` records deploy/restart/smoke verification status when relevant
-- `torque_ask(question="question", description="details")` creates a blocking human-in-the-loop follow-up task in **Backlog** when the agent cannot continue safely without a decision or approval
+- `task_progress(message="message")` updates the activity detail
+- `task_blocked(reason="reason")` marks the task as blocked
+- `task_error(message="message")` marks the task as failed and needing attention
+- `task_complete(message="summary")` completes the current task
+- `agent_ready()` completes the task and releases the agent for future work
+- `task_verify(state="passed", tests_run="...", notes="...")` records deploy/restart/smoke verification status when relevant
+- `user_ask(question="question", description="details")` creates a blocking human-in-the-loop follow-up task in **Backlog** when the agent cannot continue safely without a decision or approval
 
 These updates make the board readable without opening each agent session. A person scanning the board can see which tasks are moving, which are blocked, and which are waiting on a human decision.
 
-When the checkpoint needs to be recorded by Torque itself instead of the active agent, use `torque task verify ...` or `engineer_task_verify(...)` to mark deploy/restart attempted, smoke passed or failed, and any remaining verification notes.
+When the checkpoint needs to be recorded by Torque itself instead of the active agent, use `torque task verify ...` or `task_verify(...)` to mark deploy/restart attempted, smoke passed or failed, and any remaining verification notes.
 
-`torque_ask` is not a general status or suggestion channel. If the agent can keep moving, it should keep moving and report context through `torque_progress`, `torque_done`, `torque_blocked`, or derived-task context instead of pausing the task.
+`user_ask` is not a status channel. If the agent can keep moving, it should
+report through `task_progress`, `task_complete`, `task_blocked`, or derived
+task context instead of pausing.
 
 For the lane and completion model, see [Task Lifecycle](../tasks/lifecycle.md).
 
@@ -195,7 +197,7 @@ That creates a workflow such as:
 From the agent's perspective, this is usually one command:
 
 ```text
-torque_derive(
+task_derive(
   description="Review the auth middleware implementation",
   action="feature/review",
 )
@@ -218,7 +220,7 @@ Work is complete when the active task reaches **Done** and any required follow-u
 
 There are two common endings:
 
-- A single task finishes directly with `torque_done(message="summary")`.
+- A single task finishes directly with `task_complete(message="summary")`.
 - A pipeline finishes when its last derived task is marked done and Torque cascades completion back up the chain.
 
 If you use worktrees, completion is often followed by a git step such as review, merge, checkpoint cleanup, or worktree removal. That git flow is separate from the board flow, which is why the board can remain clean even when code review takes longer.
@@ -246,7 +248,7 @@ Here is a typical day-to-day flow:
 4. The implementation agent finishes and derives a review task:
 
    ```text
-   torque_derive(
+   task_derive(
      description="Review auth middleware",
      action="feature/review",
    )
@@ -254,9 +256,9 @@ Here is a typical day-to-day flow:
 
 5. The reviewer either:
 
-- calls `torque_done(message="summary")` if the work is good
-- calls `torque_derive(description="...", action="feature/fix-review")` if fixes are needed
-- calls `torque_ask(question="...", description="...")` if a blocking human decision or approval is required before work can continue
+- calls `task_complete(message="summary")` if the work is good
+- calls `task_derive(description="...", action="feature/fix-review")` if fixes are needed
+- calls `user_ask(question="...", description="...")` if a blocking human decision or approval is required before work can continue
 
 6. Once the implementation chain reaches **Done**, the dependent deployment task can be dispatched.
 

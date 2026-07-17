@@ -132,7 +132,7 @@ class CatalogDispatchPostscriptTests(unittest.TestCase):
     def test_oneshot_investigate_postscript_contains_contract(self):
         ps = self._postscript_for("oneshot/investigate")
         self.assertIn("Deliverable contract", ps)
-        self.assertIn("torque_task_upload_artifact", ps)
+        self.assertIn("task_artifact_upload", ps)
         self.assertIn("Investigation report", ps)
         self.assertIn("report", ps)
         self.assertIn("markdown", ps)
@@ -141,7 +141,7 @@ class CatalogDispatchPostscriptTests(unittest.TestCase):
         ps = self._postscript_for("oneshot/audit")
         self.assertIn("Deliverable contract", ps)
         self.assertIn("Audit report", ps)
-        self.assertIn("torque_task_upload_artifact", ps)
+        self.assertIn("task_artifact_upload", ps)
 
     def test_feature_research_postscript_contains_contract_and_transitions(self):
         ps = self._postscript_for("feature/research")
@@ -150,7 +150,7 @@ class CatalogDispatchPostscriptTests(unittest.TestCase):
         self.assertIn("Implementation plan", ps)
         self.assertIn("plan", ps)
         # ...AND the user-approval ask path is still wired through.
-        self.assertIn("torque_ask", ps)
+        self.assertIn("user_ask", ps)
         # The block precedes the completion-paths section so the worker
         # reads the contract before deciding which path to take.
         self.assertLess(

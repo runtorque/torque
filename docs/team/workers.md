@@ -39,7 +39,11 @@ Torque ships with three first-class adapters and a generic fallback.
 | `gemini-cli` | `gemini` | No | No | No |
 | generic | none | No | No | No |
 
-The provider determines what kind of integration the Worker has — whether Torque can install hooks, whether it can read MCP tool calls, whether it can resume the session after restart. **For Workers that need to report through the `torque_*` MCP tools, you want Claude Code or Codex.** Gemini CLI works as a launch target but doesn't have the integration to call back into Torque.
+The provider determines what kind of integration the Worker has — whether
+Torque can install hooks, whether it can read MCP tool calls, whether it can
+resume the session after restart. **For Workers that need to report through
+Torque's canonical MCP tools, use Claude Code or Codex.** Gemini CLI works as
+a launch target but doesn't have the integration to call back into Torque.
 
 For the full provider resolution rules, model flag handling, permissions handling, and max-turn behavior, see [Sessions](../operate/sessions.md).
 
@@ -83,7 +87,9 @@ If you're debugging a Worker's behavior, it helps to know exactly what landed in
 1. **A persistent system prompt** assembled from the role's `system_prompt` plus Torque's own MCP tool instructions. For Claude Code this is appended via `--append-system-prompt-file`; for Codex it's injected into the launch command.
 2. **An optional `initial_prompt`** from the role — a "what to do first" message sent before any task.
 3. **The rendered action prompt**, which includes the task description, your custom variables, and the `torque` context namespace (agent identity, worktree state, current task, terminals). → [Templates](../tasks/templates.md)
-4. **The dispatch postscript** — a short list of which `mcp__torque__*` tools the Worker is allowed to call for *this* action's transitions. If the action has a `feature/review` transition, the postscript lists `mcp__torque__torque_derive`. If it doesn't, it doesn't.
+4. **The dispatch postscript** — a short list of the canonical MCP operations
+   allowed for this action's transitions. If the action has a
+   `feature/review` transition, the postscript lists `task_derive`.
 
 The postscript is dynamic: a fresh agent gets the full reference; an agent with prior context gets a one-liner reminder. This keeps follow-up dispatches from re-injecting the whole system prompt.
 
@@ -93,18 +99,19 @@ Workers report **exclusively through MCP tools**. The CLI `torque ai *` commands
 
 | Tool | When it's called |
 |---|---|
-| `torque_progress` | A non-blocking status update with a one-line message. |
-| `torque_done` | Task complete, no follow-up needed. |
-| `torque_derive` | Hand off to the next pipeline step. Validates against the action's `transitions`. → [Pipelines](../tasks/pipelines.md) |
-| `torque_blocked` | Need user input to continue. |
-| `torque_error` | Unrecoverable error. |
-| `torque_ask` | Blocking human-in-the-loop question. Creates a derived task in Backlog with a `human` label. |
-| `torque_ready` | Done + unlink agent + cascade upward. Used for terminal handoffs. |
-| `torque_verify` | Record manual deploy/restart/smoke verification details. |
-| `torque_reply` | Answer a follow-up question from the Engineer. |
-| `torque_name` | Suggest a more descriptive agent name (the Worker often knows what it's working on better than the dispatching action did). |
+| `task_progress` | A non-blocking status update. |
+| `task_complete` | Task complete, no follow-up needed. |
+| `task_derive` | Hand off to an allowed pipeline transition. |
+| `task_blocked` | Work cannot continue. |
+| `task_error` | Unrecoverable error. |
+| `user_ask` | Blocking human decision or approval. |
+| `agent_ready` | Complete work, unlink the Worker, and cascade upward. |
+| `task_verify` | Record deploy, restart, test, or smoke evidence. |
+| `agent_reply` | Answer a follow-up question from the Engineer. |
+| `agent_rename` | Suggest a more descriptive Worker name. |
 
-Each of these maps to a state transition the daemon validates server-side. A Worker can't `torque_derive` to an action that isn't listed in its current action's transitions. → [MCP scoping](mcp-scoping.md)
+Each maps to a state transition validated server-side. A Worker cannot call
+`task_derive` with an action absent from its current transition contract.
 
 ## When you'd spawn a Worker yourself
 
@@ -123,11 +130,13 @@ This is the right way to handle work that doesn't belong to an Engineer's group:
 
 Three normal ways a Worker ends:
 
-1. **Auto-close on done.** If the action sets `auto_close_on_done: true` and the pipeline root is fully completed, Torque closes the agent automatically after `torque_done`.
-2. **Engineer cleanup.** The Engineer calls `engineer_agent_close` after merging the worktree. Sets the cleanup intent on the dispatching pass.
+1. **Auto-close on done.** If the action sets `auto_close_on_done: true` and
+   the pipeline root is complete, Torque closes the Worker after
+   `task_complete`.
+2. **Engineer cleanup.** The Engineer calls `agent_close` after merging the worktree. Sets the cleanup intent on the dispatching pass.
 3. **Manual.** You right-click the cell and remove it. Cascades to child terminals.
 
-Worker closure is reversible up until you also delete the worktree — you can `engineer_agent_relaunch` (or right-click → Relaunch) to bring back a stopped Worker if its branch still has unmerged work.
+Worker closure is reversible up until you also delete the worktree — you can `agent_relaunch` (or right-click → Relaunch) to bring back a stopped Worker if its branch still has unmerged work.
 
 ## Where to next
 

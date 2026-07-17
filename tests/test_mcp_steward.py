@@ -136,17 +136,29 @@ class MCPStewardBriefTests(unittest.IsolatedAsyncioTestCase):
     async def test_steward_projection_exposes_operating_brief_and_communication_but_no_mutations(self):
         tools = await self._list_tools()
 
-        self.assertIn("architect_group_health_brief", tools)
-        self.assertIn("architect_help_query", tools)
-        self.assertIn("architect_events_recent", tools)
-        self.assertIn("architect_ask", tools)
-        self.assertIn("architect_message_user", tools)
-        self.assertIn("architect_journal", tools)
-        self.assertIn("architect_journal_read", tools)
-        self.assertIn("architect_peer_list", tools)
-        self.assertIn("architect_peer_message", tools)
+        self.assertIn("board_summary", tools)
+        self.assertIn("help_query", tools)
+        self.assertIn("boot_summary", tools)
+        self.assertIn("user_ask", tools)
+        self.assertIn("user_message", tools)
+        self.assertIn("journal_write", tools)
+        self.assertIn("journal_list", tools)
+        self.assertIn("peer_list", tools)
+        self.assertIn("peer_message", tools)
         for denied in {
-            "architect_tool_search",
+            "task_create",
+            "task_claim",
+            "task_update",
+            "engineer_hire",
+            "agent_message",
+            "agent_ask_answer",
+            "decision_create",
+            "decision_update",
+            "decision_link",
+            "behavior_overlay_get",
+            "behavior_overlay_propose",
+            "deploy_get",
+            "settings_get",
             "architect_task_create",
             "architect_task_pickup",
             "architect_task_update",

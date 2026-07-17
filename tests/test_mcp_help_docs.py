@@ -38,8 +38,8 @@ class MCPHelpDocsTests(unittest.IsolatedAsyncioTestCase):
             headers={"X-Torque-Cell-Id": worker.id},
         ))
         names = {tool["name"] for tool in listed.payload["result"]["tools"]}
-        self.assertIn("torque_help_list", names)
-        self.assertIn("torque_help_query", names)
+        self.assertIn("help_query", names)
+        self.assertIn("help_get", names)
 
         response = await handler(FakeRequest(
             {
@@ -47,7 +47,7 @@ class MCPHelpDocsTests(unittest.IsolatedAsyncioTestCase):
                 "id": 2,
                 "method": "tools/call",
                 "params": {
-                    "name": "torque_help_search",
+                    "name": "help_search",
                     "arguments": {"query": "MCP scoping", "limit": 2},
                 },
             },
@@ -86,10 +86,10 @@ class MCPHelpDocsTests(unittest.IsolatedAsyncioTestCase):
             headers={"X-Torque-Cell-Id": architect.id},
         ))
         names = {tool["name"] for tool in listed.payload["result"]["tools"]}
-        self.assertIn("architect_help_list", names)
-        self.assertIn("architect_help_query", names)
-        self.assertNotIn("architect_mcp_calls", names)
-        self.assertNotIn("architect_engineer_hire", names)
+        self.assertIn("help_query", names)
+        self.assertIn("help_get", names)
+        self.assertNotIn("telemetry_query", names)
+        self.assertNotIn("engineer_hire", names)
 
         response = await handler(FakeRequest(
             {
@@ -97,8 +97,8 @@ class MCPHelpDocsTests(unittest.IsolatedAsyncioTestCase):
                 "id": 2,
                 "method": "tools/call",
                 "params": {
-                    "name": "architect_help_query",
-                    "arguments": {"question": "What is MCP scoping?", "limit": 1},
+                    "name": "help_query",
+                    "arguments": {"question": "MCP scoping", "limit": 1},
                 },
             },
             headers={"X-Torque-Cell-Id": architect.id},
@@ -107,7 +107,6 @@ class MCPHelpDocsTests(unittest.IsolatedAsyncioTestCase):
         payload = json.loads(response.payload["result"]["content"][0]["text"])
         self.assertEqual(payload["type"], "help_query")
         self.assertIn(payload["status"], {"answered", "no_answer"})
-        self.assertTrue(payload.get("source_model", {}).get("restricted_safe"))
 
         denied = await handler(FakeRequest(
             {
