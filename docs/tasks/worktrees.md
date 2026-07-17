@@ -22,7 +22,7 @@ Worktrees are enabled per group in [Group settings](../operate/group-settings.md
 
 1. Open Group Settings (gear icon on the group header).
 2. Go to **Workers → Worktree**.
-3. Check **Git worktree per worker**.
+3. Set **Workspace mode** to **Isolated worktree**.
 
 Once enabled, every new worker created in that group gets its own worktree, and the worker's working directory is set to the worktree path.
 
@@ -38,16 +38,16 @@ torque group settings backend -s worktree_symlink_gitignored_paths=true
 
 | Setting | What it does |
 |---|---|
-| **Git worktree per agent** | Enable worktree creation. |
+| **Workspace mode** | Choose a shared group checkout or an isolated worktree for each Worker. |
 | **Base directory** | Where worktrees live, relative to repo root. Default `.torque/worktrees`. |
 | **Base branch** | Branch to fork from. Default current HEAD. |
-| **Auto-checkpoint on stop** | Auto-commit changes when an agent's session ends. |
-| **Checkpoint on progress / done** | Throttled auto-checkpoints when the agent reports `torque_progress` or `torque_done`. |
-| **Squash on merge** | Use `git merge --squash` for the explicit direct-local merge fallback. The default PR merge path always requests a GitHub squash merge. |
+| **Automatic checkpoints** | Choose manual only, stop-only, progress-only, or progress-plus-stop checkpointing. Progress checkpoints cover `torque_progress`, `torque_done`, and `torque_ready` and are throttled. |
+| **Merge mode** | Require pull requests, require direct local merges, or use pull requests by default while allowing an explicit direct fallback. |
+| **Direct-merge history** | Preserve Worker commits or use `git merge --squash` when a direct local merge occurs. Pull-request merges always request GitHub squash. |
 | **Default post-merge cleanup** | Default cleanup behavior after the branch is actually merged when no explicit choice is given. Defaults to keeping the worker/worktree warm; opt in to auto-sweep to close the worker and delete the merged worktree/branch. |
-| **Preserve merge diff by default** | Save the full pre-merge patch as a diff artifact on the latest open boundary task. |
-| **Symlink paths** | Repo-relative paths or globs to mirror into each worktree as symlinks (e.g. `etl/**/node_modules`). Useful for shared caches. |
-| **Symlink gitignored paths** | Opt-in setting that asks Git for ignored files/directories and symlinks them into new worktrees. Torque skips `.torque/` runtime state and never replaces paths that already exist in the worktree. |
+| **Preserve merge diff** | Save the full pre-merge patch as a diff artifact on the latest open boundary task. |
+| **Explicit symlinks** | Repo-relative paths or globs to mirror into each worktree as symlinks (e.g. `etl/**/node_modules`). Useful for shared caches. |
+| **Symlink all gitignored paths** | Ask Git for ignored files/directories and symlink them into new worktrees. This may expose secrets and shared mutable files. Torque skips `.torque/` runtime state and never replaces paths that already exist in the worktree. |
 
 ## How a worktree is created
 

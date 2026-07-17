@@ -437,6 +437,8 @@ The canonical CSS API lives in `static/styles/components.css`:
 - Errors state what failed and what the operator can do next, and use
   `role="alert"` when newly inserted after an operation. Do not replace useful
   content with a generic error if stale content can remain safely visible.
+- Historical errors appear only while the current status remains unhealthy.
+  A current ready or recovered state suppresses stale failure detail.
 - Optional `.ui-state__title`, `__message`, and `__meta` regions establish a
   consistent hierarchy for full states. Compact one-line states may omit them.
 - Feature classes may own placement, width, and minimum height. They must not
@@ -497,7 +499,7 @@ scope.
 |---|---|---|
 | Foundations and tokens | Standardized, literal audit complete | Tokenize repeated component semantics; keep feature geometry local |
 | Group tabs | Standardized, compact parity audited | Preserve search, keyboard, create, and group-action access in both modes |
-| Panel tabs | Standardized, all zones audited | Keep dock and rail tab rows roving, scrollable, and action-safe |
+| Panel tabs | Standardized, all zones audited | Preserve pickup feedback, explicit insertion order, roving focus, and scrollability |
 | Feature navigation tabs | Standardized, accessibility audited | Keep long labels reachable without wrapping the panel |
 | Segmented controls | Standardized, accessibility audited | Keep tab-style segments roving and button groups natively operable |
 | Filter chips and presets | Standardized, residual toggles audited | New persistent filters opt into `filter-chip`; local modes use segmented controls |
@@ -1057,6 +1059,221 @@ scope.
   closed Settings and New Group, confirmed representative async state surfaces
   and status priority, and finished with an empty browser console.
 
+### D-023 — Panel-tab dragging shows and preserves placement intent
+
+- Date: 2026-07-15
+- Status: accepted
+- Decision: Dragging a docked panel tab creates a compact cursor-following
+  preview, visibly lifts the source tab, highlights the destination dock, and
+  renders an accent insertion marker between tabs. The dock highlight is a
+  pointer-transparent overlay above panel content so opaque surfaces cannot
+  obscure it. Dropping on a tab strip persists that exact insertion position
+  within the same dock or across docks. Dropping into the body of the panel's
+  current dock preserves its existing tab position instead of silently moving
+  it to the end.
+- Rationale: Dock-only highlighting communicates the destination region but not
+  the resulting order, and remove-then-append behavior makes an accidental drop
+  mutate a layout that appeared unchanged. Pickup and insertion feedback lets
+  the preview match the persisted result before the user releases the pointer.
+- Scope: Standalone bottom-dock and right-rail panel tabs,
+  `static/js/panel_manager.js`, and `static/styles/workspace-shell.css`.
+- Constraints: The preview is transient presentation state and is never
+  persisted. Layout persistence remains the source of truth after drop. Drops
+  on a different dock's panel body append because no more specific insertion
+  position was expressed; same-dock body drops are position-preserving.
+- Verification: Navigation source contracts protect the lifted source,
+  cursor-following preview, insertion marker, and above-content dock overlay.
+  Focused frontend regressions cover same-dock reordering, cross-dock indexed
+  insertion, same-dock body-drop stability, preview cleanup, and the existing
+  dock/float behaviors.
+
+### D-024 — Agent hierarchy uses architect selectors and engineer team bands
+
+- Date: 2026-07-15
+- Status: accepted
+- Decision: The agents grid presents architects as a labeled selector and marks
+  the architect whose hierarchy is currently shown independently from the
+  focused agent. The expanded hierarchy is named `<Architect>'s team`, and each
+  engineer anchors a contained team band with fixed-width worker cards. The
+  architect selector and every team row share the same card-column width and
+  horizontal gap and the same row inset, so a surface that fits `N` architects
+  also fits one engineer plus `N - 1` workers. The shared inset keeps cards away
+  from the team outline without changing that capacity threshold. The band
+  provides the ownership signal; dividers and connector rails that consume
+  horizontal capacity are intentionally omitted.
+  Engineer teams without workers show an explicit `No workers` state.
+  Grid-mode and create controls occupy their own in-flow toolbar above the
+  selector instead of overlaying the first row of cards.
+- Rationale: Agent focus and the hierarchy being inspected can legitimately
+  differ. Adjacency alone did not communicate ownership, empty worker shelves
+  looked like accidental whitespace, and an absolutely positioned toolbar
+  obscured architect cards at narrow widths. Named containment makes the
+  architect → engineer → worker relationship readable without changing the
+  density or interaction model of the cards themselves.
+- Scope: Agents-grid section rendering, architect card hierarchy state, empty
+  engineer rows, and grid layout styles in `static/js/grid/sections.js`,
+  `static/js/grid/agent-card.js`, and `static/styles/workspace-grid.css`.
+- Constraints: Focus, selected-agent state, hierarchy ownership, and runtime
+  status remain independent visual signals. Worker cards use the same width as
+  engineer cards and wrap without stretching to consume leftover space. Team
+  containment uses an inset outline while architect and team rows use the same
+  internal spacing, preserving both breathing room and the shared horizontal
+  capacity invariant. The hierarchy treatment reflects existing ownership data
+  only; it does not mutate assignments. Keyboard order, drag targets,
+  narrow-layout scrolling, and card actions remain unchanged.
+- Verification: Focused frontend contracts cover the labeled architect selector,
+  independent hierarchy-owner state, named team heading, contained engineer
+  bands, fixed-width worker wrapping, equal architect/team column capacity,
+  explicit empty-worker state, and non-overlaid toolbar geometry.
+
+### D-025 — Worker cards are compact summaries with focus-panel disclosure
+
+- Date: 2026-07-15
+- Status: superseded by D-026
+- Decision: Worker cards retain the shared fixed column width but use a shorter
+  summary geometry. They expose identity, runtime status, current task, and
+  current activity; worktree branch, diff, cycle, terminals, and other detail
+  remain in the existing focus panel. Clicking a worker selects it and expands
+  that focus panel when necessary. Incremental selection updates reconcile the
+  complete `selected`, `is-selected`, and `focused` class set so presentation
+  cannot retain a stale previous selection.
+- Rationale: Workers are the most numerous hierarchy level, so full-detail cards
+  made the team bands visually heavy and hard to scan. Progressive disclosure
+  preserves operational detail without changing grid capacity or introducing
+  an inline expansion mode that would destabilize neighboring cards.
+- Scope: Worker rendering and geometry, grid selection synchronization, and
+  worker click behavior in `static/js/grid/agent-card.js`,
+  `static/styles/workspace-grid.css`, `static/js/render.js`, and
+  `static/js/commands.js`.
+- Constraints: Compact workers remain full-size drag targets horizontally and
+  retain always-visible status, delete/pause controls, provider, context, and
+  kind indicators. Task links keep their direct Board action. Engineers and
+  architects keep the standard card height. The focus panel is the sole detailed
+  disclosure surface and clicking non-workers does not force it open.
+- Verification: Frontend regressions cover compact worker markup and geometry,
+  omission of duplicated detail, focus-panel reveal on worker click, non-worker
+  collapse preservation, and atomic selection/focus class reconciliation.
+
+### D-026 — Worker summaries use a two-line micro-card
+
+- Date: 2026-07-15
+- Status: superseded by D-027
+- Decision: The compact worker treatment is a two-line micro-card at roughly
+  half the engineer-card height. The first line is worker identity. The second
+  is the linked task when one exists, otherwise current activity or `no task`.
+  Runtime status remains the card's status indicator, while the card tooltip and
+  Focus panel carry the fuller activity context. Stopped-worker relaunch stays
+  in the Focus panel instead of adding a third in-card control row.
+- Rationale: The initial three-line compact card remained visually too close to
+  the standard 108px card, especially when the stopped-state relaunch control
+  contributed layout height. A worker summary should read as a subordinate
+  index item immediately, not as a slightly shorter detail card.
+- Scope: Worker-card body rendering and grid geometry in
+  `static/js/grid/agent-card.js` and `static/styles/workspace-grid.css`.
+- Constraints: Width, drag behavior, status, delete/pause controls, context
+  meter, provider, and Worker kind indicator remain unchanged. The linked task
+  remains directly actionable. Activity is omitted from the card body when a
+  task is present but remains available in the card tooltip and Focus panel.
+  Engineer and architect card geometry is unchanged.
+- Verification: Frontend contracts protect the two-line conditional body,
+  52px/56px compact height tokens, stopped-card height stability, and the
+  existing click-to-Focus interaction.
+
+### D-027 — Worker cards return to the standard detail geometry
+
+- Date: 2026-07-15
+- Status: accepted
+- Decision: Worker cards again use the shared engineer/agent card height and
+  show task, cycle, diff, branch, and current activity in place. Clicking a
+  worker follows the standard agent-selection behavior and does not forcibly
+  expand the Focus panel. The independent incremental-selection reconciliation
+  introduced alongside D-025 remains in effect.
+- Rationale: Both compact experiments made the hierarchy feel visually
+  unbalanced without producing a worker summary that improved the overall grid.
+  The established detailed card is more useful than forcing a density treatment
+  that does not fit this surface.
+- Scope: Worker card rendering and agents-grid geometry in
+  `static/js/grid/agent-card.js`, `static/js/commands.js`, and
+  `static/styles/workspace-grid.css`.
+- Constraints: Fixed worker width, team-band containment, hierarchy capacity,
+  selection correctness, and all earlier card actions remain unchanged.
+- Verification: Frontend regressions restore full worker detail, shared card
+  height, task-cycle rerender behavior, and standard non-forcing selection.
+
+### D-028 — Agent-grid utilities share the group navigation header
+
+- Date: 2026-07-15
+- Status: accepted
+- Decision: The Grid/Canvas view choices form one compact segmented control,
+  and agent creation is a separate square plus action. In standalone and
+  desktop modes these controls live at the trailing edge of the active group
+  navigation row; in multi-group layouts the scoped creation action lives in
+  each corresponding group header. The former dedicated grid-toolbar row is
+  removed.
+- Rationale: A full-width row devoted to three small controls consumed vertical
+  space without adding hierarchy. Group navigation already establishes the
+  scope those controls act on, so combining them preserves one-click access
+  while giving the agents grid more room.
+- Scope: Group-tab and group-header rendering, Canvas/Grid view controls, agent
+  creation affordance, and responsive group navigation in
+  `static/js/grid/group-tabs.js`, `static/js/grid/main.js`,
+  `static/js/canvas.js`, and `static/styles/workspace-grid.css`.
+- Constraints: The view modes remain explicit rather than cycling behind one
+  icon. Creation remains available for empty groups and reports the existing
+  agent-cap disabled state. Group tabs retain horizontal scrolling, while the
+  compact group switcher yields name width before hiding any utility action.
+- Verification: Frontend regressions cover header placement, icon-only creation,
+  active segmented state, group scoping, agent-cap behavior, and compact-layout
+  persistence.
+
+### D-029 — One workspace creation menu owns agents and groups
+
+- Date: 2026-07-15
+- Status: accepted
+- Decision: The square plus action beside the agent view switcher is the single
+  persistent workspace creation entry point. Its menu offers Architect,
+  Engineer, and Worker creation in the active group, followed by a separated
+  New group action. The duplicate plus button in the application header is
+  removed; group creation remains available from the compact group switcher and
+  empty-workspace recovery state as well.
+- Rationale: Two vertically adjacent plus icons created ambiguity while spending
+  header space on the same broad intent. A single labeled menu makes the scope
+  explicit after activation and leaves the application header for global
+  navigation and settings.
+- Scope: Application header markup and the agent-grid creation menu in
+  `webview.html`, `static/js/main.js`, `static/js/grid/main.js`, and
+  `static/js/commands.js`.
+- Constraints: Agent actions remain scoped to the active group. When that group
+  is at its agent cap, the menu remains available for New group while presenting
+  a disabled agent-limit explanation. Keyboard and compact-switcher group
+  creation paths remain unchanged.
+- Verification: Frontend regressions cover removal of the duplicate header
+  action, menu ordering and separation, New group dispatch, and at-cap menu
+  availability.
+
+### D-030 — The utility-rail divider can fit the architect row
+
+- Date: 2026-07-15
+- Status: accepted
+- Decision: Double-clicking the divider between the agents grid and the utility
+  rail expands the grid just enough to fit the visible architect cards on one
+  row, capped at four columns. The calculation uses the rendered card width,
+  gap, and row padding, and the resolved rail width is persisted like a manual
+  drag.
+- Rationale: Dragging remains useful for arbitrary layouts, but the common
+  intent is to reveal the architect hierarchy without trial-and-error resizing.
+  A content-aware shortcut makes that adjustment predictable while preserving
+  terminal space when a group contains many architects.
+- Scope: The standalone utility-rail resize interaction in
+  `static/js/panel_manager.js` and its discoverability label in `webview.html`.
+- Constraints: The shortcut only expands; it does not unexpectedly shrink an
+  already-wide grid. The utility rail keeps its minimum usable width and the
+  outer workspace/terminal divider retains its existing reset behavior. Groups
+  with more than four architects continue wrapping after the fourth column,
+  and Canvas view or an empty architect row leaves the width unchanged.
+- Verification: Frontend regressions cover rendered geometry, the four-column
+  cap, width persistence, and the no-shrink behavior.
+
 ### D-031 — Unbounded review content uses progressive disclosure
 
 - Date: 2026-07-15
@@ -1078,6 +1295,273 @@ scope.
 - Verification: Frontend performance regressions cover automatic large-diff
   collapse, very-large-file deferral, 400-line chunking, continuation, and the
   unchanged small-diff path.
+
+### D-032 — Provider catalogs guide settings without closing the escape hatch
+
+- Date: 2026-07-16
+- Status: accepted
+- Decision: When an installed provider exposes an account-aware model catalog,
+  Torque presents those models and their model-specific reasoning efforts as
+  dropdown choices. Every model and reasoning-effort dropdown ends with a
+  `Custom…` option that reveals a free-text field, and persisted values missing
+  from the current catalog automatically use that editable path.
+- Rationale: Detected choices make provider settings faster and less
+  error-prone, while catalogs can lag releases, vary by account, or disappear
+  when a CLI is unavailable. A visible final escape hatch keeps Torque usable
+  without weakening the guided default path.
+- Scope: Agent, worker, Engineer, and Architect launch settings; the New Agent
+  modal; provider metadata discovery in `torque/provider_catalog.py`; and shared
+  model/reasoning controls in `static/js/modals/core.js`.
+- Constraints: Discovery is best-effort, cached, and must never block daemon
+  startup. Torque stores model and effort values as plain strings and does not
+  reject custom values. Codex discovery uses its local account-aware protocol
+  with a CLI catalog fallback; providers without catalogs retain the same
+  editable controls.
+- Verification: Backend regressions cover Codex catalog normalization,
+  fallback, and caching. Frontend regressions cover detected ordering,
+  model-specific efforts, default labels, `Custom…` as the final option, and
+  round-tripping arbitrary model and effort values.
+
+### D-033 — Inheritance controls expose actions, not redundant status prose
+
+- Date: 2026-07-16
+- Status: accepted
+- Decision: Settings fields that inherit from Group do not render persistent
+  captions announcing `Inherited from Group` or `Override active for this agent
+  kind`. When a field contains an override, the concise `Use group default`
+  action remains available; inherited fields add no secondary status row.
+- Rationale: Blank/default values and field placeholders already communicate
+  inheritance, while the repeated status captions added visual noise throughout
+  Group Settings. The reset action is the only extra control needed when an
+  override exists.
+- Scope: Shared Group Settings inheritance decoration in
+  `static/js/modals/settings-shell.js` and `static/styles/modals.css`.
+- Constraints: This is presentation-only. Empty values continue to mean
+  inheritance, override values remain unchanged, and resetting a field still
+  clears it and marks Settings dirty.
+- Verification: Frontend contracts reject both retired captions and the status
+  dot while preserving the conditional `Use group default` action.
+
+### D-034 — Settings reset remains inside the explicit save boundary
+
+- Date: 2026-07-16
+- Status: accepted
+- Decision: `Reset section` restores the active settings section's declared
+  control defaults as an unsaved draft. It never submits or closes Settings;
+  the operator must use the section's Save action to persist the result. The
+  dirty-state caption appears directly beneath that Save action only while
+  changes are unsaved, so state and commitment read as one control group without
+  adding a persistent clean-state label.
+- Rationale: Restoring the persisted snapshot made Reset appear to save
+  immediately because it cleared the dirty state and disabled Save. Reset is a
+  potentially broad edit, so its result should remain reviewable and reversible
+  until the operator explicitly commits it.
+- Scope: Shared Group and Torque Settings footer and reset behavior in
+  `webview.html`, `static/js/modals/settings-shell.js`, and
+  `static/styles/modals.css`.
+- Constraints: Reset affects only the active primary section. Client-local
+  appearance values may still preview immediately, but are not persisted until
+  Save. Cancel and close-discard restore the captured persisted baseline.
+- Verification: Frontend regressions cover footer ordering and clean-state
+  caption suppression, and confirm Reset changes controls to their declared
+  defaults, marks the dialog dirty, reveals the caption, enables Save, and does
+  not invoke a persistence path.
+
+### D-035 — Single-purpose group actions are direct controls
+
+- Date: 2026-07-16
+- Status: accepted
+- Decision: The active group tab exposes Group Settings as a direct gear button
+  in both the full tab row and compact group switcher. The former one-item
+  overflow/context menu is removed.
+- Rationale: A menu adds an interaction step and suggests multiple choices. When
+  Settings is the only available action, a labeled direct control communicates
+  the result before activation and opens it in one click.
+- Scope: Standalone group navigation in `static/js/grid/group-tabs.js`,
+  `static/js/commands.js`, and `static/styles/workspace-grid.css`.
+- Constraints: The button remains scoped to the active group, stops propagation
+  so it does not retrigger tab selection, remains available in compact layouts,
+  and has an explicit accessible name and tooltip.
+- Verification: Frontend contracts require direct `openGroupSettings` controls
+  in both layouts and reject the retired ellipsis, menu semantics, and
+  single-item context-menu handler.
+
+### D-036 — Conditional settings expose the governing choice first
+
+- Date: 2026-07-16
+- Status: accepted
+- Decision: Settings with several dependent behaviors begin with an explicit
+  governing choice, then organize the remaining controls into named sections.
+  In Workers → Worktree, workspace isolation is a select rather than a checkbox;
+  inactive worktree settings remain visible, dimmed, and disabled so operators
+  can understand and retain the configured policy. Related boolean combinations
+  may be represented by one exhaustive select when every stored combination
+  round-trips without loss. Section-local headings, labels, and helper text rely
+  on the navigation context instead of repeating the current agent kind.
+- Rationale: A single checkbox that hid the entire Worktree configuration made
+  the section difficult to discover and understand. Independent checkpoint
+  checkboxes obscured the policy they collectively represented, while showing a
+  local squash option during PR-only merging implied that it affected GitHub's
+  merge path. Governing choices and scoped sections make dependencies explicit
+  without discarding advanced configuration.
+- Scope: Workers → Worktree structure, checkpoint mapping, merge-mode guidance,
+  direct-merge history, post-merge behavior, and shared-path controls in
+  `webview.html`, `static/js/modals/worktrees.js`,
+  `static/js/modals/group-settings.js`, and `static/styles/modals.css`.
+- Constraints: Existing persisted booleans remain the storage contract. The
+  checkpoint selector preserves manual, stop-only, progress-only, and
+  progress-plus-stop states. Pull-request mode always communicates GitHub
+  squash behavior and hides local history controls; Direct and Engineer choice
+  expose the history policy used only by direct local merges. Post-merge and
+  shared-path settings stay independent of merge mode. The previously exposed
+  merge-instructions field remains backend-compatible storage but is omitted
+  from the UI because no runtime consumes it.
+- Verification: Frontend regressions protect the section hierarchy, all
+  selector-to-setting mappings, merge-mode disclosure, inactive-state
+  presentation, concise context-aware copy, payload compatibility, and removal
+  of the inert field.
+
+### D-037 — General settings share one hierarchy and expose resolved inheritance
+
+- Date: 2026-07-16
+- Status: accepted
+- Decision: Group, Workers, Engineers, and Architects General settings use the
+  same bordered section-card and responsive field-grid system. Group settings
+  are divided into Workspace, Environment, and Limits & visibility. Worker
+  settings are divided into Launch, Runtime, and Session. Engineer and Architect
+  settings use parallel Launch and Runtime sections. Every kind-specific Launch
+  section orders Provider, Model, Reasoning effort, then the visually secondary
+  Command override. Architect directory and shell controls live in General →
+  Runtime rather than System. Section bodies maintain the standard 10px inset
+  on every edge so the first form row remains visibly separated from the
+  section header and divider.
+- Rationale: The former General panes alternated between unstructured field
+  stacks, prose dividers, and section cards, so equivalent settings appeared to
+  have different semantics. Generic `Group default` labels also required the
+  operator to navigate elsewhere to learn the effective value. A shared
+  hierarchy makes scanning transferable across agent kinds, while resolved
+  `Inherit · value` options make the current behavior legible in place.
+- Scope: Group Settings General-pane markup, shared responsive field styles,
+  inherited provider/model/reasoning/command/runtime labels, reset
+  synchronization, Architect runtime placement, operator documentation, and
+  frontend regression coverage.
+- Constraints: This is a presentation and form-composition change only. All
+  control ids, submitted fields, empty-value inheritance semantics, custom model
+  and reasoning escape hatches, and backend persistence contracts remain
+  unchanged. Directory, command, environment-file, and environment-variable
+  controls span the full row; compact controls may share two columns and stack
+  to one column on narrow layouts.
+- Verification: Frontend regressions protect section names and ordering, shared
+  Launch order, secondary command treatment, Architect runtime relocation,
+  responsive field geometry, header-to-form spacing, resolved inheritance
+  labels, and unchanged submit payloads.
+
+### D-038 — Every Group Settings pane uses semantic sections
+
+- Date: 2026-07-16
+- Status: accepted
+- Decision: Every Group Settings sub-pane uses the shared bordered section-card,
+  10px body inset, responsive field grid, and concise context-aware labels.
+  Group → Agents uses Launch defaults. Sync provider uses Connection,
+  Repository & project, Board mapping, Issue behavior, and Assignees. Advanced
+  uses Guidance. Worker notifications separates Delivery from Events. Engineer
+  Behavior uses Specializations, Orchestration, Communication, and Policy
+  overrides; Engineer System uses Permissions, Digest delivery, and Events.
+  Architect Behavior uses Orchestration, Continuity, and Instructions;
+  Architect System uses Digest delivery and Events.
+- Rationale: Flat control stacks obscured relationships and made equivalent
+  concepts look unrelated across panes. Repeating words such as `Default`,
+  `Engineer`, or `Architect` in every label added length without adding scope.
+  Stable section names make the settings hierarchy scannable and transferable
+  while leaving detailed explanation to helper text and tooltips.
+- Scope: Remaining Group Settings markup and copy, Worker notification
+  dependency state, Engineer and Architect digest event presentation, shared
+  settings styles, operator documentation, and frontend regression coverage.
+- Constraints: Control ids, persistence keys, payload shapes, provider catalog
+  behavior, notification presets, and all existing backend semantics remain
+  unchanged. Governing choices keep dependent settings visible but dimmed and
+  disabled. Required digest events are informational badges rather than disabled
+  form controls; only optional events are editable. Custom instructions and
+  system-prompt previews remain paired in the same section.
+- Verification: Frontend contracts protect every section hierarchy, concise
+  labels, responsive geometry, Worker notification disable/restore behavior,
+  human-readable event names, required-versus-optional event presentation, and
+  unchanged settings submission.
+
+### D-039 — Worker roles live with Worker launch settings
+
+- Date: 2026-07-16
+- Status: accepted
+- Decision: The default role control lives in Workers → General → Launch and
+  applies only to Worker launches. Group → Agents contains only provider,
+  model, reasoning-effort, and command defaults that genuinely apply across
+  Workers, Engineers, and Architects. Sparse Group panes use layouts suited to
+  their content: Shared launch defaults uses a balanced three-column grid, and
+  Advanced constrains its single guidance field instead of stretching it across
+  a half-empty form grid.
+- Rationale: Roles describe dispatch-time Worker behavior. Presenting Role as a
+  shared Group agent default suggested that Engineers and Architects used the
+  same role taxonomy, and the shared launch resolver could make that suggestion
+  real by applying the default role to those kinds. The former sparse layouts
+  also made Agents and Advanced appear unfinished or malformed at desktop modal
+  widths.
+- Scope: Group Settings markup and responsive styles, Worker default-role
+  resolution, launch-service role boundaries, operator documentation, and
+  regression coverage.
+- Constraints: The persisted `default_agent_template` key is retained for
+  backward compatibility. Explicit Engineer or Architect launch templates used
+  by their dedicated creation flows still work; only the implicit Group default
+  is Worker-exclusive.
+- Verification: Backend tests protect Worker inheritance and Engineer/Architect
+  exclusion. Frontend contracts protect the control location, shared-launch
+  copy, balanced sparse-pane layouts, responsive stacking, and unchanged
+  settings payload key.
+
+### D-040 — Settings footer stays outside the scrollable workspace
+
+- Date: 2026-07-16
+- Status: accepted
+- Decision: Structured settings dialogs keep their header, scrollable
+  navigation/content workspace, and footer as three sibling grid rows. The
+  workspace itself has exactly one full-height row shared by the primary
+  navigation and active settings pane.
+- Rationale: Nesting the footer inside the workspace creates implicit grid rows.
+  Content-heavy panes can hide the mistake, while sparse panes such as Group →
+  Agents and Advanced collapse the navigation and content into the top portion
+  of the dialog and leave the footer separated by empty space.
+- Scope: Group Settings modal structure, workspace grid geometry, and static
+  layout regression coverage.
+- Constraints: Only the active settings pane scrolls. The primary navigation
+  remains fixed beside it, and the footer remains fixed below both.
+- Verification: Static HTML parsing asserts that the footer is a direct child
+  of the settings dialog, and CSS coverage protects the workspace's single
+  `minmax(0, 1fr)` row.
+
+### D-041 — Global operational surfaces and saves are first-class
+
+- Date: 2026-07-17
+- Status: accepted
+- Decision: Daemon and Relay are separate primary Global Settings sections.
+  Global Settings exposes one persistent `Save changes` action that coordinates
+  ordinary profile settings and AI settings, even though each domain keeps its
+  own backend command. Daemon remains a read-only status surface and therefore
+  hides the save action; Relay remains capability-gated and hidden when the
+  current runtime does not expose it.
+- Rationale: Daemon lifecycle and remote Relay connectivity are distinct
+  operational concepts and should not be buried beneath a generic System
+  category. Multiple save buttons made the dialog's persistence boundary
+  ambiguous and encouraged operators to wonder which edits each action covered.
+- Scope: Global Settings navigation, Daemon and Relay visibility, footer
+  actions, AI settings coordination, dirty-state tracking, and frontend
+  regression coverage.
+- Constraints: AI provider secrets remain write-only and never enter global
+  settings payloads, snapshots, or logs. A pending embedding-index rebuild is
+  confirmed before either write begins. When both domains are dirty, the dialog
+  stays open until the AI write succeeds and remains open with its error state
+  if that write fails.
+- Verification: Frontend contracts protect the primary Daemon/Relay sections,
+  capability gating, the single footer action, merged dynamic AI dirty state,
+  coordinated profile and AI commands, and deferred modal close.
 
 ## Decision entry template
 

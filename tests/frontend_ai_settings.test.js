@@ -201,6 +201,54 @@ test('AI tab renders disabled-by-default defaults', () => {
   assert.doesNotMatch(html.match(/id="gls-ai-enabled"[^>]*>/)[0], /checked/);
 });
 
+test('production script order loads AI settings when its Global Settings tab opens', () => {
+  const { context, sendCalls } = createAiContext();
+  loadScript(context, 'static/js/modals/global-settings.js');
+
+  vm.runInContext(`switchGlsTab('gls-ai')`, context);
+
+  assert.equal(sendCalls.length, 1);
+  assert.deepEqual(sendCalls[0], { cmd: 'get_ai_settings' });
+});
+
+test('ready boot summaries suppress stale historical errors', () => {
+  const { context } = createAiContext();
+  const settings = settingsFixture({
+    boot_summary: {
+      enabled: true,
+      status: 'ready',
+      counts: { ready: 3, stale: 0, errors: 0 },
+      last_refreshed_at: 10,
+      last_error: 'Anthropic API key is not configured.',
+    },
+  });
+
+  const html = context._aiSummaryMeteringHtml(settings);
+
+  assert.match(html, /ai-status-ready/);
+  assert.doesNotMatch(html, /Last error/);
+  assert.doesNotMatch(html, /Anthropic API key is not configured/);
+});
+
+test('unhealthy boot summaries retain their current error details', () => {
+  const { context } = createAiContext();
+  const settings = settingsFixture({
+    boot_summary: {
+      enabled: true,
+      status: 'stale',
+      counts: { ready: 0, stale: 1, errors: 1 },
+      last_refreshed_at: 10,
+      last_error: 'Anthropic API key is not configured.',
+    },
+  });
+
+  const html = context._aiSummaryMeteringHtml(settings);
+
+  assert.match(html, /ai-status-stale/);
+  assert.match(html, /Last error/);
+  assert.match(html, /Anthropic API key is not configured/);
+});
+
 test('API keys are masked, never rendered raw, sent once when dirty, then omitted unchanged', () => {
   const { context, document, sendCalls } = createAiContext();
   const rawKey = 'sk-ant-raw-secret-value';

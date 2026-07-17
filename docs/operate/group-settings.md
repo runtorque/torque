@@ -1,22 +1,25 @@
 # Group Settings
 
-Each group has configurable settings that act as defaults when creating agents and terminals. Open the settings modal by clicking the gear icon (++2699++) on the group header, or right-click the header and select **Settings...**.
+Each group has configurable settings that act as defaults when creating agents
+and terminals. Open the modal with the gear button on the group tab or group
+header.
 
-Settings are organized into four tabs: **Group**, **Workers**, **Engineer**, and
-**Architect**. The Group tab contains sub-tabs for general defaults, worker
-defaults, terminals, sync provider configuration, and advanced actions.
+Settings are organized into four tabs: **Group**, **Workers**, **Engineers**,
+and **Architects**. The Group tab contains sub-tabs for workspace settings,
+all-agent launch defaults, sync provider configuration, and advanced actions.
 
 ## Group tab
 
-These settings apply to the group as a whole and serve as the base defaults for both agents and terminals.
+**Group → General** organizes workspace-wide settings into **Workspace**,
+**Environment**, and **Limits & visibility**.
 
 | Setting | Description |
 |---------|-------------|
 | **Directory** | Default working directory for new sessions. Supports `~` for home directory. |
-| **Shell** | Default shell (`zsh`, `bash`, `fish`). Leave as "Default" to use the runtime default shell. |
-| **Environment** | Environment variables applied to all sessions. One `KEY=VALUE` per line. |
-| **Auto-create terminals** | Number of child terminals to create automatically alongside each new agent (0--10). |
-| **Max agents** | Maximum number of agents allowed in this group. Set to 0 for unlimited. When the cap is reached, the "+ New" button shows "Full". |
+| **Shell** | Default shell (`zsh`, `bash`, `fish`). Leave as **System default** to use the runtime shell. |
+| **Env file** | Optional shell file sourced when a session starts. |
+| **Variables** | Environment variables applied to all sessions. One `KEY=VALUE` per line. |
+| **Agent limit** | Maximum number of top-level agents allowed in this group. Set to `0` for unlimited. |
 
 ### Start collapsed on load
 
@@ -29,12 +32,12 @@ When enabled, the group only appears in workspace windows where it has active se
 ### Sync provider
 
 Use **Group → Sync provider** to configure external board sync for this group.
-V1 supports GitHub Issues plus Projects v2. Choose `github`, set
-`board_sync_enabled`, then provide `github_repo`,
-`github_project_owner`/`github_project_number`, the Project Status field name,
-and the lane → Status JSON map. The **Test connection** button runs the same
-preflight as `torque board sync test -g GROUP` and surfaces `gh` auth, missing
-`project` scope, repo, project, and Status-field failures.
+The pane is organized into **Connection**, **Repository & project**, **Board
+mapping**, **Issue behavior**, and **Assignees**. V1 supports GitHub Issues plus
+Projects v2. Select GitHub, configure the repository and project, test the
+connection, then enable synchronization. The preflight is the same one used by
+`torque board sync test -g GROUP` and surfaces `gh` auth, missing `project`
+scope, repository, project, and Status-field failures.
 
 Enabled groups auto-push top-level product task creates and meaningful board
 mutations through a debounced background sync. Manual Sync now remains the
@@ -42,29 +45,68 @@ force/retry path, and pull preview/apply remains operator-gated. See
 [Board sync operator guide](board-sync.md) for setup, auto-sync behavior, PR
 closing refs, manual pull preview/apply, limitations, and recovery.
 
-## Group → Worker defaults and Workers tab
+## Launch and runtime defaults
 
-Worker-related settings are split between **Group → Worker defaults** (provider,
-role, model, reasoning effort) and the **Workers** tab (execution directory,
-worktrees, notifications). Leave a field empty to inherit from the group tab.
+**Group → Agents** defines provider, model, reasoning effort, and command
+defaults shared by Workers, Engineers, and Architects in one **Shared launch
+defaults** section. Each kind's **General** pane may override those launch
+values.
+
+**Workers → General → Launch** owns the **Default role**. Worker roles are not
+shared with Engineers or Architects. It provides the base Worker role; an
+explicit task or action role can override it.
+
+The four General panes use the same hierarchy:
+
+- **Group:** Workspace, Environment, and Limits & visibility.
+- **Workers:** Launch, Runtime, and Session.
+- **Engineers:** Launch and Runtime.
+- **Architects:** Launch and Runtime.
+
+Inherited select options and placeholders show the resolved value, for example
+`Inherit · Codex` or `Inherit · GPT-5`. Choosing or entering another value
+creates the existing per-kind override; no storage format changes.
 
 | Setting | Description |
 |---------|-------------|
-| **Directory** | Working directory for agents. Overrides the group default. |
-| **Shell** | Shell for agents. |
-| **Provider** | Preferred agent backend (`claude-code`, `codex`, `gemini-cli`, or empty to auto-detect from the boot command). |
-| **Default model** | Optional provider-specific model override for new agents in this group. |
-| **Default reasoning effort** | Optional provider-specific reasoning-effort override for new agents in this group. Unsupported providers ignore it. |
-| **Boot command** | Command Torque runs when the agent session starts. Leave empty to use the provider default or global default command. |
-| **Additional environment** | Extra environment variables for agents, merged with (and can override) the group environment. |
-| **Environment file** | Optional shell file sourced before the boot command runs. |
-| **Default agent template** | Optional base template applied to new agents in this group before group-specific `agent_*` overrides. |
+| **Provider** | Preferred agent backend (`claude-code`, `codex`, `gemini-cli`, or the inherited Group → Agents value). |
+| **Default role** | Optional base Worker role; explicit task and action roles take precedence. |
+| **Model** | Optional provider-specific model override. Detected choices remain editable through the final **Custom…** option. |
+| **Reasoning effort** | Optional provider-specific reasoning-effort override. Unsupported providers ignore it. |
+| **Command override** | Advanced escape hatch for replacing the inherited provider command. |
+| **Directory** | Working directory override. Workers inherit Group → General; Engineers and Architects inherit the shared agent runtime. |
+| **Shell** | Shell override with the resolved inherited shell shown in the default option. |
+| **Env file** | Optional shell file sourced before the Worker command runs. |
+| **Additional variables** | Extra Worker environment variables, merged with and able to override the group environment. |
 | **Session resume** | When supported by the provider, relaunch resumes the provider conversation instead of starting from scratch. |
-| **Idle timeout** | Minutes Torque waits before it may flag a quiet agent for attention. Set to `0` to disable. |
+| **Idle timeout** | Minutes Torque waits before it may flag a quiet Worker for attention. Set to `0` to disable. |
 
-### Git worktree per worker
+The Architect directory and shell controls live in **Architects → General →
+Runtime**, parallel to the Engineer controls. Architect digest delivery remains
+under **Architects → System**.
 
-When enabled, creating a worker automatically creates a new git worktree branched from the directory's repository. Each worker gets its own branch (`torque/{slug}-{short-id}`) and worktree path, so multiple workers can work on the same repo in parallel without conflicts. The worktree is cleaned up when the worker is removed.
+The underlying settings retain their existing meanings:
+
+| Stored setting | UI location |
+|----------------|-------------|
+| Group directory, shell, environment | Group → General |
+| All-agent provider, model, effort, command | Group → Agents |
+| Default Worker role, Worker launch, and shared agent runtime overrides | Workers → General |
+| Engineer launch and runtime overrides | Engineers → General |
+| Architect launch and runtime overrides | Architects → General |
+
+### Workspace isolation
+
+Under **Workers → Worktree**, choose a **Workspace mode**:
+
+- **Shared group checkout** — uses the group's normal working directory.
+- **Isolated worktree** — gives each Worker a separate branch and
+  checkout, allowing parallel work without sharing an index or uncommitted
+  files.
+
+The remaining worktree policy stays visible when the shared checkout is
+selected, but it is dimmed and inactive. Torque retains those values so they are
+ready if isolated worktrees are enabled again.
 
 See [Worktrees](../tasks/worktrees.md) for the full guide on checkpoints, rollback, and merge.
 
@@ -73,26 +115,25 @@ See [Worktrees](../tasks/worktrees.md) for the full guide on checkpoints, rollba
 
 ### Worktree options
 
-When worktrees are enabled, these settings control the execution environment:
+When isolated worktrees are selected, settings are grouped by lifecycle:
 
 | Setting | Description |
 |---------|-------------|
 | **Worktree base directory** | Repo-relative directory where Torque stores worktrees. |
 | **Worktree base branch** | Branch to fork from. Leave empty to use the repo's current HEAD. |
-| **Auto-checkpoint on stop** | Create a checkpoint commit when the agent session ends. |
-| **Checkpoint on progress / done** | Create throttled checkpoints when the agent reports progress or completion. |
-| **Squash on merge** | Prefer squash merge for the explicit direct-local fallback. The default `engineer_merge` path creates/reuses a GitHub PR and requests a squash merge regardless of this setting. |
-| **Engineer merge mode** | Locks `engineer_merge` for this group. **Pull request** (default) requires the PR workflow and rejects `force_direct=true`; **Direct local** bypasses the PR path for every engineer merge; **Engineer choice** keeps the default PR workflow with `force_direct=true` as an explicit local fallback. Disallowed attempts and lock overrides are recorded as workflow-breach audit events. |
-| **Merge instructions** | Extra text Torque appends to merge prompts. |
+| **Automatic checkpoints** | Choose manual only, checkpoint when the Worker stops, checkpoint on throttled progress updates, or both progress and stop. |
+| **Merge mode** | Locks `engineer_merge` for this group. **Pull request** (default) requires the PR workflow and rejects `force_direct=true`; **Direct local** bypasses the PR path for every Engineer merge; **Engineer choice** keeps PR as the default with `force_direct=true` as an explicit local fallback. |
+| **Direct-merge history** | For Direct local and Engineer choice, preserve Worker commits or squash them into one local commit. Pull request mode hides this option because GitHub squash is always requested. |
 | **Default post-merge cleanup** | What Torque should do by default after a successful merge when no explicit cleanup choice is provided. The default keeps the worker/worktree warm for same-worker continuity; opt in to auto-sweep to close the worker and delete the merged worktree/branch. For PR merges, cleanup runs after the PR actually merges, not when the PR is created or left pending. |
-| **Preserve merge diff by default** | Save the full pre-merge patch as a diff artifact on the latest open branch-boundary task. |
-| **Symlink paths** | Repo-relative exact paths or glob patterns that should be mirrored into every worktree as symlinks. Recursive `**` is supported (for example `etl/**/node_modules`). Only existing matches inside the repo root are linked. |
+| **Preserve merge diff** | Save the full pre-merge patch as a diff artifact on the latest open branch-boundary task. |
+| **Symlink all gitignored paths** | Mirror ignored paths into each worktree. This can expose `.env` files, credentials, caches, and dependencies; Workers modify the original files through the symlinks. |
+| **Explicit symlinks** | Repo-relative exact paths or glob patterns that should be mirrored into every worktree as symlinks. Recursive `**` is supported (for example `etl/**/node_modules`). Only existing matches inside the repo root are linked. |
 
 ### Provider and resume notes
 
 - If you set **Provider**, Torque treats that adapter as authoritative even if you also override the boot command.
 - If Provider is empty, Torque tries to infer the adapter from the boot command or running process name.
-- **Default model** and **Default reasoning effort** are only auto-applied when Torque is shaping the provider's normal command path. If you fully override the boot command, include any provider-specific flags yourself.
+- **Model** and **Reasoning effort** are only auto-applied when Torque is shaping the provider's normal command path. If you fully override the command, include any provider-specific flags yourself.
 - Session resume only works for adapters that expose a provider session ID. Claude Code and Codex support it; generic terminals do not.
 
 See [Agents & Sessions](../team/workers.md) for the end-to-end runtime model.
@@ -109,19 +150,33 @@ engineer, architect, or legacy terminal card from the grid to view its session.
 
 The **Engineer** tab owns per-group Engineer configuration.
 
-| Setting | Description |
-|---------|-------------|
-| **Agent** | Shows the group's designated engineer. Create an engineer from the group’s **+ New** dropdown, then manage it here. |
-| **Only show/manage agents launched by this engineer** | Restricts designated-engineer-only tools and views to worker agents originally created by that engineer. Human operators still see the full board. |
-| **Provider** | Optional backend override just for the designated engineer. Leave empty to inherit the group default. |
-| **Command override** | Optional boot command override for the designated engineer. |
-| **Model** | Optional provider-specific model override for the designated engineer. |
-| **Reasoning effort** | Optional provider-specific reasoning-effort override for the designated engineer. Unsupported providers ignore it. |
-| **Custom Instructions** | Extra instructions appended to the designated-engineer system prompt. |
-| **Push / Max / Heartbeat intervals** | Controls digest cadence and idle heartbeat behavior. |
-| **Events** | Choose which optional event types appear in Engineer digests. Mandatory event types are always enabled. |
+- **General** contains Launch and Runtime overrides.
+- **Behavior** contains Specializations, Orchestration, Communication, and
+  Policy overrides.
+- **System** contains Permissions, Digest delivery, and Events.
 
-The designated engineer can be restarted from its context menu. The restart flow reuses the same launch dialog, so provider, command, model, reasoning effort, and policy settings stay editable even after that engineer already exists.
+Digest events that Torque always includes are presented as informational badges.
+Only optional events use checkboxes. The Behavior notification preset updates
+the detailed System controls; manual System changes switch the preset to
+**Custom**.
+
+## Architect tab
+
+The **Architect** tab follows the same structure:
+
+- **General** contains Launch and Runtime overrides.
+- **Behavior** contains Orchestration, Continuity, and Instructions.
+- **System** contains Digest delivery and Events.
+
+Architect journal checkpoint cadence lives under **Behavior → Continuity**.
+Mandatory digest events are informational; optional events remain configurable.
+
+## Worker notifications
+
+**Workers → Notifications** separates the governing macOS **Delivery** choice
+from the **Events** that trigger it. When delivery is off, event choices remain
+visible but inactive so their configuration is still understandable and is
+retained for the next time delivery is enabled.
 
 ## How defaults are resolved
 

@@ -30,6 +30,17 @@ function _getEngineerRestrictToCreatedAgentsFromPermission() {
   return !document.getElementById('gs-engineer-restrict-to-created-agents').checked;
 }
 
+function _syncWorkerNotificationSettingsUi() {
+  const enabled = document.getElementById('gs-notifications');
+  const events = document.getElementById('gs-worker-notification-events');
+  if (!enabled || !events) return;
+  const disabled = !enabled.checked;
+  events.classList.toggle('is-disabled', disabled);
+  events.querySelectorAll('input, select, textarea, button').forEach((control) => {
+    control.disabled = disabled;
+  });
+}
+
 function _normalizeGsSelection(tab, subtab) {
   const rawTab = String(tab || 'group').trim() || 'group';
   const rawSubtab = String(subtab || '').trim();
@@ -670,12 +681,12 @@ function _groupSettingsPromptPreviewPayload() {
     default_agent_template: document.getElementById('gs-default-agent-template').value,
     agent_provider: _getProviderValue('gs-agent-provider'),
     agent_boot_command: document.getElementById('gs-agent-boot-cmd').value.trim(),
-    agent_model: document.getElementById('gs-agent-model').value.trim(),
-    agent_reasoning_effort: document.getElementById('gs-agent-reasoning-effort').value,
+    agent_model: _getModelValue('gs-agent-model'),
+    agent_reasoning_effort: _getReasoningEffortValue('gs-agent-reasoning-effort'),
     worker_provider: _getProviderValue('gs-worker-provider'),
     worker_boot_command: document.getElementById('gs-worker-boot-command').value.trim(),
-    worker_model: document.getElementById('gs-worker-model').value.trim(),
-    worker_reasoning_effort: document.getElementById('gs-worker-reasoning-effort').value,
+    worker_model: _getModelValue('gs-worker-model'),
+    worker_reasoning_effort: _getReasoningEffortValue('gs-worker-reasoning-effort'),
     agent_directory: document.getElementById('gs-agent-directory').value.trim(),
     agent_shell: document.getElementById('gs-agent-shell').value,
     engineer_merge_mode: document.getElementById('gs-engineer-merge-mode').value,
@@ -688,8 +699,8 @@ function _engineerSettingsPromptPreviewPayload() {
   return {
     engineer_provider: _getProviderValue('gs-engineer-provider'),
     engineer_boot_command: document.getElementById('gs-engineer-boot-cmd').value.trim(),
-    engineer_model: document.getElementById('gs-engineer-model').value.trim(),
-    engineer_reasoning_effort: document.getElementById('gs-engineer-reasoning-effort').value,
+    engineer_model: _getModelValue('gs-engineer-model'),
+    engineer_reasoning_effort: _getReasoningEffortValue('gs-engineer-reasoning-effort'),
     engineer_directory: document.getElementById('gs-engineer-directory').value.trim(),
     engineer_shell: document.getElementById('gs-engineer-shell').value,
     custom_instructions: document.getElementById('gs-engineer-custom-instructions').value,
@@ -710,8 +721,8 @@ function _architectSettingsPromptPreviewPayload() {
   return {
     architect_provider: _getProviderValue('gs-architect-provider'),
     architect_boot_command: document.getElementById('gs-architect-boot-cmd').value.trim(),
-    architect_model: document.getElementById('gs-architect-model').value.trim(),
-    architect_reasoning_effort: document.getElementById('gs-architect-reasoning-effort').value,
+    architect_model: _getModelValue('gs-architect-model'),
+    architect_reasoning_effort: _getReasoningEffortValue('gs-architect-reasoning-effort'),
     architect_directory: document.getElementById('gs-architect-directory').value.trim(),
     architect_shell: document.getElementById('gs-architect-shell').value,
     architect_custom_instructions: document.getElementById('gs-architect-custom-instructions').value,
@@ -1273,30 +1284,62 @@ function _populateArchitectJournalCheckpointSelect(currentValue) {
   sel.value = current;
 }
 
+function _settingsEventLabel(kind) {
+  return String(kind || '')
+    .split('_')
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
 function _renderArchitectEventCheckboxes(enabled) {
   const grid = document.getElementById('gs-architect-events-grid');
   if (!grid) return;
   const set = new Set((enabled || []).map((value) => String(value || '')));
   const mandatory = new Set(_ARCHITECT_DIGEST_MANDATORY_EVENTS);
   grid.innerHTML = '';
+  grid.className = 'gs-settings-section-body settings-event-groups';
+
+  const alwaysGroup = document.createElement('div');
+  const alwaysTitle = document.createElement('div');
+  alwaysTitle.className = 'settings-subsection-label';
+  alwaysTitle.textContent = 'Always included';
+  const alwaysBadges = document.createElement('div');
+  alwaysBadges.className = 'settings-event-badges';
+  alwaysBadges.ariaLabel = 'Events always included in Architect digests';
+  _ARCHITECT_DIGEST_MANDATORY_EVENTS.forEach((kind) => {
+    const badge = document.createElement('span');
+    badge.textContent = _settingsEventLabel(kind);
+    alwaysBadges.appendChild(badge);
+  });
+  alwaysGroup.appendChild(alwaysTitle);
+  alwaysGroup.appendChild(alwaysBadges);
+  grid.appendChild(alwaysGroup);
+
+  const optionalGroup = document.createElement('div');
+  const optionalTitle = document.createElement('div');
+  optionalTitle.className = 'settings-subsection-label';
+  optionalTitle.textContent = 'Optional';
+  const optionalGrid = document.createElement('div');
+  optionalGrid.className = 'task-modal-check-grid';
   _ARCHITECT_DIGEST_EVENT_CATALOG.forEach((kind) => {
+    if (mandatory.has(kind)) return;
     const label = document.createElement('label');
     label.className = 'gs-checkbox';
     const input = document.createElement('input');
     input.type = 'checkbox';
     input.dataset.eventKind = kind;
     input.id = `gs-architect-event-${kind.replace(/_/g, '-')}`;
-    input.checked = set.has(kind) || mandatory.has(kind);
-    if (mandatory.has(kind)) {
-      input.disabled = true;
-      input.dataset.mandatory = '1';
-    }
+    input.checked = set.has(kind);
     const text = document.createElement('span');
-    text.textContent = ' ' + kind + (mandatory.has(kind) ? ' (always on)' : '');
+    text.textContent = ' ' + _settingsEventLabel(kind);
     label.appendChild(input);
     label.appendChild(text);
-    grid.appendChild(label);
+    optionalGrid.appendChild(label);
   });
+  optionalGroup.appendChild(optionalTitle);
+  optionalGroup.appendChild(optionalGrid);
+  grid.appendChild(optionalGroup);
 }
 
 function _getArchitectEnabledEvents() {
@@ -1340,34 +1383,41 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-env-vars').value = _envToText(s.env_vars);
   document.getElementById('gs-env-file').value = s.env_file || '';
 
-  /* -- Group > Agents (all-kinds defaults) + Workers tab -- */
+  /* -- Group > Agents shared defaults + Workers tab -- */
   document.getElementById('gs-agent-directory').value = s.agent_directory || '';
   document.getElementById('gs-agent-shell').value = s.agent_shell || '';
   _populateProviderSelect('gs-agent-provider', s.agent_provider || '', false);
   _populateTemplateSelect('gs-default-agent-template', s.default_agent_template || '', 'None');
   document.getElementById('gs-agent-boot-cmd').value = s.agent_boot_command || '';
   document.getElementById('gs-agent-model').value = s.agent_model || '';
-  document.getElementById('gs-agent-reasoning-effort').value = s.agent_reasoning_effort || '';
   _populateProviderSelect('gs-worker-provider', s.worker_provider || '', true);
   document.getElementById('gs-worker-boot-command').value = s.worker_boot_command || '';
   document.getElementById('gs-worker-model').value = s.worker_model || '';
-  document.getElementById('gs-worker-reasoning-effort').value = s.worker_reasoning_effort || '';
-  onGsProviderChange();
+  onGsProviderChange(s.agent_reasoning_effort || '');
   onGsWorkerProviderChange(s.worker_reasoning_effort || '');
-  document.getElementById('gs-worktree').checked = s.git_worktree || false;
+  _setSelectValue('gs-worktree-mode', s.git_worktree ? 'isolated' : 'shared', 'shared');
   document.getElementById('gs-wt-base-dir').value = s.worktree_base_dir || '.torque/worktrees';
   document.getElementById('gs-wt-base-branch').value = s.worktree_base_branch || '';
-  document.getElementById('gs-wt-auto-checkpoint').checked = s.worktree_auto_checkpoint || false;
-  document.getElementById('gs-wt-checkpoint-on-progress').checked = s.checkpoint_on_progress || false;
-  document.getElementById('gs-wt-merge-squash').checked = s.worktree_merge_squash === true;
+  _setSelectValue(
+    'gs-wt-checkpoint-mode',
+    _worktreeCheckpointMode(
+      s.worktree_auto_checkpoint !== false,
+      s.checkpoint_on_progress === true,
+    ),
+    'stop',
+  );
+  _setSelectValue(
+    'gs-wt-direct-history',
+    s.worktree_merge_squash === true ? 'squash' : 'preserve',
+    'preserve',
+  );
   _setSelectValue('gs-engineer-merge-mode', s.engineer_merge_mode, 'pr');
-  document.getElementById('gs-wt-merge-instructions').value = s.worktree_merge_instructions || '';
   _setSelectValue('gs-wt-merge-cleanup', s.worktree_merge_cleanup, 'keep');
   document.getElementById('gs-wt-merge-preserve-diff').checked = !!s.worktree_merge_preserve_diff;
   document.getElementById('gs-wt-symlink-gitignored').checked = !!s.worktree_symlink_gitignored_paths;
   _gsWtSymlinks = (s.worktree_symlinks || []).slice();
   _renderWtSymlinks();
-  _toggleWorktreeFields();
+  _syncWorktreeSettingsUi();
   document.getElementById('gs-session-resume').checked = s.agent_session_resume !== false;
   document.getElementById('gs-agent-idle-timeout').value = s.agent_idle_timeout != null ? s.agent_idle_timeout : 0;
   document.getElementById('gs-guidance-hint-cadence').value =
@@ -1376,6 +1426,7 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-notify-finish').checked = s.notify_on_finish !== false;
   document.getElementById('gs-notify-error').checked = s.notify_on_error !== false;
   document.getElementById('gs-notify-attention').checked = s.notify_on_attention !== false;
+  _syncWorkerNotificationSettingsUi();
   document.getElementById('gs-agent-env-vars').value = _envToText(s.agent_env_vars);
   document.getElementById('gs-agent-env-file').value = s.agent_env_file || '';
 
@@ -1409,11 +1460,10 @@ function _showGroupSettings(group, data) {
   _populateProviderSelect('gs-engineer-provider', ws.engineer_provider || '', true);
   document.getElementById('gs-engineer-boot-cmd').value = ws.engineer_boot_command || '';
   document.getElementById('gs-engineer-model').value = ws.engineer_model || '';
-  document.getElementById('gs-engineer-reasoning-effort').value = ws.engineer_reasoning_effort || '';
   document.getElementById('gs-engineer-directory').value = ws.engineer_directory || '';
   document.getElementById('gs-engineer-shell').value = ws.engineer_shell || '';
   document.getElementById('gs-engineer-custom-instructions').value = ws.custom_instructions || '';
-  onGsEngineerProviderChange();
+  onGsEngineerProviderChange(ws.engineer_reasoning_effort || '');
   // Default specializations picker state — primed from the group setting,
   // refreshed in place when state.specializations updates over WS.
   _gsEngineerSpecs = Array.isArray(s.default_engineer_specializations)
@@ -1469,10 +1519,10 @@ function _showGroupSettings(group, data) {
   );
   document.getElementById('gs-architect-boot-cmd').value = architectSettings.architect_boot_command || '';
   document.getElementById('gs-architect-model').value = architectSettings.architect_model || '';
-  document.getElementById('gs-architect-reasoning-effort').value = architectSettings.architect_reasoning_effort || '';
   document.getElementById('gs-architect-directory').value = architectSettings.architect_directory || '';
   document.getElementById('gs-architect-shell').value = architectSettings.architect_shell || '';
   document.getElementById('gs-architect-custom-instructions').value = architectSettings.architect_custom_instructions || '';
+  onGsArchitectProviderChange(architectSettings.architect_reasoning_effort || '');
   _autoGrowTextArea('gs-architect-custom-instructions');
   _setSelectValue(
     'gs-architect-autonomy-mode',
@@ -1533,7 +1583,7 @@ function _showGroupSettings(group, data) {
     : initialTab === 'architect'
       ? 'gs-architect-provider'
       : initialTab === 'workers'
-        ? 'gs-agent-directory'
+        ? 'gs-default-agent-template'
         : initialSubtab === 'group-worker-defaults'
           ? 'gs-agent-provider'
       : initialSubtab === 'group-sync'
@@ -1569,6 +1619,7 @@ function submitGroupSettings() {
     10
   );
 
+  const worktreeCheckpoint = _worktreeCheckpointFlags();
   const settings = {
     /* Group */
     default_directory: document.getElementById('gs-directory').value.trim(),
@@ -1584,22 +1635,21 @@ function submitGroupSettings() {
     default_agent_template: document.getElementById('gs-default-agent-template').value,
     agent_provider: _getProviderValue('gs-agent-provider'),
     agent_boot_command: document.getElementById('gs-agent-boot-cmd').value.trim(),
-    agent_model: document.getElementById('gs-agent-model').value.trim(),
-    agent_reasoning_effort: document.getElementById('gs-agent-reasoning-effort').value,
+    agent_model: _getModelValue('gs-agent-model'),
+    agent_reasoning_effort: _getReasoningEffortValue('gs-agent-reasoning-effort'),
     worker_provider: _getProviderValue('gs-worker-provider'),
     worker_boot_command: document.getElementById('gs-worker-boot-command').value.trim(),
-    worker_model: document.getElementById('gs-worker-model').value.trim(),
-    worker_reasoning_effort: document.getElementById('gs-worker-reasoning-effort').value,
+    worker_model: _getModelValue('gs-worker-model'),
+    worker_reasoning_effort: _getReasoningEffortValue('gs-worker-reasoning-effort'),
     agent_env_vars: _textToEnv('gs-agent-env-vars'),
     agent_env_file: document.getElementById('gs-agent-env-file').value.trim(),
-    git_worktree: document.getElementById('gs-worktree').checked,
+    git_worktree: document.getElementById('gs-worktree-mode').value === 'isolated',
     worktree_base_dir: document.getElementById('gs-wt-base-dir').value.trim() || '.torque/worktrees',
     worktree_base_branch: document.getElementById('gs-wt-base-branch').value.trim(),
-    worktree_auto_checkpoint: document.getElementById('gs-wt-auto-checkpoint').checked,
-    checkpoint_on_progress: document.getElementById('gs-wt-checkpoint-on-progress').checked,
-    worktree_merge_squash: document.getElementById('gs-wt-merge-squash').checked,
+    worktree_auto_checkpoint: worktreeCheckpoint.autoCheckpoint,
+    checkpoint_on_progress: worktreeCheckpoint.checkpointOnProgress,
+    worktree_merge_squash: document.getElementById('gs-wt-direct-history').value === 'squash',
     engineer_merge_mode: document.getElementById('gs-engineer-merge-mode').value,
-    worktree_merge_instructions: document.getElementById('gs-wt-merge-instructions').value.trim(),
     worktree_merge_cleanup: document.getElementById('gs-wt-merge-cleanup').value,
     worktree_merge_preserve_diff: document.getElementById('gs-wt-merge-preserve-diff').checked,
     worktree_symlink_gitignored_paths: document.getElementById('gs-wt-symlink-gitignored').checked,
@@ -1631,8 +1681,8 @@ function submitGroupSettings() {
   const engineerSettings = {
     engineer_provider: _getProviderValue('gs-engineer-provider'),
     engineer_boot_command: document.getElementById('gs-engineer-boot-cmd').value.trim(),
-    engineer_model: document.getElementById('gs-engineer-model').value.trim(),
-    engineer_reasoning_effort: document.getElementById('gs-engineer-reasoning-effort').value,
+    engineer_model: _getModelValue('gs-engineer-model'),
+    engineer_reasoning_effort: _getReasoningEffortValue('gs-engineer-reasoning-effort'),
     engineer_directory: document.getElementById('gs-engineer-directory').value.trim(),
     engineer_shell: document.getElementById('gs-engineer-shell').value,
     custom_instructions: document.getElementById('gs-engineer-custom-instructions').value,
@@ -1652,8 +1702,8 @@ function submitGroupSettings() {
   const architectSettings = {
     architect_provider: _getProviderValue('gs-architect-provider'),
     architect_boot_command: document.getElementById('gs-architect-boot-cmd').value.trim(),
-    architect_model: document.getElementById('gs-architect-model').value.trim(),
-    architect_reasoning_effort: document.getElementById('gs-architect-reasoning-effort').value,
+    architect_model: _getModelValue('gs-architect-model'),
+    architect_reasoning_effort: _getReasoningEffortValue('gs-architect-reasoning-effort'),
     architect_directory: document.getElementById('gs-architect-directory').value.trim(),
     architect_shell: document.getElementById('gs-architect-shell').value,
     architect_custom_instructions: document.getElementById('gs-architect-custom-instructions').value,

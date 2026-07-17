@@ -164,7 +164,13 @@ test('openEngineerLaunchDialog populates persisted engineer launch settings', ()
   assert.equal(ensure('engineer-launch-provider').value, 'codex');
   assert.equal(ensure('engineer-launch-boot-cmd').value, 'codex --model gpt-5.4');
   assert.equal(ensure('engineer-launch-model').value, 'gpt-5.4');
-  assert.equal(ensure('engineer-launch-reasoning-effort').value, 'medium');
+  assert.equal(ensure('engineer-launch-model-select').value, '__custom__');
+  assert.equal(ensure('engineer-launch-reasoning-effort').value, '__custom__');
+  assert.equal(ensure('engineer-launch-reasoning-effort-custom').value, 'medium');
+  assert.equal(
+    vm.runInContext(`_getReasoningEffortValue('engineer-launch-reasoning-effort')`, context),
+    'medium',
+  );
   assert.equal(ensure('engineer-launch-custom-instructions').value, 'Keep waves tight.');
   assert.equal(ensure('engineer-launch-autonomy-mode').value, 'aggressive_auto_continue');
   assert.equal(ensure('engineer-launch-default-worker-concurrency').value, '4');

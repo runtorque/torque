@@ -175,3 +175,45 @@ class RoleManagerTemplateCompatTests(unittest.TestCase):
         )
 
         self.assertEqual(resolved["worktree_name"], "Feature API / v2")
+
+    def test_resolve_agent_config_can_skip_group_default_role(self):
+        self.mgr.save_template(
+            "worker/default",
+            {
+                "name": "worker/default",
+                "provider": "codex",
+                "model": "worker-model",
+            },
+            scope="project",
+            base_dir=str(self.project),
+        )
+        gs = SimpleNamespace(
+            default_agent_template="worker/default",
+            agent_provider="claude-code",
+            agent_model="shared-model",
+            agent_reasoning_effort="",
+            agent_directory="",
+            agent_terminal_profile="",
+            agent_shell="",
+            agent_tab_color="",
+            agent_env_vars={},
+            git_worktree=False,
+            worktree_base_dir=".torque/worktrees",
+            worktree_base_branch="",
+            worktree_auto_checkpoint=False,
+            worktree_merge_squash=True,
+            agent_session_resume=True,
+            agent_idle_timeout=0,
+        )
+
+        resolved = self.mgr.resolve_agent_config(
+            "",
+            gs,
+            {},
+            base_dir=str(self.project),
+            apply_default_template=False,
+        )
+
+        self.assertEqual(resolved["provider"], "claude-code")
+        self.assertEqual(resolved["model"], "shared-model")
+        self.assertNotIn("template", resolved)

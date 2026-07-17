@@ -1,8 +1,64 @@
 /* Worktree and history modals. */
 
-function _toggleWorktreeFields() {
-  const on = document.getElementById('gs-worktree').checked;
-  document.getElementById('gs-wt-fields').style.display = on ? 'block' : 'none';
+function _worktreeCheckpointMode(autoCheckpoint, checkpointOnProgress) {
+  if (autoCheckpoint && checkpointOnProgress) return 'progress-stop';
+  if (checkpointOnProgress) return 'progress';
+  if (autoCheckpoint) return 'stop';
+  return 'manual';
+}
+
+function _worktreeCheckpointFlags() {
+  const mode = document.getElementById('gs-wt-checkpoint-mode').value;
+  return {
+    autoCheckpoint: mode === 'stop' || mode === 'progress-stop',
+    checkpointOnProgress: mode === 'progress' || mode === 'progress-stop',
+  };
+}
+
+function _setWorktreeSettingsDisabled(container, disabled) {
+  if (!container) return;
+  container.classList.toggle('is-disabled', disabled);
+  container.ariaDisabled = disabled ? 'true' : 'false';
+  container.querySelectorAll('input, select, textarea, button').forEach((control) => {
+    control.disabled = disabled;
+  });
+}
+
+function _syncWorktreeMergeModeUi() {
+  const mergeMode = document.getElementById('gs-engineer-merge-mode').value || 'pr';
+  const help = document.getElementById('gs-wt-merge-mode-help');
+  const historyRow = document.getElementById('gs-wt-direct-history-row');
+  const historyLabel = document.getElementById('gs-wt-direct-history-label');
+
+  if (mergeMode === 'direct') {
+    help.textContent = 'Torque merges directly into the checked-out base branch without creating a pull request.';
+    historyLabel.textContent = 'Local merge history';
+  } else if (mergeMode === 'engineer-choice') {
+    help.textContent = 'Pull request by default; the Engineer can explicitly choose a direct local merge.';
+    historyLabel.textContent = 'Direct-merge history';
+  } else {
+    help.textContent = 'Torque creates a GitHub pull request and requests a squash merge. Direct local merging is disabled.';
+  }
+  historyRow.hidden = mergeMode === 'pr';
+}
+
+function _syncWorktreeSettingsUi() {
+  const mode = document.getElementById('gs-worktree-mode').value || 'shared';
+  const isolated = mode === 'isolated';
+  const hint = document.getElementById('gs-worktree-mode-hint');
+
+  hint.textContent = isolated
+    ? 'Creates a separate branch and checkout.'
+    : 'Uses the group checkout. The worktree settings below are retained but inactive.';
+  _setWorktreeSettingsDisabled(
+    document.getElementById('gs-wt-isolation-fields'),
+    !isolated,
+  );
+  _setWorktreeSettingsDisabled(
+    document.getElementById('gs-wt-dependent-settings'),
+    !isolated,
+  );
+  _syncWorktreeMergeModeUi();
 }
 
 /* -- Worktree symlinks list ------------------------------------------------ */

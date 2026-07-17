@@ -246,7 +246,7 @@ test('stratified grid renders architects, orphan engineers, and orphan workers r
   assert.match(mainEl.innerHTML, /data-agent-strata="workers"[\s\S]*loose-workers-strip[\s\S]*Loose Worker/);
   assert.doesNotMatch(mainEl.innerHTML, /agent-strata-heading/);
   assert.doesNotMatch(mainEl.innerHTML, /\+ Add Worker|\+ New Engineer|\+ New Architect/);
-  assert.match(mainEl.innerHTML, /data-agent-grid-toolbar[\s\S]*data-agent-grid-new-button[\s\S]*class="agent-grid-new-icon"[\s\S]*<span>New<\/span>/);
+  assert.match(mainEl.innerHTML, /class="group-hdr"[\s\S]*data-agent-grid-header-controls[\s\S]*data-agent-grid-new-button[\s\S]*aria-label="Create agent or group"[\s\S]*class="agent-grid-new-icon"/);
 });
 
 test('architect execution workers remain a full-width multi-column grid with one engineer and many workers', () => {
@@ -284,7 +284,7 @@ test('architect execution workers remain a full-width multi-column grid with one
   );
   assert.match(executionBandDisplay.selector, /\.agent-band--architect-execution\.agent-section/);
   const workerRowsBlock = (css.match(/\.engineer-row-workers,\s*\.loose-workers-strip\s*\{[^}]*\}/) || [''])[0];
-  assert.match(workerRowsBlock, /grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(var\(--agent-grid-card-min\),\s*1fr\)\);/);
+  assert.match(workerRowsBlock, /grid-template-columns:\s*repeat\(auto-fill,\s*var\(--agent-grid-card-basis\)\);/);
 });
 
 test('empty strata are hidden while the grid-level new menu remains', () => {
@@ -298,7 +298,7 @@ test('empty strata are hidden while the grid-level new menu remains', () => {
   assert.doesNotMatch(mainEl.innerHTML, /\+ New Architect|\+ New Engineer|\+ Add Worker/);
   assert.doesNotMatch(mainEl.innerHTML, /No orphan engineers\./);
   assert.doesNotMatch(mainEl.innerHTML, /No orphan workers\./);
-  assert.match(mainEl.innerHTML, /data-agent-grid-toolbar[\s\S]*openAgentGridNewMenu\(event,&quot;torque&quot;\)/);
+  assert.match(mainEl.innerHTML, /class="group-hdr"[\s\S]*data-agent-grid-header-controls[\s\S]*openAgentGridNewMenu\(event,&quot;torque&quot;\)/);
 });
 
 test('grid-level + New menu opens standalone architect, engineer, and worker flows', () => {
@@ -313,6 +313,7 @@ test('grid-level + New menu opens standalone architect, engineer, and worker flo
     openAddArchitectForGroup = function(group) { modalCalls.push({ type: 'architect', group: group }); };
     openAddEngineerForSection = function(group, architectId) { modalCalls.push({ type: 'engineer', group: group, architectId: architectId || '' }); };
     openAddWorkerForSection = function(group) { modalCalls.push({ type: 'worker', group: group }); };
+    openAddGroup = function() { modalCalls.push({ type: 'group' }); };
     render();
   `, context);
 
@@ -332,17 +333,20 @@ test('grid-level + New menu opens standalone architect, engineer, and worker flo
     'New architect',
     'New engineer',
     'New worker',
+    null,
+    'New group',
   ]);
   assert.equal(menuCalls[0].x, 100);
   assert.equal(menuCalls[0].y, 44);
 
-  for (const item of menuCalls[0].items) {
+  for (const item of menuCalls[0].items.filter(item => item.action)) {
     vm.runInContext(item.action, context);
   }
   assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(modalCalls)', context)), [
     { type: 'architect', group: 'torque' },
     { type: 'engineer', group: 'torque', architectId: '' },
     { type: 'worker', group: 'torque' },
+    { type: 'group' },
   ]);
 });
 
@@ -395,8 +399,11 @@ test('selecting a no-engineer Architect preserves the last execution hierarchy a
   seedRetainedArchitectScenario(sandbox);
 
   vm.runInContext("selectedAgentId = 'arch-a'; focusedItemId = 'arch-a'; render();", context);
+  assert.match(mainEl.innerHTML, /data-agent-architect-selector-heading[\s\S]*Architects[\s\S]*>3<\/span>/);
   assert.match(mainEl.innerHTML, /data-agent-strata="architect-execution"[\s\S]*data-execution-architect-id="arch-a"/);
+  assert.match(mainEl.innerHTML, /data-drag-id="arch-a"[^>]*data-execution-hierarchy-owner="true"/);
   assert.match(mainEl.innerHTML, /class="[^"]*cell[^"]*selected[^"]*focused[^"]*architect[^"]*"[\s\S]*Torqly/);
+  assert.match(mainEl.innerHTML, /cell-architect-stats--team-shown" title="Hierarchy shown below">Team \u00b7 1 engineer/);
   assert.doesNotMatch(mainEl.innerHTML, /retained-execution-owner|data-retained-execution-owner|data-execution-retained="true"/);
   assert.match(mainEl.innerHTML, /Torqly Engineer[\s\S]*Torqly Worker/);
 
@@ -404,6 +411,7 @@ test('selecting a no-engineer Architect preserves the last execution hierarchy a
 
   assert.match(mainEl.innerHTML, /data-agent-strata="architect-execution"[\s\S]*data-execution-architect-id="arch-a"[\s\S]*data-execution-selected-architect-id="arch-steward"[\s\S]*data-execution-retained="true"/);
   assert.doesNotMatch(mainEl.innerHTML, /agent-execution-retained-note|Showing [^<]*execution hierarchy while/);
+  assert.match(mainEl.innerHTML, /data-drag-id="arch-a"[^>]*data-execution-hierarchy-owner="true"/);
   assert.match(mainEl.innerHTML, /data-drag-id="arch-a"[^>]*data-retained-execution-owner="true"/);
   assert.match(mainEl.innerHTML, /class="[^"]*cell[^"]*architect[^"]*retained-execution-owner[^"]*"/);
   assert.match(mainEl.innerHTML, /class="[^"]*cell[^"]*selected[^"]*focused[^"]*architect[^"]*"[\s\S]*Torque Steward/);
@@ -462,41 +470,63 @@ test('legacy selectPrincipal persists compatibility state without filtering the 
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [{ cmd: 'ui_select_principal', principal_id: '' }]);
 });
 
-test('stratified grid CSS defines flat architect strip, retained execution area, wrapping workers, and responsive behavior', () => {
+test('stratified grid CSS defines an architect selector, explicit team owner, contained engineer bands, and responsive workers', () => {
   const css = appStylesheetSource();
   const paneBlock = (css.match(/\.agents-grid-pane\s*\{[^}]*\}/) || [''])[0];
-  const toolbarBlock = (css.match(/\.agent-grid-toolbar\s*\{[^}]*\}/) || [''])[0];
+  const headerControlsBlock = (css.match(/\.agent-grid-header-controls\s*\{[^}]*\}/) || [''])[0];
 
   assert.match(css, /\.agent-grid-stratified\s*\{[\s\S]*overflow-x:\s*auto;/);
   assert.match(css, /\.agent-strata\s*\{[\s\S]*flex-direction:\s*column;/);
   assert.doesNotMatch(css, /\.agent-strata-heading\s*\{/);
   assert.match(paneBlock, /position:\s*relative;/);
-  assert.match(toolbarBlock, /justify-content:\s*flex-end;/);
-  assert.match(toolbarBlock, /position:\s*absolute;/);
-  assert.match(toolbarBlock, /top:\s*var\(--agents-grid-pane-pad-y\);/);
-  assert.match(toolbarBlock, /right:\s*var\(--agents-grid-pane-pad-x\);/);
-  assert.match(css, /\.agent-grid-new-btn\s*\{[\s\S]*border-radius:\s*999px;/);
+  assert.match(headerControlsBlock, /display:\s*flex;/);
+  assert.match(headerControlsBlock, /flex:\s*0 0 auto;/);
+  assert.match(headerControlsBlock, /margin-left:\s*auto;/);
+  assert.doesNotMatch(css, /\.agent-grid-toolbar\s*\{/);
+  assert.match(css, /\.agent-grid-new-btn\s*\{[\s\S]*border-radius:\s*var\(--radius-sm\);/);
+  assert.match(css, /\.agent-architect-selector-heading\s*\{[\s\S]*display:\s*flex;[\s\S]*text-transform:\s*uppercase;/);
   assert.match(css, /\.agent-architect-strip\s*\{[\s\S]*display:\s*flex;[\s\S]*flex-wrap:\s*wrap;/);
   assert.match(css, /\.agent-architect-strip > \.cell\s*\{[\s\S]*flex:\s*0 1 var\(--agent-architect-column-width\);/);
   assert.match(css, /\.agent-strata--architect-execution\s*\{[\s\S]*gap:\s*5px;/);
   assert.doesNotMatch(css, /\.agent-execution-retained-note\b/);
   assert.match(css, /\.agent-execution-empty\s*\{[\s\S]*border:\s*1px solid/);
-  assert.match(css, /\.cell\.architect\.retained-execution-owner\s*\{[\s\S]*border-color:\s*color-mix\(in srgb, var\(--accent\) 48%, transparent\);/);
+  assert.match(css, /\.cell\.architect\.execution-hierarchy-owner\s*\{[\s\S]*border-color:\s*color-mix\(in srgb, var\(--accent\) 48%, transparent\);[\s\S]*inset 0 -2px 0/);
+  assert.match(css, /\.cell-architect-stats--team-shown\s*\{[\s\S]*color:\s*var\(--accent\);/);
   assert.match(css, /\.agent-band--architect-execution\s*\{[\s\S]*display:\s*block;/);
   assert.match(css, /\.agent-band-body\.agent-section-body\s*\{[\s\S]*display:\s*flex;[\s\S]*flex-direction:\s*column;/);
   assert.match(css, /\.agent-execution-body\.agent-section-body\s*\{[\s\S]*flex-direction:\s*column;/);
   assert.match(css, /\.agent-card-body\s*\{[\s\S]*flex-direction:\s*column;/);
   assert.match(css, /\.agent-card-line\s*\{[\s\S]*text-overflow:\s*ellipsis;/);
-  assert.match(css, /\.agent-grid \.engineer-row\s*\{[\s\S]*align-items:\s*stretch;/);
+  assert.match(css, /\.agent-grid\s*\{[^}]*--agent-hierarchy-column-gap:\s*6px;/s);
+  assert.match(css, /\.agent-grid\s*\{[^}]*--agent-hierarchy-row-inset:\s*6px;/s);
+  assert.match(css, /\.agent-architect-selector-heading\s*\{[^}]*padding:\s*0 var\(--agent-hierarchy-row-inset\);/s);
+  assert.match(css, /\.agent-architect-strip\s*\{[^}]*gap:\s*var\(--agent-hierarchy-column-gap\);[^}]*padding-inline:\s*var\(--agent-hierarchy-row-inset\);/s);
+  const engineerRowBlock = (css.match(/\.agent-grid \.engineer-row\s*\{[^}]*\}/) || [''])[0];
+  assert.match(engineerRowBlock, /display:\s*grid;/);
+  assert.match(engineerRowBlock, /grid-template-columns:\s*var\(--agent-engineer-column-width\) minmax\(0, 1fr\);/);
+  assert.match(engineerRowBlock, /gap:\s*var\(--agent-hierarchy-column-gap\);/);
+  assert.match(engineerRowBlock, /padding:\s*var\(--agent-hierarchy-row-inset\);/);
+  assert.match(engineerRowBlock, /border:\s*0;/);
+  assert.match(engineerRowBlock, /inset 0 0 0 1px/);
   const workerRowsBlock = (css.match(/\.engineer-row-workers,\s*\.loose-workers-strip\s*\{[^}]*\}/) || [''])[0];
   const workerCardsBlock = (css.match(/\.engineer-row-workers > \.cell,\s*\.loose-workers-strip > \.cell,\s*\.ghost-card--worker\s*\{[^}]*\}/) || [''])[0];
   assert.match(workerRowsBlock, /display:\s*grid;/);
-  assert.match(workerRowsBlock, /grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(var\(--agent-grid-card-min\),\s*1fr\)\);/);
-  assert.match(workerRowsBlock, /justify-content:\s*stretch;/);
+  assert.match(workerRowsBlock, /grid-template-columns:\s*repeat\(auto-fill,\s*var\(--agent-grid-card-basis\)\);/);
+  assert.match(workerRowsBlock, /justify-content:\s*start;/);
+  assert.match(workerRowsBlock, /gap:\s*var\(--agent-hierarchy-column-gap\);/);
   assert.doesNotMatch(workerRowsBlock, /flex-wrap/);
-  assert.match(workerCardsBlock, /width:\s*100%;/);
-  assert.match(workerCardsBlock, /max-width:\s*none;/);
-  assert.doesNotMatch(css, /\.agent-grid \.engineer-row\.engineer-row--empty-workers\s*\{[^}]*display:\s*block/s);
+  assert.match(workerCardsBlock, /width:\s*var\(--agent-grid-card-basis\);/);
+  assert.match(workerCardsBlock, /min-width:\s*var\(--agent-grid-card-basis\);/);
+  assert.match(workerCardsBlock, /max-width:\s*var\(--agent-grid-card-basis\);/);
+  assert.match(css, /\.agent-grid\s*\{[^}]*--agent-worker-card-height:\s*var\(--agent-card-height\);/s);
+  assert.match(css, /\.cell\.worker\s*\{[^}]*min-height:\s*var\(--agent-card-height, 96px\);/s);
+  assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[^}]*--agent-worker-card-height:\s*var\(--agent-card-height\);/s);
+  assert.match(css, /body\.runtime-embedded \.cell\.worker\s*\{[^}]*min-height:\s*var\(--agent-card-height, 108px\);/s);
+  assert.doesNotMatch(css, /\.cell-worker--compact/);
+  assert.match(css, /\.engineer-row-workers\s*\{[^}]*padding-left:\s*0;[^}]*border-left:\s*0;/s);
+  assert.doesNotMatch(css, /\.engineer-row-workers::before/);
+  assert.match(css, /\.agent-grid \.engineer-row\.engineer-row--empty-workers \.engineer-row-workers\s*\{[^}]*display:\s*flex/s);
+  assert.doesNotMatch(css, /\.engineer-row-empty\s*\{[^}]*border:/s);
   assert.doesNotMatch(css, /\.agent-grid \.engineer-row\.engineer-row--empty-workers \.engineer-row-anchor\s*\{[^}]*width:\s*100%/s);
   assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-architect-column-width:\s*106px;/);
   assert.doesNotMatch(css, /\.principals-row\s*\{/);

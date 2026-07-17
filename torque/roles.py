@@ -530,14 +530,15 @@ class RoleManager:
     def resolve_agent_config(self, template_name: str,
                              group_settings,
                              overrides: dict | None,
-                             base_dir: str = "") -> dict:
+                             base_dir: str = "",
+                             apply_default_template: bool = True) -> dict:
         self._warn_ignored_legacy_templates(base_dir)
         result = {}
         effective_template = ""
 
         default_template = str(
             getattr(group_settings, "default_agent_template", "") or ""
-        ).strip()
+        ).strip() if apply_default_template else ""
         if default_template:
             tpl = self.load_template(default_template, base_dir)
             if tpl:

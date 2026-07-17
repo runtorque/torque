@@ -231,31 +231,11 @@ function _aiSetSaveStatus(message, level) {
 }
 
 
-function _aiSettingsSyncSaveButtons(name) {
-  var globalSaveBtn = document.getElementById('gls-global-save-btn');
-  var aiSaveBtn = document.getElementById('gls-ai-save-btn');
-  var modal = document.getElementById('modal-global-settings');
-  var readOnly = !!(modal && modal.classList && modal.classList.contains('settings-read-only'));
-  if (globalSaveBtn) globalSaveBtn.hidden = name === 'gls-ai' || readOnly;
-  if (aiSaveBtn) aiSaveBtn.hidden = name !== 'gls-ai';
-}
-
 function _aiSettingsAfterTabSwitch(name) {
-  _aiSettingsSyncSaveButtons(name);
   if (name === 'gls-ai') openAiSettingsTab();
 }
 
 function _aiSettingsInstallModalHooks() {
-  if (typeof switchGlsTab === 'function'
-      && (!switchGlsTab.__aiSettingsWrapped)) {
-    var baseSwitchGlsTab = switchGlsTab;
-    var wrappedSwitchGlsTab = function(name) {
-      baseSwitchGlsTab(name);
-      _aiSettingsAfterTabSwitch(name);
-    };
-    wrappedSwitchGlsTab.__aiSettingsWrapped = true;
-    switchGlsTab = wrappedSwitchGlsTab;
-  }
   if (typeof closeModals === 'function'
       && (!closeModals.__aiSettingsWrapped)) {
     var baseCloseModals = closeModals;
@@ -444,12 +424,13 @@ function _aiIndexStatusHtml(settings) {
 
 function _aiSummaryMeteringHtml(settings) {
   var boot = _aiObject(settings.boot_summary);
+  var bootStatus = String(boot.status || 'unknown').toLowerCase();
   var counts = _aiObject(boot.counts);
   var metering = _aiObject(settings.metering);
   var html = '<div class="ai-status-grid">';
   html += '<div class="daemon-status-label">Summary</div>';
-  html += '<div class="daemon-status-value ai-status-line"><span class="ai-status-pill ai-status-' + _aiEsc(boot.status || 'unknown') + '">'
-    + _aiEsc(_aiStatusLabel(boot.status || 'unknown')) + '</span>';
+  html += '<div class="daemon-status-value ai-status-line"><span class="ai-status-pill ai-status-' + _aiEsc(bootStatus) + '">'
+    + _aiEsc(_aiStatusLabel(bootStatus)) + '</span>';
   html += boot.enabled === false ? '<span class="ai-muted">disabled in settings</span>' : '';
   html += '</div>';
   html += '<div class="daemon-status-label">Counts</div>';
@@ -460,7 +441,7 @@ function _aiSummaryMeteringHtml(settings) {
     + '</div>';
   html += '<div class="daemon-status-label">Refreshed</div>';
   html += '<div class="daemon-status-value">' + _aiEsc(_aiFormatTime(boot.last_refreshed_at)) + '</div>';
-  if (boot.last_error) {
+  if (boot.last_error && bootStatus !== 'ready') {
     html += '<div class="daemon-status-label">Last error</div>';
     html += '<div class="daemon-status-value ai-error-text">' + _aiEsc(boot.last_error) + '</div>';
   }
@@ -690,6 +671,9 @@ function markAiSecretDirty(provider) {
   var idx = _aiClearSecrets.indexOf(provider);
   if (idx >= 0) _aiClearSecrets.splice(idx, 1);
   _aiRefreshSecretStatus(provider);
+  if (typeof settingsShellMarkDirty === 'function') {
+    settingsShellMarkDirty('modal-global-settings');
+  }
 }
 
 function clearAiSecret(provider) {
@@ -700,6 +684,9 @@ function clearAiSecret(provider) {
   _aiSecretDirty[provider] = false;
   if (_aiClearSecrets.indexOf(provider) < 0) _aiClearSecrets.push(provider);
   _aiRefreshSecretStatus(provider);
+  if (typeof settingsShellForceDirty === 'function') {
+    settingsShellForceDirty('modal-global-settings');
+  }
 }
 
 function _aiInputValue(id) {
@@ -794,6 +781,33 @@ function _aiSendUpdatePayload(payload) {
   if (typeof send === 'function') send(payload);
 }
 
+function aiSettingsHasUnsavedChanges() {
+  if (!_aiSettingsLoaded) return false;
+  if (_aiClearSecrets.length) return true;
+  for (var i = 0; i < AI_SETTINGS_PROVIDERS.length; i++) {
+    if (_aiSecretDirty[AI_SETTINGS_PROVIDERS[i]]) return true;
+  }
+  var pane = document.querySelector
+    ? document.querySelector('#modal-global-settings .gs-pane[data-pane="gls-ai"]')
+    : null;
+  return !!(pane && typeof settingsShellScopeDirty === 'function'
+    && settingsShellScopeDirty('modal-global-settings', pane));
+}
+
+async function prepareAiSettingsUpdate(confirmEmbeddingRebuild) {
+  if (_aiSettingsUpdateInFlight) return null;
+  var payload = _aiCollectPayload(!!confirmEmbeddingRebuild);
+  if (!payload.confirm_embedding_rebuild && _aiFormRequiresRebuildConfirmation(payload.settings)) {
+    var ok = await _aiShowRebuildConfirm(_aiIndexEntryEstimate(_aiSettingsCurrent()));
+    if (!ok) {
+      _aiSetSaveStatus('Save canceled.', 'warning');
+      return null;
+    }
+    payload.confirm_embedding_rebuild = true;
+  }
+  return payload;
+}
+
 async function submitAiSettings(confirmEmbeddingRebuild) {
   if (_aiSettingsUpdateInFlight) return;
   var payload = _aiCollectPayload(!!confirmEmbeddingRebuild);
@@ -833,6 +847,7 @@ function aiIndexStart(mode) {
 }
 
 function aiSettingsReceive(msg) {
+  var completedUpdate = _aiSettingsUpdateInFlight;
   _aiSettingsLoading = false;
   _aiSettingsLoaded = true;
   _aiSettingsStoreMessage(msg);
@@ -840,7 +855,14 @@ function aiSettingsReceive(msg) {
   _aiPendingUpdatePayload = null;
   resetAiSettingsSecretDrafts();
   renderAiSettingsTab({ preserveSurface: false });
+  var root = _aiSettingsRoot();
+  if (root && typeof settingsShellMergeBaseline === 'function') {
+    settingsShellMergeBaseline('modal-global-settings', root);
+  }
   if (_aiSettingsTabOpen()) _aiSetSaveStatus('AI settings loaded.', 'success');
+  if (completedUpdate && typeof globalSettingsAiSaveComplete === 'function') {
+    globalSettingsAiSaveComplete();
+  }
 }
 
 async function aiSettingsRequiresConfirmation(msg) {
@@ -963,6 +985,9 @@ function aiSettingsHandleError(msg) {
   sanitized = sanitized.replace(/(api[_-]?key|secret|token|password|authorization)\s*[:=]\s*\S+/ig, '$1: [redacted]');
   if (typeof _showToast === 'function') _showToast(sanitized, 'error');
   _aiSetSaveStatus(sanitized, 'error');
+  if (typeof globalSettingsAiSaveFailed === 'function') {
+    globalSettingsAiSaveFailed();
+  }
   return true;
 }
 

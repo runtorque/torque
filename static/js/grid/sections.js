@@ -226,13 +226,21 @@ function _renderArchitectStrip(groupName, model, renderCell, opts) {
     ? model.architects
     : [];
   if (!architectSections.length) return '';
+  const executionOwnerId = String(opts.executionHierarchyOwnerId || '').trim();
   const retainedOwnerId = String(opts.retainedExecutionArchitectId || '').trim();
   let html = '<section class="agent-strata agent-strata--architects agent-strata--architect-strip" data-agent-strata="architects">';
+  html += '<div class="agent-architect-selector-heading" data-agent-architect-selector-heading>'
+    + '<span class="agent-architect-selector-label">Architects</span>'
+    + '<span class="agent-architect-selector-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">'
+    + esc(String(architectSections.length))
+    + '</span>'
+    + '</div>';
   html += '<div class="agent-architect-strip" data-agent-architect-strip data-agent-row-shape="architect-strip-row">';
   for (const section of architectSections) {
     if (section && section.architect) {
       const architectId = String(section.architect.id || '');
       html += renderCell(section.architect, {
+        executionHierarchyOwner: !!(executionOwnerId && architectId === executionOwnerId),
         retainedExecutionOwner: !!(retainedOwnerId && architectId === retainedOwnerId),
       });
     }
@@ -263,6 +271,7 @@ function _renderArchitectExecutionStrata(groupName, executionInfo, renderCell, o
   const sectionKey = _agentGridSectionKey(section);
   const selectedId = selectedSection && selectedSection.architect ? String(selectedSection.architect.id || '') : '';
   const executionId = String(section.architect.id || '');
+  const engineerCount = rows.length;
   let html = '<section class="agent-strata agent-strata--architect-execution"'
     + ' data-agent-strata="architect-execution"'
     + ' data-agent-section="' + esc(sectionKey) + '"'
@@ -271,8 +280,12 @@ function _renderArchitectExecutionStrata(groupName, executionInfo, renderCell, o
     + (executionInfo.retained ? ' data-execution-retained="true"' : '')
     + '>';
   html += '<div class="agent-execution-heading" data-agent-execution-heading>'
-    + '<span class="agent-execution-heading-label">Execution hierarchy</span>'
-    + '<span class="agent-execution-heading-owner">' + esc(section.architect.name || section.architect.slug || section.architect.id || 'Architect') + '</span>'
+    + '<span class="agent-execution-heading-owner">'
+    + esc((section.architect.name || section.architect.slug || section.architect.id || 'Architect') + '\u2019s team')
+    + '</span>'
+    + '<span class="agent-execution-heading-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">'
+    + esc(String(engineerCount) + ' ' + (engineerCount === 1 ? 'engineer' : 'engineers'))
+    + '</span>'
     + '</div>';
   html += '<section class="agent-band agent-band--architect-execution agent-section agent-section-architect"'
     + ' data-agent-section="' + esc(sectionKey) + '">';
@@ -346,8 +359,11 @@ function _renderStratifiedAgentGrid(groupName, model, renderCell, opts) {
     + ' data-drop-type="agent">';
   const executionInfo = _agentGridResolveExecutionArchitect(groupName, (model && model.architects) || []);
   const stripOpts = Object.assign({}, opts || {});
-  if (executionInfo && executionInfo.retained && executionInfo.executionSection && executionInfo.executionSection.architect) {
-    stripOpts.retainedExecutionArchitectId = String(executionInfo.executionSection.architect.id || '');
+  if (executionInfo && executionInfo.executionSection && executionInfo.executionSection.architect) {
+    stripOpts.executionHierarchyOwnerId = String(executionInfo.executionSection.architect.id || '');
+    if (executionInfo.retained) {
+      stripOpts.retainedExecutionArchitectId = stripOpts.executionHierarchyOwnerId;
+    }
   }
   html += _renderArchitectStrip(groupName, model, renderCell, stripOpts);
   html += _renderArchitectExecutionStrata(groupName, executionInfo, renderCell, opts);
@@ -379,7 +395,13 @@ function _renderEngineerRow(row, renderCell) {
     + ' data-engineer-id="' + esc(row.engineer.id || '') + '">';
   html += '<div class="engineer-row-anchor">' + renderCell(row.engineer) + '</div>';
   html += '<div class="engineer-row-workers">';
-  for (const worker of workers) html += renderCell(worker);
+  if (workers.length) {
+    for (const worker of workers) html += renderCell(worker);
+  } else {
+    html += '<div class="engineer-row-empty" data-engineer-row-empty="true">'
+      + '<span>No workers</span>'
+      + '</div>';
+  }
   html += '</div>';
   html += '</div>';
   return html;

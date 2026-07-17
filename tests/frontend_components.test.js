@@ -300,7 +300,7 @@ test('compact dialogs, icon actions, and primary fields retain accessible afford
   assert.match(board, /aria-label="Remove image /);
   for (const pair of [
     ['add-name-input', 'Name'],
-    ['gs-engineer-autonomy-mode', 'Autonomy mode'],
+    ['gs-engineer-autonomy-mode', 'Autonomy'],
     ['gls-appearance-contrast', 'Contrast'],
     ['task-task-input', 'Task'],
     ['schedule-name-input', 'Name'],
@@ -325,7 +325,7 @@ test('residual responsive audit preserves compact actions, priority, and direct 
   const health = source('static/js/health.js');
 
   assert.match(design, /D-021 — Narrow layouts preserve action priority and component parity/);
-  assert.match(groupTabs, /agent-group-compact-menu btn btn-quiet btn-xs/);
+  assert.match(groupTabs, /agent-group-compact-settings btn btn-quiet btn-xs/);
   assert.match(groupTabs, /agent-group-quick-switcher ui-popover[\s\S]*?onkeydown="agentGroupQuickSwitcherKeydown\(event\)"/);
   assert.match(groupTabs, /\[data-group-switch-option\], \.agent-group-quick-new/);
   assert.match(groupTabs, /event\.key !== 'Home' && event\.key !== 'End'/);
@@ -705,7 +705,7 @@ test('shared menus define one floating surface and compact item state grammar', 
   assert.doesNotMatch(css, /#ctx-menu|agent-group-quick-switcher|board-filter-dropdown|board-view-menu/);
 });
 
-test('group and Board popovers opt into canonical markup and semantics', () => {
+test('group navigation and Board popovers use the appropriate direct and transient semantics', () => {
   const html = source('webview.html');
   const groups = source('static/js/grid/group-tabs.js');
   const commands = source('static/js/commands.js');
@@ -714,7 +714,8 @@ test('group and Board popovers opt into canonical markup and semantics', () => {
   const view = source('static/js/board/view-state.js');
 
   assert.match(html, /id="ctx-menu" class="ui-popover ui-menu" role="menu" aria-hidden="true"/);
-  assert.match(groups, /aria-haspopup="menu" aria-expanded="false"/);
+  assert.match(groups, /class="agent-group-tab-settings"[\s\S]*openGroupSettings\(/);
+  assert.doesNotMatch(groups, /Group actions|openAgentGroupTabActions|aria-haspopup="menu"/);
   assert.match(groups, /class="agent-group-quick-switcher ui-popover" role="dialog"/);
   assert.match(groups, /class="agent-group-quick-option ui-menu-item/);
   assert.match(commands, /role="menuitem" class="ui-menu-item/);

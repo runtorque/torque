@@ -769,13 +769,12 @@ function _taskCycleState(task, agent) {
   if (action.indexOf('review') >= 0) return 'review';
   if (action.indexOf('fix') >= 0) return 'fix';
   if (action.indexOf('implement') >= 0 || actionTail === 'impl') return 'implementation';
-  if (action) {
-    return actionTail.replace(/[-_]+/g, ' ');
-  }
+  if (action) return actionTail.replace(/[-_]+/g, ' ');
   if (lane === 'in progress') return 'in progress';
   if (lane) return lane.replace(/[-_]+/g, ' ');
   return 'idle';
 }
+
 function _agentStatusMixClass(agent) {
   const cls = typeof agentStatusClass === 'function' ? agentStatusClass(agent) : '';
   if (cls === 'attention' || cls === 'disconnected') return 'error';
@@ -878,9 +877,7 @@ function _renderWorkerCardBody(a) {
   } else {
     html += '<div class="agent-card-line cell-task cell-worker-task cell-worker-task--empty">no task</div>';
   }
-  html += '<div class="agent-card-line cell-worker-cycle">'
-    + esc('cycle: ' + cycle)
-    + '</div>';
+  html += '<div class="agent-card-line cell-worker-cycle">' + esc('cycle: ' + cycle) + '</div>';
   const diffLabel = _workerDiffLabel(a);
   if (diffLabel) {
     html += '<div class="agent-card-line cell-worker-diff">' + esc(diffLabel) + '</div>';
@@ -920,7 +917,8 @@ function _renderEngineerCardBody(a, askingText) {
   return html;
 }
 
-function _renderArchitectCellBody(a) {
+function _renderArchitectCellBody(a, opts) {
+  opts = opts || {};
   const stats = _architectStatsForCard(a, null);
   const actionLabel = _agentCardCurrentOrLastActionLabel(a);
   const identity = _agentCardPrimaryClassIdentity(a);
@@ -928,8 +926,10 @@ function _renderArchitectCellBody(a) {
   html += '<div class="agent-card-line cell-name"'
     + (identity ? (' title="' + esc('Agent Class: ' + identity.label + ' · base kind ' + (identity.baseKindLabel || 'Architect')) + '"') : '')
     + '>' + esc(_agentCardPrimaryDisplayName(a)) + '</div>';
-  html += '<div class="agent-card-line cell-architect-stats">'
-    + esc(stats.engineerCount + ' engineers')
+  html += '<div class="agent-card-line cell-architect-stats' + (opts.teamShown ? ' cell-architect-stats--team-shown' : '') + '"'
+    + (opts.teamShown ? ' title="Hierarchy shown below"' : '')
+    + '>'
+    + esc((opts.teamShown ? 'Team \u00b7 ' : '') + stats.engineerCount + ' ' + (stats.engineerCount === 1 ? 'engineer' : 'engineers'))
     + '</div>';
   html += '<div class="agent-card-line cell-architect-activity" title="' + esc(actionLabel) + '">' + esc(actionLabel) + '</div>';
   html += '</div>';
@@ -982,12 +982,14 @@ function renderAgentCell(a, options) {
     ? state.agent_digest_settings[String(a.id || '')] : null;
   let _digestPaused = !!(_cardDigestSettings && _cardDigestSettings.paused);
   if (!_cardDigestSettings && _isDigestRecipient && _isDesignatedEngineer) _digestPaused = _engineerPaused;
+  const _isExecutionHierarchyOwner = !!(options.executionHierarchyOwner && _isArchitect);
   const _isRetainedExecutionOwner = !!(options.retainedExecutionOwner && _isArchitect && !selected);
   if (_isArchitect) cls.push('architect');
   if (_isEngineerKind) cls.push('engineer');
   if (_isWorker) cls.push('worker');
-  if (_isDismissed) cls.push('dismissed');
+  if (_isExecutionHierarchyOwner) cls.push('execution-hierarchy-owner');
   if (_isRetainedExecutionOwner) cls.push('retained-execution-owner');
+  if (_isDismissed) cls.push('dismissed');
 
   const statusCls = _isDismissed ? 'dismissed' : agentStatusClass(a);
   const titleParts = [a.name, `(${a.status})`];
@@ -1008,6 +1010,7 @@ function renderAgentCell(a, options) {
   }
 
   let h = `<div class="${cls.join(' ')}" draggable="true" data-drag-id="${a.id}" data-drag-type="agent" data-drag-group="${esc(a.group)}" data-nav-id="${esc(a.id)}"`;
+  if (_isExecutionHierarchyOwner) h += ' data-execution-hierarchy-owner="true"';
   if (_isRetainedExecutionOwner) h += ' data-retained-execution-owner="true"';
   if (_isDismissed) h += ` data-dismissed-at="${esc(_agentDismissedAt(a))}"`;
   h += ` onclick="onAgentClick('${a.id}')" ondblclick="onAgentDblClick('${a.id}')" oncontextmenu="onCellContextMenu(event,'${a.id}')" onauxclick="if(event.button===1){event.preventDefault();removeAgent('${a.id}')}" title="${esc(titleParts.join(' '))}">`;
@@ -1035,7 +1038,7 @@ function renderAgentCell(a, options) {
   }
   if (_isWorker) h += _renderWorkerCardBody(a);
   else if (_isEngineerKind || _isDesignatedEngineer) h += _renderEngineerCardBody(a, _engineerAsking ? _engineerWs.pending_question : '');
-  else if (_isArchitect) h += _renderArchitectCellBody(a);
+  else if (_isArchitect) h += _renderArchitectCellBody(a, { teamShown: _isExecutionHierarchyOwner });
   else h += _renderGenericAgentCardBody(a);
   h += _renderAgentProviderBadge(a.agent_type, 'cell-provider');
   h += _renderAgentContextMeter(a);

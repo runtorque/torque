@@ -28,11 +28,157 @@ function _runtimeDefaultCommand() {
 function _runtimeDefaultProviderName() {
   return _detectProviderNameFromCommand(_runtimeDefaultCommand());
 }
-function _populateReasoningEffortSelect(selectId, providerName, currentValue, emptyLabel, unsupportedLabel) {
+
+const _PROVIDER_CUSTOM_VALUE = '__custom__';
+
+function _providerModels(providerName) {
+  const meta = providerName ? _findProviderMeta(providerName) : null;
+  return meta && Array.isArray(meta.models) ? meta.models : [];
+}
+
+function _findProviderModel(providerName, modelId) {
+  const current = String(modelId || '').trim();
+  if (!current) return null;
+  return _providerModels(providerName).find((model) =>
+    String((model && (model.id || model.model)) || '').trim() === current
+  ) || null;
+}
+
+function _reasoningEffortOptions(rawOptions) {
+  if (!Array.isArray(rawOptions)) return [];
+  const seen = new Set();
+  const options = [];
+  rawOptions.forEach((raw) => {
+    const value = String(
+      raw && typeof raw === 'object'
+        ? (raw.value || raw.reasoning_effort || raw.reasoningEffort || '')
+        : (raw || '')
+    ).trim();
+    if (!value || seen.has(value)) return;
+    seen.add(value);
+    options.push({
+      value: value,
+      description: raw && typeof raw === 'object'
+        ? String(raw.description || '').trim()
+        : '',
+    });
+  });
+  return options;
+}
+
+function _getModelValue(inputId) {
+  const input = document.getElementById(inputId);
+  return input ? String(input.value || '').trim() : '';
+}
+
+function _getReasoningEffortValue(selectId) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return '';
+  if (sel.value !== _PROVIDER_CUSTOM_VALUE) {
+    return String(sel.value || '').trim();
+  }
+  const custom = document.getElementById(selectId + '-custom');
+  return custom ? String(custom.value || '').trim() : '';
+}
+
+function _onReasoningEffortSelectChange(selectId) {
+  const sel = document.getElementById(selectId);
+  const custom = document.getElementById(selectId + '-custom');
+  if (!sel || !custom) return;
+  const isCustom = sel.value === _PROVIDER_CUSTOM_VALUE;
+  custom.classList.toggle('hidden', !isCustom);
+  if (isCustom) {
+    if (!custom.value && sel.dataset.customValue) {
+      custom.value = sel.dataset.customValue;
+    }
+    if (typeof custom.focus === 'function') custom.focus();
+  }
+}
+
+function _populateReasoningEffortSelect(
+  selectId,
+  providerName,
+  currentValue,
+  emptyLabel,
+  unsupportedLabel,
+  modelValue,
+  preferEmptyLabel
+) {
   const sel = document.getElementById(selectId);
   if (!sel) return;
   const meta = providerName ? _findProviderMeta(providerName) : null;
-  const options = meta && Array.isArray(meta.reasoning_efforts) ? meta.reasoning_efforts : [];
+  const model = _findProviderModel(providerName, modelValue);
+  const modelOptions = model
+    ? _reasoningEffortOptions(model.reasoning_efforts || model.supported_reasoning_efforts)
+    : [];
+  const providerOptions = meta ? _reasoningEffortOptions(meta.reasoning_efforts) : [];
+  const options = modelOptions.length ? modelOptions : providerOptions;
+  const current = String(currentValue || '').trim();
+  sel.innerHTML = '';
+
+  const empty = document.createElement('option');
+  empty.value = '';
+  const modelDefault = model
+    ? String(model.default_reasoning_effort || '').trim()
+    : '';
+  empty.textContent = preferEmptyLabel && emptyLabel
+    ? emptyLabel
+    : modelDefault
+    ? `Model default (${modelDefault})`
+    : (emptyLabel || 'Provider default');
+  sel.appendChild(empty);
+
+  for (const option of options) {
+    const opt = document.createElement('option');
+    opt.value = option.value;
+    opt.textContent = option.value;
+    if (option.description) opt.title = option.description;
+    sel.appendChild(opt);
+  }
+
+  if (!options.length) {
+    empty.textContent = unsupportedLabel || empty.textContent;
+    empty.dataset.preserveLabel = 'true';
+  }
+
+  const customOption = document.createElement('option');
+  customOption.value = _PROVIDER_CUSTOM_VALUE;
+  customOption.textContent = 'Custom\u2026';
+  sel.appendChild(customOption);
+
+  const known = options.some((option) => option.value === current);
+  const custom = document.getElementById(selectId + '-custom');
+  if (current && !known) {
+    sel.value = _PROVIDER_CUSTOM_VALUE;
+    sel.dataset.customValue = current;
+    if (custom) {
+      custom.value = current;
+      custom.classList.remove('hidden');
+    }
+  } else {
+    sel.value = current || '';
+    if (custom) {
+      custom.classList.add('hidden');
+      if (!current) custom.value = '';
+    }
+  }
+}
+
+function _populateModelSelect(
+  inputId,
+  providerName,
+  currentValue,
+  emptyLabel,
+  effortSelectId,
+  currentEffort,
+  effortEmptyLabel,
+  effortUnsupportedLabel,
+  preferEffortEmptyLabel
+) {
+  const input = document.getElementById(inputId);
+  const sel = document.getElementById(inputId + '-select');
+  if (!input || !sel) return;
+  const models = _providerModels(providerName);
   const current = String(currentValue || '').trim();
   sel.innerHTML = '';
 
@@ -41,23 +187,99 @@ function _populateReasoningEffortSelect(selectId, providerName, currentValue, em
   empty.textContent = emptyLabel || 'Provider default';
   sel.appendChild(empty);
 
-  for (const value of options) {
+  models.forEach((model) => {
+    const modelId = String((model && (model.id || model.model)) || '').trim();
+    if (!modelId) return;
     const opt = document.createElement('option');
-    opt.value = value;
-    opt.textContent = value;
+    opt.value = modelId;
+    const label = String(model.display_name || model.displayName || modelId).trim();
+    opt.textContent = model.is_default ? `${label} (default)` : label;
+    if (model.description) opt.title = model.description;
     sel.appendChild(opt);
+  });
+
+  const custom = document.createElement('option');
+  custom.value = _PROVIDER_CUSTOM_VALUE;
+  custom.textContent = 'Custom\u2026';
+  sel.appendChild(custom);
+
+  const known = models.some((model) =>
+    String((model && (model.id || model.model)) || '').trim() === current
+  );
+  input.value = current;
+  input.dataset.providerName = providerName || '';
+  input.dataset.effortSelectId = effortSelectId || '';
+  input.dataset.effortEmptyLabel = effortEmptyLabel || 'Provider default';
+  input.dataset.effortUnsupportedLabel =
+    effortUnsupportedLabel || 'Not supported for this provider';
+  input.dataset.preferEffortEmptyLabel = preferEffortEmptyLabel ? 'true' : '';
+  if (current && !known) {
+    sel.value = _PROVIDER_CUSTOM_VALUE;
+    input.dataset.customValue = current;
+    input.classList.remove('hidden');
+  } else {
+    sel.value = current || '';
+    input.classList.add('hidden');
   }
 
-  if (!options.length) {
-    empty.textContent = unsupportedLabel || empty.textContent;
+  if (effortSelectId) {
+    _populateReasoningEffortSelect(
+      effortSelectId,
+      providerName,
+      currentEffort,
+      input.dataset.effortEmptyLabel,
+      input.dataset.effortUnsupportedLabel,
+      current,
+      input.dataset.preferEffortEmptyLabel === 'true'
+    );
   }
-  if (current && !options.includes(current)) {
-    const custom = document.createElement('option');
-    custom.value = current;
-    custom.textContent = current;
-    sel.appendChild(custom);
+}
+
+function _onModelSelectChange(inputId) {
+  const input = document.getElementById(inputId);
+  const sel = document.getElementById(inputId + '-select');
+  if (!input || !sel) return;
+  const isCustom = sel.value === _PROVIDER_CUSTOM_VALUE;
+  if (isCustom) {
+    input.value = input.dataset.customValue || '';
+    input.classList.remove('hidden');
+    if (typeof input.focus === 'function') input.focus();
+  } else {
+    input.value = sel.value || '';
+    input.classList.add('hidden');
   }
-  sel.value = current || '';
+  const effortSelectId = input.dataset.effortSelectId || '';
+  if (effortSelectId) {
+    _populateReasoningEffortSelect(
+      effortSelectId,
+      input.dataset.providerName || '',
+      _getReasoningEffortValue(effortSelectId),
+      input.dataset.effortEmptyLabel || 'Provider default',
+      input.dataset.effortUnsupportedLabel || 'Not supported for this provider',
+      _getModelValue(inputId),
+      input.dataset.preferEffortEmptyLabel === 'true'
+    );
+  }
+  refreshGsInheritedLaunchPlaceholders();
+}
+
+function _onCustomModelInput(inputId) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  input.dataset.customValue = input.value || '';
+  const effortSelectId = input.dataset.effortSelectId || '';
+  if (effortSelectId) {
+    _populateReasoningEffortSelect(
+      effortSelectId,
+      input.dataset.providerName || '',
+      _getReasoningEffortValue(effortSelectId),
+      input.dataset.effortEmptyLabel || 'Provider default',
+      input.dataset.effortUnsupportedLabel || 'Not supported for this provider',
+      _getModelValue(inputId),
+      input.dataset.preferEffortEmptyLabel === 'true'
+    );
+  }
+  refreshGsInheritedLaunchPlaceholders();
 }
 
 function _agentSettingsProviderForReasoning() {
@@ -98,8 +320,49 @@ function _providerDefaultCommand(providerName) {
   return meta ? meta.command : _runtimeDefaultCommand();
 }
 
+function _inheritSettingLabel(value) {
+  return 'Inherit \u00b7 ' + (String(value || '').trim() || 'system default');
+}
+
+function _providerDisplayName(providerName) {
+  const meta = providerName ? _findProviderMeta(providerName) : null;
+  return meta
+    ? String(meta.display_name || meta.name || providerName)
+    : (String(providerName || '').trim() || 'system default');
+}
+
+function _gsGroupProviderPreview() {
+  return _providerDisplayName(
+    _getProviderValue('gs-agent-provider') || _runtimeDefaultProviderName()
+  );
+}
+
 function _gsGroupDefaultModelPreview() {
-  return _gsInputValue('gs-agent-model') || 'system default';
+  const modelId = _gsInputValue('gs-agent-model');
+  if (modelId) {
+    const model = _findProviderModel(_agentSettingsProviderForReasoning(), modelId);
+    return model
+      ? String(model.display_name || model.displayName || modelId).trim()
+      : modelId;
+  }
+  const defaultModel = _providerModels(_agentSettingsProviderForReasoning())
+    .find((model) => model && model.is_default);
+  return defaultModel
+    ? String(defaultModel.display_name || defaultModel.displayName
+      || defaultModel.id || defaultModel.model).trim()
+    : 'provider default';
+}
+
+function _gsGroupDefaultReasoningPreview() {
+  const effort = _getReasoningEffortValue('gs-agent-reasoning-effort');
+  if (effort) return effort;
+  const model = _findProviderModel(
+    _agentSettingsProviderForReasoning(),
+    _getModelValue('gs-agent-model')
+  );
+  return model && model.default_reasoning_effort
+    ? String(model.default_reasoning_effort).trim()
+    : 'provider default';
 }
 
 function _gsGroupDefaultCommandPreview(providerName) {
@@ -112,24 +375,61 @@ function _setInputPlaceholder(id, text) {
   if (el) el.placeholder = text;
 }
 
+function _setSelectEmptyOptionLabel(id, text) {
+  const el = document.getElementById(id);
+  if (!el || !el.children) return;
+  const empty = Array.from(el.children).find((option) => option.value === '');
+  if (empty && (!empty.dataset || empty.dataset.preserveLabel !== 'true')) {
+    empty.textContent = text;
+  }
+}
+
 function refreshGsInheritedLaunchPlaceholders() {
   const modelPreview = _gsGroupDefaultModelPreview();
-  _setInputPlaceholder('gs-worker-model', 'Group default: ' + modelPreview);
-  _setInputPlaceholder('gs-engineer-model', 'Group default: ' + modelPreview);
-  _setInputPlaceholder('gs-architect-model', 'Group default: ' + modelPreview);
+  const reasoningPreview = _gsGroupDefaultReasoningPreview();
+  const providerPreview = _gsGroupProviderPreview();
+  const groupDirectory = _gsInputValue('gs-directory') || 'current directory';
+  const runtimeDirectory = _gsInputValue('gs-agent-directory') || groupDirectory;
+  const groupShell = _gsInputValue('gs-shell') || 'system default';
+  const runtimeShell = _gsInputValue('gs-agent-shell') || groupShell;
+  const groupEnvFile = _gsInputValue('gs-env-file') || 'none';
+
+  ['gs-worker-provider', 'gs-engineer-provider', 'gs-architect-provider']
+    .forEach((id) => _setSelectEmptyOptionLabel(
+      id,
+      _inheritSettingLabel(providerPreview)
+    ));
+  ['gs-worker-model-select', 'gs-engineer-model-select', 'gs-architect-model-select']
+    .forEach((id) => _setSelectEmptyOptionLabel(
+      id,
+      _inheritSettingLabel(modelPreview)
+    ));
+  ['gs-worker-reasoning-effort', 'gs-engineer-reasoning-effort',
+    'gs-architect-reasoning-effort']
+    .forEach((id) => _setSelectEmptyOptionLabel(
+      id,
+      _inheritSettingLabel(reasoningPreview)
+    ));
 
   _setInputPlaceholder(
     'gs-worker-boot-command',
-    'Group default: ' + _gsGroupDefaultCommandPreview(_workerProviderForReasoning())
+    _inheritSettingLabel(_gsGroupDefaultCommandPreview(_workerProviderForReasoning()))
   );
   _setInputPlaceholder(
     'gs-engineer-boot-cmd',
-    'Group default: ' + _gsGroupDefaultCommandPreview(_engineerProviderForReasoning())
+    _inheritSettingLabel(_gsGroupDefaultCommandPreview(_engineerProviderForReasoning()))
   );
   _setInputPlaceholder(
     'gs-architect-boot-cmd',
-    'Group default: ' + _gsGroupDefaultCommandPreview(_architectProviderForReasoning())
+    _inheritSettingLabel(_gsGroupDefaultCommandPreview(_architectProviderForReasoning()))
   );
+  _setInputPlaceholder('gs-agent-directory', _inheritSettingLabel(groupDirectory));
+  _setInputPlaceholder('gs-engineer-directory', _inheritSettingLabel(runtimeDirectory));
+  _setInputPlaceholder('gs-architect-directory', _inheritSettingLabel(runtimeDirectory));
+  _setInputPlaceholder('gs-agent-env-file', _inheritSettingLabel(groupEnvFile));
+  _setSelectEmptyOptionLabel('gs-agent-shell', _inheritSettingLabel(groupShell));
+  _setSelectEmptyOptionLabel('gs-engineer-shell', _inheritSettingLabel(runtimeShell));
+  _setSelectEmptyOptionLabel('gs-architect-shell', _inheritSettingLabel(runtimeShell));
 }
 
 function _populateProviderSelect(selectId, currentValue, includeGroupDefault) {
@@ -137,7 +437,7 @@ function _populateProviderSelect(selectId, currentValue, includeGroupDefault) {
   sel.innerHTML = '';
   if (includeGroupDefault) {
     const opt = document.createElement('option');
-    opt.value = ''; opt.textContent = 'Group default';
+    opt.value = ''; opt.textContent = _inheritSettingLabel(_gsGroupProviderPreview());
     sel.appendChild(opt);
   } else {
     const opt = document.createElement('option');
@@ -205,25 +505,29 @@ function _findTemplateMeta(name) {
   return (_cachedAgentTemplates || []).find(t => t.name === name) || null;
 }
 
-function onGsProviderChange() {
+function onGsProviderChange(currentEffort) {
   const v = document.getElementById('gs-agent-provider').value;
   const row = document.getElementById('gs-agent-boot-cmd-row');
   const label = row.querySelector('label');
   const input = document.getElementById('gs-agent-boot-cmd');
   row.classList.remove('hidden');
   if (v === '__custom__') {
-    label.textContent = 'Default boot command';
+    label.innerHTML = 'Command <span class="label-hint">required for custom providers</span>';
     input.placeholder = 'e.g. my-agent-cli';
   } else {
-    label.textContent = 'Command override';
+    label.innerHTML = 'Command override <span class="label-hint">advanced</span>';
     input.placeholder = _getProviderCommand('gs-agent-provider') + ' (default)';
   }
-  _populateReasoningEffortSelect(
-    'gs-agent-reasoning-effort',
-    _agentSettingsProviderForReasoning(),
-    document.getElementById('gs-agent-reasoning-effort').value,
+  const providerName = _agentSettingsProviderForReasoning();
+  _populateModelSelect(
+    'gs-agent-model',
+    providerName,
+    _getModelValue('gs-agent-model'),
     'Provider default',
-    'Not supported for this provider'
+    'gs-agent-reasoning-effort',
+    currentEffort == null
+      ? _getReasoningEffortValue('gs-agent-reasoning-effort')
+      : currentEffort
   );
   refreshGsInheritedLaunchPlaceholders();
   if (!_getProviderValue('gs-worker-provider')) {
@@ -237,7 +541,7 @@ function onGsProviderChange() {
   }
 }
 
-function onAddProviderChange() {
+function onAddProviderChange(currentEffort) {
   const v = document.getElementById('add-provider-select').value;
   const cmdRow = document.getElementById('add-cmd-row');
   const label = cmdRow.querySelector('label');
@@ -252,48 +556,70 @@ function onAddProviderChange() {
     label.textContent = 'Command override';
     input.placeholder = _getProviderCommand('add-provider-select') + ' (default)';
   }
-  _populateReasoningEffortSelect(
+  const providerName = _getProviderValue('add-provider-select') || _runtimeDefaultProviderName();
+  _populateModelSelect(
+    'add-model-input',
+    providerName,
+    _getModelValue('add-model-input'),
+    'Provider default',
     'add-reasoning-effort',
-    _getProviderValue('add-provider-select') || _runtimeDefaultProviderName(),
-    document.getElementById('add-reasoning-effort').value,
-    'Provider default',
-    'Not supported for this provider'
+    currentEffort == null
+      ? _getReasoningEffortValue('add-reasoning-effort')
+      : currentEffort
   );
 }
 
-function onGsEngineerProviderChange() {
-  refreshGsInheritedLaunchPlaceholders();
-  _populateReasoningEffortSelect(
-    'gs-engineer-reasoning-effort',
+function onGsEngineerProviderChange(currentEffort) {
+  _populateModelSelect(
+    'gs-engineer-model',
     _engineerProviderForReasoning(),
-    document.getElementById('gs-engineer-reasoning-effort').value,
-    'Provider default',
-    'Not supported for this provider'
+    _getModelValue('gs-engineer-model'),
+    _inheritSettingLabel(_gsGroupDefaultModelPreview()),
+    'gs-engineer-reasoning-effort',
+    currentEffort == null
+      ? _getReasoningEffortValue('gs-engineer-reasoning-effort')
+      : currentEffort,
+    _inheritSettingLabel(_gsGroupDefaultReasoningPreview()),
+    'Not supported for this provider',
+    true
   );
+  refreshGsInheritedLaunchPlaceholders();
 }
 
-function onGsWorkerProviderChange(currentValue) {
-  refreshGsInheritedLaunchPlaceholders();
+function onGsWorkerProviderChange(currentEffort) {
   const reasoning = document.getElementById('gs-worker-reasoning-effort');
   if (!reasoning) return;
-  _populateReasoningEffortSelect(
-    'gs-worker-reasoning-effort',
+  _populateModelSelect(
+    'gs-worker-model',
     _workerProviderForReasoning(),
-    currentValue == null ? reasoning.value : currentValue,
-    'Provider default',
-    'Not supported for this provider'
+    _getModelValue('gs-worker-model'),
+    _inheritSettingLabel(_gsGroupDefaultModelPreview()),
+    'gs-worker-reasoning-effort',
+    currentEffort == null
+      ? _getReasoningEffortValue('gs-worker-reasoning-effort')
+      : currentEffort,
+    _inheritSettingLabel(_gsGroupDefaultReasoningPreview()),
+    'Not supported for this provider',
+    true
   );
+  refreshGsInheritedLaunchPlaceholders();
 }
 
-function onGsArchitectProviderChange() {
-  refreshGsInheritedLaunchPlaceholders();
-  _populateReasoningEffortSelect(
-    'gs-architect-reasoning-effort',
+function onGsArchitectProviderChange(currentEffort) {
+  _populateModelSelect(
+    'gs-architect-model',
     _architectProviderForReasoning(),
-    document.getElementById('gs-architect-reasoning-effort').value,
-    'Provider default',
-    'Not supported for this provider'
+    _getModelValue('gs-architect-model'),
+    _inheritSettingLabel(_gsGroupDefaultModelPreview()),
+    'gs-architect-reasoning-effort',
+    currentEffort == null
+      ? _getReasoningEffortValue('gs-architect-reasoning-effort')
+      : currentEffort,
+    _inheritSettingLabel(_gsGroupDefaultReasoningPreview()),
+    'Not supported for this provider',
+    true
   );
+  refreshGsInheritedLaunchPlaceholders();
 }
 
 /* -- Hint popover (for ? buttons) ---------------------------------------- */

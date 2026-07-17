@@ -311,11 +311,16 @@ class AgentLaunchService:
     def resolve_agent_launch_config(self, group: str, *,
                                     base_dir: str = "",
                                     explicit_template: str = "",
-                                    overrides: dict[str, Any] | None = None) -> dict:
+                                    overrides: dict[str, Any] | None = None,
+                                    apply_group_default_role: bool = True) -> dict:
         """Resolve the effective launch configuration for an agent."""
         gs = self.state.get_group_settings(group)
         resolved = self.template_mgr.resolve_agent_config(
-            explicit_template, gs, overrides or {}, base_dir=base_dir
+            explicit_template,
+            gs,
+            overrides or {},
+            base_dir=base_dir,
+            apply_default_template=apply_group_default_role,
         )
 
         provider = str(
@@ -456,6 +461,7 @@ class AgentLaunchService:
             base_dir=base_dir,
             explicit_template=explicit_template,
             overrides=merged,
+            apply_group_default_role=False,
         )
         resolved["worktree"] = False
         return resolved
@@ -488,6 +494,7 @@ class AgentLaunchService:
             base_dir=base_dir,
             explicit_template=explicit_template,
             overrides=merged,
+            apply_group_default_role=True,
         )
 
     def resolve_architect_launch_config(self, group: str, *,
@@ -519,6 +526,7 @@ class AgentLaunchService:
             base_dir=base_dir,
             explicit_template=explicit_template,
             overrides=merged,
+            apply_group_default_role=False,
         )
         resolved["worktree"] = False
         return resolved

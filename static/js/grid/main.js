@@ -1,4 +1,4 @@
-function _renderAgentGridNewToolbar(groupName, disabled) {
+function _renderAgentGridHeaderControls(groupName, atAgentCap) {
   const group = String(groupName || '').trim();
   if (!group) return '';
   const groupArg = _jsStringAttr(group);
@@ -19,31 +19,23 @@ function _renderAgentGridNewToolbar(groupName, disabled) {
       + '</svg>';
     viewToggle = '<div class="segmented-control agent-view-toggle agent-view-toggle--grid" role="group" aria-label="Agent view">'
       + '<button type="button" class="segmented-control__item agent-view-toggle-btn' + (vm === 'grid' ? ' is-active' : '') + '"'
-      + ' data-agent-view-toggle="grid" aria-pressed="' + (vm === 'grid' ? 'true' : 'false') + '" onclick="_torqueSetAgentViewMode(\'grid\')"'
+      + ' draggable="false" data-agent-view-toggle="grid" aria-pressed="' + (vm === 'grid' ? 'true' : 'false') + '" onclick="event.stopPropagation();_torqueSetAgentViewMode(\'grid\')"'
       + ' title="Grid view" aria-label="Grid view">' + gridIcon + '</button>'
       + '<button type="button" class="segmented-control__item agent-view-toggle-btn' + (vm === 'canvas' ? ' is-active' : '') + '"'
-      + ' data-agent-view-toggle="canvas" aria-pressed="' + (vm === 'canvas' ? 'true' : 'false') + '" onclick="_torqueSetAgentViewMode(\'canvas\')"'
+      + ' draggable="false" data-agent-view-toggle="canvas" aria-pressed="' + (vm === 'canvas' ? 'true' : 'false') + '" onclick="event.stopPropagation();_torqueSetAgentViewMode(\'canvas\')"'
       + ' title="Canvas view" aria-label="Canvas view">' + canvasIcon + '</button>'
       + '</div>';
   }
-  return '<div class="agent-grid-toolbar" data-agent-grid-toolbar>'
+  return '<div class="agent-grid-header-controls" data-agent-grid-header-controls>'
     + viewToggle
-    + '<button type="button" class="agent-grid-new-btn" data-agent-grid-new-button'
+    + '<button type="button" class="agent-grid-new-btn" draggable="false" data-agent-grid-new-button'
     + ' data-group="' + esc(group) + '"'
-    + (disabled ? ' disabled aria-disabled="true" title="Agent limit reached"' : ' aria-haspopup="menu" aria-expanded="false" title="Create a standalone agent"')
-    + (disabled ? '' : ' onclick="openAgentGridNewMenu(event,' + groupArg + ')"')
+    + (atAgentCap ? ' data-agent-cap="true"' : '')
+    + ' aria-haspopup="menu" aria-expanded="false" title="Create agent or group" aria-label="Create agent or group"'
+    + ' onclick="openAgentGridNewMenu(event,' + groupArg + ')"'
     + '><svg class="agent-grid-new-icon" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 2v8M2 6h8"/></svg>'
-    + '<span>New</span></button>'
+    + '</button>'
     + '</div>';
-}
-
-function _agentGridNewToolbarForContexts(groupContexts) {
-  const contexts = Array.isArray(groupContexts) ? groupContexts.filter(Boolean) : [];
-  if (!contexts.length) return '';
-  const active = (typeof _activeGroup === 'function') ? String(_activeGroup() || '') : '';
-  let target = active ? contexts.find(ctx => ctx && ctx.gname === active) : null;
-  if (!target) target = contexts.find(ctx => ctx && !ctx.collapsed) || contexts[0];
-  return _renderAgentGridNewToolbar(target.gname || '', !!target.atAgentCap);
 }
 
 function _gridNavControlId(controlType, groupName, sectionKey) {
@@ -545,7 +537,7 @@ function _renderMainGrid(opts, renderMode) {
   const navModel = _buildAgentGridNavigationModel(groupContexts);
   focusedItemId = _resolveFocusedItemForGridRender(focusedItemId, navModel);
 
-  let html = _agentGridNewToolbarForContexts(groupContexts);
+  let html = '';
   const renderGroupChrome = !(renderMode && renderMode.singleGroup);
   for (const ctx of groupContexts) {
     const gname = ctx.gname;
@@ -560,6 +552,7 @@ function _renderMainGrid(opts, renderMode) {
       html += `  <button class="group-toggle" draggable="false" aria-label="${collapsed ? 'Expand' : 'Collapse'} ${esc(gname)} group" aria-expanded="${collapsed ? 'false' : 'true'}" onclick="event.stopPropagation();toggleGroup('${esc(gname)}')">\u25BE</button>`;
       html += `  <span class="group-name" title="${esc(gname)}">${esc(gname)}</span>`;
       html += `  <span class="group-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">${agents.length}</span>`;
+      html += _renderAgentGridHeaderControls(gname, ctx.atAgentCap);
       html += `  <button class="group-btn" draggable="false" title="Group settings" aria-label="Group settings" onclick="event.stopPropagation();openGroupSettings('${esc(gname)}')">\u2699</button>`;
       html += `</div>`;
 

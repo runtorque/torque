@@ -14,27 +14,32 @@ function load(context, file) {
   vm.runInContext(source(file), context, { filename: file });
 }
 
-test('group navigation dedicates the rail to groups and moves view controls into the grid toolbar', () => {
+test('group navigation shares its header row with compact view and creation controls', () => {
   const html = source('webview.html');
   const tabs = source('static/js/grid/group-tabs.js');
   const grid = source('static/js/grid/main.js');
   const css = source('static/styles/workspace-grid.css');
 
-  assert.match(html, /id="add-group-header-btn"[\s\S]*title="New group"[\s\S]*aria-label="New group"/);
+  assert.doesNotMatch(html, /id="add-group-header-btn"|<div class="hdr-spacer"><\/div>/);
   assert.match(html, /onclick="openNavigationPalette\('all'\)"[\s\S]*aria-label="Go to"/);
-  assert.match(tabs, /agent-group-tab-menu/);
+  assert.match(tabs, /agent-group-tab-settings/);
+  assert.match(tabs, /openGroupSettings\(/);
+  assert.doesNotMatch(tabs, /openAgentGroupTabActions|aria-haspopup="menu"/);
   assert.match(tabs, /agent-group-compact-trigger/);
   assert.match(tabs, /agent-group-quick-search/);
   assert.match(tabs, /_scrollAgentGroupTabs/);
   assert.match(tabs, /agentGroupTabKeydown/);
   assert.doesNotMatch(tabs, /agent-group-tab-actions|agent-view-toggle--tabs/);
+  assert.match(tabs, /_renderAgentGridHeaderControls\(active, atAgentCap\)/);
   assert.match(grid, /agent-view-toggle--grid/);
   assert.match(grid, /data-agent-view-toggle="grid"/);
   assert.match(grid, /data-agent-view-toggle="canvas"/);
   assert.match(grid, /data-agent-view-toggle="grid" aria-pressed="/);
   assert.match(grid, /data-agent-view-toggle="canvas" aria-pressed="/);
-  assert.match(grid, /class="agent-grid-new-icon"[\s\S]*<span>New<\/span>/);
-  assert.match(css, /\.agent-grid-new-btn\s*\{[^}]*border:\s*1px solid var\(--border\);[^}]*border-radius:\s*var\(--radius\);[^}]*background:\s*transparent;/s);
+  assert.match(grid, /class="agent-grid-new-btn"[\s\S]*aria-label="Create agent or group"[\s\S]*class="agent-grid-new-icon"/);
+  assert.doesNotMatch(grid, /agent-grid-toolbar|<span>New<\/span>/);
+  assert.match(css, /\.agent-grid-header-controls\s*\{[^}]*display:\s*flex;[^}]*margin-left:\s*auto;/s);
+  assert.match(css, /\.agent-grid-new-btn\s*\{[^}]*width:\s*24px;[^}]*border:\s*1px solid var\(--border\);[^}]*border-radius:\s*var\(--radius-sm\);[^}]*background:\s*transparent;/s);
   assert.match(css, /\.agent-group-tab\s*\{[^}]*min-height:\s*var\(--control-height-xs\);[^}]*padding:\s*2px var\(--control-padding-x-xs\);[^}]*border-radius:\s*var\(--radius-sm\);[^}]*font-size:\s*var\(--control-font-size-xs\);/s);
   assert.match(css, /container:\s*agent-group-nav\s*\/\s*inline-size/);
   assert.match(css, /@container agent-group-nav \(max-width:\s*380px\)/);
@@ -60,6 +65,10 @@ test('panel launcher is compact, pinned, searchable, and backed by consistent SV
   assert.match(css, /\.standalone-panel-zone-header\s*\{[^}]*gap:\s*6px;[^}]*padding:\s*3px 6px;/s);
   assert.match(css, /\.standalone-panel-tab,[\s\S]*?\.standalone-panel-zone-btn\s*\{[^}]*border:\s*var\(--control-border\);[^}]*font-size:\s*var\(--control-font-size-xs\);[^}]*height:\s*var\(--control-height-sm\);[^}]*padding:\s*0 var\(--control-padding-x-xs\);/s);
   assert.match(css, /\.standalone-panel-tab\s*\{[^}]*border-radius:\s*var\(--radius-sm\);/s);
+  assert.match(css, /\.standalone-panel-tab\.is-dragging\s*\{[^}]*opacity:\s*\.32;[^}]*transform:\s*translateY\(-2px\) scale\(\.96\);/s);
+  assert.match(css, /\.standalone-panel-tab\.drop-before::before,[\s\S]*?\.standalone-panel-tab\.drop-after::after\s*\{[^}]*background:\s*var\(--accent\);/s);
+  assert.match(css, /#standalone-bottom-dock\.drag-target::after,[\s\S]*?#standalone-right-rail\.drag-target::after\s*\{[^}]*position:\s*absolute;[^}]*inset:\s*0;[^}]*z-index:\s*20;[^}]*pointer-events:\s*none;/s);
+  assert.match(css, /\.standalone-panel-drag-preview\s*\{[^}]*position:\s*fixed;[^}]*pointer-events:\s*none;/s);
   assert.match(css, /\.standalone-panel-zone-btn-icon\s*\{[^}]*width:\s*24px;[^}]*height:\s*24px;/s);
   assert.match(css, /\.taskbar-app\.panel-nav-hidden\s*\{\s*display:\s*none !important;/);
   assert.match(css, /@container panel-launcher \(max-width:\s*1180px\)/);

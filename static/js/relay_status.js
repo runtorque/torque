@@ -289,26 +289,26 @@ function _relaySectionUpdateVisibility() {
   var section = document.getElementById('gls-relay-section');
   if (!section) return;
   section.hidden = !(_relayConnModalVisible || _relayConfigModalVisible);
-  var relaySubtab = document.querySelector
-    ? document.querySelector('#modal-global-settings .gs-subtab[data-subtab="gls-relay"]')
+  var relayTab = document.querySelector
+    ? document.querySelector('#modal-global-settings .gs-tab[data-tab="gls-relay"]')
     : null;
-  if (relaySubtab) relaySubtab.hidden = section.hidden;
-  if (section.hidden && relaySubtab && relaySubtab.classList
-      && relaySubtab.classList.contains('active')) {
-    var daemonSubtab = document.querySelector
-      ? document.querySelector('#modal-global-settings .gs-subtab[data-subtab="gls-daemon"]')
+  if (relayTab) relayTab.hidden = section.hidden;
+  if (section.hidden && relayTab && relayTab.classList
+      && relayTab.classList.contains('active')) {
+    var daemonTab = document.querySelector
+      ? document.querySelector('#modal-global-settings .gs-tab[data-tab="gls-daemon"]')
       : null;
-    if (daemonSubtab && typeof switchGlsSubTab === 'function') {
-      switchGlsSubTab(daemonSubtab);
+    if (daemonTab && typeof switchGlsTab === 'function') {
+      switchGlsTab('gls-daemon');
     } else {
-      relaySubtab.classList.remove('active');
+      relayTab.classList.remove('active');
       var relayPane = document.querySelector
-        ? document.querySelector('#modal-global-settings .gs-subpane[data-subpane="gls-relay"]')
+        ? document.querySelector('#modal-global-settings .gs-pane[data-pane="gls-relay"]')
         : null;
       var daemonPane = document.querySelector
-        ? document.querySelector('#modal-global-settings .gs-subpane[data-subpane="gls-daemon"]')
+        ? document.querySelector('#modal-global-settings .gs-pane[data-pane="gls-daemon"]')
         : null;
-      if (daemonSubtab && daemonSubtab.classList) daemonSubtab.classList.add('active');
+      if (daemonTab && daemonTab.classList) daemonTab.classList.add('active');
       if (relayPane && relayPane.classList) relayPane.classList.remove('active');
       if (daemonPane && daemonPane.classList) daemonPane.classList.add('active');
     }

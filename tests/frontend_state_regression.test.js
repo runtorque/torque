@@ -1164,6 +1164,22 @@ function createRelayStatusHarness() {
     'gls-relay-device-link-error',
     'gls-relay-device-link-panel',
   ].forEach((id) => document.register(id));
+  const relayTab = document.register('gls-relay-primary-tab');
+  relayTab.classList.add('gs-tab');
+  relayTab.dataset.tab = 'gls-relay';
+  const daemonTab = document.register('gls-daemon-primary-tab');
+  daemonTab.classList.add('gs-tab');
+  daemonTab.dataset.tab = 'gls-daemon';
+  const relayPane = document.register('gls-relay-primary-pane');
+  relayPane.classList.add('gs-pane');
+  relayPane.dataset.pane = 'gls-relay';
+  const daemonPane = document.register('gls-daemon-primary-pane');
+  daemonPane.classList.add('gs-pane');
+  daemonPane.dataset.pane = 'gls-daemon';
+  document.setSelector('#modal-global-settings .gs-tab[data-tab="gls-relay"]', relayTab);
+  document.setSelector('#modal-global-settings .gs-tab[data-tab="gls-daemon"]', daemonTab);
+  document.setSelector('#modal-global-settings .gs-pane[data-pane="gls-relay"]', relayPane);
+  document.setSelector('#modal-global-settings .gs-pane[data-pane="gls-daemon"]', daemonPane);
   const context = vm.createContext(sandbox);
   // Vendored QR encoder must load BEFORE relay_status.js (provides `qrcode`).
   loadScript(context, 'static/js/vendor/qrcode-generator.js');
@@ -1297,7 +1313,6 @@ function createMainHarness(overrides = {}) {
     'standalone-rail-resize-handle',
     'main',
     'group-switcher',
-    'add-group-header-btn',
     'bottom-panel',
     'panel-resize-handle',
     'panel-board',
@@ -1403,6 +1418,7 @@ function createStandaloneRenderHarness() {
   sandbox.renderTerminalWorkspace = function() {
     sandbox.renderTerminalWorkspaceCalls++;
   };
+  document.register('app-group-tabs-host');
   document.register('main');
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/render.js');
@@ -6234,24 +6250,20 @@ test('modal Relay dot uses the relay-status-dot base so color modifiers win the 
   assert.ok(baseIdx < greenIdx, 'relay-status-dot base precedes its color modifiers');
 });
 
-test('system settings splits Daemon and Relay into subtabs and keeps fields in place', () => {
+test('global settings promotes Daemon and Relay to primary panes and keeps fields in place', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  const systemStart = html.indexOf('data-pane="gls-system"');
-  assert.ok(systemStart >= 0, 'System settings pane exists');
-  const daemonPaneStart = html.indexOf('data-subpane="gls-daemon"', systemStart);
-  const relayPaneStart = html.indexOf('data-subpane="gls-relay"', systemStart);
-  assert.ok(daemonPaneStart > systemStart, 'Daemon subpane exists inside System');
-  assert.ok(relayPaneStart > daemonPaneStart, 'Relay subpane follows Daemon');
-  assert.match(html.slice(systemStart, relayPaneStart), /data-subtab="gls-daemon"/);
-  assert.match(html.slice(systemStart, relayPaneStart), /data-subtab="gls-relay"/);
+  const daemonPaneStart = html.indexOf('data-pane="gls-daemon"');
+  const relayPaneStart = html.indexOf('data-pane="gls-relay"');
+  assert.ok(daemonPaneStart >= 0, 'Daemon primary pane exists');
+  assert.ok(relayPaneStart > daemonPaneStart, 'Relay primary pane follows Daemon');
+  assert.match(html, /data-tab="gls-daemon"[^>]*>[\s\S]*?<span>Daemon<\/span>/);
+  assert.match(html, /data-tab="gls-relay"[^>]*hidden[^>]*>[\s\S]*?<span>Relay<\/span>/);
+  assert.doesNotMatch(html, /data-tab="gls-system"/);
+  assert.doesNotMatch(html, /data-subtab="gls-(?:daemon|relay)"/);
 
   const daemonPaneHtml = html.slice(daemonPaneStart, relayPaneStart);
   const relayPaneEnd = html.indexOf('<div class="modal-actions"', relayPaneStart);
   const relayPaneHtml = html.slice(relayPaneStart, relayPaneEnd);
-  assert.doesNotMatch(daemonPaneHtml, /<h3[^>]*>\s*Daemon\s*<\/h3>/,
-    'Daemon subpane relies on the subtab label instead of a duplicate visible heading');
-  assert.doesNotMatch(relayPaneHtml, /<h3[^>]*>\s*Relay\s*<\/h3>/,
-    'Relay subpane relies on the subtab label instead of a duplicate visible heading');
   assert.doesNotMatch(daemonPaneHtml, /aria-labelledby="gls-daemon-heading"/,
     'Daemon section does not reference a removed heading id');
   assert.doesNotMatch(relayPaneHtml, /aria-labelledby="gls-relay-heading"/,
@@ -6289,53 +6301,7 @@ test('global settings Board subtab omits deprecated default lanes control', () =
   assert.match(boardHtml, /id="gls-max-pipeline-depth"/, 'Max pipeline depth remains in Board settings');
 });
 
-test('global settings subtabs switch and restore the selected System subtab', () => {
-  const { sandbox, document } = createSandbox();
-  const context = vm.createContext(sandbox);
-  loadModalScripts(context);
-
-  const pane = new FakeElement();
-  pane.classList.add('gs-pane');
-  pane.dataset.pane = 'gls-system';
-  const daemonTab = new FakeElement();
-  daemonTab.classList.add('gs-subtab', 'active');
-  daemonTab.dataset.subtab = 'gls-daemon';
-  const relayTab = new FakeElement();
-  relayTab.classList.add('gs-subtab');
-  relayTab.dataset.subtab = 'gls-relay';
-  const daemonPane = new FakeElement();
-  daemonPane.classList.add('gs-subpane', 'active');
-  daemonPane.dataset.subpane = 'gls-daemon';
-  const relayPane = new FakeElement();
-  relayPane.classList.add('gs-subpane');
-  relayPane.dataset.subpane = 'gls-relay';
-  [daemonTab, relayTab, daemonPane, relayPane].forEach((el) => pane.appendChild(el));
-  pane.setQuerySelectorAll('.gs-subtab', [daemonTab, relayTab]);
-  pane.setQuerySelectorAll('.gs-subpane', [daemonPane, relayPane]);
-  context.__systemRelayTab = relayTab;
-  context.__systemPane = pane;
-
-  runInContext(context, 'switchGlsSubTab(__systemRelayTab);');
-  assert.equal(relayTab.classList.contains('active'), true);
-  assert.equal(relayPane.classList.contains('active'), true);
-  assert.equal(daemonTab.classList.contains('active'), false);
-  assert.equal(daemonPane.classList.contains('active'), false);
-
-  // Simulate a settings refresh rebuilding active classes, then restore from
-  // the remembered per-pane subtab selection.
-  relayTab.classList.remove('active');
-  relayPane.classList.remove('active');
-  daemonTab.classList.add('active');
-  daemonPane.classList.add('active');
-  document.setSelectorAll('#modal-global-settings .gs-pane', [pane]);
-  runInContext(context, '_syncGlsSubTabs(true);');
-  assert.equal(relayTab.classList.contains('active'), true);
-  assert.equal(relayPane.classList.contains('active'), true);
-  assert.equal(daemonTab.classList.contains('active'), false);
-  assert.equal(daemonPane.classList.contains('active'), false);
-});
-
-test('relay source badges are removed from System settings markup and relay config DOM', () => {
+test('relay source badges are removed from Relay settings markup and relay config DOM', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   const css = appStylesheetSource();
   [
@@ -6420,7 +6386,7 @@ test('relay_connection delta patches state in place without a panel/grid rebuild
 });
 
 test('relay_connection modal "Relay" row renders from state and hides when absent', () => {
-  const { context } = createRelayStatusHarness();
+  const { context, document } = createRelayStatusHarness();
   // Present field → section visible, fields populated.
   runInContext(context, `
     state.relay_connection = {
@@ -6430,6 +6396,7 @@ test('relay_connection modal "Relay" row renders from state and hides when absen
     _relayStatusRenderModalRow();
   `);
   assert.equal(jsonValue(context, `document.getElementById('gls-relay-section').hidden`), false);
+  assert.equal(document.getElementById('gls-relay-primary-tab').hidden, false);
   assert.equal(jsonValue(context, `document.getElementById('gls-relay-status-text').textContent`), 'disconnected');
   assert.equal(jsonValue(context, `document.getElementById('gls-relay-host').textContent`), 'relay.runtorque.com');
   assert.equal(jsonValue(context, `document.getElementById('gls-relay-retry-count').textContent`), '4');
@@ -6479,6 +6446,7 @@ test('relay_connection modal "Relay" row renders from state and hides when absen
     _relayStatusRenderModalRow();
   `);
   assert.equal(jsonValue(context, `document.getElementById('gls-relay-section').hidden`), true);
+  assert.equal(document.getElementById('gls-relay-primary-tab').hidden, true);
 });
 
 /* -- Relay config (TORQUE:603 #1) ----------------------------------------- */
@@ -23174,7 +23142,10 @@ test('Library Specializations list refresh preserves unsaved editor draft and ca
 test('task modal and add-agent labels rename template UI to role UI', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   assert.match(html, /<label for="add-template-select">Role<\/label>\s*<select id="add-template-select"/);
-  assert.match(html, /<label for="gs-default-agent-template">Default role<\/label>\s*<select id="gs-default-agent-template"/);
+  const workersStart = html.indexOf('<div class="gs-pane" data-pane="workers">');
+  const engineersStart = html.indexOf('<div class="gs-pane" data-pane="engineer">');
+  const workersPane = html.slice(workersStart, engineersStart);
+  assert.match(workersPane, /<label for="gs-default-agent-template">Default role<\/label>\s*<select id="gs-default-agent-template"/);
   assert.match(html, /<label for="task-template-select">Role[\s\S]*Optional role used when this task creates a new agent during dispatch\./);
 });
 
@@ -24773,8 +24744,10 @@ test('rendered add-agent templates apply model and reasoning effort overrides', 
     'add-cmd-row',
     'add-model-row',
     'add-reasoning-row',
+    'add-model-input-select',
     'add-model-input',
     'add-reasoning-effort',
+    'add-reasoning-effort-custom',
     'add-shell-select',
     'add-env-vars',
     'add-wt-enabled',
@@ -26014,6 +25987,28 @@ test('agent focus selection updates focus panel without rewriting the grid shell
   assert.equal(jsonValue(context, `selectedAgentId`), 'agent-2');
 });
 
+test('incremental agent selection reconciles selected and focused card classes atomically', () => {
+  const { context, document } = createMainGridDragHarness();
+  const main = document.getElementById('main');
+  const previous = new FakeElement();
+  previous.dataset.dragId = 'agent-1';
+  previous.setAttribute('data-drag-id', 'agent-1');
+  previous.classList.add('selected', 'is-selected', 'focused');
+  const next = new FakeElement();
+  next.dataset.dragId = 'agent-2';
+  next.setAttribute('data-drag-id', 'agent-2');
+  main.setQuerySelectorAll('[data-drag-id]', [previous, next]);
+
+  runInContext(context, `focusedItemId = 'agent-2'; _updateAgentGridSelectionForFocus('agent-1', 'agent-2');`);
+
+  assert.equal(previous.classList.contains('selected'), false);
+  assert.equal(previous.classList.contains('is-selected'), false);
+  assert.equal(previous.classList.contains('focused'), false);
+  assert.equal(next.classList.contains('selected'), true);
+  assert.equal(next.classList.contains('is-selected'), true);
+  assert.equal(next.classList.contains('focused'), true);
+});
+
 test('focus surface gates ignore non-focused traffic and preserve focus-panel scroll', () => {
   const { sandbox, document } = createSandbox({ updateEventsAttentionBadge() {} });
   document.register('main');
@@ -26240,6 +26235,7 @@ test('agent focus split renders persisted collapsed handle in grid and canvas vi
 test('embedded runtime reuses the shared group, cell, and terminal UI', () => {
   const { context, document, sandbox } = createStandaloneRenderHarness();
   const main = document.getElementById('main');
+  const tabsHost = document.getElementById('app-group-tabs-host');
 
   sandbox._cachedAgentTemplates = [{ name: 'fixer', display_name: 'Fixer', shadowed: false }];
   sandbox.state.runtime = { mode: 'standalone', embedded_terminal: true };
@@ -26298,7 +26294,8 @@ test('embedded runtime reuses the shared group, cell, and terminal UI', () => {
   assert.match(main.innerHTML, /Shell Root/);
   assert.match(main.innerHTML, /class="cell[^"]*selected/);
   assert.match(main.innerHTML, /class="term-row/);
-  assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*data-agent-grid-new-button[\s\S]*openAgentGridNewMenu\(event,&quot;alpha&quot;\)/);
+  assert.doesNotMatch(main.innerHTML, /data-agent-grid-header-controls/);
+  assert.match(tabsHost.innerHTML, /data-agent-grid-header-controls[\s\S]*data-agent-grid-new-button[\s\S]*openAgentGridNewMenu\(event,&quot;alpha&quot;\)/);
   assert.doesNotMatch(main.innerHTML, /ghost-card ghost-card--worker|ghost-card ghost-card--engineer|ghost-card ghost-card--architect/);
   assert.doesNotMatch(main.innerHTML, /quickAddAgent\('alpha'\)/);
   assert.doesNotMatch(main.innerHTML, /openAddAgentAdvanced\('alpha'\)/);
@@ -26369,7 +26366,7 @@ test('main agent grid omits the retired legacy creation dropdown', () => {
   assert.doesNotMatch(main.innerHTML, /cell-add-drop/);
   assert.doesNotMatch(main.innerHTML, /agent-grid-global-add-row/);
   assert.doesNotMatch(main.innerHTML, /agent-add-menu/);
-  assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*data-agent-grid-new-button[\s\S]*class="agent-grid-new-icon"[\s\S]*<span>New<\/span>/);
+  assert.match(main.innerHTML, /data-agent-grid-header-controls[\s\S]*data-agent-grid-new-button[\s\S]*aria-label="Create agent or group"[\s\S]*class="agent-grid-new-icon"/);
   assert.doesNotMatch(main.innerHTML, /ghost-card ghost-card--worker|ghost-card ghost-card--engineer|ghost-card ghost-card--architect/);
   assert.doesNotMatch(main.innerHTML, /\+ Add Worker|\+ New Engineer|\+ New Architect/);
 });
@@ -26840,27 +26837,43 @@ test('agent grid group tabs render standalone controls and switch active group',
   sandbox.state.runtime = { mode: 'toolbelt', embedded_terminal: false };
   sandbox.state.groups = { alpha: [], beta: [] };
   runInContext(context, `renderGroupSwitcher();`);
-  assert.equal(addGroupHeaderButton.hidden, false);
+  assert.equal(addGroupHeaderButton, null);
   assert.equal(runInContext(context, `_renderAgentGroupTabsHtml()`), '');
 
   sandbox.state.runtime = { mode: 'standalone', embedded_terminal: true };
   runInContext(context, `renderGroupSwitcher();`);
-  assert.equal(addGroupHeaderButton.hidden, false);
+  assert.equal(addGroupHeaderButton, null);
   let tabsHtml = runInContext(context, `_renderAgentGroupTabsHtml()`);
   assert.match(tabsHtml, /class="agent-group-tabs"/);
   assert.match(tabsHtml, /role="tablist" aria-label="Groups"/);
   assert.match(tabsHtml, /class="agent-group-tab active"[\s\S]*title="alpha"[\s\S]*alpha/);
   assert.match(tabsHtml, /onGroupTabClick\(&quot;alpha&quot;, event\)/);
-  assert.match(tabsHtml, /oncontextmenu="onGroupTabContextMenu\(event, &quot;alpha&quot;\)"/);
   assert.match(tabsHtml, /title="beta"[\s\S]*beta/);
-  assert.match(tabsHtml, /class="agent-group-tab-menu"[\s\S]*openAgentGroupTabActions/);
+  assert.match(tabsHtml, /class="agent-group-tab-settings"[\s\S]*aria-label="Open settings for alpha"[\s\S]*openGroupSettings\(&quot;alpha&quot;\)/);
   assert.match(tabsHtml, /class="agent-group-compact-trigger"/);
-  assert.match(tabsHtml, /class="agent-group-compact-menu btn btn-quiet btn-xs"[\s\S]*aria-label="Group actions for alpha"/);
+  assert.match(tabsHtml, /class="agent-group-compact-settings btn btn-quiet btn-xs"[\s\S]*aria-label="Open settings for alpha"[\s\S]*openGroupSettings\(&quot;alpha&quot;\)/);
   assert.match(tabsHtml, /class="agent-group-quick-search"/);
   assert.match(tabsHtml, /agent-group-quick-switcher ui-popover[\s\S]*onkeydown="agentGroupQuickSwitcherKeydown\(event\)"/);
   assert.match(tabsHtml, />\+<\/span> New group/);
-  assert.match(tabsHtml, /&#8943;/);
-  assert.doesNotMatch(tabsHtml, /agent-view-toggle|agent-group-tab-actions|<select|Delete group/);
+  assert.match(tabsHtml, /&#9881;/);
+  assert.doesNotMatch(tabsHtml, /Group actions|openAgentGroupTabActions|onGroupTabContextMenu|&#8943;/);
+  assert.match(tabsHtml, /data-agent-grid-header-controls[\s\S]*aria-label="Create agent or group"/);
+  assert.doesNotMatch(tabsHtml, /agent-group-tab-actions|<select|Delete group/);
+
+  runInContext(context, `
+    state.groups.alpha = ['agent-cap'];
+    state.agents['agent-cap'] = { id: 'agent-cap', group: 'alpha', cell_type: 'agent' };
+    state.group_settings = state.group_settings || {};
+    state.group_settings.alpha = { max_agents: 1 };
+  `);
+  tabsHtml = runInContext(context, `_renderAgentGroupTabsHtml()`);
+  assert.match(tabsHtml, /data-agent-grid-new-button[^>]*data-agent-cap="true"[^>]*aria-label="Create agent or group"/);
+  assert.doesNotMatch(tabsHtml, /data-agent-grid-new-button[^>]*disabled/);
+  assert.deepEqual(jsonValue(context, `_agentGridNewMenuItems('alpha').map(function(item) { return { label: item.label || null, disabled: !!item.disabled, separator: !!item.separator }; })`), [
+    { label: 'Agent limit reached', disabled: true, separator: false },
+    { label: null, disabled: false, separator: true },
+    { label: 'New group', disabled: false, separator: false },
+  ]);
 
   sandbox.openedGroupSettings = [];
   sandbox.openGroupSettings = function(group) {
@@ -26953,50 +26966,6 @@ test('compact group switcher arrows traverse visible options and the create acti
   assert.equal(trigger.focused, true, 'Escape restores the compact switcher trigger');
 });
 
-test('group tab context menu offers settings for the clicked group', () => {
-  const { context, document } = createSelectionHarness();
-  const menu = document.register('ctx-menu');
-  context.window.innerWidth = 160;
-  context.window.innerHeight = 100;
-  menu.getBoundingClientRect = () => ({
-    top: 20,
-    bottom: 80,
-    left: 150,
-    right: 210,
-    width: 120,
-    height: 60,
-  });
-  context.state.groups = { alpha: [], beta: [] };
-  let prevented = false;
-  let stopped = false;
-
-  context.onGroupTabContextMenu({
-    preventDefault() { prevented = true; },
-    stopPropagation() { stopped = true; },
-    clientX: 150,
-    clientY: 20,
-  }, 'beta');
-
-  assert.equal(prevented, true);
-  assert.equal(stopped, true);
-  assert.equal(menu.classList.contains('open'), true);
-  assert.match(menu.innerHTML, /Group settings/);
-  assert.match(menu.innerHTML, /openGroupSettings\(&quot;beta&quot;\)/);
-  assert.equal(menu.style.left, '36px');
-  assert.equal(menu.style.top, '20px');
-
-  menu.classList.remove('open');
-  menu.innerHTML = '';
-  context.onGroupTabContextMenu({
-    preventDefault() {},
-    stopPropagation() {},
-    clientX: 12,
-    clientY: 24,
-  }, 'missing');
-  assert.equal(menu.classList.contains('open'), false);
-  assert.equal(menu.innerHTML, '');
-});
-
 test('standalone group tabs render above the agent grid scroll pane', () => {
   const { context, document } = createMainHarness({
     renderTerminalWorkspace() {},
@@ -27069,13 +27038,13 @@ test('legacy header group switcher clears removed dropdown chrome', () => {
   assert.equal(root.hidden, true);
   assert.equal(root.innerHTML, '');
   assert.equal(root._torqueLastHtml, '');
-  assert.equal(addGroupHeaderButton.hidden, false);
+  assert.equal(addGroupHeaderButton, null);
 
   runInContext(context, `
     state.runtime = { mode: 'toolbelt', embedded_terminal: false };
     renderGroupSwitcher();
   `);
-  assert.equal(addGroupHeaderButton.hidden, false);
+  assert.equal(addGroupHeaderButton, null);
 });
 
 test('active group changes reload visible group-scoped Actions and Roles panels', () => {
@@ -27255,7 +27224,7 @@ test('grid-level New engineer submits a user-hired engineer without architect co
   assert.doesNotMatch(main.innerHTML, /No orphan engineers\./);
   assert.doesNotMatch(main.innerHTML, /No orphan workers\./);
   assert.doesNotMatch(main.innerHTML, /class="ghost-card ghost-card--engineer"|data-hired-by-architect-id=""/);
-  assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*openAgentGridNewMenu\(event,&quot;torque&quot;\)/);
+  assert.match(main.innerHTML, /data-agent-grid-header-controls[\s\S]*openAgentGridNewMenu\(event,&quot;torque&quot;\)/);
   assert.doesNotMatch(main.innerHTML, /architect-header-row|agent-section-header-row/);
 
   const menuItem = context._agentGridNewMenuItems('torque')
@@ -27326,7 +27295,7 @@ test('grid-level New worker affordance survives delta rerenders and uses standal
   `);
 
   assert.doesNotMatch(main.innerHTML, /principals-row/);
-  assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*class="agent-grid-new-icon"[\s\S]*<span>New<\/span>/);
+  assert.match(main.innerHTML, /data-agent-grid-header-controls[\s\S]*class="agent-grid-new-icon"/);
   assert.doesNotMatch(main.innerHTML, /class="ghost-card ghost-card--engineer|class="ghost-card ghost-card--worker|\+ New Engineer|\+ Add Worker/);
   main.scrollTop = 37;
 
@@ -27340,7 +27309,7 @@ test('grid-level New worker affordance survives delta rerenders and uses standal
     });
   `);
 
-  assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*class="agent-grid-new-icon"[\s\S]*<span>New<\/span>/);
+  assert.match(main.innerHTML, /data-agent-grid-header-controls[\s\S]*class="agent-grid-new-icon"/);
   assert.doesNotMatch(main.innerHTML, /class="ghost-card ghost-card--engineer|class="ghost-card ghost-card--worker|\+ New Engineer|\+ Add Worker/);
   assert.equal(jsonValue(context, `focusedItemId`), 'eng-a');
   assert.equal(jsonValue(context, `String(state.selected_principal_id || '')`), '');
@@ -27436,7 +27405,7 @@ test('stratified grid renders Architects stratum and architect card without inli
   assert.doesNotMatch(main.innerHTML, /class="principals-row"/);
   assert.match(main.innerHTML, /data-agent-strata="architects"[\s\S]*data-drag-id="arch-a"[\s\S]*Architect A/);
   assert.doesNotMatch(main.innerHTML, /\+ New Architect|agent-new-architect-card/);
-  assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*class="agent-grid-new-icon"[\s\S]*<span>New<\/span>/);
+  assert.match(main.innerHTML, /data-agent-grid-header-controls[\s\S]*class="agent-grid-new-icon"/);
   assert.match(main.innerHTML, /class="agent-card-kind ui-badge ui-badge--micro cell-architect-badge">Architect<\/div>/);
   assert.doesNotMatch(main.innerHTML, /agent-grid-new-architect-row/);
 
@@ -27480,7 +27449,7 @@ test('grid-level New architect opens the group-scoped architect modal', () => {
   runInContext(context, `render();`);
 
   assert.doesNotMatch(main.innerHTML, /class="ghost-card ghost-card--architect|\+ New Architect/);
-  assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*openAgentGridNewMenu\(event,&quot;torque&quot;\)/);
+  assert.match(main.innerHTML, /data-agent-grid-header-controls[\s\S]*openAgentGridNewMenu\(event,&quot;torque&quot;\)/);
   assert.match(main.innerHTML, /data-agent-strata="architects"[\s\S]*Architect A/);
   assert.doesNotMatch(main.innerHTML, /principals-row/);
   assert.doesNotMatch(main.innerHTML, /agent-grid-new-architect-row/);
@@ -27505,7 +27474,7 @@ test('grid-level New architect opens the group-scoped architect modal', () => {
   }]);
 });
 
-test('grid-level creation toolbar replaces hierarchical creation controls', () => {
+test('group-header creation control replaces hierarchical creation controls', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
 
@@ -27516,7 +27485,7 @@ test('grid-level creation toolbar replaces hierarchical creation controls', () =
 
   runInContext(context, `render();`);
 
-  assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*class="agent-grid-new-btn"[\s\S]*class="agent-grid-new-icon"[\s\S]*<span>New<\/span>/);
+  assert.match(main.innerHTML, /class="group-hdr"[\s\S]*data-agent-grid-header-controls[\s\S]*class="agent-grid-new-btn"[\s\S]*aria-label="Create agent or group"[\s\S]*class="agent-grid-new-icon"/);
   assert.doesNotMatch(main.innerHTML, /class="ghost-card ghost-card--worker|class="ghost-card ghost-card--engineer|class="ghost-card ghost-card--architect/);
   assert.doesNotMatch(main.innerHTML, /\+ Add Worker|\+ New Engineer|\+ New Architect/);
   assert.doesNotMatch(main.innerHTML, /data-agent-strata=/);
@@ -27524,8 +27493,8 @@ test('grid-level creation toolbar replaces hierarchical creation controls', () =
   const css = appStylesheetSource();
   assert.match(css, /--agent-grid-card-height:\s*96px;/);
   assert.match(css, /--agent-grid-card-basis:\s*var\(--agent-engineer-column-width\);/);
-  assert.match(css, /\.agent-grid-toolbar\s*\{[\s\S]*justify-content:\s*flex-end;/);
-  assert.match(css, /\.agent-grid-new-btn\s*\{[\s\S]*border-radius:\s*999px;/);
+  assert.match(css, /\.agent-grid-header-controls\s*\{[\s\S]*display:\s*flex;[\s\S]*margin-left:\s*auto;/);
+  assert.match(css, /\.agent-grid-new-btn\s*\{[\s\S]*width:\s*24px;[\s\S]*border-radius:\s*var\(--radius-sm\);/);
   assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-grid-card-height:\s*108px;/);
   assert.match(css, /\.agent-grid\s*\{[\s\S]*--agent-worker-card-height:\s*var\(--agent-card-height\);/);
   assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-worker-card-height:\s*var\(--agent-card-height\);/);
@@ -27635,12 +27604,14 @@ test('agents-grid v1.6 uses one-line metrics, action threshold labels, empty-row
   runInContext(context, `render();`);
 
   assert.equal(main.scrollTop, 144);
-  assert.match(main.innerHTML, /data-drag-id="arch-a"[\s\S]*cell-architect-stats">2 engineers/);
+  assert.match(main.innerHTML, /data-drag-id="arch-a"[^>]*data-execution-hierarchy-owner="true"[\s\S]*cell-architect-stats cell-architect-stats--team-shown"[^>]*>Team \u00b7 2 engineers/);
   assert.match(main.innerHTML, /data-drag-id="arch-a"[\s\S]*cell-architect-activity"[^>]*>dispatching :220/);
   assert.doesNotMatch(main.innerHTML, /decisions/);
   assert.doesNotMatch(main.innerHTML, /last decision/);
 
   assert.match(main.innerHTML, /engineer-row--empty-workers[^"]*"[^>]*data-worker-count="0"[^>]*data-engineer-id="eng-empty"/);
+  assert.match(main.innerHTML, /data-engineer-id="eng-empty"[\s\S]*data-engineer-row-empty="true"[\s\S]*No workers/);
+  assert.doesNotMatch(main.innerHTML, /engineer-row-empty-rail/);
   assert.match(main.innerHTML, /data-drag-id="eng-empty"[\s\S]*cell-engineer-workers[\s\S]*0 workers/);
   assert.match(main.innerHTML, /data-drag-id="eng-empty"[\s\S]*cell-engineer-queue">queue: 0/);
   assert.match(main.innerHTML, /data-drag-id="eng-empty"[\s\S]*cell-engineer-activity[^>]*>queue_empty \(1m\)/);
@@ -27650,6 +27621,9 @@ test('agents-grid v1.6 uses one-line metrics, action threshold labels, empty-row
 
   assert.match(main.innerHTML, /data-drag-id="worker-a"[\s\S]*cell-worker-task cell-worker-task--clickable[^"]*"[^>]*>TORQUE:216/);
   assert.match(main.innerHTML, /data-drag-id="worker-a"[\s\S]*cell-worker-cycle">cycle: review/);
+  assert.match(main.innerHTML, /data-drag-id="worker-a"[\s\S]*cell-worker-diff">\(\+4\/-1 committed\)/);
+  assert.match(main.innerHTML, /data-drag-id="worker-a"[\s\S]*data-worktree-branch="torque\/panelsmith\/worker-polish-pass-abc123"/);
+  assert.match(main.innerHTML, /title="Worker A \(running\) — running node tests"/);
   assert.match(main.innerHTML, /data-drag-id="worker-a"[\s\S]*cell-worker-activity[^>]*>running node tests/);
   assert.doesNotMatch(main.innerHTML, /engineers ·|queue: 0 ·|TORQUE:216 ·|last action 30s/);
 });
@@ -28260,13 +28234,15 @@ test('main render places architects in a flat strip and shows selected execution
     render();
   `);
 
-  assert.match(main.innerHTML, /data-agent-architect-strip[\s\S]*data-drag-id="arch-a"[\s\S]*Productmind/);
+  assert.match(main.innerHTML, /data-agent-architect-selector-heading[\s\S]*Architects/);
+  assert.match(main.innerHTML, /data-agent-architect-strip[\s\S]*data-drag-id="arch-a"[^>]*data-execution-hierarchy-owner="true"[\s\S]*Productmind/);
   const start = main.innerHTML.indexOf('data-agent-strata="architect-execution"');
   const end = main.innerHTML.indexOf('</section>', start);
   const sectionHtml = main.innerHTML.slice(start, end);
   assert.ok(start >= 0 && end > start, 'architect execution section should render');
   assert.match(sectionHtml, /data-execution-architect-id="arch-a"/);
-  assert.match(sectionHtml, /agent-execution-heading-owner">Productmind</);
+  assert.match(sectionHtml, /agent-execution-heading-owner">Productmind\u2019s team</);
+  assert.match(sectionHtml, /agent-execution-heading-count[^>]*>3 engineers/);
   assert.equal((sectionHtml.match(/class="[^"]*\bengineer-row\b[^"]*\bagent-grid-engineer-row\b[^"]*"/g) || []).length, 3);
   assert.match(sectionHtml, /agent-section-body[\s\S]*Engineer One[\s\S]*Engineer Two[\s\S]*Engineer Three/);
   assert.doesNotMatch(sectionHtml, /\+ New Engineer|ghost-card--engineer/);
@@ -28335,16 +28311,24 @@ test('main render keeps responsive worker cards inside their engineer row and fi
 
   const css = appStylesheetSource();
   assert.match(css, /--agent-architect-column-width:\s*77px/);
+  assert.match(css, /--agent-hierarchy-column-gap:\s*6px/);
+  assert.match(css, /--agent-hierarchy-row-inset:\s*6px/);
   assert.match(css, /\.agent-section\s*\{[^}]*grid-template-columns:\s*var\(--agent-architect-column-width\)\s+minmax\(0,\s*1fr\)/s);
-  assert.match(css, /\.agent-grid \.engineer-row\s*\{[^}]*display:\s*flex/s);
+  assert.match(css, /\.agent-architect-strip\s*\{[^}]*gap:\s*var\(--agent-hierarchy-column-gap\);[^}]*padding-inline:\s*var\(--agent-hierarchy-row-inset\)/s);
+  assert.match(css, /\.agent-grid \.engineer-row\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*var\(--agent-engineer-column-width\) minmax\(0, 1fr\);[^}]*gap:\s*var\(--agent-hierarchy-column-gap\);[^}]*padding:\s*var\(--agent-hierarchy-row-inset\);[^}]*border:\s*0;/s);
   assert.doesNotMatch(css, /\.agent-grid \.engineer-row\.engineer-row--empty-workers\s*\{[^}]*display:\s*block/s);
   const workerRowsBlock = (css.match(/\.engineer-row-workers,\s*\.loose-workers-strip\s*\{[^}]*\}/) || [''])[0];
   const workerCardsBlock = (css.match(/\.engineer-row-workers > \.cell,\s*\.loose-workers-strip > \.cell,\s*\.ghost-card--worker\s*\{[^}]*\}/) || [''])[0];
   assert.match(workerRowsBlock, /display:\s*grid/);
-  assert.match(workerRowsBlock, /grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(var\(--agent-grid-card-min\),\s*1fr\)\)/);
+  assert.match(workerRowsBlock, /grid-template-columns:\s*repeat\(auto-fill,\s*var\(--agent-grid-card-basis\)\)/);
+  assert.match(workerRowsBlock, /justify-content:\s*start/);
+  assert.match(workerRowsBlock, /gap:\s*var\(--agent-hierarchy-column-gap\)/);
   assert.doesNotMatch(workerRowsBlock, /flex-wrap/);
-  assert.match(workerCardsBlock, /width:\s*100%/);
-  assert.match(workerCardsBlock, /max-width:\s*none/);
+  assert.match(workerCardsBlock, /width:\s*var\(--agent-grid-card-basis\)/);
+  assert.match(workerCardsBlock, /min-width:\s*var\(--agent-grid-card-basis\)/);
+  assert.match(workerCardsBlock, /max-width:\s*var\(--agent-grid-card-basis\)/);
+  assert.match(css, /\.engineer-row-workers\s*\{[^}]*padding-left:\s*0;[^}]*border-left:\s*0/s);
+  assert.doesNotMatch(css, /\.engineer-row-workers::before/);
 });
 
 
@@ -28950,7 +28934,6 @@ test('task delta updates visible worker cycle state while preserving main-grid f
   currentButton.selectionStart = 2;
   currentButton.selectionEnd = 7;
   document.activeElement = currentButton;
-
   runInContext(context, `
     _handleDelta({
       seq: 2,
@@ -29743,6 +29726,7 @@ test('grid-level + New dropdown exposes standalone creation flows', () => {
     var engineerNewCalls = [];
     var workerNewCalls = [];
     var architectNewCalls = [];
+    var groupNewCalls = 0;
     openAddEngineerForSection = function(group, architectId) {
       engineerNewCalls.push({ group: group, architectId: architectId || '' });
     };
@@ -29752,10 +29736,13 @@ test('grid-level + New dropdown exposes standalone creation flows', () => {
     openAddArchitectForGroup = function(group) {
       architectNewCalls.push({ group: group });
     };
+    openAddGroup = function() {
+      groupNewCalls += 1;
+    };
     render();
   `);
 
-  assert.match(document.getElementById('main').innerHTML, /data-agent-grid-toolbar[\s\S]*class="agent-grid-new-icon"[\s\S]*<span>New<\/span>/);
+  assert.match(document.getElementById('main').innerHTML, /data-agent-grid-header-controls[\s\S]*class="agent-grid-new-icon"/);
   assert.deepEqual(jsonValue(context, `window._navCreationControls`), []);
 
   context.openAgentGridNewMenu({
@@ -29773,17 +29760,20 @@ test('grid-level + New dropdown exposes standalone creation flows', () => {
     'New architect',
     'New engineer',
     'New worker',
+    null,
+    'New group',
   ]);
   assert.equal(menuCalls[0].x, 33);
   assert.equal(menuCalls[0].y, 48);
 
-  for (const item of menuCalls[0].items) vm.runInContext(item.action, context);
+  for (const item of menuCalls[0].items.filter(item => item.action)) vm.runInContext(item.action, context);
 
   assert.deepEqual(jsonValue(context, `workerNewCalls`), [{ group: 'torque' }]);
   assert.deepEqual(jsonValue(context, `engineerNewCalls`), [
     { group: 'torque', architectId: '' },
   ]);
   assert.deepEqual(jsonValue(context, `architectNewCalls`), [{ group: 'torque' }]);
+  assert.equal(jsonValue(context, `groupNewCalls`), 1);
 });
 
 
@@ -30234,6 +30224,93 @@ test('standalone outer resize stops before compressing the right rail below its 
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.size`), 320);
   assert.equal(document.body.style['--standalone-sidebar-width'], '688px');
   assert.equal(document.getElementById('standalone-sidebar-shell').style['--standalone-right-rail-width'], '320px');
+});
+
+test('standalone utility-rail divider double-click fits at most four architect columns without shrinking', () => {
+  const { context, document, sandbox } = createPanelManagerHarness();
+  document.body.classList.add('runtime-embedded');
+  context.isEmbeddedTerminalMode = function() { return true; };
+  context.window.innerWidth = 1600;
+
+  const shell = document.getElementById('standalone-sidebar-shell');
+  shell.clientWidth = 900;
+  shell.getBoundingClientRect = () => ({
+    top: 0,
+    bottom: 720,
+    left: 0,
+    right: 900,
+    width: 900,
+    height: 720,
+  });
+
+  const strip = new FakeElement('architect-strip');
+  strip.classList.add('agent-architect-strip');
+  strip.clientWidth = 320;
+  const cards = Array.from({ length: 6 }, (_, index) => {
+    const card = new FakeElement(`architect-${index + 1}`);
+    card.classList.add('cell', 'architect');
+    card.getBoundingClientRect = () => ({
+      top: 0,
+      bottom: 108,
+      left: 0,
+      right: 106,
+      width: 106,
+      height: 108,
+    });
+    strip.appendChild(card);
+    return card;
+  });
+  strip.setQuerySelectorAll('.cell', cards);
+  document.setSelector('.agent-architect-strip', strip);
+  context.getComputedStyle = function(element) {
+    assert.equal(element, strip);
+    const values = {
+      'column-gap': '6px',
+      gap: '6px',
+      'padding-left': '6px',
+      'padding-right': '6px',
+      '--agent-architect-column-width': '106px',
+    };
+    return {
+      getPropertyValue(property) {
+        return values[property] || '';
+      },
+    };
+  };
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 470, tabs: ['context'], active: 'context' },
+      floats: {},
+      last_active: 'context',
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+    sendCalls = [];
+  `);
+  let prevented = false;
+  document.getElementById('standalone-rail-resize-handle').listeners.dblclick({
+    preventDefault() { prevented = true; },
+  });
+
+  assert.equal(prevented, true);
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.size`), 336);
+  assert.equal(shell.style['--standalone-right-rail-width'], '336px');
+  assert.equal(sandbox.sendCalls.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls[0])), {
+    cmd: 'standalone_set_panel_layout',
+    layout: jsonValue(context, `_standalonePanelCurrentLayout()`),
+  });
+
+  strip.clientWidth = 500;
+  document.getElementById('standalone-rail-resize-handle').listeners.dblclick({
+    preventDefault() {},
+  });
+
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.size`), 336);
+  assert.equal(sandbox.sendCalls.length, 1);
 });
 
 test('standalone rail drag does not shrink below the right rail minimum', () => {
@@ -31518,6 +31595,156 @@ test('standalone pointer drag moves a panel without native drag events', () => {
   assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().right.tabs`), ['actions']);
   assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-bottom-dock'), ['panel-board', 'panel-context']);
   assert.equal(document.body.classList.contains('standalone-panel-dragging'), false);
+});
+
+test('standalone pointer drag lifts the source tab and reorders it at the visible insertion marker', () => {
+  const { context, document } = createAttachedStandaloneWsSyncHarness();
+  const rightRail = document.getElementById('standalone-right-rail');
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['context', 'actions', 'events'], active: 'context' },
+      floats: {},
+      last_active: 'context',
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+  `);
+
+  const tabs = findDescendantsByClassName(rightRail, 'standalone-panel-tab');
+  const contextTab = tabs.find((tab) => tab.dataset.app === 'context');
+  const actionsTab = tabs.find((tab) => tab.dataset.app === 'actions');
+  const eventsTab = tabs.find((tab) => tab.dataset.app === 'events');
+  actionsTab.getBoundingClientRect = () => ({ left: 84, right: 164, width: 80, top: 16, bottom: 40, height: 24 });
+  document.elementsFromPoint = function() { return [actionsTab]; };
+
+  contextTab.onmousedown({
+    button: 0,
+    clientX: 32,
+    clientY: 28,
+    currentTarget: contextTab,
+  });
+  document.listeners.mousemove({
+    clientX: 150,
+    clientY: 28,
+    preventDefault() {},
+  });
+
+  const preview = findChildByClassName(document.body, 'standalone-panel-drag-preview');
+  assert.ok(preview, 'drag preview follows the pointer');
+  assert.equal(preview.classList.contains('is-visible'), true);
+  assert.equal(preview.style.transform, 'translate3d(162px,40px,0) scale(1)');
+  assert.equal(contextTab.classList.contains('is-dragging'), true);
+  assert.equal(eventsTab.classList.contains('drop-before'), true);
+
+  document.listeners.mouseup({
+    clientX: 150,
+    clientY: 28,
+    preventDefault() {},
+  });
+
+  assert.deepEqual(
+    jsonValue(context, `_standalonePanelCurrentLayout().right.tabs`),
+    ['actions', 'context', 'events'],
+  );
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.active`), 'context');
+  assert.equal(contextTab.classList.contains('is-dragging'), false);
+  assert.equal(document.body.classList.contains('standalone-panel-dragging'), false);
+  assert.equal(findChildByClassName(document.body, 'standalone-panel-drag-preview'), null);
+});
+
+test('standalone pointer drop in the current panel body preserves the existing tab position', () => {
+  const { context, document } = createAttachedStandaloneWsSyncHarness();
+  const rightRail = document.getElementById('standalone-right-rail');
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['context', 'actions', 'events'], active: 'context' },
+      floats: {},
+      last_active: 'context',
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+  `);
+
+  const contextTab = findDescendantsByClassName(rightRail, 'standalone-panel-tab')
+    .find((tab) => tab.dataset.app === 'context');
+  const rightBody = findChildByClassName(rightRail, 'standalone-panel-zone-body');
+  document.elementsFromPoint = function() { return [rightBody]; };
+
+  contextTab.onmousedown({
+    button: 0,
+    clientX: 32,
+    clientY: 28,
+    currentTarget: contextTab,
+  });
+  document.listeners.mousemove({
+    clientX: 120,
+    clientY: 180,
+    preventDefault() {},
+  });
+  document.listeners.mouseup({
+    clientX: 120,
+    clientY: 180,
+    preventDefault() {},
+  });
+
+  assert.deepEqual(
+    jsonValue(context, `_standalonePanelCurrentLayout().right.tabs`),
+    ['context', 'actions', 'events'],
+  );
+});
+
+test('standalone pointer drag inserts a cross-dock panel at the targeted tab position', () => {
+  const { context, document } = createAttachedStandaloneWsSyncHarness();
+  const bottomDock = document.getElementById('standalone-bottom-dock');
+  const rightRail = document.getElementById('standalone-right-rail');
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board', 'chat'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['context', 'actions'], active: 'context' },
+      floats: {},
+      last_active: 'context',
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+  `);
+
+  const contextTab = findDescendantsByClassName(rightRail, 'standalone-panel-tab')
+    .find((tab) => tab.dataset.app === 'context');
+  const chatTab = findDescendantsByClassName(bottomDock, 'standalone-panel-tab')
+    .find((tab) => tab.dataset.app === 'chat');
+  chatTab.getBoundingClientRect = () => ({ left: 84, right: 164, width: 80, top: 500, bottom: 524, height: 24 });
+  document.elementsFromPoint = function() { return [chatTab]; };
+
+  contextTab.onmousedown({
+    button: 0,
+    clientX: 640,
+    clientY: 28,
+    currentTarget: contextTab,
+  });
+  document.listeners.mousemove({
+    clientX: 90,
+    clientY: 512,
+    preventDefault() {},
+  });
+  document.listeners.mouseup({
+    clientX: 90,
+    clientY: 512,
+    preventDefault() {},
+  });
+
+  assert.deepEqual(
+    jsonValue(context, `_standalonePanelCurrentLayout().bottom.tabs`),
+    ['board', 'context', 'chat'],
+  );
+  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().right.tabs`), ['actions']);
 });
 
 test('standalone pointer drag ignores releases outside dock targets', () => {

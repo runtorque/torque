@@ -42,16 +42,11 @@
                 title="Go to (⌘K / Ctrl+K)" aria-label="Go to">
           <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4"></circle><path d="m10 10 3 3"></path></svg>
         </button>
-        <div class="hdr-spacer"></div>
-        <button id="add-group-header-btn" class="hdr-btn hdr-icon-btn" onclick="openAddGroup()"
-                title="New group" aria-label="New group">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"></path></svg>
-        </button>
       </header>
       <div id="app-group-tabs-host" class="agent-group-tabs-host app-group-tabs-host" data-agent-group-tabs-host></div>
       <main id="main"></main>
     </div>
-    <div id="standalone-rail-resize-handle" title="Resize utility rail"></div>
+    <div id="standalone-rail-resize-handle" title="Resize utility rail · Double-click to fit architects"></div>
     <aside id="standalone-right-rail"></aside>
     <div id="standalone-bottom-resize-handle" title="Resize board dock"></div>
     <section id="standalone-bottom-dock"></section>
@@ -127,12 +122,14 @@
             <input id="add-cmd-input" placeholder="e.g. npm run dev" autocomplete="off">
           </div>
           <div id="add-model-row" class="hidden">
-            <label for="add-model-input">Model</label>
-            <input id="add-model-input" placeholder="Use provider default" autocomplete="off">
+            <label for="add-model-input-select">Model</label>
+            <select id="add-model-input-select" onchange="_onModelSelectChange('add-model-input')"></select>
+            <input id="add-model-input" class="provider-custom-input hidden" aria-label="Custom model" placeholder="Enter a model ID" autocomplete="off" oninput="_onCustomModelInput('add-model-input')">
           </div>
           <div id="add-reasoning-row" class="hidden">
             <label for="add-reasoning-effort">Reasoning effort</label>
-            <select id="add-reasoning-effort"></select>
+            <select id="add-reasoning-effort" onchange="_onReasoningEffortSelectChange('add-reasoning-effort')"></select>
+            <input id="add-reasoning-effort-custom" class="provider-custom-input hidden" aria-label="Custom reasoning effort" placeholder="Enter a reasoning effort" autocomplete="off">
           </div>
           <div id="add-args-row" class="hidden">
             <label for="add-args-input">Arguments</label>
@@ -309,10 +306,12 @@
         <select id="engineer-launch-provider" onchange="onEngineerLaunchProviderChange()"></select>
         <label for="engineer-launch-boot-cmd">Boot command</label>
         <input id="engineer-launch-boot-cmd" placeholder="Use provider default" autocomplete="off">
-        <label for="engineer-launch-model">Model</label>
-        <input id="engineer-launch-model" placeholder="Use provider default" autocomplete="off">
+        <label for="engineer-launch-model-select">Model</label>
+        <select id="engineer-launch-model-select" onchange="_onModelSelectChange('engineer-launch-model')"></select>
+        <input id="engineer-launch-model" class="provider-custom-input hidden" aria-label="Custom model" placeholder="Enter a model ID" autocomplete="off" oninput="_onCustomModelInput('engineer-launch-model')">
         <label for="engineer-launch-reasoning-effort">Reasoning effort</label>
-        <select id="engineer-launch-reasoning-effort"></select>
+        <select id="engineer-launch-reasoning-effort" onchange="_onReasoningEffortSelectChange('engineer-launch-reasoning-effort')"></select>
+        <input id="engineer-launch-reasoning-effort-custom" class="provider-custom-input hidden" aria-label="Custom reasoning effort" placeholder="Enter a reasoning effort" autocomplete="off">
         <label for="engineer-launch-custom-instructions">Custom instructions</label>
         <textarea id="engineer-launch-custom-instructions" rows="5" placeholder="Instructions appended after Torque's built-in Engineer policy..."></textarea>
         <label>Specializations
@@ -497,63 +496,119 @@
 
       <!-- General sub-tab -->
       <div class="gs-subpane active" data-subpane="group-general">
-      <label for="gs-directory">Directory</label>
-      <input id="gs-directory" placeholder="/path/to/project" autocomplete="off">
-      <label for="gs-shell">Shell</label>
-      <select id="gs-shell">
-        <option value="">Default</option>
-        <option value="zsh">zsh</option>
-        <option value="bash">bash</option>
-        <option value="fish">fish</option>
-      </select>
-      <label for="gs-env-vars">Environment <span class="label-hint">KEY=VALUE per line</span></label>
-      <textarea id="gs-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
-      <label for="gs-env-file">Env file <span class="label-hint">sourced on session start</span></label>
-      <input id="gs-env-file" placeholder=".env" autocomplete="off">
-      <label for="gs-max-agents">Max workers <span class="label-hint">0 = unlimited</span></label>
-      <input id="gs-max-agents" type="number" min="0" max="100" value="0">
-      <label class="gs-checkbox">
-        <input id="gs-collapsed" type="checkbox"> Start collapsed on load
-        <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Collapse this group automatically when the page loads. You can still expand it manually at any time.">?</span>
-      </label>
-      <label class="gs-checkbox">
-        <input id="gs-filter-window" type="checkbox"> Pin to active window
-        <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Only show this group in windows where it has active sessions. If all sessions are closed, the group appears in every window so you can relaunch.">?</span>
-      </label>
+        <section class="gs-settings-section">
+          <div class="gs-settings-section-title">Workspace</div>
+          <div class="gs-settings-section-body settings-field-grid">
+            <div class="settings-field settings-field--wide">
+              <label for="gs-directory">Directory</label>
+              <input id="gs-directory" placeholder="/path/to/project" autocomplete="off"
+                     oninput="refreshGsInheritedLaunchPlaceholders()">
+            </div>
+            <div class="settings-field">
+              <label for="gs-shell">Shell</label>
+              <select id="gs-shell" onchange="refreshGsInheritedLaunchPlaceholders()">
+                <option value="">System default</option>
+                <option value="zsh">zsh</option>
+                <option value="bash">bash</option>
+                <option value="fish">fish</option>
+              </select>
+            </div>
+          </div>
+        </section>
+
+        <section class="gs-settings-section">
+          <div class="gs-settings-section-title">Environment</div>
+          <div class="gs-settings-section-body settings-field-grid">
+            <div class="settings-field settings-field--wide">
+              <label for="gs-env-file">Env file <span class="label-hint">sourced on session start</span></label>
+              <input id="gs-env-file" placeholder=".env" autocomplete="off"
+                     oninput="refreshGsInheritedLaunchPlaceholders()">
+            </div>
+            <div class="settings-field settings-field--wide">
+              <label for="gs-env-vars">Variables <span class="label-hint">KEY=VALUE per line</span></label>
+              <textarea id="gs-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
+            </div>
+          </div>
+        </section>
+
+        <section class="gs-settings-section">
+          <div class="gs-settings-section-title">Limits &amp; visibility</div>
+          <div class="gs-settings-section-body">
+            <div class="settings-field-grid">
+              <div class="settings-field">
+                <label for="gs-max-agents">Agent limit <span class="label-hint">0 = unlimited</span></label>
+                <input id="gs-max-agents" type="number" min="0" max="100" value="0">
+              </div>
+            </div>
+            <div class="settings-check-list">
+              <label class="gs-checkbox">
+                <input id="gs-collapsed" type="checkbox"> Start collapsed on load
+                <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Collapse this group automatically when the page loads. You can still expand it manually at any time.">?</span>
+              </label>
+              <label class="gs-checkbox">
+                <input id="gs-filter-window" type="checkbox"> Pin to active window
+                <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Only show this group in windows where it has active sessions. If all sessions are closed, the group appears in every window so you can relaunch.">?</span>
+              </label>
+            </div>
+          </div>
+        </section>
       </div>
 
-      <!-- Agents (all-kinds defaults) sub-tab -->
+      <!-- Agents (all-kinds launch defaults) sub-tab -->
       <div class="gs-subpane" data-subpane="group-worker-defaults">
-        <div class="label-hint task-modal-section-intro">Group-wide defaults for all agents — workers, engineers, and architects — unless overridden per-kind.</div>
-        <label for="gs-agent-provider">Default provider</label>
-        <select id="gs-agent-provider" onchange="onGsProviderChange()"></select>
-        <label for="gs-default-agent-template">Default role</label>
-        <select id="gs-default-agent-template"></select>
-        <div id="gs-agent-boot-cmd-row" class="hidden">
-          <label for="gs-agent-boot-cmd">Default boot command</label>
-          <input id="gs-agent-boot-cmd" placeholder="e.g. my-agent-cli" autocomplete="off" oninput="refreshGsInheritedLaunchPlaceholders()">
-        </div>
-        <label for="gs-agent-model">Default model</label>
-        <input id="gs-agent-model" placeholder="Use provider default" autocomplete="off" oninput="refreshGsInheritedLaunchPlaceholders()">
-        <label for="gs-agent-reasoning-effort">Default reasoning effort</label>
-        <select id="gs-agent-reasoning-effort"></select>
+        <section class="gs-settings-section">
+          <div class="gs-settings-section-title">Shared launch defaults</div>
+          <div class="gs-settings-section-body">
+            <p class="settings-section-description">Used by every agent kind unless its own General settings override them.</p>
+            <div class="settings-field-grid settings-field-grid--three">
+              <div class="settings-field">
+                <label for="gs-agent-provider">Provider</label>
+                <select id="gs-agent-provider" onchange="onGsProviderChange()"></select>
+              </div>
+              <div class="settings-field">
+                <label for="gs-agent-model-select">Model</label>
+                <select id="gs-agent-model-select" onchange="_onModelSelectChange('gs-agent-model')"></select>
+                <input id="gs-agent-model" class="provider-custom-input hidden" aria-label="Custom default model" placeholder="Enter a model ID" autocomplete="off" oninput="_onCustomModelInput('gs-agent-model')">
+              </div>
+              <div class="settings-field">
+                <label for="gs-agent-reasoning-effort">Reasoning effort</label>
+                <select id="gs-agent-reasoning-effort" onchange="_onReasoningEffortSelectChange('gs-agent-reasoning-effort');refreshGsInheritedLaunchPlaceholders()"></select>
+                <input id="gs-agent-reasoning-effort-custom" class="provider-custom-input hidden" aria-label="Custom default reasoning effort" placeholder="Enter a reasoning effort" autocomplete="off" oninput="refreshGsInheritedLaunchPlaceholders()">
+              </div>
+              <div id="gs-agent-boot-cmd-row" class="settings-field settings-field--wide settings-field--secondary hidden">
+                <label for="gs-agent-boot-cmd">Command override <span class="label-hint">advanced</span></label>
+                <input id="gs-agent-boot-cmd" placeholder="e.g. my-agent-cli" autocomplete="off" oninput="refreshGsInheritedLaunchPlaceholders()">
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
 
       <!-- Sync provider sub-tab -->
       <div class="gs-subpane" data-subpane="group-sync">
-        <div class="label-hint task-modal-section-intro">Configure external board sync for this group. V1 supports GitHub Issues + Projects; additional providers can occupy this selector later.</div>
-        <label for="gs-board-sync-provider">Board sync provider</label>
-        <select id="gs-board-sync-provider" onchange="onGsBoardSyncProviderChange()">
-          <option value="none">None</option>
-          <option value="github">GitHub</option>
-        </select>
-        <label class="gs-checkbox">
-          <input id="gs-board-sync-enabled" type="checkbox"> Enable sync
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Provider selection and enablement are separate: configure GitHub here, then turn sync on when ready.">?</span>
-        </label>
+        <section class="gs-settings-section">
+          <div class="gs-settings-section-title">Connection</div>
+          <div class="gs-settings-section-body">
+            <div class="settings-field-grid">
+              <div class="settings-field">
+                <label for="gs-board-sync-provider">Provider</label>
+                <select id="gs-board-sync-provider" onchange="onGsBoardSyncProviderChange()">
+                  <option value="none">None</option>
+                  <option value="github">GitHub</option>
+                </select>
+              </div>
+            </div>
+            <div class="settings-check-list">
+              <label class="gs-checkbox">
+                <input id="gs-board-sync-enabled" type="checkbox"> Enable sync
+                <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Configure and test the provider before enabling synchronization.">?</span>
+              </label>
+            </div>
+          </div>
+        </section>
         <div id="gs-board-sync-github-config" class="board-sync-provider-config" style="display:none">
-          <div class="gs-settings-section">
-            <div class="gs-settings-section-title">GitHub repository and project</div>
+          <section class="gs-settings-section">
+            <div class="gs-settings-section-title">Repository &amp; project</div>
             <div class="gs-settings-section-body">
               <label for="gs-board-sync-github-repo">Repository <span class="label-hint">owner/repo</span></label>
               <div class="board-sync-inline-row">
@@ -576,10 +631,14 @@
               </details>
               <label for="gs-board-sync-github-status-field">Project Status field name</label>
               <input id="gs-board-sync-github-status-field" autocomplete="off" placeholder="Status">
+              <div class="board-sync-test-row">
+                <button type="button" class="btn-secondary" id="gs-board-sync-test" onclick="testGroupBoardSyncConnection()">Test connection</button>
+                <span id="gs-board-sync-preflight-summary" class="board-sync-preflight-summary" aria-live="polite"></span>
+              </div>
             </div>
-          </div>
-          <div class="gs-settings-section">
-            <div class="gs-settings-section-title">GitHub mapping and behavior</div>
+          </section>
+          <section class="gs-settings-section">
+            <div class="gs-settings-section-title">Board mapping</div>
             <div class="gs-settings-section-body">
               <label for="gs-board-sync-github-lane-map">Lane → status mapping</label>
               <div id="gs-board-sync-lane-map-editor" class="settings-map-editor" aria-label="Lane to GitHub status mapping"></div>
@@ -590,12 +649,22 @@
                           oninput="gsBoardSyncMapRender('lane')"
                           placeholder='{"Backlog":"Todo","In Progress":"In Progress","Done":"Done"}'></textarea>
               </details>
+            </div>
+          </section>
+          <section class="gs-settings-section">
+            <div class="gs-settings-section-title">Issue behavior</div>
+            <div class="gs-settings-section-body">
               <label class="gs-checkbox">
                 <input id="gs-board-sync-github-close-via-pr" type="checkbox"> Close linked issues via PR body
               </label>
               <label class="gs-checkbox">
                 <input id="gs-board-sync-github-create-labels" type="checkbox"> Create missing labels in GitHub (recommended)
               </label>
+            </div>
+          </section>
+          <section class="gs-settings-section">
+            <div class="gs-settings-section-title">Assignees</div>
+            <div class="gs-settings-section-body">
               <label for="gs-board-sync-github-assignee-map">Assignee mapping <span class="label-hint">Torque agent → GitHub login</span></label>
               <div id="gs-board-sync-assignee-map-editor" class="settings-map-editor" aria-label="Torque agent to GitHub assignee mapping"></div>
               <button type="button" class="btn-secondary settings-map-add" onclick="gsBoardSyncMapAddRow('assignee')">+ Add assignee</button>
@@ -606,24 +675,22 @@
                           placeholder='{"worker-1":"octocat","backend-engineer":"hubot"}'></textarea>
               </details>
             </div>
-          </div>
-        </div>
-        <div class="board-sync-test-row">
-          <button type="button" class="btn-secondary" id="gs-board-sync-test" onclick="testGroupBoardSyncConnection()">Test connection</button>
-          <span id="gs-board-sync-preflight-summary" class="board-sync-preflight-summary" aria-live="polite"></span>
+          </section>
         </div>
       </div>
 
       <!-- Advanced sub-tab -->
-      <div class="gs-subpane" data-subpane="group-advanced">
-        <div class="gs-settings-section">
-          <div class="gs-settings-section-title">Guidance hints</div>
+      <div class="gs-subpane gs-subpane--compact" data-subpane="group-advanced">
+        <section class="gs-settings-section">
+          <div class="gs-settings-section-title">Guidance</div>
           <div class="gs-settings-section-body">
-            <label for="gs-guidance-hint-cadence">Guidance hint cadence</label>
-            <input id="gs-guidance-hint-cadence" type="number" min="0" max="100" step="1" value="4">
-            <div class="label-hint task-modal-section-intro">Recurring guidance hints (for example the user-message reply-tool hint and the engineer identity anchor) show on the 1st occurrence, then every N agent messages. 0 = every message.</div>
+            <div class="settings-field settings-field--compact">
+              <label for="gs-guidance-hint-cadence">Hint cadence</label>
+              <input id="gs-guidance-hint-cadence" type="number" min="0" max="100" step="1" value="4">
+              <div class="settings-field-help">Show recurring guidance on the first applicable message, then every N messages. Use 0 for every message.</div>
+            </div>
           </div>
-        </div>
+        </section>
         <section class="settings-danger-zone" aria-labelledby="gs-danger-zone-title">
           <div>
             <strong id="gs-danger-zone-title">Danger zone</strong>
@@ -644,133 +711,226 @@
 
       <!-- Execution sub-tab -->
       <div class="gs-subpane active" data-subpane="worker-execution">
-        <div class="label-hint task-modal-section-intro">Worker defaults can override the group-wide Agents defaults here. Leave provider, command, model, or reasoning effort blank to inherit Group → Agents.</div>
-        <label for="gs-worker-provider">Provider</label>
-        <select id="gs-worker-provider" onchange="onGsWorkerProviderChange()"></select>
-        <label for="gs-worker-boot-command">Command override</label>
-        <input id="gs-worker-boot-command" placeholder="Group default" autocomplete="off">
-        <label for="gs-worker-model">Model</label>
-        <input id="gs-worker-model" placeholder="Group default" autocomplete="off">
-        <label for="gs-worker-reasoning-effort">Reasoning effort</label>
-        <select id="gs-worker-reasoning-effort"></select>
-        <div class="label-hint task-modal-section-intro">Execution context defaults for worker sessions.</div>
-        <label for="gs-agent-directory">Directory</label>
-        <input id="gs-agent-directory" placeholder="Same as group" autocomplete="off">
-        <label for="gs-agent-shell">Shell</label>
-        <select id="gs-agent-shell">
-          <option value="">Same as group</option>
-          <option value="zsh">zsh</option>
-          <option value="bash">bash</option>
-          <option value="fish">fish</option>
-        </select>
-        <label for="gs-agent-env-vars">Additional environment <span class="label-hint">KEY=VALUE per line</span></label>
-        <textarea id="gs-agent-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
-        <label for="gs-agent-env-file">Env file</label>
-        <input id="gs-agent-env-file" placeholder="Inherits from group" autocomplete="off">
-        <label class="gs-checkbox">
-          <input id="gs-session-resume" type="checkbox" checked> Resume session on relaunch
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When relaunching a worker, resume the previous conversation instead of starting fresh. Currently supported for Claude Code.">?</span>
-        </label>
-        <label for="gs-agent-idle-timeout">Idle timeout <span class="label-hint">minutes, 0 = disable</span></label>
-        <input id="gs-agent-idle-timeout" type="number" min="0" max="60" value="5">
+        <section class="gs-settings-section">
+          <div class="gs-settings-section-title">Launch</div>
+          <div class="gs-settings-section-body settings-field-grid">
+            <div class="settings-field">
+              <label for="gs-default-agent-template">Default role</label>
+              <select id="gs-default-agent-template"></select>
+              <div class="settings-field-help">Base role for Workers; a task or action role can override it.</div>
+            </div>
+            <div class="settings-field">
+              <label for="gs-worker-provider">Provider</label>
+              <select id="gs-worker-provider" onchange="onGsWorkerProviderChange()"></select>
+            </div>
+            <div class="settings-field">
+              <label for="gs-worker-model-select">Model</label>
+              <select id="gs-worker-model-select" onchange="_onModelSelectChange('gs-worker-model')"></select>
+              <input id="gs-worker-model" class="provider-custom-input hidden" aria-label="Custom worker model" placeholder="Enter a model ID" autocomplete="off" oninput="_onCustomModelInput('gs-worker-model')">
+            </div>
+            <div class="settings-field">
+              <label for="gs-worker-reasoning-effort">Reasoning effort</label>
+              <select id="gs-worker-reasoning-effort" onchange="_onReasoningEffortSelectChange('gs-worker-reasoning-effort')"></select>
+              <input id="gs-worker-reasoning-effort-custom" class="provider-custom-input hidden" aria-label="Custom worker reasoning effort" placeholder="Enter a reasoning effort" autocomplete="off">
+            </div>
+            <div class="settings-field settings-field--wide settings-field--secondary">
+              <label for="gs-worker-boot-command">Command override <span class="label-hint">advanced</span></label>
+              <input id="gs-worker-boot-command" placeholder="Inherit group command" autocomplete="off">
+            </div>
+          </div>
+        </section>
+
+        <section class="gs-settings-section">
+          <div class="gs-settings-section-title">Runtime</div>
+          <div class="gs-settings-section-body settings-field-grid">
+            <div class="settings-field settings-field--wide">
+              <label for="gs-agent-directory">Directory</label>
+              <input id="gs-agent-directory" placeholder="Inherit group directory" autocomplete="off"
+                     oninput="refreshGsInheritedLaunchPlaceholders()">
+            </div>
+            <div class="settings-field">
+              <label for="gs-agent-shell">Shell</label>
+              <select id="gs-agent-shell" onchange="refreshGsInheritedLaunchPlaceholders()">
+                <option value="">Inherit group shell</option>
+                <option value="zsh">zsh</option>
+                <option value="bash">bash</option>
+                <option value="fish">fish</option>
+              </select>
+            </div>
+            <div class="settings-field settings-field--wide">
+              <label for="gs-agent-env-file">Env file</label>
+              <input id="gs-agent-env-file" placeholder="Inherit group env file" autocomplete="off">
+            </div>
+            <div class="settings-field settings-field--wide">
+              <label for="gs-agent-env-vars">Additional variables <span class="label-hint">KEY=VALUE per line</span></label>
+              <textarea id="gs-agent-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
+            </div>
+          </div>
+        </section>
+
+        <section class="gs-settings-section">
+          <div class="gs-settings-section-title">Session</div>
+          <div class="gs-settings-section-body">
+            <div class="settings-field-grid">
+              <div class="settings-field">
+                <label for="gs-agent-idle-timeout">Idle timeout <span class="label-hint">minutes, 0 = disable</span></label>
+                <input id="gs-agent-idle-timeout" type="number" min="0" max="60" value="5">
+              </div>
+            </div>
+            <div class="settings-check-list">
+              <label class="gs-checkbox">
+                <input id="gs-session-resume" type="checkbox" checked> Resume session on relaunch
+                <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When relaunching a worker, resume the previous conversation instead of starting fresh. Currently supported for Claude Code.">?</span>
+              </label>
+            </div>
+          </div>
+        </section>
       </div>
 
       <!-- Worktree sub-tab -->
       <div class="gs-subpane" data-subpane="worker-worktree">
-        <label class="gs-checkbox">
-          <input id="gs-worktree" type="checkbox" onchange="_toggleWorktreeFields()"> Git worktree per worker
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Create a new git worktree and branch for each worker, so they can work on the same repo in parallel without conflicts.">?</span>
-        </label>
-        <div id="gs-wt-fields" style="display:none;padding-left:20px">
-          <label for="gs-wt-base-dir">Worktree directory <span class="label-hint">relative to repo root</span></label>
-          <input id="gs-wt-base-dir" placeholder=".torque/worktrees" autocomplete="off">
-          <label for="gs-wt-base-branch">Base branch <span class="label-hint">empty = current HEAD</span></label>
-          <input id="gs-wt-base-branch" placeholder="main" autocomplete="off">
-          <label class="gs-checkbox">
-            <input id="gs-wt-auto-checkpoint" type="checkbox"> Auto-checkpoint on stop
-            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Automatically commit all changes when a worker stops. Creates a checkpoint commit on the worktree branch.">?</span>
-          </label>
-          <label class="gs-checkbox">
-            <input id="gs-wt-checkpoint-on-progress" type="checkbox"> Checkpoint on progress
-            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Automatically checkpoint when a worker reports progress or completes a task. Throttled to at most once per 5 minutes. Creates finer-grained save points for rollback.">?</span>
-          </label>
-          <label class="gs-checkbox">
-            <input id="gs-wt-merge-squash" type="checkbox" checked> Squash commits on merge
-            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Squash all worktree commits into a single commit when merging to main. Keeps the main branch history clean.">?</span>
-          </label>
-          <label for="gs-engineer-merge-mode">Engineer merge mode
-            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Locks engineer_merge to Pull request, Direct local, or Engineer choice. Lock overrides and disallowed attempts are recorded as workflow-breach audit events.">?</span>
-          </label>
-          <select id="gs-engineer-merge-mode">
-            <option value="pr">Pull request (default)</option>
-            <option value="direct">Direct local</option>
-            <option value="engineer-choice">Engineer choice</option>
-          </select>
-          <div class="label-hint">
-            Pull request rejects force_direct=true. Direct local bypasses the
-            PR path. Engineer choice keeps the current default-PR plus
-            force_direct escape hatch.
+        <div class="settings-pane-intro">
+          <h3>Repository workflow</h3>
+          <p>Configure isolation, checkpoints, merging, and shared paths.</p>
+        </div>
+
+        <section class="gs-settings-section">
+          <div class="gs-settings-section-title">Workspace isolation</div>
+          <div class="gs-settings-section-body">
+            <label for="gs-worktree-mode">Workspace mode</label>
+            <select id="gs-worktree-mode" onchange="_syncWorktreeSettingsUi()">
+              <option value="shared">Shared group checkout</option>
+              <option value="isolated">Isolated worktree (recommended)</option>
+            </select>
+            <div id="gs-worktree-mode-hint" class="worktree-setting-summary" aria-live="polite"></div>
+            <div id="gs-wt-isolation-fields" class="worktree-dependent-fields">
+              <label for="gs-wt-base-dir">Worktree directory <span class="label-hint">relative to repo root</span></label>
+              <input id="gs-wt-base-dir" placeholder=".torque/worktrees" autocomplete="off">
+              <label for="gs-wt-base-branch">Base branch <span class="label-hint">empty = current HEAD</span></label>
+              <input id="gs-wt-base-branch" placeholder="main" autocomplete="off">
+            </div>
           </div>
-          <label for="gs-wt-merge-instructions">Additional merge instructions
-            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Extra instructions appended to the merge prompt sent to Claude. Use this to customize merge behavior, e.g. 'Use a conventional commit message' or 'Run tests after merging'.">?</span>
-          </label>
-          <textarea id="gs-wt-merge-instructions" rows="2" placeholder="e.g. Use a conventional commit message"></textarea>
-          <label for="gs-wt-merge-cleanup">Default post-merge cleanup
-            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="What Torque should do by default after a successful merge when no explicit cleanup choice is provided. Keep worker and worktree preserves warm continuity by default. Auto-sweep is opt-in and runs only after the branch is actually merged; same-worker queued follow-up tasks still keep the worker and worktree alive.">?</span>
-          </label>
-          <select id="gs-wt-merge-cleanup">
-            <option value="keep">Keep worker and worktree (default / warm)</option>
-            <option value="auto_sweep">Auto-sweep merged branch and worktree</option>
-            <option value="close">Close worker only</option>
-            <option value="remove">Delete worktree only</option>
-            <option value="close_remove">Close worker and delete worktree</option>
-          </select>
-          <label class="gs-checkbox">
-            <input id="gs-wt-merge-preserve-diff" type="checkbox"> Preserve merge diff by default
-            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When a merge succeeds, save the full pre-merge patch as a diff artifact on the latest open branch-boundary task. If no open boundary task exists, Torque warns but still completes the merge.">?</span>
-          </label>
-          <label>Symlinks <span class="label-hint">symlinked from repo root</span>
-            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Repo-relative exact paths or glob patterns to symlink into each new worktree. Recursive `**` is supported (for example `etl/**/node_modules`). Only existing matches inside the repo root are linked, and escape paths like `..` are ignored.">?</span>
-          </label>
-          <label class="gs-checkbox">
-            <input id="gs-wt-symlink-gitignored" type="checkbox"> Symlink gitignored paths
-            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Use Git ignore rules to symlink ignored files and directories into each new worktree. Torque skips its own .torque runtime directory and never replaces paths that already exist in the worktree.">?</span>
-          </label>
-          <div class="label-hint">
-            Warning: symlinks every gitignored path, including .env, secrets,
-            credentials, and node_modules. Workers read and modify the real
-            files because these are symlinks, not copies.
-          </div>
-          <div id="gs-wt-symlinks-list" class="wt-symlinks-chips"></div>
-          <div style="display:flex;gap:4px;align-items:center">
-            <input id="gs-wt-symlink-input" placeholder="e.g. etl/**/node_modules" autocomplete="off" style="flex:1"
-                   onkeydown="if(event.key==='Enter'){event.preventDefault();_addWtSymlink()}">
-            <button class="btn btn-sm" onclick="_addWtSymlink()">Add</button>
-          </div>
-          <div class="wt-symlink-presets">
-            <button type="button" class="preset-button" onclick="_addWtSymlinkPreset('node_modules')">node_modules</button>
-            <button type="button" class="preset-button" onclick="_addWtSymlinkPreset('.venv')">.venv</button>
-            <button type="button" class="preset-button" onclick="_addWtSymlinkPreset('vendor/bundle')">vendor/bundle</button>
-            <button type="button" class="preset-button" onclick="_addWtSymlinkPreset('vendor')">vendor/</button>
-          </div>
+        </section>
+
+        <div id="gs-wt-dependent-settings" class="worktree-dependent-fields">
+          <section class="gs-settings-section">
+            <div class="gs-settings-section-title">Checkpoints</div>
+            <div class="gs-settings-section-body">
+              <label for="gs-wt-checkpoint-mode">Automatic checkpoints</label>
+              <select id="gs-wt-checkpoint-mode">
+                <option value="manual">Manual only</option>
+                <option value="stop" selected>On stop</option>
+                <option value="progress">On progress updates</option>
+                <option value="progress-stop">On progress updates and stop</option>
+              </select>
+              <div class="worktree-setting-summary">
+                Progress checkpoints are throttled to at most once every five minutes.
+              </div>
+            </div>
+          </section>
+
+          <section class="gs-settings-section">
+            <div class="gs-settings-section-title">Merge workflow</div>
+            <div class="gs-settings-section-body">
+              <label for="gs-engineer-merge-mode">Merge mode
+                <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Locks engineer_merge to Pull request, Direct local, or Engineer choice. Lock overrides and disallowed attempts are recorded as workflow-breach audit events.">?</span>
+              </label>
+              <select id="gs-engineer-merge-mode" onchange="_syncWorktreeMergeModeUi()">
+                <option value="pr">Pull request (default)</option>
+                <option value="direct">Direct local</option>
+                <option value="engineer-choice">Engineer choice</option>
+              </select>
+              <div id="gs-wt-merge-mode-help" class="worktree-setting-summary" aria-live="polite"></div>
+              <div id="gs-wt-direct-history-row">
+                <label id="gs-wt-direct-history-label" for="gs-wt-direct-history">Direct-merge history</label>
+                <select id="gs-wt-direct-history">
+                  <option value="preserve" selected>Preserve commits</option>
+                  <option value="squash">Squash into one commit</option>
+                </select>
+                <div class="worktree-setting-summary">
+                  This setting applies only when Torque merges directly into the local base branch.
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="gs-settings-section">
+            <div class="gs-settings-section-title">After merge</div>
+            <div class="gs-settings-section-body">
+              <label for="gs-wt-merge-cleanup">Default cleanup
+                <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="What Torque should do by default after a successful merge when no explicit cleanup choice is provided. Keep worker and worktree preserves warm continuity by default. Auto-sweep is opt-in and runs only after the branch is actually merged; same-worker queued follow-up tasks still keep the worker and worktree alive.">?</span>
+              </label>
+              <select id="gs-wt-merge-cleanup">
+                <option value="keep">Keep worker and worktree (default / warm)</option>
+                <option value="auto_sweep">Auto-sweep merged branch and worktree</option>
+                <option value="close">Close worker only</option>
+                <option value="remove">Delete worktree only</option>
+                <option value="close_remove">Close worker and delete worktree</option>
+              </select>
+              <label class="gs-checkbox">
+                <input id="gs-wt-merge-preserve-diff" type="checkbox"> Preserve merge diff
+                <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When a merge succeeds, save the full pre-merge patch as a diff artifact on the latest open branch-boundary task. If no open boundary task exists, Torque warns but still completes the merge.">?</span>
+              </label>
+            </div>
+          </section>
+
+          <section class="gs-settings-section">
+            <div class="gs-settings-section-title">Shared paths</div>
+            <div class="gs-settings-section-body">
+              <label class="gs-checkbox">
+                <input id="gs-wt-symlink-gitignored" type="checkbox"> Symlink all gitignored paths
+                <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Use Git ignore rules to symlink ignored files and directories into each new worktree. Torque skips its own .torque runtime directory and never replaces paths that already exist in the worktree.">?</span>
+              </label>
+              <div class="worktree-setting-warning">
+                This can expose .env files, credentials, caches, and dependencies. Changes through these symlinks modify the original files.
+              </div>
+              <label>Explicit symlinks <span class="label-hint">repo-relative paths or globs</span>
+                <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Repo-relative exact paths or glob patterns to symlink into each new worktree. Recursive `**` is supported (for example `etl/**/node_modules`). Only existing matches inside the repo root are linked, and escape paths like `..` are ignored.">?</span>
+              </label>
+              <div id="gs-wt-symlinks-list" class="wt-symlinks-chips"></div>
+              <div class="worktree-symlink-entry">
+                <input id="gs-wt-symlink-input" placeholder="e.g. etl/**/node_modules" autocomplete="off"
+                       onkeydown="if(event.key==='Enter'){event.preventDefault();_addWtSymlink()}">
+                <button type="button" class="btn btn-sm" onclick="_addWtSymlink()">Add</button>
+              </div>
+              <div class="wt-symlink-presets">
+                <button type="button" class="preset-button" onclick="_addWtSymlinkPreset('node_modules')">node_modules</button>
+                <button type="button" class="preset-button" onclick="_addWtSymlinkPreset('.venv')">.venv</button>
+                <button type="button" class="preset-button" onclick="_addWtSymlinkPreset('vendor/bundle')">vendor/bundle</button>
+                <button type="button" class="preset-button" onclick="_addWtSymlinkPreset('vendor')">vendor/</button>
+              </div>
+            </div>
+          </section>
         </div>
       </div>
 
       <!-- Notifications sub-tab -->
       <div class="gs-subpane" data-subpane="worker-notifications">
-        <label class="gs-checkbox">
-          <input id="gs-notifications" type="checkbox"> Enable macOS worker notifications
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Send macOS notifications when workers in this group finish, encounter errors, or need attention. Notifications are batched over 5 seconds.">?</span>
-        </label>
-        <label class="gs-checkbox">
-          <input id="gs-notify-finish" type="checkbox" checked> Notify on finish
-        </label>
-        <label class="gs-checkbox">
-          <input id="gs-notify-error" type="checkbox" checked> Notify on error
-        </label>
-        <label class="gs-checkbox">
-          <input id="gs-notify-attention" type="checkbox" checked> Notify when needs attention
-        </label>
+        <section class="gs-settings-section">
+          <div class="gs-settings-section-title">Delivery</div>
+          <div class="gs-settings-section-body">
+            <label class="gs-checkbox">
+              <input id="gs-notifications" type="checkbox" onchange="_syncWorkerNotificationSettingsUi()"> Enable macOS notifications
+              <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Send batched macOS notifications for workers in this group. Notifications are grouped over a 5-second window.">?</span>
+            </label>
+          </div>
+        </section>
+        <section class="gs-settings-section">
+          <div class="gs-settings-section-title">Events</div>
+          <div id="gs-worker-notification-events" class="gs-settings-section-body settings-dependent-fields">
+            <div class="settings-check-list settings-check-list--flush">
+              <label class="gs-checkbox">
+                <input id="gs-notify-finish" type="checkbox" checked> Worker finished
+              </label>
+              <label class="gs-checkbox">
+                <input id="gs-notify-error" type="checkbox" checked> Worker error
+              </label>
+              <label class="gs-checkbox">
+                <input id="gs-notify-attention" type="checkbox" checked> Worker needs attention
+              </label>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
 
@@ -784,102 +944,158 @@
 
       <!-- General sub-tab -->
       <div class="gs-subpane active" data-subpane="engineer-general">
-        <label for="gs-engineer-provider">Provider</label>
-        <select id="gs-engineer-provider" onchange="onGsEngineerProviderChange()"></select>
-        <label for="gs-engineer-boot-cmd">Command override</label>
-        <input id="gs-engineer-boot-cmd" placeholder="Use provider default" autocomplete="off">
-        <label for="gs-engineer-model">Model</label>
-        <input id="gs-engineer-model" placeholder="Use provider default" autocomplete="off">
-        <label for="gs-engineer-reasoning-effort">Reasoning effort</label>
-        <select id="gs-engineer-reasoning-effort"></select>
-        <label>Terminal overrides</label>
-        <div class="label-hint task-modal-section-intro">Optional launch overrides for the designated Engineer only. Leave blank to inherit the usual agent/group defaults.</div>
-        <label for="gs-engineer-directory">Directory</label>
-        <input id="gs-engineer-directory" placeholder="Same as agent/group" autocomplete="off">
-        <label for="gs-engineer-shell">Shell</label>
-        <select id="gs-engineer-shell">
-          <option value="">Same as agent/group</option>
-          <option value="zsh">zsh</option>
-          <option value="bash">bash</option>
-          <option value="fish">fish</option>
-        </select>
+        <section class="gs-settings-section">
+          <div class="gs-settings-section-title">Launch</div>
+          <div class="gs-settings-section-body settings-field-grid">
+            <div class="settings-field">
+              <label for="gs-engineer-provider">Provider</label>
+              <select id="gs-engineer-provider" onchange="onGsEngineerProviderChange()"></select>
+            </div>
+            <div class="settings-field">
+              <label for="gs-engineer-model-select">Model</label>
+              <select id="gs-engineer-model-select" onchange="_onModelSelectChange('gs-engineer-model')"></select>
+              <input id="gs-engineer-model" class="provider-custom-input hidden" aria-label="Custom engineer model" placeholder="Enter a model ID" autocomplete="off" oninput="_onCustomModelInput('gs-engineer-model')">
+            </div>
+            <div class="settings-field">
+              <label for="gs-engineer-reasoning-effort">Reasoning effort</label>
+              <select id="gs-engineer-reasoning-effort" onchange="_onReasoningEffortSelectChange('gs-engineer-reasoning-effort')"></select>
+              <input id="gs-engineer-reasoning-effort-custom" class="provider-custom-input hidden" aria-label="Custom engineer reasoning effort" placeholder="Enter a reasoning effort" autocomplete="off">
+            </div>
+            <div class="settings-field settings-field--wide settings-field--secondary">
+              <label for="gs-engineer-boot-cmd">Command override <span class="label-hint">advanced</span></label>
+              <input id="gs-engineer-boot-cmd" placeholder="Inherit group command" autocomplete="off">
+            </div>
+          </div>
+        </section>
+
+        <section class="gs-settings-section">
+          <div class="gs-settings-section-title">Runtime</div>
+          <div class="gs-settings-section-body settings-field-grid">
+            <div class="settings-field settings-field--wide">
+              <label for="gs-engineer-directory">Directory</label>
+              <input id="gs-engineer-directory" placeholder="Inherit runtime directory" autocomplete="off">
+            </div>
+            <div class="settings-field">
+              <label for="gs-engineer-shell">Shell</label>
+              <select id="gs-engineer-shell">
+                <option value="">Inherit runtime shell</option>
+                <option value="zsh">zsh</option>
+                <option value="bash">bash</option>
+                <option value="fish">fish</option>
+              </select>
+            </div>
+          </div>
+        </section>
       </div>
 
       <!-- Behavior sub-tab -->
       <div class="gs-subpane" data-subpane="engineer-behavior">
-        <label for="gs-engineer-specializations-available">Default Specializations
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Ordered list of specialization YAMLs applied to new engineers at creation. Each engineer can override this default after creation.">?</span>
-        </label>
-        <div class="label-hint task-modal-section-intro">Applied to new engineers at creation.</div>
-        <div id="gs-engineer-specializations-picker" class="specializations-picker">
-          <ul id="gs-engineer-specializations-selected" class="specializations-selected"></ul>
-          <div class="specializations-controls">
-            <select id="gs-engineer-specializations-available"></select>
-            <button type="button" class="btn-secondary" onclick="gsEngineerAddSpecialization()">+ Add</button>
+        <section class="gs-settings-section">
+          <div class="gs-settings-section-title">Specializations</div>
+          <div class="gs-settings-section-body">
+            <label for="gs-engineer-specializations-available">Defaults
+              <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Ordered specialization YAMLs applied when an Engineer is created. Each Engineer can override these later.">?</span>
+            </label>
+            <div id="gs-engineer-specializations-picker" class="specializations-picker">
+              <ul id="gs-engineer-specializations-selected" class="specializations-selected"></ul>
+              <div class="specializations-controls">
+                <select id="gs-engineer-specializations-available"></select>
+                <button type="button" class="btn-secondary" onclick="gsEngineerAddSpecialization()">+ Add</button>
+              </div>
+              <div class="specializations-footer">
+                <button type="button" class="btn-link" onclick="openGsEngineerNewSpecializationDialog()">+ New specialization</button>
+              </div>
+            </div>
           </div>
-          <div class="specializations-footer">
-            <button type="button" class="btn-link" onclick="openGsEngineerNewSpecializationDialog()">+ New specialization</button>
-          </div>
-        </div>
+        </section>
 
-        <label for="gs-engineer-autonomy-mode">Autonomy mode
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="How proactively the Engineer should continue work without waiting for you. Use a preset instead of writing custom instructions for common behavior.">?</span>
-        </label>
-        <select id="gs-engineer-autonomy-mode">
-          <option value="suggest_only">Suggest only</option>
-          <option value="dispatch_when_clear">Dispatch when clear</option>
-          <option value="aggressive_auto_continue">Aggressive auto-continue</option>
-        </select>
-        <label for="gs-engineer-default-worker-concurrency">Default worker concurrency
-            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Used as the default max_concurrent value when the Engineer dispatches a wave without specifying one explicitly. Counts non-Engineer workers only.">?</span>
-        </label>
-        <select id="gs-engineer-default-worker-concurrency">
-          <option value="1">1 worker</option>
-          <option value="2">2 workers</option>
-          <option value="3">3 workers</option>
-          <option value="4">4 workers</option>
-          <option value="5">5 workers</option>
-          <option value="6">6 workers</option>
-          <option value="8">8 workers</option>
-        </select>
-        <label for="gs-engineer-wave-size-preference">Wave size preference</label>
-        <select id="gs-engineer-wave-size-preference">
-          <option value="small">Small reviewable waves</option>
-          <option value="balanced">Balanced waves</option>
-          <option value="large">Fill available capacity</option>
-        </select>
-        <label for="gs-engineer-same-agent-follow-up-preference">Same-worker follow-up preference</label>
-        <select id="gs-engineer-same-agent-follow-up-preference">
-          <option value="balanced">Balanced</option>
-          <option value="prefer_same_agent">Prefer same worker</option>
-          <option value="prefer_fresh_agent">Prefer fresh worker</option>
-        </select>
-        <label class="gs-checkbox">
-          <input id="gs-engineer-behavior-requires-user-approval" type="checkbox">
-          Require user approval for per-agent Engineer behavior overlays
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Per-agent Engineer overlays only. Role overlays are stricter and always require user approval regardless of this setting.">?</span>
-        </label>
-        <label for="gs-engineer-notification-preset">Notification noise
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Quick presets for how much digest noise Engineer should send. Detailed changes in System → Digest settings switch the preset to Custom.">?</span>
-        </label>
-        <select id="gs-engineer-notification-preset" onchange="onGsEngineerNotificationPresetChange()">
-          <option value="quiet">Quiet</option>
-          <option value="normal">Normal</option>
-          <option value="noisy">Noisy</option>
-          <option value="custom">Custom</option>
-        </select>
-        <div id="gs-engineer-notification-preset-hint" class="label-hint task-modal-section-intro"></div>
-        <label for="gs-engineer-escalation-style">Escalation style</label>
-        <select id="gs-engineer-escalation-style">
-          <option value="ask_early">Ask early</option>
-          <option value="note_then_ask">Note first, ask when blocked</option>
-          <option value="keep_moving">Keep moving unless blocked</option>
-        </select>
-        <label for="gs-engineer-custom-instructions">Custom instructions <span class="label-hint">expert override</span></label>
-        <textarea id="gs-engineer-custom-instructions" rows="5" placeholder="Instructions appended after Torque's built-in Engineer policy..."></textarea>
-        <div class="system-prompt-preview-row">
-          <button type="button" id="gs-engineer-view-system-prompt" class="btn-secondary system-prompt-preview-btn" onclick="openGroupSystemPromptPreview('engineer')">View system prompt</button>
-        </div>
+        <section class="gs-settings-section">
+          <div class="gs-settings-section-title">Orchestration</div>
+          <div class="gs-settings-section-body settings-field-grid">
+            <div class="settings-field">
+              <label for="gs-engineer-autonomy-mode">Autonomy
+                <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="How proactively the Engineer continues work without waiting for you.">?</span>
+              </label>
+              <select id="gs-engineer-autonomy-mode">
+                <option value="suggest_only">Suggest only</option>
+                <option value="dispatch_when_clear">Dispatch when clear</option>
+                <option value="aggressive_auto_continue">Aggressive auto-continue</option>
+              </select>
+            </div>
+            <div class="settings-field">
+              <label for="gs-engineer-default-worker-concurrency">Worker concurrency
+                <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Default maximum used when an Engineer dispatches a wave without specifying one.">?</span>
+              </label>
+              <select id="gs-engineer-default-worker-concurrency">
+                <option value="1">1 worker</option>
+                <option value="2">2 workers</option>
+                <option value="3">3 workers</option>
+                <option value="4">4 workers</option>
+                <option value="5">5 workers</option>
+                <option value="6">6 workers</option>
+                <option value="8">8 workers</option>
+              </select>
+            </div>
+            <div class="settings-field">
+              <label for="gs-engineer-wave-size-preference">Wave size</label>
+              <select id="gs-engineer-wave-size-preference">
+                <option value="small">Small reviewable waves</option>
+                <option value="balanced">Balanced waves</option>
+                <option value="large">Fill available capacity</option>
+              </select>
+            </div>
+            <div class="settings-field">
+              <label for="gs-engineer-same-agent-follow-up-preference">Worker reuse</label>
+              <select id="gs-engineer-same-agent-follow-up-preference">
+                <option value="balanced">Balanced</option>
+                <option value="prefer_same_agent">Prefer same worker</option>
+                <option value="prefer_fresh_agent">Prefer fresh worker</option>
+              </select>
+            </div>
+          </div>
+        </section>
+
+        <section class="gs-settings-section">
+          <div class="gs-settings-section-title">Communication</div>
+          <div class="gs-settings-section-body settings-field-grid">
+            <div class="settings-field">
+              <label for="gs-engineer-notification-preset">Notification level
+                <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Preset for digest frequency and event coverage. Detailed System changes switch this to Custom.">?</span>
+              </label>
+              <select id="gs-engineer-notification-preset" onchange="onGsEngineerNotificationPresetChange()">
+                <option value="quiet">Quiet</option>
+                <option value="normal">Normal</option>
+                <option value="noisy">Noisy</option>
+                <option value="custom">Custom</option>
+              </select>
+              <div id="gs-engineer-notification-preset-hint" class="settings-field-help"></div>
+            </div>
+            <div class="settings-field">
+              <label for="gs-engineer-escalation-style">Escalation</label>
+              <select id="gs-engineer-escalation-style">
+                <option value="ask_early">Ask early</option>
+                <option value="note_then_ask">Note first, ask when blocked</option>
+                <option value="keep_moving">Keep moving unless blocked</option>
+              </select>
+            </div>
+          </div>
+        </section>
+
+        <section class="gs-settings-section">
+          <div class="gs-settings-section-title">Policy overrides</div>
+          <div class="gs-settings-section-body">
+            <label class="gs-checkbox">
+              <input id="gs-engineer-behavior-requires-user-approval" type="checkbox">
+              Require approval for per-Engineer behavior overrides
+              <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Applies to per-Engineer behavior overlays. Role overlays always require user approval.">?</span>
+            </label>
+            <label for="gs-engineer-custom-instructions">Custom instructions <span class="label-hint">expert override</span></label>
+            <textarea id="gs-engineer-custom-instructions" rows="5" placeholder="Instructions appended after Torque's built-in Engineer policy..."></textarea>
+            <div class="system-prompt-preview-row">
+              <button type="button" id="gs-engineer-view-system-prompt" class="btn-secondary system-prompt-preview-btn" onclick="openGroupSystemPromptPreview('engineer')">View system prompt</button>
+            </div>
+          </div>
+        </section>
       </div>
 
       <!-- System sub-tab -->
@@ -887,66 +1103,87 @@
         <div class="gs-settings-section">
           <div class="gs-settings-section-title">Permissions</div>
           <div class="gs-settings-section-body">
-            <label class="gs-checkbox">
-              <input id="gs-engineer-restrict-to-created-agents" type="checkbox" checked>
-              Allow the Engineer to see workers created by other Engineers
-            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When enabled, this Engineer can see and control workers created by other Engineers. Human operators still see all workers on the board.">?</span>
-            </label>
-            <label class="gs-checkbox">
-              <input id="gs-engineer-can-override-worker-provider" type="checkbox" checked>
-              Allow the Engineer to override the provider for the workers it creates
-              <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Engineers running Claude Code tend to choose Claude Code for their workers regardless of the group's default provider. Disable this to force the engineer to use the group default.">?</span>
-            </label>
+            <div class="settings-check-list settings-check-list--flush">
+              <label class="gs-checkbox">
+                <input id="gs-engineer-restrict-to-created-agents" type="checkbox" checked>
+                See other Engineers' workers
+                <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Allow Engineers to see and control workers created by other Engineers. Operators always see every worker.">?</span>
+              </label>
+              <label class="gs-checkbox">
+                <input id="gs-engineer-can-override-worker-provider" type="checkbox" checked>
+                Choose providers for created workers
+                <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Allow an Engineer to choose a provider instead of using the group's worker default.">?</span>
+              </label>
+            </div>
           </div>
         </div>
         <div class="gs-settings-section">
-          <div class="gs-settings-section-title">Digest settings</div>
-          <div class="gs-settings-section-body">
-            <div class="label-hint task-modal-section-intro">Advanced notification controls. Heartbeats and optional event types affect digest noise, not the Engineer's orchestration policy presets.</div>
-            <label for="gs-engineer-digest-verbosity">Digest verbosity
-              <span id="gs-engineer-digest-verbosity-hint" class="hint-btn" onclick="event.preventDefault();toggleHint(this)">?</span>
-            </label>
-            <select id="gs-engineer-digest-verbosity" onchange="syncGsEngineerNotificationPreset()">
-              <option value="compact">Compact</option>
-              <option value="balanced">Balanced</option>
-              <option value="detailed">Detailed</option>
-            </select>
-            <label for="gs-engineer-push-interval">Push interval</label>
-            <select id="gs-engineer-push-interval" onchange="syncGsEngineerNotificationPreset()">
-              <option value="10">10s</option>
-              <option value="30">30s</option>
-              <option value="60">60s</option>
-              <option value="120">120s</option>
-              <option value="300">300s</option>
-            </select>
-            <label for="gs-engineer-max-interval">Max interval</label>
-            <select id="gs-engineer-max-interval" onchange="syncGsEngineerNotificationPreset()">
-              <option value="60">60s</option>
-              <option value="120">120s</option>
-              <option value="300">300s</option>
-              <option value="600">600s</option>
-            </select>
-            <label for="gs-engineer-heartbeat-interval">Idle heartbeat</label>
-            <select id="gs-engineer-heartbeat-interval" onchange="syncGsEngineerNotificationPreset()">
-              <option value="0">Off</option>
-              <option value="60">1 min</option>
-              <option value="120">2 min</option>
-              <option value="300">5 min</option>
-              <option value="600">10 min</option>
-            </select>
-            <label>Events</label>
-            <div class="task-modal-check-grid">
-              <label class="gs-checkbox"><input type="checkbox" checked disabled> task_completed <span class="label-hint">(mandatory)</span></label>
-              <label class="gs-checkbox"><input type="checkbox" checked disabled> agent_error <span class="label-hint">(mandatory)</span></label>
-              <label class="gs-checkbox"><input type="checkbox" checked disabled> agent_reply <span class="label-hint">(mandatory)</span></label>
-              <label class="gs-checkbox"><input type="checkbox" checked disabled> agent_blocked <span class="label-hint">(mandatory)</span></label>
-              <label class="gs-checkbox"><input type="checkbox" checked disabled> perceived_empty_episode <span class="label-hint">(mandatory)</span></label>
-              <label class="gs-checkbox"><input type="checkbox" checked disabled> ask_created <span class="label-hint">(mandatory)</span></label>
-              <label class="gs-checkbox"><input id="gs-engineer-event-agent-started" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> agent_started</label>
-              <label class="gs-checkbox"><input id="gs-engineer-event-task-dispatched" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> task_dispatched</label>
-              <label class="gs-checkbox"><input id="gs-engineer-event-task-derived" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> task_derived</label>
-              <label class="gs-checkbox"><input id="gs-engineer-event-agent-progress" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> agent_progress</label>
-              <label class="gs-checkbox"><input id="gs-engineer-event-task-health-alert" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> task_health_alert</label>
+          <div class="gs-settings-section-title">Digest delivery</div>
+          <div class="gs-settings-section-body settings-field-grid">
+            <div class="settings-field">
+              <label for="gs-engineer-digest-verbosity">Verbosity
+                <span id="gs-engineer-digest-verbosity-hint" class="hint-btn" onclick="event.preventDefault();toggleHint(this)">?</span>
+              </label>
+              <select id="gs-engineer-digest-verbosity" onchange="syncGsEngineerNotificationPreset()">
+                <option value="compact">Compact</option>
+                <option value="balanced">Balanced</option>
+                <option value="detailed">Detailed</option>
+              </select>
+            </div>
+            <div class="settings-field">
+              <label for="gs-engineer-push-interval">Push interval</label>
+              <select id="gs-engineer-push-interval" onchange="syncGsEngineerNotificationPreset()">
+                <option value="10">10s</option>
+                <option value="30">30s</option>
+                <option value="60">60s</option>
+                <option value="120">120s</option>
+                <option value="300">300s</option>
+              </select>
+            </div>
+            <div class="settings-field">
+              <label for="gs-engineer-max-interval">Maximum interval</label>
+              <select id="gs-engineer-max-interval" onchange="syncGsEngineerNotificationPreset()">
+                <option value="60">60s</option>
+                <option value="120">120s</option>
+                <option value="300">300s</option>
+                <option value="600">600s</option>
+              </select>
+            </div>
+            <div class="settings-field">
+              <label for="gs-engineer-heartbeat-interval">Idle heartbeat</label>
+              <select id="gs-engineer-heartbeat-interval" onchange="syncGsEngineerNotificationPreset()">
+                <option value="0">Off</option>
+                <option value="60">1 min</option>
+                <option value="120">2 min</option>
+                <option value="300">5 min</option>
+                <option value="600">10 min</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="gs-settings-section">
+          <div class="gs-settings-section-title">Events</div>
+          <div class="gs-settings-section-body settings-event-groups">
+            <div>
+              <div class="settings-subsection-label">Always included</div>
+              <div class="settings-event-badges" aria-label="Events always included in Engineer digests">
+                <span>Task completed</span>
+                <span>Agent error</span>
+                <span>Agent reply</span>
+                <span>Agent blocked</span>
+                <span>Empty episode</span>
+                <span>Question created</span>
+              </div>
+            </div>
+            <div>
+              <div class="settings-subsection-label">Optional</div>
+              <div class="task-modal-check-grid">
+                <label class="gs-checkbox"><input id="gs-engineer-event-agent-started" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> Agent started</label>
+                <label class="gs-checkbox"><input id="gs-engineer-event-task-dispatched" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> Task dispatched</label>
+                <label class="gs-checkbox"><input id="gs-engineer-event-task-derived" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> Task derived</label>
+                <label class="gs-checkbox"><input id="gs-engineer-event-agent-progress" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> Agent progress</label>
+                <label class="gs-checkbox"><input id="gs-engineer-event-task-health-alert" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> Task health alert</label>
+              </div>
             </div>
           </div>
         </div>
@@ -963,108 +1200,160 @@
 
       <!-- General sub-tab -->
       <div class="gs-subpane active" data-subpane="architect-general">
-        <label for="gs-architect-provider">Provider</label>
-        <select id="gs-architect-provider" onchange="onGsArchitectProviderChange()"></select>
-        <label for="gs-architect-boot-cmd">Command override</label>
-        <input id="gs-architect-boot-cmd" placeholder="Use provider default" autocomplete="off">
-        <label for="gs-architect-model">Model</label>
-        <input id="gs-architect-model" placeholder="Use provider default" autocomplete="off">
-        <label for="gs-architect-reasoning-effort">Reasoning effort</label>
-        <select id="gs-architect-reasoning-effort"></select>
+        <section class="gs-settings-section">
+          <div class="gs-settings-section-title">Launch</div>
+          <div class="gs-settings-section-body settings-field-grid">
+            <div class="settings-field">
+              <label for="gs-architect-provider">Provider</label>
+              <select id="gs-architect-provider" onchange="onGsArchitectProviderChange()"></select>
+            </div>
+            <div class="settings-field">
+              <label for="gs-architect-model-select">Model</label>
+              <select id="gs-architect-model-select" onchange="_onModelSelectChange('gs-architect-model')"></select>
+              <input id="gs-architect-model" class="provider-custom-input hidden" aria-label="Custom architect model" placeholder="Enter a model ID" autocomplete="off" oninput="_onCustomModelInput('gs-architect-model')">
+            </div>
+            <div class="settings-field">
+              <label for="gs-architect-reasoning-effort">Reasoning effort</label>
+              <select id="gs-architect-reasoning-effort" onchange="_onReasoningEffortSelectChange('gs-architect-reasoning-effort')"></select>
+              <input id="gs-architect-reasoning-effort-custom" class="provider-custom-input hidden" aria-label="Custom architect reasoning effort" placeholder="Enter a reasoning effort" autocomplete="off">
+            </div>
+            <div class="settings-field settings-field--wide settings-field--secondary">
+              <label for="gs-architect-boot-cmd">Command override <span class="label-hint">advanced</span></label>
+              <input id="gs-architect-boot-cmd" placeholder="Inherit group command" autocomplete="off">
+            </div>
+          </div>
+        </section>
+
+        <section class="gs-settings-section">
+          <div class="gs-settings-section-title">Runtime</div>
+          <div class="gs-settings-section-body settings-field-grid">
+            <div class="settings-field settings-field--wide">
+              <label for="gs-architect-directory">Directory</label>
+              <input id="gs-architect-directory" placeholder="Inherit runtime directory" autocomplete="off">
+            </div>
+            <div class="settings-field">
+              <label for="gs-architect-shell">Shell</label>
+              <select id="gs-architect-shell">
+                <option value="">Inherit runtime shell</option>
+                <option value="zsh">zsh</option>
+                <option value="bash">bash</option>
+                <option value="fish">fish</option>
+              </select>
+            </div>
+          </div>
+        </section>
       </div>
 
       <!-- Behavior sub-tab -->
       <div class="gs-subpane" data-subpane="architect-behavior">
-        <label for="gs-architect-autonomy-mode">Autonomy</label>
-        <select id="gs-architect-autonomy-mode">
-          <option value="dispatch_freely">Dispatch freely</option>
-          <option value="dispatch_after_confirm">Dispatch after confirm</option>
-          <option value="ask_always">Ask always</option>
-        </select>
-        <label for="gs-architect-custom-instructions">Custom instructions</label>
-        <textarea id="gs-architect-custom-instructions" rows="6" class="gs-autogrow" oninput="_autoGrowTextArea('gs-architect-custom-instructions')" placeholder="Instructions appended after Torque's built-in Architect policy..."></textarea>
-        <div class="system-prompt-preview-row">
-          <button type="button" id="gs-architect-view-system-prompt" class="btn-secondary system-prompt-preview-btn" onclick="openGroupSystemPromptPreview('architect')">View system prompt</button>
-        </div>
-        <div class="label-hint task-modal-section-intro">Configure architect checkpoint policy.</div>
-        <label for="gs-architect-journal-checkpoint">Journal checkpoint cadence
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="How often Torque reminds the architect to write a `checkpoint` journal entry summarizing active engineers, open scope, pending hires, open decisions, and planned next moves.">?</span>
-        </label>
-        <select id="gs-architect-journal-checkpoint"></select>
+        <section class="gs-settings-section">
+          <div class="gs-settings-section-title">Orchestration</div>
+          <div class="gs-settings-section-body settings-field-grid">
+            <div class="settings-field">
+              <label for="gs-architect-autonomy-mode">Autonomy</label>
+              <select id="gs-architect-autonomy-mode">
+                <option value="dispatch_freely">Dispatch freely</option>
+                <option value="dispatch_after_confirm">Dispatch after confirm</option>
+                <option value="ask_always">Ask always</option>
+              </select>
+            </div>
+          </div>
+        </section>
+        <section class="gs-settings-section">
+          <div class="gs-settings-section-title">Continuity</div>
+          <div class="gs-settings-section-body settings-field-grid">
+            <div class="settings-field">
+              <label for="gs-architect-journal-checkpoint">Journal checkpoint
+                <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="How often Torque reminds the Architect to summarize active Engineers, open scope, pending hires, decisions, and next moves.">?</span>
+              </label>
+              <select id="gs-architect-journal-checkpoint"></select>
+            </div>
+          </div>
+        </section>
+        <section class="gs-settings-section">
+          <div class="gs-settings-section-title">Instructions</div>
+          <div class="gs-settings-section-body">
+            <label for="gs-architect-custom-instructions">Custom instructions <span class="label-hint">expert override</span></label>
+            <textarea id="gs-architect-custom-instructions" rows="6" class="gs-autogrow" oninput="_autoGrowTextArea('gs-architect-custom-instructions')" placeholder="Instructions appended after Torque's built-in Architect policy..."></textarea>
+            <div class="system-prompt-preview-row">
+              <button type="button" id="gs-architect-view-system-prompt" class="btn-secondary system-prompt-preview-btn" onclick="openGroupSystemPromptPreview('architect')">View system prompt</button>
+            </div>
+          </div>
+        </section>
       </div>
 
       <!-- System sub-tab -->
       <div class="gs-subpane" data-subpane="architect-system">
         <div class="gs-settings-section">
-          <div class="gs-settings-section-title">Terminal overrides</div>
+          <div class="gs-settings-section-title">Digest delivery</div>
           <div class="gs-settings-section-body">
-            <div class="label-hint task-modal-section-intro">Optional launch overrides for Architect agents only. Leave blank to inherit the usual agent/group defaults.</div>
-            <label for="gs-architect-directory">Directory</label>
-            <input id="gs-architect-directory" placeholder="Same as agent/group" autocomplete="off">
-            <label for="gs-architect-shell">Shell</label>
-            <select id="gs-architect-shell">
-              <option value="">Same as agent/group</option>
-              <option value="zsh">zsh</option>
-              <option value="bash">bash</option>
-              <option value="fish">fish</option>
-            </select>
+            <div class="settings-field-grid">
+              <div class="settings-field">
+                <label for="gs-architect-digest-verbosity">Verbosity
+                  <span id="gs-architect-digest-verbosity-hint" class="hint-btn" onclick="event.preventDefault();toggleHint(this)">?</span>
+                </label>
+                <select id="gs-architect-digest-verbosity">
+                  <option value="terse">Terse</option>
+                  <option value="balanced">Balanced</option>
+                  <option value="verbose">Verbose</option>
+                </select>
+              </div>
+              <div class="settings-field">
+                <label for="gs-architect-push-interval">Push interval</label>
+                <select id="gs-architect-push-interval">
+                  <option value="60">60s</option>
+                  <option value="120">120s</option>
+                  <option value="300">300s</option>
+                  <option value="600">600s</option>
+                  <option value="900">900s</option>
+                </select>
+              </div>
+              <div class="settings-field">
+                <label for="gs-architect-max-interval">Maximum interval</label>
+                <select id="gs-architect-max-interval">
+                  <option value="120">120s</option>
+                  <option value="300">300s</option>
+                  <option value="600">600s</option>
+                  <option value="1200">1200s</option>
+                  <option value="1800">1800s</option>
+                </select>
+              </div>
+              <div class="settings-field">
+                <label for="gs-architect-heartbeat-interval">Idle heartbeat</label>
+                <select id="gs-architect-heartbeat-interval">
+                  <option value="0">Off</option>
+                  <option value="300">5 min</option>
+                  <option value="600">10 min</option>
+                  <option value="1200">20 min</option>
+                  <option value="1800">30 min</option>
+                </select>
+              </div>
+            </div>
+            <div class="settings-check-list">
+              <label class="gs-checkbox">
+                <input id="gs-architect-suppress-empty" type="checkbox"> Suppress empty digests
+                <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Advance the heartbeat without sending a digest when no events accrued in the window.">?</span>
+              </label>
+            </div>
           </div>
         </div>
         <div class="gs-settings-section">
-          <div class="gs-settings-section-title">Digest settings</div>
-          <div class="gs-settings-section-body">
-            <div class="label-hint task-modal-section-intro">Throttle digest delivery to architect agents in this group. Defaults are tuned to suppress empty-window heartbeats.</div>
-            <label for="gs-architect-digest-verbosity">Digest verbosity
-              <span id="gs-architect-digest-verbosity-hint" class="hint-btn" onclick="event.preventDefault();toggleHint(this)">?</span>
-            </label>
-            <select id="gs-architect-digest-verbosity">
-              <option value="terse">Terse</option>
-              <option value="balanced">Balanced</option>
-              <option value="verbose">Verbose</option>
-            </select>
-            <label for="gs-architect-push-interval">Push interval</label>
-            <select id="gs-architect-push-interval">
-              <option value="60">60s</option>
-              <option value="120">120s</option>
-              <option value="300">300s</option>
-              <option value="600">600s</option>
-              <option value="900">900s</option>
-            </select>
-            <label for="gs-architect-max-interval">Max interval</label>
-            <select id="gs-architect-max-interval">
-              <option value="120">120s</option>
-              <option value="300">300s</option>
-              <option value="600">600s</option>
-              <option value="1200">1200s</option>
-              <option value="1800">1800s</option>
-            </select>
-            <label for="gs-architect-heartbeat-interval">Idle heartbeat</label>
-            <select id="gs-architect-heartbeat-interval">
-              <option value="0">Off</option>
-              <option value="300">5 min</option>
-              <option value="600">10 min</option>
-              <option value="1200">20 min</option>
-              <option value="1800">30 min</option>
-            </select>
-            <label class="gs-checkbox">
-              <input id="gs-architect-suppress-empty" type="checkbox"> Suppress empty-window digests
-              <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When checked, the architect heartbeat is silently advanced when no events accrued in the window — no digest is sent. Recommended on to avoid empty notifications.">?</span>
-            </label>
-            <label>Events</label>
-            <div class="task-modal-check-grid" id="gs-architect-events-grid"></div>
-          </div>
+          <div class="gs-settings-section-title">Events</div>
+          <div class="gs-settings-section-body" id="gs-architect-events-grid"></div>
         </div>
       </div>
-    </div>
 
     </div>
+    </div>
     <div class="modal-actions settings-dialog-footer ui-modal__footer">
-      <span class="settings-save-state" id="gs-save-state" aria-live="polite">No unsaved changes</span>
       <button type="button" class="btn-secondary settings-reset-section"
               onclick="settingsShellResetSection('modal-group-settings')">Reset section</button>
       <span class="settings-footer-spacer"></span>
       <button class="btn-cancel" onclick="settingsShellRequestClose('modal-group-settings')">Cancel</button>
-      <button class="btn-primary" id="gs-save-btn" onclick="submitGroupSettings()" disabled>Save changes</button>
+      <div class="settings-save-control">
+        <button class="btn-primary" id="gs-save-btn" onclick="submitGroupSettings()" disabled>Save changes</button>
+        <span class="settings-save-state" id="gs-save-state" aria-live="polite" hidden></span>
+      </div>
     </div>
   </div>
 </div>
@@ -1110,7 +1399,7 @@
         <span>Appearance</span><small>Theme and density</small>
       </button>
       <button type="button" class="ui-tab gs-tab" data-tab="gls-general" onclick="switchGlsTab('gls-general')" role="tab" aria-selected="false" tabindex="-1">
-        <span>General</span><small>Runtime and Board</small>
+        <span>General</span><small>Defaults and Board</small>
       </button>
       <button type="button" class="ui-tab gs-tab" data-tab="gls-ai" onclick="switchGlsTab('gls-ai')" role="tab" aria-selected="false" tabindex="-1">
         <span>AI</span><small>Providers and recall</small>
@@ -1121,8 +1410,11 @@
       <button type="button" class="ui-tab gs-tab" data-tab="gls-keybindings" onclick="switchGlsTab('gls-keybindings')" role="tab" aria-selected="false" tabindex="-1">
         <span>Shortcuts</span><small>Keyboard controls</small>
       </button>
-      <button type="button" class="ui-tab gs-tab" data-tab="gls-system" onclick="switchGlsTab('gls-system')" role="tab" aria-selected="false" tabindex="-1">
-        <span>System</span><small>Daemon and Relay</small>
+      <button type="button" class="ui-tab gs-tab" data-tab="gls-daemon" onclick="switchGlsTab('gls-daemon')" role="tab" aria-selected="false" tabindex="-1">
+        <span>Daemon</span><small>Runtime status</small>
+      </button>
+      <button type="button" class="ui-tab gs-tab" data-tab="gls-relay" onclick="switchGlsTab('gls-relay')" role="tab" aria-selected="false" tabindex="-1" hidden>
+        <span>Relay</span><small>Remote connectivity</small>
       </button>
     </div>
     <div class="settings-search-results" data-settings-search-results hidden></div>
@@ -1323,14 +1615,8 @@
       </div>
     </div>
 
-    <!-- System tab -->
-    <div class="gs-pane" data-pane="gls-system">
-      <div class="gs-subtabs ui-tablist" role="tablist" aria-label="System settings views" onkeydown="uiTablistKeydown(event)">
-        <button type="button" role="tab" aria-selected="true" tabindex="0" class="ui-tab ui-tab--underline gs-subtab active" data-subtab="gls-daemon" onclick="switchGlsSubTab(this)">Daemon</button>
-        <button type="button" role="tab" aria-selected="false" tabindex="-1" class="ui-tab ui-tab--underline gs-subtab" data-subtab="gls-relay" onclick="switchGlsSubTab(this)">Relay</button>
-      </div>
-
-      <div class="gs-subpane active" data-subpane="gls-daemon">
+    <!-- Daemon tab -->
+    <div class="gs-pane" data-pane="gls-daemon">
         <section class="daemon-status" aria-label="Daemon">
           <div class="daemon-status-grid">
             <div class="daemon-status-label">Status</div>
@@ -1370,9 +1656,10 @@
             </button>
           </div>
         </section>
-      </div>
+    </div>
 
-      <div class="gs-subpane" data-subpane="gls-relay">
+    <!-- Relay tab -->
+    <div class="gs-pane" data-pane="gls-relay">
         <!-- Relay detail (TORQUE:560 connection + TORQUE:603 config).
              Hidden when the daemon publishes neither `relay_connection` nor
              `relay_config` (pre-producer / community). -->
@@ -1553,18 +1840,18 @@
                  role="status" aria-live="polite" hidden></div>
           </div>
         </section>
-      </div>
     </div>
 
     </div>
     <div class="modal-actions settings-dialog-footer ui-modal__footer">
-      <span class="settings-save-state" id="gls-save-state" aria-live="polite">No unsaved changes</span>
       <button type="button" class="btn-secondary settings-reset-section"
               onclick="settingsShellResetSection('modal-global-settings')">Reset section</button>
       <span class="settings-footer-spacer"></span>
       <button class="btn-cancel" onclick="settingsShellRequestClose('modal-global-settings')">Cancel</button>
-      <button class="btn-primary" id="gls-global-save-btn" onclick="submitGlobalSettings()" disabled>Save changes</button>
-      <button class="btn-primary" id="gls-ai-save-btn" onclick="submitAiSettings()" hidden disabled>Save AI settings</button>
+      <div class="settings-save-control">
+        <button class="btn-primary" id="gls-global-save-btn" onclick="submitGlobalSettings()" disabled>Save changes</button>
+        <span class="settings-save-state" id="gls-save-state" aria-live="polite" hidden></span>
+      </div>
     </div>
   </div>
 </div>

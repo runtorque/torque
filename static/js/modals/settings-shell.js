@@ -53,7 +53,7 @@ function _settingsShellEqual(left, right) {
 function _settingsShellSaveButtons(modal) {
   if (!modal || !modal.querySelectorAll) return [];
   return Array.prototype.slice.call(modal.querySelectorAll(
-    '#gs-save-btn, #gls-global-save-btn, #gls-ai-save-btn'
+    '#gs-save-btn, #gls-global-save-btn'
   ));
 }
 
@@ -71,7 +71,11 @@ function _settingsShellApplyDirty(modal, dirty) {
   var dialog = modal.querySelector && modal.querySelector('.settings-dialog');
   if (dialog && dialog.classList) dialog.classList.toggle('is-dirty', !!dirty);
   var label = _settingsShellStateLabel(modal);
-  if (label) label.textContent = dirty ? 'Unsaved changes' : 'No unsaved changes';
+  if (label) {
+    label.textContent = dirty ? 'Unsaved changes' : '';
+    label.hidden = !dirty || !!(dialog && dialog.classList
+      && dialog.classList.contains('settings-read-only'));
+  }
   _settingsShellSaveButtons(modal).forEach(function(button) {
     button.disabled = !dirty;
   });
@@ -123,6 +127,28 @@ function settingsShellCaptureBaseline(modalOrId) {
   settingsShellSyncView(modal.id);
 }
 
+function settingsShellMergeBaseline(modalOrId, root) {
+  var modal = _settingsShellModal(modalOrId);
+  var state = modal && _settingsShellState[modal.id];
+  if (!modal || !root || !state || !state.baseline) return;
+  _settingsShellControls(root).forEach(function(el, index) {
+    var key = _settingsShellControlKey(el, index);
+    state.baseline[key] = _settingsShellControlValue(el);
+  });
+  settingsShellMarkDirty(modal);
+}
+
+function settingsShellScopeDirty(modalOrId, root) {
+  var modal = _settingsShellModal(modalOrId);
+  var state = modal && _settingsShellState[modal.id];
+  if (!modal || !root || !state || !state.baseline) return false;
+  return _settingsShellControls(root).some(function(el, index) {
+    var key = _settingsShellControlKey(el, index);
+    return !Object.prototype.hasOwnProperty.call(state.baseline, key)
+      || state.baseline[key] !== _settingsShellControlValue(el);
+  });
+}
+
 function _settingsShellInheritanceSource(control) {
   if (!control) return '';
   if (/^gs-(worker|engineer|architect)-/.test(control.id || '')) return 'Group default';
@@ -142,13 +168,9 @@ function _settingsShellUpdateInheritance(control) {
     : null;
   if (!note) return;
   var inherited = _settingsShellIsInherited(control);
-  note.classList.toggle('is-overridden', !inherited);
-  var copy = note.querySelector('.settings-inheritance-copy');
   var reset = note.querySelector('button');
-  if (copy) copy.textContent = inherited
-    ? 'Inherited from Group'
-    : 'Override active for this agent kind';
-  if (reset) reset.hidden = inherited;
+  note.hidden = inherited;
+  if (reset) reset.hidden = false;
 }
 
 function settingsShellUseInherited(controlId) {
@@ -179,13 +201,10 @@ function settingsShellDecorateInheritance() {
       var note = document.createElement('div');
       note.className = 'settings-inheritance-note';
       note.dataset.for = control.id;
-      var copy = document.createElement('span');
-      copy.className = 'settings-inheritance-copy';
       var reset = document.createElement('button');
       reset.type = 'button';
       reset.textContent = 'Use group default';
       reset.onclick = function() { settingsShellUseInherited(control.id); };
-      note.appendChild(copy);
       note.appendChild(reset);
       control.parentNode.insertBefore(note, control.nextSibling);
     }
@@ -207,21 +226,68 @@ function _settingsShellRestoreControls(root, values) {
   });
 }
 
+function _settingsShellDefaultControlValue(control) {
+  if (!control) return '';
+  if (control.type === 'checkbox' || control.type === 'radio') {
+    return !!control.defaultChecked;
+  }
+  if (control.tagName === 'SELECT') {
+    var options = Array.prototype.slice.call(control.options || []);
+    var selected = options.find(function(option) { return option.defaultSelected; });
+    if (!selected && options.length) selected = options[0];
+    return selected ? String(selected.value == null ? '' : selected.value) : '';
+  }
+  return String(control.defaultValue == null ? '' : control.defaultValue);
+}
+
+function _settingsShellResetControl(control) {
+  var value = _settingsShellDefaultControlValue(control);
+  if (control.type === 'checkbox' || control.type === 'radio') control.checked = value;
+  else control.value = value;
+  if (!control.dataset) return;
+  if (control.id === 'gls-relay-enabled') control.dataset.relayDirty = '1';
+  if (control.dataset.statusbarItem) control.dataset.statusBarDirty = '1';
+}
+
 function settingsShellResetSection(modalOrId) {
   var modal = _settingsShellModal(modalOrId);
   var state = modal && _settingsShellState[modal.id];
   if (!modal || !state || !state.baseline) return;
   var pane = modal.querySelector('.gs-pane.active') || modal;
   var controls = _settingsShellControls(pane);
-  controls.forEach(function(el) {
-    var all = _settingsShellControls(modal);
-    var index = all.indexOf(el);
-    var key = _settingsShellControlKey(el, index);
-    if (!Object.prototype.hasOwnProperty.call(state.baseline, key)) return;
-    if (el.type === 'checkbox' || el.type === 'radio') el.checked = !!state.baseline[key];
-    else el.value = state.baseline[key];
+  controls.forEach(function(control) {
+    _settingsShellResetControl(control);
+    if (modal.id === 'modal-group-settings') _settingsShellUpdateInheritance(control);
   });
-  if (modal.id === 'modal-global-settings') settingsAppearancePreview();
+  if (modal.id === 'modal-global-settings'
+      && pane.dataset && pane.dataset.pane === 'gls-appearance') {
+    settingsAppearancePreview();
+  }
+  if (modal.id === 'modal-group-settings'
+      && typeof _syncWorktreeSettingsUi === 'function') {
+    _syncWorktreeSettingsUi();
+  }
+  if (modal.id === 'modal-group-settings'
+      && typeof _syncWorkerNotificationSettingsUi === 'function') {
+    _syncWorkerNotificationSettingsUi();
+  }
+  if (modal.id === 'modal-group-settings'
+      && typeof refreshGsInheritedLaunchPlaceholders === 'function') {
+    var activeGroupPane = pane.dataset ? pane.dataset.pane : '';
+    if (activeGroupPane === 'group' && typeof onGsProviderChange === 'function') {
+      onGsProviderChange();
+    } else if (activeGroupPane === 'workers'
+        && typeof onGsWorkerProviderChange === 'function') {
+      onGsWorkerProviderChange();
+    } else if (activeGroupPane === 'engineer'
+        && typeof onGsEngineerProviderChange === 'function') {
+      onGsEngineerProviderChange();
+    } else if (activeGroupPane === 'architect'
+        && typeof onGsArchitectProviderChange === 'function') {
+      onGsArchitectProviderChange();
+    }
+    refreshGsInheritedLaunchPlaceholders();
+  }
   settingsShellMarkDirty(modal);
 }
 
@@ -293,9 +359,7 @@ function settingsShellSyncView(modalOrId) {
   var readOnly = false;
   if (modal.id === 'modal-global-settings') {
     var activePane = modal.querySelector('.gs-pane.active');
-    var activeSubpane = activePane && activePane.querySelector('.gs-subpane.active');
-    readOnly = !!(activePane && activePane.dataset.pane === 'gls-system'
-      && activeSubpane && activeSubpane.dataset.subpane === 'gls-daemon');
+    readOnly = !!(activePane && activePane.dataset.pane === 'gls-daemon');
     var globalSave = document.getElementById('gls-global-save-btn');
     if (globalSave) globalSave.hidden = readOnly;
   }
@@ -305,9 +369,9 @@ function settingsShellSyncView(modalOrId) {
   var stateLabel = _settingsShellStateLabel(modal);
   var state = _settingsShellState[modal.id];
   if (stateLabel) {
-    stateLabel.textContent = readOnly
-      ? 'Read-only system information'
-      : (state && state.dirty ? 'Unsaved changes' : 'No unsaved changes');
+    var dirty = !!(state && state.dirty);
+    stateLabel.textContent = dirty ? 'Unsaved changes' : '';
+    stateLabel.hidden = !dirty || readOnly;
   }
 }
 

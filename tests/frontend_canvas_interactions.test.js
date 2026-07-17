@@ -493,6 +493,7 @@ test('canvas render honors skipTerminalRefresh from direct and invalidated main 
   const context = createContext();
   let terminalCalls = 0;
   let shellCalls = 0;
+  let headerHtml = '';
   const main = { innerHTML: '' };
   context.document = {
     getElementById(id) { return id === 'main' ? main : null; },
@@ -505,9 +506,10 @@ test('canvas render honors skipTerminalRefresh from direct and invalidated main 
   };
   context.renderGroupSwitcher = function() {};
   context._torqueRefreshViewToggleButtons = function() {};
-  context._renderAgentGridAndFocus = function(mainEl, canvasHtml) {
+  context._renderAgentGridAndFocus = function(mainEl, canvasHtml, options) {
     shellCalls += 1;
     mainEl.innerHTML = canvasHtml;
+    headerHtml = options && options.tabsHtml || '';
   };
   context.renderTerminalWorkspace = function() { terminalCalls += 1; };
   context.updateEventsAttentionBadge = function() {};
@@ -521,9 +523,11 @@ test('canvas render honors skipTerminalRefresh from direct and invalidated main 
   vm.runInContext('render({ skipTerminalRefresh: true })', context);
   assert.equal(shellCalls, 1, 'canvas shell still renders with skipTerminalRefresh');
   assert.equal(terminalCalls, 0, 'direct canvas render must honor skipTerminalRefresh');
-  assert.match(main.innerHTML, /data-agent-view-toggle="grid"/,
+  assert.doesNotMatch(main.innerHTML, /data-agent-view-toggle/,
+    'canvas content should not reserve a dedicated control row');
+  assert.match(headerHtml, /data-agent-view-toggle="grid"/,
     'canvas view must keep the control that returns to the grid visible');
-  assert.match(main.innerHTML, /data-agent-view-toggle="canvas"/,
+  assert.match(headerHtml, /data-agent-view-toggle="canvas"/,
     'canvas view must keep the active view control visible');
 
   vm.runInContext('render()', context);

@@ -182,8 +182,7 @@ function _showAddModal(mode, group, config) {
     _populateProviderSelect('add-provider-select', resolved.provider || gs.agent_provider || '', true);
     document.getElementById('add-cmd-input').value = resolved.command || '';
     document.getElementById('add-model-input').value = resolved.model || '';
-    document.getElementById('add-reasoning-effort').value = resolved.reasoning_effort || '';
-    onAddProviderChange();
+    onAddProviderChange(resolved.reasoning_effort || '');
   }
 
   const dir = isAgent
@@ -244,7 +243,7 @@ function _applyRenderedAddTemplate(config, templateName) {
   document.getElementById('add-provider-select').value = config.provider || '';
   document.getElementById('add-cmd-input').value = config.command || '';
   document.getElementById('add-model-input').value = config.model || '';
-  document.getElementById('add-reasoning-effort').value = config.reasoning_effort || '';
+  onAddProviderChange(config.reasoning_effort || '');
   document.getElementById('add-shell-select').value = config.shell || '';
   document.getElementById('add-env-vars').value = _envToText(config.env_vars || {});
   document.getElementById('add-wt-enabled').checked = !!config.worktree;
@@ -381,8 +380,8 @@ function submitAdd() {
     const prov = document.getElementById('add-provider-select').value;
     if (prov && prov !== '__custom__') msg.provider = prov;
     if (command) msg.command = command;
-    const model = document.getElementById('add-model-input').value.trim();
-    const reasoningEffort = document.getElementById('add-reasoning-effort').value;
+    const model = _getModelValue('add-model-input');
+    const reasoningEffort = _getReasoningEffortValue('add-reasoning-effort');
     if (model) msg.model = model;
     if (reasoningEffort) msg.reasoning_effort = reasoningEffort;
     /* worktree overrides */

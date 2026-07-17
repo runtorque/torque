@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import asdict
 
 from ..dispatch_registry import AsyncHandlerRegistry
@@ -40,6 +41,9 @@ async def _handle_settings_read_command(
         group_settings = state.get_group_settings(group)
         profile_names = await bridge.list_profiles()
         base_dir = await resolve_base_dir(group)
+        provider_payload = providers()
+        if inspect.isawaitable(provider_payload):
+            provider_payload = await provider_payload
         return {
             "type": "group_settings",
             "group": group,
@@ -47,10 +51,14 @@ async def _handle_settings_read_command(
             "engineer_settings": asdict(state.get_engineer_settings(group)),
             "architect_settings": asdict(state.get_architect_settings(group)),
             "resolved_agent_defaults": template_mgr.resolve_agent_config(
-                "", group_settings, {}, base_dir=base_dir
+                "",
+                group_settings,
+                {},
+                base_dir=base_dir,
+                apply_default_template=False,
             ),
             "profiles": profile_names,
-            "providers": providers(),
+            "providers": provider_payload,
             "templates": template_mgr.list_templates(base_dir),
             "actions": action_mgr.list_actions(base_dir),
             "playbooks": state.list_playbooks(

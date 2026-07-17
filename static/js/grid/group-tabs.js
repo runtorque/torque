@@ -37,15 +37,13 @@ function _renderAgentGroupTabsHtml() {
       + ' aria-selected="' + (selected ? 'true' : 'false') + '"'
       + ' title="' + esc(group) + '"'
       + ' onclick="onGroupTabClick(' + groupArg + ', event)"'
-      + ' onkeydown="agentGroupTabKeydown(event,' + groupArg + ')"'
-      + ' oncontextmenu="onGroupTabContextMenu(event, ' + groupArg + ')">'
+      + ' onkeydown="agentGroupTabKeydown(event,' + groupArg + ')">'
       + '<span class="agent-group-tab-name">' + esc(group) + '</span>'
       + '<span class="agent-group-tab-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count" aria-label="' + count + ' agents">' + count + '</span>'
       + (selected
-        ? '<button type="button" class="agent-group-tab-menu" title="Group actions" aria-label="Group actions for ' + esc(group) + '"'
-          + ' aria-haspopup="menu" aria-expanded="false"'
-          + ' onclick="openAgentGroupTabActions(event,' + groupArg + ')">'
-          + '<span aria-hidden="true">&#8943;</span></button>'
+        ? '<button type="button" class="agent-group-tab-settings" title="Group settings" aria-label="Open settings for ' + esc(group) + '"'
+          + ' onclick="event.preventDefault();event.stopPropagation();openGroupSettings(' + groupArg + ')">'
+          + '<span aria-hidden="true">&#9881;</span></button>'
         : '')
       + '</div>';
   }
@@ -61,10 +59,10 @@ function _renderAgentGroupTabsHtml() {
     + '</button>';
   if (active) {
     const activeArg = _jsStringAttr(active);
-    html += '<button type="button" class="agent-group-compact-menu btn btn-quiet btn-xs" title="Group actions"'
-      + ' aria-label="Group actions for ' + esc(active) + '" aria-haspopup="menu" aria-expanded="false"'
-      + ' onclick="openAgentGroupTabActions(event,' + activeArg + ')">'
-      + '<span aria-hidden="true">&#8943;</span></button>';
+    html += '<button type="button" class="agent-group-compact-settings btn btn-quiet btn-xs" title="Group settings"'
+      + ' aria-label="Open settings for ' + esc(active) + '"'
+      + ' onclick="event.preventDefault();event.stopPropagation();openGroupSettings(' + activeArg + ')">'
+      + '<span aria-hidden="true">&#9881;</span></button>';
   }
   html += '<div class="agent-group-quick-switcher ui-popover" role="dialog" aria-label="Switch group" hidden'
     + ' onclick="event.stopPropagation()" onkeydown="agentGroupQuickSwitcherKeydown(event)">'
@@ -86,6 +84,18 @@ function _renderAgentGroupTabsHtml() {
   html += '<button type="button" class="agent-group-quick-new ui-menu-item" onclick="closeAgentGroupQuickSwitcher();openAddGroup()">'
     + '<span aria-hidden="true">+</span> New group</button>';
   html += '</div></div>';
+  if (active && typeof _renderAgentGridHeaderControls === 'function') {
+    const activeSettings = ((state && state.group_settings) || {})[active] || {};
+    const activeIds = ((state && state.groups) || {})[active] || [];
+    const activeAgentCount = activeIds.reduce(function(total, id) {
+      const cell = state && state.agents && state.agents[id];
+      if (!cell || cell.cell_type !== 'agent') return total;
+      if (typeof _isTombstonedAgent === 'function' && _isTombstonedAgent(cell)) return total;
+      return total + 1;
+    }, 0);
+    const atAgentCap = activeSettings.max_agents > 0 && activeAgentCount >= activeSettings.max_agents;
+    html += _renderAgentGridHeaderControls(active, atAgentCap);
+  }
   html += '</div>';
   return html;
 }
@@ -123,14 +133,6 @@ function agentGroupTabKeydown(event, group) {
   };
   if (typeof requestAnimationFrame === 'function') requestAnimationFrame(focusActive);
   else focusActive();
-}
-
-function openAgentGroupTabActions(event, group) {
-  if (event) {
-    if (typeof event.preventDefault === 'function') event.preventDefault();
-    if (typeof event.stopPropagation === 'function') event.stopPropagation();
-  }
-  if (typeof onGroupTabContextMenu === 'function') onGroupTabContextMenu(event, group);
 }
 
 function _agentGroupQuickSwitcher() {

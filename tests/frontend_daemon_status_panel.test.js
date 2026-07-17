@@ -25,6 +25,7 @@ class FakeElement {
   constructor(id = '') {
     this.id = id;
     this.textContent = '';
+    this.value = '';
     this.title = '';
     this.hidden = false;
     this.disabled = false;
@@ -50,7 +51,7 @@ function createSandbox() {
     return elements.get(id);
   }
 
-  const tabNames = ['gls-general', 'gls-keybindings', 'gls-system'];
+  const tabNames = ['gls-general', 'gls-keybindings', 'gls-daemon', 'gls-relay'];
   const tabs = tabNames.map((name, idx) => {
     const el = new FakeElement(`tab-${name}`);
     el.dataset.tab = name;
@@ -137,19 +138,22 @@ function installConfirmStub(context, sandbox) {
   vm.runInContext('showConfirm = __showConfirmStub', context);
 }
 
-test('global settings System tab markup is present without removing existing tabs', () => {
+test('global settings exposes Daemon and Relay as primary sections', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
 
   assert.match(html, /data-tab="gls-appearance"[^>]*>[\s\S]*?<span>Appearance<\/span>/);
   assert.match(html, /data-tab="gls-general"[^>]*>[\s\S]*?<span>General<\/span>/);
   assert.match(html, /data-tab="gls-statusbar"[^>]*>[\s\S]*?<span>Status bar<\/span>/);
   assert.match(html, /data-tab="gls-keybindings"[^>]*>[\s\S]*?<span>Shortcuts<\/span>/);
-  assert.match(html, /data-tab="gls-system"[^>]*>[\s\S]*?<span>System<\/span>/);
+  assert.match(html, /data-tab="gls-daemon"[^>]*>[\s\S]*?<span>Daemon<\/span>/);
+  assert.match(html, /data-tab="gls-relay"[^>]*>[\s\S]*?<span>Relay<\/span>/);
+  assert.doesNotMatch(html, /data-tab="gls-system"/);
   assert.match(html, /<div class="gs-pane active" data-pane="gls-appearance">/);
   assert.match(html, /<div class="gs-pane" data-pane="gls-general">/);
   assert.match(html, /<div class="gs-pane" data-pane="gls-statusbar">/);
   assert.match(html, /<div class="gs-pane" data-pane="gls-keybindings">/);
-  assert.match(html, /<div class="gs-pane" data-pane="gls-system">/);
+  assert.match(html, /<div class="gs-pane" data-pane="gls-daemon">/);
+  assert.match(html, /<div class="gs-pane" data-pane="gls-relay">/);
   assert.match(html, /id="gls-statusbar-daemon-status"/);
   assert.match(html, /Daemon \+ Supervisor status/);
   assert.match(html, /Supervisor and\s+Relay visibility ride the daemon\/runtime status item/);
@@ -159,16 +163,16 @@ test('global settings System tab markup is present without removing existing tab
   assert.match(html, /id="gls-daemon-log-path"/);
 });
 
-test('System tab populates daemon status from runtime payload', () => {
+test('Daemon section populates status from runtime payload', () => {
   const { sandbox, ensure, tabs, panes } = createSandbox();
   ensure('conn-dot').classList.add('ok');
   const context = vm.createContext(sandbox);
   loadCommandsAndModals(context);
 
-  vm.runInContext(`switchGlsTab('gls-system')`, context);
+  vm.runInContext(`switchGlsTab('gls-daemon')`, context);
 
-  assert.equal(tabs.find((el) => el.dataset.tab === 'gls-system').classList.contains('active'), true);
-  assert.equal(panes.find((el) => el.dataset.pane === 'gls-system').classList.contains('active'), true);
+  assert.equal(tabs.find((el) => el.dataset.tab === 'gls-daemon').classList.contains('active'), true);
+  assert.equal(panes.find((el) => el.dataset.pane === 'gls-daemon').classList.contains('active'), true);
   assert.equal(ensure('gls-daemon-status-text').textContent, 'Running');
   assert.equal(ensure('gls-daemon-status-dot').classList.contains('daemon-status-dot-ok'), true);
   assert.equal(ensure('gls-daemon-version').textContent, '1.2.3');
@@ -213,6 +217,38 @@ test('daemon relative time formatter handles recent and elapsed times', () => {
     vm.runInContext(`_formatDaemonRelativeTime(${(nowMs / 1000) - 7200}, ${nowMs})`, context),
     '2 hours ago',
   );
+});
+
+test('one Global Settings save action coordinates profile and AI updates', async () => {
+  const { sandbox, ensure } = createSandbox();
+  ensure('gls-xterm-scrollback').value = '2000';
+  ensure('gls-max-pipeline-depth').value = '10';
+  ensure('gls-max-event-log').value = '500';
+  ensure('gls-mcp-call-log-full-capture-tools').value = '';
+  ensure('gls-relay-url').value = '';
+  ensure('gls-relay-daemon-id').value = '';
+  ensure('gls-relay-credential-id').value = '';
+  ensure('gls-relay-private-key-path').value = '';
+  let closeCalls = 0;
+  const aiPayload = { cmd: 'update_ai_settings', settings: { enabled: true } };
+  sandbox.closeModals = function() { closeCalls += 1; };
+  sandbox.aiSettingsHasUnsavedChanges = function() { return true; };
+  sandbox.prepareAiSettingsUpdate = async function() { return aiPayload; };
+  sandbox._aiSendUpdatePayload = function(payload) {
+    sandbox.sendCalls.push(payload);
+  };
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/modals/global-settings.js');
+
+  await vm.runInContext('submitGlobalSettings()', context);
+
+  assert.equal(sandbox.sendCalls.length, 2);
+  assert.equal(sandbox.sendCalls[0].cmd, 'update_global_settings');
+  assert.equal(sandbox.sendCalls[1], aiPayload);
+  assert.equal(closeCalls, 0, 'modal stays open until the AI write succeeds');
+
+  vm.runInContext('globalSettingsAiSaveComplete()', context);
+  assert.equal(closeCalls, 1);
 });
 
 test('Restart and Stop daemon confirmation copy matches control-panel sketch', async () => {

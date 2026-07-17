@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 import unittest
+from html.parser import HTMLParser
 from pathlib import Path
 
 
@@ -39,6 +40,59 @@ def _read(path: Path) -> str:
 def _read_app_styles() -> str:
     """Return the production stylesheet cascade as one searchable source."""
     return "\n".join(_read(path) for path in STYLE_MODULES)
+
+
+class _GroupSettingsStructureParser(HTMLParser):
+    """Capture the source parent of key Group Settings containers."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stack: list[dict[str, str]] = []
+        self.footer_parent_class = ""
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if tag != "div":
+            return
+        attributes = dict(attrs)
+        classes = attributes.get("class", "").split()
+        if "settings-dialog-footer" in classes:
+            parent = self.stack[-1] if self.stack else {}
+            self.footer_parent_class = parent.get("class", "")
+        self.stack.append(attributes)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "div" and self.stack:
+            self.stack.pop()
+
+
+class GroupSettingsShellLayoutTests(unittest.TestCase):
+    """Short settings panes must not split the modal workspace into implicit rows."""
+
+    def test_footer_is_outside_the_scrollable_workspace(self):
+        parser = _GroupSettingsStructureParser()
+        parser.feed(_read(WEBVIEW))
+
+        self.assertIn(
+            "settings-dialog",
+            parser.footer_parent_class.split(),
+            "Group Settings footer must be a direct child of .settings-dialog; "
+            "nesting it in .settings-dialog-workspace creates implicit grid rows "
+            "that collapse short panes such as Agents and Advanced.",
+        )
+
+    def test_workspace_has_one_explicit_full_height_row(self):
+        css = _read_app_styles()
+        match = re.search(
+            r"\.settings-dialog-workspace\s*\{([^}]*)\}",
+            css,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match, "Missing .settings-dialog-workspace rule")
+        self.assertIn(
+            "grid-template-rows: minmax(0, 1fr)",
+            match.group(1),
+            "Settings navigation and active pane must share one full-height row.",
+        )
 
 
 class WebviewHeaderLocationTests(unittest.TestCase):
@@ -99,8 +153,9 @@ class WebviewHeaderLocationTests(unittest.TestCase):
     def test_header_controls_are_preserved_inside_the_new_location(self):
         html = _read(WEBVIEW)
         # Confirm the exact controls the user expects still exist on the
-        # relocated header. Each is load-bearing: global settings, add group,
-        # restart daemon. Connection status indicator + TORQUE branding also.
+        # relocated header. Workspace creation now belongs to the group
+        # navigation menu (D-029), so the duplicate add-group action must not
+        # return here.
         self.assertRegex(
             html,
             r'<header>[\s\S]*id="conn-dot"[\s\S]*</header>',
@@ -116,15 +171,21 @@ class WebviewHeaderLocationTests(unittest.TestCase):
             r'<header>[\s\S]*openGlobalSettings\(\)[\s\S]*</header>',
             "Settings gear button missing from header",
         )
-        self.assertRegex(
+        self.assertNotRegex(
             html,
             r'<header>[\s\S]*openAddGroup\(\)[\s\S]*</header>',
-            "+ Group button missing from header",
+            "Duplicate New group action returned to the application header",
         )
         self.assertRegex(
             html,
             r'<header>[\s\S]*restartDaemon\(\)[\s\S]*</header>',
             "Restart daemon button missing from header",
+        )
+        self.assertRegex(
+            html,
+            r'<header>[\s\S]*openNavigationPalette\('
+            r"'all'\)[\s\S]*</header>",
+            "Go to button missing from header",
         )
 
 

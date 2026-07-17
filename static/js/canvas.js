@@ -167,19 +167,6 @@ function _canvasIsWorker(cell) {
 
 /* -- Canvas render ------------------------------------------------------ */
 
-function _canvasToolbarHtml(groupName) {
-  if (!groupName || typeof _renderAgentGridNewToolbar !== 'function') return '';
-  const settings = ((state && state.group_settings) || {})[groupName] || {};
-  const ids = ((state && state.groups) || {})[groupName] || [];
-  const agentCount = ids.reduce(function(total, id) {
-    const cell = state && state.agents && state.agents[id];
-    if (!cell || cell.cell_type !== 'agent' || _canvasIsTombstoned(cell)) return total;
-    return total + 1;
-  }, 0);
-  const atAgentCap = settings.max_agents > 0 && agentCount >= settings.max_agents;
-  return _renderAgentGridNewToolbar(groupName, atAgentCap);
-}
-
 function _torqueRenderAgentCanvas(opts) {
   const main = document.getElementById('main');
   if (!main) return;
@@ -195,7 +182,7 @@ function _torqueRenderAgentCanvas(opts) {
       + '</div>';
   } else {
     const model = _canvasBuildTrees(groupName);
-    canvasHtml = _canvasToolbarHtml(groupName) + _canvasRenderHtml(groupName, model);
+    canvasHtml = _canvasRenderHtml(groupName, model);
   }
 
   // Route through the same split-shell the grid uses, so the agent

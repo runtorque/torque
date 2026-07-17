@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from .. import cloud_hooks
-from ..adapters import get_providers
+from ..adapters import get_providers_async
 from ..deploy_state import architect_deploy_state_payload
 from ..events import get_cell_event_stream
 from ..mission_control import build_mission_control_summary
@@ -178,7 +178,7 @@ async def handle_direct_command(
                 state.get_architect_settings(group)
             ),
             "resolved_agent_defaults": resolved_defaults,
-            "providers": get_providers(),
+            "providers": await get_providers_async(),
             "templates": template_mgr.list_templates(current_path
                                                       or await _resolve_base_dir(group)),
             "playbooks": state.list_playbooks(group=group,
@@ -195,7 +195,7 @@ async def handle_direct_command(
         resolve_base_dir=_resolve_base_dir,
         template_mgr=template_mgr,
         action_mgr=action_mgr,
-        providers=get_providers,
+        providers=get_providers_async,
         runtime_payload=_runtime_payload,
         resolve_relay_config=lambda settings: cloud_hooks.resolve_relay_config(
             settings,
@@ -233,6 +233,7 @@ async def handle_direct_command(
             group_settings,
             _agent_overrides_from_role_settings(kind, role_settings),
             base_dir=base_dir,
+            apply_default_template=False,
         )
         specializations_preamble = ""
         specialization_names = []

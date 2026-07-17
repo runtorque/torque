@@ -848,6 +848,8 @@ function showContextMenu(x, y, items, options) {
   for (const item of items) {
     if (item.separator) {
       html += '<div class="ctx-sep ui-menu-separator" role="separator"></div>';
+    } else if (item.disabled) {
+      html += `<button type="button" role="menuitem" class="ui-menu-item" disabled aria-disabled="true">${esc(item.label)}</button>`;
     } else if (item.submenu) {
       html += `<button type="button" role="menuitem" class="ui-menu-item" onclick="event.stopPropagation();${esc(item.submenu)}">${esc(item.label)} \u25B8</button>`;
     } else {
@@ -1013,37 +1015,28 @@ function copyAgentId(id) {
   navigator.clipboard.writeText(id).then(function() { closeContextMenu(); });
 }
 
-function onGroupTabContextMenu(e, group) {
-  if (e) {
-    if (typeof e.preventDefault === 'function') e.preventDefault();
-    if (typeof e.stopPropagation === 'function') e.stopPropagation();
-  }
-  const groupName = String(group || '').trim();
-  if (!groupName || !state || !state.groups
-      || !Object.prototype.hasOwnProperty.call(state.groups, groupName)) {
-    return;
-  }
-  let x = e ? Number(e.clientX || 0) : 0;
-  let y = e ? Number(e.clientY || 0) : 0;
-  if ((!x && !y) && e && e.currentTarget
-      && typeof e.currentTarget.getBoundingClientRect === 'function') {
-    const rect = e.currentTarget.getBoundingClientRect();
-    x = rect.left;
-    y = rect.bottom + 4;
-  }
-  showContextMenu(x, y, [
-    { label: 'Group settings', action: 'openGroupSettings(' + JSON.stringify(groupName) + ')' },
-  ], { invoker: e && e.currentTarget });
-}
-
 function _agentGridNewMenuItems(group) {
   const groupName = String(group || '').trim();
   if (!groupName) return [];
-  return [
+  const settings = ((state && state.group_settings) || {})[groupName] || {};
+  const ids = ((state && state.groups) || {})[groupName] || [];
+  const agentCount = ids.reduce(function(total, id) {
+    const cell = state && state.agents && state.agents[id];
+    if (!cell || cell.cell_type !== 'agent') return total;
+    if (typeof _isTombstonedAgent === 'function' && _isTombstonedAgent(cell)) return total;
+    return total + 1;
+  }, 0);
+  const atAgentCap = settings.max_agents > 0 && agentCount >= settings.max_agents;
+  const items = atAgentCap ? [
+    { label: 'Agent limit reached', disabled: true },
+  ] : [
     { label: 'New architect', action: 'openAddArchitectForGroup(' + JSON.stringify(groupName) + ')' },
     { label: 'New engineer', action: 'openAddEngineerForSection(' + JSON.stringify(groupName) + ', "")' },
     { label: 'New worker', action: 'openAddWorkerForSection(' + JSON.stringify(groupName) + ')' },
   ];
+  items.push({ separator: true });
+  items.push({ label: 'New group', action: 'openAddGroup()' });
+  return items;
 }
 
 function openAgentGridNewMenu(e, group) {

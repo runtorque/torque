@@ -98,7 +98,7 @@ from .events import (
 from .event_ingest_db import event_call_row_from_record, redact_event_for_mcp_call_log
 from .perceived_empty import PerceivedEmptyDetector
 from .metrics import MetricsDaemon
-from .adapters import get_adapter, get_providers
+from .adapters import get_adapter, get_providers_async
 from .adapters.base import AgentEvent
 from .notifications import NotificationManager
 from .worktree import (
@@ -4003,7 +4003,7 @@ async def main(connection=None):
             "seq": state._seq,
             **state_payload,
             **engineer_buffer.export_state(),
-            "providers": get_providers(),
+            "providers": await get_providers_async(),
             "runtime": _runtime_payload(bridge=bridge, state=state),
         }
 

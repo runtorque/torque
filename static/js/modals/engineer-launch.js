@@ -226,7 +226,7 @@ function _engineerLaunchProviderForReasoning(group) {
   );
 }
 
-function onEngineerLaunchProviderChange() {
+function onEngineerLaunchProviderChange(currentEffort) {
   const input = document.getElementById('engineer-launch-boot-cmd');
   if (!input) return;
   const v = document.getElementById('engineer-launch-provider').value;
@@ -239,12 +239,15 @@ function onEngineerLaunchProviderChange() {
     const meta = effectiveProvider ? _findProviderMeta(effectiveProvider) : null;
     input.placeholder = (meta ? meta.command : _runtimeDefaultCommand()) + ' (default)';
   }
-  _populateReasoningEffortSelect(
-    'engineer-launch-reasoning-effort',
+  _populateModelSelect(
+    'engineer-launch-model',
     _engineerLaunchProviderForReasoning(group),
-    document.getElementById('engineer-launch-reasoning-effort').value,
-    'Provider default',
-    'Not supported for this provider'
+    _getModelValue('engineer-launch-model'),
+    'Group default',
+    'engineer-launch-reasoning-effort',
+    currentEffort == null
+      ? _getReasoningEffortValue('engineer-launch-reasoning-effort')
+      : currentEffort
   );
 }
 
@@ -292,7 +295,6 @@ function openEngineerLaunchDialog(group, agentId) {
   );
   document.getElementById('engineer-launch-boot-cmd').value = ws.engineer_boot_command || '';
   document.getElementById('engineer-launch-model').value = ws.engineer_model || '';
-  document.getElementById('engineer-launch-reasoning-effort').value = ws.engineer_reasoning_effort || '';
   document.getElementById('engineer-launch-custom-instructions').value = ws.custom_instructions || '';
   _setSelectValue('engineer-launch-autonomy-mode', ws.autonomy_mode, 'dispatch_when_clear');
   _setSelectValue(
@@ -321,7 +323,7 @@ function openEngineerLaunchDialog(group, agentId) {
     'note_then_ask'
   );
   syncEngineerLaunchNotificationPreset();
-  onEngineerLaunchProviderChange();
+  onEngineerLaunchProviderChange(ws.engineer_reasoning_effort || '');
 
   if (typeof openModalDialog === 'function') {
     openModalDialog('modal-engineer-launch', {
@@ -350,8 +352,8 @@ function submitEngineerLaunchDialog() {
     group: group,
     engineer_provider: _getProviderValue('engineer-launch-provider'),
     engineer_boot_command: document.getElementById('engineer-launch-boot-cmd').value.trim(),
-    engineer_model: document.getElementById('engineer-launch-model').value.trim(),
-    engineer_reasoning_effort: document.getElementById('engineer-launch-reasoning-effort').value,
+    engineer_model: _getModelValue('engineer-launch-model'),
+    engineer_reasoning_effort: _getReasoningEffortValue('engineer-launch-reasoning-effort'),
     custom_instructions: document.getElementById('engineer-launch-custom-instructions').value,
     autonomy_mode: document.getElementById('engineer-launch-autonomy-mode').value,
     default_worker_concurrency: parseInt(document.getElementById('engineer-launch-default-worker-concurrency').value, 10) || 2,

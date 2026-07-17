@@ -5,6 +5,7 @@ var _glsDefaults = {};        // default keybinding specs from server
 var _glsCapturing = null;     // action name currently capturing a keypress
 var _glsPendingConflict = null; // pending custom in-modal reassign confirmation
 var _glsKeybindingFilter = '';
+var _glsCloseAfterAiSave = false;
 var GLS_STATUS_BAR_VISIBILITY_ITEMS = [
   'daemon_status',
   'claude_usage',
@@ -260,9 +261,12 @@ function switchGlsTab(name) {
     t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('#modal-global-settings .gs-pane').forEach(p =>
     p.classList.toggle('active', p.dataset.pane === name));
-  if (name === 'gls-system') loadDaemonStatus();
+  if (name === 'gls-daemon') loadDaemonStatus();
   if (typeof settingsShellSyncView === 'function') {
     settingsShellSyncView('modal-global-settings');
+  }
+  if (typeof _aiSettingsAfterTabSwitch === 'function') {
+    _aiSettingsAfterTabSwitch(name);
   }
 }
 
@@ -681,9 +685,9 @@ function _syncKeybindingSettingsFromGlobal(settings) {
   _renderKeybindingList();
 }
 
-function submitGlobalSettings() {
+function _collectGlobalSettingsPayload() {
   var xtermScrollback = _parseGlsXtermScrollback();
-  if (xtermScrollback === null) return;
+  if (xtermScrollback === null) return null;
 
   var settings = {
     default_command: document.getElementById('gls-default-cmd').value.trim(),
@@ -743,9 +747,39 @@ function submitGlobalSettings() {
   var relayPrivateKeyPathEl = document.getElementById('gls-relay-private-key-path');
   if (relayPrivateKeyPathEl) settings.relay_private_key_path = relayPrivateKeyPathEl.value.trim();
 
+  return settings;
+}
+
+async function submitGlobalSettings() {
+  var settings = _collectGlobalSettingsPayload();
+  if (!settings) return;
+
+  var aiPayload = null;
+  var saveAi = typeof aiSettingsHasUnsavedChanges === 'function'
+    && aiSettingsHasUnsavedChanges();
+  if (saveAi && typeof prepareAiSettingsUpdate === 'function') {
+    aiPayload = await prepareAiSettingsUpdate(false);
+    if (!aiPayload) return;
+  }
+
   if (typeof settingsAppearanceCommit === 'function') settingsAppearanceCommit();
   send({ cmd: 'update_global_settings', settings: settings });
+  if (aiPayload && typeof _aiSendUpdatePayload === 'function') {
+    _glsCloseAfterAiSave = true;
+    _aiSendUpdatePayload(aiPayload);
+    return;
+  }
   closeModals();
+}
+
+function globalSettingsAiSaveComplete() {
+  if (!_glsCloseAfterAiSave) return;
+  _glsCloseAfterAiSave = false;
+  closeModals();
+}
+
+function globalSettingsAiSaveFailed() {
+  _glsCloseAfterAiSave = false;
 }
 
 /* ---- Schedule modal -------------------------------------------------- */

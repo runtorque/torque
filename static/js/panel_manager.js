@@ -38,6 +38,8 @@ var _standalonePanelLayoutVersion = 1;
 var _standalonePanelLayout = null;
 var _standalonePanelSyncing = false;
 var _standalonePanelDragApp = '';
+var _standalonePanelDragPreview = null;
+var _standalonePanelDragSourceEl = null;
 var _standalonePanelFloatDrag = null;
 var _standalonePanelFloatResizeDrag = null;
 var _standalonePanelPointerDrag = null;
@@ -774,6 +776,11 @@ function _standaloneMovePanelToZone(app, zoneName, opts) {
   opts = opts || {};
   var currentLayout = _standalonePanelCurrentLayout();
   var layout = _standaloneClone(currentLayout);
+  var sourceZoneName = _standalonePanelPlacement(app);
+  var sourceIndex = (sourceZoneName === 'bottom' || sourceZoneName === 'right')
+    ? layout[sourceZoneName].tabs.indexOf(app)
+    : -1;
+  var requestedIndex = Number.isFinite(opts.index) ? Math.max(0, Math.floor(opts.index)) : null;
   var cachedFloatFrame = (currentLayout.floats && currentLayout.floats[app])
     || (_standaloneFloatFrameCache(layout, false)[app])
     || null;
@@ -789,7 +796,15 @@ function _standaloneMovePanelToZone(app, zoneName, opts) {
     if (zoneName !== 'bottom' && zoneName !== 'right') return;
     var zone = layout[zoneName];
     zone.open = true;
-    if (opts.prepend) zone.tabs.unshift(app);
+    if (requestedIndex != null) {
+      if (sourceZoneName === zoneName && sourceIndex >= 0 && sourceIndex < requestedIndex) {
+        requestedIndex--;
+      }
+      requestedIndex = Math.max(0, Math.min(zone.tabs.length, requestedIndex));
+      zone.tabs.splice(requestedIndex, 0, app);
+    } else if (sourceZoneName === zoneName && sourceIndex >= 0) {
+      zone.tabs.splice(Math.min(sourceIndex, zone.tabs.length), 0, app);
+    } else if (opts.prepend) zone.tabs.unshift(app);
     else zone.tabs.push(app);
     zone.tabs = _standaloneEnsureUniqueTabs(zone.tabs);
     zone.active = app;
@@ -1280,21 +1295,106 @@ function _standaloneUpdateTaskbarButtons() {
   if (typeof panelNavSyncActive === 'function') panelNavSyncActive();
 }
 
-function standalonePanelDragStart(event, app) {
+function _standalonePanelTabElements(zoneName) {
+  var root = _standaloneDropTargetElement(zoneName);
+  if (!root) return [];
+  var tabs = root.querySelectorAll
+    ? Array.prototype.slice.call(root.querySelectorAll('.standalone-panel-tab[data-app]') || [])
+    : [];
+  if (tabs.length) return tabs;
+  function visit(node) {
+    if (!node || !node.children) return;
+    for (var i = 0; i < node.children.length; i++) {
+      var child = node.children[i];
+      if (child && child.classList && child.classList.contains('standalone-panel-tab')) tabs.push(child);
+      visit(child);
+    }
+  }
+  visit(root);
+  return tabs;
+}
+
+function _standalonePanelMarkDragSource(app, active) {
+  ['bottom', 'right'].forEach(function(zoneName) {
+    _standalonePanelTabElements(zoneName).forEach(function(tab) {
+      if (!tab.dataset || tab.dataset.app !== app || !tab.classList) return;
+      tab.classList.toggle('is-dragging', !!active);
+      tab.setAttribute('aria-grabbed', active ? 'true' : 'false');
+    });
+  });
+  if (_standalonePanelDragSourceEl && _standalonePanelDragSourceEl.classList) {
+    _standalonePanelDragSourceEl.classList.toggle('is-dragging', !!active);
+    if (typeof _standalonePanelDragSourceEl.setAttribute === 'function') {
+      _standalonePanelDragSourceEl.setAttribute('aria-grabbed', active ? 'true' : 'false');
+    }
+  }
+}
+
+function _standaloneCreatePanelDragPreview(app, sourceEl) {
+  if (_standalonePanelDragPreview || !document || !document.body) return;
+  var preview = _makeStandaloneNode('div', 'standalone-panel-drag-preview');
+  preview.setAttribute('aria-hidden', 'true');
+  var icon = _standalonePanelIconNode(app, 'standalone-panel-drag-preview-icon');
+  if (icon) preview.appendChild(icon);
+  preview.appendChild(_makeStandaloneNode('span', 'standalone-panel-drag-preview-label', _standalonePanelTitle(app)));
+  var rect = sourceEl && typeof sourceEl.getBoundingClientRect === 'function'
+    ? sourceEl.getBoundingClientRect()
+    : null;
+  if (rect && Number.isFinite(rect.width)) {
+    preview.style.width = Math.max(56, Math.min(180, Math.round(rect.width))) + 'px';
+  }
+  document.body.appendChild(preview);
+  _standalonePanelDragPreview = preview;
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(function() {
+      if (preview.classList) preview.classList.add('is-visible');
+    });
+  } else if (preview.classList) {
+    preview.classList.add('is-visible');
+  }
+}
+
+function _standalonePositionPanelDragPreview(clientX, clientY) {
+  if (!_standalonePanelDragPreview || !_standalonePanelDragPreview.style) return;
+  var x = Number.isFinite(clientX) ? clientX : 0;
+  var y = Number.isFinite(clientY) ? clientY : 0;
+  _standalonePanelDragPreview.style.transform = 'translate3d('
+    + Math.round(x + 12) + 'px,' + Math.round(y + 12) + 'px,0) scale(1)';
+}
+
+function _standaloneReleasePanelDragPreview() {
+  var preview = _standalonePanelDragPreview;
+  _standalonePanelDragPreview = null;
+  if (!preview) return;
+  if (preview.classList) preview.classList.add('is-releasing');
+  var remove = function() {
+    if (preview && typeof preview.remove === 'function') preview.remove();
+  };
+  if (typeof setTimeout === 'function') setTimeout(remove, 120);
+  else remove();
+}
+
+function standalonePanelDragStart(event, app, sourceEl) {
   _standalonePanelDragApp = app;
+  _standalonePanelDragSourceEl = sourceEl || (event && event.currentTarget) || null;
   if (event && event.dataTransfer) {
     try { event.dataTransfer.setData('text/plain', app); } catch (_) {}
     event.dataTransfer.effectAllowed = 'move';
   }
   document.body.classList.add('standalone-panel-dragging');
+  _standaloneCreatePanelDragPreview(app, _standalonePanelDragSourceEl);
   if (_standaloneHasEmptyZonePreview()) _standaloneRenderPanelWorkspace();
+  _standalonePanelMarkDragSource(app, true);
 }
 
 function standalonePanelDragEnd() {
   var shouldRender = _standaloneHasEmptyZonePreview();
+  _standalonePanelMarkDragSource(_standalonePanelDragApp, false);
   _standalonePanelDragApp = '';
+  _standalonePanelDragSourceEl = null;
   document.body.classList.remove('standalone-panel-dragging');
   _standaloneSetDragTarget('');
+  _standaloneReleasePanelDragPreview();
   if (shouldRender) _standaloneRenderPanelWorkspace();
 }
 
@@ -1320,11 +1420,22 @@ function _standaloneDropTargetElement(zoneName) {
   return null;
 }
 
-function _standaloneSetDragTarget(zoneName) {
+function _standaloneSetDragTarget(zoneName, insertionIndex) {
   ['bottom', 'right'].forEach(function(name) {
     var el = _standaloneDropTargetElement(name);
     if (el && el.classList) el.classList.toggle('drag-target', name === zoneName);
+    _standalonePanelTabElements(name).forEach(function(tab) {
+      if (tab.classList) tab.classList.remove('drop-before', 'drop-after');
+    });
   });
+  if (zoneName !== 'bottom' && zoneName !== 'right') return;
+  var hasIndex = Number.isFinite(insertionIndex);
+  if (!hasIndex) return;
+  var tabs = _standalonePanelTabElements(zoneName);
+  if (!tabs.length) return;
+  var index = Math.max(0, Math.min(tabs.length, Math.floor(insertionIndex)));
+  var marker = index >= tabs.length ? tabs[tabs.length - 1] : tabs[index];
+  if (marker && marker.classList) marker.classList.add(index >= tabs.length ? 'drop-after' : 'drop-before');
 }
 
 function _standaloneDropTargetZoneForElement(el) {
@@ -1337,18 +1448,65 @@ function _standaloneDropTargetZoneForElement(el) {
   return '';
 }
 
-function _standaloneDropTargetZoneAtPoint(clientX, clientY) {
-  if (!document) return '';
+function _standalonePanelAncestorWithClass(el, className) {
+  for (var node = el || null; node; node = node.parentNode || null) {
+    if (node.classList && node.classList.contains(className)) return node;
+  }
+  return null;
+}
+
+function _standalonePanelElementsAtPoint(clientX, clientY) {
+  if (!document) return [];
   if (typeof document.elementsFromPoint === 'function') {
     var stack = document.elementsFromPoint(clientX, clientY) || [];
-    for (var i = 0; i < stack.length; i++) {
-      var zoneName = _standaloneDropTargetZoneForElement(stack[i]);
-      if (zoneName) return zoneName;
-    }
-    return '';
+    if (stack.length) return stack;
   }
-  if (typeof document.elementFromPoint !== 'function') return '';
-  return _standaloneDropTargetZoneForElement(document.elementFromPoint(clientX, clientY));
+  if (typeof document.elementFromPoint === 'function') {
+    var single = document.elementFromPoint(clientX, clientY);
+    return single ? [single] : [];
+  }
+  return [];
+}
+
+function _standalonePanelDropPlacementAtPoint(clientX, clientY) {
+  var stack = _standalonePanelElementsAtPoint(clientX, clientY);
+  var fallbackZone = '';
+  for (var i = 0; i < stack.length; i++) {
+    var el = stack[i];
+    var zoneName = _standaloneDropTargetZoneForElement(el);
+    if (!zoneName) continue;
+    if (!fallbackZone) fallbackZone = zoneName;
+    var tab = _standalonePanelAncestorWithClass(el, 'standalone-panel-tab');
+    if (tab && tab.dataset && tab.dataset.app) {
+      var tabs = _standalonePanelCurrentLayout()[zoneName].tabs;
+      var tabIndex = tabs.indexOf(tab.dataset.app);
+      if (tabIndex >= 0) {
+        var rect = typeof tab.getBoundingClientRect === 'function' ? tab.getBoundingClientRect() : null;
+        var after = !!(rect && Number.isFinite(rect.left) && Number.isFinite(rect.width)
+          && clientX >= rect.left + rect.width / 2);
+        return { zone: zoneName, index: tabIndex + (after ? 1 : 0), inTabStrip: true };
+      }
+    }
+    var tablist = _standalonePanelAncestorWithClass(el, 'standalone-panel-zone-tabs');
+    if (tablist) {
+      var zoneTabs = _standalonePanelTabElements(zoneName);
+      var insertionIndex = zoneTabs.length;
+      for (var j = 0; j < zoneTabs.length; j++) {
+        var tabRect = typeof zoneTabs[j].getBoundingClientRect === 'function'
+          ? zoneTabs[j].getBoundingClientRect()
+          : null;
+        if (tabRect && Number.isFinite(tabRect.left) && Number.isFinite(tabRect.width)
+            && clientX < tabRect.left + tabRect.width / 2) {
+          insertionIndex = j;
+          break;
+        }
+      }
+      return { zone: zoneName, index: insertionIndex, inTabStrip: true };
+    }
+  }
+  return fallbackZone
+    ? { zone: fallbackZone, index: null, inTabStrip: false }
+    : { zone: '', index: null, inTabStrip: false };
 }
 
 function standalonePanelPointerDragStart(event, app) {
@@ -1357,6 +1515,7 @@ function standalonePanelPointerDragStart(event, app) {
     app: app,
     startX: event.clientX,
     startY: event.clientY,
+    sourceEl: event.currentTarget || event.target || null,
     active: false,
   };
   document.addEventListener('mousemove', _standalonePanelOnPointerDrag);
@@ -1371,10 +1530,12 @@ function _standalonePanelOnPointerDrag(event) {
   if (!drag.active && dx < 4 && dy < 4) return;
   if (!drag.active) {
     drag.active = true;
-    standalonePanelDragStart(null, drag.app);
+    standalonePanelDragStart(null, drag.app, drag.sourceEl);
   }
   if (event && typeof event.preventDefault === 'function') event.preventDefault();
-  _standaloneSetDragTarget(_standaloneDropTargetZoneAtPoint(event.clientX, event.clientY));
+  _standalonePositionPanelDragPreview(event.clientX, event.clientY);
+  var placement = _standalonePanelDropPlacementAtPoint(event.clientX, event.clientY);
+  _standaloneSetDragTarget(placement.zone, placement.index);
 }
 
 function _standaloneClearPointerDrag() {
@@ -1397,27 +1558,37 @@ function _standalonePanelStopPointerDrag(event) {
   if (!drag.active) return;
   var clientX = event && Number.isFinite(event.clientX) ? event.clientX : drag.startX;
   var clientY = event && Number.isFinite(event.clientY) ? event.clientY : drag.startY;
-  var zoneName = _standaloneDropTargetZoneAtPoint(clientX, clientY);
+  var placement = _standalonePanelDropPlacementAtPoint(clientX, clientY);
   _standalonePanelSuppressClick = true;
   _standaloneResetSuppressedPanelClickSoon();
   if (event && typeof event.preventDefault === 'function') event.preventDefault();
   standalonePanelDragEnd();
-  if (zoneName) _standaloneMovePanelToZone(drag.app, zoneName);
+  if (placement.zone) {
+    var opts = placement.inTabStrip ? { index: placement.index } : {};
+    _standaloneMovePanelToZone(drag.app, placement.zone, opts);
+  }
 }
 
 function standalonePanelZoneDragOver(event, zoneName) {
   var app = _standaloneDraggedApp(event);
   if (!app) return;
   if (event && typeof event.preventDefault === 'function') event.preventDefault();
-  _standaloneSetDragTarget(zoneName);
+  var placement = event && Number.isFinite(event.clientX) && Number.isFinite(event.clientY)
+    ? _standalonePanelDropPlacementAtPoint(event.clientX, event.clientY)
+    : { zone: zoneName, index: null, inTabStrip: false };
+  _standaloneSetDragTarget(placement.zone || zoneName, placement.index);
 }
 
 function standalonePanelZoneDrop(event, zoneName) {
   var app = _standaloneDraggedApp(event);
   if (!app) return;
   if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  var placement = event && Number.isFinite(event.clientX) && Number.isFinite(event.clientY)
+    ? _standalonePanelDropPlacementAtPoint(event.clientX, event.clientY)
+    : { zone: zoneName, index: null, inTabStrip: false };
   standalonePanelDragEnd();
-  _standaloneMovePanelToZone(app, zoneName);
+  var opts = placement.inTabStrip ? { index: placement.index } : {};
+  _standaloneMovePanelToZone(app, placement.zone || zoneName, opts);
 }
 
 function standalonePanelFloatDragOver(event) {
@@ -1781,6 +1952,67 @@ function standalonePanelResizeRight(clientX) {
   _standalonePanelSetLayout(layout, { fromServer: true });
 }
 
+function _standaloneArchitectStripMissingWidth() {
+  if (typeof document === 'undefined' || !document.querySelector) return 0;
+  var strip = document.querySelector('.agent-architect-strip');
+  if (!strip) return 0;
+
+  var cards = strip.querySelectorAll ? Array.from(strip.querySelectorAll('.cell')) : [];
+  if (!cards.length && strip.children) {
+    cards = Array.from(strip.children).filter(function(child) {
+      return child && child.classList && child.classList.contains('cell');
+    });
+  }
+  var columnCount = Math.min(4, cards.length);
+  if (!columnCount) return 0;
+
+  var stripStyle = typeof getComputedStyle === 'function' ? getComputedStyle(strip) : null;
+  function stylePixels(property, fallback) {
+    var raw = stripStyle && typeof stripStyle.getPropertyValue === 'function'
+      ? stripStyle.getPropertyValue(property)
+      : (stripStyle && stripStyle[property]);
+    var parsed = parseFloat(raw || '');
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  var firstCard = cards[0];
+  var cardRect = firstCard && typeof firstCard.getBoundingClientRect === 'function'
+    ? firstCard.getBoundingClientRect()
+    : null;
+  var cardWidth = cardRect && Number.isFinite(cardRect.width) && cardRect.width > 0
+    ? cardRect.width
+    : Number(firstCard && firstCard.offsetWidth) || stylePixels('--agent-architect-column-width', 0);
+  if (!(cardWidth > 0)) return 0;
+
+  var requiredStripWidth = stylePixels('padding-left', 0)
+    + stylePixels('padding-right', 0)
+    + (columnCount * cardWidth)
+    + (Math.max(0, columnCount - 1) * stylePixels('column-gap', stylePixels('gap', 0)));
+  var stripRect = typeof strip.getBoundingClientRect === 'function'
+    ? strip.getBoundingClientRect()
+    : null;
+  var availableStripWidth = Number(strip.clientWidth)
+    || (stripRect && Number(stripRect.width))
+    || 0;
+  return Math.max(0, Math.ceil(requiredStripWidth - availableStripWidth));
+}
+
+function standalonePanelFitArchitectColumns() {
+  if (!_standalonePanelsEnabled()) return false;
+  var missingWidth = _standaloneArchitectStripMissingWidth();
+  if (!(missingWidth > 0)) return false;
+
+  var layout = _standaloneClone(_standalonePanelCurrentLayout());
+  if (!layout.right || !layout.right.open || !layout.right.active) return false;
+  var bounds = _standaloneRightSizeBounds(_standalonePreferredShellWidth());
+  var currentSize = _standaloneClamp(layout.right.size, bounds.min, bounds.max, bounds.min);
+  var nextSize = Math.max(bounds.min, currentSize - missingWidth);
+  if (!(nextSize < currentSize)) return false;
+  layout.right.size = nextSize;
+  _standalonePanelSetLayout(layout);
+  return true;
+}
+
 (function() {
   function bindHandle(id, onMove, onStop, adjustEvent) {
     var handle = document.getElementById(id);
@@ -1840,6 +2072,13 @@ function standalonePanelResizeRight(clientX) {
       clientX: event.clientX + dragOffsetX,
     });
   });
+  var railHandle = document.getElementById('standalone-rail-resize-handle');
+  if (railHandle) {
+    railHandle.addEventListener('dblclick', function(event) {
+      if (event && typeof event.preventDefault === 'function') event.preventDefault();
+      standalonePanelFitArchitectColumns();
+    });
+  }
   if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
     window.addEventListener('resize', function() {
       if (!_standalonePanelsEnabled() || !_standalonePanelLayout) return;

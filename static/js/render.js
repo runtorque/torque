@@ -1394,7 +1394,6 @@ function renderAgentFocusPanel(opts) {
 }
 
 function _updateAgentGridSelectionForFocus(prevId, nextId) {
-  if (prevId === nextId) return;
   const main = document.getElementById('main');
   if (!main || typeof main.querySelector !== 'function') return;
   const cssEscape = function(value) {
@@ -1402,14 +1401,37 @@ function _updateAgentGridSelectionForFocus(prevId, nextId) {
     if (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function') return CSS.escape(raw);
     return raw.replace(/"/g, '\\"');
   };
-  if (prevId) {
-    const prev = main.querySelector('[data-drag-id="' + cssEscape(prevId) + '"]');
-    if (prev && prev.classList) prev.classList.remove('selected');
+  const setCardState = function(card, selected, focused) {
+    if (!card || !card.classList) return;
+    card.classList.toggle('selected', !!selected);
+    card.classList.toggle('is-selected', !!selected);
+    card.classList.toggle('focused', !!focused);
+  };
+  if (typeof main.querySelectorAll === 'function') {
+    const cards = main.querySelectorAll('[data-drag-id]');
+    if (cards && cards.length) {
+      for (let i = 0; i < cards.length; i++) {
+        const card = cards[i];
+        const cardId = card && card.getAttribute
+          ? card.getAttribute('data-drag-id')
+          : ((card && card.dataset && card.dataset.dragId) || '');
+        setCardState(card, cardId === nextId, cardId === focusedItemId);
+      }
+      return;
+    }
   }
-  if (nextId) {
-    const next = main.querySelector('[data-drag-id="' + cssEscape(nextId) + '"]');
-    if (next && next.classList) next.classList.add('selected');
-  }
+  const prev = prevId
+    ? main.querySelector('[data-drag-id="' + cssEscape(prevId) + '"]')
+    : null;
+  const next = nextId
+    ? main.querySelector('[data-drag-id="' + cssEscape(nextId) + '"]')
+    : null;
+  const focused = focusedItemId
+    ? main.querySelector('[data-drag-id="' + cssEscape(focusedItemId) + '"]')
+    : null;
+  setCardState(prev, false, prev === focused);
+  setCardState(next, true, next === focused);
+  if (focused && focused !== prev && focused !== next) setCardState(focused, false, true);
 }
 
 function refreshSelectedAgentFocus(prevSelectedId) {

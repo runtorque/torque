@@ -26,6 +26,7 @@ class _FakeState:
                  agent_provider="", agent_boot_command="",
                  agent_model="", agent_reasoning_effort="",
                  agent_tab_color="", tab_color="",
+                 default_agent_template="",
                  default_command="claude", git_worktree=False):
         self._settings = types.SimpleNamespace(
             agent_directory=agent_directory,
@@ -34,6 +35,7 @@ class _FakeState:
             agent_boot_command=agent_boot_command,
             agent_model=agent_model,
             agent_reasoning_effort=agent_reasoning_effort,
+            default_agent_template=default_agent_template,
             worker_provider=worker_provider,
             worker_boot_command=worker_boot_command,
             worker_model=worker_model,
@@ -134,7 +136,7 @@ class _EmptyWorktreeManager:
 
 class _FakeTemplateManager:
     def resolve_agent_config(self, explicit_template, gs, overrides, *,
-                             base_dir=""):
+                             base_dir="", apply_default_template=True):
         data = {
             "provider": getattr(gs, "agent_provider", ""),
             "command": getattr(gs, "agent_boot_command", ""),
@@ -142,6 +144,15 @@ class _FakeTemplateManager:
             "reasoning_effort": getattr(gs, "agent_reasoning_effort", ""),
             "runner_backend": getattr(gs, "runner_backend", ""),
         }
+        template = (
+            explicit_template
+            or (
+                getattr(gs, "default_agent_template", "")
+                if apply_default_template else ""
+            )
+        )
+        if template:
+            data["template"] = template
         data.update(overrides or {})
         return data
 
@@ -324,6 +335,35 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(resolved["tab_color"], "")
 
+    def test_resolve_engineer_launch_config_ignores_default_worker_role(self):
+        service = self.server_agent_mod.AgentLaunchService(
+            state=_FakeState(default_agent_template="ui-worker"),
+            connection=None,
+            bridge=_FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=_FakeTemplateManager(),
+        )
+
+        resolved = service.resolve_engineer_launch_config("backend")
+
+        self.assertEqual(resolved["template"], "")
+
+    def test_resolve_engineer_launch_config_keeps_explicit_role(self):
+        service = self.server_agent_mod.AgentLaunchService(
+            state=_FakeState(default_agent_template="ui-worker"),
+            connection=None,
+            bridge=_FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=_FakeTemplateManager(),
+        )
+
+        resolved = service.resolve_engineer_launch_config(
+            "backend",
+            explicit_template="engineer-hire-role",
+        )
+
+        self.assertEqual(resolved["template"], "engineer-hire-role")
+
     def test_resolve_architect_launch_config_prefers_architect_specific_overrides(self):
         service = self.server_agent_mod.AgentLaunchService(
             state=_FakeState(
@@ -443,6 +483,19 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         resolved = service.resolve_architect_launch_config("backend")
 
         self.assertEqual(resolved["tab_color"], "")
+
+    def test_resolve_architect_launch_config_ignores_default_worker_role(self):
+        service = self.server_agent_mod.AgentLaunchService(
+            state=_FakeState(default_agent_template="ui-worker"),
+            connection=None,
+            bridge=_FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=_FakeTemplateManager(),
+        )
+
+        resolved = service.resolve_architect_launch_config("backend")
+
+        self.assertEqual(resolved["template"], "")
 
     def test_resolve_worker_launch_config_prefers_worker_specific_overrides(self):
         service = self.server_agent_mod.AgentLaunchService(
@@ -608,6 +661,19 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resolved["provider"], "")
         self.assertEqual(resolved["agent_type"], "codex")
         self.assertEqual(resolved["command"], "codex")
+
+    def test_resolve_worker_launch_config_applies_default_worker_role(self):
+        service = self.server_agent_mod.AgentLaunchService(
+            state=_FakeState(default_agent_template="ui-worker"),
+            connection=None,
+            bridge=_FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=_FakeTemplateManager(),
+        )
+
+        resolved = service.resolve_worker_launch_config("backend")
+
+        self.assertEqual(resolved["template"], "ui-worker")
 
     def test_generic_launch_config_ignores_worker_specific_overrides(self):
         service = self.server_agent_mod.AgentLaunchService(

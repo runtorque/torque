@@ -48,6 +48,7 @@ class FakeElement {
     this._firstSubtab = null;
     this._subtabs = [];
     this._subpanes = [];
+    this._controls = [];
     this._closestPane = null;
     this._label = null;
   }
@@ -76,6 +77,7 @@ class FakeElement {
   querySelectorAll(selector) {
     if (selector === '.gs-subtab') return this._subtabs || [];
     if (selector === '.gs-subpane') return this._subpanes || [];
+    if (selector === 'input, select, textarea, button') return this._controls || [];
     return [];
   }
   closest(selector) {
@@ -222,17 +224,22 @@ function seedProviders(context, providers) {
   vm.runInContext(`_cachedProviders = ${JSON.stringify(providers)};`, context);
 }
 
-test('architect settings markup renders provider then command override', () => {
+test('architect General uses shared launch ordering and keeps command secondary', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  const match = html.match(
-    /<div class="gs-subpane active" data-subpane="architect-general">([\s\S]*?)<\/div>/,
-  );
-  assert.ok(match, 'architect general subpane should be present');
-  assert.match(
-    match[1],
-    /<label for="gs-architect-provider">Provider<\/label>\s*<select id="gs-architect-provider"[^>]*><\/select>\s*<label for="gs-architect-boot-cmd">Command override<\/label>\s*<input id="gs-architect-boot-cmd"/,
-  );
-  assert.doesNotMatch(match[1], /Boot command/);
+  const generalStart = html.indexOf('data-subpane="architect-general"');
+  const behaviorStart = html.indexOf('data-subpane="architect-behavior"');
+  const general = html.slice(generalStart, behaviorStart);
+  const provider = general.indexOf('id="gs-architect-provider"');
+  const model = general.indexOf('id="gs-architect-model-select"');
+  const effort = general.indexOf('id="gs-architect-reasoning-effort"');
+  const command = general.indexOf('id="gs-architect-boot-cmd"');
+
+  assert.match(general, /gs-settings-section-title">Launch/);
+  assert.ok(provider < model);
+  assert.ok(model < effort);
+  assert.ok(effort < command);
+  assert.match(general, /settings-field--secondary[\s\S]*id="gs-architect-boot-cmd"/);
+  assert.doesNotMatch(general, />Boot command</);
 });
 
 test('architect settings markup removes paused control and renders checkpoint dropdown tooltip', () => {
@@ -241,10 +248,10 @@ test('architect settings markup removes paused control and renders checkpoint dr
 
   assert.doesNotMatch(html, /gs-architect-paused|Event delivery paused/);
   assert.doesNotMatch(modalJs, /gs-architect-paused|architect_paused/);
-  assert.match(html, /<label for="gs-architect-journal-checkpoint">Journal checkpoint cadence\s*<span class="hint-btn"/);
+  assert.match(html, /<label for="gs-architect-journal-checkpoint">Journal checkpoint\s*<span class="hint-btn"/);
   assert.match(
     html,
-    /data-hint="How often Torque reminds the architect to write a `checkpoint` journal entry summarizing active engineers, open scope, pending hires, open decisions, and planned next moves\."/,
+    /data-hint="How often Torque reminds the Architect to summarize active Engineers, open scope, pending hires, decisions, and next moves\."/,
   );
   assert.match(html, /<select id="gs-architect-journal-checkpoint"><\/select>/);
 });
@@ -301,23 +308,295 @@ test('group settings drops leftover Option A implementation-choice comment', () 
   assert.doesNotMatch(html, /Option A:/);
 });
 
-test('group settings renders engineer merge mode selector', () => {
+test('group settings inheritance affordances omit redundant status captions', () => {
+  const source = fs.readFileSync(
+    path.join(repoRoot, 'static/js/modals/settings-shell.js'),
+    'utf8',
+  );
+  const css = appStylesheetSource();
+
+  assert.doesNotMatch(source, /Inherited from Group/);
+  assert.doesNotMatch(source, /Override active for this agent kind/);
+  assert.doesNotMatch(source, /settings-inheritance-copy/);
+  assert.match(source, /reset\.textContent = 'Use group default'/);
+  assert.match(source, /note\.hidden = inherited/);
+  assert.doesNotMatch(css, /\.settings-inheritance-note::before/);
+});
+
+test('settings footers place save state beneath the save action', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const css = appStylesheetSource();
+
+  assert.match(
+    html,
+    /class="settings-save-control"[\s\S]*id="gs-save-btn"[\s\S]*id="gs-save-state"/,
+  );
+  assert.match(
+    html,
+    /class="settings-save-control"[\s\S]*id="gls-global-save-btn"[\s\S]*id="gls-save-state"/,
+  );
+  assert.doesNotMatch(html, /id="gls-ai-save-btn"/);
+  assert.doesNotMatch(html, /Save AI settings/);
+  assert.doesNotMatch(html, /No unsaved changes/);
+  assert.match(html, /id="gs-save-state"[^>]*hidden/);
+  assert.match(html, /id="gls-save-state"[^>]*hidden/);
+  assert.match(
+    css,
+    /\.settings-save-control\s*\{[^}]*flex-direction:\s*column[^}]*\}/,
+  );
+  assert.match(css, /\.settings-save-state\s*\{[^}]*text-align:\s*center[^}]*\}/);
+});
+
+test('Reset section creates an unsaved default draft without persisting it', () => {
+  const source = fs.readFileSync(
+    path.join(repoRoot, 'static/js/modals/settings-shell.js'),
+    'utf8',
+  );
+  const control = {
+    id: 'field',
+    tagName: 'INPUT',
+    type: 'text',
+    value: 'persisted',
+    defaultValue: 'default',
+    dataset: {},
+    parentNode: null,
+  };
+  const saveState = { textContent: '', hidden: true };
+  const saveButton = { disabled: true };
+  const pane = {
+    dataset: { pane: 'group' },
+    querySelectorAll(selector) {
+      return selector === 'input, select, textarea' ? [control] : [];
+    },
+  };
+  const dialog = { classList: new FakeClassList() };
+  const modal = {
+    id: 'modal-group-settings',
+    classList: new FakeClassList(),
+    querySelector(selector) {
+      if (selector === '.gs-pane.active') return pane;
+      if (selector === '.settings-dialog') return dialog;
+      if (selector === '.settings-save-state') return saveState;
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === 'input, select, textarea') return [control];
+      if (selector.includes('#gs-save-btn')) return [saveButton];
+      return [];
+    },
+  };
+  let persisted = 0;
+  const context = vm.createContext({
+    console,
+    document: {
+      documentElement: {
+        dataset: {},
+        style: { setProperty() {} },
+      },
+      getElementById(id) {
+        return id === modal.id ? modal : null;
+      },
+      querySelectorAll() { return []; },
+    },
+    localStorage: {
+      getItem() { return null; },
+      setItem() { persisted += 1; },
+    },
+    send() { persisted += 1; },
+  });
+
+  vm.runInContext(source, context);
+  vm.runInContext(
+    `_settingsShellState['modal-group-settings'] = {
+      baseline: { field: 'persisted' },
+      dirty: false,
+    };
+    settingsShellResetSection('modal-group-settings');`,
+    context,
+  );
+
+  assert.equal(control.value, 'default');
+  assert.equal(saveState.textContent, 'Unsaved changes');
+  assert.equal(saveState.hidden, false);
+  assert.equal(saveButton.disabled, false);
+  assert.equal(persisted, 0);
+});
+
+test('dynamic AI controls merge into the Global Settings dirty baseline', () => {
+  const source = fs.readFileSync(
+    path.join(repoRoot, 'static/js/modals/settings-shell.js'),
+    'utf8',
+  );
+  const profileControl = {
+    id: 'gls-default-cmd',
+    tagName: 'INPUT',
+    type: 'text',
+    value: 'codex',
+  };
+  const aiControl = {
+    id: 'gls-ai-enabled',
+    tagName: 'INPUT',
+    type: 'checkbox',
+    checked: false,
+  };
+  const aiRoot = {
+    querySelectorAll(selector) {
+      return selector === 'input, select, textarea' ? [aiControl] : [];
+    },
+  };
+  const saveButton = { disabled: true };
+  const saveState = { textContent: '', hidden: true };
+  const dialog = { classList: new FakeClassList() };
+  const modal = {
+    id: 'modal-global-settings',
+    classList: new FakeClassList(),
+    querySelector(selector) {
+      if (selector === '.settings-dialog') return dialog;
+      if (selector === '.settings-save-state') return saveState;
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === 'input, select, textarea') return [profileControl, aiControl];
+      if (selector.includes('#gls-global-save-btn')) return [saveButton];
+      return [];
+    },
+  };
+  const context = vm.createContext({
+    console,
+    document: {
+      getElementById(id) {
+        return id === modal.id ? modal : null;
+      },
+    },
+  });
+  vm.runInContext(source, context);
+  context.__modal = modal;
+  context.__aiRoot = aiRoot;
+  vm.runInContext(
+    `_settingsShellState['modal-global-settings'] = {
+      baseline: { 'gls-default-cmd': 'codex' },
+      dirty: false,
+    };
+    settingsShellMergeBaseline(__modal, __aiRoot);`,
+    context,
+  );
+
+  assert.equal(
+    vm.runInContext(
+      `settingsShellScopeDirty('modal-global-settings', __aiRoot)`,
+      context,
+    ),
+    false,
+  );
+  assert.equal(saveButton.disabled, true);
+
+  aiControl.checked = true;
+  vm.runInContext(`settingsShellMarkDirty('modal-global-settings')`, context);
+  assert.equal(
+    vm.runInContext(
+      `settingsShellScopeDirty('modal-global-settings', __aiRoot)`,
+      context,
+    ),
+    true,
+  );
+  assert.equal(saveButton.disabled, false);
+  assert.equal(saveState.textContent, 'Unsaved changes');
+});
+
+test('group settings renders structured worktree controls and merge-mode-specific history', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
 
-  assert.match(html, /<label for="gs-engineer-merge-mode">Engineer merge mode[\s\S]*<select id="gs-engineer-merge-mode">/);
+  assert.match(html, /Repository workflow/);
+  assert.doesNotMatch(html, /Worker workspaces/);
+  assert.match(html, /<label for="gs-worktree-mode">Workspace mode<\/label>[\s\S]*<select id="gs-worktree-mode"/);
+  assert.match(html, /<option value="shared">Shared group checkout<\/option>/);
+  assert.match(html, /<option value="isolated">Isolated worktree \(recommended\)<\/option>/);
+  assert.match(html, /<label for="gs-wt-checkpoint-mode">Automatic checkpoints<\/label>/);
+  assert.match(html, /<option value="manual">Manual only<\/option>/);
+  assert.match(html, /<option value="stop" selected>On stop<\/option>/);
+  assert.match(html, /<option value="progress-stop">On progress updates and stop<\/option>/);
+  assert.match(html, /<label for="gs-engineer-merge-mode">Merge mode/);
   assert.match(html, /<option value="pr">Pull request \(default\)<\/option>/);
   assert.match(html, /<option value="direct">Direct local<\/option>/);
   assert.match(html, /<option value="engineer-choice">Engineer choice<\/option>/);
+  assert.match(html, /id="gs-wt-direct-history-row"/);
+  assert.match(html, /<option value="preserve" selected>Preserve commits<\/option>/);
+  assert.match(html, /<option value="squash">Squash into one commit<\/option>/);
   assert.match(html, /workflow-breach audit events/);
+  assert.doesNotMatch(html, /id="gs-wt-merge-instructions"/);
+  assert.doesNotMatch(html, /id="gs-worktree" type="checkbox"/);
 });
 
 test('group settings renders opt-in auto-sweep cleanup mode', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
 
-  assert.match(html, /<label for="gs-wt-merge-cleanup">Default post-merge cleanup[\s\S]*<select id="gs-wt-merge-cleanup">/);
+  assert.match(html, /<div class="gs-settings-section-title">After merge<\/div>/);
+  assert.match(html, /<label for="gs-wt-merge-cleanup">Default cleanup[\s\S]*<select id="gs-wt-merge-cleanup">/);
   assert.match(html, /<option value="keep">Keep worker and worktree \(default \/ warm\)<\/option>/);
   assert.match(html, /<option value="auto_sweep">Auto-sweep merged branch and worktree<\/option>/);
   assert.match(html, /Auto-sweep is opt-in and runs only after the branch is actually merged/);
+});
+
+test('worktree UI maps persisted flags to selectors and adapts merge guidance', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+
+  vm.runInContext(`_showGroupSettings("alpha", {
+    settings: {
+      git_worktree: true,
+      worktree_auto_checkpoint: true,
+      checkpoint_on_progress: true,
+      worktree_merge_squash: true,
+      engineer_merge_mode: "engineer-choice",
+      worktree_symlinks: []
+    },
+    engineer_settings: {},
+    profiles: ["Default"]
+  })`, context);
+
+  assert.equal(ensure('gs-worktree-mode').value, 'isolated');
+  assert.equal(ensure('gs-wt-checkpoint-mode').value, 'progress-stop');
+  assert.equal(ensure('gs-wt-direct-history').value, 'squash');
+  assert.equal(ensure('gs-wt-direct-history-row').hidden, false);
+  assert.equal(ensure('gs-wt-direct-history-label').textContent, 'Direct-merge history');
+  assert.match(ensure('gs-wt-merge-mode-help').textContent, /Pull request by default/);
+  assert.equal(ensure('gs-worktree-mode-hint').textContent, 'Creates a separate branch and checkout.');
+
+  ensure('gs-engineer-merge-mode').value = 'pr';
+  vm.runInContext('_syncWorktreeMergeModeUi()', context);
+  assert.equal(ensure('gs-wt-direct-history-row').hidden, true);
+  assert.match(ensure('gs-wt-merge-mode-help').textContent, /requests a squash merge/);
+
+  ensure('gs-worktree-mode').value = 'shared';
+  vm.runInContext('_syncWorktreeSettingsUi()', context);
+  assert.equal(ensure('gs-wt-dependent-settings').classList.contains('is-disabled'), true);
+  assert.match(ensure('gs-worktree-mode-hint').textContent, /retained but inactive/);
+});
+
+test('worktree checkpoint selector preserves all four stored flag combinations', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+
+  const cases = [
+    ['manual', false, false],
+    ['stop', true, false],
+    ['progress', false, true],
+    ['progress-stop', true, true],
+  ];
+  for (const [mode, autoCheckpoint, checkpointOnProgress] of cases) {
+    assert.equal(
+      vm.runInContext(
+        `_worktreeCheckpointMode(${autoCheckpoint}, ${checkpointOnProgress})`,
+        context,
+      ),
+      mode,
+    );
+    ensure('gs-wt-checkpoint-mode').value = mode;
+    const flags = JSON.parse(vm.runInContext('JSON.stringify(_worktreeCheckpointFlags())', context));
+    assert.deepEqual(flags, { autoCheckpoint, checkpointOnProgress });
+  }
 });
 
 test('system prompt preview popup sends unsaved form state and closes as nested modal', () => {
@@ -534,25 +813,98 @@ test('group settings refreshes reasoning effort options when provider changes', 
   vm.runInContext('onGsProviderChange()', context);
   assert.deepEqual(
     ensure('gs-agent-reasoning-effort').children.map((child) => child.value),
-    ['', 'low', 'medium', 'high', 'xhigh'],
+    ['', 'low', 'medium', 'high', 'xhigh', '__custom__'],
   );
 
   ensure('gs-agent-provider').value = 'claude-code';
   vm.runInContext('onGsProviderChange()', context);
   assert.deepEqual(
     ensure('gs-agent-reasoning-effort').children.map((child) => child.value),
-    ['', 'low', 'medium', 'high', 'xhigh', 'max'],
+    ['', 'low', 'medium', 'high', 'xhigh', 'max', '__custom__'],
   );
 
   ensure('gs-agent-provider').value = 'gemini-cli';
   vm.runInContext('onGsProviderChange()', context);
   assert.deepEqual(
     ensure('gs-agent-reasoning-effort').children.map((child) => child.value),
-    [''],
+    ['', '__custom__'],
   );
   assert.equal(
     ensure('gs-agent-reasoning-effort').children[0].textContent,
     'Not supported for this provider',
+  );
+});
+
+test('Codex model controls use detected choices with editable fallbacks last', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+  seedProviders(context, [
+    {
+      name: 'codex',
+      display_name: 'Codex',
+      command: 'codex',
+      reasoning_efforts: ['low', 'medium', 'high', 'xhigh'],
+      models: [
+        {
+          id: 'gpt-5.6-sol',
+          display_name: 'GPT-5.6-Sol',
+          is_default: true,
+          default_reasoning_effort: 'low',
+          reasoning_efforts: [
+            { value: 'low', description: 'Fast' },
+            { value: 'high', description: 'Deep' },
+          ],
+        },
+        {
+          id: 'gpt-5.6-terra',
+          display_name: 'GPT-5.6-Terra',
+          default_reasoning_effort: 'medium',
+          reasoning_efforts: [
+            { value: 'medium', description: 'Balanced' },
+            { value: 'xhigh', description: 'Extra high' },
+          ],
+        },
+      ],
+    },
+  ]);
+
+  ensure('gs-agent-provider').value = 'codex';
+  ensure('gs-agent-model').value = 'gpt-5.6-terra';
+  vm.runInContext(`onGsProviderChange('xhigh')`, context);
+
+  assert.deepEqual(
+    ensure('gs-agent-model-select').children.map((child) => child.value),
+    ['', 'gpt-5.6-sol', 'gpt-5.6-terra', '__custom__'],
+  );
+  assert.equal(
+    ensure('gs-agent-model-select').children[1].textContent,
+    'GPT-5.6-Sol (default)',
+  );
+  assert.equal(ensure('gs-agent-model-select').value, 'gpt-5.6-terra');
+  assert.equal(ensure('gs-agent-model').classList.contains('hidden'), true);
+  assert.deepEqual(
+    ensure('gs-agent-reasoning-effort').children.map((child) => child.value),
+    ['', 'medium', 'xhigh', '__custom__'],
+  );
+  assert.equal(
+    ensure('gs-agent-reasoning-effort').children[0].textContent,
+    'Model default (medium)',
+  );
+
+  ensure('gs-agent-model-select').value = '__custom__';
+  vm.runInContext(`_onModelSelectChange('gs-agent-model')`, context);
+  ensure('gs-agent-model').value = 'future-codex-model';
+  vm.runInContext(`_onCustomModelInput('gs-agent-model')`, context);
+  ensure('gs-agent-reasoning-effort').value = '__custom__';
+  vm.runInContext(`_onReasoningEffortSelectChange('gs-agent-reasoning-effort')`, context);
+  ensure('gs-agent-reasoning-effort-custom').value = 'ultra';
+
+  assert.equal(ensure('gs-agent-model').classList.contains('hidden'), false);
+  assert.equal(vm.runInContext(`_getModelValue('gs-agent-model')`, context), 'future-codex-model');
+  assert.equal(
+    vm.runInContext(`_getReasoningEffortValue('gs-agent-reasoning-effort')`, context),
+    'ultra',
   );
 });
 
@@ -597,33 +949,95 @@ test('worker provider block inherits group default provider and previews model/c
       text: child.textContent,
     })),
     [
-      { value: '', text: 'Group default' },
+      { value: '', text: 'Inherit · Codex' },
       { value: 'codex', text: 'Codex' },
       { value: 'claude-code', text: 'Claude Code' },
     ],
   );
   assert.equal(ensure('gs-worker-model').value, '');
-  assert.equal(ensure('gs-worker-model').placeholder, 'Group default: gpt-5');
+  assert.equal(ensure('gs-worker-model-select').children[0].textContent, 'Inherit · gpt-5');
   assert.equal(ensure('gs-worker-boot-command').value, '');
-  assert.equal(ensure('gs-worker-boot-command').placeholder, 'Group default: codex --sandbox');
+  assert.equal(ensure('gs-worker-boot-command').placeholder, 'Inherit · codex --sandbox');
   assert.deepEqual(
     ensure('gs-worker-reasoning-effort').children.map((child) => child.value),
-    ['', 'low', 'medium', 'high'],
+    ['', 'low', 'medium', 'high', '__custom__'],
   );
   assert.equal(ensure('gs-worker-reasoning-effort').value, 'high');
-  assert.equal(ensure('gs-engineer-model').placeholder, 'Group default: gpt-5');
-  assert.equal(ensure('gs-architect-model').placeholder, 'Group default: gpt-5');
+  assert.equal(ensure('gs-engineer-model-select').children[0].textContent, 'Inherit · gpt-5');
+  assert.equal(ensure('gs-architect-model-select').children[0].textContent, 'Inherit · gpt-5');
 
   ensure('gs-agent-boot-cmd').value = '';
   ensure('gs-agent-model').value = '';
   ensure('gs-worker-provider').value = 'claude-code';
   vm.runInContext('onGsWorkerProviderChange()', context);
-  assert.equal(ensure('gs-worker-model').placeholder, 'Group default: system default');
-  assert.equal(ensure('gs-worker-boot-command').placeholder, 'Group default: claude');
+  assert.equal(ensure('gs-worker-model-select').children[0].textContent, 'Inherit · provider default');
+  assert.equal(ensure('gs-worker-boot-command').placeholder, 'Inherit · claude');
   assert.deepEqual(
     ensure('gs-worker-reasoning-effort').children.map((child) => child.value),
-    ['', 'low', 'medium', 'high', 'max'],
+    ['', 'low', 'medium', 'high', 'max', '__custom__'],
   );
+  assert.equal(
+    ensure('gs-worker-reasoning-effort').children[0].textContent,
+    'Inherit · provider default',
+  );
+});
+
+test('General panes expose resolved inheritance inside launch and runtime controls', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+  seedProviders(context, [
+    {
+      name: 'codex',
+      display_name: 'Codex',
+      command: 'codex',
+      models: [{
+        id: 'gpt-5',
+        display_name: 'GPT-5',
+        is_default: true,
+        reasoning_efforts: ['low', 'medium', 'high'],
+        default_reasoning_effort: 'medium',
+      }],
+      reasoning_efforts: ['low', 'medium', 'high'],
+    },
+  ]);
+  ['gs-agent-shell', 'gs-engineer-shell', 'gs-architect-shell'].forEach((id) => {
+    const option = new FakeElement('option');
+    option.value = '';
+    ensure(id).appendChild(option);
+  });
+
+  vm.runInContext(`_showGroupSettings("alpha", {
+    settings: {
+      default_directory: "/repo",
+      shell: "zsh",
+      env_file: ".env.local",
+      agent_directory: "/repo/agents",
+      agent_shell: "bash",
+      agent_provider: "codex",
+      agent_model: "gpt-5",
+      agent_reasoning_effort: "high"
+    },
+    engineer_settings: {},
+    architect_settings: {},
+    profiles: ["Default"]
+  })`, context);
+
+  assert.equal(ensure('gs-worker-provider').children[0].textContent, 'Inherit · Codex');
+  assert.equal(ensure('gs-engineer-model-select').children[0].textContent, 'Inherit · GPT-5');
+  assert.equal(ensure('gs-architect-reasoning-effort').children[0].textContent, 'Inherit · high');
+  assert.equal(ensure('gs-worker-boot-command').placeholder, 'Inherit · codex');
+  assert.equal(ensure('gs-agent-directory').placeholder, 'Inherit · /repo');
+  assert.equal(ensure('gs-engineer-directory').placeholder, 'Inherit · /repo/agents');
+  assert.equal(ensure('gs-architect-directory').placeholder, 'Inherit · /repo/agents');
+  assert.equal(ensure('gs-agent-env-file').placeholder, 'Inherit · .env.local');
+  assert.equal(ensure('gs-agent-shell').children[0].textContent, 'Inherit · zsh');
+  assert.equal(ensure('gs-engineer-shell').children[0].textContent, 'Inherit · bash');
+  assert.equal(ensure('gs-architect-shell').children[0].textContent, 'Inherit · bash');
+
+  ensure('gs-agent-reasoning-effort').value = 'medium';
+  vm.runInContext('refreshGsInheritedLaunchPlaceholders()', context);
+  assert.equal(ensure('gs-worker-reasoning-effort').children[0].textContent, 'Inherit · medium');
 });
 
 test('group settings modal populates engineer fields and honors engineer tab deep-link', () => {
@@ -695,7 +1109,7 @@ test('group settings modal populates engineer fields and honors engineer tab dee
   assert.equal(ensure('gs-agent-reasoning-effort').value, 'minimal');
   assert.deepEqual(
     ensure('gs-agent-reasoning-effort').children.map((child) => child.value),
-    ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh'],
+    ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', '__custom__'],
   );
   assert.equal(ensure('gs-engineer-model').value, 'gpt-5.1-codex');
   assert.equal(ensure('gs-engineer-reasoning-effort').value, 'xhigh');
@@ -703,7 +1117,7 @@ test('group settings modal populates engineer fields and honors engineer tab dee
   assert.equal(ensure('gs-engineer-shell').value, 'fish');
   assert.deepEqual(
     ensure('gs-engineer-reasoning-effort').children.map((child) => child.value),
-    ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh'],
+    ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', '__custom__'],
   );
   assert.equal(ensure('gs-engineer-custom-instructions').value, 'Watch for regressions.');
   assert.equal(ensure('gs-engineer-restrict-to-created-agents').checked, false);
@@ -899,7 +1313,8 @@ test('group settings uses Group/Workers split plus scoped Engineer and Architect
   assert.ok(architectBehavior < html.indexOf('id="gs-architect-custom-instructions"'));
   assert.ok(html.indexOf('id="gs-architect-custom-instructions"') < architectSystem);
   assert.ok(architectBehavior < html.indexOf('id="gs-architect-journal-checkpoint"'));
-  assert.ok(architectSystem < html.indexOf('id="gs-architect-directory"'));
+  assert.ok(architectGeneral < html.indexOf('id="gs-architect-directory"'));
+  assert.ok(html.indexOf('id="gs-architect-directory"') < architectBehavior);
   assert.ok(architectSystem < html.indexOf('id="gs-architect-digest-verbosity"'));
   assert.ok(html.indexOf('id="gs-architect-digest-verbosity"') < html.indexOf('id="gs-architect-push-interval"'));
 });
@@ -919,21 +1334,25 @@ test('group settings places all-kind defaults under Group and worker overrides u
   const sync = groupPane.indexOf('data-subpane="group-sync"');
   const advanced = groupPane.indexOf('data-subpane="group-advanced"');
   assert.ok(workerDefaults < groupPane.indexOf('id="gs-agent-provider"'));
-  assert.ok(workerDefaults < groupPane.indexOf('id="gs-default-agent-template"'));
   assert.ok(workerDefaults < groupPane.indexOf('id="gs-agent-model"'));
   assert.ok(workerDefaults < sync);
   assert.ok(sync < advanced);
   assert.doesNotMatch(groupPane, /data-subpane="group-terminals"/);
   assert.doesNotMatch(groupPane, /id="gs-auto-terminals"/);
   assert.doesNotMatch(groupPane, /id="gs-terminal-prefix"/);
-  assert.match(groupPane, /Group-wide defaults for all agents — workers, engineers, and architects — unless overridden per-kind\./);
-  assert.match(groupPane, /Default provider/);
-  assert.match(groupPane, /Default role/);
-  assert.match(groupPane, /Default model/);
+  assert.match(groupPane, /gs-settings-section-title">Shared launch defaults/);
+  assert.match(groupPane, /<label for="gs-agent-provider">Provider<\/label>/);
+  assert.doesNotMatch(groupPane, /id="gs-default-agent-template"/);
+  assert.match(groupPane, /<label for="gs-agent-model-select">Model<\/label>/);
+  assert.match(groupPane, /settings-field-grid settings-field-grid--three/);
+  assert.match(groupPane, /Used by every agent kind unless its own General settings override them/);
+  assert.match(groupPane, /settings-field--secondary[\s\S]*id="gs-agent-boot-cmd"/);
   assert.doesNotMatch(groupPane, /Default worker provider/);
   assert.doesNotMatch(groupPane, /Default worker model/);
 
   assert.match(workersPane, /data-subpane="worker-execution"/);
+  assert.match(workersPane, /<label for="gs-default-agent-template">Default role<\/label>/);
+  assert.match(workersPane, /id="gs-default-agent-template"/);
   assert.match(workersPane, /id="gs-worker-provider"/);
   assert.match(workersPane, /id="gs-worker-boot-command"/);
   assert.match(workersPane, /id="gs-worker-model"/);
@@ -941,17 +1360,114 @@ test('group settings places all-kind defaults under Group and worker overrides u
   assert.match(workersPane, /id="gs-agent-directory"/);
   assert.match(workersPane, /id="gs-session-resume"/);
   assert.match(workersPane, /id="gs-agent-idle-timeout"/);
-  assert.match(workersPane, /id="gs-worktree"/);
+  assert.match(workersPane, /id="gs-worktree-mode"/);
+  assert.match(workersPane, /id="gs-wt-checkpoint-mode"/);
+  assert.match(workersPane, /id="gs-wt-dependent-settings"/);
   assert.match(workersPane, /id="gs-notifications"/);
-  assert.match(workersPane, /Enable macOS worker notifications/);
-  assert.match(workersPane, /Group → Agents/);
+  assert.match(workersPane, /Enable macOS notifications/);
   assert.doesNotMatch(workersPane, /Group → Worker defaults/);
   assert.doesNotMatch(workersPane, /id="gs-agent-provider"/);
   assert.doesNotMatch(workersPane, /id="gs-agent-model"/);
   assert.doesNotMatch(workersPane, /id="gs-terminal-prefix"/);
 });
 
-test('engineer System sub-tab groups permissions and digest settings', () => {
+test('all General panes use shared section cards and responsive field grids', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const css = appStylesheetSource();
+  const groupStart = html.indexOf('data-subpane="group-general"');
+  const groupEnd = html.indexOf('data-subpane="group-worker-defaults"');
+  const workerStart = html.indexOf('data-subpane="worker-execution"');
+  const workerEnd = html.indexOf('data-subpane="worker-worktree"');
+  const engineerStart = html.indexOf('data-subpane="engineer-general"');
+  const engineerEnd = html.indexOf('data-subpane="engineer-behavior"');
+  const architectStart = html.indexOf('data-subpane="architect-general"');
+  const architectEnd = html.indexOf('data-subpane="architect-behavior"');
+  const group = html.slice(groupStart, groupEnd);
+  const worker = html.slice(workerStart, workerEnd);
+  const engineer = html.slice(engineerStart, engineerEnd);
+  const architect = html.slice(architectStart, architectEnd);
+
+  assert.match(group, /gs-settings-section-title">Workspace/);
+  assert.match(group, /gs-settings-section-title">Environment/);
+  assert.match(group, /gs-settings-section-title">Limits &amp; visibility/);
+  assert.match(group, /Agent limit/);
+  assert.doesNotMatch(group, /Max workers/);
+  assert.match(worker, /gs-settings-section-title">Launch/);
+  assert.match(worker, /gs-settings-section-title">Runtime/);
+  assert.match(worker, /gs-settings-section-title">Session/);
+
+  for (const pane of [engineer, architect]) {
+    assert.match(pane, /gs-settings-section-title">Launch/);
+    assert.match(pane, /gs-settings-section-title">Runtime/);
+    assert.match(pane, /settings-field--secondary[\s\S]*Command override/);
+    assert.doesNotMatch(pane, /Terminal overrides|designated Engineer|Architect agents only/);
+  }
+
+  assert.match(css, /\.settings-field-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/);
+  assert.match(css, /\.settings-field-grid--three\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);/);
+  assert.match(css, /\.settings-field--wide\s*\{[^}]*grid-column:\s*1\s*\/\s*-1;/);
+  assert.match(css, /\.settings-field--compact\s*\{[^}]*max-width:\s*360px;/);
+  assert.match(css, /\.gs-settings-section-body\s*\{\s*padding:\s*10px;\s*\}/);
+  assert.match(css, /@media \(max-width: 760px\)\s*\{[\s\S]*?\.settings-field-grid\s*\{[^}]*grid-template-columns:\s*1fr;/);
+});
+
+test('remaining settings panes use the shared section hierarchy and concise labels', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const css = appStylesheetSource();
+  const pane = (start, end) => html.slice(html.indexOf(`data-subpane="${start}"`), html.indexOf(`data-subpane="${end}"`));
+  const agents = pane('group-worker-defaults', 'group-sync');
+  const sync = pane('group-sync', 'group-advanced');
+  const advanced = pane('group-advanced', 'worker-execution');
+  const notifications = pane('worker-notifications', 'engineer-general');
+  const engineerBehavior = pane('engineer-behavior', 'engineer-system');
+  const architectBehavior = pane('architect-behavior', 'architect-system');
+
+  assert.match(agents, /gs-settings-section-title">Shared launch defaults/);
+  assert.doesNotMatch(agents, />Default (provider|role|model|reasoning effort)</i);
+  for (const title of ['Connection', 'Repository &amp; project', 'Board mapping', 'Issue behavior', 'Assignees']) {
+    assert.match(sync, new RegExp(`gs-settings-section-title">${title}`));
+  }
+  assert.match(advanced, /gs-settings-section-title">Guidance/);
+  assert.match(html, /class="gs-subpane gs-subpane--compact" data-subpane="group-advanced"/);
+  assert.match(advanced, /settings-field settings-field--compact/);
+  assert.match(notifications, /gs-settings-section-title">Delivery/);
+  assert.match(notifications, /gs-settings-section-title">Events/);
+  for (const title of ['Specializations', 'Orchestration', 'Communication', 'Policy overrides']) {
+    assert.match(engineerBehavior, new RegExp(`gs-settings-section-title">${title}`));
+  }
+  for (const title of ['Orchestration', 'Continuity', 'Instructions']) {
+    assert.match(architectBehavior, new RegExp(`gs-settings-section-title">${title}`));
+  }
+  assert.match(css, /\.settings-field-help\s*\{/);
+  assert.match(css, /\.settings-event-badges\s*\{/);
+});
+
+test('worker notification event controls remain visible but disable with delivery', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+  const events = ensure('gs-worker-notification-events');
+  const finish = ensure('gs-notify-finish');
+  const error = ensure('gs-notify-error');
+  const attention = ensure('gs-notify-attention');
+  events._controls = [finish, error, attention];
+
+  ensure('gs-notifications').checked = false;
+  vm.runInContext('_syncWorkerNotificationSettingsUi()', context);
+  assert.equal(events.classList.contains('is-disabled'), true);
+  assert.equal(finish.disabled, true);
+  assert.equal(error.disabled, true);
+  assert.equal(attention.disabled, true);
+
+  ensure('gs-notifications').checked = true;
+  vm.runInContext('_syncWorkerNotificationSettingsUi()', context);
+  assert.equal(events.classList.contains('is-disabled'), false);
+  assert.equal(finish.disabled, false);
+  assert.equal(error.disabled, false);
+  assert.equal(attention.disabled, false);
+});
+
+test('engineer System groups permissions, digest delivery, and human-readable events', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   const modals = fs.readFileSync(path.join(repoRoot, 'static/js/modals/group-settings.js'), 'utf8');
   const engineerStart = html.indexOf('<div class="gs-pane" data-pane="engineer">');
@@ -961,25 +1477,26 @@ test('engineer System sub-tab groups permissions and digest settings', () => {
   const behavior = engineerPane.indexOf('data-subpane="engineer-behavior"');
   const system = engineerPane.indexOf('data-subpane="engineer-system"');
   const permissions = engineerPane.indexOf('gs-settings-section-title">Permissions');
-  const digestSettings = engineerPane.indexOf('gs-settings-section-title">Digest settings');
+  const digestDelivery = engineerPane.indexOf('gs-settings-section-title">Digest delivery');
+  const events = engineerPane.indexOf('gs-settings-section-title">Events');
 
   assert.notEqual(system, -1);
   assert.ok(general < behavior);
   assert.ok(behavior < system);
   assert.ok(system < permissions);
-  assert.ok(permissions < digestSettings);
+  assert.ok(permissions < digestDelivery);
+  assert.ok(digestDelivery < events);
   assert.equal(engineerPane.indexOf('>Digests</button>'), -1);
   assert.match(engineerPane, /data-subtab="engineer-system"[\s\S]*>System<\/button>/);
-  assert.match(engineerPane, /Allow the Engineer to see workers created by other Engineers/);
-  assert.match(engineerPane, /Allow the Engineer to override the provider for the workers it creates/);
-  assert.match(
-    engineerPane,
-    /Engineers running Claude Code tend to choose Claude Code for their workers regardless of the group's default provider\. Disable this to force the engineer to use the group default\./,
-  );
+  assert.match(engineerPane, /See other Engineers' workers/);
+  assert.match(engineerPane, /Choose providers for created workers/);
   assert.ok(permissions < engineerPane.indexOf('id="gs-engineer-restrict-to-created-agents"'));
-  assert.ok(engineerPane.indexOf('id="gs-engineer-can-override-worker-provider"') < digestSettings);
-  assert.ok(digestSettings < engineerPane.indexOf('id="gs-engineer-digest-verbosity"'));
+  assert.ok(engineerPane.indexOf('id="gs-engineer-can-override-worker-provider"') < digestDelivery);
+  assert.ok(digestDelivery < engineerPane.indexOf('id="gs-engineer-digest-verbosity"'));
   assert.ok(engineerPane.indexOf('id="gs-engineer-digest-verbosity"') < engineerPane.indexOf('id="gs-engineer-push-interval"'));
+  assert.match(engineerPane, /settings-event-badges[\s\S]*Task completed[\s\S]*Question created/);
+  assert.match(engineerPane, /id="gs-engineer-event-agent-started"[^>]*> Agent started/);
+  assert.doesNotMatch(engineerPane, />\s*task_completed\s*</);
   assert.ok(behavior < engineerPane.indexOf('id="gs-engineer-notification-preset"'));
   assert.ok(engineerPane.indexOf('id="gs-engineer-notification-preset"') < system);
   assert.match(engineerPane, /id="gs-engineer-digest-verbosity-hint" class="hint-btn"/);
@@ -988,7 +1505,7 @@ test('engineer System sub-tab groups permissions and digest settings', () => {
   assert.match(modals, /gs-architect-digest-verbosity-hint', DIGEST_VERBOSITY_TOOLTIP_HELP/);
 });
 
-test('architect System sub-tab groups terminal overrides and digest settings', () => {
+test('architect General owns runtime while System separates digest delivery and events', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   const architectStart = html.indexOf('<div class="gs-pane" data-pane="architect">');
   const footerStart = html.indexOf('<div class="modal-actions ui-modal__footer">', architectStart);
@@ -996,21 +1513,26 @@ test('architect System sub-tab groups terminal overrides and digest settings', (
   const general = architectPane.indexOf('data-subpane="architect-general"');
   const behavior = architectPane.indexOf('data-subpane="architect-behavior"');
   const system = architectPane.indexOf('data-subpane="architect-system"');
-  const terminalOverrides = architectPane.indexOf('gs-settings-section-title">Terminal overrides');
-  const digestSettings = architectPane.indexOf('gs-settings-section-title">Digest settings');
+  const runtime = architectPane.indexOf('gs-settings-section-title">Runtime');
+  const digestDelivery = architectPane.indexOf('gs-settings-section-title">Digest delivery');
+  const events = architectPane.indexOf('gs-settings-section-title">Events');
 
   assert.notEqual(system, -1);
   assert.ok(general < behavior);
   assert.ok(behavior < system);
-  assert.ok(system < terminalOverrides);
-  assert.ok(terminalOverrides < digestSettings);
+  assert.ok(general < runtime);
+  assert.ok(runtime < behavior);
+  assert.ok(system < digestDelivery);
+  assert.ok(digestDelivery < events);
   assert.equal(architectPane.indexOf('>Digests</button>'), -1);
   assert.match(architectPane, /data-subtab="architect-system"[\s\S]*>System<\/button>/);
-  assert.ok(terminalOverrides < architectPane.indexOf('id="gs-architect-directory"'));
+  assert.ok(runtime < architectPane.indexOf('id="gs-architect-directory"'));
   assert.ok(architectPane.indexOf('id="gs-architect-directory"') < architectPane.indexOf('id="gs-architect-shell"'));
+  assert.ok(architectPane.indexOf('id="gs-architect-shell"') < behavior);
+  assert.equal(architectPane.indexOf('Terminal overrides'), -1);
   assert.equal(architectPane.indexOf('id="gs-architect-profile"'), -1);
   assert.equal(architectPane.indexOf('id="gs-architect-color-swatches"'), -1);
-  assert.ok(digestSettings < architectPane.indexOf('id="gs-architect-digest-verbosity"'));
+  assert.ok(digestDelivery < architectPane.indexOf('id="gs-architect-digest-verbosity"'));
   assert.ok(architectPane.indexOf('id="gs-architect-digest-verbosity"') < architectPane.indexOf('id="gs-architect-push-interval"'));
   assert.ok(behavior < architectPane.indexOf('id="gs-architect-journal-checkpoint"'));
   assert.ok(architectPane.indexOf('id="gs-architect-journal-checkpoint"') < system);
@@ -1073,13 +1595,14 @@ test('group settings Advanced sub-tab owns Delete group action', () => {
   assert.match(groupPane, /data-subtab="group-general"[\s\S]*data-subtab="group-advanced"/);
 
   const advancedPane = groupPane.slice(groupAdvancedIndex);
-  assert.match(advancedPane, /Guidance hint cadence/);
+  assert.match(advancedPane, /gs-settings-section-title">Guidance/);
+  assert.match(advancedPane, />Hint cadence<\/label>/);
   assert.match(
     advancedPane,
     /<input id="gs-guidance-hint-cadence" type="number" min="0" max="100" step="1" value="4">/,
   );
-  assert.match(advancedPane, /show on the 1st occurrence, then every N agent messages/);
-  assert.match(advancedPane, /0 = every message/);
+  assert.match(advancedPane, /Show recurring guidance on the first applicable message, then every N messages/);
+  assert.match(advancedPane, /Use 0 for every message/);
   assert.match(advancedPane, /Delete group/);
   assert.match(advancedPane, /class="btn-danger"/);
   assert.match(advancedPane, /deleteSettingsGroup\(\)/);
@@ -1089,7 +1612,8 @@ test('group settings Advanced sub-tab owns Delete group action', () => {
   assert.doesNotMatch(render, /oncontextmenu="onGroupContextMenu/);
   assert.doesNotMatch(render, /title="Delete group"/);
   assert.match(gridMain, /title="Group settings"[^`]*\\u2699/);
-  assert.match(groupTabs, /agent-group-tab-menu[\s\S]*openAgentGroupTabActions\(event,[\s\S]*&#8943;/);
+  assert.match(groupTabs, /agent-group-tab-settings[\s\S]*openGroupSettings\([\s\S]*&#9881;/);
+  assert.doesNotMatch(groupTabs, /openAgentGroupTabActions|agent-group-tab-menu|&#8943;/);
   assert.doesNotMatch(main, /openActiveGroupMenu|&#8942;|Delete group/);
 });
 
@@ -1206,7 +1730,9 @@ test('architect behavior sub-tab keeps policy fields without fallback review-gat
   const behaviorStart = html.indexOf('data-subpane="architect-behavior"');
   const systemStart = html.indexOf('data-subpane="architect-system"');
   const behaviorPane = html.slice(behaviorStart, systemStart);
-  assert.match(behaviorPane, /Configure architect checkpoint policy\./);
+  assert.match(behaviorPane, /gs-settings-section-title">Orchestration/);
+  assert.match(behaviorPane, /gs-settings-section-title">Continuity/);
+  assert.match(behaviorPane, /gs-settings-section-title">Instructions/);
   assert.doesNotMatch(behaviorPane, /id="gs-architect-digest-verbosity"/);
   assert.match(html, /id="gs-architect-journal-checkpoint"/);
   assert.doesNotMatch(html, /fallback review-gate defaults for transitions without their own LOC gate/);
@@ -1233,6 +1759,9 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   ensure('gs-worker-boot-command').value = 'codex --worker-kind';
   ensure('gs-worker-model').value = 'gpt-5-worker';
   ensure('gs-worker-reasoning-effort').value = 'high';
+  ensure('gs-worktree-mode').value = 'isolated';
+  ensure('gs-wt-checkpoint-mode').value = 'progress';
+  ensure('gs-wt-direct-history').value = 'squash';
   ensure('gs-engineer-merge-mode').value = 'direct';
   ensure('gs-wt-merge-cleanup').value = 'remove';
   ensure('gs-wt-merge-preserve-diff').checked = true;
@@ -1296,6 +1825,11 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   assert.equal(Object.prototype.hasOwnProperty.call(sandbox.sendCalls[0].settings, 'auto_terminals'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(sandbox.sendCalls[0].settings, 'terminal_name_prefix'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(sandbox.sendCalls[0].settings, 'terminal_boot_command'), false);
+  assert.equal(sandbox.sendCalls[0].settings.git_worktree, true);
+  assert.equal(sandbox.sendCalls[0].settings.worktree_auto_checkpoint, false);
+  assert.equal(sandbox.sendCalls[0].settings.checkpoint_on_progress, true);
+  assert.equal(sandbox.sendCalls[0].settings.worktree_merge_squash, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(sandbox.sendCalls[0].settings, 'worktree_merge_instructions'), false);
   assert.equal(sandbox.sendCalls[0].settings.engineer_merge_mode, 'direct');
   assert.equal(sandbox.sendCalls[0].settings.worktree_merge_cleanup, 'remove');
   assert.equal(sandbox.sendCalls[0].settings.worktree_merge_preserve_diff, true);
@@ -1425,8 +1959,8 @@ test('group settings no longer renders the legacy no-engineer placeholder copy',
   assert.doesNotMatch(html, legacyCopy);
   assert.doesNotMatch(modalJs, legacyCopy);
   assert.doesNotMatch(html, /Hide other engineers' workers from this engineer/);
-  assert.match(html, /Allow the Engineer to see workers created by other Engineers/);
-  assert.match(html, /Human operators still see all workers on the board/);
+  assert.match(html, /See other Engineers' workers/);
+  assert.match(html, /Operators always see every worker/);
   // _showGroupSettings fetches specializations to populate the
   // default-specializations picker; ignore that side request here.
   const callsWithoutSpecFetch = sandbox.sendCalls.filter(
@@ -1664,10 +2198,10 @@ test('_addWtSymlink trims outer slashes while preserving glob syntax', () => {
 test('worktree gitignored symlink checkbox renders and loads from settings', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   assert.match(html, /id="gs-wt-symlink-gitignored"/);
-  assert.match(html, /Symlink gitignored paths/);
+  assert.match(html, /Symlink all gitignored paths/);
   assert.match(
     html,
-    /Warning: symlinks every gitignored path, including \.env, secrets,[\s\S]*credentials, and node_modules\.[\s\S]*Workers read and modify the real[\s\S]*files because these are symlinks, not copies\./,
+    /This can expose \.env files, credentials, caches, and dependencies\.[\s\S]*Changes through these symlinks modify the original files\./,
   );
 
   const { sandbox, ensure } = createSandbox();

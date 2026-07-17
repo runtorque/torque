@@ -29,8 +29,6 @@ function _scheduleGroupSwitcherSelectSync() {
 
 function renderGroupSwitcher() {
   var root = document.getElementById('group-switcher');
-  var addGroupButton = document.getElementById('add-group-header-btn');
-  if (addGroupButton) addGroupButton.hidden = false;
   if (!root) return;
   root.hidden = true;
   if (root._torqueLastHtml !== '') {
