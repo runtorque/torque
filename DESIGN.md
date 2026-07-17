@@ -206,6 +206,22 @@ Segmented toggles, filters, terminal cards, badges, and tags are not navigation
 tabs. Do not apply tab styles to them merely because their class name contains
 “tab.”
 
+### Scrollbars
+
+- Native scrollbars use `--scrollbar-thumb` with a transparent track. Hover uses
+  `--scrollbar-thumb-hover`; feature surfaces must not derive a separate thumb
+  color from text or accent tokens.
+- Vertical scrollbars are 5px. Compact horizontal navigation scrollbars may be
+  4px when space is constrained.
+- Panel-tab overflow keeps that 4px visual thumb inside an 8px native hit
+  target. Transparent thumb borders enlarge the grab area without adding
+  visual weight.
+- Surfaces governed by these pixel tokens keep the standard `scrollbar-width`
+  and `scrollbar-color` properties at `auto`; non-auto values override the
+  explicit WebKit geometry in Chromium.
+- Scrollbars remain natively operable. Hiding one is reserved for surfaces with
+  an equivalent visible navigation control.
+
 ### Segmented controls
 
 - Segmented controls choose one mutually exclusive local mode or view. They use
@@ -1070,7 +1086,9 @@ scope.
   obscure it. Dropping on a tab strip persists that exact insertion position
   within the same dock or across docks. Dropping into the body of the panel's
   current dock preserves its existing tab position instead of silently moving
-  it to the end.
+  it to the end. When the strip overflows, it remains natively scrollable but
+  uses the canonical compact scrollbar thumb on a transparent track instead of
+  platform chrome.
 - Rationale: Dock-only highlighting communicates the destination region but not
   the resulting order, and remove-then-append behavior makes an accidental drop
   mutate a layout that appeared unchanged. Pickup and insertion feedback lets

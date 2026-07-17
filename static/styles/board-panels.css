@@ -76,7 +76,7 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  scrollbar-width: thin;
+  scrollbar-width: auto;
 }
 .chat-thread-list {
   padding: 6px;
@@ -1466,7 +1466,7 @@ body.runtime-embedded .board-empty-action:focus-visible {
 .board-filter-dropdown-list {
   max-height: 200px; overflow-y: auto; overflow-x: hidden;
   padding: 2px 0;
-  scrollbar-width: thin;
+  scrollbar-width: auto;
 }
 .board-filter-dropdown-item {
   gap: 6px;
@@ -2764,9 +2764,17 @@ body.runtime-embedded .board-empty-action:focus-visible {
 /* ------------------------------------------------------------------ */
 /* Scrollbar                                                           */
 /* ------------------------------------------------------------------ */
-::-webkit-scrollbar { width: 6px; }
+html {
+  scrollbar-color: auto;
+  scrollbar-width: auto;
+}
+::-webkit-scrollbar {
+  width: var(--scrollbar-size);
+  height: var(--scrollbar-size);
+}
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
 
 /* ------------------------------------------------------------------ */
 /* Standalone / wide layout (dual mode or standalone window)           */

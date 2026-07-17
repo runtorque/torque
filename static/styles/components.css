@@ -868,7 +868,7 @@ textarea[aria-invalid="true"] {
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-inline: contain;
-  scrollbar-width: thin;
+  scrollbar-width: auto;
 }
 
 .ui-tablist > [role="tab"] {

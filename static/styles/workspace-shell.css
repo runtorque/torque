@@ -591,7 +591,24 @@ body.runtime-embedded #standalone-right-rail {
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-inline: contain;
-  scrollbar-width: thin;
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+  scroll-behavior: smooth;
+}
+.standalone-panel-zone-tabs::-webkit-scrollbar {
+  height: var(--scrollbar-hit-size-nav);
+}
+.standalone-panel-zone-tabs::-webkit-scrollbar-track {
+  background: transparent;
+}
+.standalone-panel-zone-tabs::-webkit-scrollbar-thumb {
+  border: calc((var(--scrollbar-hit-size-nav) - var(--scrollbar-size-compact)) / 2) solid transparent;
+  border-radius: 999px;
+  background: var(--scrollbar-thumb);
+  background-clip: content-box;
+}
+.standalone-panel-zone-tabs::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
 }
 .standalone-panel-tab,
 .standalone-panel-zone-btn {

@@ -292,16 +292,16 @@
   color: var(--text);
   overflow-x: auto;
   padding: 0.6em 0.7em calc(0.6em + var(--torque-md-code-scrollbar-space));
-  scrollbar-color: color-mix(in srgb, var(--text-dim) 58%, transparent) transparent;
+  scrollbar-color: auto;
   scrollbar-gutter: stable;
-  scrollbar-width: thin;
+  scrollbar-width: auto;
   white-space: pre;
 }
 .torque-markdown .torque-md-code-block::-webkit-scrollbar {
   height: var(--torque-md-code-scrollbar-space);
 }
 .torque-markdown .torque-md-code-block::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--text-dim) 58%, transparent);
+  background: var(--scrollbar-thumb);
   background-clip: content-box;
   border: 2px solid transparent;
   border-radius: 999px;

@@ -1090,8 +1090,8 @@ main {
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-width: auto;
+  scrollbar-color: auto;
   -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 8px, #000 calc(100% - 8px), transparent 100%);
   mask-image: linear-gradient(90deg, transparent 0, #000 8px, #000 calc(100% - 8px), transparent 100%);
   scroll-behavior: smooth;
@@ -1101,11 +1101,16 @@ main {
   padding-left: 6px;
   border-left: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
 }
-.agent-group-tabs-list::-webkit-scrollbar { height: 4px; }
+.agent-group-tabs-list::-webkit-scrollbar {
+  height: var(--scrollbar-size-compact);
+}
 .agent-group-tabs-list::-webkit-scrollbar-track { background: transparent; }
 .agent-group-tabs-list::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: var(--border-strong);
+  background: var(--scrollbar-thumb);
+}
+.agent-group-tabs-list::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
 }
 .agent-group-tabs-empty {
   flex: 0 0 auto;
@@ -2766,7 +2771,7 @@ body.runtime-embedded .agent-focus-header {
 .mcp-log {
   flex: 1; min-width: 0;
   max-height: 72px; overflow-y: auto;
-  scrollbar-width: thin;
+  scrollbar-width: auto;
 }
 .mcp-entry {
   display: flex; align-items: baseline; gap: 4px;

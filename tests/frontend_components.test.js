@@ -27,6 +27,27 @@ test('shared content states define semantic, placement, hierarchy, and motion va
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.ui-state--loading::before\s*\{\s*animation:\s*none;/s);
 });
 
+test('native scrollbars share canonical thumb and hover colors', () => {
+  const tokens = source('static/styles/tokens-base.css');
+  const board = source('static/styles/board-panels.css');
+  const grid = source('static/styles/workspace-grid.css');
+  const shell = source('static/styles/workspace-shell.css');
+  const features = source('static/styles/feature-panels.css');
+
+  assert.match(tokens, /--scrollbar-thumb:\s*var\(--border\);/);
+  assert.match(tokens, /--scrollbar-thumb-hover:\s*var\(--border-strong\);/);
+  assert.match(tokens, /--scrollbar-size:\s*5px;/);
+  assert.match(tokens, /--scrollbar-size-compact:\s*4px;/);
+  assert.match(tokens, /--scrollbar-hit-size-nav:\s*8px;/);
+  assert.match(board, /html\s*\{[^}]*scrollbar-color:\s*auto;[^}]*scrollbar-width:\s*auto;/s);
+  assert.match(board, /::\-webkit-scrollbar\s*\{[^}]*width:\s*var\(--scrollbar-size\);[^}]*height:\s*var\(--scrollbar-size\);/s);
+  assert.match(board, /::\-webkit-scrollbar-thumb\s*\{[^}]*background:\s*var\(--scrollbar-thumb\);/s);
+  assert.match(board, /::\-webkit-scrollbar-thumb:hover\s*\{[^}]*background:\s*var\(--scrollbar-thumb-hover\);/s);
+  assert.match(grid, /\.agent-group-tabs-list\s*\{[^}]*scrollbar-color:\s*auto;/s);
+  assert.match(shell, /\.standalone-panel-zone-tabs\s*\{[^}]*scrollbar-color:\s*auto;/s);
+  assert.match(features, /\.torque-markdown \.torque-md-code-block\s*\{[^}]*scrollbar-color:\s*auto;/s);
+});
+
 test('operator-facing content states opt into the canonical API and announcement semantics', () => {
   const board = source('static/js/board/model.js');
   const grid = source('static/js/grid/main.js');
@@ -338,7 +359,7 @@ test('residual responsive audit preserves compact actions, priority, and direct 
   assert.match(panelManager, /function _standaloneCaptureZoneTabFocus\(\)[\s\S]*?standalone-panel-tab[\s\S]*?Right rail panels/);
   assert.match(panelManager, /function _standaloneRestoreZoneTabFocus\(snapshot\)[\s\S]*?preventScroll/);
   assert.match(panelManager, /var zoneTabFocus = _standaloneCaptureZoneTabFocus\(\)[\s\S]*?_standaloneRestoreZoneTabFocus\(zoneTabFocus\)/);
-  assert.match(shellCss, /\.standalone-panel-zone-tabs\s*\{[^}]*flex:\s*1 1 auto;[^}]*max-width:\s*100%;[^}]*overflow-x:\s*auto;[^}]*overscroll-behavior-inline:\s*contain;[^}]*scrollbar-width:\s*thin;/s);
+  assert.match(shellCss, /\.standalone-panel-zone-tabs\s*\{[^}]*flex:\s*1 1 auto;[^}]*max-width:\s*100%;[^}]*overflow-x:\s*auto;[^}]*overscroll-behavior-inline:\s*contain;[^}]*scrollbar-width:\s*auto;/s);
 
   assert.match(history, /ah-filters segmented-control" role="group" aria-label="History status"/);
   assert.match(history, /ah-filter-btn segmented-control__item/);

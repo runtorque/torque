@@ -23257,8 +23257,8 @@ test('markdown code blocks reserve horizontal scrollbar space for message bodies
     'bottom padding reserves room for overlay horizontal scrollbars',
   );
   assert.match(blockRule[0], /scrollbar-gutter:\s*stable;/);
-  assert.match(blockRule[0], /scrollbar-width:\s*thin;/);
-  assert.match(blockRule[0], /scrollbar-color:\s*color-mix\(in srgb, var\(--text-dim\) 58%, transparent\) transparent;/);
+  assert.match(blockRule[0], /scrollbar-width:\s*auto;/);
+  assert.match(blockRule[0], /scrollbar-color:\s*auto;/);
 
   const webkitRule = css.match(/\.torque-markdown \.torque-md-code-block::-webkit-scrollbar\s*\{[^}]*\}/s);
   assert.ok(webkitRule, 'WebKit scrollbar rule exists for browser and desktop webviews');
@@ -23266,7 +23266,7 @@ test('markdown code blocks reserve horizontal scrollbar space for message bodies
 
   const thumbRule = css.match(/\.torque-markdown \.torque-md-code-block::-webkit-scrollbar-thumb\s*\{[^}]*\}/s);
   assert.ok(thumbRule, 'WebKit scrollbar thumb rule exists');
-  assert.match(thumbRule[0], /background:\s*color-mix\(in srgb, var\(--text-dim\) 58%, transparent\);/);
+  assert.match(thumbRule[0], /background:\s*var\(--scrollbar-thumb\);/);
   assert.match(thumbRule[0], /border:\s*2px solid transparent;/);
 });
 
@@ -29955,6 +29955,30 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
   );
   assert.match(css, /\.agent-group-tabs-host\s*\{[^}]*container:\s*agent-group-nav\s*\/\s*inline-size;[^}]*padding:\s*3px 6px;[^}]*border-bottom:\s*1px solid var\(--border\);/s);
   assert.match(css, /\.agent-group-tabs-list\s*\{[^}]*overflow-x:\s*auto;[^}]*overflow-y:\s*hidden;/s);
+  assert.match(
+    css,
+    /\.standalone-panel-zone-tabs\s*\{[^}]*overflow-x:\s*auto;[^}]*scrollbar-width:\s*auto;[^}]*scrollbar-color:\s*auto;/s,
+    'overflowing panel tabs use the compact themed scrollbar contract',
+  );
+  assert.match(
+    css,
+    /\.standalone-panel-zone-tabs::\-webkit-scrollbar\s*\{[^}]*height:\s*var\(--scrollbar-hit-size-nav\);/s,
+    'browser and desktop webviews keep a usable panel-tab scrollbar hit target',
+  );
+  assert.match(
+    css,
+    /\.standalone-panel-zone-tabs::\-webkit-scrollbar-track\s*\{[^}]*background:\s*transparent;/s,
+    'panel-tab overflow never renders a bright platform scrollbar trough',
+  );
+  assert.match(
+    css,
+    /\.standalone-panel-zone-tabs::\-webkit-scrollbar-thumb\s*\{[^}]*border:\s*calc\(\(var\(--scrollbar-hit-size-nav\) - var\(--scrollbar-size-compact\)\) \/ 2\) solid transparent;[^}]*background-clip:\s*content-box;/s,
+    'panel-tab overflow preserves a compact visual thumb inside the larger native hit target',
+  );
+  assert.match(
+    css,
+    /\.standalone-panel-zone-tabs::\-webkit-scrollbar-thumb\s*\{[^}]*border-radius:\s*999px;[^}]*background:\s*var\(--scrollbar-thumb\);/s,
+  );
   assert.match(css, /@container agent-group-nav \(max-width:\s*380px\)\s*\{[^}]*\.agent-group-tabs-list\s*\{\s*display:\s*none;/s);
   assert.match(css, /@container agent-group-nav \(max-width:\s*380px\)[\s\S]*?\.agent-group-compact\s*\{\s*display:\s*flex;/s);
   assert.doesNotMatch(css, /\.agent-group-tab-actions\s*\{/s);

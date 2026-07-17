@@ -951,7 +951,7 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   min-height: 0;
   overflow-y: auto;
   padding: 8px;
-  scrollbar-width: thin;
+  scrollbar-width: auto;
 }
 .agent-panel-message-card {
   border-left: 2px solid color-mix(in srgb, var(--text-dim) 45%, var(--border));

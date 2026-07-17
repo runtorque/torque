@@ -11,6 +11,11 @@
   --border:      #303a47;
   --border-subtle: #252e39;
   --border-strong: #465466;
+  --scrollbar-thumb: var(--border);
+  --scrollbar-thumb-hover: var(--border-strong);
+  --scrollbar-size: 5px;
+  --scrollbar-size-compact: 4px;
+  --scrollbar-hit-size-nav: 8px;
   --text:        #edf2f7;
   --text-dim:    #9aa8b8;
   --text-secondary: #bac5d1;
