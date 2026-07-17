@@ -883,6 +883,7 @@ function renderActivePanel() {
   for (let i = 0; i < surfaces.length; i++) _renderSurface(surfaces[i]);
   _updateEngineerTaskbarBadge();
   if (typeof updateEventsAttentionBadge === 'function') updateEventsAttentionBadge();
+  if (typeof inboxUpdateBadge === 'function') inboxUpdateBadge();
 }
 
 function renderInvalidatedSurfaces(flags) {
@@ -917,6 +918,7 @@ function renderInvalidatedSurfaces(flags) {
   }
   _updateEngineerTaskbarBadge();
   if (typeof updateEventsAttentionBadge === 'function') updateEventsAttentionBadge();
+  if (typeof inboxUpdateBadge === 'function') inboxUpdateBadge();
 }
 
 function _updateEngineerTaskbarBadge() {

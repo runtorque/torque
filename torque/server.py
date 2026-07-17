@@ -413,6 +413,10 @@ from .commands.memory import (
     _MEMORY_COMMAND_REGISTRY,
     _handle_memory_command,
 )
+from .commands.operator_notices import (
+    OPERATOR_NOTICE_COMMAND_NAMES,
+    _OPERATOR_NOTICE_COMMAND_REGISTRY,
+)
 from .commands.ai_reports import (
     AIReportCommandRuntime,
     TORQUE_AI_MCP_REPORT_ACTIONS as _TORQUE_AI_MCP_REPORT_ACTIONS,
@@ -3769,6 +3773,17 @@ async def main(connection=None):
 
     async def _broadcast_toast(message, level="info"):
         """Send a toast notification to all WS clients."""
+        if str(level or "").strip().lower() == "error":
+            state.publish_operator_notice_best_effort(
+                notice_type="alert",
+                severity="error",
+                category="background_operation",
+                title="Background operation failed",
+                message=message,
+                source="server",
+                action_kind="open_inbox",
+            )
+            return
         msg = json.dumps({"type": "toast", "message": message,
                           "level": level})
         dead = set()
@@ -5396,6 +5411,14 @@ async def main(connection=None):
                     resolve_task_id=_resolve_task_id,
                 )
                 result = memory_result.value
+
+            elif cmd in OPERATOR_NOTICE_COMMAND_NAMES:
+                notice_result = await _OPERATOR_NOTICE_COMMAND_REGISTRY.dispatch(
+                    cmd,
+                    data,
+                    state,
+                )
+                result = notice_result.value
 
             elif cmd in UI_STATE_COMMAND_NAMES:
                 ui_state_result = await _UI_STATE_COMMAND_REGISTRY.dispatch(

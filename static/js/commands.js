@@ -26,17 +26,119 @@ function openTaskInBoard(taskId) {
   }, 80);
 }
 
-function _showToast(message, level) {
-  const el = document.createElement('div');
-  el.className = 'toast toast-' + (level || 'info');
-  el.textContent = message;
-  document.body.appendChild(el);
-  // Trigger reflow then animate in
-  requestAnimationFrame(() => el.classList.add('visible'));
-  setTimeout(() => {
-    el.classList.remove('visible');
-    setTimeout(() => el.remove(), 300);
-  }, 4000);
+function _toastStack() {
+  var stack = document.getElementById('toast-stack');
+  if (stack) return stack;
+  stack = document.createElement('div');
+  stack.id = 'toast-stack';
+  stack.className = 'toast-stack';
+  stack.setAttribute('aria-live', 'polite');
+  stack.setAttribute('aria-relevant', 'additions');
+  document.body.appendChild(stack);
+  return stack;
+}
+
+function _dismissToast(el) {
+  if (!el || el._torqueClosing) return;
+  el._torqueClosing = true;
+  if (el._torqueTimer) clearTimeout(el._torqueTimer);
+  el.classList.remove('visible');
+  setTimeout(function() {
+    if (el.remove) el.remove();
+    else if (el.parentNode) el.parentNode.removeChild(el);
+  }, 180);
+}
+
+function _showToast(message, level, opts) {
+  opts = opts || {};
+  var kind = String(level || 'info');
+  var el = document.createElement('div');
+  el.className = 'toast toast-' + kind;
+  el.setAttribute('role', kind === 'error' ? 'alert' : 'status');
+
+  var content = document.createElement('div');
+  content.className = 'toast-content';
+  if (opts.title) {
+    var title = document.createElement('strong');
+    title.className = 'toast-title';
+    title.textContent = opts.title;
+    content.appendChild(title);
+  }
+  var text = document.createElement('span');
+  text.className = 'toast-message';
+  text.textContent = String(message || '');
+  content.appendChild(text);
+  el.appendChild(content);
+
+  if (opts.actionLabel && typeof opts.onAction === 'function') {
+    var action = document.createElement('button');
+    action.type = 'button';
+    action.className = 'toast-action';
+    action.textContent = opts.actionLabel;
+    action.onclick = function(event) {
+      if (event && event.stopPropagation) event.stopPropagation();
+      opts.onAction();
+      _dismissToast(el);
+    };
+    el.appendChild(action);
+  }
+
+  var close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'toast-close';
+  close.setAttribute('aria-label', 'Dismiss message');
+  close.textContent = '×';
+  close.onclick = function(event) {
+    if (event && event.stopPropagation) event.stopPropagation();
+    _dismissToast(el);
+  };
+  el.appendChild(close);
+  _toastStack().appendChild(el);
+
+  var defaultDuration = kind === 'error' ? 0 : (kind === 'warning' ? 8000 : 5000);
+  var duration = Object.prototype.hasOwnProperty.call(opts, 'duration')
+    ? Number(opts.duration)
+    : defaultDuration;
+  var remaining = Math.max(0, Number.isFinite(duration) ? duration : defaultDuration);
+  var startedAt = 0;
+
+  function startTimer() {
+    if (!remaining || el._torqueClosing) return;
+    startedAt = Date.now();
+    el._torqueTimer = setTimeout(function() { _dismissToast(el); }, remaining);
+  }
+  function pauseTimer() {
+    if (!el._torqueTimer) return;
+    clearTimeout(el._torqueTimer);
+    el._torqueTimer = 0;
+    remaining = Math.max(0, remaining - (Date.now() - startedAt));
+  }
+  if (typeof el.addEventListener === 'function') {
+    el.addEventListener('mouseenter', pauseTimer);
+    el.addEventListener('mouseleave', startTimer);
+    el.addEventListener('focusin', pauseTimer);
+    el.addEventListener('focusout', startTimer);
+  }
+  requestAnimationFrame(function() { el.classList.add('visible'); });
+  startTimer();
+  return el;
+}
+
+function _showNoticeToast(notice) {
+  if (!notice) return null;
+  var isAlert = notice.notice_type === 'alert';
+  return _showToast(
+    notice.message || notice.title || 'Torque',
+    isAlert ? 'error' : (notice.severity || 'info'),
+    {
+      title: notice.title || (isAlert ? 'Alert' : 'Notification'),
+      duration: isAlert ? 0 : 8000,
+      actionLabel: 'View inbox',
+      onAction: function() {
+        if (typeof openInboxPopover === 'function') openInboxPopover();
+      },
+    }
+  );
 }
 
 function _applySystemBanner(banner) {

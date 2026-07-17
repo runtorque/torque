@@ -173,10 +173,11 @@ Mandatory digest events are informational; optional events remain configurable.
 
 ## Worker notifications
 
-**Workers → Notifications** separates the governing macOS **Delivery** choice
-from the **Events** that trigger it. When delivery is off, event choices remain
-visible but inactive so their configuration is still understandable and is
-retained for the next time delivery is enabled.
+**Workers → Notifications** separates durable Inbox event choices from optional
+macOS **Delivery**. Matching events are retained in the Inbox across reconnects
+and restarts. Turning **Deliver to macOS** off only disables the desktop
+delivery channel; the event choices remain visible and continue to govern which
+Worker activity becomes an Inbox item.
 
 ## How defaults are resolved
 

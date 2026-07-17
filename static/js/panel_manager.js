@@ -1018,6 +1018,13 @@ function _standalonePanelActionButton(label, iconName, onClick) {
   return btn;
 }
 
+function _standaloneCanDetachPanels() {
+  return !!(typeof window !== 'undefined'
+    && window.nativeApi
+    && typeof window.nativeApi.available === 'function'
+    && window.nativeApi.available());
+}
+
 function _standaloneConnectedNodesIconSvg() {
   var svg = _standaloneSvgNode('svg', {
     class: 'thinking-connected-nodes-icon',
@@ -1132,10 +1139,12 @@ function _standaloneBuildZone(zoneName, rootEl, roots, placed) {
 
     var actions = _makeStandaloneNode('div', 'standalone-panel-zone-actions');
     if (zone.active) {
-      var detachBtn = _standalonePanelActionButton('Detach to OS window', 'detach', function(activeApp) {
-        return function() { _standaloneDetachPanel(activeApp); };
-      }(zone.active));
-      actions.appendChild(detachBtn);
+      if (_standaloneCanDetachPanels()) {
+        var detachBtn = _standalonePanelActionButton('Detach to OS window', 'detach', function(activeApp) {
+          return function() { _standaloneDetachPanel(activeApp); };
+        }(zone.active));
+        actions.appendChild(detachBtn);
+      }
       var floatBtn = _standalonePanelActionButton('Float', 'float', function(activeApp) {
         return function() { _standaloneMovePanelToZone(activeApp, 'float'); };
       }(zone.active));
@@ -1180,10 +1189,12 @@ function _standaloneFloatHeader(app) {
   }
   header.appendChild(title);
   var actions = _makeStandaloneNode('div', 'standalone-float-actions');
-  var detach = _standalonePanelActionButton('Detach to OS window', 'detach', function() {
-    _standaloneDetachPanel(app);
-  });
-  actions.appendChild(detach);
+  if (_standaloneCanDetachPanels()) {
+    var detach = _standalonePanelActionButton('Detach to OS window', 'detach', function() {
+      _standaloneDetachPanel(app);
+    });
+    actions.appendChild(detach);
+  }
   var dockBottom = _standalonePanelActionButton('Dock', 'dock', function() {
     _standaloneMovePanelToZone(app, _standalonePanelDefaults[app] || 'bottom');
   });

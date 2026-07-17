@@ -1364,7 +1364,7 @@ test('group settings places all-kind defaults under Group and worker overrides u
   assert.match(workersPane, /id="gs-wt-checkpoint-mode"/);
   assert.match(workersPane, /id="gs-wt-dependent-settings"/);
   assert.match(workersPane, /id="gs-notifications"/);
-  assert.match(workersPane, /Enable macOS notifications/);
+  assert.match(workersPane, /Deliver to macOS/);
   assert.doesNotMatch(workersPane, /Group → Worker defaults/);
   assert.doesNotMatch(workersPane, /id="gs-agent-provider"/);
   assert.doesNotMatch(workersPane, /id="gs-agent-model"/);
@@ -1430,7 +1430,7 @@ test('remaining settings panes use the shared section hierarchy and concise labe
   assert.match(advanced, /gs-settings-section-title">Guidance/);
   assert.match(html, /class="gs-subpane gs-subpane--compact" data-subpane="group-advanced"/);
   assert.match(advanced, /settings-field settings-field--compact/);
-  assert.match(notifications, /gs-settings-section-title">Delivery/);
+  assert.match(notifications, /gs-settings-section-title">Desktop delivery/);
   assert.match(notifications, /gs-settings-section-title">Events/);
   for (const title of ['Specializations', 'Orchestration', 'Communication', 'Policy overrides']) {
     assert.match(engineerBehavior, new RegExp(`gs-settings-section-title">${title}`));
@@ -1442,7 +1442,7 @@ test('remaining settings panes use the shared section hierarchy and concise labe
   assert.match(css, /\.settings-event-badges\s*\{/);
 });
 
-test('worker notification event controls remain visible but disable with delivery', () => {
+test('worker Inbox event choices stay editable when desktop delivery is off', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
   loadModals(context);
@@ -1454,10 +1454,10 @@ test('worker notification event controls remain visible but disable with deliver
 
   ensure('gs-notifications').checked = false;
   vm.runInContext('_syncWorkerNotificationSettingsUi()', context);
-  assert.equal(events.classList.contains('is-disabled'), true);
-  assert.equal(finish.disabled, true);
-  assert.equal(error.disabled, true);
-  assert.equal(attention.disabled, true);
+  assert.equal(events.classList.contains('is-disabled'), false);
+  assert.equal(finish.disabled, false);
+  assert.equal(error.disabled, false);
+  assert.equal(attention.disabled, false);
 
   ensure('gs-notifications').checked = true;
   vm.runInContext('_syncWorkerNotificationSettingsUi()', context);

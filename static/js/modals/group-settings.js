@@ -31,13 +31,13 @@ function _getEngineerRestrictToCreatedAgentsFromPermission() {
 }
 
 function _syncWorkerNotificationSettingsUi() {
-  const enabled = document.getElementById('gs-notifications');
   const events = document.getElementById('gs-worker-notification-events');
-  if (!enabled || !events) return;
-  const disabled = !enabled.checked;
-  events.classList.toggle('is-disabled', disabled);
+  if (!events) return;
+  // Event choices govern durable Inbox recording. The delivery toggle only
+  // controls the additional macOS channel, so these controls stay independent.
+  events.classList.remove('is-disabled');
   events.querySelectorAll('input, select, textarea, button').forEach((control) => {
-    control.disabled = disabled;
+    control.disabled = false;
   });
 }
 

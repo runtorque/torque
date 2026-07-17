@@ -6,6 +6,45 @@ from .state import BehaviorOverlayScope, Path
 
 
 class StateServicesMixin:
+    def publish_operator_notice(self, **kwargs) -> dict | None:
+        return self._operator_notice_service.publish(**kwargs)
+
+    def publish_operator_notice_best_effort(self, **kwargs) -> dict | None:
+        return self._operator_notice_service.publish_best_effort(**kwargs)
+
+    def update_operator_notice(
+        self,
+        notice_id: str,
+        action: str,
+        *,
+        broadcast: bool = True,
+    ) -> dict | None:
+        return self._operator_notice_service.update_lifecycle(
+            notice_id,
+            action,
+            broadcast=broadcast,
+        )
+
+    def mark_all_operator_notices_read(
+        self,
+        *,
+        notice_type: str = "",
+        broadcast: bool = True,
+    ) -> int:
+        return self._operator_notice_service.mark_all_read(
+            notice_type=notice_type,
+            broadcast=broadcast,
+        )
+
+    def list_operator_notices(self, **kwargs) -> list[dict]:
+        return self._operator_notice_service.list(**kwargs)
+
+    def operator_notices_snapshot(self) -> dict[str, dict]:
+        return self._operator_notice_service.snapshot()
+
+    def operator_notice_summary(self) -> dict:
+        return self._operator_notice_service.summary()
+
     def _emit_initiative(self, initiative: dict | None) -> None:
         self._initiative_service._emit_initiative(initiative)
 

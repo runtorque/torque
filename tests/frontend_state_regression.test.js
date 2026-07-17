@@ -30043,6 +30043,35 @@ test('standalone float resize handles define edge cursors and disable selection 
   assert.match(css, /body\.standalone-float-resizing\s*\{[^}]*user-select:\s*none;/s);
 });
 
+test('separate-window panel controls render only when the Tauri API is available', () => {
+  const { context } = createPanelHarness();
+
+  runInContext(context, `
+    window.nativeApi = { available: function() { return false; } };
+  `);
+  const browserHeader = context._standaloneFloatHeader('board');
+  assert.deepEqual(
+    findDescendantsByClassName(browserHeader, 'standalone-panel-zone-btn').map((button) => button.title),
+    ['Dock', 'Hide'],
+  );
+
+  runInContext(context, `
+    window.nativeApi = { available: function() { return true; } };
+  `);
+  const tauriHeader = context._standaloneFloatHeader('board');
+  assert.deepEqual(
+    findDescendantsByClassName(tauriHeader, 'standalone-panel-zone-btn').map((button) => button.title),
+    ['Detach to OS window', 'Dock', 'Hide'],
+  );
+
+  const manager = fs.readFileSync(path.join(repoRoot, 'static/js/panel_manager.js'), 'utf8');
+  assert.match(
+    manager,
+    /if \(_standaloneCanDetachPanels\(\)\) \{\s*var detachBtn = _standalonePanelActionButton/s,
+    'docked-panel headers use the same Tauri capability gate',
+  );
+});
+
 test('app css defaults to selectable text while draggable chrome opts out', () => {
   const css = appStylesheetSource();
 

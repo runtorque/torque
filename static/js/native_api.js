@@ -16,7 +16,13 @@
 
   function toastError(error, fallback) {
     var message = (error && (error.message || String(error))) || fallback || 'Native desktop action failed';
-    if (typeof _showToast === 'function') _showToast(message, 'error');
+    if (typeof inboxReportClientError === 'function') {
+      inboxReportClientError(message, {
+        title: fallback || 'Desktop action failed',
+        category: 'desktop',
+        source: 'native_api',
+      });
+    } else if (typeof _showToast === 'function') _showToast(message, 'error');
     else if (typeof console !== 'undefined' && console.warn) console.warn(message);
     throw error;
   }

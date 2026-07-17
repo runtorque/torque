@@ -32,9 +32,6 @@ class NotificationManager:
             return
 
         gs = self._state.get_group_settings(cell.group)
-        if not gs.notifications:
-            return
-
         kind = None
         if event.event_type == "session_end" and gs.notify_on_finish:
             kind = "finished"
@@ -46,12 +43,39 @@ class NotificationManager:
         if not kind:
             return
 
-        self._pending.append({
+        item = {
             "group": cell.group,
             "cell_name": cell.name,
             "kind": kind,
             "noun": "agents",
-        })
+        }
+        event_message = (
+            str((event.data or {}).get("error", "") or "").strip()
+            if kind == "error"
+            else ""
+        )
+        self._publish_operator_notice(
+            notice_type="alert" if kind == "error" else "notification",
+            severity="error" if kind == "error" else (
+                "warning" if kind == "needs attention" else "success"
+            ),
+            category="agent",
+            title=f"{cell.name} {kind}",
+            message=event_message or f"{cell.name} {kind} in {cell.group}.",
+            source="agent_event",
+            group_name=cell.group,
+            agent_id=cell.id,
+            action_kind="open_agent",
+            action_payload={"agent_id": cell.id},
+            dedupe_key=(
+                f"agent:{cell.id}:"
+                f"{getattr(cell, 'session_id', '') or event.timestamp}:"
+                f"{event.event_type}"
+            ),
+        )
+        if not gs.notifications:
+            return
+        self._pending.append(item)
         self._schedule_flush()
 
     def on_health_alert(self, cell_id: str, message: str):
@@ -61,15 +85,31 @@ class NotificationManager:
             return
 
         gs = self._state.get_group_settings(cell.group)
-        if not gs.notifications or not gs.notify_on_attention:
+        if not gs.notify_on_attention:
             return
 
-        self._pending.append({
+        item = {
             "group": cell.group,
             "cell_name": cell.name,
             "kind": "needs attention",
             "noun": "agents",
-        })
+        }
+        self._publish_operator_notice(
+            notice_type="alert",
+            severity="warning",
+            category="agent_health",
+            title=f"{cell.name} needs attention",
+            message=message or f"{cell.name} needs attention.",
+            source="agent_health",
+            group_name=cell.group,
+            agent_id=cell.id,
+            action_kind="open_agent",
+            action_payload={"agent_id": cell.id},
+            dedupe_key=f"agent-health:{cell.id}:{message}",
+        )
+        if not gs.notifications:
+            return
+        self._pending.append(item)
         self._schedule_flush()
 
     def on_system_alert(self, title: str, body: str):
@@ -77,9 +117,19 @@ class NotificationManager:
         5-second batch window. Used for infrastructure events that the
         user should see right away (e.g. PTY supervisor restart).
         """
-        if not self._loop:
-            return
-        asyncio.create_task(_send_notification(title, body))
+        self._publish_operator_notice(
+            notice_type="alert",
+            severity="critical",
+            category="infrastructure",
+            title=title,
+            message=body,
+            source="system",
+            action_kind="open_panel",
+            action_payload={"panel": "health"},
+            dedupe_key=f"system:{title}:{body}",
+        )
+        if self._loop:
+            asyncio.create_task(_send_notification(title, body))
 
     def on_direct_user_message(self, row: dict) -> bool:
         """Notify for agent→user direct messages.
@@ -103,7 +153,7 @@ class NotificationManager:
         if not group:
             return False
         gs = self._state.get_group_settings(group)
-        if not gs.notifications or not gs.notify_on_attention:
+        if not gs.notify_on_attention:
             return False
 
         agent_name = (
@@ -115,6 +165,22 @@ class NotificationManager:
         first_line = _first_line(row.get("message", ""))
         title = f"Torque message from {agent_name}"
         body = f"{agent_name}: {first_line}"
+        message_id = str(row.get("id", "") or row.get("message_id", "")).strip()
+        self._publish_operator_notice(
+            notice_type="notification",
+            severity="info",
+            category="direct_message",
+            title=f"Message from {agent_name}",
+            message=first_line or "New direct message",
+            source="direct_message",
+            group_name=group,
+            agent_id=sender_id,
+            action_kind="open_agent",
+            action_payload={"agent_id": sender_id},
+            dedupe_key=f"direct-message:{message_id or sender_id + ':' + first_line}",
+        )
+        if not gs.notifications:
+            return False
         return self._send_immediate_best_effort(
             title,
             body,
@@ -128,20 +194,46 @@ class NotificationManager:
             return
 
         gs = self._state.get_group_settings(task.group)
-        if not gs.notifications or not gs.notify_on_attention:
+        if not gs.notify_on_attention:
             return
 
         kind = _health_notification_kind(health_state)
         if not kind:
             return
 
-        self._pending.append({
+        item = {
             "group": task.group,
             "cell_name": _task_subject(task.task),
             "kind": kind,
             "noun": "tasks",
-        })
+        }
+        self._publish_operator_notice(
+            notice_type="alert",
+            severity="warning",
+            category="task_health",
+            title=f"{_task_subject(task.task)} {kind}",
+            message=f"{_task_subject(task.task)} is {kind}.",
+            source="task_health",
+            group_name=task.group,
+            task_id=task.id,
+            action_kind="open_task",
+            action_payload={"task_id": task.id},
+            dedupe_key=f"task-health:{task.id}:{health_state}",
+        )
+        if not gs.notifications:
+            return
+        self._pending.append(item)
         self._schedule_flush()
+
+    def _publish_operator_notice(self, **kwargs) -> dict | None:
+        publisher = getattr(
+            self._state,
+            "publish_operator_notice_best_effort",
+            None,
+        )
+        if not callable(publisher):
+            return None
+        return publisher(**kwargs)
 
     def _schedule_flush(self):
         if not self._loop:

@@ -98,6 +98,7 @@ function _handleFullState(msg) {
   _awaitingFullState = false;
   _clientScopedFocusActive = !!(msg && msg.client_scoped_focus);
   state = msg;
+  if (typeof inboxNormalizeState === 'function') inboxNormalizeState();
   if (typeof _compactInitDeferredMaps === 'function') _compactInitDeferredMaps();
   if (typeof _invalidateTaskLookupIndex === 'function') _invalidateTaskLookupIndex();
   if (typeof _agentPanelWorkerTaskIdCacheByAgent !== 'undefined') {

@@ -1,7 +1,7 @@
 # Torque Design System
 
 Status: living document
-Last updated: 2026-07-15
+Last updated: 2026-07-17
 
 This document is the source of truth for Torque's product design language. It
 records the rules that make the interface feel like one system and the decisions
@@ -462,6 +462,32 @@ The canonical CSS API lives in `static/styles/components.css`:
 - Metadata such as “no assignment,” disabled explanations, validation text
   beside a field, and specialized canvas instructions remain local when they do
   not replace a content surface.
+
+### Feedback, alerts, and notifications
+
+- Inline validation stays beside the control or operation it belongs to. It is
+  not copied into the Inbox unless the failure outlives that local context or
+  needs later recovery.
+- Toasts acknowledge transient actions. They stack at the bottom-right, can
+  always be dismissed, pause while hovered or focused, and may offer one typed
+  action. Information and success feedback expire; error overlays remain until
+  dismissed. Closing an overlay never deletes a durable Inbox record.
+- Alerts are durable problems with an open/resolved lifecycle. They remain
+  prominent until resolved, dismissed, or archived. Repeated occurrences update
+  and reopen the existing alert instead of creating an indistinguishable pile.
+- Notifications are durable awareness items with an unread/read lifecycle.
+  They remain available after their delivery overlay disappears and across
+  reconnects or restarts.
+- The Inbox is the history and action surface for both types. It opens from a
+  global notification bell rather than occupying a dockable workspace panel;
+  alerts and notifications are application-level state, not project content.
+  The bell badge counts open alerts plus unread notifications. Alert and
+  Notification views remain separate because acknowledgement and resolution
+  are different acts.
+- Inbox actions are typed application routes such as Open task, Open agent,
+  Retry, or Open panel. Persisted records never contain executable UI code.
+- Desktop notifications are an optional delivery channel. Disabling them does
+  not disable durable Inbox recording.
 
 ## Responsive and embedded behavior
 
@@ -1580,6 +1606,82 @@ scope.
 - Verification: Frontend contracts protect the primary Daemon/Relay sections,
   capability gating, the single footer action, merged dynamic AI dirty state,
   coordinated profile and AI commands, and deferred modal close.
+
+### D-042 — Durable Inbox separates alerts from notifications
+
+- Date: 2026-07-17
+- Status: accepted
+- Decision: Torque persists operator-facing alerts and notifications in one
+  SQLite-backed Inbox while preserving separate semantics. Alerts use
+  open/resolved state; notifications use unread/read state. Both support
+  archive/restore, deduplication, occurrence counts, typed navigation or retry
+  actions, reconnect-safe WebSocket deltas, and optional desktop delivery.
+  Transient toasts are a dismissible delivery layer, not the historical source
+  of truth.
+- Rationale: A four-second overlay cannot support recovery, auditing, or an
+  operator who is away. Treating every error as a notification would create
+  noise and erase the distinction between “something failed” and “something
+  happened.” A shared storage/delivery substrate with distinct lifecycles keeps
+  the system reliable without flattening those meanings.
+- Scope: Operator-notice schema and persistence, state snapshots and deltas,
+  command handlers, agent/task/system notification producers, the dockable
+  Inbox panel and badge, toast behavior, board-sync and desktop-client errors,
+  Worker notification settings copy, documentation, and regression coverage.
+- Constraints: Field validation and errors already represented by a stable
+  inline surface remain local. Inbox actions use an allow-listed typed action
+  contract and inert payload data. Provider secrets and arbitrary executable
+  content are never stored. A repeated alert reopens and increments its record;
+  resolving, dismissing, or archiving does not erase history. This decision
+  supersedes D-038 only where D-038 treated Worker event choices as dependent
+  on macOS delivery; those choices now govern durable Inbox recording and stay
+  editable independently.
+- Verification: Persistence tests protect migration, deduplication, lifecycle,
+  summary counts, and typed actions. Frontend tests protect Inbox registration,
+  badge and delta behavior, filters, action commands, durable error routing,
+  toast controls, and workspace-layout integration.
+
+### D-043 — Inbox lives in global chrome, not the panel workspace
+
+- Date: 2026-07-17
+- Status: accepted
+- Decision: The durable Inbox opens from a notification bell in Torque's
+  application chrome. In the browser header, the bell is aligned to the far
+  right so global attention state remains visually distinct from workspace
+  commands. It uses an anchored overlay with the existing separate Alert and
+  Notification views. It is not a dockable, detachable, floatable, pinnable, or
+  Go To panel.
+- Rationale: Alerts and notifications describe the whole application and must
+  remain reachable regardless of the active workspace layout. Treating the
+  Inbox as peer content beside Board, Agent, and Health made global state look
+  like an optional project tool and consumed panel-navigation space.
+- Scope: Header and desktop-status bell controls, unread/open badge, anchored
+  Inbox overlay, toast actions, legacy panel-pin and workspace-layout cleanup,
+  and frontend regression coverage. This supersedes D-042 only where that
+  decision described the Inbox as a dockable panel with a taskbar badge.
+- Constraints: The overlay preserves durable history, separate lifecycles,
+  typed actions, pagination, archived-item access, keyboard dismissal, and
+  click-away dismissal. Browser and desktop modes must both expose a bell.
+- Verification: Frontend tests protect the global bell and overlay contract,
+  badge behavior, open/close behavior, removal from panel registries and saved
+  layouts, toast routing, and lifecycle commands.
+
+### D-044 — Panel actions reflect runtime capabilities
+
+- Date: 2026-07-17
+- Status: accepted
+- Decision: Docked and floating panel headers expose `Detach to OS window` only
+  when Torque is running inside the Tauri desktop shell. Browser standalone
+  keeps in-workspace Float, Dock, and Hide actions but does not render a control
+  for a native-window operation it cannot perform.
+- Rationale: Showing an unavailable action creates dead chrome and suggests that
+  browser tabs have native window-management capabilities. Capability-gating the
+  control keeps the panel header accurate without changing desktop workflows.
+- Scope: Shared docked and floating panel-header action construction.
+- Constraints: Capability detection comes from the native API bridge rather
+  than viewport, platform, or user-agent heuristics. The underlying detach
+  operation remains guarded as a second line of defense.
+- Verification: Frontend regressions cover both unavailable browser and
+  available Tauri action sets and protect both header construction paths.
 
 ## Decision entry template
 

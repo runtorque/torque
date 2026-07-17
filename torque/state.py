@@ -101,6 +101,7 @@ from .services.metrics import (
     _health_task_value,
     _parse_health_timestamp,
 )
+from .services.operator_notices import OperatorNoticeService
 from .services.thinking import ThinkingService
 from .perceived_empty import (
     coerce_perceived_empty_threshold,
@@ -2544,6 +2545,7 @@ class MatrixState(
         self._behavior_overlay_service = BehaviorOverlayService(self)
         self._journal_service = JournalService(self)
         self._metrics_service = MetricsService(self)
+        self._operator_notice_service = OperatorNoticeService(self)
         self.boot_timestamp: float = time.time()
         self.boot_repo_root: str = ""
         self.boot_head_commit: str = ""
@@ -3651,6 +3653,8 @@ class MatrixState(
             "engineer_streams": self._engineer_streams_snapshot(),
             "decisions": decisions,
             "pending_hires": pending_hires,
+            "operator_notices": self.operator_notices_snapshot(),
+            "operator_notice_summary": self.operator_notice_summary(),
             "thinking": self.thinking_snapshot(),
             "idea_briefs": self.idea_brief_snapshot(),
             "behavior_overlay_proposals": behavior_overlay_proposals,
@@ -3956,6 +3960,8 @@ class MatrixState(
             "agent_message_history": self.agent_message_history_snapshot(),
             "direct_messages_by_agent": self.direct_messages_snapshot(),
             "agent_peer_threads": self.agent_peer_threads_snapshot(),
+            "operator_notices": self.operator_notices_snapshot(),
+            "operator_notice_summary": self.operator_notice_summary(),
             "thinking": self.thinking_snapshot(),
             "idea_briefs": self.idea_brief_snapshot(),
             "behavior_overlay_proposals": behavior_overlay_proposals,

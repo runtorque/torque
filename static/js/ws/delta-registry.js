@@ -26,6 +26,27 @@ function _noBroadSurfaceInvalidation() {
   // Explicit no-op: the operation performs a targeted DOM/state patch only.
 }
 
+_registerDeltaOperations('operator_notice_upsert', {
+  invalidate: _noBroadSurfaceInvalidation,
+  apply: function(op) {
+    if (typeof inboxReceiveUpsert === 'function') inboxReceiveUpsert(op);
+  },
+});
+
+_registerDeltaOperations('operator_notice_summary', {
+  invalidate: _noBroadSurfaceInvalidation,
+  apply: function(op) {
+    if (typeof inboxReceiveSummary === 'function') inboxReceiveSummary(op);
+  },
+});
+
+_registerDeltaOperations('operator_notices_read_all', {
+  invalidate: _noBroadSurfaceInvalidation,
+  apply: function(op) {
+    if (typeof inboxReceiveReadAll === 'function') inboxReceiveReadAll(op);
+  },
+});
+
 _registerDeltaOperations('context_update', {
   invalidate: _noBroadSurfaceInvalidation,
   apply: function(op) {

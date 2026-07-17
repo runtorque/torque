@@ -12,6 +12,10 @@ function _handleWsMessage(e) {
         && behaviorOverlayReceiveMessage(msg)) {
       return;
     }
+    if (typeof inboxReceiveCommandMessage === 'function'
+        && inboxReceiveCommandMessage(msg)) {
+      return;
+    }
     if (!msg.type && msg.agent_class_status) {
       if (typeof agentClassManagerReceiveLaunchResult === 'function') {
         agentClassManagerReceiveLaunchResult(msg);

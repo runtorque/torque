@@ -15,7 +15,7 @@ import json
 import sqlite3
 from typing import Callable, Iterable
 
-SCHEMA_VERSION = "20"
+SCHEMA_VERSION = "21"
 
 
 @dataclass(frozen=True)
@@ -3060,6 +3060,53 @@ def _migration_0020_auto_dispatch_runtime_contract(
     )
 
 
+def _migration_0021_operator_inbox(
+    conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Create the durable operator Inbox for alerts and notifications."""
+
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS operator_notices (
+            id                  TEXT PRIMARY KEY,
+            notice_type         TEXT NOT NULL DEFAULT 'notification',
+            severity            TEXT NOT NULL DEFAULT 'info',
+            category            TEXT NOT NULL DEFAULT 'general',
+            title               TEXT NOT NULL DEFAULT '',
+            message             TEXT NOT NULL DEFAULT '',
+            source              TEXT NOT NULL DEFAULT '',
+            group_name          TEXT NOT NULL DEFAULT '',
+            agent_id            TEXT NOT NULL DEFAULT '',
+            task_id             TEXT NOT NULL DEFAULT '',
+            action_kind         TEXT NOT NULL DEFAULT '',
+            action_payload      TEXT NOT NULL DEFAULT '{}',
+            dedupe_key          TEXT NOT NULL DEFAULT '',
+            occurrence_count    INTEGER NOT NULL DEFAULT 1,
+            first_occurred_at   REAL NOT NULL DEFAULT 0,
+            last_occurred_at    REAL NOT NULL DEFAULT 0,
+            read_at             REAL NOT NULL DEFAULT 0,
+            resolved_at         REAL NOT NULL DEFAULT 0,
+            dismissed_at        REAL NOT NULL DEFAULT 0,
+            archived_at         REAL NOT NULL DEFAULT 0,
+            created_at          REAL NOT NULL DEFAULT 0,
+            updated_at          REAL NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_operator_notices_recent
+            ON operator_notices(last_occurred_at DESC, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_operator_notices_active
+            ON operator_notices(
+                archived_at, notice_type, resolved_at, read_at,
+                last_occurred_at DESC
+            );
+        CREATE INDEX IF NOT EXISTS idx_operator_notices_dedupe
+            ON operator_notices(dedupe_key, last_occurred_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_operator_notices_group
+            ON operator_notices(group_name, last_occurred_at DESC);
+        """
+    )
+
+
 SCHEMA_MIGRATIONS = (
     SchemaMigration(
         1,
@@ -3204,6 +3251,14 @@ SCHEMA_MIGRATIONS = (
         "auto_dispatch_runtime_contract",
         "auto-dispatch-engineer-provider-routing-v1",
         _migration_0020_auto_dispatch_runtime_contract,
+        phase="post_init",
+        repair_on_boot=True,
+    ),
+    SchemaMigration(
+        21,
+        "operator_inbox",
+        "operator-alert-notification-inbox-v1",
+        _migration_0021_operator_inbox,
         phase="post_init",
         repair_on_boot=True,
     ),

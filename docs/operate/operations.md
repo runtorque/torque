@@ -122,11 +122,24 @@ can fall back to an existing legacy Toolbelt log for migration diagnostics.
 
 ## Notifications
 
-Torque supports macOS notifications for agent activity. Notification behavior is configured per group.
+Torque has a durable operator Inbox with two kinds of item:
+
+- **Alerts** are problems that stay open until they are resolved, dismissed, or
+  archived.
+- **Notifications** are awareness items that stay unread until acknowledged.
+
+Open the Inbox from the notification bell in Torque's application chrome. Its
+badge counts open alerts and unread notifications. Items survive overlay
+dismissal, browser reconnects, and daemon restarts. Repeated matching problems
+update one alert and increase its occurrence count rather than creating
+duplicate rows.
+
+macOS notifications are an optional delivery channel for matching agent
+activity. Disabling desktop delivery does not disable Inbox history.
 
 Available toggles include:
 
-- master notifications switch
+- macOS delivery
 - notify on finish
 - notify on error
 - notify on attention-needed

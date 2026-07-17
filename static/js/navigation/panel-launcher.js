@@ -37,7 +37,9 @@ function _panelNavReadPins() {
   try {
     stored = JSON.parse(localStorage.getItem(_panelNavStorageKey) || 'null');
   } catch (_err) {}
-  var source = stored && Array.isArray(stored.pinned) ? stored.pinned : _panelNavDefaultPins;
+  var source = stored && Array.isArray(stored.pinned)
+    ? stored.pinned.slice()
+    : _panelNavDefaultPins;
   var valid = _panelNavValidIds();
   var seen = {};
   return source.filter(function(app) {
@@ -49,7 +51,9 @@ function _panelNavReadPins() {
 
 function _panelNavWritePins(pinned) {
   try {
-    localStorage.setItem(_panelNavStorageKey, JSON.stringify({ pinned: pinned }));
+    localStorage.setItem(_panelNavStorageKey, JSON.stringify({
+      pinned: pinned,
+    }));
   } catch (_err) {}
 }
 

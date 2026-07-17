@@ -143,10 +143,20 @@ test('panel pin preferences persist order while keeping active unpinned panels a
 
   context.panelNavMove('thinking', -1);
   assert.deepEqual(JSON.parse(JSON.stringify(context._panelNavReadPins())), ['board', 'engineer', 'events', 'thinking', 'health']);
-
-  context.panelNavTogglePin('events');
-  assert.deepEqual(JSON.parse(JSON.stringify(context._panelNavReadPins())), ['board', 'engineer', 'thinking', 'health']);
   assert.deepEqual(JSON.parse(JSON.stringify(context._panelNavVisibleApps())), ['health']);
+});
+
+test('legacy pin preferences drop Inbox now that notifications live in global chrome', () => {
+  const { context, storage } = createNavigationContext();
+  storage.set(
+    'torque.panel_navigation.v1',
+    JSON.stringify({ pinned: ['board', 'engineer', 'inbox', 'events', 'health'] }),
+  );
+
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(context._panelNavReadPins())),
+    ['board', 'engineer', 'events', 'health'],
+  );
 });
 
 test('Go To index includes every group, stopped agents, and all panels', () => {

@@ -42,6 +42,18 @@
                 title="Go to (⌘K / Ctrl+K)" aria-label="Go to">
           <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4"></circle><path d="m10 10 3 3"></path></svg>
         </button>
+        <button class="hdr-btn hdr-icon-btn inbox-bell-button inbox-bell-button--header"
+                onclick="toggleInboxPopover(event)"
+                title="Notifications"
+                aria-label="Notifications"
+                aria-haspopup="dialog"
+                aria-expanded="false">
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M3.4 11.2h9.2l-1.1-1.5V6.8A3.5 3.5 0 0 0 8 3.2 3.5 3.5 0 0 0 4.5 6.8v2.9z"></path>
+            <path d="M6.5 12.8a1.7 1.7 0 0 0 3 0"></path>
+          </svg>
+          <span class="inbox-bell-badge" hidden></span>
+        </button>
       </header>
       <div id="app-group-tabs-host" class="agent-group-tabs-host app-group-tabs-host" data-agent-group-tabs-host></div>
       <main id="main"></main>
@@ -55,6 +67,9 @@
   <section id="terminal-workspace"></section>
 </div>
 <div id="standalone-float-layer"></div>
+<div id="inbox-popover" class="inbox-popover ui-popover"
+     role="dialog" aria-label="Notifications" hidden
+     onclick="event.stopPropagation()"></div>
 <div id="diff-view-root"></div>
 <div class="overlay" id="modal-task-history">
   <div class="modal ui-modal ui-modal--lg ui-modal--tall ui-modal--structured task-history-modal" role="dialog" aria-modal="true" aria-labelledby="task-history-title">
@@ -907,11 +922,11 @@
       <!-- Notifications sub-tab -->
       <div class="gs-subpane" data-subpane="worker-notifications">
         <section class="gs-settings-section">
-          <div class="gs-settings-section-title">Delivery</div>
+          <div class="gs-settings-section-title">Desktop delivery</div>
           <div class="gs-settings-section-body">
             <label class="gs-checkbox">
-              <input id="gs-notifications" type="checkbox" onchange="_syncWorkerNotificationSettingsUi()"> Enable macOS notifications
-              <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Send batched macOS notifications for workers in this group. Notifications are grouped over a 5-second window.">?</span>
+              <input id="gs-notifications" type="checkbox" onchange="_syncWorkerNotificationSettingsUi()"> Deliver to macOS
+              <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Also deliver matching Inbox items as batched macOS notifications. Turning this off does not remove durable Inbox history.">?</span>
             </label>
           </div>
         </section>
@@ -2225,6 +2240,19 @@
           type="button"
           onclick="statusBarOpenAttention()"
           title="Attention items">Attention —</button>
+    <button class="statusbar-segment statusbar-segment--action inbox-bell-button inbox-bell-button--statusbar"
+            type="button"
+            onclick="toggleInboxPopover(event)"
+            title="Notifications"
+            aria-label="Notifications"
+            aria-haspopup="dialog"
+            aria-expanded="false">
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M3.4 11.2h9.2l-1.1-1.5V6.8A3.5 3.5 0 0 0 8 3.2 3.5 3.5 0 0 0 4.5 6.8v2.9z"></path>
+        <path d="M6.5 12.8a1.7 1.7 0 0 0 3 0"></path>
+      </svg>
+      <span class="inbox-bell-badge" hidden></span>
+    </button>
   </div>
 </div>
 
@@ -2512,6 +2540,7 @@
 <script src="/static/js/chat.js"></script>
 <script src="/static/js/supervisor.js"></script>
 <script src="/static/js/health.js"></script>
+<script src="/static/js/inbox.js"></script>
 <script src="/static/js/help.js"></script>
 <script src="/static/js/panel_manager.js"></script>
 <script src="/static/js/navigation/panel-launcher.js"></script>

@@ -323,34 +323,24 @@ function boardPullPreview(taskId, opts) {
 
 function _boardShowSyncErrorToast(message, taskId) {
   message = String(message || 'GitHub sync failed').trim() || 'GitHub sync failed';
-  if (!taskId || !document || !document.createElement || !document.body) {
-    if (typeof _showToast === 'function') _showToast(message, 'error');
-    return;
+  if (typeof inboxReportClientError === 'function') {
+    inboxReportClientError(message, {
+      title: 'GitHub sync failed',
+      category: 'board_sync',
+      source: 'board',
+      task_id: taskId || '',
+      action_kind: taskId ? 'retry_board_sync' : 'open_inbox',
+      action_payload: taskId ? { task_id: taskId } : {},
+      dedupe_key: 'board-sync:' + String(taskId || 'unknown') + ':' + message,
+    });
+  } else if (typeof _showToast === 'function') {
+    _showToast(message, 'error', {
+      actionLabel: taskId ? 'Retry' : '',
+      onAction: taskId ? function() {
+        boardSyncTaskNow(taskId, { quiet: true });
+      } : null,
+    });
   }
-  var el = document.createElement('div');
-  el.className = 'toast toast-error toast-actionable';
-  var text = document.createElement('span');
-  text.textContent = message.length > 180 ? (message.slice(0, 177) + '…') : message;
-  var btn = document.createElement('button');
-  btn.type = 'button';
-  btn.textContent = 'Retry';
-  btn.onclick = function(ev) {
-    if (ev && ev.stopPropagation) ev.stopPropagation();
-    boardSyncTaskNow(taskId, { quiet: true });
-    if (el.remove) el.remove();
-  };
-  el.appendChild(text);
-  el.appendChild(btn);
-  document.body.appendChild(el);
-  if (typeof requestAnimationFrame === 'function') {
-    requestAnimationFrame(function() { el.classList.add('visible'); });
-  } else {
-    el.classList.add('visible');
-  }
-  setTimeout(function() {
-    el.classList.remove('visible');
-    setTimeout(function() { if (el.remove) el.remove(); }, 300);
-  }, 8000);
 }
 
 function _boardSyncResponseMessage(msg) {

@@ -370,6 +370,7 @@ function _restorePanelState() {
 
   // panel_active: new key; backward compat from board_panel_open
   var active = state.panel_active || '';
+  if (active === 'inbox') active = '';
   if (!active && state.board_panel_open) active = 'board';
   if (!active && typeof isEmbeddedTerminalMode === 'function' && isEmbeddedTerminalMode()) {
     active = 'board';
