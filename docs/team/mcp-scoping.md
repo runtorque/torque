@@ -14,8 +14,8 @@ the implementation, visible records, and permitted targets.
 | Caller | Advertised surface | Scope of action |
 |---|---|---|
 | Worker | Authority-filtered catalog; all tools eager | The Worker's own task, reports, replies, and shared context. |
-| Engineer | Authority-filtered catalog with at most 30 tools classified eager | The Engineer's group, owned Workers, assigned tasks, and eligible peers/supervisor. |
-| Architect | Authority-filtered catalog with at most 30 tools classified eager | The Architect's group, with per-Architect ownership on decisions, hires, journal, and peer threads. |
+| Engineer | Authority-filtered catalog; a full-authority hired Engineer has 56 tools classified eager | The Engineer's group, owned Workers, assigned tasks, and eligible peers/supervisor. |
+| Architect | Authority-filtered catalog; a full-authority Architect has 53 tools classified eager | The Architect's group, with per-Architect ownership on decisions, hires, journal, and peer threads. |
 
 Historical `torque_*`, `engineer_*`, and `architect_*` names are hidden
 compatibility aliases. They are never advertised and cannot cross the caller's

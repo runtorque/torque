@@ -41,6 +41,37 @@ present in `tools/list`. Torque emits the eager partition first, in stable
 source order, before the deferred partition so provider-native discovery sees
 the bounded boot core before indexing specialty schemas.
 
+### Engineer eager core
+
+For a fresh full-authority hired Engineer, the maintained eager budget is
+exactly 56 canonical operations. A restricted Engineer receives only the
+intersection of this set and its frozen Agent Class authority, and
+relationship-specific operations such as `supervisor_message` are projected
+only when the caller has the required relationship:
+
+| Category | Eager canonical operations |
+| --- | --- |
+| Boot and orientation | `context`, `tool_search`, `help_query`, `help_get`, `board_summary`, `boot_summary`, `session_map`, `event_list` |
+| Communication, task, and agent routing | `task_list`, `task_get`, `task_create`, `task_update`, `task_move`, `task_dispatch`, `task_verify`, `task_artifact_upload`, `agent_list`, `agent_get`, `agent_message`, `agent_ask_answer`, `user_ask`, `user_message`, `user_note`, `peer_list`, `peer_message`, `peer_inbox`, `peer_reply`, `supervisor_message`, `agent_reply` |
+| Memory and context | `memory_publish`, `memory_list`, `memory_get`, `memory_set_pin`, `memory_link`, `semantic_recall`, `journal_write`, `journal_list` |
+| Execution flow | `stream_list`, `stream_get`, `action_list`, `action_get`, `hint_set_state`, `event_delivery_update` |
+| Worktree and release | `worktree_diff`, `worktree_checkpoint`, `worktree_advance_boundary`, `worktree_rebase`, `worktree_create_pr`, `worktree_merge`, `worktree_remove`, `worktree_adopt` |
+| Task and agent operations | `task_mark_covered`, `task_reassign`, `agent_launch_settings`, `agent_close`, `agent_relaunch` |
+
+Eager classification changes boot availability, not authorization or handler
+semantics. Frozen Agent Class capability checks still filter `tools/list`, and
+the existing ownership, worker/peer visibility, Architect-chain
+communication, worktree boundary, reviewed-SHA, and merge gates still apply
+at call time. Because `tool_search` searches the deferred partition only, an
+exact search for an authorized eager operation returns no deferred schema;
+the operation is already present in the initial projection. Denied operations
+are absent from both the projection and exact search.
+
+Intentionally lazy Engineer exceptions include unrelated planning,
+specialization editing, behavior-overlay administration, deep telemetry, and
+other specialty inspection operations. External connectors are separate from
+this Torque projection and remain lazy/provider-managed.
+
 ### Architect eager core
 
 For a full-authority Architect, the maintained eager budget is exactly 53
@@ -65,12 +96,6 @@ event-delivery configuration, deep planning mutations, Idea Brief/Thinking
 editing, Engineer feedback/thread inspection, and backlog reconciliation.
 They remain discoverable when authorized. External connectors are separate
 from this Torque projection and remain lazy/provider-managed.
-
-Engineers retain their own bounded partition. In particular,
-`worktree_merge` and `worktree_rebase` remain deferred for Engineers in this
-partition, but are advertised, exactly searchable, and callable whenever the
-frozen Engineer authority grants `worktree.merge`. A class that denies the
-capability cannot list, search, or call either operation.
 
 ## Shared vocabulary
 

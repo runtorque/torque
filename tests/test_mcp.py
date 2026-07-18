@@ -1814,7 +1814,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("engineer group's currently active", max_desc)
         self.assertIn("not an agent_group", max_desc)
 
-    async def test_engineer_merge_schema_includes_pr_title_body(self):
+    async def test_engineer_merge_schema_is_eager_and_includes_pr_title_body(self):
         state = self.state_mod.MatrixState()
         engineer = self.state_mod.AgentCell(
             id="engineer-1",
@@ -1840,25 +1840,11 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             state=state,
         )
         self.assertEqual(status, 200)
-        search, search_status = await self.mcp_mod.dispatch_mcp_rpc_body(
-            {
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {
-                    "name": "tool_search",
-                    "arguments": {"query": "select:worktree_merge"},
-                },
-            },
-            cell_id=engineer.id,
-            handle_command=fake_handle_command,
-            state=state,
+        tool = next(
+            tool
+            for tool in response["result"]["tools"]
+            if tool["name"] == "worktree_merge"
         )
-        self.assertEqual(search_status, 200)
-        payload = self._parse_functions_block(
-            search["result"]["content"][0]["text"]
-        )
-        tool = payload["tools"][0]
         props = tool["inputSchema"]["properties"]
 
         self.assertIn("pr_title", props)
