@@ -15,6 +15,8 @@ projection of Torque's canonical MCP vocabulary. It maintains:
 4. **A board read** at the group level — every task, every assignee, every label, every attribution.
 5. **A peer-message inbox** — durable same-group Architect threads, including reply obligations.
 6. **An ask channel** to you for blocking product/scope questions.
+7. **A safety-gated worktree path when its Agent Class grants it** — inspect,
+   rebase, publish, or merge only eligible hired-Engineer streams.
 
 The Architect doesn't dispatch Workers directly. It creates tasks, assigns them to Engineers, and lets Engineers handle the Worker-level orchestration. That separation is what keeps the Architect free to plan instead of orchestrate.
 
@@ -131,6 +133,11 @@ Architect scope is asymmetric and worth memorizing:
 - **Engineers in its group**: The Architect sees both **hired** Engineers (with `hired_by_architect_id == architect.id`) and **visible** Engineers (no architect ownership) in the same group. It can fully control hired Engineers (message, dismiss, rehire, reassign tasks); for visible ones it has read-only board awareness.
 - **Tasks**: Reads all tasks in the group, with full `created_by` attribution. Edits only tasks created by itself or the User. Cannot edit other Architects' tasks, Engineer-created tasks, or system-derived parent tasks. Can move any visible task between lanes.
 - **Workers**: Indirect visibility only — through their owning Engineer's worklog and journal entries. The Architect doesn't directly control Workers.
+- **Worktrees**: No authority is inferred from the Architect title. When the
+  frozen Agent Class grants `worktree.read` or `worktree.merge`, the canonical
+  worktree operations are projected only for eligible hired-Engineer streams.
+  Existing ownership, reviewed-SHA, worktree-boundary, preflight, conflict,
+  and configured merge-mode checks still apply.
 - **Other Architects**: Same-group Architects can discover and direct-message each other. The message may include explicit task, Engineer, or decision snapshots, but it does **not** grant access to the sender's private journal, decision log, hired-Engineer controls, or cross-group state. Pending hires remain per-Architect.
 
 The boundary isn't a convention — it's enforced server-side. → [MCP scoping](mcp-scoping.md)

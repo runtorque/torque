@@ -1871,7 +1871,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             props["force_direct"]["description"],
         )
 
-    async def test_architect_can_discover_and_merge_hired_engineer_worktree(self):
+    async def test_architect_can_merge_hired_engineer_worktree_without_search(self):
         state = self.state_mod.MatrixState()
         architect = self.state_mod.AgentCell(
             id="architect-1",
@@ -1944,33 +1944,10 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("worktree_merge", listed_names)
         self.assertIn("worktree_rebase", listed_names)
 
-        search, search_status = await self.mcp_mod.dispatch_mcp_rpc_body(
-            {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "tools/call",
-                "params": {
-                    "name": "tool_search",
-                    "arguments": {"query": "select:worktree_merge"},
-                },
-            },
-            cell_id=architect.id,
-            handle_command=fake_handle_command,
-            state=state,
-        )
-        self.assertEqual(search_status, 200)
-        search_payload = self._parse_functions_block(
-            search["result"]["content"][0]["text"]
-        )
-        self.assertEqual(
-            [tool["name"] for tool in search_payload["tools"]],
-            ["worktree_merge"],
-        )
-
         result, status = await self.mcp_mod.dispatch_mcp_rpc_body(
             {
                 "jsonrpc": "2.0",
-                "id": 2,
+                "id": 1,
                 "method": "tools/call",
                 "params": {
                     "name": "worktree_merge",

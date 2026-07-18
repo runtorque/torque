@@ -30,10 +30,6 @@ ARCHITECT_DEFERRED_TOOL_NAMES = {
     "architect_engineer_rehire",
     "architect_engineer_restore",
     "architect_mcp_calls",
-    "architect_merge",
-    "architect_rebase",
-    "architect_create_pr",
-    "architect_diff",
 }
 
 _ARCHITECT_WORKTREE_SOURCE_NAMES = {
@@ -41,6 +37,10 @@ _ARCHITECT_WORKTREE_SOURCE_NAMES = {
     "engineer_rebase",
     "engineer_create_pr",
     "engineer_diff",
+}
+
+_ARCHITECT_TASK_EXECUTION_SOURCE_NAMES = {
+    "engineer_task_verify",
 }
 
 _ARCHITECT_WORKTREE_DESCRIPTIONS = {
@@ -99,6 +99,25 @@ def _architect_worktree_tool_specs() -> list[dict]:
         if "agent" not in required:
             required.append("agent")
         schema["required"] = required
+        tools.append(copied)
+    return tools
+
+
+def _architect_task_execution_tool_specs() -> list[dict]:
+    """Adapt task execution handlers that are authorized for Architects."""
+
+    tools = []
+    for source in _ENGINEER_TOOL_SPECS:
+        source_name = str(source.get("name", "") or "").strip()
+        if source_name not in _ARCHITECT_TASK_EXECUTION_SOURCE_NAMES:
+            continue
+        copied = deepcopy(source)
+        copied["name"] = source_name.replace("engineer_", "architect_", 1)
+        copied["description"] = (
+            "Record verification evidence for a visible Architect-owned task. "
+            "This updates task evidence only; it does not bypass review, "
+            "merge, deployment, or worktree-boundary gates."
+        )
         tools.append(copied)
     return tools
 
@@ -2179,6 +2198,7 @@ ARCHITECT_TOOLS = [
         _ARCHITECT_TOOL_SPECS
         + _ARCHITECT_PRODUCT_TOOL_SPECS
         + _ARCHITECT_THINKING_TOOL_SPECS
+        + _architect_task_execution_tool_specs()
         + _architect_worktree_tool_specs()
     )
 ]
