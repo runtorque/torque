@@ -17,7 +17,7 @@ from torque.mcp import (
     _resolve_public_tool_call,
 )
 from torque.mcp_canonical import canonical_tool_name
-from torque.mcp_tool_search import public_tool_spec
+from torque.mcp_tool_search import public_tool_spec, tool_search_response
 
 
 class _State:
@@ -101,7 +101,7 @@ class CanonicalMCPContractTests(unittest.TestCase):
         limits = {
             "worker": (24, 24),
             "engineer": (30, 75),
-            "architect": (30, 95),
+            "architect": (30, 100),
         }
         legacy_names = {tool["name"] for tool in ALL_TOOLS}
         for kind, (eager_limit, total_limit) in limits.items():
@@ -129,6 +129,89 @@ class CanonicalMCPContractTests(unittest.TestCase):
         self.assertFalse(tools["context"].get("deferred"))
         self.assertFalse(tools["event_list"].get("deferred"))
         self.assertTrue(tools["task_mark_covered"].get("deferred"))
+
+    def test_architect_worktree_tools_are_deferred_and_route_canonically(self):
+        tools = {
+            tool["name"]: tool
+            for tool in _canonical_tools_for_caller(
+                _State("architect"),
+                "caller",
+            )
+        }
+
+        for name in (
+            "worktree_merge",
+            "worktree_rebase",
+            "worktree_create_pr",
+            "worktree_diff",
+        ):
+            self.assertIn(name, tools)
+            self.assertTrue(tools[name].get("deferred"), name)
+            self.assertEqual(
+                tools[name]["inputSchema"].get("required"),
+                ["agent"],
+            )
+            self.assertNotIn(
+                "worktree_path",
+                tools[name]["inputSchema"]["properties"],
+            )
+
+        resolved, translated = _resolve_public_tool_call(
+            _State("architect"),
+            "caller",
+            "worktree_merge",
+            {"agent": "courier", "pr_title": "Land reviewed change"},
+        )
+        self.assertEqual(resolved, "architect_merge")
+        self.assertEqual(
+            translated,
+            {"agent": "courier", "pr_title": "Land reviewed change"},
+        )
+
+    def test_architect_worktree_projection_obeys_restricted_authority(self):
+        merge_authority = {
+            "schema_version": 1,
+            "base_kind": "architect",
+            "acl_mode": "allow",
+            "capabilities": {
+                "self.read": "self",
+                "worktree.merge": "children",
+            },
+        }
+        merge_state = _State("architect", authority=merge_authority)
+        merge_tools = {
+            tool["name"]: tool
+            for tool in _canonical_tools_for_caller(merge_state, "caller")
+        }
+
+        self.assertIn("worktree_merge", merge_tools)
+        self.assertIn("worktree_rebase", merge_tools)
+        self.assertIn("worktree_create_pr", merge_tools)
+        self.assertNotIn("worktree_diff", merge_tools)
+        search = tool_search_response(
+            merge_tools.values(),
+            {"query": "select:worktree_merge"},
+        )
+        self.assertIn('"name": "worktree_merge"', search)
+
+        read_authority = {
+            "schema_version": 1,
+            "base_kind": "architect",
+            "acl_mode": "allow",
+            "capabilities": {
+                "self.read": "self",
+                "worktree.read": "children",
+            },
+        }
+        read_tools = {
+            tool["name"]
+            for tool in _canonical_tools_for_caller(
+                _State("architect", authority=read_authority),
+                "caller",
+            )
+        }
+        self.assertIn("worktree_diff", read_tools)
+        self.assertNotIn("worktree_merge", read_tools)
 
     def test_public_schemas_never_advertise_legacy_tool_names(self):
         legacy_names = self._legacy_tool_names()

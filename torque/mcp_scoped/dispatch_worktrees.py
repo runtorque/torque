@@ -167,14 +167,14 @@ async def dispatch_worktrees(ctx: ScopedDispatchContext):
                 return (
                     f"Merge has conflicts:\n{conflict_list}\n\n"
                     "Resolve/rebase the driverless worktree manually, then retry "
-                    f"{tool_name_with_prefix(tool_prefix, 'merge')}."
+                    "worktree_merge."
                 ), True
             return (
                 f"Merge has conflicts:\n{conflict_list}\n\n"
-                f"Run {tool_name_with_prefix(tool_prefix, 'rebase')} on "
+                "Run worktree_rebase on "
                 f"{cell.slug or cell.id} to replay "
                 f"{cell.worktree_branch} onto {cell.worktree_base_branch}, "
-                f"then retry {tool_name_with_prefix(tool_prefix, 'merge')}. "
+                "then retry worktree_merge. "
                 "Ask the human only if the rebase still fails."
             ), True
 
@@ -241,13 +241,12 @@ async def dispatch_worktrees(ctx: ScopedDispatchContext):
                     return (
                         f"Merge failed: {error}{conflict_text}\n\n"
                         "Resolve/rebase the driverless worktree manually, then retry "
-                        f"{tool_name_with_prefix(tool_prefix, 'merge')}."
+                        "worktree_merge."
                     ), True
                 return (
                     f"Merge failed: {error}{conflict_text}\n\n"
-                    f"Run {tool_name_with_prefix(tool_prefix, 'rebase')} on "
-                    f"{cell.slug or cell.id} and retry "
-                    f"{tool_name_with_prefix(tool_prefix, 'merge')}. "
+                    "Run worktree_rebase on "
+                    f"{cell.slug or cell.id} and retry worktree_merge. "
                     "Ask the human only if the rebase still fails."
                 ), True
             if cacheable is False:

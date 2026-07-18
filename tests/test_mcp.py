@@ -1867,6 +1867,110 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             props["force_direct"]["description"],
         )
 
+    async def test_architect_can_discover_and_merge_hired_engineer_worktree(self):
+        state = self.state_mod.MatrixState()
+        architect = self.state_mod.AgentCell(
+            id="architect-1",
+            name="Torqly",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+            effective_agent_class_snapshot={
+                "effective_authority": {
+                    "schema_version": 1,
+                    "base_kind": "architect",
+                    "acl_mode": "allow",
+                    "capabilities": {
+                        "self.read": "self",
+                        "worktree.merge": "children",
+                    },
+                },
+            },
+        )
+        courier = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Courier",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+            hired_by_architect_id=architect.id,
+            worktree_path="/tmp/courier",
+            worktree_branch="torque/courier/reviewed",
+            worktree_base_branch="main",
+        )
+        state.agents[architect.id] = architect
+        state.agents[courier.id] = courier
+        state.groups["g"] = [architect.id, courier.id]
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            if payload["cmd"] == "worktree_check_merge":
+                return {
+                    "type": "worktree_check_merge",
+                    "id": courier.id,
+                    "clean": True,
+                    "conflicts": [],
+                }
+            if payload["cmd"] == "worktree_merge":
+                return {
+                    "type": "worktree_merge",
+                    "id": courier.id,
+                    "ok": True,
+                    "sha": "reviewed-sha",
+                    "cleanup": {"errors": []},
+                }
+            self.fail(f"Unexpected command: {payload}")
+
+        search, search_status = await self.mcp_mod.dispatch_mcp_rpc_body(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "tool_search",
+                    "arguments": {"query": "select:worktree_merge"},
+                },
+            },
+            cell_id=architect.id,
+            handle_command=fake_handle_command,
+            state=state,
+        )
+        self.assertEqual(search_status, 200)
+        search_payload = self._parse_functions_block(
+            search["result"]["content"][0]["text"]
+        )
+        self.assertEqual(
+            [tool["name"] for tool in search_payload["tools"]],
+            ["worktree_merge"],
+        )
+
+        result, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "worktree_merge",
+                    "arguments": {"agent": courier.id},
+                },
+            },
+            cell_id=architect.id,
+            handle_command=fake_handle_command,
+            state=state,
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(result["result"]["isError"])
+        self.assertEqual(
+            json.loads(result["result"]["content"][0]["text"])["sha"],
+            "reviewed-sha",
+        )
+        self.assertEqual(
+            [call["cmd"] for call in calls],
+            ["worktree_check_merge", "worktree_merge"],
+        )
+        self.assertEqual(calls[-1]["actor_agent_id"], architect.id)
+
     async def test_engineer_batch_dispatch_deferral_reports_group_and_refreshes_cap(self):
         state = self.state_mod.MatrixState()
         engineer = self.state_mod.AgentCell(

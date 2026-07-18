@@ -198,6 +198,8 @@ class WorktreeStreamTests(unittest.TestCase):
         packet = stream["merge_readiness"]
         self.assertEqual(packet["state"], "ready_to_merge")
         self.assertEqual(packet["recommended_next_action"], "merge")
+        self.assertEqual(packet["recommended_tool"], "worktree_merge")
+        self.assertEqual(stream["recommended_tool"], "worktree_merge")
         self.assertEqual(packet["product_task_ids"], [product.id])
         self.assertEqual(packet["workflow_task_ids"], [review.id])
         self.assertEqual(packet["active_workflow_task_ids"], [])
@@ -352,11 +354,13 @@ class WorktreeStreamTests(unittest.TestCase):
         self.assertEqual(stream["state"], "ready_to_merge")
         self.assertEqual(stream["merge_state"], "ready")
         self.assertEqual(stream["recommended_next_action"], "rebase")
+        self.assertEqual(stream["recommended_tool"], "worktree_rebase")
         packet = stream["merge_readiness"]
         self.assertEqual(packet["stale_base"]["state"], "stale")
         self.assertTrue(packet["stale_base"]["stale"])
         self.assertEqual(packet["stale_base"]["source"], "boundary")
         self.assertEqual(packet["recommended_next_action"], "rebase")
+        self.assertEqual(packet["recommended_tool"], "worktree_rebase")
         self.assertEqual(
             packet["head"]["current_branch_head_sha"],
             "reviewed-head",

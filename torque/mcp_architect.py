@@ -17,6 +17,9 @@ from .db import TorqueDB
 from .mcp_stdio_proxy import serve_http_proxy
 from .mcp_tools_shared import authorize_caller, dispatch_scoped_tool
 from .mcp_tool_search import make_tool_search_spec, tool_search_response
+from .mcp_engineer_tools.tool_specs import (
+    ENGINEER_TOOLS as _ENGINEER_TOOL_SPECS,
+)
 from .help_docs import help_tool_specs
 
 _ENV_VAR = "TORQUE_ARCHITECT_ID"
@@ -27,7 +30,77 @@ ARCHITECT_DEFERRED_TOOL_NAMES = {
     "architect_engineer_rehire",
     "architect_engineer_restore",
     "architect_mcp_calls",
+    "architect_merge",
+    "architect_rebase",
+    "architect_create_pr",
+    "architect_diff",
 }
+
+_ARCHITECT_WORKTREE_SOURCE_NAMES = {
+    "engineer_merge",
+    "engineer_rebase",
+    "engineer_create_pr",
+    "engineer_diff",
+}
+
+_ARCHITECT_WORKTREE_DESCRIPTIONS = {
+    "architect_merge": (
+        "Merge a hired Engineer's reviewed worktree stream through Torque's "
+        "configured PR or direct-merge workflow. Safety gates remain active; "
+        "use worktree_rebase if Torque reports conflicts or a stale base."
+    ),
+    "architect_rebase": (
+        "Rebase a hired Engineer's worktree stream onto its base branch, then "
+        "return its updated merge readiness."
+    ),
+    "architect_create_pr": (
+        "Push a hired Engineer's worktree branch and create a GitHub pull "
+        "request through Torque."
+    ),
+    "architect_diff": (
+        "Inspect the changed files or diff for a hired Engineer's worktree."
+    ),
+}
+
+
+def _architect_worktree_tool_specs() -> list[dict]:
+    """Adapt the audited worktree handlers to the Architect namespace.
+
+    Architect worktree operations intentionally require an agent target.
+    Driverless path/branch targeting is an Engineer-only escape hatch because
+    it cannot express the Architect-to-hired-Engineer relationship enforced by
+    the frozen Agent Class authority gate.
+    """
+
+    tools = []
+    for source in _ENGINEER_TOOL_SPECS:
+        source_name = str(source.get("name", "") or "").strip()
+        if source_name not in _ARCHITECT_WORKTREE_SOURCE_NAMES:
+            continue
+        copied = deepcopy(source)
+        copied["name"] = source_name.replace("engineer_", "architect_", 1)
+        copied["description"] = _ARCHITECT_WORKTREE_DESCRIPTIONS[
+            copied["name"]
+        ]
+        schema = copied.get("inputSchema", {})
+        properties = schema.get("properties", {})
+        for key in ("worktree_path", "branch", "repo_root", "base_branch"):
+            properties.pop(key, None)
+        if "agent" in properties:
+            properties["agent"]["description"] = (
+                "Hired Engineer ID or name with a worktree."
+            )
+        boundary_override = properties.get("force_boundary_mismatch", {})
+        if boundary_override:
+            boundary_override["description"] = str(
+                boundary_override.get("description", "") or ""
+            ).replace("an Engineer verifies", "the Architect verifies")
+        required = list(schema.get("required", []) or [])
+        if "agent" not in required:
+            required.append("agent")
+        schema["required"] = required
+        tools.append(copied)
+    return tools
 
 
 _ARCHITECT_TOOL_SPECS = [
@@ -2106,6 +2179,7 @@ ARCHITECT_TOOLS = [
         _ARCHITECT_TOOL_SPECS
         + _ARCHITECT_PRODUCT_TOOL_SPECS
         + _ARCHITECT_THINKING_TOOL_SPECS
+        + _architect_worktree_tool_specs()
     )
 ]
 

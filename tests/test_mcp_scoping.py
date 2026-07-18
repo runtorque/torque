@@ -17,6 +17,8 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         self.state_mod = importlib.reload(self.state_mod)
         self.mcp_engineer_mod = importlib.import_module("torque.mcp_engineer")
         self.mcp_engineer_mod = importlib.reload(self.mcp_engineer_mod)
+        self.mcp_architect_mod = importlib.import_module("torque.mcp_architect")
+        self.mcp_architect_mod = importlib.reload(self.mcp_architect_mod)
 
     def _make_state(self):
         state = self.state_mod.MatrixState()
@@ -543,6 +545,68 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
             [call["cmd"] for call in force_alias_calls],
             ["worktree_check_merge", "worktree_merge"],
         )
+
+    async def test_architect_merge_targets_only_hired_engineer_worktrees(self):
+        state = self._make_state()
+        architect = self._add_architect(state, "arch", "Torqly")
+        courier = self._add_engineer(state, "eng-courier", "Courier")
+        courier.hired_by_architect_id = architect.id
+        courier.worktree_path = "/tmp/courier"
+        courier.worktree_branch = "torque/courier/change"
+        courier.worktree_base_branch = "main"
+        outsider = self._add_engineer(state, "eng-outsider", "Outsider")
+        outsider.worktree_path = "/tmp/outsider"
+        outsider.worktree_branch = "torque/outsider/change"
+        outsider.worktree_base_branch = "main"
+        calls = []
+
+        async def handle_command(payload):
+            calls.append(dict(payload))
+            if payload["cmd"] == "worktree_check_merge":
+                return {
+                    "type": "worktree_check_merge",
+                    "id": courier.id,
+                    "clean": True,
+                    "conflicts": [],
+                }
+            if payload["cmd"] == "worktree_merge":
+                self.assertEqual(payload["id"], courier.id)
+                self.assertEqual(payload["actor_agent_id"], architect.id)
+                return {
+                    "type": "worktree_merge",
+                    "id": courier.id,
+                    "ok": True,
+                    "sha": "reviewed-sha",
+                    "cleanup": {"errors": []},
+                }
+            self.fail(f"Unexpected command: {payload}")
+
+        text, is_error = await self.mcp_architect_mod._dispatch_architect_tool(
+            "architect_merge",
+            {"agent": courier.id},
+            handle_command,
+            state,
+            caller_id=architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        self.assertEqual(json.loads(text)["sha"], "reviewed-sha")
+        self.assertEqual(
+            [call["cmd"] for call in calls],
+            ["worktree_check_merge", "worktree_merge"],
+        )
+
+        calls.clear()
+        text, is_error = await self.mcp_architect_mod._dispatch_architect_tool(
+            "architect_merge",
+            {"agent": outsider.id},
+            handle_command,
+            state,
+            caller_id=architect.id,
+        )
+        self.assertTrue(is_error)
+        self.assertIn("Agent not found", text)
+        self.assertEqual(calls, [])
 
     async def test_engineer_merge_driverless_boundary_error_not_phantom_conflict(self):
         state = self._make_state()

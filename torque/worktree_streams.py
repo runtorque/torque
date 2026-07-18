@@ -331,6 +331,15 @@ def _merge_readiness_next_action(*, stream_state: str, stale_base: dict,
     return recommended_next_action
 
 
+def _recommended_worktree_tool(recommended_next_action: str) -> str:
+    """Return the canonical MCP operation for an actionable stream hint."""
+
+    return {
+        "merge": "worktree_merge",
+        "rebase": "worktree_rebase",
+    }.get(str(recommended_next_action or "").strip(), "")
+
+
 def _merge_readiness_packet(*, stream_id_value: str, repo_root: str,
                             branch: str, stream_state: str,
                             merge_state: str, code_state: str,
@@ -417,6 +426,7 @@ def _merge_readiness_packet(*, stream_id_value: str, repo_root: str,
         "partial_review_safe": partial_review_safe,
         "gate_reason": gate_reason,
         "recommended_next_action": next_action,
+        "recommended_tool": _recommended_worktree_tool(next_action),
     }
     packet["merge_report_snippet"] = merge_report_snippet_template(packet)
     return packet
@@ -1274,6 +1284,7 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
         ),
         "gate_reason": gate_reason,
         "recommended_next_action": recommended_next_action,
+        "recommended_tool": merge_readiness.get("recommended_tool", ""),
         "merge_readiness": merge_readiness,
         "branch_advanced": branch_has_advanced,
         "partial_review_safe": partial_review_safe,
