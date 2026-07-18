@@ -43,7 +43,9 @@ class ArchitectPromptTests(unittest.TestCase):
 
         self.assertIn("caller-scoped set of canonical MCP tools", prompt)
         self.assertNotIn("architect_* MCP tool surface", prompt)
-        self.assertIn("**Messaging / user asks**: agent_message, peer_message", prompt)
+        self.assertIn("**Messaging / user asks**: agent_list, agent_message", prompt)
+        self.assertIn("**Shared memory**: memory_publish, memory_list", prompt)
+        self.assertIn("worktree_rebase, worktree_create_pr, worktree_merge", prompt)
 
     def test_agent_class_preamble_uses_canonical_context_tool(self):
         class_snapshot = self._class_prompt_context("default-architect")

@@ -118,6 +118,11 @@ class CanonicalMCPContractTests(unittest.TestCase):
                 self.assertEqual(len(names), len(set(names)))
                 self.assertLessEqual(len(eager), eager_limit)
                 self.assertLessEqual(len(tools), total_limit)
+                self.assertEqual(tools[:len(eager)], eager)
+                self.assertTrue(all(
+                    tool.get("deferred")
+                    for tool in tools[len(eager):]
+                ))
                 self.assertFalse(set(names) & legacy_names)
 
     def test_architect_core_orchestration_categories_are_eager(self):

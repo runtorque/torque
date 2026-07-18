@@ -2069,6 +2069,90 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_architect_authorized_task_verify_is_projected_and_callable(self):
+        state = self.state_mod.MatrixState()
+        architect = self.state_mod.AgentCell(
+            id="architect-1",
+            name="Torqly",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+            effective_agent_class_snapshot={
+                "effective_authority": {
+                    "schema_version": 1,
+                    "base_kind": "architect",
+                    "acl_mode": "allow",
+                    "capabilities": {
+                        "self.read": "self",
+                        "task.verify": "self",
+                    },
+                },
+            },
+        )
+        task = self.state_mod.BoardTask(
+            id="TORQUE:1",
+            task="Verify rollout",
+            group="g",
+            lane="In Progress",
+            created_by_architect_id=architect.id,
+        )
+        state.agents[architect.id] = architect
+        state.groups["g"] = [architect.id]
+        state.board_tasks[task.id] = task
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            return {"type": "task_updated", "id": task.id}
+
+        listed, listed_status = await self.mcp_mod.dispatch_mcp_rpc_body(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/list",
+                "params": {},
+            },
+            cell_id=architect.id,
+            handle_command=fake_handle_command,
+            state=state,
+        )
+        self.assertEqual(listed_status, 200)
+        listed_names = {
+            tool["name"] for tool in listed["result"]["tools"]
+        }
+        self.assertIn("task_verify", listed_names)
+
+        result, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "task_verify",
+                    "arguments": {
+                        "task": task.id,
+                        "tests_run": "focused suite",
+                        "state": "passed",
+                    },
+                },
+            },
+            cell_id=architect.id,
+            handle_command=fake_handle_command,
+            state=state,
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(result["result"]["isError"])
+        self.assertEqual(
+            calls,
+            [{
+                "cmd": "board_verify_task",
+                "id": task.id,
+                "actor_name": architect.name,
+                "verification_state": "passed",
+                "tests_run": "focused suite",
+            }],
+        )
+
     async def test_engineer_batch_dispatch_deferral_reports_group_and_refreshes_cap(self):
         state = self.state_mod.MatrixState()
         engineer = self.state_mod.AgentCell(

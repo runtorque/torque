@@ -833,7 +833,11 @@ def canonicalize_tool_specs(
         if name not in eager:
             spec["deferred"] = True
         result.append(spec)
-    return result
+    # Preserve source order inside each partition, but advertise eager schemas
+    # first. Public MCP schemas intentionally omit the internal ``deferred``
+    # marker, so stable eager-first ordering is the remaining boot projection
+    # signal before provider-native discovery indexes the full callable list.
+    return sorted(result, key=lambda spec: bool(spec.get("deferred")))
 
 
 def _is_proposal_variant(name: str) -> bool:

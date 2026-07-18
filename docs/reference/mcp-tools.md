@@ -37,7 +37,9 @@ when to load them into model context.
 
 Workers have no deferred catalog. Engineers and Architects have a bounded
 eager subset plus an authority-filtered on-demand subset; both subsets are
-present in `tools/list`.
+present in `tools/list`. Torque emits the eager partition first, in stable
+source order, before the deferred partition so provider-native discovery sees
+the bounded boot core before indexing specialty schemas.
 
 ### Architect eager core
 
