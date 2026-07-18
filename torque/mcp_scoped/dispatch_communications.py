@@ -46,7 +46,6 @@ async def dispatch_communications(ctx: ScopedDispatchContext):
                 reply_to_id=str(args.get("reply_to_id", "") or "").strip(),
                 context=context,
                 idempotency_key=idempotency_key,
-                infer_architect_reply_to=caller_kind == "architect",
                 notify=True,
             )
         except ValueError as exc:

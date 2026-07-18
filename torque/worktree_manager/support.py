@@ -20,6 +20,7 @@ TORQUE_EXCLUDE_ENTRIES = [
     ".claude/settings.local.json",
     ".claude/instructions.md",
     ".claude/skills/torque-*/",
+    ".agents/skills/torque-*/",
     ".codex/config.toml",
     ".codex/hooks.json",
     ".codex/AGENTS.md",

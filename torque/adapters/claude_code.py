@@ -15,11 +15,15 @@ from ..context_window import normalize_context_window_usage
 from ..provider_usage import normalize_provider_usage_rate_limits
 from .base import AgentAdapter, AgentEvent, InputReadyPolicy
 from .mcp_launch import build_stdio_launch_spec
+from .torque_skills import (
+    SKILLS,
+    install_torque_skills,
+    render_skill_md,
+    uninstall_torque_skills,
+)
 
 _TORQUE_EVENT_URL_RE = re.compile(r"http://(?:localhost|127\.0\.0\.1):\d+/events")
 
-# Skill directory prefix used to identify Torque-managed skills during cleanup
-TORQUE_SKILL_PREFIX = "torque-"
 _AUTO_MEMORY_ORIGINAL_REL_PATH = Path(
     ".torque/claude-auto-memory-original.json"
 )
@@ -31,75 +35,8 @@ _STATUSLINE_PROXY_REL_PATH = Path(
 )
 _TORQUE_STATUSLINE_MARKER = "claude-statusline-proxy.py"
 
-# ---------------------------------------------------------------------------
-# Slash command (skill) definitions — injected into .claude/skills/
-# ---------------------------------------------------------------------------
-
-SKILLS = {
-    "torque-status": {
-        "frontmatter": {
-            "name": "torque-status",
-            "description": (
-                "Show current Torque agent context, linked task, "
-                "and pipeline state"
-            ),
-            "allowed-tools": "mcp__torque__context",
-        },
-        "body": dedent("""\
-            Show the current Torque agent context using the context MCP tool.
-
-            Format the output clearly:
-            - Agent name, group, and status
-            - Current task title, lane, and action
-            - Pipeline info (parent task, depth) if this is a derived task
-            - Worktree branch and diff stats if in a worktree
-        """),
-    },
-    "torque-board": {
-        "frontmatter": {
-            "name": "torque-board",
-            "description": (
-                "Show the Torque task board with all lanes and tasks"
-            ),
-            "allowed-tools": "Bash",
-        },
-        "body": dedent("""\
-            Show the current Torque task board.
-
-            ## Board state
-            !`torque board list`
-
-            Summarize the board state: how many tasks in each lane,
-            any tasks that need attention (blocked/error labels),
-            and what's currently in progress.
-        """),
-    },
-    "torque-done": {
-        "frontmatter": {
-            "name": "torque-done",
-            "description": "Mark the current Torque task as complete",
-            "allowed-tools": "mcp__torque__task_complete",
-            "argument-hint": "[completion message]",
-        },
-        "body": dedent("""\
-            Mark the current task as complete using the task_complete MCP tool.
-
-            If $ARGUMENTS is provided, use it as the completion message.
-            Otherwise, write a brief summary of what was accomplished.
-        """),
-    },
-}
-
-
-def _render_skill_md(skill: dict) -> str:
-    """Render a skill dict into SKILL.md content with YAML frontmatter."""
-    lines = ["---"]
-    for key, value in skill["frontmatter"].items():
-        lines.append(f"{key}: {value}")
-    lines.append("---")
-    lines.append("")
-    lines.append(skill["body"])
-    return "\n".join(lines)
+# Backward-compatible import seam for adapter tests and downstream callers.
+_render_skill_md = render_skill_md
 
 
 @contextmanager
@@ -683,7 +620,11 @@ def _current_torque_port() -> str:
 
 
 
-def _torque_event_curl_command(url: str) -> str:
+def _torque_event_curl_command(
+    url: str,
+    *,
+    ignore_delivery_failure: bool = False,
+) -> str:
     """Return a command hook that posts stdin JSON durably to /events.
 
     The Python shim adds a deterministic event_id when the agent hook payload
@@ -705,6 +646,10 @@ def _torque_event_curl_command(url: str) -> str:
         + ' -H "X-Torque-Cell-Id: $TORQUE_CELL_ID"'
         + ' --data-binary @"$tmp"'
     )
+    if ignore_delivery_failure:
+        # SessionStart can race the local listener while the provider is still
+        # initializing. Keep retries without surfacing a provider hook error.
+        curl += " 2>/dev/null || true"
     # Use a temp file rather than piping into curl so curl can rewind the
     # request body for HTTP 503 retry attempts.
     return (
@@ -715,7 +660,7 @@ def _torque_event_curl_command(url: str) -> str:
     )
 
 def _torque_hook_url() -> str:
-    return f"http://localhost:{_current_torque_port()}/events"
+    return f"http://127.0.0.1:{_current_torque_port()}/events"
 
 
 def _is_torque_event_target(value: str) -> bool:
@@ -873,11 +818,14 @@ class ClaudeCodeAdapter(AgentAdapter):
                 entry["matcher"] = matcher
             return [entry]
 
-        def _cmd_hook(matcher=None):
+        def _cmd_hook(matcher=None, *, ignore_delivery_failure=False):
             """Command hook that curls to Torque (for events that don't support HTTP hooks)."""
             h = {"type": "command", "timeout": cmd_timeout,
                  "command": (
-                     _torque_event_curl_command(url)
+                     _torque_event_curl_command(
+                         url,
+                         ignore_delivery_failure=ignore_delivery_failure,
+                     )
                  )}
             entry = {"hooks": [h]}
             if matcher:
@@ -887,7 +835,7 @@ class ClaudeCodeAdapter(AgentAdapter):
         return {
             "hooks": {
                 # SessionStart only supports command hooks (Claude Code limitation)
-                "SessionStart": _cmd_hook(),
+                "SessionStart": _cmd_hook(ignore_delivery_failure=True),
                 "PreToolUse": _http_hook(".*"),
                 "PostToolUse": _http_hook(".*"),
                 "PostToolUseFailure": _http_hook(".*"),
@@ -1069,39 +1017,14 @@ class ClaudeCodeAdapter(AgentAdapter):
         existing Torque skills to keep them in sync with the daemon version.
         Returns True if at least one skill was installed successfully.
         """
-        skills_dir = Path(working_dir) / ".claude" / "skills"
-        installed = 0
-        for name, skill in SKILLS.items():
-            try:
-                skill_dir = skills_dir / name
-                skill_dir.mkdir(parents=True, exist_ok=True)
-                (skill_dir / "SKILL.md").write_text(_render_skill_md(skill))
-                installed += 1
-            except Exception:
-                pass  # Best-effort per skill
-        return installed > 0
+        return install_torque_skills(working_dir, ".claude/skills")
 
     def uninstall_skills(self, working_dir: str):
         """Remove Torque-managed skills from .claude/skills/.
 
-        Only removes directories matching the TORQUE_SKILL_PREFIX.
+        Only removes skill files owned by Torque.
         """
-        skills_dir = Path(working_dir) / ".claude" / "skills"
-        if not skills_dir.exists():
-            return
-        try:
-            for child in skills_dir.iterdir():
-                if child.is_dir() and child.name.startswith(TORQUE_SKILL_PREFIX):
-                    skill_md = child / "SKILL.md"
-                    if skill_md.exists():
-                        skill_md.unlink()
-                    # Remove dir if empty
-                    try:
-                        child.rmdir()
-                    except OSError:
-                        pass  # Not empty — user added files
-        except Exception:
-            pass  # Best-effort cleanup
+        uninstall_torque_skills(working_dir, ".claude/skills")
 
     def parse_event(self, raw: dict, cell) -> AgentEvent | None:
         """Parse a Claude Code hook HTTP payload into a normalized AgentEvent."""

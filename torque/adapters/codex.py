@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .base import AgentAdapter, AgentEvent, InputReadyPolicy
+from .torque_skills import install_torque_skills, uninstall_torque_skills
 from ..context_window import normalize_context_window_usage
 from ..provider_usage import normalize_provider_usage_rate_limits
 from .. import config as torque_config
@@ -115,6 +116,7 @@ def _torque_event_curl_command(
     url: str,
     *,
     discard_response_stdout: bool = False,
+    ignore_delivery_failure: bool = False,
 ) -> str:
     """Return a command hook that posts stdin JSON durably to /events.
 
@@ -141,6 +143,11 @@ def _torque_event_curl_command(
         # PermissionRequest hooks can make allow/deny decisions via stdout.
         # Torque is a passive observer, so that hook must emit no response body.
         curl += " --output /dev/null"
+    if ignore_delivery_failure:
+        # SessionStart can race the local listener while Codex is still
+        # initializing. Keep the bounded retries, but do not turn that
+        # transient telemetry miss into a provider-visible hook failure.
+        curl += " 2>/dev/null || true"
     # Use a temp file rather than piping into curl so curl can rewind the
     # request body for HTTP 503 retry attempts.
     return (
@@ -151,7 +158,7 @@ def _torque_event_curl_command(
     )
 
 def _torque_hook_url() -> str:
-    return f"http://localhost:{_current_torque_port()}/events"
+    return f"http://127.0.0.1:{_current_torque_port()}/events"
 
 
 def _torque_mcp_url() -> str:
@@ -1001,12 +1008,18 @@ class CodexAdapter(AgentAdapter):
         """
         timeout = 8
 
-        def _cmd_hook(matcher=None, *, discard_response_stdout=False):
+        def _cmd_hook(
+            matcher=None,
+            *,
+            discard_response_stdout=False,
+            ignore_delivery_failure=False,
+        ):
             h = {"type": "command", "timeout": timeout,
                  "command": (
                      _torque_event_curl_command(
                          _torque_hook_url(),
                          discard_response_stdout=discard_response_stdout,
+                         ignore_delivery_failure=ignore_delivery_failure,
                      )
                  )}
             entry = {"hooks": [h]}
@@ -1016,7 +1029,10 @@ class CodexAdapter(AgentAdapter):
 
         return {
             "hooks": {
-                "SessionStart": _cmd_hook(),
+                # The startup observation is advisory. Codex also has the
+                # normal screen-ready backstop, so a brief listener race must
+                # not surface as a failed provider hook.
+                "SessionStart": _cmd_hook(ignore_delivery_failure=True),
                 "PreToolUse": _cmd_hook(".*"),
                 # PermissionRequest can be policy-bearing in Codex.  Torque's
                 # hook is deliberately passive: it observes the prompt and
@@ -1052,6 +1068,16 @@ class CodexAdapter(AgentAdapter):
     def uninstall_mcp_config(self, working_dir: str):
         """Leave user/project .codex config files untouched."""
         del working_dir
+
+    def install_skills(self, working_dir: str) -> bool:
+        """Install canonical Torque skills for Codex workspace discovery."""
+
+        return install_torque_skills(working_dir, ".agents/skills")
+
+    def uninstall_skills(self, working_dir: str) -> None:
+        """Remove only Torque-managed Codex workspace skills."""
+
+        uninstall_torque_skills(working_dir, ".agents/skills")
 
     def _agent_config_payload(self, cell, working_dir: str) -> tuple[Path, dict]:
         config_file = _codex_agent_config_file(getattr(cell, "id", ""))

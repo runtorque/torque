@@ -117,6 +117,19 @@ class CanonicalMCPContractTests(unittest.TestCase):
                 self.assertLessEqual(len(tools), total_limit)
                 self.assertFalse(set(names) & legacy_names)
 
+    def test_architect_boot_reads_are_eager(self):
+        tools = {
+            tool["name"]: tool
+            for tool in _canonical_tools_for_caller(
+                _State("architect"),
+                "caller",
+            )
+        }
+
+        self.assertFalse(tools["context"].get("deferred"))
+        self.assertFalse(tools["event_list"].get("deferred"))
+        self.assertTrue(tools["task_mark_covered"].get("deferred"))
+
     def test_public_schemas_never_advertise_legacy_tool_names(self):
         legacy_names = self._legacy_tool_names()
         pattern = re.compile(

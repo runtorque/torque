@@ -615,7 +615,8 @@ TOOLS = [
                 "reply_to_id": {
                     "type": "string",
                     "description": (
-                        "Optional message id this is replying to. Torque "
+                        "Message ID from a `## Message from the User` block "
+                        "when replying. Omit for a proactive message. Torque "
                         "derives the user lane from the calling agent."
                     ),
                 },

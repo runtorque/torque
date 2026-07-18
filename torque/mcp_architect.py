@@ -759,12 +759,10 @@ _ARCHITECT_TOOL_SPECS = [
                 "reply_to_id": {
                     "type": "string",
                     "description": (
-                        "Optional message id this is replying to. If omitted, "
-                        "Torque infers it only when this architect has exactly "
-                        "one pending direct user message; pass it explicitly "
-                        "for threading or when multiple user messages are "
-                        "pending. Torque derives the user lane from the "
-                        "calling architect."
+                        "Message ID from a `## Message from the User` block "
+                        "when replying. Omit only for a proactive message. "
+                        "Torque never guesses a reply target from historical "
+                        "messages and derives the user lane from the caller."
                     ),
                 },
                 "context_task_ids": {
@@ -1894,8 +1892,8 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
     },
     {
         "name": "architect_proposal_message_user", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self","handler_scoped": True}]},
-        "description": "Send a product-scoped direct user message after validating product-scoped context attachments. If reply_to_id is omitted, Torque infers it only when this architect has exactly one pending direct user message.",
-        "inputSchema": {"type": "object", "properties": {"message": {"type": "string"}, "reply_to_id": {"type": "string", "description": "Optional direct user-message id; omit only when exactly one pending direct user message is unambiguous."}, "thread_id": {"type": "string"}, "context_task_ids": {"type": "array", "items": {"type": "string"}}, "context_decision_ids": {"type": "array", "items": {"type": "string"}}, "context_area_ids": {"type": "array", "items": {"type": "string"}}, "context_initiative_ids": {"type": "array", "items": {"type": "string"}}, "context_idea_brief_ids": {"type": "array", "items": {"type": "string"}}, "context_summary": {"type": "string"}}, "required": ["message"]},
+        "description": "Send a product-scoped direct user message after validating product-scoped context attachments. Pass reply_to_id from the injected user-message block when replying; omit it for a proactive message.",
+        "inputSchema": {"type": "object", "properties": {"message": {"type": "string"}, "reply_to_id": {"type": "string", "description": "Message ID from the injected user-message block when replying; omit for a proactive message."}, "thread_id": {"type": "string"}, "context_task_ids": {"type": "array", "items": {"type": "string"}}, "context_decision_ids": {"type": "array", "items": {"type": "string"}}, "context_area_ids": {"type": "array", "items": {"type": "string"}}, "context_initiative_ids": {"type": "array", "items": {"type": "string"}}, "context_idea_brief_ids": {"type": "array", "items": {"type": "string"}}, "context_summary": {"type": "string"}}, "required": ["message"]},
     },
     {
         "name": "architect_proposal_ask_user", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self","handler_scoped": True}]},

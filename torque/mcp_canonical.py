@@ -289,7 +289,7 @@ _EAGER_BY_KIND = {
         "context", "tool_search", "help_query", "help_get", "board_summary",
         "boot_summary", "task_list", "task_get", "task_create",
         "task_update", "task_claim", "task_reassign", "task_move",
-        "task_mark_covered", "agent_list", "agent_message", "agent_reply",
+        "event_list", "agent_list", "agent_message", "agent_reply",
         "user_ask", "user_message", "peer_list", "peer_message",
         "peer_inbox", "peer_reply", "area_list", "area_get",
         "initiative_list", "initiative_get", "decision_list",

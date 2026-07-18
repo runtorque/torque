@@ -3184,7 +3184,10 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent[0][0], worker.id)
         prompt = sent[0][1]
         self.assertIn('## Message from the User', prompt)
-        self.assertNotIn('Message ID:', prompt)
+        self.assertIn(
+            f'Message ID: `{result["message_id"]}`',
+            prompt,
+        )
         self.assertNotIn('Thread ID:', prompt)
         self.assertNotIn('Sent:', prompt)
         self.assertIn('Can you summarize your current plan?', prompt)
@@ -4199,7 +4202,10 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
                 f'message="...", reply_to_id="{reply_to_id}")'
             )
             self.assertIn(reply_snippet, prompt)
-            self.assertNotIn('Message ID:', prompt)
+            self.assertIn(
+                f'Message ID: `{reply_to_id}`',
+                prompt,
+            )
             self.assertNotIn('Thread ID:', prompt)
             self.assertNotIn('Sent:', prompt)
 
@@ -4309,7 +4315,10 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(sent), 1)
         self.assertEqual(sent[0][0], architect.id)
         prompt = sent[0][1]
-        self.assertNotIn('Message ID:', prompt)
+        self.assertIn(
+            f'Message ID: `{result["message_id"]}`',
+            prompt,
+        )
         self.assertNotIn('Thread ID:', prompt)
         self.assertNotIn('Sent:', prompt)
         self.assertIn(

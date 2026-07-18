@@ -156,10 +156,14 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             self.assertEqual(len(installed["hooks"]["SessionEnd"]), 1)
             self.assertEqual(len(installed["hooks"]["Notification"]), 1)
             session_start_hook = installed["hooks"]["SessionStart"][0]["hooks"][0]
-            self.assertIn("http://localhost:18933/events", session_start_hook["command"])
+            self.assertIn(
+                "http://127.0.0.1:18933/events",
+                session_start_hook["command"],
+            )
             self.assertIn("--fail", session_start_hook["command"])
             self.assertIn("--retry 3", session_start_hook["command"])
             self.assertIn("event_id", session_start_hook["command"])
+            self.assertIn("2>/dev/null || true", session_start_hook["command"])
             self.assertNotIn("> /dev/null", session_start_hook["command"])
             self.assertNotIn("http://localhost:18932/events", session_start_hook["command"])
 
@@ -803,7 +807,7 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 installed = json.loads(settings_file.read_text())
                 proxy = installed["statusLine"]
                 proxy_source = (Path(tmp) / ".torque" / "claude-statusline-proxy.py").read_text()
-                self.assertIn(f"http://localhost:{port}/events", proxy_source)
+                self.assertIn(f"http://127.0.0.1:{port}/events", proxy_source)
                 self.assertNotIn('os.environ.get("TORQUE_PORT")', proxy_source)
                 self.assertLess(
                     proxy_source.index("payload = _post_event(raw)"),
@@ -967,6 +971,30 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             adapter.resolve_reasoning_effort_flags("high"),
             " -c model_reasoning_effort=high",
         )
+
+    def test_claude_and_codex_install_the_same_canonical_torque_skills(self):
+        for adapter, relative_root in (
+            (ClaudeCodeAdapter(), Path(".claude/skills")),
+            (CodexAdapter(), Path(".agents/skills")),
+        ):
+            with self.subTest(adapter=adapter.name):
+                with tempfile.TemporaryDirectory() as tmp:
+                    self.assertTrue(adapter.install_skills(tmp))
+                    root = Path(tmp) / relative_root
+                    status = (root / "torque-status" / "SKILL.md").read_text()
+                    done = (root / "torque-done" / "SKILL.md").read_text()
+                    self.assertIn("mcp__torque__context", status)
+                    self.assertNotIn("torque_context", status)
+                    self.assertIn("mcp__torque__task_complete", done)
+                    self.assertNotIn("torque_done", done)
+
+                    adapter.uninstall_skills(tmp)
+                    self.assertFalse(
+                        (root / "torque-status" / "SKILL.md").exists()
+                    )
+                    self.assertFalse(
+                        (root / "torque-done" / "SKILL.md").exists()
+                    )
 
     def test_codex_persistent_prompts_use_cli_args(self):
         with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as data_dir:
@@ -1209,6 +1237,63 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             self.assertEqual(json.loads(hooks_file.read_text()), original)
             self.assertEqual(user_config.read_text(), 'model = "gpt-5"\n')
 
+    def test_codex_session_start_hook_is_nonfatal_but_runtime_hooks_are_strict(self):
+        with mock.patch.dict(
+            os.environ,
+            {"TORQUE_PORT": "18933"},
+            clear=False,
+        ):
+            hooks = CodexAdapter().get_hook_config(SimpleNamespace())
+
+        session_start = hooks["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+        pre_tool = hooks["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+
+        self.assertIn("http://127.0.0.1:18933/events", session_start)
+        self.assertIn("2>/dev/null || true", session_start)
+        self.assertIn("--retry 3", session_start)
+        self.assertNotIn("|| true", pre_tool)
+
+    def test_codex_nonfatal_start_hook_swallows_curl_connection_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_curl = Path(tmp) / "curl"
+            fake_curl.write_text("#!/bin/sh\nexit 7\n")
+            fake_curl.chmod(0o755)
+            env = dict(os.environ)
+            env["PATH"] = f"{tmp}{os.pathsep}{env.get('PATH', '')}"
+            payload = json.dumps({"hook_event_name": "SessionStart"})
+
+            nonfatal = codex_adapter._torque_event_curl_command(
+                "http://127.0.0.1:18933/events",
+                ignore_delivery_failure=True,
+            )
+            strict = codex_adapter._torque_event_curl_command(
+                "http://127.0.0.1:18933/events",
+            )
+
+            nonfatal_result = subprocess.run(
+                nonfatal,
+                input=payload,
+                text=True,
+                shell=True,
+                executable="/bin/sh",
+                env=env,
+                capture_output=True,
+                check=False,
+            )
+            strict_result = subprocess.run(
+                strict,
+                input=payload,
+                text=True,
+                shell=True,
+                executable="/bin/sh",
+                env=env,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(nonfatal_result.returncode, 0)
+            self.assertEqual(strict_result.returncode, 7)
+
 
     def test_codex_mcp_config_install_and_cleanup_leave_project_config_unchanged(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1339,9 +1424,10 @@ class AgentTemplateAdapterTests(unittest.TestCase):
 
             generated_file = Path(data_dir) / "codex" / "agents" / "agent-1" / "config.toml"
             generated = generated_file.read_text()
-            self.assertIn("http://localhost:18933/events", generated)
+            self.assertIn("http://127.0.0.1:18933/events", generated)
             self.assertIn("--retry 3", generated)
             self.assertIn("event_id", generated)
+            self.assertIn("2>/dev/null || true", generated)
             self.assertIn("--output /dev/null", generated)
             self.assertIn("[hooks.state.", generated)
             self.assertIn("trusted_hash = \"sha256:", generated)

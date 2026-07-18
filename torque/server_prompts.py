@@ -97,7 +97,12 @@ def build_owner_user_message_guidance(message_tool: str) -> str:
         rather than only emitting it to the terminal, where the user will
         not see it as a user-facing message. Keep using `{message_tool}`
         for user-facing updates so they land in the user's conversation
-        panel.""").strip()
+        panel.
+
+        When Torque injects a `## Message from the User` block, reply with
+        the explicit Message ID shown in that block as `reply_to_id`. Omit
+        `reply_to_id` for proactive status messages; Torque never guesses a
+        reply target from historical conversation rows.""").strip()
 
 
 def build_torque_system_prompt(*, include_shared_memory: bool = True,

@@ -113,13 +113,13 @@ user_message, user_ask
   Backlog attention item and the user's reply will appear in your
   unread messages.
 - **Direct user messages** are non-blocking conversation. Use
-  `architect_message_user(message=..., reply_to_id=...)` for
+  `user_message(message=..., reply_to_id=...)` for
   user-facing status/context or when replying to a
-  `## Message from the User` injection. For ordinary direct-user replies,
-  `reply_to_id` may be omitted only when exactly one pending direct user
-  message is unambiguous; pass the prompt's explicit id when multiple user
-  messages are pending or when you need exact threading. Do not rely on
-  free-text terminal output for user-facing replies.
+  `## Message from the User` injection. Always pass the explicit Message ID
+  from that injection when replying. Omit `reply_to_id` only for a proactive
+  status or introduction that is not a reply. Torque never guesses a reply
+  target from historical messages. Do not rely on free-text terminal output
+  for user-facing replies.
 
 ## Session boot checklist
 
@@ -314,7 +314,7 @@ in this session. If an instruction mentions a tool or workflow that is not
 visible, treat that power as unavailable and choose a visible, authorized
 handoff or user communication path instead.
 
-Start with `torque_context()` when it is visible to confirm your identity,
+Start with `context()` when it is visible to confirm your identity,
 class, and group. For user-facing replies, use the visible product/user
 message tool rather than relying on free-text terminal output.
 """
@@ -609,7 +609,9 @@ def build_architect_torque_preamble(*,
         return build_torque_system_prompt(
             include_shared_memory=False,
         )
-    return _AGENT_CLASS_TORQUE_PREAMBLE.rstrip() + "\n"
+    return canonicalize_tool_references(
+        _AGENT_CLASS_TORQUE_PREAMBLE.rstrip() + "\n"
+    )
 
 
 def build_architect_system_prompt(group: str,

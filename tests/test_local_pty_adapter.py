@@ -1094,7 +1094,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
                 settings = json.loads(settings_file.read_text())
                 self.assertIs(settings.get("autoMemoryEnabled"), False)
                 self.assertIn(
-                    "http://localhost:18933/events",
+                    "http://127.0.0.1:18933/events",
                     settings_file.read_text(),
                 )
             finally:

@@ -124,6 +124,11 @@ the caller. Setting `ack_required` additionally requires
 `agent_message` and `supervisor_message` express relationship direction.
 Recipient kind is not part of the capability model.
 
+`user_message` uses explicit reply threading. A `## Message from the User`
+injection includes its Message ID; pass that value as `reply_to_id` when
+replying. Omit `reply_to_id` for a proactive status or introduction. Torque
+does not guess a reply target from historical conversation rows.
+
 ### Tasks
 
 | Tool | Purpose |

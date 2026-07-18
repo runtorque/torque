@@ -990,7 +990,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(torqly.id, state.direct_messages_by_agent)
             db.close()
 
-    async def test_architect_message_user_infers_single_pending_user_reply(self):
+    async def test_architect_message_user_without_reply_id_is_proactive(self):
         db_mod = importlib.import_module("torque.db")
         with tempfile.TemporaryDirectory() as tmp:
             db = db_mod.TorqueDB(Path(tmp) / "torque.db")
@@ -1046,15 +1046,15 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(result["result"]["isError"])
             payload = json.loads(result["result"]["content"][0]["text"])
             row = db.load_direct_message(payload["message_id"])
-            self.assertEqual(payload["reply_to_id"], "msg-user-1")
-            self.assertEqual(row["reply_to_id"], "msg-user-1")
+            self.assertEqual(payload["reply_to_id"], "")
+            self.assertEqual(row["reply_to_id"], "")
             self.assertEqual(row["thread_id"], thread_id)
             self.assertEqual(row["sender_id"], architect.id)
             self.assertEqual(row["recipient_id"], "user")
             self.assertEqual([item["id"] for item in notifications], [row["id"]])
             db.close()
 
-    async def test_architect_message_user_requires_explicit_reply_when_ambiguous(self):
+    async def test_architect_message_user_history_does_not_block_proactive_message(self):
         db_mod = importlib.import_module("torque.db")
         with tempfile.TemporaryDirectory() as tmp:
             db = db_mod.TorqueDB(Path(tmp) / "torque.db")
@@ -1090,22 +1090,23 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
 
             text, is_error = await self.mcp_mod._dispatch_architect_tool(
                 "architect_message_user",
-                {"message": "Need an explicit target."},
+                {"message": "Fresh status after restart."},
                 fake_handle_command,
                 state,
                 caller_id=architect.id,
             )
-            self.assertTrue(is_error)
-            self.assertIn("Multiple pending direct user messages", text)
-            self.assertIn("msg-user-1", text)
-            self.assertIn("msg-user-2", text)
+            self.assertFalse(is_error)
+            payload = json.loads(text)
+            self.assertEqual(payload["reply_to_id"], "")
+            saved = db.load_direct_message(payload["message_id"])
+            self.assertEqual(saved["reply_to_id"], "")
             self.assertEqual(
                 [row["id"] for row in db.load_direct_messages_for_thread(thread_id)],
-                ["msg-user-1", "msg-user-2"],
+                ["msg-user-1", "msg-user-2", payload["message_id"]],
             )
             db.close()
 
-    async def test_architect_message_user_errors_when_user_thread_has_no_pending_reply(self):
+    async def test_architect_message_user_after_prior_reply_can_start_fresh_message(self):
         db_mod = importlib.import_module("torque.db")
         with tempfile.TemporaryDirectory() as tmp:
             db = db_mod.TorqueDB(Path(tmp) / "torque.db")
@@ -1154,14 +1155,15 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
 
             text, is_error = await self.mcp_mod._dispatch_architect_tool(
                 "architect_message_user",
-                {"message": "No inferred target should exist."},
+                {"message": "A new proactive status."},
                 fake_handle_command,
                 state,
                 caller_id=architect.id,
             )
-            self.assertTrue(is_error)
-            self.assertIn("No pending direct user message", text)
-            self.assertEqual(len(db.load_direct_messages_for_thread(thread_id)), 2)
+            self.assertFalse(is_error)
+            payload = json.loads(text)
+            self.assertEqual(payload["reply_to_id"], "")
+            self.assertEqual(len(db.load_direct_messages_for_thread(thread_id)), 3)
             db.close()
 
     async def test_architect_message_user_rejects_other_architect_reply_to_id(self):
@@ -1475,7 +1477,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         for name in {
             "tool_search", "board_summary", "boot_summary", "task_list",
             "task_get", "task_create", "task_update", "task_move",
-            "task_mark_covered", "agent_list", "agent_message", "peer_list",
+            "event_list", "agent_list", "agent_message", "peer_list",
             "peer_message", "peer_inbox", "decision_list", "journal_write",
             "journal_list", "user_message",
         }:

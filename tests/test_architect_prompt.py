@@ -45,6 +45,16 @@ class ArchitectPromptTests(unittest.TestCase):
         self.assertNotIn("architect_* MCP tool surface", prompt)
         self.assertIn("**Messaging / user asks**: agent_message, peer_message", prompt)
 
+    def test_agent_class_preamble_uses_canonical_context_tool(self):
+        class_snapshot = self._class_prompt_context("default-architect")
+
+        prompt = self.architect_mod.build_architect_torque_preamble(
+            agent_class_snapshot=class_snapshot,
+        )
+
+        self.assertIn("Start with `context()`", prompt)
+        self.assertNotIn("torque_context", prompt)
+
     def test_prompt_includes_dispatch_freely_autonomy_guidance(self):
         prompt = self.architect_mod.build_architect_system_prompt(
             "Torque",

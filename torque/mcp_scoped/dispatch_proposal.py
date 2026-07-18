@@ -405,7 +405,7 @@ async def dispatch_proposal(ctx: ScopedDispatchContext):
         if length_error:
             return length_error, True
         try:
-            saved, created = save_agent_user_direct_message_from_mcp(real_state, sender, message=message, thread_id=str(args.get("thread_id", "") or "").strip(), reply_to_id=str(args.get("reply_to_id", "") or "").strip(), context=context, idempotency_key=idempotency_key, infer_architect_reply_to=True, notify=True)
+            saved, created = save_agent_user_direct_message_from_mcp(real_state, sender, message=message, thread_id=str(args.get("thread_id", "") or "").strip(), reply_to_id=str(args.get("reply_to_id", "") or "").strip(), context=context, idempotency_key=idempotency_key, notify=True)
         except ValueError as exc:
             return str(exc), True
         payload = _direct_user_message_response(saved, deduped=not created)
