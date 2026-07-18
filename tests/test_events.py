@@ -1187,6 +1187,45 @@ asyncio.run(main())
                 self.assertEqual(saved, [])
                 self.assertEqual(state._delta_ops, [])
 
+    async def test_codex_replacement_rejects_old_stop_before_session_start(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Codex replacement",
+            group="g",
+            cell_type="agent",
+            agent_type="codex",
+            status="running",
+            activity="thinking",
+            session_id="replacement-pty-session",
+            # Restart/relaunch intentionally clears this before the new
+            # provider SessionStart event is drained.
+            agent_session_id="",
+        )
+        state.agents[cell.id] = cell
+        saved = []
+        callbacks = []
+        state._db_save_agent = lambda agent: saved.append(agent.id)
+        bus = self.events_mod.EventBus(state, self.events_mod.EventLog())
+
+        async def on_session_end(ended_cell):
+            callbacks.append(ended_cell.id)
+
+        bus.on_session_end = on_session_end
+        await bus.emit(self.base_mod.AgentEvent(
+            cell_id=cell.id,
+            timestamp=time.time(),
+            event_type="session_end",
+            data={"session_id": "old-codex-session"},
+        ))
+
+        self.assertEqual(cell.status, "running")
+        self.assertEqual(cell.activity, "thinking")
+        self.assertEqual(cell.agent_session_id, "")
+        self.assertEqual(saved, [])
+        self.assertEqual(callbacks, [])
+        self.assertEqual(state._delta_ops, [])
+
     async def test_session_end_broadcasts_idle_before_completion_callback(self):
         state = self._make_state()
         cell = self.state_mod.AgentCell(

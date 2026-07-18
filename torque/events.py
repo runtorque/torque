@@ -882,11 +882,13 @@ class EventBus:
         """Return whether a completion event may mutate this live cell.
 
         Provider ``session_id`` values identify provider conversations, not
-        Torque PTY sessions.  A missing value is allowed for the trusted PTY
-        idle-screen backstop and for providers that do not expose one; when a
-        value is present it must agree with an already observed provider
-        session.  The first valid completion after a missed SessionStart is
-        still accepted and records that provider session in ``_apply``.
+        Torque PTY sessions. A missing value is allowed for the trusted PTY
+        idle-screen backstop and for providers that do not expose one. Codex
+        Stop payloads with an ID require an already observed, matching
+        SessionStart ID: a restart deliberately clears that field, so accepting
+        a delayed old Stop before the replacement SessionStart drains would
+        bind and idle the replacement. The PTY backstop closes that short
+        startup window without weakening provider-session correlation.
         """
         if str(getattr(cell, "status", "") or "") != "running":
             return False
@@ -903,6 +905,11 @@ class EventBus:
         current_session_id = str(
             getattr(cell, "agent_session_id", "") or ""
         ).strip()
+        if str(getattr(cell, "agent_type", "") or "") == "codex":
+            return not event_session_id or (
+                bool(current_session_id)
+                and event_session_id == current_session_id
+            )
         return not (
             event_session_id
             and current_session_id
