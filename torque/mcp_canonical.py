@@ -267,6 +267,46 @@ CANONICAL_DESCRIPTIONS = {
 }
 
 
+_ARCHITECT_EAGER_BY_CATEGORY = {
+    # Always-small boot and product-orientation reads.
+    "boot": {
+        "context", "tool_search", "help_query", "help_get", "board_summary",
+        "boot_summary", "event_list", "agent_list", "area_list", "area_get",
+        "initiative_list", "initiative_get",
+    },
+    # Durable communication paths needed to coordinate without discovery.
+    "communication": {
+        "user_ask", "user_message", "peer_list", "peer_message",
+        "peer_inbox", "peer_reply", "agent_message", "agent_reply",
+        "agent_ask_get", "agent_ask_answer",
+    },
+    # Architect task routing. task_create carries the authorized
+    # dispatch-to-hired-Engineer flow; Architects do not dispatch Workers.
+    "tasks": {
+        "task_list", "task_get", "task_chain", "task_claim", "task_create",
+        "task_update", "task_reassign", "task_move", "task_mark_covered",
+        "task_verify",
+    },
+    # Recovery and durable operating context.
+    "memory": {
+        "journal_write", "journal_list", "decision_list", "decision_get",
+        "decision_create", "decision_update", "decision_link",
+        "memory_publish", "memory_list", "memory_get", "memory_set_pin",
+        "memory_link", "semantic_recall",
+    },
+    # Bounded execution rollups and the safety-gated worktree path.
+    "execution": {
+        "attention_digest", "group_health_brief", "wave_summary",
+        "completion_audit", "worktree_merge", "worktree_rebase",
+        "worktree_create_pr", "worktree_diff",
+    },
+}
+
+ARCHITECT_EAGER_TOOL_NAMES = frozenset().union(
+    *_ARCHITECT_EAGER_BY_CATEGORY.values()
+)
+
+
 _EAGER_BY_KIND = {
     "worker": {
         "context", "area_list", "area_get", "help_search", "help_query", "help_get",
@@ -285,16 +325,7 @@ _EAGER_BY_KIND = {
         "peer_list", "peer_message", "peer_inbox", "peer_reply",
         "supervisor_message", "agent_reply", "event_list",
     },
-    "architect": {
-        "context", "tool_search", "help_query", "help_get", "board_summary",
-        "boot_summary", "task_list", "task_get", "task_create",
-        "task_update", "task_claim", "task_reassign", "task_move",
-        "event_list", "agent_list", "agent_message", "agent_reply",
-        "user_ask", "user_message", "peer_list", "peer_message",
-        "peer_inbox", "peer_reply", "area_list", "area_get",
-        "initiative_list", "initiative_get", "decision_list",
-        "journal_write", "journal_list",
-    },
+    "architect": ARCHITECT_EAGER_TOOL_NAMES,
 }
 
 
@@ -802,7 +833,11 @@ def canonicalize_tool_specs(
         if name not in eager:
             spec["deferred"] = True
         result.append(spec)
-    return result
+    # Preserve source order inside each partition, but advertise eager schemas
+    # first. Public MCP schemas intentionally omit the internal ``deferred``
+    # marker, so stable eager-first ordering is the remaining boot projection
+    # signal before provider-native discovery indexes the full callable list.
+    return sorted(result, key=lambda spec: bool(spec.get("deferred")))
 
 
 def _is_proposal_variant(name: str) -> bool:

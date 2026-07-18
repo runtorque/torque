@@ -16,7 +16,10 @@ from torque.mcp import (
     _canonical_tools_for_caller,
     _resolve_public_tool_call,
 )
-from torque.mcp_canonical import canonical_tool_name
+from torque.mcp_canonical import (
+    ARCHITECT_EAGER_TOOL_NAMES,
+    canonical_tool_name,
+)
 from torque.mcp_tool_search import public_tool_spec, tool_search_response
 
 
@@ -101,7 +104,7 @@ class CanonicalMCPContractTests(unittest.TestCase):
         limits = {
             "worker": (24, 24),
             "engineer": (30, 75),
-            "architect": (30, 100),
+            "architect": (55, 100),
         }
         legacy_names = {tool["name"] for tool in ALL_TOOLS}
         for kind, (eager_limit, total_limit) in limits.items():
@@ -115,9 +118,14 @@ class CanonicalMCPContractTests(unittest.TestCase):
                 self.assertEqual(len(names), len(set(names)))
                 self.assertLessEqual(len(eager), eager_limit)
                 self.assertLessEqual(len(tools), total_limit)
+                self.assertEqual(tools[:len(eager)], eager)
+                self.assertTrue(all(
+                    tool.get("deferred")
+                    for tool in tools[len(eager):]
+                ))
                 self.assertFalse(set(names) & legacy_names)
 
-    def test_architect_boot_reads_are_eager(self):
+    def test_architect_core_orchestration_categories_are_eager(self):
         tools = {
             tool["name"]: tool
             for tool in _canonical_tools_for_caller(
@@ -125,12 +133,36 @@ class CanonicalMCPContractTests(unittest.TestCase):
                 "caller",
             )
         }
+        eager = {
+            name
+            for name, tool in tools.items()
+            if not tool.get("deferred")
+        }
 
-        self.assertFalse(tools["context"].get("deferred"))
-        self.assertFalse(tools["event_list"].get("deferred"))
-        self.assertTrue(tools["task_mark_covered"].get("deferred"))
+        self.assertEqual(eager, ARCHITECT_EAGER_TOOL_NAMES)
+        for category in (
+            {"peer_message", "agent_message", "user_message", "agent_reply"},
+            {"task_create", "task_get", "task_update", "task_reassign"},
+            {"journal_list", "decision_get", "memory_get", "semantic_recall"},
+            {"wave_summary", "task_chain", "task_verify", "worktree_merge"},
+        ):
+            self.assertTrue(category <= eager)
+        self.assertTrue(tools["engineer_hire"].get("deferred"))
+        self.assertTrue(tools["thinking_list"].get("deferred"))
 
-    def test_architect_worktree_tools_are_deferred_and_route_canonically(self):
+        resolved, translated = _resolve_public_tool_call(
+            _State("architect"),
+            "caller",
+            "task_verify",
+            {"task": "TORQUE:1", "tests_run": "focused suite"},
+        )
+        self.assertEqual(resolved, "architect_task_verify")
+        self.assertEqual(
+            translated,
+            {"task": "TORQUE:1", "tests_run": "focused suite"},
+        )
+
+    def test_architect_worktree_tools_are_eager_and_route_canonically(self):
         tools = {
             tool["name"]: tool
             for tool in _canonical_tools_for_caller(
@@ -146,7 +178,7 @@ class CanonicalMCPContractTests(unittest.TestCase):
             "worktree_diff",
         ):
             self.assertIn(name, tools)
-            self.assertTrue(tools[name].get("deferred"), name)
+            self.assertFalse(tools[name].get("deferred"), name)
             self.assertEqual(
                 tools[name]["inputSchema"].get("required"),
                 ["agent"],
@@ -188,11 +220,7 @@ class CanonicalMCPContractTests(unittest.TestCase):
         self.assertIn("worktree_rebase", merge_tools)
         self.assertIn("worktree_create_pr", merge_tools)
         self.assertNotIn("worktree_diff", merge_tools)
-        search = tool_search_response(
-            merge_tools.values(),
-            {"query": "select:worktree_merge"},
-        )
-        self.assertIn('"name": "worktree_merge"', search)
+        self.assertFalse(merge_tools["worktree_merge"].get("deferred"))
 
         read_authority = {
             "schema_version": 1,
@@ -212,6 +240,89 @@ class CanonicalMCPContractTests(unittest.TestCase):
         }
         self.assertIn("worktree_diff", read_tools)
         self.assertNotIn("worktree_merge", read_tools)
+
+    def test_restricted_architect_denies_core_tools_without_capabilities(self):
+        restricted_authority = {
+            "schema_version": 1,
+            "base_kind": "architect",
+            "acl_mode": "allow",
+            "capabilities": {"self.read": "self"},
+        }
+        tools = {
+            tool["name"]: tool
+            for tool in _canonical_tools_for_caller(
+                _State("architect", authority=restricted_authority),
+                "caller",
+            )
+        }
+        self.assertEqual(set(tools), {"context", "tool_search"})
+        for denied in (
+            "peer_message",
+            "task_create",
+            "memory_get",
+            "semantic_recall",
+            "wave_summary",
+            "task_verify",
+            "worktree_merge",
+        ):
+            self.assertNotIn(denied, tools)
+            self.assertNotIn(
+                f'"name": "{denied}"',
+                tool_search_response(
+                    tools.values(),
+                    {"query": f"select:{denied}"},
+                ),
+            )
+
+    def test_engineer_worktree_tools_remain_deferred_searchable_and_denied_by_acl(self):
+        merge_authority = {
+            "schema_version": 1,
+            "base_kind": "engineer",
+            "acl_mode": "allow",
+            "capabilities": {
+                "self.read": "self",
+                "worktree.merge": "children",
+            },
+        }
+        merge_tools = {
+            tool["name"]: tool
+            for tool in _canonical_tools_for_caller(
+                _State("engineer", authority=merge_authority),
+                "caller",
+            )
+        }
+        for name in ("worktree_merge", "worktree_rebase"):
+            self.assertIn(name, merge_tools)
+            self.assertTrue(merge_tools[name].get("deferred"))
+        for query in ("select:worktree_merge", "worktree rebase"):
+            search = tool_search_response(
+                merge_tools.values(),
+                {"query": query},
+            )
+            self.assertIn('"name": "worktree_', search)
+
+        restricted_authority = {
+            "schema_version": 1,
+            "base_kind": "engineer",
+            "acl_mode": "allow",
+            "capabilities": {"self.read": "self"},
+        }
+        restricted_tools = {
+            tool["name"]: tool
+            for tool in _canonical_tools_for_caller(
+                _State("engineer", authority=restricted_authority),
+                "caller",
+            )
+        }
+        self.assertNotIn("worktree_merge", restricted_tools)
+        self.assertNotIn("worktree_rebase", restricted_tools)
+        self.assertNotIn(
+            '"name": "worktree_',
+            tool_search_response(
+                restricted_tools.values(),
+                {"query": "worktree"},
+            ),
+        )
 
     def test_public_schemas_never_advertise_legacy_tool_names(self):
         legacy_names = self._legacy_tool_names()

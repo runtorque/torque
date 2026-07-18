@@ -37,7 +37,40 @@ when to load them into model context.
 
 Workers have no deferred catalog. Engineers and Architects have a bounded
 eager subset plus an authority-filtered on-demand subset; both subsets are
-present in `tools/list`.
+present in `tools/list`. Torque emits the eager partition first, in stable
+source order, before the deferred partition so provider-native discovery sees
+the bounded boot core before indexing specialty schemas.
+
+### Architect eager core
+
+For a full-authority Architect, the maintained eager budget is exactly 53
+canonical operations. A restricted Architect receives only the intersection
+of this set and its frozen Agent Class authority:
+
+| Category | Eager canonical operations |
+| --- | --- |
+| Boot and orientation | `context`, `tool_search`, `help_query`, `help_get`, `board_summary`, `boot_summary`, `event_list`, `agent_list`, `area_list`, `area_get`, `initiative_list`, `initiative_get` |
+| Communication | `user_ask`, `user_message`, `peer_list`, `peer_message`, `peer_inbox`, `peer_reply`, `agent_message`, `agent_reply`, `agent_ask_get`, `agent_ask_answer` |
+| Task routing and evidence | `task_list`, `task_get`, `task_chain`, `task_claim`, `task_create`, `task_update`, `task_reassign`, `task_move`, `task_mark_covered`, `task_verify` |
+| Durable context | `journal_write`, `journal_list`, `decision_list`, `decision_get`, `decision_create`, `decision_update`, `decision_link`, `memory_publish`, `memory_list`, `memory_get`, `memory_set_pin`, `memory_link`, `semantic_recall` |
+| Execution flow | `attention_digest`, `group_health_brief`, `wave_summary`, `completion_audit`, `worktree_merge`, `worktree_rebase`, `worktree_create_pr`, `worktree_diff` |
+
+`task_create` is the Architect's dispatch-capable routing flow: when its
+authorized dispatch arguments are used, it routes to a hired Engineer.
+Architects do not receive Worker dispatch authority.
+
+Intentionally lazy exceptions are unrelated administration and lifecycle
+operations, behavior overlays, telemetry/settings/deploy inspection, broad
+event-delivery configuration, deep planning mutations, Idea Brief/Thinking
+editing, Engineer feedback/thread inspection, and backlog reconciliation.
+They remain discoverable when authorized. External connectors are separate
+from this Torque projection and remain lazy/provider-managed.
+
+Engineers retain their own bounded partition. In particular,
+`worktree_merge` and `worktree_rebase` remain deferred for Engineers in this
+partition, but are advertised, exactly searchable, and callable whenever the
+frozen Engineer authority grants `worktree.merge`. A class that denies the
+capability cannot list, search, or call either operation.
 
 ## Shared vocabulary
 
