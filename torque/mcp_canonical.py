@@ -307,6 +307,49 @@ ARCHITECT_EAGER_TOOL_NAMES = frozenset().union(
 )
 
 
+_ENGINEER_EAGER_BY_CATEGORY = {
+    # Existing bounded launch surface for orientation, routing, and
+    # communication. Relationship-specific entries are still projected only
+    # when the caller is eligible for their underlying handlers.
+    "core": {
+        "context", "tool_search", "help_query", "help_get", "board_summary",
+        "boot_summary", "session_map", "task_list", "task_get", "task_create",
+        "task_update", "task_move", "task_dispatch", "task_verify",
+        "task_artifact_upload", "agent_list", "agent_get", "agent_message",
+        "agent_ask_answer", "user_ask", "user_message", "user_note",
+        "peer_list", "peer_message", "peer_inbox", "peer_reply",
+        "supervisor_message", "agent_reply", "event_list",
+    },
+    # Durable context needed during normal implementation and recovery.
+    "memory": {
+        "memory_publish", "memory_list", "memory_get", "memory_set_pin",
+        "memory_link", "semantic_recall", "journal_write", "journal_list",
+    },
+    # Routine stream/action inspection and event-delivery control.
+    "execution": {
+        "stream_list", "stream_get", "action_list", "action_get",
+        "hint_set_state", "event_delivery_update",
+    },
+    # Release operations remain guarded by the frozen authority and the
+    # existing ownership, boundary, reviewed-SHA, and merge checks.
+    "worktree": {
+        "worktree_diff", "worktree_checkpoint",
+        "worktree_advance_boundary", "worktree_rebase",
+        "worktree_create_pr", "worktree_merge", "worktree_remove",
+        "worktree_adopt",
+    },
+    # Common task coverage/routing and owned-agent lifecycle operations.
+    "task_agent": {
+        "task_mark_covered", "task_reassign", "agent_launch_settings",
+        "agent_close", "agent_relaunch",
+    },
+}
+
+ENGINEER_EAGER_TOOL_NAMES = frozenset().union(
+    *_ENGINEER_EAGER_BY_CATEGORY.values()
+)
+
+
 _EAGER_BY_KIND = {
     "worker": {
         "context", "area_list", "area_get", "help_search", "help_query", "help_get",
@@ -316,15 +359,7 @@ _EAGER_BY_KIND = {
         "agent_reply", "memory_publish", "memory_list", "memory_get",
         "memory_set_pin", "memory_link",
     },
-    "engineer": {
-        "context", "tool_search", "help_query", "help_get", "board_summary",
-        "boot_summary", "session_map", "task_list", "task_get", "task_create",
-        "task_update", "task_move", "task_dispatch", "task_verify",
-        "task_artifact_upload", "agent_list", "agent_get", "agent_message",
-        "agent_ask_answer", "user_ask", "user_message", "user_note",
-        "peer_list", "peer_message", "peer_inbox", "peer_reply",
-        "supervisor_message", "agent_reply", "event_list",
-    },
+    "engineer": ENGINEER_EAGER_TOOL_NAMES,
     "architect": ARCHITECT_EAGER_TOOL_NAMES,
 }
 

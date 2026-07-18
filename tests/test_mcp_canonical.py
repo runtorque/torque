@@ -15,9 +15,11 @@ from torque.mcp import (
     ALL_TOOLS,
     _canonical_tools_for_caller,
     _resolve_public_tool_call,
+    _visible_tools,
 )
 from torque.mcp_canonical import (
     ARCHITECT_EAGER_TOOL_NAMES,
+    ENGINEER_EAGER_TOOL_NAMES,
     canonical_tool_name,
 )
 from torque.mcp_tool_search import public_tool_spec, tool_search_response
@@ -103,7 +105,7 @@ class CanonicalMCPContractTests(unittest.TestCase):
     def test_default_surfaces_are_unique_canonical_and_bounded(self):
         limits = {
             "worker": (24, 24),
-            "engineer": (30, 75),
+            "engineer": (56, 75),
             "architect": (55, 100),
         }
         legacy_names = {tool["name"] for tool in ALL_TOOLS}
@@ -274,8 +276,95 @@ class CanonicalMCPContractTests(unittest.TestCase):
                 ),
             )
 
-    def test_engineer_worktree_tools_remain_deferred_searchable_and_denied_by_acl(self):
-        merge_authority = {
+    def test_engineer_execution_categories_are_eager_and_route_canonically(self):
+        tools = {
+            tool["name"]: tool
+            for tool in _canonical_tools_for_caller(
+                _State("engineer"),
+                "caller",
+            )
+        }
+        eager = {
+            name
+            for name, tool in tools.items()
+            if not tool.get("deferred")
+        }
+        categories = (
+            {
+                "memory_publish", "memory_list", "memory_get",
+                "memory_set_pin", "memory_link", "semantic_recall",
+                "journal_write", "journal_list",
+            },
+            {
+                "stream_list", "stream_get", "action_list", "action_get",
+                "hint_set_state", "event_delivery_update",
+            },
+            {
+                "worktree_diff", "worktree_checkpoint",
+                "worktree_advance_boundary", "worktree_rebase",
+                "worktree_create_pr", "worktree_merge", "worktree_remove",
+                "worktree_adopt",
+            },
+            {
+                "task_mark_covered", "task_reassign",
+                "agent_launch_settings", "agent_close", "agent_relaunch",
+            },
+        )
+
+        self.assertEqual(len(eager), 56)
+        self.assertEqual(eager, ENGINEER_EAGER_TOOL_NAMES)
+        initial_projection = _visible_tools(_State("engineer"), "caller")
+        self.assertEqual(
+            {tool["name"] for tool in initial_projection[:56]},
+            ENGINEER_EAGER_TOOL_NAMES,
+        )
+        for category in categories:
+            self.assertTrue(category <= eager)
+            for name in category:
+                self.assertIn(name, tools)
+                self.assertFalse(tools[name].get("deferred"), name)
+                self.assertNotIn(
+                    f'"name": "{name}"',
+                    tool_search_response(
+                        tools.values(),
+                        {"query": f"select:{name}"},
+                    ),
+                    name,
+                )
+
+        for name, arguments, legacy_name in (
+            ("memory_get", {"entry_id": "abc"}, "torque_memory_read"),
+            ("stream_get", {"stream": "stream-1"}, "engineer_stream_show"),
+            (
+                "action_get",
+                {"name": "feature/implement"},
+                "engineer_action_show",
+            ),
+            (
+                "worktree_checkpoint",
+                {"agent": "courier"},
+                "engineer_worktree_checkpoint",
+            ),
+            (
+                "task_reassign",
+                {"task": "TORQUE:1", "new_engineer_id": "engineer-2"},
+                "engineer_task_reassign",
+            ),
+            (
+                "agent_relaunch",
+                {"agent": "courier"},
+                "engineer_agent_relaunch",
+            ),
+        ):
+            self._assert_routes_to_schema(
+                "engineer",
+                name,
+                arguments,
+                legacy_name,
+            )
+
+    def test_restricted_engineer_denies_eager_tools_and_exact_search(self):
+        worktree_authority = {
             "schema_version": 1,
             "base_kind": "engineer",
             "acl_mode": "allow",
@@ -284,28 +373,33 @@ class CanonicalMCPContractTests(unittest.TestCase):
                 "worktree.merge": "children",
             },
         }
-        merge_tools = {
+        worktree_tools = {
             tool["name"]: tool
             for tool in _canonical_tools_for_caller(
-                _State("engineer", authority=merge_authority),
+                _State("engineer", authority=worktree_authority),
                 "caller",
             )
         }
-        for name in ("worktree_merge", "worktree_rebase"):
-            self.assertIn(name, merge_tools)
-            self.assertTrue(merge_tools[name].get("deferred"))
-        for query in ("select:worktree_merge", "worktree rebase"):
-            search = tool_search_response(
-                merge_tools.values(),
-                {"query": query},
-            )
-            self.assertIn('"name": "worktree_', search)
+        for name in (
+            "worktree_merge",
+            "worktree_rebase",
+            "worktree_create_pr",
+            "worktree_checkpoint",
+            "worktree_advance_boundary",
+            "worktree_remove",
+            "worktree_adopt",
+        ):
+            self.assertIn(name, worktree_tools)
+            self.assertFalse(worktree_tools[name].get("deferred"), name)
+        self.assertNotIn("worktree_diff", worktree_tools)
 
         restricted_authority = {
             "schema_version": 1,
             "base_kind": "engineer",
             "acl_mode": "allow",
-            "capabilities": {"self.read": "self"},
+            "capabilities": {
+                "self.read": "self",
+            },
         }
         restricted_tools = {
             tool["name"]: tool
@@ -314,15 +408,25 @@ class CanonicalMCPContractTests(unittest.TestCase):
                 "caller",
             )
         }
-        self.assertNotIn("worktree_merge", restricted_tools)
-        self.assertNotIn("worktree_rebase", restricted_tools)
-        self.assertNotIn(
-            '"name": "worktree_',
-            tool_search_response(
-                restricted_tools.values(),
-                {"query": "worktree"},
-            ),
-        )
+        self.assertEqual(set(restricted_tools), {"context", "tool_search"})
+        for denied in (
+            "memory_get",
+            "semantic_recall",
+            "stream_get",
+            "action_get",
+            "worktree_merge",
+            "worktree_checkpoint",
+            "task_reassign",
+            "agent_relaunch",
+        ):
+            self.assertNotIn(denied, restricted_tools)
+            self.assertNotIn(
+                f'"name": "{denied}"',
+                tool_search_response(
+                    restricted_tools.values(),
+                    {"query": f"select:{denied}"},
+                ),
+            )
 
     def test_public_schemas_never_advertise_legacy_tool_names(self):
         legacy_names = self._legacy_tool_names()
