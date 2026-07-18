@@ -814,6 +814,21 @@ class EventBus:
             log.warning("Event for unknown cell %s (type=%s), discarding",
                         event.cell_id, event.event_type)
             return
+        if event.event_type == "session_end" and not self._session_end_is_current(
+                cell, event.data):
+            # Completion is only meaningful for the live provider session.
+            # In particular, a delayed Codex Stop hook must never complete a
+            # replacement session, or revive a stopped/error/tombstoned cell.
+            profiling.recorder().incr("events_dropped_stale_session_end")
+            log.info(
+                "Discarding stale session_end for cell '%s' (status=%s, "
+                "event_session=%s, current_session=%s)",
+                cell.name,
+                getattr(cell, "status", ""),
+                str((event.data or {}).get("session_id") or ""),
+                str(getattr(cell, "agent_session_id", "") or ""),
+            )
+            return
 
         prev_activity = cell.activity
         prev_status = cell.status
@@ -861,6 +876,45 @@ class EventBus:
                 log.exception("on_session_end callback failed for '%s'",
                               cell.name)
         self._schedule_broadcast()
+
+    @staticmethod
+    def _session_end_is_current(cell, data: dict | None) -> bool:
+        """Return whether a completion event may mutate this live cell.
+
+        Provider ``session_id`` values identify provider conversations, not
+        Torque PTY sessions. A missing value is allowed for the trusted PTY
+        idle-screen backstop and for providers that do not expose one. Codex
+        Stop payloads with an ID require an already observed, matching
+        SessionStart ID: a restart deliberately clears that field, so accepting
+        a delayed old Stop before the replacement SessionStart drains would
+        bind and idle the replacement. The PTY backstop closes that short
+        startup window without weakening provider-session correlation.
+        """
+        if str(getattr(cell, "status", "") or "") != "running":
+            return False
+        if bool(getattr(cell, "dismissed_at", 0) or 0):
+            return False
+        if bool(getattr(cell, "deleted_at", 0) or 0):
+            return False
+
+        event_session_id = str(
+            (data or {}).get("session_id")
+            or (data or {}).get("sessionId")
+            or ""
+        ).strip()
+        current_session_id = str(
+            getattr(cell, "agent_session_id", "") or ""
+        ).strip()
+        if str(getattr(cell, "agent_type", "") or "") == "codex":
+            return not event_session_id or (
+                bool(current_session_id)
+                and event_session_id == current_session_id
+            )
+        return not (
+            event_session_id
+            and current_session_id
+            and event_session_id != current_session_id
+        )
 
     def _schedule_worker_boot_doa_check(self, cell, started_at: float):
         """Schedule the safe boot-DOA escalation check for worker sessions."""

@@ -1110,6 +1110,122 @@ asyncio.run(main())
         self.assertEqual(upserts[-1]["status"], "idle")
         self.assertEqual(upserts[-1]["last_event_text"], "Session ended")
 
+    async def test_codex_session_end_for_current_provider_session_marks_idle(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Codex worker",
+            group="g",
+            cell_type="agent",
+            agent_type="codex",
+            status="running",
+            activity="thinking",
+            session_id="pty-session-1",
+            agent_session_id="codex-session-current",
+        )
+        state.agents[cell.id] = cell
+        saved = []
+        state._db_save_agent = lambda agent: saved.append((agent.id, agent.status))
+        bus = self.events_mod.EventBus(state, self.events_mod.EventLog())
+
+        await bus.emit(self.base_mod.AgentEvent(
+            cell_id=cell.id,
+            timestamp=time.time(),
+            event_type="session_end",
+            data={
+                "session_id": "codex-session-current",
+                "summary": "Finished",
+            },
+        ))
+
+        self.assertEqual(cell.status, "idle")
+        self.assertEqual(cell.last_summary, "Finished")
+        self.assertEqual(saved, [(cell.id, "idle")])
+        self.assertEqual(
+            [op for op in state._delta_ops if op["op"] == "agent_upsert"][-1]["status"],
+            "idle",
+        )
+
+    async def test_session_end_ignores_stale_or_non_live_cell(self):
+        cases = (
+            ("stale provider session", {"agent_session_id": "current"},
+             {"session_id": "old"}),
+            ("stopped", {"status": "stopped"}, {}),
+            ("terminal error", {"status": "error"}, {}),
+            ("dismissed", {"dismissed_at": 1}, {}),
+            ("tombstoned", {"deleted_at": 1.0}, {}),
+        )
+        for label, overrides, data in cases:
+            with self.subTest(label=label):
+                state = self._make_state()
+                cell_kwargs = {
+                    "id": "agent-1",
+                    "name": "Codex worker",
+                    "group": "g",
+                    "cell_type": "agent",
+                    "agent_type": "codex",
+                    "status": "running",
+                    "activity": "thinking",
+                    "session_id": "pty-session-1",
+                }
+                cell_kwargs.update(overrides)
+                cell = self.state_mod.AgentCell(**cell_kwargs)
+                state.agents[cell.id] = cell
+                saved = []
+                state._db_save_agent = lambda agent: saved.append(agent.id)
+                bus = self.events_mod.EventBus(state, self.events_mod.EventLog())
+
+                await bus.emit(self.base_mod.AgentEvent(
+                    cell_id=cell.id,
+                    timestamp=time.time(),
+                    event_type="session_end",
+                    data=data,
+                ))
+
+                self.assertEqual(cell.status, overrides.get("status", "running"))
+                self.assertEqual(cell.activity, "thinking")
+                self.assertEqual(saved, [])
+                self.assertEqual(state._delta_ops, [])
+
+    async def test_codex_replacement_rejects_old_stop_before_session_start(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Codex replacement",
+            group="g",
+            cell_type="agent",
+            agent_type="codex",
+            status="running",
+            activity="thinking",
+            session_id="replacement-pty-session",
+            # Restart/relaunch intentionally clears this before the new
+            # provider SessionStart event is drained.
+            agent_session_id="",
+        )
+        state.agents[cell.id] = cell
+        saved = []
+        callbacks = []
+        state._db_save_agent = lambda agent: saved.append(agent.id)
+        bus = self.events_mod.EventBus(state, self.events_mod.EventLog())
+
+        async def on_session_end(ended_cell):
+            callbacks.append(ended_cell.id)
+
+        bus.on_session_end = on_session_end
+        await bus.emit(self.base_mod.AgentEvent(
+            cell_id=cell.id,
+            timestamp=time.time(),
+            event_type="session_end",
+            data={"session_id": "old-codex-session"},
+        ))
+
+        self.assertEqual(cell.status, "running")
+        self.assertEqual(cell.activity, "thinking")
+        self.assertEqual(cell.agent_session_id, "")
+        self.assertEqual(saved, [])
+        self.assertEqual(callbacks, [])
+        self.assertEqual(state._delta_ops, [])
+
     async def test_session_end_broadcasts_idle_before_completion_callback(self):
         state = self._make_state()
         cell = self.state_mod.AgentCell(

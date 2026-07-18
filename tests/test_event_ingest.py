@@ -884,7 +884,9 @@ class EventIngestClientAndDrainerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_restart_backlog_session_end_invokes_callbacks_and_hooks(self):
         state, cell = self._state_with_cell()
+        cell.agent_type = "codex"
         cell.status = "running"
+        cell.agent_session_id = "codex-session-current"
         panel_seen: list[dict] = []
         panel_log = PanelEventLog()
         panel_log.on_event = lambda evt: panel_seen.append(evt)
@@ -896,6 +898,7 @@ class EventIngestClientAndDrainerTests(unittest.IsolatedAsyncioTestCase):
                 build_event_ingest_envelope(
                     {
                         "hook_event_name": "Stop",
+                        "session_id": "codex-session-current",
                         "last_assistant_message": "finished from backlog",
                     },
                     headers={"X-Torque-Cell-Id": cell.id},
