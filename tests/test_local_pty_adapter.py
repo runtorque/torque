@@ -1269,6 +1269,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("--config", launch_text)
             self.assertIn("mcp_servers.torque.url", launch_text)
             self.assertIn("hooks.SessionStart", launch_text)
+            self.assertIn("hooks.Stop", launch_text)
             command_parts = shlex.split(launch_text.splitlines()[-1].removeprefix("exec "))
             config_values = [
                 value
@@ -1292,6 +1293,8 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
             generated_text = generated.read_text()
             self.assertIn("[mcp_servers.torque]", generated_text)
             self.assertIn("[[hooks.SessionStart]]", generated_text)
+            self.assertIn("[[hooks.Stop]]", generated_text)
+            self.assertIn("X-Torque-Cell-Id: $TORQUE_CELL_ID", generated_text)
             self.assertIn("model_instructions_file", generated_text)
             self.assertIn("env_http_headers", generated_text)
             self.assertEqual(project_config.read_text(), '[profiles.default]\nmodel = "gpt-5"\n')
