@@ -13,9 +13,9 @@ the implementation, visible records, and permitted targets.
 
 | Caller | Advertised surface | Scope of action |
 |---|---|---|
-| Worker | 24 eager tools | The Worker's own task, reports, replies, and shared context. |
-| Engineer | At most 30 eager tools plus an authority-filtered deferred catalog | The Engineer's group, owned Workers, assigned tasks, and eligible peers/supervisor. |
-| Architect | At most 30 eager tools plus an authority-filtered deferred catalog | The Architect's group, with per-Architect ownership on decisions, hires, journal, and peer threads. |
+| Worker | Authority-filtered catalog; all tools eager | The Worker's own task, reports, replies, and shared context. |
+| Engineer | Authority-filtered catalog with at most 30 tools classified eager | The Engineer's group, owned Workers, assigned tasks, and eligible peers/supervisor. |
+| Architect | Authority-filtered catalog with at most 30 tools classified eager | The Architect's group, with per-Architect ownership on decisions, hires, journal, and peer threads. |
 
 Historical `torque_*`, `engineer_*`, and `architect_*` names are hidden
 compatibility aliases. They are never advertised and cannot cross the caller's
@@ -55,13 +55,18 @@ operations that act on agent state refuse to execute.
 
 ## Tool list filtering happens at list time
 
-When an agent's MCP client asks for the available tools, the response is **filtered before it leaves the server**. Hidden tools never appear in the list — there's no way for a Worker to discover the Engineer tools by inspection.
+When an agent's MCP client asks for the available tools, the response is
+**filtered before it leaves the server**. Hidden tools never appear in the
+list — there's no way for a Worker to discover Engineer tools by inspection.
 
-This means scoping is not implemented as "see everything, reject some calls."
-Each caller sees only its eager canonical operations. `tool_search` lets
-Engineers and Architects discover only deferred operations already allowed by
-their frozen Agent Class authority. Workers need no `tool_search` because
-their entire surface is eager.
+The filtered response contains the caller's complete callable catalog,
+including operations Torque classifies as deferred. This is required by the
+MCP client contract: provider-native tool search can remove schemas from model
+context only after `tools/list` registers the underlying callable handlers.
+Engineers and Architects therefore keep a bounded eager subset without
+turning the remaining authorized operations into search-only text. Torque's
+`tool_search` offers a portable compact lookup over that deferred subset.
+Workers need no `tool_search` because their entire catalog is eager.
 
 ## Caller-aware result filtering
 

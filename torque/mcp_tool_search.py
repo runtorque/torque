@@ -40,10 +40,11 @@ def make_tool_search_spec(name: str, surface: str) -> dict:
             }],
         },
         "description": (
-            f"Search {surface} MCP tools that are available on demand but "
-            "omitted from the eager tools/list response. Use select:name1,name2 "
-            "for exact tool names. Returns matching tool schemas in a "
-            "<functions>{...}</functions> block."
+            f"Search {surface} MCP tools classified for on-demand use. All "
+            "authority-projected tools remain advertised through MCP "
+            "tools/list so provider-native tool search can register and call "
+            "them. Use select:name1,name2 for exact tool names. Returns "
+            "matching tool schemas in a <functions>{{...}}</functions> block."
         ),
         "inputSchema": deepcopy(TOOL_SEARCH_INPUT_SCHEMA),
     }

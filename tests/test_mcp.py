@@ -1479,14 +1479,18 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             "task_get", "task_create", "task_update", "task_move",
             "event_list", "agent_list", "agent_message", "peer_list",
             "peer_message", "peer_inbox", "decision_list", "journal_write",
-            "journal_list", "user_message",
+            "journal_list", "user_message", "worktree_merge",
+            "worktree_rebase",
         }:
             self.assertIn(name, architect_tool_names)
-        self.assertLessEqual(len(architect_tool_names), 30)
         self.assertFalse(any(
-            name.startswith(("torque_", "engineer_", "architect_"))
+            name.startswith(("torque_", "architect_"))
             for name in architect_tool_names
         ))
+        self.assertTrue(
+            {"engineer_hire", "engineer_update", "engineer_lifecycle"}
+            <= set(architect_tool_names)
+        )
         architect_message_tool = next(
             tool
             for tool in listed_architect.payload["result"]["tools"]
@@ -1531,8 +1535,8 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn("supervisor_message", engineer_tool_names)
         self.assertNotIn("agent_reply", engineer_tool_names)
-        self.assertNotIn("worktree_merge", engineer_tool_names)
-        self.assertLessEqual(len(engineer_tool_names), 30)
+        self.assertIn("worktree_merge", engineer_tool_names)
+        self.assertIn("worktree_rebase", engineer_tool_names)
         self.assertFalse(any(
             name.startswith(("torque_", "engineer_", "architect_"))
             for name in engineer_tool_names
@@ -1922,6 +1926,24 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                 }
             self.fail(f"Unexpected command: {payload}")
 
+        listed, listed_status = await self.mcp_mod.dispatch_mcp_rpc_body(
+            {
+                "jsonrpc": "2.0",
+                "id": 0,
+                "method": "tools/list",
+                "params": {},
+            },
+            cell_id=architect.id,
+            handle_command=fake_handle_command,
+            state=state,
+        )
+        self.assertEqual(listed_status, 200)
+        listed_names = {
+            tool["name"] for tool in listed["result"]["tools"]
+        }
+        self.assertIn("worktree_merge", listed_names)
+        self.assertIn("worktree_rebase", listed_names)
+
         search, search_status = await self.mcp_mod.dispatch_mcp_rpc_body(
             {
                 "jsonrpc": "2.0",
@@ -1970,6 +1992,105 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             ["worktree_check_merge", "worktree_merge"],
         )
         self.assertEqual(calls[-1]["actor_agent_id"], architect.id)
+
+    async def test_architect_listed_worktree_rebase_is_callable(self):
+        state = self.state_mod.MatrixState()
+        architect = self.state_mod.AgentCell(
+            id="architect-1",
+            name="Torqly",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+            effective_agent_class_snapshot={
+                "effective_authority": {
+                    "schema_version": 1,
+                    "base_kind": "architect",
+                    "acl_mode": "allow",
+                    "capabilities": {
+                        "self.read": "self",
+                        "worktree.merge": "children",
+                    },
+                },
+            },
+        )
+        courier = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Courier",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+            hired_by_architect_id=architect.id,
+            worktree_path="/tmp/courier",
+            worktree_branch="torque/courier/reviewed",
+            worktree_base_branch="main",
+        )
+        state.agents[architect.id] = architect
+        state.agents[courier.id] = courier
+        state.groups["g"] = [architect.id, courier.id]
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            if payload["cmd"] == "worktree_check_merge":
+                return {
+                    "type": "worktree_check_merge",
+                    "id": courier.id,
+                    "clean": True,
+                    "conflicts": [],
+                }
+            if payload["cmd"] == "worktree_rebase":
+                return {
+                    "type": "worktree_rebase",
+                    "id": courier.id,
+                    "ok": True,
+                    "post_rebase_head_sha": "rebased-sha",
+                }
+            self.fail(f"Unexpected command: {payload}")
+
+        listed, listed_status = await self.mcp_mod.dispatch_mcp_rpc_body(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/list",
+                "params": {},
+            },
+            cell_id=architect.id,
+            handle_command=fake_handle_command,
+            state=state,
+        )
+        self.assertEqual(listed_status, 200)
+        listed_names = {
+            tool["name"] for tool in listed["result"]["tools"]
+        }
+        self.assertIn("worktree_rebase", listed_names)
+
+        result, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "worktree_rebase",
+                    "arguments": {"agent": courier.id},
+                },
+            },
+            cell_id=architect.id,
+            handle_command=fake_handle_command,
+            state=state,
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(result["result"]["isError"])
+        payload = json.loads(result["result"]["content"][0]["text"])
+        self.assertEqual(payload["post_rebase_head_sha"], "rebased-sha")
+        self.assertTrue(payload["merge_ready"])
+        self.assertEqual(
+            [call["cmd"] for call in calls],
+            [
+                "worktree_check_merge",
+                "worktree_rebase",
+                "worktree_check_merge",
+            ],
+        )
 
     async def test_engineer_batch_dispatch_deferral_reports_group_and_refreshes_cap(self):
         state = self.state_mod.MatrixState()

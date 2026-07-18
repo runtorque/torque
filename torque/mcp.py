@@ -1111,12 +1111,19 @@ def _canonical_tools_for_caller(state, cell_id: str) -> list[dict]:
 
 
 def _visible_tools(state, cell_id: str):
-    """Return the canonical eager MCP tool list visible to the caller."""
+    """Return the complete canonical MCP catalog visible to the caller.
+
+    MCP clients can defer tool schemas only after the server advertises those
+    tools through ``tools/list``.  Omitting Torque's internally deferred tools
+    made their schemas searchable as text while leaving the client without a
+    registered callable handler.  Keep eager/deferred classification internal
+    and let each provider's native tool-search layer decide which advertised
+    schemas enter the model context.
+    """
 
     return [
         public_tool_spec(tool)
         for tool in _canonical_tools_for_caller(state, cell_id)
-        if not tool.get("deferred")
     ]
 
 

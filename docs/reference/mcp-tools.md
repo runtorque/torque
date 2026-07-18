@@ -19,19 +19,25 @@ names returned by MCP `tools/list`.
 - An operation can select different semantics without changing its public
   name. A Product Manager's `task_create`, for example, creates a non-binding
   proposal; a full Architect's `task_create` creates an executable task.
-- The eager surface is intentionally bounded. Engineers and Architects use
-  `tool_search` to retrieve deferred schemas before calling them.
+- The model-context surface is intentionally bounded. `tools/list` still
+  advertises every authority-projected callable operation so provider-native
+  tool search can retain a real MCP handler while deferring schemas from the
+  prompt.
 - Internal authority metadata and compatibility aliases are never returned in
   public tool schemas.
 
 ## Discovery
 
-`tool_search(query, max_results)` searches only deferred operations already
-allowed by the caller's effective authority. Use `select:<tool_name>` for an
-exact schema.
+`tool_search(query, max_results)` searches only operations Torque classifies
+for on-demand use and that are already allowed by the caller's effective
+authority. Use `select:<tool_name>` for an exact schema. It is a compact
+portable schema lookup, not an activation endpoint: deferred operations are
+already registered from `tools/list`, and provider-native tool search decides
+when to load them into model context.
 
-Workers have no deferred catalog, so their complete surface is returned by
-`tools/list`.
+Workers have no deferred catalog. Engineers and Architects have a bounded
+eager subset plus an authority-filtered on-demand subset; both subsets are
+present in `tools/list`.
 
 ## Shared vocabulary
 
