@@ -70,6 +70,16 @@ _CODEX_HOOK_EVENT_LABELS = {
     "Stop": "stop",
 }
 
+# Lowercased substrings Codex renders in the composer footer while a turn is
+# actively running. Their presence means the agent is busy; their absence
+# (with the composer prompt on screen) means the turn has finished. These are
+# TUI affordances, not assistant prose, so they will not collide with a
+# completed reply that happens to mention interrupting/cancelling work.
+_CODEX_BUSY_SCREEN_MARKERS = (
+    "esc to interrupt",
+    "esc to cancel",
+)
+
 _CODEX_TORQUE_CONFIG_ROOT = "codex/agents"
 _CODEX_APPROVAL_SANDBOX_BYPASS_FLAG = "--dangerously-bypass-approvals-and-sandbox"
 # Codex represents configuration supplied by repeated `--config key=value`
@@ -999,6 +1009,31 @@ class CodexAdapter(AgentAdapter):
             and "directory:" in lower
             and "›" in screen_text
         )
+
+    def is_idle_composer_screen(self, screen_text: str) -> bool:
+        """Return whether the visible screen is Codex's idle composer.
+
+        ``is_input_ready_screen`` matches the *startup* banner (``OpenAI
+        Codex`` / ``model:`` / ``directory:``). That banner scrolls out of the
+        fixed-size viewport after the first substantial turn, so it cannot be
+        used to detect that a *later* turn has finished — which is what left
+        Codex agents stuck showing "running" once real work pushed the banner
+        off screen.
+
+        End-of-turn idle is recognized structurally instead: the composer
+        prompt (``›``) is rendered and no active-work indicator (Codex's
+        "Esc to interrupt" hint) is on screen. The composer box stays visible
+        while Codex works, so the prompt marker alone cannot separate idle from
+        busy — the absence of the interrupt hint is the discriminator. The hint
+        is a TUI affordance (not assistant prose), so matching it will not be
+        confused by a finished turn whose reply text happens to mention work.
+        """
+        if not screen_text:
+            return False
+        lower = screen_text.lower()
+        if any(marker in lower for marker in _CODEX_BUSY_SCREEN_MARKERS):
+            return False
+        return "›" in screen_text
 
     def get_hook_config(self, cell) -> dict | None:
         """Return the Codex hooks.json structure for Torque integration.

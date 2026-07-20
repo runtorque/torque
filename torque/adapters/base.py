@@ -184,6 +184,17 @@ class AgentAdapter:
         """Return True when the visible screen indicates the TUI is ready."""
         return True
 
+    def is_idle_composer_screen(self, screen_text: str) -> bool:
+        """Return True when the visible screen is the idle input composer.
+
+        Distinct from :meth:`is_input_ready_screen`, which detects *startup*
+        readiness: this is used by turn-completion backstops to recognize the
+        composer after a turn has finished, potentially long after any startup
+        banner has scrolled out of the viewport.  Defaults to the startup
+        readiness check for adapters that do not distinguish the two.
+        """
+        return self.is_input_ready_screen(screen_text)
+
     def parse_event(self, raw: dict, cell) -> AgentEvent | None:
         """Parse an incoming hook payload into a normalized AgentEvent.
 

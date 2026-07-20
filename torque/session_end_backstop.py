@@ -12,6 +12,8 @@ class _IdleBackstopState:
     saw_busy: bool = False
     stable_ready_polls: int = 0
     emitted: bool = False
+    last_screen: str = ""
+    have_last_screen: bool = False
 
 
 class CodexIdleSessionEndDetector:
@@ -45,14 +47,22 @@ class CodexIdleSessionEndDetector:
     def clear(self) -> None:
         self._states.clear()
 
-    def observe(self, cell, *, ready: bool, stable_polls: int) -> bool:
+    def observe(
+        self, cell, *, ready: bool, stable_polls: int, screen_text: str = "",
+    ) -> bool:
         """Return True when this observation completes a Codex turn.
 
         The detector is scoped to live Codex agent cells in ``running`` status.
-        It requires that the running turn first show a non-ready screen and then
-        a stable ready screen.  That prevents the pre-submit composer (still in
+        It requires that the running turn first show a busy screen and then a
+        stable idle screen.  That prevents the pre-submit composer (still in
         scrollback or visible while Torque is writing the prompt) from being
         mistaken for turn completion, and prevents repeat events while idle.
+
+        ``ready`` is the caller's idle-composer verdict for the current screen.
+        The optional ``screen_text`` lets the detector treat any visible change
+        during the running turn as additional evidence that work happened, so a
+        fast or output-quiet turn whose busy indicator was missed between polls
+        can still complete instead of leaving the agent stuck on "running".
         """
         cell_id = str(getattr(cell, "id", "") or "")
         if not cell_id:
@@ -80,6 +90,8 @@ class CodexIdleSessionEndDetector:
             state.saw_busy = False
             state.stable_ready_polls = 0
             state.emitted = False
+            state.last_screen = ""
+            state.have_last_screen = False
             return False
 
         if not state.saw_running:
@@ -87,6 +99,16 @@ class CodexIdleSessionEndDetector:
             state.saw_busy = False
             state.stable_ready_polls = 0
             state.emitted = False
+            state.last_screen = ""
+            state.have_last_screen = False
+
+        screen_changed = state.have_last_screen and screen_text != state.last_screen
+        state.last_screen = screen_text
+        state.have_last_screen = True
+        if screen_changed:
+            # Visible movement during the running turn is unambiguous evidence
+            # of work, even when the interrupt hint was not caught in a poll.
+            state.saw_busy = True
 
         if not ready:
             state.saw_busy = True
@@ -95,7 +117,7 @@ class CodexIdleSessionEndDetector:
 
         if not state.saw_busy:
             # Do not count the old composer as completion until we have seen
-            # the screen leave input-ready during this running turn.
+            # the screen leave the idle composer during this running turn.
             state.stable_ready_polls = 0
             return False
 
