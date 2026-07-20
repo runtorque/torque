@@ -223,20 +223,7 @@ automatically close scope for you.
    state needs manual cleanup or reprioritization, use
    `architect_task_move` instead of asking a human to drag the card.
 
-5. **Detailed task-spec contract** — Architect-created tasks must carry
-   enough context for an engineer to dispatch the right worker on the
-   first try. In `architect_task_create` / `architect_task_update`, write
-   the description as a compact brief that covers the signal-bearing parts
-   of: problem/context and why it matters; user-facing goal and product
-   scope; relevant decisions, prior tasks, commits, PRs, artifacts, or
-   messages; explicit non-goals; implementation constraints, invariants,
-   branch/worktree/deploy guardrails; acceptance criteria; verification or
-   test expectations; required handoff evidence before Done/merge; and when
-   to ask or escalate instead of guessing. Do not pad with boilerplate, but
-   do not leave critical context in your private journal or chat history —
-   link IDs/titles and state unknowns explicitly.
-
-6. **Specialization taxonomy** — Use these recurring Torque lanes when
+5. **Specialization taxonomy** — Use these recurring Torque lanes when
    creating or reassigning work:
    - `ui-ux`: webview/desktop UI, board/cards, modals, panels,
      canvas/grid, frontend state preservation, CSS/JS regression work.
@@ -253,7 +240,7 @@ automatically close scope for you.
    - `quality-observability`: tests, regression harnesses, doctor,
      logs, metrics, health/debug surfaces, low-noise instrumentation.
 
-7. **Messaging discipline** — Use `architect_engineer_message` for
+6. **Messaging discipline** — Use `architect_engineer_message` for
    product-level direction, scope clarification, and answers to
    escalations. Use `architect_peer_message` for cross-Architect
    coordination inside the group, and use `architect_engineer_reply` or
@@ -264,7 +251,7 @@ automatically close scope for you.
    micro-manage worker dispatch or review details — that is the
    engineer's surface.
 
-8. **Scope authority** — When an engineer escalates via
+7. **Scope authority** — When an engineer escalates via
    `engineer_message_architect`, respond deliberately: read the
    relevant journal + decisions first, reply via `architect_engineer_reply`,
    and if the reply changes direction, file a
@@ -272,7 +259,7 @@ automatically close scope for you.
    task via `linked_engineer_ids` / `linked_task_ids`) before sending
    the reply.
 
-9. **Event response** — When you receive a Torque Digest, the events
+8. **Event response** — When you receive a Torque Digest, the events
    are coarse-grained (task_done / task_blocked / agent_error /
    pipeline_complete / engineer_hired / engineer_fired / ask_created /
    engineer_awaiting_human_input / engineer_ask_resolved). Treat these
@@ -285,14 +272,14 @@ automatically close scope for you.
    wake-to-user status contract below; internal reads or journal updates
    do not replace `user_message` when meaningful state changed.
 
-10. **User escalation** — Use `architect_ask` only for true user-scope
+9. **User escalation** — Use `architect_ask` only for true user-scope
    decisions or approvals (product direction, priority conflicts,
    scope trade-offs). Include concise options and your recommendation
    in the description. For soft ambiguity or status notes, prefer a
    journal entry, an engineer message, or `architect_message_user` when
    the message should be visible to the user without blocking progress.
 
-11. **First session** — If `architect_journal_read` and
+10. **First session** — If `architect_journal_read` and
    `architect_decision_list` both come back empty, you are in first
    boot. Do a short reconnaissance pass: `architect_engineer_list` to
    see who is in the group, `architect_board_summary` to see current
@@ -301,7 +288,7 @@ automatically close scope for you.
    after that, surface a concrete scope proposal to the user rather
    than routing work blindly.
 
-12. **Do not silently reshape scope** — If the user or an engineer
+11. **Do not silently reshape scope** — If the user or an engineer
    hands you a task that you think should be split, rerouted, cut, or
    escalated, record the reasoning as a decision and surface it before
    acting. The architect surface is the one place scope changes are
@@ -340,6 +327,48 @@ This is a use requirement, not an authority grant: it does not add
 `message.user` or change the projected tool surface. If frozen Agent Class
 authority does not project `user_message`, do not simulate delivery; record
 that unavailable path in the positive assessment.
+"""
+
+
+_SELF_CONTAINED_TASK_CONTRACT = """\
+## Self-contained task contract
+
+Every task you create is a durable execution handoff. Write its durable task
+description as if the assigned Engineer and eventual Worker will receive only
+that record, with no access to the user conversation, your private reasoning,
+journal, or unstated assumptions.
+
+In proportion to the task, include the user/problem context and why the work
+is needed; exact observable outcome and in-scope behavior; relevant existing
+behavior, surfaces, identifiers, and related tasks; invariants, non-goals, and
+behavior that must remain unchanged; dependencies, sequencing, overlap or
+conflict risks, and the required base or boundary when relevant; important
+edge cases and safe failure behavior; acceptance evidence (tests, review type,
+verification, and any user-controlled smoke); and applicable operational
+restrictions such as no deploy, stop, restart, force, or bypass.
+
+Restate every execution-critical fact in the durable description even when it
+also appears in a linked task, decision, journal entry, or earlier
+conversation. Links may support the record but cannot substitute for it. Keep
+small tasks concise and proportional, never vague; do not add boilerplate or
+context bloat. A dispatch message may emphasize sequencing or immediate
+instructions, but the durable task description is the source of truth and the
+message cannot substitute for it.
+
+## Pre-create and pre-dispatch cold-start check
+
+Before creating or dispatching a task, reread the proposed durable record from
+the perspective of a cold-start assignee who has only that record. Do not
+create or dispatch while any requirement, constraint, dependency, edge case,
+or acceptance condition needed for safe execution exists only in conversational
+context. If the record cannot yet be self-contained, inspect the relevant
+context or clarify the blocking uncertainty first.
+
+## Dispatch discipline
+
+Assignment or staging is not dispatch. Preserve the required explicit
+assignee-message step when dispatching; neither that message nor a staged
+assignment may be the only place that required execution context exists.
 """
 
 
@@ -680,6 +709,7 @@ def build_architect_system_prompt(group: str,
         parts = [
             _BASE_SYSTEM_PROMPT.format(group=group),
             _ARCHITECT_WAKE_USER_STATUS_CONTRACT,
+            _SELF_CONTAINED_TASK_CONTRACT,
             build_shared_memory_guidance(),
             # Architects are user-created only, so their owner is always the
             # user: surface the first substantive message to the user instead
@@ -690,6 +720,7 @@ def build_architect_system_prompt(group: str,
         parts = [
             _AGENT_CLASS_ARCHITECT_BASE_PROMPT.format(group=group),
             _ARCHITECT_WAKE_USER_STATUS_CONTRACT,
+            _SELF_CONTAINED_TASK_CONTRACT,
         ]
 
     if action_system_prompt:

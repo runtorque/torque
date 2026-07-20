@@ -20,6 +20,35 @@ projection of Torque's canonical MCP vocabulary. It maintains:
 
 The Architect doesn't dispatch Workers directly. It creates tasks, assigns them to Engineers, and lets Engineers handle the Worker-level orchestration. That separation is what keeps the Architect free to plan instead of orchestrate.
 
+## Durable task handoffs
+
+Every task an Architect creates is a durable execution handoff. Its description
+must be understandable to the assigned Engineer and eventual Worker as though
+they have only the task record—not the user conversation, the Architect's
+private reasoning or journal, or unstated assumptions. In proportion to the
+task, it includes the problem and why; exact observable, in-scope outcome;
+relevant existing behavior, surfaces, identifiers, and related tasks;
+invariants and non-goals; relevant dependencies, sequencing, overlap/conflict
+risks, and base/boundary; important edge and safe-failure cases; acceptance
+evidence (tests, review type, verification, and any user-controlled smoke);
+and operational restrictions such as no deploy, stop, restart, force, or
+bypass.
+
+Execution-critical facts must be restated in the description even when a
+linked task, decision, journal entry, or conversation also contains them.
+Links support the handoff but never replace it. Small tasks stay concise and
+proportional, never vague; this is not an invitation to add boilerplate. A
+dispatch message may highlight sequencing or immediate instructions, but the
+durable description remains the source of truth.
+
+Before creating or dispatching, the Architect rereads the proposed record from
+the perspective of a cold-start assignee. It must inspect relevant context or
+clarify uncertainty before proceeding if any safe-execution requirement,
+constraint, dependency, edge case, or acceptance condition exists only in
+conversation. Assignment or staging is not dispatch: the required explicit
+assignee message still applies, and it cannot be the only place execution
+context exists.
+
 ## You hire the Architect
 
 Architects are **user-only**. There is no flow that auto-creates an Architect for you, and an Architect cannot hire another Architect. The buck stops with one Architect per project area, and ultimately with you.

@@ -311,18 +311,71 @@ class ArchitectPromptTests(unittest.TestCase):
         self.assertIn("assigned engineer does not carry", prompt)
         self.assertIn("choose the primary deliverable", prompt)
 
-    def test_prompt_includes_detailed_task_spec_contract(self):
+    def test_self_contained_task_contract_covers_required_execution_context(self):
         prompt = self.architect_mod.build_architect_system_prompt("Torque")
 
-        self.assertIn("**Detailed task-spec contract**", prompt)
-        self.assertIn("problem/context and why it matters", prompt)
-        self.assertIn("user-facing goal and product", prompt)
-        self.assertIn("relevant decisions, prior tasks", prompt)
-        self.assertIn("explicit non-goals", prompt)
-        self.assertIn("acceptance criteria", prompt)
-        self.assertIn("verification or\n   test expectations", prompt)
-        self.assertIn("required handoff evidence before Done/merge", prompt)
-        self.assertIn("when\n   to ask or escalate", prompt)
+        self.assertIn("## Self-contained task contract", prompt)
+        self.assertIn("durable execution handoff", prompt)
+        self.assertIn("assigned Engineer and eventual Worker will receive only", prompt)
+        self.assertIn("user conversation, your private reasoning,\njournal", prompt)
+        self.assertIn("user/problem context and why", prompt)
+        self.assertIn("exact observable outcome and in-scope behavior", prompt)
+        self.assertIn("existing\nbehavior, surfaces, identifiers, and related tasks", prompt)
+        self.assertIn("invariants, non-goals", prompt)
+        self.assertIn("dependencies, sequencing, overlap or\nconflict risks", prompt)
+        self.assertIn("required base or boundary", prompt)
+        self.assertIn("edge cases and safe failure behavior", prompt)
+        self.assertIn("acceptance evidence (tests, review type,\nverification", prompt)
+        self.assertIn("operational\nrestrictions such as no deploy, stop, restart, force, or bypass", prompt)
+
+    def test_self_contained_task_contract_requires_proportional_durable_record(self):
+        prompt = self.architect_mod.build_architect_system_prompt("Torque")
+
+        self.assertIn("Restate every execution-critical fact in the durable description", prompt)
+        self.assertIn("linked task, decision, journal entry, or earlier\nconversation", prompt)
+        self.assertIn("Links may support the record but cannot substitute", prompt)
+        self.assertIn("small tasks concise and proportional, never vague", prompt)
+        self.assertIn("do not add boilerplate or\ncontext bloat", prompt)
+        self.assertIn("durable task description is the source of truth", prompt)
+        self.assertIn("message cannot substitute for it", prompt)
+
+    def test_self_contained_task_contract_has_cold_start_and_dispatch_gates(self):
+        prompt = self.architect_mod.build_architect_system_prompt("Torque")
+
+        self.assertIn("## Pre-create and pre-dispatch cold-start check", prompt)
+        self.assertIn("perspective of a cold-start assignee who has only that record", prompt)
+        self.assertIn("Do not\ncreate or dispatch", prompt)
+        self.assertIn("requirement, constraint, dependency, edge case,\nor acceptance condition", prompt)
+        self.assertIn("inspect the relevant\ncontext or clarify the blocking uncertainty first", prompt)
+        self.assertIn("## Dispatch discipline", prompt)
+        self.assertIn("Assignment or staging is not dispatch", prompt)
+        self.assertIn("required explicit\nassignee-message step", prompt)
+
+    def test_self_contained_task_contract_is_shared_with_restricted_architect_classes(self):
+        for class_id in ("default-architect", "product-manager", "creative-architect", "torque-steward"):
+            with self.subTest(class_id=class_id):
+                class_snapshot = self._class_prompt_context(class_id)
+                prompt = self.architect_mod.build_architect_system_prompt(
+                    "Torque",
+                    agent_class_snapshot=class_snapshot,
+                )
+
+                self.assertIn("## Self-contained task contract", prompt)
+                self.assertIn("durable execution handoff", prompt)
+                self.assertIn("## Pre-create and pre-dispatch cold-start check", prompt)
+                self.assertIn("Assignment or staging is not dispatch", prompt)
+
+    def test_shared_task_contract_does_not_claim_authority_or_runtime_enforcement(self):
+        prompt = self.architect_mod.build_architect_system_prompt(
+            "Torque",
+            agent_class_snapshot=self._class_prompt_context("torque-steward"),
+        )
+
+        contract = prompt[prompt.index("## Self-contained task contract"):]
+        self.assertNotIn("grants", contract)
+        self.assertNotIn("automatically", contract)
+        self.assertNotIn("runtime enforcement", contract)
+        self.assertNotIn("architect_task_create", contract)
 
     def test_full_architect_class_uses_generic_base_kind_contract(self):
         class_snapshot = self._class_prompt_context(
