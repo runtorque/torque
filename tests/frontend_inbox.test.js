@@ -128,6 +128,97 @@ function prepareFocusedDirectConversation(sandbox, terminalWorkspace, agentId) {
   sandbox.focusedItemId = agentId;
 }
 
+function createToastContext() {
+  const timers = [];
+  const focusedAgents = [];
+  const inboxOpens = [];
+
+  function createElement(tagName) {
+    return {
+      tagName: String(tagName || '').toUpperCase(),
+      className: '',
+      classList: classList(),
+      children: [],
+      attributes: {},
+      parentNode: null,
+      textContent: '',
+      setAttribute(name, value) { this.attributes[name] = String(value); },
+      appendChild(child) {
+        child.parentNode = this;
+        this.children.push(child);
+        return child;
+      },
+      remove() {
+        if (!this.parentNode || !this.parentNode.children) return;
+        const index = this.parentNode.children.indexOf(this);
+        if (index >= 0) this.parentNode.children.splice(index, 1);
+        this.parentNode = null;
+      },
+      addEventListener() {},
+    };
+  }
+
+  function findByClass(root, name) {
+    if (!root) return null;
+    if (String(root.className || '').split(/\s+/).includes(name)) return root;
+    for (const child of root.children || []) {
+      const found = findByClass(child, name);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  const stack = createElement('div');
+  stack.id = 'toast-stack';
+  const sandbox = {
+    console,
+    Date,
+    Number,
+    Object,
+    String,
+    state: {
+      agents: {
+        'agent-a': { id: 'agent-a', cell_type: 'agent', kind: 'worker' },
+        'agent-b': { id: 'agent-b', cell_type: 'agent', kind: 'worker' },
+        deleted: { id: 'deleted', cell_type: 'agent', kind: 'worker', deleted_at: 1 },
+      },
+    },
+    document: {
+      body: {
+        children: [],
+        appendChild(element) {
+          element.parentNode = this;
+          this.children.push(element);
+          if (element.id === 'toast-stack') sandbox.toastStack = element;
+        },
+      },
+      createElement,
+      getElementById(id) {
+        return id === 'toast-stack' ? sandbox.toastStack : null;
+      },
+    },
+    requestAnimationFrame(callback) { callback(); },
+    setTimeout(callback, delay) {
+      timers.push({ callback, delay });
+      return timers.length;
+    },
+    clearTimeout() {},
+    openInboxPopover() { inboxOpens.push(true); },
+    focusAgent(id) { focusedAgents.push(id); },
+    _isTombstonedAgent(agent) { return Number((agent && agent.deleted_at) || 0) > 0; },
+    _agentFocusVisibleRootAgentId(id) {
+      return id === 'inaccessible' ? '' : id;
+    },
+  };
+  sandbox.toastStack = stack;
+  sandbox.global = sandbox;
+  sandbox.globalThis = sandbox;
+  const context = vm.createContext(sandbox);
+  vm.runInContext(source('static/js/commands.js'), context);
+  sandbox.focusAgent = function(id) { focusedAgents.push(id); };
+  return { context, sandbox, stack, focusedAgents, inboxOpens, findByClass };
+}
+
 test('Inbox is global chrome opened from a notification bell, not a dockable panel', () => {
   const html = source('webview.html');
   const manager = source('static/js/panel_manager.js');
@@ -467,6 +558,91 @@ test('durable client errors and toast controls use the notification substrate', 
   assert.match(deltas, /operator_notices_read_all/);
 });
 
+test('message toast body click and keyboard open the exact canonical source agent', () => {
+  const { context, stack, focusedAgents, findByClass } = createToastContext();
+
+  const clickToast = context._showNoticeToast(directMessageNotice('dm-a', 'agent-a'));
+  const clickBody = findByClass(clickToast, 'toast-content');
+  assert.equal(clickBody.attributes.role, 'button');
+  assert.equal(clickBody.attributes.tabindex, '0');
+  clickBody.onclick({ stopPropagation() {} });
+  assert.deepEqual(focusedAgents, ['agent-a']);
+
+  const enterToast = context._showNoticeToast(directMessageNotice('dm-b', 'agent-b'));
+  const enterBody = findByClass(enterToast, 'toast-content');
+  let enterPrevented = false;
+  enterBody.onkeydown({
+    key: 'Enter',
+    preventDefault() { enterPrevented = true; },
+    stopPropagation() {},
+  });
+  assert.equal(enterPrevented, true);
+
+  const spaceToast = context._showNoticeToast(directMessageNotice('dm-space', 'agent-a'));
+  const spaceBody = findByClass(spaceToast, 'toast-content');
+  let spacePrevented = false;
+  spaceBody.onkeydown({
+    key: ' ',
+    preventDefault() { spacePrevented = true; },
+    stopPropagation() {},
+  });
+  assert.equal(spacePrevented, true);
+  assert.deepEqual(focusedAgents, ['agent-a', 'agent-b', 'agent-a']);
+  assert.equal(stack.children.length, 3, 'dismiss animation preserves existing timing');
+});
+
+test('message toast explicit inbox and dismiss actions never trigger the body action', () => {
+  const { context, focusedAgents, inboxOpens, findByClass } = createToastContext();
+  const inboxToast = context._showNoticeToast(directMessageNotice('dm-inbox', 'agent-a'));
+  const inboxAction = findByClass(inboxToast, 'toast-action');
+  let inboxStopped = false;
+  inboxAction.onclick({
+    stopPropagation() { inboxStopped = true; },
+  });
+  assert.equal(inboxStopped, true);
+  assert.deepEqual(inboxOpens, [true]);
+  assert.deepEqual(focusedAgents, [], 'View inbox opens only the Inbox');
+
+  const dismissToast = context._showNoticeToast(directMessageNotice('dm-close', 'agent-a'));
+  const close = findByClass(dismissToast, 'toast-close');
+  let closeStopped = false;
+  close.onclick({
+    stopPropagation() { closeStopped = true; },
+  });
+  assert.equal(closeStopped, true);
+  assert.deepEqual(focusedAgents, [], 'dismiss does not open the source agent');
+});
+
+test('only routine message toasts with an accessible live source agent are interactive', () => {
+  const { context, sandbox, focusedAgents, findByClass } = createToastContext();
+  sandbox.state.agents.inaccessible = {
+    id: 'inaccessible', cell_type: 'agent', kind: 'worker',
+  };
+  const cases = [
+    directMessageNotice('missing', 'missing'),
+    directMessageNotice('deleted', 'deleted'),
+    directMessageNotice('inaccessible', 'inaccessible'),
+    Object.assign(directMessageNotice('system', 'agent-a'), { category: 'system' }),
+    Object.assign(directMessageNotice('sticky', 'agent-a'), { severity: 'error' }),
+    Object.assign(directMessageNotice('alert', 'agent-a'), { notice_type: 'alert' }),
+  ];
+
+  for (const notice of cases) {
+    const toast = context._showNoticeToast(notice);
+    const body = findByClass(toast, 'toast-content');
+    assert.equal(body.attributes.role, undefined, notice.id + ' remains non-interactive');
+    assert.equal(body.onclick, undefined, notice.id + ' has no unsafe fallback focus');
+  }
+  assert.deepEqual(focusedAgents, []);
+
+  const removedAfterDelivery = context._showNoticeToast(
+    directMessageNotice('removed-after-delivery', 'agent-a'),
+  );
+  delete sandbox.state.agents['agent-a'];
+  findByClass(removedAfterDelivery, 'toast-content').onclick({ stopPropagation() {} });
+  assert.deepEqual(focusedAgents, [], 'a source removed before activation safely no-ops');
+});
+
 test('toast variants share a translucent surface without fading their contents', () => {
   const css = source('static/styles/modals.css');
   const toastRule = css.match(/\.toast\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body || '';
@@ -481,4 +657,20 @@ test('toast variants share a translucent surface without fading their contents',
     'visible toasts must keep text, icons, borders, and controls fully opaque');
   assert.doesNotMatch(visibleRule, /opacity:\s*(?:0?\.)?9(?:0+)?\b/,
     'surface translucency must not be implemented as whole-toast opacity');
+});
+
+test('View inbox is a compact text action on its own right-aligned toast row', () => {
+  const css = source('static/styles/modals.css');
+  const commands = source('static/js/commands.js');
+  const actionRow = css.match(/\.toast-actions\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body || '';
+  const actionRules = Array.from(css.matchAll(/\.toast-action\s*\{(?<body>[\s\S]*?)\}/g));
+  const actionRule = actionRules.map((match) => match.groups?.body || '').join('\n');
+
+  assert.match(commands, /actions\.className = 'toast-actions'/);
+  assert.match(actionRow, /grid-column:\s*1\s*\/\s*-1/);
+  assert.match(actionRow, /grid-row:\s*2/);
+  assert.match(actionRow, /justify-content:\s*flex-end/);
+  assert.match(actionRule, /border-color:\s*transparent/);
+  assert.match(actionRule, /background:\s*transparent/);
+  assert.doesNotMatch(actionRule, /border:\s*1px/);
 });
