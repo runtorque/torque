@@ -88,8 +88,6 @@ class ServerModuleExtractionTests(unittest.TestCase):
         expected = (
             "## Message from the User\n"
             "\n"
-            "Message ID: `user-msg-123`\n"
-            "\n"
             "Please summarize the latest status.\n"
             "\n"
             "Reply with:\n"
@@ -111,6 +109,41 @@ class ServerModuleExtractionTests(unittest.TestCase):
                     "Reply to this user-facing conversation with:", prompt)
                 self.assertNotIn(
                     "Do not rely on free-text terminal output", prompt)
+                self.assertNotIn("Message ID:", prompt)
+
+    def test_user_direct_message_prompt_keeps_multiline_body_and_reply_id(
+            self):
+        row = {
+            "id": "user-msg-multiline",
+            "message": "First line.\n\nSecond line.",
+        }
+        expected = (
+            "## Message from the User\n"
+            "\n"
+            "First line.\n"
+            "\n"
+            "Second line.\n"
+            "\n"
+            "Reply with:\n"
+            "  mcp__torque__user_message(message=\"...\", "
+            "reply_to_id=\"user-msg-multiline\")\n"
+            "\n"
+            "---\n"
+        )
+
+        for recipient_kind in ("architect", "engineer"):
+            with self.subTest(recipient_kind=recipient_kind):
+                prompt = self.server_mod._format_user_direct_message_prompt(
+                    row,
+                    recipient_kind,
+                )
+
+                self.assertEqual(prompt, expected)
+                self.assertNotIn("Message ID:", prompt)
+                self.assertIn(
+                    'reply_to_id="user-msg-multiline")',
+                    prompt,
+                )
 
     def test_normalize_engineer_specialization_selection_validates_and_dedupes(self):
         normalize = self.server_mod._normalize_engineer_specialization_selection
@@ -3207,10 +3240,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent[0][0], worker.id)
         prompt = sent[0][1]
         self.assertIn('## Message from the User', prompt)
-        self.assertIn(
-            f'Message ID: `{result["message_id"]}`',
-            prompt,
-        )
+        self.assertNotIn('Message ID:', prompt)
         self.assertNotIn('Thread ID:', prompt)
         self.assertNotIn('Sent:', prompt)
         self.assertIn('Can you summarize your current plan?', prompt)
@@ -4232,10 +4262,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
                 f'message="...", reply_to_id="{reply_to_id}")'
             )
             self.assertIn(reply_snippet, prompt)
-            self.assertIn(
-                f'Message ID: `{reply_to_id}`',
-                prompt,
-            )
+            self.assertNotIn('Message ID:', prompt)
             self.assertNotIn('Thread ID:', prompt)
             self.assertNotIn('Sent:', prompt)
 
@@ -4348,10 +4375,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(sent), 1)
         self.assertEqual(sent[0][0], architect.id)
         prompt = sent[0][1]
-        self.assertIn(
-            f'Message ID: `{result["message_id"]}`',
-            prompt,
-        )
+        self.assertNotIn('Message ID:', prompt)
         self.assertNotIn('Thread ID:', prompt)
         self.assertNotIn('Sent:', prompt)
         self.assertIn(

@@ -371,8 +371,6 @@ def _format_user_direct_message_prompt(
     parts = [
         "## Message from the User",
         "",
-        f"Message ID: `{message_id}`",
-        "",
     ]
     if message_type == "loop":
         parts.extend([
