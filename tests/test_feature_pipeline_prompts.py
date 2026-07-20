@@ -13,7 +13,7 @@ class FeaturePipelinePromptTests(unittest.TestCase):
 
         self.assertIn("Engineer approval is enough", prompt)
         self.assertIn("Human approval is required", prompt)
-        self.assertIn("torque_ask(question=\"Clarification needed\"", prompt)
+        self.assertIn("raise(question=\"Clarification needed\"", prompt)
         self.assertIn("Do NOT derive to implementation before the appropriate approval", prompt)
         self.assertIn("send an immediate `torque_progress(message=\"...\")` update", prompt)
         self.assertIn("compact task brief for the implementer", prompt)
@@ -42,7 +42,7 @@ class FeaturePipelinePromptTests(unittest.TestCase):
         self.assertIn("Blocking issues", sample_prompt)
         self.assertIn("Follow-up suggestions", sample_prompt)
         self.assertIn("Follow-up classification", sample_prompt)
-        self.assertIn("user_ask", sample_prompt)
+        self.assertIn("raise", sample_prompt)
         self.assertIn("torque_derive", project_prompt)
         self.assertIn("torque_done", project_prompt)
         self.assertIn("## Closeout (mandatory)", project_prompt)

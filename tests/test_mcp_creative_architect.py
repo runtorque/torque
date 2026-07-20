@@ -123,7 +123,7 @@ class MCPCreativeArchitectTests(unittest.IsolatedAsyncioTestCase):
             "area_get", "initiative_list", "initiative_get",
             "decision_list", "task_list", "task_get", "task_create",
             "peer_list", "peer_message", "peer_inbox", "peer_reply",
-            "user_message", "user_ask", "journal_write", "journal_list",
+            "user_message", "raise", "journal_write", "journal_list",
         }:
             self.assertIn(name, tool_names)
 

@@ -109,7 +109,7 @@ class MCPClassAuthorityTests(unittest.IsolatedAsyncioTestCase):
             "boot_summary",
             "task_list",
             "task_get",
-            "user_ask",
+            "raise",
             "user_message",
             "peer_list",
             "peer_message",

@@ -142,7 +142,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         for name in {
             "context", "tool_search", "task_create", "peer_list",
             "peer_message", "peer_inbox", "peer_reply", "user_message",
-            "user_ask", "journal_write",
+            "raise", "journal_write",
         }:
             self.assertIn(name, tool_names)
 
