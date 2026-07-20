@@ -186,7 +186,7 @@ transitions:
     when: changes look correct but need human sign-off before merging
 ```
 
-`ask: true` enables `user_ask(...)` as a completion path instead of deriving
+`ask: true` enables `raise(...)` as a completion path instead of deriving
 another action.
 
 ### Transition routing

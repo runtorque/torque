@@ -91,6 +91,43 @@ class CanonicalMCPContractTests(unittest.TestCase):
             f"{set(schema.get('required') or []) - set(translated)}",
         )
 
+    def test_raise_is_the_only_public_blocking_escalation_name(self):
+        expected_handlers = {
+            "worker": "torque_ask",
+            "engineer": "engineer_ask",
+            "architect": "architect_ask",
+        }
+        for kind, handler in expected_handlers.items():
+            with self.subTest(kind=kind):
+                tools = _canonical_tools_for_caller(_State(kind), "caller")
+                names = {tool["name"] for tool in tools}
+                self.assertIn("raise", names)
+                self.assertNotIn("user_ask", names)
+                self.assertIn("raise", {
+                    tool["name"] for tool in _visible_tools(_State(kind), "caller")
+                })
+                spec = next(tool for tool in tools if tool["name"] == "raise")
+                self.assertIn("immediate decision owner", spec["description"])
+                self.assertIn("question", spec["inputSchema"]["required"])
+                self.assertEqual(
+                    _resolve_public_tool_call(
+                        _State(kind), "caller", "raise", {"question": "Proceed?"}
+                    )[0],
+                    handler,
+                )
+                # Previous canonical name is an unadvertised migration alias.
+                self.assertEqual(
+                    _resolve_public_tool_call(
+                        _State(kind), "caller", "user_ask", {"question": "Proceed?"}
+                    )[0],
+                    handler,
+                )
+                # ``raise`` is eager, so deferred search need not return it;
+                # it must never resurrect the retired public name.
+                self.assertNotIn(
+                    "user_ask", tool_search_response(tools, {"query": "raise"})
+                )
+
     def test_role_and_proposal_variants_share_one_public_name(self):
         aliases = {
             "architect_peer_message",

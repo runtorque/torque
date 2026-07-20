@@ -27,7 +27,7 @@ prompt: |
   - Read the codebase to understand the relevant architecture, patterns, and conventions
   - Identify the files and modules that will need to change
   - Look for existing tests, related features, and potential conflicts
-  - If the task description is unclear or missing critical details, use `torque_ask(question="Clarification needed", description="Explain what detail is missing and why it blocks planning.")` before proceeding
+  - If the task description is unclear or missing critical details, use `raise(question="Clarification needed", description="Explain what detail is missing and why it blocks planning.")` before proceeding
 
   ## Phase 2: Plan
 
@@ -47,7 +47,7 @@ prompt: |
   - **Engineer approval is enough** for bounded, low-risk implementation plans that stay within the approved product direction and do not expand scope, change architecture, introduce migrations, or require sensitive operational decisions
   - **Human approval is required** for product behavior changes, scope expansion, architecture or API shifts, migrations, security/privacy implications, or anything else that needs product judgment
 
-  If the plan needs human approval, ask for it with the `torque_ask` MCP tool so the user can review the plan in your output. If the plan is Engineer-approvable, say so explicitly in your final plan so the Engineer can approve and advance it. Do NOT derive to implementation before the appropriate approval has happened.
+  If the plan needs a decision outside your authority, raise it with the `raise` MCP tool so the immediate decision owner can review it. If the plan is Engineer-approvable, say so explicitly in your final plan so the Engineer can approve and advance it. Do NOT derive to implementation before the appropriate approval has happened.
 
   If approval is granted and you transition or derive directly into implementation on the same agent, send an immediate `torque_progress(message="...")` update in the implementation task before doing more exploration so the board does not look idle.
 

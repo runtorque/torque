@@ -539,14 +539,14 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertIn("Use the Torque MCP tools", prompt)
         self.assertIn("task_complete(message=", prompt)
         self.assertIn("task_verify(state=", prompt)
-        self.assertIn("blocking human decision or approval", prompt)
+        self.assertIn("blocking decision or approval", prompt)
         self.assertIn("For status updates, non-blocking observations, or optional", prompt)
         self.assertIn("When you derive a review, fix, validation", prompt)
         self.assertIn("handoff self-contained", prompt)
         self.assertIn("evidence the next agent should provide", prompt)
         self.assertIn("context()", prompt)
         self.assertEqual(
-            prompt.count("`user_ask(question=\"question\", description=\"details\")`"),
+            prompt.count("`raise(question=\"question\", description=\"details\")`"),
             1,
         )
         self.assertNotIn("torque_a-", prompt)
@@ -707,7 +707,7 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertIn("Available completion paths for this task:", prompt)
         self.assertIn("task_derive(description=", prompt)
         self.assertIn("continues in the same agent", prompt)
-        self.assertIn("user_ask(question=\"title\", description=\"details\")", prompt)
+        self.assertIn("raise(question=\"title\", description=\"details\")", prompt)
         self.assertIn("task_complete(message=\"brief summary\")", prompt)
         self.assertIn("Other reporting tools when relevant:", prompt)
         self.assertIn("task_blocked(reason=", prompt)

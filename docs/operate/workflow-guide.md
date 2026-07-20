@@ -164,13 +164,13 @@ Once an agent is working on a task, the agent can report back to Torque with MCP
 - `task_complete(message="summary")` completes the current task
 - `agent_ready()` completes the task and releases the agent for future work
 - `task_verify(state="passed", tests_run="...", notes="...")` records deploy/restart/smoke verification status when relevant
-- `user_ask(question="question", description="details")` creates a blocking human-in-the-loop follow-up task in **Backlog** when the agent cannot continue safely without a decision or approval
+- `raise(question="question", description="details")` creates a blocking follow-up task in **Backlog** when the agent cannot continue safely without a decision or approval; Torque routes it to the immediate decision owner (Worker → owning Engineer → hiring Architect → user fallback)
 
-These updates make the board readable without opening each agent session. A person scanning the board can see which tasks are moving, which are blocked, and which are waiting on a human decision.
+These updates make the board readable without opening each agent session. A person scanning the board can see which tasks are moving, which are blocked, and which are waiting on a decision-owner decision.
 
 When the checkpoint needs to be recorded by Torque itself instead of the active agent, use `torque task verify ...` or `task_verify(...)` to mark deploy/restart attempted, smoke passed or failed, and any remaining verification notes.
 
-`user_ask` is not a status channel. If the agent can keep moving, it should
+`raise` is not a status channel. If the agent can keep moving, it should
 report through `task_progress`, `task_complete`, `task_blocked`, or derived
 task context instead of pausing.
 
@@ -258,7 +258,7 @@ Here is a typical day-to-day flow:
 
 - calls `task_complete(message="summary")` if the work is good
 - calls `task_derive(description="...", action="feature/fix-review")` if fixes are needed
-- calls `user_ask(question="...", description="...")` if a blocking human decision or approval is required before work can continue
+- calls `raise(question="...", description="...")` if a blocking decision-owner decision or approval is required before work can continue
 
 6. Once the implementation chain reaches **Done**, the dependent deployment task can be dispatched.
 

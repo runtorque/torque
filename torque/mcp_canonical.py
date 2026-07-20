@@ -30,10 +30,10 @@ _SUFFIX_TO_CANONICAL = {
     "help_query": "help_query",
     "help_show": "help_get",
     # Human and agent communication.
-    "ask": "user_ask",
+    "ask": "raise",
     "message_user": "user_message",
     "proposal_message_user": "user_message",
-    "proposal_ask_user": "user_ask",
+    "proposal_ask_user": "raise",
     "note": "user_note",
     "stop_user_message_loop": "user_message_loop_stop",
     "peer_list": "peer_list",
@@ -237,7 +237,7 @@ CANONICAL_DESCRIPTIONS = {
     "help_query": "Answer a question from maintained Torque help with source excerpts.",
     "help_get": "Read one maintained Torque help topic.",
     "user_message": "Send a durable, non-blocking message to the owning user conversation.",
-    "user_ask": "Ask the owning user a blocking question and pause event delivery until answered.",
+    "raise": "Raise a blocking decision to the immediate decision owner and pause until answered. Ownership routes Worker to owning Engineer, hired Engineer to hiring Architect, and Architect or an orphaned agent to the user.",
     "user_note": "Post a persistent non-blocking note or soft question for the user.",
     "peer_list": "List same-level peers eligible for direct coordination.",
     "peer_message": "Send a message to an eligible same-level peer. Peer eligibility is derived from the caller.",
@@ -276,7 +276,7 @@ _ARCHITECT_EAGER_BY_CATEGORY = {
     },
     # Durable communication paths needed to coordinate without discovery.
     "communication": {
-        "user_ask", "user_message", "peer_list", "peer_message",
+        "raise", "user_message", "peer_list", "peer_message",
         "peer_inbox", "peer_reply", "agent_message", "agent_reply",
         "agent_ask_get", "agent_ask_answer",
     },
@@ -316,7 +316,7 @@ _ENGINEER_EAGER_BY_CATEGORY = {
         "boot_summary", "session_map", "task_list", "task_get", "task_create",
         "task_update", "task_move", "task_dispatch", "task_verify",
         "task_artifact_upload", "agent_list", "agent_get", "agent_message",
-        "agent_ask_answer", "user_ask", "user_message", "user_note",
+        "agent_ask_answer", "raise", "user_message", "user_note",
         "peer_list", "peer_message", "peer_inbox", "peer_reply",
         "supervisor_message", "agent_reply", "event_list",
     },
@@ -355,7 +355,7 @@ _EAGER_BY_KIND = {
         "context", "area_list", "area_get", "help_search", "help_query", "help_get",
         "task_artifact_upload", "task_complete", "task_blocked", "task_error",
         "task_progress", "task_verify", "agent_ready", "agent_rename",
-        "task_derive", "user_ask", "user_message", "user_message_loop_stop",
+        "task_derive", "raise", "user_message", "user_message_loop_stop",
         "agent_reply", "memory_publish", "memory_list", "memory_get",
         "memory_set_pin", "memory_link",
     },
@@ -378,6 +378,8 @@ def canonical_tool_name(name: str) -> str:
     text = str(name or "").strip()
     if not text:
         return ""
+    if text == "user_ask":
+        return "raise"
     if text in _SUFFIX_TO_CANONICAL.values():
         return text
     suffix = strip_role_prefix(text)

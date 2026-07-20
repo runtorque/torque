@@ -137,7 +137,7 @@ class DirectMessageMirrorTests(unittest.TestCase):
             ["torque:human", "torque:derived", NON_USER_ASK_LABEL],
         )
 
-    def test_worker_ask_mirror_seeds_direct_cache_not_peer_cache(self):
+    def test_owner_routed_ask_mirror_is_excluded_from_user_dm_cache_and_loader(self):
         engineer = self._add_agent("eng-1", "engineer", "Engineer")
         worker = self._add_agent(
             "worker-1",
@@ -186,23 +186,11 @@ class DirectMessageMirrorTests(unittest.TestCase):
             [row["id"] for row in self.db.load_agent_peer_messages_for_agent(engineer.id)],
             [],
         )
-        self.assertEqual(
-            [row["id"] for row in self.db.load_direct_messages_for_agent(worker.id)],
-            [ask_row["id"]],
-        )
-        self.assertEqual(
-            [row["id"] for row in self.db.load_direct_messages_for_agent(engineer.id)],
-            [ask_row["id"]],
-        )
-
-        worker_cached = self.state.direct_messages_by_agent[worker.id][0]
-        engineer_cached = self.state.direct_messages_by_agent[engineer.id][0]
-        self.assertEqual(worker_cached["id"], ask_row["id"])
-        self.assertEqual(worker_cached["direction"], "sent")
-        self.assertEqual(worker_cached["peer_kind"], "engineer")
-        self.assertEqual(engineer_cached["id"], ask_row["id"])
-        self.assertEqual(engineer_cached["direction"], "received")
-        self.assertEqual(engineer_cached["peer_kind"], "worker")
+        self.assertEqual(self.db.load_direct_messages_for_agent(worker.id), [])
+        self.assertEqual(self.db.load_direct_messages_for_agent(engineer.id), [])
+        self.assertEqual(self.state.direct_messages_by_agent.get(worker.id, []), [])
+        self.assertEqual(self.state.direct_messages_by_agent.get(engineer.id, []), [])
+        self.assertEqual(self.db.load_recent_user_direct_messages(limit=10), [])
 
     def test_canonical_resolver_name_and_alias_are_the_same(self):
         # The canonical resolver and its back-compat alias must be one object,
@@ -284,6 +272,60 @@ class DirectMessageMirrorTests(unittest.TestCase):
         self.assertEqual(recipient.id, "user")
         self.assertTrue(ask_recipient_is_user(self.state, None))
 
+    def test_snapshot_and_deltas_project_only_user_destined_raises(self):
+        architect = self._add_agent("arch-1", "architect", "Architect")
+        hired_engineer = self._add_agent(
+            "eng-hired", "engineer", "Hired Engineer",
+            hired_by_architect_id=architect.id,
+        )
+        owned_worker = self._add_agent(
+            "worker-owned", "worker", "Owned Worker",
+            owner_engineer_id=hired_engineer.id,
+        )
+        orphan_worker = self._add_agent("worker-orphan", "worker", "Orphan")
+        orphan_engineer = self._add_agent("eng-orphan", "engineer", "Orphan Engineer")
+
+        emitted = []
+        original_emit = self.state._emit
+        self.state._emit = lambda operation, **payload: emitted.append((operation, payload))
+        try:
+            rows = {
+                cell.id: save_direct_ask_mirror(
+                    self.state, cell, f"Question from {cell.id}?",
+                    source_task_id=f"raise-{cell.id}",
+                )
+                for cell in (
+                    owned_worker, hired_engineer, architect,
+                    orphan_worker, orphan_engineer,
+                )
+            }
+        finally:
+            self.state._emit = original_emit
+
+        snapshot = self.state.direct_messages_snapshot()
+        visible_ids = {
+            entry["id"]
+            for entries in snapshot.values()
+            for entry in entries
+        }
+        self.assertEqual(
+            visible_ids,
+            {rows[architect.id]["id"], rows[orphan_worker.id]["id"], rows[orphan_engineer.id]["id"]},
+        )
+        self.assertNotIn(owned_worker.id, snapshot)
+        self.assertNotIn(hired_engineer.id, snapshot)
+        self.assertEqual(
+            [operation for operation, _payload in emitted],
+            ["direct_message_upsert", "direct_message_upsert", "direct_message_upsert"],
+        )
+        self.assertEqual(
+            {payload["id"] for _operation, payload in emitted}, visible_ids,
+        )
+        self.assertEqual(
+            {row["id"] for row in self.db.load_recent_user_direct_messages(limit=10)},
+            visible_ids,
+        )
+
     def test_mirror_recipient_matches_canonical_resolver(self):
         # The recipient stamped onto the persisted DM row must be IDENTICAL to
         # the canonical resolver output -- this is what the connector egress
@@ -357,13 +399,17 @@ class DirectMessageMirrorTests(unittest.TestCase):
         self.assertEqual(reply_row["recipient_kind"], "worker")
         self.assertEqual(reply_row["thread_id"], ask_row["thread_id"])
 
+        self.assertEqual(self.state.direct_messages_by_agent.get(worker.id, []), [])
+        self.assertEqual(self.state.direct_messages_by_agent.get(engineer.id, []), [])
+        self.assertEqual(self.db.load_direct_messages_for_agent(worker.id), [])
+        # The reply remains a durable non-user transport row for reconnect
+        # replay, despite being absent from the user conversation projection.
+        buffered = self.state.update_direct_message_delivery(
+            reply_row["id"], "buffered", emit=False)
+        self.assertEqual(buffered["delivery_state"], "buffered")
         self.assertEqual(
-            [entry["id"] for entry in self.state.direct_messages_by_agent[worker.id]],
-            [ask_row["id"], reply_row["id"]],
-        )
-        self.assertEqual(
-            [entry["id"] for entry in self.state.direct_messages_by_agent[engineer.id]],
-            [ask_row["id"], reply_row["id"]],
+            [row["id"] for row in self.db.load_buffered_direct_messages(worker.id)],
+            [reply_row["id"]],
         )
         self.assertEqual(worker.mcp_messages, [])
         self.assertEqual(engineer.mcp_messages, [])
@@ -378,9 +424,8 @@ class DirectMessageMirrorTests(unittest.TestCase):
         )
         user_worker = self._add_agent("worker-user", "worker", "User Worker")
 
-        # User-destined ask (recipient=user) and owner-routed ask
-        # (recipient=engineer); both live in the user↔agent lane the loader
-        # serves -- downstream gating decides egress, not this loader.
+        # Only the resolver-stamped user-destined ask belongs in this loader;
+        # the owner-routed row stays durable but is not user-DM projection.
         user_ask = save_direct_ask_mirror(
             self.state, user_worker, "user ask",
             source_task_id="t-user", created_at=10.0,
@@ -391,15 +436,11 @@ class DirectMessageMirrorTests(unittest.TestCase):
         )
 
         recent = self.db.load_recent_user_direct_messages(limit=10)
-        self.assertEqual(
-            [row["id"] for row in recent],
-            [owner_ask["id"], user_ask["id"]],  # newest first
-        )
-        owner_row = next(r for r in recent if r["id"] == owner_ask["id"])
-        self.assertEqual(owner_row["recipient_kind"], "engineer")
+        self.assertEqual([row["id"] for row in recent], [user_ask["id"]])
+        self.assertNotIn(owner_ask["id"], [row["id"] for row in recent])
 
         bounded = self.db.load_recent_user_direct_messages(limit=1)
-        self.assertEqual([row["id"] for row in bounded], [owner_ask["id"]])
+        self.assertEqual([row["id"] for row in bounded], [user_ask["id"]])
 
 
 if __name__ == "__main__":

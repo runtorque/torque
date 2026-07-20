@@ -52,7 +52,7 @@ only when the caller has the required relationship:
 | Category | Eager canonical operations |
 | --- | --- |
 | Boot and orientation | `context`, `tool_search`, `help_query`, `help_get`, `board_summary`, `boot_summary`, `session_map`, `event_list` |
-| Communication, task, and agent routing | `task_list`, `task_get`, `task_create`, `task_update`, `task_move`, `task_dispatch`, `task_verify`, `task_artifact_upload`, `agent_list`, `agent_get`, `agent_message`, `agent_ask_answer`, `user_ask`, `user_message`, `user_note`, `peer_list`, `peer_message`, `peer_inbox`, `peer_reply`, `supervisor_message`, `agent_reply` |
+| Communication, task, and agent routing | `task_list`, `task_get`, `task_create`, `task_update`, `task_move`, `task_dispatch`, `task_verify`, `task_artifact_upload`, `agent_list`, `agent_get`, `agent_message`, `agent_ask_answer`, `raise`, `user_message`, `user_note`, `peer_list`, `peer_message`, `peer_inbox`, `peer_reply`, `supervisor_message`, `agent_reply` |
 | Memory and context | `memory_publish`, `memory_list`, `memory_get`, `memory_set_pin`, `memory_link`, `semantic_recall`, `journal_write`, `journal_list` |
 | Execution flow | `stream_list`, `stream_get`, `action_list`, `action_get`, `hint_set_state`, `event_delivery_update` |
 | Worktree and release | `worktree_diff`, `worktree_checkpoint`, `worktree_advance_boundary`, `worktree_rebase`, `worktree_create_pr`, `worktree_merge`, `worktree_remove`, `worktree_adopt` |
@@ -81,7 +81,7 @@ of this set and its frozen Agent Class authority:
 | Category | Eager canonical operations |
 | --- | --- |
 | Boot and orientation | `context`, `tool_search`, `help_query`, `help_get`, `board_summary`, `boot_summary`, `event_list`, `agent_list`, `area_list`, `area_get`, `initiative_list`, `initiative_get` |
-| Communication | `user_ask`, `user_message`, `peer_list`, `peer_message`, `peer_inbox`, `peer_reply`, `agent_message`, `agent_reply`, `agent_ask_get`, `agent_ask_answer` |
+| Communication | `raise`, `user_message`, `peer_list`, `peer_message`, `peer_inbox`, `peer_reply`, `agent_message`, `agent_reply`, `agent_ask_get`, `agent_ask_answer` |
 | Task routing and evidence | `task_list`, `task_get`, `task_chain`, `task_claim`, `task_create`, `task_update`, `task_reassign`, `task_move`, `task_mark_covered`, `task_verify` |
 | Durable context | `journal_write`, `journal_list`, `decision_list`, `decision_get`, `decision_create`, `decision_update`, `decision_link`, `memory_publish`, `memory_list`, `memory_get`, `memory_set_pin`, `memory_link`, `semantic_recall` |
 | Execution flow | `attention_digest`, `group_health_brief`, `wave_summary`, `completion_audit`, `worktree_merge`, `worktree_rebase`, `worktree_create_pr`, `worktree_diff` |
@@ -165,7 +165,7 @@ never block boot, dispatch, review, or merge on the summary.
 | Tool | Purpose |
 | --- | --- |
 | `user_message` | Send a durable non-blocking message to the user. |
-| `user_ask` | Create a blocking human decision or approval request. |
+| `raise` | Raise a blocking decision or approval to the immediate decision owner. Workers route to their owning Engineer, hired Engineers to their hiring Architect, and only Architects/orphans fall through to the user. |
 | `user_note` | Record a non-blocking note or soft question. |
 | `user_message_loop_stop` | Stop the caller's direct-message loop. |
 | `peer_list` | List eligible same-level peers. |

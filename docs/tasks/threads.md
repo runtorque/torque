@@ -113,16 +113,16 @@ When a transition declares an explicit `target` (`self`, `parent`, `root`), the 
 
 A consequence worth knowing: if you derive into a fresh-worker dispatch (no target), the new Worker sees the calling Worker's branch. Your reviewer sees the implementer's worktree. That's intentional — it's how the reviewer can read the diff.
 
-## Threads and the human
+## Threads and the decision owner
 
-Sometimes a Worker hits a question only you can answer. The pattern is
-`user_ask`:
+Sometimes a Worker hits a question that needs its immediate decision owner. The pattern is
+`raise`:
 
 ```text
-user_ask(question="Should we ship this behind a feature flag?")
+raise(question="Should we ship this behind a feature flag?")
 ```
 
-This creates a derived task — same thread, just one extra depth — that lands in **Backlog** with a `human` label, **not dispatched**. The board pauses. You read the question, write the answer (by editing the task body and dispatching it, or by replying through the panel), and the thread continues.
+This creates a derived task — same thread, just one extra depth — that lands in **Backlog** with a `human` label, **not dispatched**. The board pauses. The decision owner reads the question and writes the answer (by editing the task body and dispatching it, or by replying through the panel), and the thread continues.
 
 The `ask` derivation is special in two ways: it doesn't auto-dispatch, and it appears as a small pill node in the pipeline graph rather than a regular action node. → [Pipelines](pipelines.md#the-ask-transition)
 

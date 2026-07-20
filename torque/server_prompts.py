@@ -8,8 +8,8 @@ from .mcp_canonical import canonical_tool_name, canonicalize_tool_references
 
 _POSTSCRIPT_MANDATE = (
     "IMPORTANT: Finish this task by calling a Torque MCP tool below. "
-    "Do NOT ask the user directly. Use `torque_ask(...)` only for a "
-    "blocking human decision or approval so Torque can track it. "
+    "Do NOT bypass Torque's decision routing. Use `raise(...)` only for a "
+    "blocking decision or approval so Torque can route and track it. "
     "Do NOT just stop — always signal completion via one of these tools."
 )
 
@@ -18,8 +18,8 @@ _DONE_LINE = (
 )
 
 _ASK_LINE = (
-    '- `torque_ask(question="title", description="details")` '
-    '— blocking human decision/approval only '
+    '- `raise(question="title", description="details")` '
+    '— blocking decision/approval only; routes to the immediate decision owner '
     '(creates a task in Backlog for review; `description` is optional)'
 )
 
@@ -133,7 +133,7 @@ def build_torque_system_prompt(*, include_shared_memory: bool = True,
         - `torque_error(message="message")` — report an unrecoverable error
         - `torque_verify(state="passed", tests_run="...", test_outcome="full_suite_passed", notes="...")` — record tests/deploy/smoke verification details when relevant; use `unrelated_flake_accepted` with isolated rerun evidence for accepted flakes and `live_smoke_pending=true, deploy_attempted=false` when operator smoke remains
         - `torque_derive(description="title", action="action-name", context="details")` — create a subtask and dispatch it according to the allowed transition
-        - `torque_ask(question="question", description="details")` — request a blocking human decision or approval when the task cannot continue safely without it
+        - `raise(question="question", description="details")` — raise a blocking decision or approval to the immediate decision owner when the task cannot continue safely
         - `torque_message_user(message="message", reply_to_id="message-id")` — send a non-blocking durable message to the user-facing conversation panel
         - `torque_context()` — view your current task, agent info, and pipeline state
     """).rstrip()]
@@ -147,7 +147,7 @@ def build_torque_system_prompt(*, include_shared_memory: bool = True,
         Always signal completion via one of the tools above.
         Your dispatch prompt specifies which transitions are available —
         use those to determine valid `derive` targets.
-        Use `torque_ask` only when a blocking human answer or approval is
+        Use `raise` only when a blocking decision owner answer or approval is
         required to continue safely. If you can keep moving, do so.
         If you receive a `## Message from the User` block, reply through
         `torque_message_user` rather than relying on free-text terminal
@@ -344,7 +344,7 @@ def _build_review_required_block(*,
          "After you derive the review, the reviewer's Ship verdict "
          "cascades the parent to Done — you do not need to call "
          "`torque_done()` again on this parent task. If you believe a "
-         "review is unnecessary, use `torque_ask(...)` to request a human "
+         "review is unnecessary, use `raise(...)` to request a decision-owner "
          "decision; do NOT self-skip."),
         "",
     ]

@@ -2153,18 +2153,9 @@ class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('Answer:\nShip it', qa_ops[0]['entry'])
         direct_rows = db.load_direct_messages_for_agent(engineer.id)
         direct_by_type = {row['message_type']: row for row in direct_rows}
-        self.assertEqual(set(direct_by_type), {'ask', 'ask_reply'})
-        self.assertEqual(direct_by_type['ask']['sender_id'], engineer.id)
-        self.assertEqual(direct_by_type['ask']['recipient_id'], architect.id)
-        self.assertEqual(direct_by_type['ask']['recipient_kind'], 'architect')
-        self.assertTrue(direct_by_type['ask']['blocking'])
-        self.assertEqual(direct_by_type['ask_reply']['sender_id'], architect.id)
-        self.assertEqual(direct_by_type['ask_reply']['recipient_id'], engineer.id)
-        self.assertFalse(direct_by_type['ask_reply']['blocking'])
-        self.assertEqual(
-            direct_by_type['ask_reply']['reply_to_id'],
-            direct_by_type['ask']['id'],
-        )
+        # Architect-routed escalation and answer remain durable transport
+        # records, but do not project into the user↔agent DM loader.
+        self.assertEqual(direct_by_type, {})
 
     async def test_deliver_engineer_reply_buffers_when_session_is_absent(self):
         from torque.db import TorqueDB
@@ -5457,7 +5448,7 @@ class TorqueAiMcpReportToolNamesTests(unittest.TestCase):
             "done": "task_complete",
             "blocked": "task_blocked",
             "error": "task_error",
-            "ask": "user_ask",
+            "ask": "raise",
             "derive": "task_derive",
             "ready": "agent_ready",
             "verify": "task_verify",

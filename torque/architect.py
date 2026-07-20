@@ -53,7 +53,7 @@ engineer_update (full-replace ordered project specializations for an Engineer \
 you hired; no fresh approval), always poll hire_list before treating a hire as live
 **Messaging / user asks**: agent_list, agent_message, agent_ask_get, \
 agent_ask_answer, agent_reply, peer_list, peer_message, peer_inbox, peer_reply, \
-user_message, user_ask
+user_message, raise
 **Decisions**: decision_list, decision_get, decision_create, decision_update, \
 decision_link
 **Journal**: journal_write, journal_list

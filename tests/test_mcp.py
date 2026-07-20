@@ -1504,7 +1504,8 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             "reply_to_id",
             architect_message_tool["inputSchema"]["properties"],
         )
-        self.assertIn("user_ask", architect_tool_names)
+        self.assertIn("raise", architect_tool_names)
+        self.assertNotIn("user_ask", architect_tool_names)
 
         listed_engineer = await handler(
             FakeRequest(

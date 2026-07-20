@@ -104,7 +104,7 @@ Workers report **exclusively through MCP tools**. The CLI `torque ai *` commands
 | `task_derive` | Hand off to an allowed pipeline transition. |
 | `task_blocked` | Work cannot continue. |
 | `task_error` | Unrecoverable error. |
-| `user_ask` | Blocking human decision or approval. |
+| `raise` | Blocking decision-owner decision or approval. |
 | `agent_ready` | Complete work, unlink the Worker, and cascade upward. |
 | `task_verify` | Record deploy, restart, test, or smoke evidence. |
 | `agent_reply` | Answer a follow-up question from the Engineer. |

@@ -104,7 +104,7 @@ class EngineerPromptTests(unittest.TestCase):
         self.assertIn("proposed next-wave plans", prompt)
         self.assertIn("board should stop widening work", prompt)
         self.assertIn("use `user_note`", prompt)
-        self.assertIn("instead of `user_ask`", prompt)
+        self.assertIn("instead of `raise`", prompt)
         self.assertIn("**Torque mechanics**", prompt)
         self.assertIn("shared `agent_group`", prompt)
         self.assertIn("`task_dispatch(agent=...)`", prompt)

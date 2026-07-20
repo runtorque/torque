@@ -268,7 +268,7 @@ view.
 | Observe | `observe.self_context`, `observe.task_detail` |
 | Planning | `planning.area_read` |
 | Task | `task.complete`, `task.verify`, `task.upload_artifact` |
-| Communication | `comm.user_ask`, `comm.user_message` |
+| Communication | `comm.raise`, `comm.user_message` |
 | Journal | `journal.private` |
 | Memory | `memory.read`, `memory.publish` |
 
@@ -299,7 +299,7 @@ Architect includes the broadest Torque authority:
 | Task | `task.create`, `task.create_queued`, `task.update`, `task.update_planning_fields`, `task.reassign`, `task.move`, `task.move_planning_safe`, `task.dispatch`, `task.mark_covered`, `task.verify`, `task.complete`, `task.upload_artifact`, `task.board_sync_read` |
 | Decisions | `decision.list`, `decision.create`, `decision.create_proposed`, `decision.update`, `decision.update_proposed`, `decision.accept`, `decision.link` |
 | Agent control | `agent.engineer_roster_read`, `agent.hire_engineer`, `agent.manage_engineer_roster`, `agent.dispatch_worker` |
-| Communication | `comm.user_ask`, `comm.user_message`, `comm.engineer_message`, `comm.worker_message`, `comm.peer_architect_list`, `comm.peer_architect_message`, `comm.product_ack_request` |
+| Communication | `comm.raise`, `comm.user_message`, `comm.engineer_message`, `comm.worker_message`, `comm.peer_architect_list`, `comm.peer_architect_message`, `comm.product_ack_request` |
 | Journal | `journal.private`, `journal.read`, `journal.write` |
 | Memory | `memory.read`, `memory.publish`, `memory.admin` |
 | Worktree | `worktree.read`, `worktree.merge` |

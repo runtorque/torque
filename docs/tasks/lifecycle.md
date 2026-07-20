@@ -25,7 +25,7 @@ The reserved lanes have specific meanings:
 
 | Lane | What it means |
 |---|---|
-| **Backlog** | Anything not actively in motion. New tasks land here. `user_ask(...)` puts derived tasks here for human review. |
+| **Backlog** | Anything not actively in motion. New tasks land here. `raise(...)` puts derived tasks here for decision-owner review. |
 | **To Do** | Planned and ready-to-dispatch. The Engineer's "next wave candidates" usually live here. |
 | **In Progress** | Actively assigned to an agent. Tasks move here on dispatch and stay here until their entire thread closes. |
 | **Done** | Complete. Reached via `task_complete`, `agent_ready`, or cascade completion. |
@@ -54,7 +54,7 @@ A few common badge patterns:
 
 - `"On Review"` — child reviewer is reading the diff.
 - `"Fixing review issues"` — child fixer is addressing review comments.
-- `"Awaiting Input"` — `ask` transition fired, the human has to answer.
+- `"Awaiting Input"` — `ask` transition fired, the decision owner has to answer.
 - `"Verifying"` — verification task is running tests / smoke checks.
 - `"Implementing"` — explicit override for the implement action's own state.
 
@@ -95,7 +95,7 @@ Not every task ends in Done. The other outcomes:
 |---|---|---|
 | **Blocked** | `task_blocked(reason="...")` | Need user input to continue. Adds `blocked` label, flags the agent for attention. Task stays in In Progress. |
 | **Error** | `task_error(message="...")` | Unrecoverable error. Adds `error` label, agent flagged. Task stays in In Progress. |
-| **Awaiting Input** | `user_ask(question="...")` | Derived task in Backlog with `human` label; parent stays In Progress with badge "Awaiting Input". |
+| **Awaiting Input** | `raise(question="...")` | Derived task in Backlog with `human` label; parent stays In Progress with badge "Awaiting Input". |
 | **Depth limit** | Worker tried to derive past `max_pipeline_depth` | Task gets `depth-limit` label, agent flagged. The chain didn't run. |
 | **Manual archive** | User moves the task to Archived | The work was abandoned or superseded. |
 
