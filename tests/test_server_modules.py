@@ -80,6 +80,38 @@ class ServerModuleExtractionTests(unittest.TestCase):
         state.add_group("g")
         return state
 
+    def test_user_direct_message_prompt_uses_compact_reply_guidance_for_all_recipient_kinds(self):
+        row = {
+            "id": "user-msg-123",
+            "message": "Please summarize the latest status.",
+        }
+        expected = (
+            "## Message from the User\n"
+            "\n"
+            "Message ID: `user-msg-123`\n"
+            "\n"
+            "Please summarize the latest status.\n"
+            "\n"
+            "Reply with:\n"
+            "  mcp__torque__user_message(message=\"...\", "
+            "reply_to_id=\"user-msg-123\")\n"
+            "\n"
+            "---\n"
+        )
+
+        for recipient_kind in ("architect", "engineer", "worker"):
+            with self.subTest(recipient_kind=recipient_kind):
+                prompt = self.server_mod._format_user_direct_message_prompt(
+                    row,
+                    recipient_kind,
+                )
+
+                self.assertEqual(prompt, expected)
+                self.assertNotIn(
+                    "Reply to this user-facing conversation with:", prompt)
+                self.assertNotIn(
+                    "Do not rely on free-text terminal output", prompt)
+
     def test_normalize_engineer_specialization_selection_validates_and_dedupes(self):
         normalize = self.server_mod._normalize_engineer_specialization_selection
 
@@ -3193,15 +3225,13 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('Can you summarize your current plan?', prompt)
         self.assertIn(
             (
-                'mcp__torque__user_message('
+                'Reply with:\n  mcp__torque__user_message('
                 f'message="...", reply_to_id="{result["message_id"]}")'
             ),
             prompt,
         )
-        self.assertIn(
-            'Do not rely on free-text terminal output',
-            prompt,
-        )
+        self.assertNotIn('Reply to this user-facing conversation with:', prompt)
+        self.assertNotIn('Do not rely on free-text terminal output', prompt)
         self.assertTrue(sent[0][2].get('background'))
         self.assertTrue(sent[0][2].get('prime_input_ready'))
         self.assertTrue(sent[0][2].get('settled_submit'))
@@ -3258,10 +3288,12 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         prompt = sent[0][1]
         self.assertIn('First line of the DM\nSecond line stays separate', prompt)
         self.assertIn(
-            'First line of the DM\nSecond line stays separate\n\nReply to this user-facing conversation',
+            'First line of the DM\nSecond line stays separate\n\nReply with:',
             prompt,
         )
         self.assertNotIn('First line of the DMSecond line stays separate', prompt)
+        self.assertNotIn('Reply to this user-facing conversation with:', prompt)
+        self.assertNotIn('Do not rely on free-text terminal output', prompt)
 
         persisted = self.db.load_direct_message(result['message_id'])
         self.assertEqual(persisted['message'], message)
@@ -4097,7 +4129,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['delivery_state'], 'delivered')
         self.assertEqual(worker.status, 'running')
 
-    async def test_user_agent_message_reply_hint_cadence_and_replay(self):
+    async def test_user_agent_message_compact_reply_guidance_and_replay(self):
         state = self._make_state()
         state.group_settings['g'] = self.state_mod.GroupSettings(
             guidance_hint_cadence=4,
@@ -4182,10 +4214,17 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result5['delivery_state'], 'delivered')
         self.assertEqual(len(sent), 5)
 
-        hint = 'Do not rely on free-text terminal output'
+        old_reply_guidance = 'Reply to this user-facing conversation with:'
+        old_free_text_guidance = 'Do not rely on free-text terminal output'
         self.assertEqual(
-            [hint in prompt for _agent_id, prompt, _kwargs in sent],
-            [True, False, False, True, False],
+            [old_reply_guidance in prompt
+             for _agent_id, prompt, _kwargs in sent],
+            [False, False, False, False, False],
+        )
+        self.assertEqual(
+            [old_free_text_guidance in prompt
+             for _agent_id, prompt, _kwargs in sent],
+            [False, False, False, False, False],
         )
         expected_reply_to_ids = [
             results[0]['message_id'],
@@ -4198,7 +4237,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
                 sent,
                 expected_reply_to_ids):
             reply_snippet = (
-                'mcp__torque__user_message('
+                'Reply with:\n  mcp__torque__user_message('
                 f'message="...", reply_to_id="{reply_to_id}")'
             )
             self.assertIn(reply_snippet, prompt)
@@ -4209,7 +4248,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn('Thread ID:', prompt)
             self.assertNotIn('Sent:', prompt)
 
-    async def test_user_agent_message_reply_hint_cadence_zero_is_legacy(self):
+    async def test_user_agent_message_compact_reply_guidance_ignores_legacy_cadence(self):
         state = self._make_state()
         state.group_settings['g'] = self.state_mod.GroupSettings(
             guidance_hint_cadence=0,
@@ -4249,10 +4288,13 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(sent), 3)
         self.assertTrue(
-            all('Do not rely on free-text terminal output' in p for p in sent)
+            all('Reply with:\n  mcp__torque__user_message(' in p for p in sent)
         )
         self.assertTrue(
-            all('mcp__torque__user_message(' in p for p in sent)
+            all('Reply to this user-facing conversation with:' not in p for p in sent)
+        )
+        self.assertTrue(
+            all('Do not rely on free-text terminal output' not in p for p in sent)
         )
 
     async def test_user_agent_message_buffers_down_agent_and_replays_on_wake(self):

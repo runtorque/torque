@@ -16,7 +16,7 @@ from .config import log
 from .db import canonical_user_agent_thread_id
 from .direct_message_mirrors import save_direct_ask_reply_mirror
 from .identity import agent_identity_anchor
-from .server_agent_common import _resolve_agent_id, _should_show_guidance_hint
+from .server_agent_common import _resolve_agent_id
 from .server_agent_operations import _agent_dismissed_at
 from .server_artifacts import describe_task_artifact_for_digest
 from .state import BoardTask, MatrixState, task_counts_as_done, task_is_closed
@@ -350,7 +350,6 @@ def _format_user_direct_message_prompt(
         row: dict,
         recipient_kind: str,
         *,
-        include_free_text_reply_hint: bool = True,
         state: MatrixState | None = None) -> str:
     """Format a durable user→agent message as an injected agent prompt."""
     row = row or {}
@@ -385,14 +384,10 @@ def _format_user_direct_message_prompt(
     if message:
         parts.extend([message, ""])
     parts.extend([
-        "Reply to this user-facing conversation with:",
+        "Reply with:",
         f"  mcp__torque__{tool_name}(message=\"...\", reply_to_id={reply_arg})",
         "",
     ])
-    if include_free_text_reply_hint:
-        parts.append(
-            "Do not rely on free-text terminal output for the user-facing reply."
-        )
     parts.append("---")
     return "\n".join(parts) + "\n"
 
@@ -521,11 +516,6 @@ async def _queue_user_direct_message_to_agent(
     prompt = _format_user_direct_message_prompt(
         row,
         str(getattr(target, "kind", "") or "worker").strip() or "worker",
-        include_free_text_reply_hint=_should_show_guidance_hint(
-            state,
-            target,
-            GUIDANCE_HINT_USER_DIRECT_REPLY,
-        ),
         state=state,
     )
     try:
