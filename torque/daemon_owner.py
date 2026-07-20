@@ -22,6 +22,7 @@ from typing import Callable
 
 OWNER_FILE_NAME = "daemon-owner.lock"
 OWNER_SCHEMA_VERSION = 1
+OWNER_FD_ENV = "TORQUE_DAEMON_OWNER_FD"
 
 
 @dataclass(frozen=True)
@@ -190,6 +191,25 @@ def _read_owner(handle) -> tuple[dict | None, str]:
     return value, ""
 
 
+def _read_contended_owner(handle, *, timeout: float = 0.5) -> tuple[dict | None, str]:
+    """Wait briefly for a just-acquired owner to finish publishing metadata."""
+
+    deadline = time.monotonic() + max(0.0, timeout)
+    owner = None
+    metadata_error = ""
+    # A fresh winner holds flock before process inspection and metadata write.
+    # Without this bounded wait, a simultaneous loser could report an
+    # unactionable "unknown" owner even though startup is correctly rejected.
+    time.sleep(0.01)
+    while True:
+        owner, metadata_error = _read_owner(handle)
+        if owner and not metadata_error:
+            return owner, ""
+        if time.monotonic() >= deadline:
+            return owner, metadata_error
+        time.sleep(0.01)
+
+
 def _owner_summary(owner: dict | None) -> str:
     owner = owner or {}
     identity = dict(owner.get("process_identity") or {})
@@ -213,6 +233,38 @@ def _attach_advice(owner: dict | None) -> str:
         f"Attach to the existing Torque daemon{port_hint}, or choose a "
         "distinct TORQUE_PROFILE/TORQUE_DATA_DIR."
     )
+
+
+def _build_owner_metadata(
+    *,
+    data_dir: Path,
+    profile: str,
+    port: int,
+    source_path: Path | str,
+    executable: Path | str | None,
+    inspection: ProcessInspection,
+) -> dict:
+    return {
+        "schema_version": OWNER_SCHEMA_VERSION,
+        "daemon_id": uuid.uuid4().hex,
+        "pid": os.getpid(),
+        "port": int(port),
+        "profile": str(profile or "default"),
+        "data_dir": str(data_dir),
+        "acquired_at": time.time(),
+        "executable": str(_resolved(executable or sys.executable)),
+        "source_path": str(_resolved(source_path)),
+        "process_identity": dict(inspection.identity),
+    }
+
+
+def _write_owner(handle, metadata: dict) -> None:
+    handle.seek(0)
+    handle.truncate()
+    json.dump(metadata, handle, sort_keys=True)
+    handle.write("\n")
+    handle.flush()
+    os.fsync(handle.fileno())
 
 
 class ProfileDaemonOwner:
@@ -251,6 +303,17 @@ class ProfileDaemonOwner:
         resolved_data_dir = _resolved(data_dir)
         resolved_data_dir.mkdir(parents=True, exist_ok=True)
         owner_path = resolved_data_dir / OWNER_FILE_NAME
+        adopted = cls._adopt_exec_handoff(
+            owner_path=owner_path,
+            data_dir=resolved_data_dir,
+            profile=profile,
+            port=port,
+            source_path=source_path,
+            executable=executable,
+            process_inspector=process_inspector,
+        )
+        if adopted is not None:
+            return adopted
         handle = owner_path.open("a+", encoding="utf-8")
         try:
             os.chmod(owner_path, 0o600)
@@ -263,7 +326,7 @@ class ProfileDaemonOwner:
             if exc.errno not in (errno.EACCES, errno.EAGAIN):
                 handle.close()
                 raise
-            owner, metadata_error = _read_owner(handle)
+            owner, metadata_error = _read_contended_owner(handle)
             handle.close()
             detail = _owner_summary(owner)
             if metadata_error:
@@ -328,24 +391,15 @@ class ProfileDaemonOwner:
                     "Cannot establish a safe Torque daemon process identity "
                     f"for PID {pid}: {self_inspection.detail or self_inspection.status}"
                 )
-            metadata = {
-                "schema_version": OWNER_SCHEMA_VERSION,
-                "daemon_id": uuid.uuid4().hex,
-                "pid": pid,
-                "port": int(port),
-                "profile": str(profile or "default"),
-                "data_dir": str(resolved_data_dir),
-                "acquired_at": time.time(),
-                "executable": str(_resolved(executable or sys.executable)),
-                "source_path": str(_resolved(source_path)),
-                "process_identity": dict(self_inspection.identity),
-            }
-            handle.seek(0)
-            handle.truncate()
-            json.dump(metadata, handle, sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
+            metadata = _build_owner_metadata(
+                data_dir=resolved_data_dir,
+                profile=profile,
+                port=port,
+                source_path=source_path,
+                executable=executable,
+                inspection=self_inspection,
+            )
+            _write_owner(handle, metadata)
             return cls(handle=handle, path=owner_path, metadata=metadata)
         except Exception:
             try:
@@ -353,6 +407,104 @@ class ProfileDaemonOwner:
             finally:
                 handle.close()
             raise
+
+    @classmethod
+    def _adopt_exec_handoff(
+        cls,
+        *,
+        owner_path: Path,
+        data_dir: Path,
+        profile: str,
+        port: int,
+        source_path: Path | str,
+        executable: Path | str | None,
+        process_inspector: Callable[[int], ProcessInspection],
+    ) -> "ProfileDaemonOwner | None":
+        raw_fd = os.environ.pop(OWNER_FD_ENV, "").strip()
+        if not raw_fd:
+            return None
+        try:
+            fd = int(raw_fd)
+        except ValueError as exc:
+            raise UnsafeDaemonOwnershipError(
+                f"Invalid inherited Torque daemon owner descriptor: {raw_fd!r}"
+            ) from exc
+        try:
+            handle = os.fdopen(fd, "r+", encoding="utf-8")
+        except OSError as exc:
+            # Child processes normally inherit the environment but not this
+            # descriptor because subprocess closes non-pass_fds. Only an
+            # in-place daemon exec is eligible to adopt it.
+            if exc.errno == errno.EBADF:
+                return None
+            raise
+        try:
+            os.set_inheritable(fd, False)
+            held_stat = os.fstat(fd)
+            path_stat = owner_path.stat()
+            if (
+                held_stat.st_dev != path_stat.st_dev
+                or held_stat.st_ino != path_stat.st_ino
+            ):
+                raise UnsafeDaemonOwnershipError(
+                    "Inherited Torque daemon owner descriptor does not match "
+                    f"{owner_path}; refusing restart handoff"
+                )
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            previous, metadata_error = _read_owner(handle)
+            if metadata_error or not previous:
+                raise UnsafeDaemonOwnershipError(
+                    "Inherited Torque daemon ownership has unverifiable "
+                    f"metadata ({metadata_error or 'metadata is empty'})"
+                )
+            inspection = process_inspector(os.getpid())
+            recorded_dir = _resolved(previous.get("data_dir") or owner_path.parent)
+            if (
+                int(previous.get("pid") or 0) != os.getpid()
+                or recorded_dir != data_dir
+                or inspection.status != "live"
+                or not _identity_matches(
+                    dict(previous.get("process_identity") or {}),
+                    inspection.identity,
+                )
+            ):
+                raise UnsafeDaemonOwnershipError(
+                    "Inherited Torque daemon ownership does not match this "
+                    "re-executed process; refusing restart handoff",
+                    owner=previous,
+                )
+            metadata = _build_owner_metadata(
+                data_dir=data_dir,
+                profile=profile,
+                port=port,
+                source_path=source_path,
+                executable=executable,
+                inspection=inspection,
+            )
+            _write_owner(handle, metadata)
+            return cls(handle=handle, path=owner_path, metadata=metadata)
+        except Exception:
+            handle.close()
+            raise
+
+    def prepare_exec_handoff(self) -> None:
+        """Keep the held kernel lock across the daemon's in-place exec."""
+
+        if self._released or self._handle is None:
+            raise DaemonOwnershipError(
+                "Cannot hand off released Torque daemon ownership"
+            )
+        fd = self._handle.fileno()
+        os.set_inheritable(fd, True)
+        os.environ[OWNER_FD_ENV] = str(fd)
+
+    def cancel_exec_handoff(self) -> None:
+        """Restore normal close-on-exec behavior after a failed exec call."""
+
+        handle = self._handle
+        if handle is not None:
+            os.set_inheritable(handle.fileno(), False)
+        os.environ.pop(OWNER_FD_ENV, None)
 
     def release(self) -> None:
         if self._released:
@@ -362,6 +514,7 @@ class ProfileDaemonOwner:
         self._handle = None
         if handle is None:
             return
+        os.environ.pop(OWNER_FD_ENV, None)
         try:
             # Do not unlink a flock file: unlinking can create two independently
             # lockable inodes during a handoff race. Empty metadata marks an

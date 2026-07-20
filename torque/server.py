@@ -5548,7 +5548,12 @@ async def _main_owned(*, connection=None, daemon_owner: ProfileDaemonOwner):
                 # Persist all agents (status etc.) before restart
                 for cell in state.agents.values():
                     state._db_save_agent(cell)
-                os.execv(sys.executable, [sys.executable] + sys.argv)
+                daemon_owner.prepare_exec_handoff()
+                try:
+                    os.execv(sys.executable, [sys.executable] + sys.argv)
+                except Exception:
+                    daemon_owner.cancel_exec_handoff()
+                    raise
 
         except Exception as exc:
             log.exception("Command '%s' failed", cmd)
