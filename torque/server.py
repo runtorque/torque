@@ -51,6 +51,7 @@ from .config import (
     log,
 )
 from .db import TorqueDB, canonical_user_agent_thread_id
+from .daemon_owner import ProfileDaemonOwner
 from .deploy_state import architect_deploy_state_payload, capture_deploy_boot_state
 from .mission_control import build_mission_control_summary
 from .remote_ingress import (
@@ -739,6 +740,7 @@ _LOG_LINE_RE = re.compile(
 _LOG_TAIL_BYTES = 256 * 1024
 _LOG_MAX_LINES = 500
 _CODEX_PROVIDER_USAGE_BACKFILL_INTERVAL_SECONDS = 300
+_ACTIVE_DAEMON_OWNER: ProfileDaemonOwner | None = None
 
 
 def _runtime_payload(*, bridge=None, state=None) -> dict:
@@ -773,6 +775,9 @@ def _runtime_payload(*, bridge=None, state=None) -> dict:
         "version": _TORQUE_VERSION,
         "pid": os.getpid(),
         "started_at": _STARTED_AT,
+        "daemon_id": (
+            _ACTIVE_DAEMON_OWNER.daemon_id if _ACTIVE_DAEMON_OWNER else ""
+        ),
         "log_path": str(DATA_DIR / "torque.log"),
         "supervisor_log_path": str(DATA_DIR / "pty_supervisor.log"),
         "supervisor": supervisor_health,
@@ -3164,8 +3169,45 @@ configure_worktree_orchestration(
 )
 
 
+def _acquire_profile_daemon_owner() -> ProfileDaemonOwner:
+    """Acquire the resolved DATA_DIR before authoritative runtime startup."""
+
+    global _ACTIVE_DAEMON_OWNER
+    profile = os.environ.get("TORQUE_PROFILE", "").strip() or "default"
+    source_path = torque_config.SCRIPT_DIR / "torque.py"
+    if not source_path.exists():
+        source_path = torque_config.SCRIPT_DIR
+    try:
+        owner = ProfileDaemonOwner.acquire(
+            data_dir=DATA_DIR,
+            profile=profile,
+            port=WS_PORT,
+            source_path=source_path,
+        )
+    except Exception as exc:
+        log.error("Torque backend ownership acquisition failed: %s", exc)
+        raise
+    _ACTIVE_DAEMON_OWNER = owner
+    log.info("Torque daemon profile ownership acquired (%s)", owner.label)
+    return owner
+
+
+def _release_profile_daemon_owner(owner: ProfileDaemonOwner) -> None:
+    global _ACTIVE_DAEMON_OWNER
+    log.info("Releasing Torque daemon profile ownership (%s)", owner.label)
+    if _ACTIVE_DAEMON_OWNER is owner:
+        _ACTIVE_DAEMON_OWNER = None
+    owner.release()
+
+
 async def main(connection=None):
-    log.info("Torque starting (port=%d)", WS_PORT)
+    """Run the main backend while holding authoritative profile ownership."""
+    owner = _acquire_profile_daemon_owner()
+    log.info(
+        "Torque starting (port=%d, daemon=%s)",
+        WS_PORT,
+        owner.label,
+    )
     profiling.configure_asyncio(asyncio.get_running_loop())
     cloud_connector_runtime = None
     db = TorqueDB(DB_FILE)
@@ -3283,6 +3325,7 @@ async def main(connection=None):
         event_ingest_client,
         event_bus,
         state,
+        daemon_identity=owner.label,
     )
     perceived_empty_detector = PerceivedEmptyDetector()
     log.info("Event bus, event-ingest client, health monitor, "
@@ -4000,7 +4043,11 @@ async def main(connection=None):
     # Also checkpoint when the terminal session is actually closed (tab closed)
     bridge.on_session_terminated = _on_agent_session_end
     event_ingest_drainer.start()
-    log.info("Durable event-ingest drainer started after EventBus callbacks")
+    log.info(
+        "Durable event-ingest drainer started after EventBus callbacks "
+        "(daemon=%s)",
+        owner.label,
+    )
 
     async def _state_payload(*, compact: bool = False) -> dict:
         # Prefill the per-repo branch cache before legacy state.to_dict()
@@ -5507,7 +5554,12 @@ async def main(connection=None):
                 # Persist all agents (status etc.) before restart
                 for cell in state.agents.values():
                     state._db_save_agent(cell)
-                os.execv(sys.executable, [sys.executable] + sys.argv)
+                owner.prepare_exec_handoff()
+                try:
+                    os.execv(sys.executable, [sys.executable] + sys.argv)
+                except Exception:
+                    owner.cancel_exec_handoff()
+                    raise
 
         except Exception as exc:
             log.exception("Command '%s' failed", cmd)
@@ -5719,27 +5771,30 @@ async def main(connection=None):
 
         await daemon_stop_event.wait()
     finally:
-        if supervisor_watchdog is not None:
-            try:
-                await supervisor_watchdog.stop()
-            except Exception:
-                log.exception("Supervisor liveness watchdog shutdown failed")
         try:
-            await metrics_daemon.stop()
-        except Exception:
-            log.exception("Metrics daemon shutdown failed")
-        await board_sync_manager.stop()
-        await _shutdown_daemon_runtime(
-            terminal_clients=terminal_clients,
-            ui_ws_clients=state._ws_clients,
-            panel_log=panel_log,
-            event_ingest_drainer=event_ingest_drainer,
-            event_ingest_client=event_ingest_client,
-            cloud_connector_runtime=cloud_connector_runtime_holder[0],
-            ai_index_service=ai_index_service,
-            ai_summary_service=ai_summary_service,
-            bridge=bridge,
-            runner=runner,
-            state=state,
-            db=db,
-        )
+            if supervisor_watchdog is not None:
+                try:
+                    await supervisor_watchdog.stop()
+                except Exception:
+                    log.exception("Supervisor liveness watchdog shutdown failed")
+            try:
+                await metrics_daemon.stop()
+            except Exception:
+                log.exception("Metrics daemon shutdown failed")
+            await board_sync_manager.stop()
+            await _shutdown_daemon_runtime(
+                terminal_clients=terminal_clients,
+                ui_ws_clients=state._ws_clients,
+                panel_log=panel_log,
+                event_ingest_drainer=event_ingest_drainer,
+                event_ingest_client=event_ingest_client,
+                cloud_connector_runtime=cloud_connector_runtime_holder[0],
+                ai_index_service=ai_index_service,
+                ai_summary_service=ai_summary_service,
+                bridge=bridge,
+                runner=runner,
+                state=state,
+                db=db,
+            )
+        finally:
+            _release_profile_daemon_owner(owner)
