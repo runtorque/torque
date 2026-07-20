@@ -95,10 +95,14 @@ function _inboxFocusedConversationAgentId() {
 function _inboxDocumentVisibleAndFocused() {
   if (typeof document === 'undefined' || !document) return false;
   if (document.hidden || document.visibilityState === 'hidden') return false;
-  // `hasFocus` is absent in a few embedded/webview environments. Preserve
-  // their previous behavior rather than treating an unavailable signal as a
-  // broad suppression permission.
-  return typeof document.hasFocus !== 'function' || document.hasFocus();
+  // Suppression must fail closed: without a positive focus signal, retain the
+  // normal Inbox/toast delivery rather than silently acknowledging a message.
+  if (typeof document.hasFocus !== 'function') return false;
+  try {
+    return document.hasFocus() === true;
+  } catch (_err) {
+    return false;
+  }
 }
 
 function _inboxActiveConversationVisible() {

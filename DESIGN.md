@@ -1696,7 +1696,8 @@ scope.
   reading is noise, while broad app-focus suppression would hide genuinely
   unattended conversations.
 - Constraints: The canonical terminal selection and focused agent must both
-  match the notification agent; document visibility/focus and terminal
+  match the notification agent; a positive document focus signal, document
+  visibility, and terminal
   visibility are required. This changes neither durable message history nor
   alert/error lifecycle semantics, and introduces no background or OS
   notification behavior.

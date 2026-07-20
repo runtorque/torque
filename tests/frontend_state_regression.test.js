@@ -264,6 +264,10 @@ class FakeDocument {
     this.listeners[type] = handler;
   }
 
+  hasFocus() {
+    return true;
+  }
+
   removeEventListener(type, handler) {
     if (this.listeners[type] === handler) delete this.listeners[type];
   }

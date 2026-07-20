@@ -366,6 +366,34 @@ test('different agent or hidden/unfocused conversation retains direct-message no
   assert.equal(sends.length, 0);
 });
 
+test('missing or non-function document.hasFocus retains routine direct-message delivery', () => {
+  const { context, sandbox, sends, terminalWorkspace } = createInboxContext();
+  prepareFocusedDirectConversation(sandbox, terminalWorkspace, 'agent-a');
+
+  delete sandbox.document.hasFocus;
+  context.inboxReceiveUpsert({
+    event: 'publish',
+    notice: directMessageNotice('dm-no-focus-api', 'agent-a'),
+    summary: { unread_notifications: 1, unread_total: 1, active_total: 1 },
+  });
+  assert.equal(sandbox.shownNotice.id, 'dm-no-focus-api');
+  assert.equal(sandbox.state.operator_notices['dm-no-focus-api'].read_at, 0);
+  assert.equal(sandbox.state.operator_notice_summary.unread_notifications, 1);
+  assert.equal(sends.length, 0);
+
+  delete sandbox.shownNotice;
+  sandbox.document.hasFocus = true;
+  context.inboxReceiveUpsert({
+    event: 'publish',
+    notice: directMessageNotice('dm-invalid-focus-api', 'agent-a'),
+    summary: { unread_notifications: 2, unread_total: 2, active_total: 2 },
+  });
+  assert.equal(sandbox.shownNotice.id, 'dm-invalid-focus-api');
+  assert.equal(sandbox.state.operator_notices['dm-invalid-focus-api'].read_at, 0);
+  assert.equal(sandbox.state.operator_notice_summary.unread_notifications, 2);
+  assert.equal(sends.length, 0);
+});
+
 test('error notices remain sticky and focus transitions preserve direct-message attention state', () => {
   const { context, sandbox, sends, terminalWorkspace } = createInboxContext();
   prepareFocusedDirectConversation(sandbox, terminalWorkspace, 'agent-a');
