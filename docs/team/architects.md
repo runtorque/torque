@@ -198,7 +198,7 @@ Messages to a dismissed peer Architect are saved as buffered and replay when tha
 
 Architects have one ask channel:
 
-- `user_ask(question)` — blocking. Creates a human-input task and pauses the
+- `raise(question)` — blocking. Creates a decision-input task and pauses the
   board until you answer.
 
 Use this for product-level checkpoints: "Should we ship dark mode now or after the API refactor?" — not for orchestration questions, which the Engineer should be handling.

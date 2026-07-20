@@ -23,11 +23,27 @@ _AGENT_PEER_MESSAGE_NON_USER_WHERE = (
     "(sender_kind!='user' AND recipient_kind!='user' "
     "AND message_type='message' AND blocking=0)"
 )
+# Only actual user participants belong to the user↔agent DM projection.
+# A non-user blocking raise is persisted in this table for routing/audit but
+# must not leak into local snapshots, deltas, or remote user egress.
+_USER_PARTICIPANT_WHERE = (
+    "((sender_kind='user' AND sender_id='user') "
+    "OR (recipient_kind='user' AND recipient_id='user'))"
+)
+# Blocking raise mirrors are special: only resolver-stamped user destinations
+# are user-DM rows. Existing non-raise system/audit display rows retain their
+# established projection behavior.
 _AGENT_DIRECT_MESSAGE_WHERE = (
-    "(sender_kind='user' OR recipient_kind='user' "
-    "OR message_type!='message' OR blocking!=0)"
+    f"({_USER_PARTICIPANT_WHERE} "
+    "OR (message_type NOT IN ('ask','ask_reply') "
+    "AND (message_type!='message' OR blocking!=0)))"
 )
 _AGENT_PEER_MESSAGE_USER_WHERE = _AGENT_DIRECT_MESSAGE_WHERE
+# Buffered replies to a parent-routed raise still need durable replay to the
+# asking agent, even though neither participant is the user.
+_BUFFERED_DIRECT_MESSAGE_TRANSPORT_WHERE = (
+    f"({_AGENT_DIRECT_MESSAGE_WHERE} OR message_type='ask_reply')"
+)
 _AGENT_PEER_CHAT_WHERE = (
     f"({_AGENT_PEER_MESSAGE_NON_USER_WHERE} "
     "AND sender_kind IN ('architect','engineer') "
@@ -627,11 +643,12 @@ class AgentHistoryPersistenceMixin:
     ) -> list[dict]:
         """Load recent direct/display messages involving one agent.
 
-        Direct rows include ordinary user↔agent messages and display-only ask
-        mirrors (``message_type!='message'``/``blocking``) whose owner-aware
-        recipient can be another agent.  ``peer_id``/``peer_kind`` can narrow
-        the opposite participant, while ``thread_id`` keeps future
-        multi-thread callers possible without changing storage.
+        Direct rows include user↔agent conversation plus established system
+        display rows. Owner-routed blocking raises (and their replies) remain
+        durable routing/audit records but are excluded from this user-DM
+        projection. ``peer_id``/``peer_kind`` can narrow the opposite
+        participant, while ``thread_id`` keeps future multi-thread callers
+        possible without changing storage.
         """
         agent_id = str(agent_id or "").strip()
         if not agent_id:
@@ -748,13 +765,11 @@ class AgentHistoryPersistenceMixin:
     ) -> list[dict]:
         """Load recent user↔agent direct rows across all agents, newest first.
 
-        This is the user-conversation lane that feeds the remote-channel egress
-        (ordinary user↔agent messages plus the display-only ask/ask_reply
-        mirrors).  It deliberately includes owner-routed ask mirrors whose
-        recipient is an agent; user-destined filtering for egress is applied
-        downstream by the connector (the canonical resolver-stamped gate), so
-        this loader stays the single shared source and never re-derives
-        ownership.  Bounded by ``limit``; never unbounded.
+        This is the user-conversation lane that feeds remote-channel egress.
+        Owner-routed raises are deliberately excluded based on their
+        resolver-stamped recipient fields; established system/audit display
+        rows remain available to their local surface. Bounded by ``limit``;
+        never unbounded.
         """
         limit = max(1, min(int(limit or 100), 1000))
         where = [_AGENT_DIRECT_MESSAGE_WHERE]
@@ -916,7 +931,7 @@ class AgentHistoryPersistenceMixin:
             "SELECT " + ", ".join(_AGENT_PEER_MESSAGE_COLUMNS) + " "
             "FROM agent_peer_messages "
             "WHERE recipient_id=? AND delivery_state='buffered' "
-            f"AND {_AGENT_PEER_MESSAGE_USER_WHERE} "
+            f"AND {_BUFFERED_DIRECT_MESSAGE_TRANSPORT_WHERE} "
             "AND archived_at=0 "
             "ORDER BY created_at ASC, id ASC LIMIT ?",
             (recipient_id, limit),

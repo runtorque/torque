@@ -47,7 +47,7 @@ In practice that loop looks like:
 4. Wait for Torque to push a digest. Don't poll.
 5. When the digest arrives, react to the changed tasks and agents only.
 6. Journal the dispatch decisions.
-7. Review diffs, merge, or ask the human when approval is needed.
+7. Review diffs, merge, or ask the decision owner when approval is needed.
 
 The crucial discipline is in step 4: **the Engineer waits for digests instead of polling**. Polling burns context. The digest is delivered with a heartbeat so the Engineer always knows it's still alive even when nothing's happening.
 
@@ -92,7 +92,7 @@ The journal is the Engineer's persistent memory. It's how the Engineer recovers 
 | Entry type | Use it for |
 |---|---|
 | `decision` | A choice the Engineer made and why. |
-| `observation` | Something learned from events, agents, or the human. |
+| `observation` | Something learned from events, agents, or the decision owner. |
 | `checkpoint` | A compact snapshot of board state and next steps. |
 | `plan` | Intended next actions. |
 
@@ -109,15 +109,15 @@ work — it is the Engineer's orientation surface, not the journal.
 
 ![The Engineer's session map: streams summary, ask counts, queued follow-ups, and per-stream NEXT/PRODUCT/WORKFLOW context.](../images/session-map.png)
 
-## Asking the human
+## Asking the decision owner
 
 Two ways to surface to you:
 
 - **`user_note`** — non-blocking. A note, soft question, status update, or proposed next wave. The Engineer keeps working.
-- **`user_ask`** — blocking. The board pauses until you answer. Use when the next orchestration step should not be guessed.
+- **`raise`** — blocking. The board pauses until you answer. Use when the next orchestration step should not be guessed.
 
-A common antipattern is using `user_ask` for things that are not actually
-blocking. Use `user_note` for visibility and reserve `user_ask` for decisions
+A common antipattern is using `raise` for things that are not actually
+blocking. Use `user_note` for visibility and reserve `raise` for decisions
 without which work cannot continue.
 
 When you reply (either through the panel or directly in the terminal), Torque automatically unpauses event delivery.
@@ -187,7 +187,7 @@ control, journals, worktrees, and messaging. The most important groups are:
 - **Artifacts and reports** — `task_artifact_upload`.
 - **Review and merge** — `worktree_diff`, `worktree_merge`, `worktree_rebase`, `worktree_create_pr`.
 - **Worktree** — `worktree_checkpoint`, `worktree_remove`.
-- **Communication** — `agent_message`, `user_note`, `user_ask`, `event_delivery_update`.
+- **Communication** — `agent_message`, `user_note`, `raise`, `event_delivery_update`.
 - **Recovery** — `journal_write`, `journal_list`, `event_list`.
 
 ## Dispatch philosophy

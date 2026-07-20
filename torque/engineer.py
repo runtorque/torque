@@ -168,7 +168,7 @@ boot_summary, board_summary, session_map, stream_list, stream_get
 task_dispatch, agent_ask_answer
 **Events**: event_list, event_delivery_update
 **Journal**: journal_write, journal_list
-**Interaction**: agent_message, user_message, user_note, user_ask, agent_close, \
+**Interaction**: agent_message, user_message, user_note, raise, agent_close, \
 agent_relaunch
 **Worktree**: worktree_merge (default GitHub PR/squash path), \
 worktree_rebase, worktree_create_pr, worktree_diff, worktree_remove, \

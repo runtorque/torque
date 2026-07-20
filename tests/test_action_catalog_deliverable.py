@@ -79,7 +79,7 @@ class CatalogDeliverableContractTests(unittest.TestCase):
     def test_feature_research_preserves_existing_transitions(self):
         # The deliverable rollout MUST NOT clobber the existing pipeline
         # transitions: the engineer-approved feature/implement self-transition
-        # and the torque_ask user-approval path.
+        # and the raise decision-owner path.
         rendered = self._render("feature/research")
         transitions = rendered["transitions"]
         actions = [
@@ -88,7 +88,7 @@ class CatalogDeliverableContractTests(unittest.TestCase):
         self.assertIn("feature/implement", actions)
         self.assertTrue(
             any(tr.get("ask") for tr in transitions),
-            "feature/research must keep its torque_ask transition for "
+            "feature/research must keep its raise transition for "
             "user-approval flows",
         )
 
@@ -101,7 +101,7 @@ class CatalogDeliverableContractTests(unittest.TestCase):
             "Phase 2: Plan",
             "Engineer approval is enough",
             "Human approval is required",
-            "torque_ask",
+            "raise",
         ):
             self.assertIn(needle, prompt)
 
@@ -150,7 +150,8 @@ class CatalogDispatchPostscriptTests(unittest.TestCase):
         self.assertIn("Implementation plan", ps)
         self.assertIn("plan", ps)
         # ...AND the user-approval ask path is still wired through.
-        self.assertIn("user_ask", ps)
+        self.assertIn("raise", ps)
+        self.assertNotIn("user_ask", ps)
         # The block precedes the completion-paths section so the worker
         # reads the contract before deciding which path to take.
         self.assertLess(

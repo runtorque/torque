@@ -1010,7 +1010,7 @@ class TorqueDBTests(unittest.TestCase):
                 row["id"]
                 for row in self.db.load_direct_messages_for_agent("arch-a")
             ],
-            ["direct-ask-display", "direct-buffered"],
+            ["direct-buffered"],
         )
         self.assertEqual(
             [

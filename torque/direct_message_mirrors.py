@@ -5,23 +5,19 @@ recipient / is the ask user-destined" (``resolve_ask_recipient``).  Every
 surface that needs owner-aware ask routing MUST share this one resolver rather
 than re-deriving ownership in parallel:
 
-1. ``torque_ask`` blocking-HITL routing (server.py ``ask`` action): uses
-   ``ask_recipient_is_user`` for ``needs_attention`` and
-   ``ask_task_labels_for_owner_recipient`` for the ``torque:non-user-ask``
-   label.
-2. The direct-message mirror rows below the terminal: ``save_direct_ask_mirror``
-   stamps the resolved ``recipient_*`` fields onto the persisted row.
-3. The EE connector egress (``ee/python`` / ``_wire_kind_for_direct_message_row``):
-   it consumes the resolver's OUTPUT as stamped on the row
-   (``recipient_kind``/``sender_kind``) to decide whether an ask is user-destined
-   and may egress to the ``{kind:"remote-client", id:"user"}`` lane.  It does NOT
+1. The blocking ``raise`` action uses ``ask_recipient_is_user`` for
+   ``needs_attention`` and ``ask_task_labels_for_owner_recipient`` for the
+   ``torque:non-user-ask`` label.
+2. ``save_direct_ask_mirror`` stamps the resolved ``recipient_*`` fields onto
+   the durable row. Only rows stamped for the user are projected into the
+   user↔agent DM cache.
+3. The EE connector consumes those stamped fields to decide whether a row may
+   egress to the ``{kind:"remote-client", id:"user"}`` lane; it does NOT
    re-derive ownership.
-4. P6's remote ask surface consumes the same stamped rows, so it answers exactly
-   the asks that are genuinely user-destined -- identical to local behavior.
 
-The ask row itself remains a display mirror.  Ask-reply rows are also the
-durable transport record for answer delivery: if the asking agent has no live
-session, the row stays buffered and is replayed when the agent wakes.
+Ask-reply rows are also the durable transport record for answer delivery: if
+the asking agent has no live session, the row stays buffered and is replayed
+when the agent wakes, even when the decision owner is another agent.
 """
 
 from __future__ import annotations
@@ -80,7 +76,7 @@ def agent_direct_message_participant(cell) -> DirectMessageParticipant:
 def resolve_ask_recipient(state, asking_agent) -> DirectMessageParticipant:
     """Canonical owner-aware resolver: who answers ``asking_agent``'s ask.
 
-    This is THE single resolver shared by ``torque_ask`` routing, the
+    This is THE single resolver shared by blocking ``raise`` routing, the
     direct-message mirror, and (via the stamped row fields) the connector
     egress.  Owner-chain routing falls through to the user only when the
     immediate owner is the user:
@@ -240,6 +236,8 @@ def save_direct_ask_mirror(
     now = float(created_at if created_at is not None else time.time())
     row = {
         "id": message_id,
+        # Storage keeps a stable thread id for compatibility. Projection is
+        # gated by the resolver-stamped recipient fields, never this id.
         "thread_id": canonical_user_agent_thread_id(sender.id),
         "reply_to_id": "",
         "group_name": str(getattr(asking_agent, "group", "") or "").strip(),

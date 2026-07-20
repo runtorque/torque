@@ -83,7 +83,7 @@ The `ask` transition replaces `action:` with `ask: true`:
 ```yaml
 transitions:
   - ask: true
-    when: changes look correct but need human approval before merging
+    when: changes look correct but need decision-owner approval before merging
 ```
 
 The `when` field is documentation that the agent reads. It's included in the dispatch postscript so the Worker knows when each transition is appropriate. Be specific. "When ready" is useless; "implementation is complete and tests pass" is actionable.
@@ -165,15 +165,15 @@ There's one exception worth knowing: a review-cycle fix that derives `feature/fi
 
 ## The `ask` transition
 
-`ask: true` is the human-in-the-loop gate. It's a transition that, when taken, **does not auto-dispatch**.
+`ask: true` is the decision owner-in-the-loop gate. It's a transition that, when taken, **does not auto-dispatch**.
 
 ```yaml
 transitions:
   - ask: true
-    when: changes look correct but need human approval before merging
+    when: changes look correct but need decision-owner approval before merging
 ```
 
-When an agent calls `user_ask(question="...")`:
+When an agent calls `raise(question="...")`, Torque resolves the immediate decision owner (Worker → owning Engineer; hired Engineer → hiring Architect; Architect or orphan → user).
 
 1. A derived task is created in the **Backlog** lane with a `human` label.
 2. The task body contains the question.

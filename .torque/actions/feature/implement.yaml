@@ -34,7 +34,7 @@ prompt: |
 
   ## Approach
 
-  - Before coding, confirm the task context includes the goal, relevant prior decisions or artifacts, constraints/non-goals, acceptance criteria, and verification expectations. If something important is missing but inferable, state your assumption in progress or closeout; if it blocks safe implementation, use `torque_ask(...)` instead of guessing.
+  - Before coding, confirm the task context includes the goal, relevant prior decisions or artifacts, constraints/non-goals, acceptance criteria, and verification expectations. If something important is missing but inferable, state your assumption in progress or closeout; if it blocks safe implementation, use `raise(...)` instead of guessing.
   - Follow the plan from the previous steps — do not redesign or re-scope
   - Write clean, minimal code that follows the existing patterns in the codebase
   - Add or update tests to cover the new behavior

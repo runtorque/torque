@@ -656,16 +656,13 @@ class MatrixStateCleanupTests(unittest.TestCase):
         )
         self.assertEqual(
             [entry["id"] for entry in state.direct_messages_by_agent[arch_a.id]],
-            ["direct-user-arch-a", "direct-ask-arch-a"],
+            ["direct-user-arch-a"],
         )
         self.assertEqual(
             state.direct_messages_by_agent[arch_a.id][0]["thread_id"],
             "user-agent:user:arch-a",
         )
-        self.assertEqual(
-            state.direct_messages_by_agent[arch_b.id][0]["id"],
-            "direct-ask-arch-a",
-        )
+        self.assertEqual(state.direct_messages_by_agent.get(arch_b.id), [])
         self.assertEqual(
             [entry["id"] for entry in state.agents[arch_b.id].mcp_messages],
             ["msg-peer-1"],

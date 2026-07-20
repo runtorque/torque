@@ -1403,16 +1403,28 @@ def _peer_message_cache_entry(row: dict, agent_id: str) -> dict | None:
 
 
 def _is_user_direct_message_row(row: dict) -> bool:
+    """Return whether a row belongs in the user↔agent DM projection.
+
+    Blocking escalation rows may be persisted between an agent and its
+    immediate owner. Their resolver-stamped participants, not their
+    ``message_type`` or compatibility thread id, decide whether they belong
+    in the user conversation.
+    """
     sender_kind = str((row or {}).get("sender_kind", "") or "").strip()
+    sender_id = str((row or {}).get("sender_id", "") or "").strip()
     recipient_kind = str((row or {}).get("recipient_kind", "") or "").strip()
-    message_type = str((row or {}).get("message_type", "message") or "message").strip()
-    blocking = bool((row or {}).get("blocking", False))
-    return (
-        sender_kind == "user"
-        or recipient_kind == "user"
-        or message_type != "message"
-        or blocking
+    recipient_id = str((row or {}).get("recipient_id", "") or "").strip()
+    involves_user = (
+        (sender_kind == "user" and sender_id == "user")
+        or (recipient_kind == "user" and recipient_id == "user")
     )
+    message_type = str((row or {}).get("message_type", "message") or "message").strip()
+    # A blocking raise and its answer are user-DM rows only when the resolved
+    # recipient is actually the user. Other system/audit display rows keep
+    # their established projection behavior.
+    if message_type in {"ask", "ask_reply"}:
+        return involves_user
+    return involves_user or message_type != "message" or bool(row.get("blocking", False))
 
 
 def _direct_message_cache_entry(row: dict, agent_id: str) -> dict | None:
