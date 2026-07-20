@@ -18112,6 +18112,7 @@ test('incoming direct_message_upsert refreshes the real terminal direct-message 
   loadScript(context, 'static/js/terminal/composer.js');
   loadScript(context, 'static/js/terminal/composer-attachments.js');
   loadScript(context, 'static/js/terminal/xterm-runtime.js');
+  loadScript(context, 'static/js/inbox.js');
   const dom = attachTerminalWorkspaceDom(document);
 
   runInContext(context, `
@@ -18141,6 +18142,11 @@ test('incoming direct_message_upsert refreshes the real terminal direct-message 
     };
     selectedTerminalId = 'worker-1';
     selectedAgentId = 'worker-1';
+    focusedItemId = 'worker-1';
+    var __noticeToastCalls = 0;
+    var __noticeLifecycleCommands = [];
+    send = function(message) { __noticeLifecycleCommands.push(message); return true; };
+    _showNoticeToast = function() { __noticeToastCalls += 1; };
     renderTerminalWorkspace();
   `);
   assert.doesNotMatch(dom.directMessages.innerHTML, /delta hello/);
@@ -18164,6 +18170,27 @@ test('incoming direct_message_upsert refreshes the real terminal direct-message 
         recipient_id: 'user',
         recipient_kind: 'user',
       },
+    }, {
+      op: 'operator_notice_upsert',
+      event: 'publish',
+      notice: {
+        id: 'notice-delta-dm-1',
+        notice_type: 'notification',
+        severity: 'info',
+        category: 'direct_message',
+        title: 'Message from Worker',
+        message: 'delta hello',
+        agent_id: 'worker-1',
+        read_at: 0,
+        archived_at: 0,
+      },
+      summary: {
+        open_alerts: 0,
+        unread_alerts: 0,
+        unread_notifications: 1,
+        unread_total: 1,
+        active_total: 1,
+      },
     }],
   });
 
@@ -18171,6 +18198,13 @@ test('incoming direct_message_upsert refreshes the real terminal direct-message 
     'viewed direct message delta must refresh the real terminal workspace');
   assert.match(dom.directMessages.innerHTML, /delta hello/);
   assert.match(dom.directMessages.innerHTML, /terminal-direct-message--agent-to-user/);
+  assert.equal(runInContext(context, `__noticeToastCalls`), 0,
+    'the visible conversation replaces the routine bottom-right delivery overlay');
+  assert.ok(runInContext(context, `state.operator_notices['notice-delta-dm-1'].read_at`) > 0,
+    'the focused conversation acknowledges its redundant Inbox notice');
+  assert.deepEqual(JSON.parse(JSON.stringify(runInContext(context, `__noticeLifecycleCommands.pop()`))), {
+    cmd: 'operator_notice_mark_read', id: 'notice-delta-dm-1',
+  });
 });
 
 test('mcp_call_append for non-focused agent does NOT invalidate engineer panel (TORQUE:236 v4)', () => {

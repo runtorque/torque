@@ -67,6 +67,80 @@ function _inboxPopoverVisible() {
   return !!(root && !root.hidden);
 }
 
+function _inboxConversationAgentId(cellId) {
+  var id = String(cellId || '').trim();
+  if (!id || !state || !state.agents) return '';
+  var cell = state.agents[id];
+  if (!cell) return '';
+  if (cell.cell_type === 'agent') return String(cell.id || '').trim();
+  if (cell.cell_type === 'terminal') {
+    var parentId = String(cell.parent_id || '').trim();
+    return parentId && state.agents[parentId] ? parentId : '';
+  }
+  return '';
+}
+
+function _inboxActiveConversationAgentId() {
+  return _inboxConversationAgentId(
+    typeof selectedTerminalId !== 'undefined' ? selectedTerminalId : ''
+  );
+}
+
+function _inboxFocusedConversationAgentId() {
+  return _inboxConversationAgentId(
+    typeof focusedItemId !== 'undefined' ? focusedItemId : ''
+  );
+}
+
+function _inboxDocumentVisibleAndFocused() {
+  if (typeof document === 'undefined' || !document) return false;
+  if (document.hidden || document.visibilityState === 'hidden') return false;
+  // `hasFocus` is absent in a few embedded/webview environments. Preserve
+  // their previous behavior rather than treating an unavailable signal as a
+  // broad suppression permission.
+  return typeof document.hasFocus !== 'function' || document.hasFocus();
+}
+
+function _inboxActiveConversationVisible() {
+  var root = document.getElementById('terminal-workspace');
+  return !!(
+    root
+    && !root.hidden
+    && root.classList
+    && typeof root.classList.contains === 'function'
+    && root.classList.contains('active')
+  );
+}
+
+function _inboxShouldAcknowledgeFocusedDirectMessage(notice) {
+  if (!notice
+      || notice.notice_type !== 'notification'
+      || String(notice.category || '') !== 'direct_message'
+      || String(notice.severity || '').toLowerCase() === 'error') {
+    return false;
+  }
+  var agentId = String(notice.agent_id || '').trim();
+  return !!(
+    agentId
+    && _inboxDocumentVisibleAndFocused()
+    && _inboxActiveConversationVisible()
+    && _inboxActiveConversationAgentId() === agentId
+    && _inboxFocusedConversationAgentId() === agentId
+  );
+}
+
+function _inboxAcknowledgeFocusedDirectMessage(notice) {
+  if (!notice || Number(notice.read_at || 0)) return;
+  // Keep the local badge truthful while the normal lifecycle command persists
+  // the acknowledgement and returns its authoritative summary/delta.
+  notice.read_at = Date.now() / 1000;
+  var summary = _inboxSummary();
+  summary.unread_notifications = Math.max(0, summary.unread_notifications - 1);
+  summary.unread_total = Math.max(0, summary.unread_total - 1);
+  state.operator_notice_summary = summary;
+  inboxLifecycle(notice.id, 'read');
+}
+
 function _inboxDefaultAnchor() {
   var buttons = document.querySelectorAll
     ? document.querySelectorAll('.inbox-bell-button')
@@ -424,9 +498,15 @@ function inboxReceiveUpsert(op) {
   if (op.summary && typeof op.summary === 'object') {
     state.operator_notice_summary = op.summary;
   }
+  var acknowledgeFocusedDirectMessage = (op.event === 'publish' || op.event === 'recur')
+    && _inboxShouldAcknowledgeFocusedDirectMessage(op.notice);
+  if (acknowledgeFocusedDirectMessage) {
+    _inboxAcknowledgeFocusedDirectMessage(op.notice);
+  }
   inboxUpdateBadge();
   if (_inboxPopoverVisible()) renderInbox();
   if ((op.event === 'publish' || op.event === 'recur')
+      && !acknowledgeFocusedDirectMessage
       && typeof _showNoticeToast === 'function') {
     _showNoticeToast(op.notice);
   }
