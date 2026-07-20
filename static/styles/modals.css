@@ -1741,7 +1741,7 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   font-size: 11px;
   padding: 10px 10px 10px 12px;
   border-radius: var(--radius);
-  background: var(--bg-surface);
+  background: color-mix(in srgb, var(--bg-surface) 90%, transparent);
   border: 1px solid var(--border);
   color: var(--text);
   box-shadow: 0 4px 12px rgba(0,0,0,.4);
