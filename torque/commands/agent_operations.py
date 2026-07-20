@@ -376,6 +376,12 @@ async def handle_agent_operation_command(
     elif cmd == "add_agent":
         group = data["group"]
         is_engineer = data.get("is_engineer", False)
+        # ``add_agent`` is the legacy/general user creation route.  The
+        # only ordinary agent kind is now ``worker`` (Architects and
+        # Engineers have dedicated creation flows), so it must use the
+        # worker resolver just like ``add_worker`` and task dispatch.  Using
+        # the generic resolver here silently bypassed group worker defaults
+        # such as ``worker_model``.
 
         # Enforce one engineer per group
         if is_engineer:
@@ -399,7 +405,7 @@ async def handle_agent_operation_command(
             _overrides = dict(data)
             resolver = (
                 _resolve_engineer_launch_config
-                if is_engineer else _resolve_agent_launch_config
+                if is_engineer else _resolve_worker_launch_config
             )
             launch_cfg = resolver(
                 group,
@@ -460,7 +466,8 @@ async def handle_agent_operation_command(
                     "target_session_id", ""),
                 target_window_id=data.get(
                     "target_window_id", ""),
-                persistent_prompt_text=persistent_prompt_text)
+                persistent_prompt_text=persistent_prompt_text,
+                kind="engineer" if is_engineer else "worker")
             if cell:
                 # Designate as engineer
                 if is_engineer:

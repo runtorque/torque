@@ -1,5 +1,6 @@
 import importlib
 import os
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -521,6 +522,53 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
             "codex --model gpt-5.4 -c model_reasoning_effort=high",
         )
         self.assertTrue(resolved["worktree"])
+
+    async def test_persisted_worker_model_launches_codex_worker_with_terra(self):
+        """A persisted Worker default reaches the fresh Codex launch input."""
+        from torque.db import TorqueDB
+        from torque.adapters.codex import CodexAdapter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db = TorqueDB(Path(tmp) / "torque.db")
+            db.init()
+            self.addCleanup(db.close)
+            state = self.state_mod.MatrixState(db=db)
+            state.add_group("backend")
+            state.update_group_settings(
+                "backend",
+                worker_provider="codex",
+                worker_model="gpt-5.6-terra",
+            )
+
+            # Model resolution must consume the persisted field, not the
+            # pre-update in-memory settings object.
+            reloaded = self.state_mod.MatrixState(db=db)
+            reloaded.load()
+            bridge = _CapturingBridge(current_path=tmp)
+            service = self.server_agent_mod.AgentLaunchService(
+                state=reloaded,
+                connection=None,
+                bridge=bridge,
+                worktree_mgr=None,
+                template_mgr=_FakeTemplateManager(),
+            )
+            launch_cfg = service.resolve_worker_launch_config(
+                "backend", base_dir=tmp)
+            worker = await service.create_agent_with_config(
+                "backend", "Terra Worker", launch_cfg, kind="worker")
+
+        self.assertEqual(
+            launch_cfg["command"], "codex --model gpt-5.6-terra",
+        )
+        self.assertEqual(worker.command, launch_cfg["command"])
+        self.assertEqual(bridge.create_session_calls[0]["cell"].command,
+                         "codex --model gpt-5.6-terra")
+        telemetry = CodexAdapter().parse_event({
+            "hook_event_name": "SessionStart",
+            "model": "gpt-5.6-terra",
+            "session_id": "terra-session",
+        }, worker)
+        self.assertEqual(telemetry.data["model"], "gpt-5.6-terra")
 
     def test_resolve_worker_launch_config_explicit_provider_command_win(self):
         service = self.server_agent_mod.AgentLaunchService(

@@ -137,7 +137,7 @@ class TerminalAutoTerminalsGuardTests(unittest.IsolatedAsyncioTestCase):
 
     @staticmethod
     async def _fake_create_agent_with_config(state, group, name, launch_cfg,
-                                             **_kwargs):
+                                             **kwargs):
         cell = state.add_agent(
             name=name,
             group=group,
@@ -151,6 +151,7 @@ class TerminalAutoTerminalsGuardTests(unittest.IsolatedAsyncioTestCase):
         )
         if cell:
             cell.agent_type = launch_cfg.get("agent_type", "")
+            cell.kind = kwargs.get("kind", "")
             state._emit_agent(cell)
             state._db_save_agent(cell)
         return cell
@@ -160,6 +161,58 @@ class TerminalAutoTerminalsGuardTests(unittest.IsolatedAsyncioTestCase):
         state.add_group("g")
         state.update_group_settings("g", auto_terminals=count)
         return state
+
+    async def test_add_agent_uses_worker_defaults_and_stamps_worker_kind(self):
+        """Legacy/general creation remains an ordinary Worker launch path."""
+        state = self._state_with_hidden_auto_terminals()
+        calls = []
+        launch_cfg = {
+            "provider": "codex",
+            "agent_type": "codex",
+            "profile": "Default",
+            "command": "codex --model gpt-5.6-terra",
+            "directory": "/repo",
+            "tab_color": "",
+            "initial_prompt": "",
+            "terminals": [],
+            "worktree": False,
+        }
+
+        def resolve_worker(group, *, base_dir="", explicit_template="",
+                           overrides=None):
+            calls.append({
+                "group": group,
+                "base_dir": base_dir,
+                "template": explicit_template,
+                "overrides": dict(overrides or {}),
+            })
+            return launch_cfg
+
+        def generic_resolver(*_args, **_kwargs):
+            raise AssertionError("ordinary add_agent must use worker defaults")
+
+        handle_command = self._extract_handle_command(
+            state,
+            _create_agent_with_config=(
+                lambda group, name, cfg, **kwargs:
+                self._fake_create_agent_with_config(
+                    state, group, name, cfg, **kwargs)
+            ),
+            _resolve_agent_launch_config=generic_resolver,
+            _resolve_worker_launch_config=resolve_worker,
+        )
+
+        await handle_command({
+            "cmd": "add_agent",
+            "group": "g",
+            "name": "Inherited Worker",
+        })
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["group"], "g")
+        worker = next(iter(state.agents.values()))
+        self.assertEqual(worker.kind, "worker")
+        self.assertEqual(worker.command, "codex --model gpt-5.6-terra")
 
     async def test_add_agent_ignores_hidden_auto_terminals_without_explicit_companions(self):
         state = self._state_with_hidden_auto_terminals(count=2)
@@ -184,7 +237,7 @@ class TerminalAutoTerminalsGuardTests(unittest.IsolatedAsyncioTestCase):
                     state, group, name, cfg, **kwargs)
             ),
             _create_child_terminals=create_child_terminals,
-            _resolve_agent_launch_config=lambda *args, **kwargs: launch_cfg,
+            _resolve_worker_launch_config=lambda *args, **kwargs: launch_cfg,
         )
 
         await handle_command({
@@ -245,7 +298,7 @@ class TerminalAutoTerminalsGuardTests(unittest.IsolatedAsyncioTestCase):
                     state, group, name, cfg, **kwargs)
             ),
             _create_child_terminals=create_child_terminals,
-            _resolve_agent_launch_config=resolve_launch_config,
+            _resolve_worker_launch_config=resolve_launch_config,
         )
 
         result = await handle_command({
@@ -313,7 +366,7 @@ class TerminalAutoTerminalsGuardTests(unittest.IsolatedAsyncioTestCase):
                     state, group, name, cfg, **kwargs)
             ),
             _create_child_terminals=create_child_terminals,
-            _resolve_agent_launch_config=lambda *args, **kwargs: launch_cfg,
+            _resolve_worker_launch_config=lambda *args, **kwargs: launch_cfg,
         )
 
         await handle_command({
