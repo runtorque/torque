@@ -29,6 +29,10 @@ function classList() {
 function createInboxContext() {
   const sends = [];
   const badge = { hidden: true, textContent: '' };
+  const terminalWorkspace = {
+    hidden: false,
+    classList: classList(),
+  };
   const button = {
     classList: classList(),
     attributes: {},
@@ -63,7 +67,12 @@ function createInboxContext() {
       operator_notice_summary: {},
     },
     document: {
-      getElementById(id) { return id === 'inbox-popover' ? panel : null; },
+      hidden: false,
+      hasFocus() { return sandbox.documentFocused; },
+      getElementById(id) {
+        if (id === 'inbox-popover') return panel;
+        return id === 'terminal-workspace' ? terminalWorkspace : null;
+      },
       querySelector(selector) {
         return selector === '.inbox-bell-button' ? button : null;
       },
@@ -77,6 +86,7 @@ function createInboxContext() {
       innerHeight: 800,
       addEventListener() {},
     },
+    documentFocused: true,
     esc(value) {
       return String(value == null ? '' : value)
         .replace(/&/g, '&amp;')
@@ -91,7 +101,31 @@ function createInboxContext() {
   sandbox.globalThis = sandbox;
   const context = vm.createContext(sandbox);
   vm.runInContext(source('static/js/inbox.js'), context);
-  return { context, sandbox, panel, button, badge, sends };
+  return { context, sandbox, panel, button, badge, sends, terminalWorkspace };
+}
+
+function directMessageNotice(id, agentId) {
+  return {
+    id,
+    notice_type: 'notification',
+    severity: 'info',
+    category: 'direct_message',
+    title: 'Message from Agent',
+    message: 'A direct message',
+    agent_id: agentId,
+    read_at: 0,
+    archived_at: 0,
+  };
+}
+
+function prepareFocusedDirectConversation(sandbox, terminalWorkspace, agentId) {
+  terminalWorkspace.classList.add('active');
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.agents = {
+    [agentId]: { id: agentId, cell_type: 'agent', kind: 'worker' },
+  };
+  sandbox.selectedTerminalId = agentId;
+  sandbox.focusedItemId = agentId;
 }
 
 test('Inbox is global chrome opened from a notification bell, not a dockable panel', () => {
@@ -250,6 +284,165 @@ test('notice deltas update state, badge, visible panel, and delivery overlay', (
     },
   });
   assert.equal(sandbox.shownNotice, undefined, 'lifecycle updates do not create new overlays');
+});
+
+test('focused visible direct-message conversation acknowledges the routine notice without a toast', () => {
+  const { context, sandbox, badge, sends, terminalWorkspace } = createInboxContext();
+  prepareFocusedDirectConversation(sandbox, terminalWorkspace, 'agent-a');
+
+  context.inboxReceiveUpsert({
+    event: 'publish',
+    notice: directMessageNotice('dm-a', 'agent-a'),
+    summary: {
+      open_alerts: 0,
+      unread_alerts: 0,
+      unread_notifications: 1,
+      unread_total: 1,
+      active_total: 1,
+    },
+  });
+
+  assert.equal(sandbox.shownNotice, undefined, 'the inline conversation is the delivery surface');
+  assert.ok(sandbox.state.operator_notices['dm-a'].read_at > 0, 'notice is acknowledged locally');
+  assert.equal(sandbox.state.operator_notice_summary.unread_notifications, 0);
+  assert.equal(sandbox.state.operator_notice_summary.unread_total, 0);
+  assert.equal(badge.hidden, true, 'no redundant unread badge remains');
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(sends.pop())),
+    { cmd: 'operator_notice_mark_read', id: 'dm-a' },
+    'the normal lifecycle command persists the acknowledgement',
+  );
+});
+
+test('different agent or hidden/unfocused conversation retains direct-message notification delivery', () => {
+  const { context, sandbox, sends, terminalWorkspace } = createInboxContext();
+  prepareFocusedDirectConversation(sandbox, terminalWorkspace, 'agent-a');
+
+  context.inboxReceiveUpsert({
+    event: 'publish',
+    notice: directMessageNotice('dm-b', 'agent-b'),
+    summary: { unread_notifications: 1, unread_total: 1, active_total: 1 },
+  });
+  assert.equal(sandbox.shownNotice.id, 'dm-b', 'another agent remains unattended');
+  assert.equal(sandbox.state.operator_notices['dm-b'].read_at, 0);
+  assert.equal(sends.length, 0);
+
+  delete sandbox.shownNotice;
+  sandbox.selectedTerminalId = 'agent-a';
+  sandbox.focusedItemId = 'agent-a';
+  terminalWorkspace.classList.remove('active');
+  context.inboxReceiveUpsert({
+    event: 'publish',
+    notice: directMessageNotice('dm-other-panel', 'agent-a'),
+    summary: { unread_notifications: 2, unread_total: 2, active_total: 2 },
+  });
+  assert.equal(sandbox.shownNotice.id, 'dm-other-panel',
+    'a different visible panel is not the direct-message conversation');
+  assert.equal(sandbox.state.operator_notices['dm-other-panel'].read_at, 0);
+  assert.equal(sends.length, 0);
+
+  delete sandbox.shownNotice;
+  terminalWorkspace.classList.add('active');
+  sandbox.document.hidden = true;
+  context.inboxReceiveUpsert({
+    event: 'publish',
+    notice: directMessageNotice('dm-hidden', 'agent-a'),
+    summary: { unread_notifications: 3, unread_total: 3, active_total: 3 },
+  });
+  assert.equal(sandbox.shownNotice.id, 'dm-hidden', 'hidden windows retain current delivery behavior');
+  assert.equal(sandbox.state.operator_notices['dm-hidden'].read_at, 0);
+  assert.equal(sends.length, 0);
+
+  delete sandbox.shownNotice;
+  sandbox.document.hidden = false;
+  sandbox.documentFocused = false;
+  context.inboxReceiveUpsert({
+    event: 'publish',
+    notice: directMessageNotice('dm-unfocused', 'agent-a'),
+    summary: { unread_notifications: 4, unread_total: 4, active_total: 4 },
+  });
+  assert.equal(sandbox.shownNotice.id, 'dm-unfocused', 'unfocused windows retain current delivery behavior');
+  assert.equal(sandbox.state.operator_notices['dm-unfocused'].read_at, 0);
+  assert.equal(sends.length, 0);
+});
+
+test('missing or non-function document.hasFocus retains routine direct-message delivery', () => {
+  const { context, sandbox, sends, terminalWorkspace } = createInboxContext();
+  prepareFocusedDirectConversation(sandbox, terminalWorkspace, 'agent-a');
+
+  delete sandbox.document.hasFocus;
+  context.inboxReceiveUpsert({
+    event: 'publish',
+    notice: directMessageNotice('dm-no-focus-api', 'agent-a'),
+    summary: { unread_notifications: 1, unread_total: 1, active_total: 1 },
+  });
+  assert.equal(sandbox.shownNotice.id, 'dm-no-focus-api');
+  assert.equal(sandbox.state.operator_notices['dm-no-focus-api'].read_at, 0);
+  assert.equal(sandbox.state.operator_notice_summary.unread_notifications, 1);
+  assert.equal(sends.length, 0);
+
+  delete sandbox.shownNotice;
+  sandbox.document.hasFocus = true;
+  context.inboxReceiveUpsert({
+    event: 'publish',
+    notice: directMessageNotice('dm-invalid-focus-api', 'agent-a'),
+    summary: { unread_notifications: 2, unread_total: 2, active_total: 2 },
+  });
+  assert.equal(sandbox.shownNotice.id, 'dm-invalid-focus-api');
+  assert.equal(sandbox.state.operator_notices['dm-invalid-focus-api'].read_at, 0);
+  assert.equal(sandbox.state.operator_notice_summary.unread_notifications, 2);
+  assert.equal(sends.length, 0);
+});
+
+test('error notices remain sticky and focus transitions preserve direct-message attention state', () => {
+  const { context, sandbox, sends, terminalWorkspace } = createInboxContext();
+  prepareFocusedDirectConversation(sandbox, terminalWorkspace, 'agent-a');
+  const originalToast = sandbox._showNoticeToast;
+  sandbox._showNoticeToast = function(notice) {
+    sandbox.shownNotice = notice;
+    return originalToast(notice);
+  };
+
+  const errorNotice = Object.assign(directMessageNotice('dm-error', 'agent-a'), {
+    severity: 'error',
+  });
+  context.inboxReceiveUpsert({
+    event: 'publish',
+    notice: errorNotice,
+    summary: { unread_notifications: 1, unread_total: 1, active_total: 1 },
+  });
+  assert.equal(sandbox.shownNotice.id, 'dm-error', 'error delivery is never suppressed');
+  assert.equal(sandbox.state.operator_notices['dm-error'].read_at, 0);
+  assert.equal(sends.length, 0);
+
+  delete sandbox.shownNotice;
+  sandbox.selectedTerminalId = 'agent-b';
+  sandbox.focusedItemId = 'agent-b';
+  sandbox.state.agents['agent-b'] = { id: 'agent-b', cell_type: 'agent', kind: 'worker' };
+  context.inboxReceiveUpsert({
+    event: 'publish',
+    notice: directMessageNotice('dm-after-focus-change', 'agent-a'),
+    summary: { unread_notifications: 2, unread_total: 2, active_total: 2 },
+  });
+  assert.equal(sandbox.shownNotice.id, 'dm-after-focus-change');
+  assert.equal(sandbox.state.operator_notices['dm-after-focus-change'].read_at, 0);
+  assert.equal(sends.length, 0, 'a new focused agent must not acknowledge the old conversation');
+
+  sandbox.selectedTerminalId = 'agent-a';
+  sandbox.focusedItemId = 'agent-a';
+  delete sandbox.shownNotice;
+  context.inboxReceiveUpsert({
+    event: 'publish',
+    notice: directMessageNotice('dm-after-return', 'agent-a'),
+    summary: { unread_notifications: 3, unread_total: 3, active_total: 3 },
+  });
+  assert.equal(sandbox.shownNotice, undefined, 'returning to the conversation restores inline acknowledgement');
+  assert.equal(sandbox.state.operator_notices['dm-after-return'].read_at > 0, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(sends.pop())), {
+    cmd: 'operator_notice_mark_read', id: 'dm-after-return',
+  });
+  assert.equal(sandbox.state.operator_notices['dm-after-focus-change'].read_at, 0,
+    'the unattended message remains unread after focus transitions');
 });
 
 test('durable client errors and toast controls use the notification substrate', () => {

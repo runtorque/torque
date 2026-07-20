@@ -1683,6 +1683,28 @@ scope.
 - Verification: Frontend regressions cover both unavailable browser and
   available Tauri action sets and protect both header construction paths.
 
+### D-045 — Visible direct-message conversations acknowledge routine delivery inline
+
+- Date: 2026-07-20
+- Status: accepted
+- Decision: When the visible, focused terminal conversation is for the same
+  agent as a routine direct-message notification, Torque renders and persists
+  the message inline and acknowledges its Inbox notification without a toast
+  or unread badge. A different agent or panel, a hidden/unfocused window, and
+  all error delivery retain the normal Inbox/toast behavior.
+- Rationale: A second attention signal for a message the operator is already
+  reading is noise, while broad app-focus suppression would hide genuinely
+  unattended conversations.
+- Constraints: The canonical terminal selection and focused agent must both
+  match the notification agent; a positive document focus signal, document
+  visibility, and terminal
+  visibility are required. This changes neither durable message history nor
+  alert/error lifecycle semantics, and introduces no background or OS
+  notification behavior.
+- Verification: Frontend regressions cover exact-conversation suppression,
+  off-agent and hidden/unfocused retention, error retention, and focus
+  transitions that preserve unread state for unattended messages.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:
