@@ -649,7 +649,7 @@ body.runtime-embedded #modal-group .modal-summary {
   gap: 8px;
   margin: 0 0 8px;
   padding: 8px 0;
-  background: color-mix(in srgb, var(--bg-surface) 90%, transparent);
+  background: var(--bg-surface);
 }
 .settings-list-toolbar input { min-width: 0; }
 .settings-list-toolbar button { flex: 0 0 auto; padding: 6px 9px; }
