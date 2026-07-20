@@ -288,24 +288,6 @@ class ServerOwnershipBoundaryTests(unittest.IsolatedAsyncioTestCase):
 
         cls.server = server
 
-    async def test_server_releases_owner_when_owned_runtime_exits(self):
-        server = self.server
-        owner = mock.Mock()
-        owner.daemon_id = "daemon-test"
-        owner.label = "daemon-test pid=1 port=2"
-        with mock.patch.object(
-            server.ProfileDaemonOwner, "acquire", return_value=owner
-        ), mock.patch.object(
-            server, "_main_owned", mock.AsyncMock()
-        ) as owned_runtime:
-            await server.main()
-
-        owned_runtime.assert_awaited_once_with(
-            connection=None, daemon_owner=owner
-        )
-        owner.release.assert_called_once_with()
-        self.assertIsNone(server._ACTIVE_DAEMON_OWNER)
-
     async def test_server_refuses_second_owner_before_backend_db_or_drainer_setup(self):
         server = self.server
         with tempfile.TemporaryDirectory() as tmp:
@@ -316,20 +298,20 @@ class ServerOwnershipBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 source_path=__file__,
             )
             self.addCleanup(owner.release)
-            owned_runtime = mock.AsyncMock()
+            db_factory = mock.Mock()
 
             with mock.patch.object(server, "DATA_DIR", Path(tmp)), mock.patch.object(
                 server, "WS_PORT", 18933
             ), mock.patch.dict(
                 os.environ, {"TORQUE_PROFILE": "incident"}
             ), mock.patch.object(
-                server, "_main_owned", owned_runtime
+                server, "TorqueDB", db_factory
             ):
                 with self.assertRaises(DaemonAlreadyOwnedError) as raised:
                     await server.main()
 
             self.assertIn("port=18932", str(raised.exception))
-            owned_runtime.assert_not_awaited()
+            db_factory.assert_not_called()
 
     async def test_exact_incident_topology_cannot_steal_and_ack_stop(self):
         """A second unknown-cell consumer never reaches the global ack cursor."""

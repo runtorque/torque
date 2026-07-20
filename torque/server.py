@@ -3169,8 +3169,9 @@ configure_worktree_orchestration(
 )
 
 
-async def main(connection=None):
-    """Acquire authoritative profile ownership before starting the backend."""
+def _acquire_profile_daemon_owner() -> ProfileDaemonOwner:
+    """Acquire the resolved DATA_DIR before authoritative runtime startup."""
+
     global _ACTIVE_DAEMON_OWNER
     profile = os.environ.get("TORQUE_PROFILE", "").strip() or "default"
     source_path = torque_config.SCRIPT_DIR / "torque.py"
@@ -3188,19 +3189,24 @@ async def main(connection=None):
         raise
     _ACTIVE_DAEMON_OWNER = owner
     log.info("Torque daemon profile ownership acquired (%s)", owner.label)
-    try:
-        await _main_owned(connection=connection, daemon_owner=owner)
-    finally:
-        log.info("Releasing Torque daemon profile ownership (%s)", owner.label)
+    return owner
+
+
+def _release_profile_daemon_owner(owner: ProfileDaemonOwner) -> None:
+    global _ACTIVE_DAEMON_OWNER
+    log.info("Releasing Torque daemon profile ownership (%s)", owner.label)
+    if _ACTIVE_DAEMON_OWNER is owner:
         _ACTIVE_DAEMON_OWNER = None
-        owner.release()
+    owner.release()
 
 
-async def _main_owned(*, connection=None, daemon_owner: ProfileDaemonOwner):
+async def main(connection=None):
+    """Run the main backend while holding authoritative profile ownership."""
+    owner = _acquire_profile_daemon_owner()
     log.info(
         "Torque starting (port=%d, daemon=%s)",
         WS_PORT,
-        daemon_owner.label,
+        owner.label,
     )
     profiling.configure_asyncio(asyncio.get_running_loop())
     cloud_connector_runtime = None
@@ -3319,7 +3325,7 @@ async def _main_owned(*, connection=None, daemon_owner: ProfileDaemonOwner):
         event_ingest_client,
         event_bus,
         state,
-        daemon_identity=daemon_owner.label,
+        daemon_identity=owner.label,
     )
     perceived_empty_detector = PerceivedEmptyDetector()
     log.info("Event bus, event-ingest client, health monitor, "
@@ -4040,7 +4046,7 @@ async def _main_owned(*, connection=None, daemon_owner: ProfileDaemonOwner):
     log.info(
         "Durable event-ingest drainer started after EventBus callbacks "
         "(daemon=%s)",
-        daemon_owner.label,
+        owner.label,
     )
 
     async def _state_payload(*, compact: bool = False) -> dict:
@@ -5548,11 +5554,11 @@ async def _main_owned(*, connection=None, daemon_owner: ProfileDaemonOwner):
                 # Persist all agents (status etc.) before restart
                 for cell in state.agents.values():
                     state._db_save_agent(cell)
-                daemon_owner.prepare_exec_handoff()
+                owner.prepare_exec_handoff()
                 try:
                     os.execv(sys.executable, [sys.executable] + sys.argv)
                 except Exception:
-                    daemon_owner.cancel_exec_handoff()
+                    owner.cancel_exec_handoff()
                     raise
 
         except Exception as exc:
@@ -5765,27 +5771,30 @@ async def _main_owned(*, connection=None, daemon_owner: ProfileDaemonOwner):
 
         await daemon_stop_event.wait()
     finally:
-        if supervisor_watchdog is not None:
-            try:
-                await supervisor_watchdog.stop()
-            except Exception:
-                log.exception("Supervisor liveness watchdog shutdown failed")
         try:
-            await metrics_daemon.stop()
-        except Exception:
-            log.exception("Metrics daemon shutdown failed")
-        await board_sync_manager.stop()
-        await _shutdown_daemon_runtime(
-            terminal_clients=terminal_clients,
-            ui_ws_clients=state._ws_clients,
-            panel_log=panel_log,
-            event_ingest_drainer=event_ingest_drainer,
-            event_ingest_client=event_ingest_client,
-            cloud_connector_runtime=cloud_connector_runtime_holder[0],
-            ai_index_service=ai_index_service,
-            ai_summary_service=ai_summary_service,
-            bridge=bridge,
-            runner=runner,
-            state=state,
-            db=db,
-        )
+            if supervisor_watchdog is not None:
+                try:
+                    await supervisor_watchdog.stop()
+                except Exception:
+                    log.exception("Supervisor liveness watchdog shutdown failed")
+            try:
+                await metrics_daemon.stop()
+            except Exception:
+                log.exception("Metrics daemon shutdown failed")
+            await board_sync_manager.stop()
+            await _shutdown_daemon_runtime(
+                terminal_clients=terminal_clients,
+                ui_ws_clients=state._ws_clients,
+                panel_log=panel_log,
+                event_ingest_drainer=event_ingest_drainer,
+                event_ingest_client=event_ingest_client,
+                cloud_connector_runtime=cloud_connector_runtime_holder[0],
+                ai_index_service=ai_index_service,
+                ai_summary_service=ai_summary_service,
+                bridge=bridge,
+                runner=runner,
+                state=state,
+                db=db,
+            )
+        finally:
+            _release_profile_daemon_owner(owner)
