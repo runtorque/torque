@@ -34,17 +34,42 @@ The agent survives daemon restarts, `/clear`, and long pauses. Closing its tab p
 
 ## The Architect's session boot checklist
 
-When the Architect boots (or recovers after `/clear`), its system prompt walks it through a deterministic orientation sequence:
+When the Architect starts, resumes, relaunches, recovers after `/clear` or a
+daemon restart, or wakes for a digest or another Torque event, its system
+prompt walks it through a deterministic orientation sequence:
 
-1. `journal_list` — its prior checkpoints, observations, plans.
-2. `decision_list` — every decision and its current status.
-3. `peer_inbox(requires_reply=true)` — unanswered peer-Architect messages.
-4. `agent_list` — hired and visible Engineers.
-5. `hire_list` — pending or recently resolved hires.
-6. `board_summary` — board state by Engineer, including peer-message counts.
-7. `event_list` — coarse-grained events from while it was idle.
+1. `boot_summary` — cached recovery context first, with raw reads as the
+   immediate fallback when it is empty, stale, refreshing, or unavailable.
+2. `attention_digest` — the compact list of actionable gates.
+3. `journal_list` — prior checkpoints, observations, and plans when exact
+   detail is needed.
+4. `decision_list` — durable decisions and their current status.
+5. `peer_inbox(requires_reply=true)` — unanswered peer-Architect messages.
+6. `agent_thread_list` — active Engineer peer threads when relevant.
+7. `agent_list` — hired and visible Engineers.
+8. `hire_list` — pending or recently resolved hires.
+9. `board_summary` — board state by Engineer, including peer-message counts.
+10. `event_list` — coarse-grained attribution and debug context when needed.
 
-By the end of step 7, the Architect has reconstructed enough state to make decisions without replaying chat history. This is the Architect equivalent of the Engineer's recovery sequence.
+After recovering context, the Architect must compare current state with its
+last user-facing update before yielding:
+
+- If meaningful state changed, it proactively calls canonical
+  `user_message` with a concise, deduplicated status: what changed, current
+  state, and the next step and owner. Meaningful changes include dispatched
+  progress; task, review, or merge completion; blockers, stalls, or recovery;
+  pending user action; scope or priority changes; and corrections to prior
+  status.
+- If nothing material changed, it positively chooses not to message. Empty
+  heartbeats and unchanged state should not create noise.
+- A reply to a `## Message from the User` must pass that block's exact
+  Message ID as `reply_to_id`. Digest- or wake-driven proactive status omits
+  `reply_to_id`.
+
+Free-text terminal output is not user-facing delivery. The Architect must use
+the canonical product `user_message` tool when the status should reach the
+user. This prompt rule does not grant a class new authority or make the daemon
+send messages automatically.
 
 ## Hiring Engineers
 
@@ -228,16 +253,19 @@ Concrete walkthrough of an Architect's working session, so the toolkit feels les
 **09:00 — Boot.** The Architect's tab opens. Its system prompt has it run the orientation sequence:
 
 ```text
-journal_list()                     # recent private checkpoints
+boot_summary()                     # cached recovery context
+attention_digest()                 # actionable gates
+journal_list()                     # exact private checkpoints
 decision_list()                    # decisions and their statuses
 peer_inbox(requires_reply=true)    # peer threads I owe
 agent_list(include_tombstoned=true)
 hire_list(status_filter="pending")
 board_summary()
-event_list()
+event_list()                       # attribution when needed
 ```
 
-It writes a checkpoint journal entry summarizing the state it just reconstructed:
+It writes a checkpoint journal entry summarizing the state it just
+reconstructed, then applies the wake-to-user status contract before yielding.
 
 ```text
 journal_write(

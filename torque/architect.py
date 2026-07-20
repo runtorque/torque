@@ -281,7 +281,9 @@ automatically close scope for you.
    `architect_engineer_pending_question(engineer_id=...)` for the full
    blocking question before deciding whether to journal, file a
    decision, message an engineer, or route new work — never by touching
-   workers.
+   workers. Before yielding after digest triage, apply the
+   wake-to-user status contract below; internal reads or journal updates
+   do not replace `user_message` when meaningful state changed.
 
 10. **User escalation** — Use `architect_ask` only for true user-scope
    decisions or approvals (product direction, priority conflicts,
@@ -304,6 +306,40 @@ automatically close scope for you.
    escalated, record the reasoning as a decision and surface it before
    acting. The architect surface is the one place scope changes are
    expected to be legible.
+"""
+
+
+_ARCHITECT_WAKE_USER_STATUS_CONTRACT = """\
+## Wake-to-user status contract
+
+After every Torque wake — a first session start, resumed session, relaunch,
+recovery after `/clear` or a daemon restart, digest-triggered wake, or any
+other Torque wake — recover the relevant context and compare it with the
+last user-facing update before yielding.
+
+1. Positively assess whether anything meaningful changed since that update.
+   Meaningful changes include dispatched-work progress; task, review, or
+   merge completion; a blocker, stall, or recovery; pending user action;
+   scope or priority changes; or a correction to prior status.
+2. If something meaningful changed, proactively call
+   `user_message(message="...")` before yielding. Keep it concise and
+   deduplicated, and state what changed, the current state, and the next
+   step and owner. For digest/wake-driven proactive status, omit
+   `reply_to_id`.
+3. If nothing material changed, positively determine that and send no
+   message. Empty heartbeats and unchanged state are not reasons to emit
+   noise.
+
+When responding to a `## Message from the User`, always pass the exact
+Message ID from that block as `reply_to_id`; never attach that ID to a
+digest/wake-driven proactive status. Free-text terminal output is not
+user-facing delivery and does not satisfy this contract; use the canonical
+product `user_message` tool.
+
+This is a use requirement, not an authority grant: it does not add
+`message.user` or change the projected tool surface. If frozen Agent Class
+authority does not project `user_message`, do not simulate delivery; record
+that unavailable path in the positive assessment.
 """
 
 
@@ -643,6 +679,7 @@ def build_architect_system_prompt(group: str,
     if not authority.get("class_id"):
         parts = [
             _BASE_SYSTEM_PROMPT.format(group=group),
+            _ARCHITECT_WAKE_USER_STATUS_CONTRACT,
             build_shared_memory_guidance(),
             # Architects are user-created only, so their owner is always the
             # user: surface the first substantive message to the user instead
@@ -650,7 +687,10 @@ def build_architect_system_prompt(group: str,
             build_owner_user_message_guidance("architect_message_user"),
         ]
     else:
-        parts = [_AGENT_CLASS_ARCHITECT_BASE_PROMPT.format(group=group)]
+        parts = [
+            _AGENT_CLASS_ARCHITECT_BASE_PROMPT.format(group=group),
+            _ARCHITECT_WAKE_USER_STATUS_CONTRACT,
+        ]
 
     if action_system_prompt:
         parts.append(str(action_system_prompt).rstrip())

@@ -42,8 +42,10 @@ prompt:
     text: Use product task proposal tools only for queued, unassigned, non-dispatched task
       proposals.
   - when_capability: message.user
-    text: After bootstrapping, send substantive user-facing status through a visible user-message
-      tool rather than relying on terminal output alone.
+    text: After every start, resume, relaunch, digest, or other wake, follow the base wake-status
+      contract before yielding. Use canonical user_message for meaningful changes; positively
+      choose no message for unchanged state. Terminal or free-text output is not user-facing
+      delivery.
 warnings:
 - 'Creative Architect is proposal-only: ideas, decisions, tasks, and messages remain non-binding
   until accepted through normal Torque authority.'

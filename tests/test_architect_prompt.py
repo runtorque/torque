@@ -164,6 +164,115 @@ class ArchitectPromptTests(unittest.TestCase):
         self.assertIn("decision_list", prompt)
         self.assertIn("never\n   wait for summary generation", prompt)
 
+    def test_prompt_requires_wake_assess_and_proactive_user_status(self):
+        prompt = self.architect_mod.build_architect_system_prompt("Torque")
+
+        self.assertIn("## Wake-to-user status contract", prompt)
+        for wake_kind in (
+            "first session start",
+            "resumed session",
+            "relaunch",
+            "recovery after `/clear` or a daemon restart",
+            "digest-triggered wake",
+            "any\nother Torque wake",
+        ):
+            self.assertIn(wake_kind, prompt)
+        self.assertIn(
+            "compare it with the\nlast user-facing update before yielding",
+            prompt,
+        )
+        self.assertIn(
+            "Positively assess whether anything meaningful changed",
+            prompt,
+        )
+        self.assertIn(
+            'proactively call\n   `user_message(message="...")` before yielding',
+            prompt,
+        )
+        self.assertIn("what changed, the current state, and the next", prompt)
+        self.assertIn("step and owner", prompt)
+
+    def test_prompt_defines_meaningful_change_and_no_noise_path(self):
+        prompt = self.architect_mod.build_architect_system_prompt("Torque")
+
+        for meaningful_change in (
+            "dispatched-work progress",
+            "task, review, or\n   merge completion",
+            "blocker, stall, or recovery",
+            "pending user action",
+            "scope or priority changes",
+            "correction to prior status",
+        ):
+            self.assertIn(meaningful_change, prompt)
+        self.assertIn(
+            "If nothing material changed, positively determine that and send no",
+            prompt,
+        )
+        self.assertIn(
+            "Empty heartbeats and unchanged state are not reasons to emit",
+            prompt,
+        )
+        self.assertIn("concise and\n   deduplicated", prompt)
+
+    def test_prompt_preserves_user_reply_threading_and_proactive_omission(self):
+        prompt = self.architect_mod.build_architect_system_prompt("Torque")
+
+        self.assertIn("When responding to a `## Message from the User`", prompt)
+        self.assertIn(
+            "always pass the exact\nMessage ID from that block as `reply_to_id`",
+            prompt,
+        )
+        self.assertIn(
+            "For digest/wake-driven proactive status, omit\n   `reply_to_id`",
+            prompt,
+        )
+        self.assertIn(
+            "never attach that ID to a\ndigest/wake-driven proactive status",
+            prompt,
+        )
+
+    def test_prompt_requires_product_message_delivery_without_deferred_runtime_design(self):
+        prompt = self.architect_mod.build_architect_system_prompt("Torque")
+
+        self.assertIn(
+            "Free-text terminal output is not\nuser-facing delivery",
+            prompt,
+        )
+        self.assertIn("canonical\nproduct `user_message` tool", prompt)
+        self.assertNotIn("terminal output reaches the user", prompt)
+        self.assertNotIn("wake_on_digest", prompt)
+        self.assertNotIn("durable final-report", prompt)
+        self.assertNotIn("final-report obligation", prompt)
+        self.assertNotIn("daemon automatically sends", prompt)
+
+    def test_wake_contract_applies_to_architect_derived_class_prompts(self):
+        for class_id in (
+            "default-architect",
+            "product-manager",
+            "creative-architect",
+            "torque-steward",
+        ):
+            with self.subTest(class_id=class_id):
+                class_snapshot = self._class_prompt_context(class_id)
+                prompt = self.architect_mod.build_architect_system_prompt(
+                    "Torque",
+                    agent_class_snapshot=class_snapshot,
+                )
+
+                self.assertIn("## Wake-to-user status contract", prompt)
+                self.assertIn(
+                    'proactively call\n   `user_message(message="...")`',
+                    prompt,
+                )
+                self.assertIn(
+                    "This is a use requirement, not an authority grant",
+                    prompt,
+                )
+                self.assertIn(
+                    "does not add\n`message.user` or change the projected tool surface",
+                    prompt,
+                )
+
     def test_prompt_includes_completion_audit_before_goal_completion(self):
         prompt = self.architect_mod.build_architect_system_prompt("Torque")
 
@@ -244,8 +353,8 @@ class ArchitectPromptTests(unittest.TestCase):
             ),
             agent_class_snapshot=class_snapshot,
         )
-        self.assertNotIn(
-            "After bootstrapping, send substantive user-facing status",
+        self.assertIn(
+            "## Wake-to-user status contract",
             base_prompt,
         )
         prompt = self._append_class_block(base_prompt, class_snapshot)
@@ -256,7 +365,11 @@ class ArchitectPromptTests(unittest.TestCase):
         self.assertIn("Propose decisions (`decision.propose`)", prompt)
         self.assertIn("Message peers (`message.peer`)", prompt)
         self.assertIn(
-            "After bootstrapping, send substantive user-facing status",
+            "After every start, resume, relaunch, digest, or other wake",
+            prompt,
+        )
+        self.assertIn(
+            "positively choose no message for unchanged state",
             prompt,
         )
         self.assertIn("Autonomy mode: Dispatch after confirm (authority-bounded)", prompt)

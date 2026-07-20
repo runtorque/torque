@@ -1540,7 +1540,11 @@ class AgentClassDoctorAndCommandTests(unittest.TestCase):
         self.assertFalse(mcp_tool_allowed_by_authority("architect_deploy_state", authority))
         self.assertIn("Torque Steward", created_prompt["persistent_prompt_text"])
         self.assertIn("Effective Torque MCP authority", created_prompt["persistent_prompt_text"])
-        self.assertIn("visible user-message tool", created_prompt["persistent_prompt_text"])
+        self.assertIn("## Wake-to-user status contract", created_prompt["persistent_prompt_text"])
+        self.assertIn(
+            "positively choose no message for unchanged state",
+            created_prompt["persistent_prompt_text"],
+        )
         self.assertNotIn("architect_proposal_message_user", created_prompt["persistent_prompt_text"])
 
 
