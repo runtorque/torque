@@ -466,3 +466,19 @@ test('durable client errors and toast controls use the notification substrate', 
   assert.match(deltas, /operator_notice_upsert/);
   assert.match(deltas, /operator_notices_read_all/);
 });
+
+test('toast variants share a translucent surface without fading their contents', () => {
+  const css = source('static/styles/modals.css');
+  const toastRule = css.match(/\.toast\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body || '';
+  const visibleRule = css.match(/\.toast\.visible\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body || '';
+
+  assert.match(
+    toastRule,
+    /background:\s*color-mix\(in srgb,\s*var\(--bg-surface\)\s*90%,\s*transparent\)/,
+    'routine and sticky/error variants should inherit the same translucent surface',
+  );
+  assert.match(visibleRule, /opacity:\s*1\b/,
+    'visible toasts must keep text, icons, borders, and controls fully opaque');
+  assert.doesNotMatch(visibleRule, /opacity:\s*(?:0?\.)?9(?:0+)?\b/,
+    'surface translucency must not be implemented as whole-toast opacity');
+});
