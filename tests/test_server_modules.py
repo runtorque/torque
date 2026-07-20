@@ -3288,10 +3288,12 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         prompt = sent[0][1]
         self.assertIn('First line of the DM\nSecond line stays separate', prompt)
         self.assertIn(
-            'First line of the DM\nSecond line stays separate\n\nReply to this user-facing conversation',
+            'First line of the DM\nSecond line stays separate\n\nReply with:',
             prompt,
         )
         self.assertNotIn('First line of the DMSecond line stays separate', prompt)
+        self.assertNotIn('Reply to this user-facing conversation with:', prompt)
+        self.assertNotIn('Do not rely on free-text terminal output', prompt)
 
         persisted = self.db.load_direct_message(result['message_id'])
         self.assertEqual(persisted['message'], message)
