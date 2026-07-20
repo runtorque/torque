@@ -364,6 +364,14 @@ class ArchitectPromptTests(unittest.TestCase):
                 self.assertIn("durable execution handoff", prompt)
                 self.assertIn("## Pre-create and pre-dispatch cold-start check", prompt)
                 self.assertIn("Assignment or staging is not dispatch", prompt)
+                self.assertIn("## Wake-to-user status contract", prompt)
+                self.assertIn("user_message", prompt)
+
+    def test_default_architect_keeps_existing_canonical_user_tools(self):
+        prompt = self.architect_mod.build_architect_system_prompt("Torque")
+
+        self.assertIn("user_message", prompt)
+        self.assertIn("raise", prompt)
 
     def test_shared_task_contract_does_not_claim_authority_or_runtime_enforcement(self):
         prompt = self.architect_mod.build_architect_system_prompt(
