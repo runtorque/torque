@@ -51,6 +51,7 @@ from .config import (
     log,
 )
 from .db import TorqueDB, canonical_user_agent_thread_id
+from .daemon_owner import ProfileDaemonOwner
 from .deploy_state import architect_deploy_state_payload, capture_deploy_boot_state
 from .mission_control import build_mission_control_summary
 from .remote_ingress import (
@@ -739,6 +740,7 @@ _LOG_LINE_RE = re.compile(
 _LOG_TAIL_BYTES = 256 * 1024
 _LOG_MAX_LINES = 500
 _CODEX_PROVIDER_USAGE_BACKFILL_INTERVAL_SECONDS = 300
+_ACTIVE_DAEMON_OWNER: ProfileDaemonOwner | None = None
 
 
 def _runtime_payload(*, bridge=None, state=None) -> dict:
@@ -773,6 +775,9 @@ def _runtime_payload(*, bridge=None, state=None) -> dict:
         "version": _TORQUE_VERSION,
         "pid": os.getpid(),
         "started_at": _STARTED_AT,
+        "daemon_id": (
+            _ACTIVE_DAEMON_OWNER.daemon_id if _ACTIVE_DAEMON_OWNER else ""
+        ),
         "log_path": str(DATA_DIR / "torque.log"),
         "supervisor_log_path": str(DATA_DIR / "pty_supervisor.log"),
         "supervisor": supervisor_health,
@@ -3165,7 +3170,38 @@ configure_worktree_orchestration(
 
 
 async def main(connection=None):
-    log.info("Torque starting (port=%d)", WS_PORT)
+    """Acquire authoritative profile ownership before starting the backend."""
+    global _ACTIVE_DAEMON_OWNER
+    profile = os.environ.get("TORQUE_PROFILE", "").strip() or "default"
+    source_path = torque_config.SCRIPT_DIR / "torque.py"
+    if not source_path.exists():
+        source_path = torque_config.SCRIPT_DIR
+    try:
+        owner = ProfileDaemonOwner.acquire(
+            data_dir=DATA_DIR,
+            profile=profile,
+            port=WS_PORT,
+            source_path=source_path,
+        )
+    except Exception as exc:
+        log.error("Torque backend ownership acquisition failed: %s", exc)
+        raise
+    _ACTIVE_DAEMON_OWNER = owner
+    log.info("Torque daemon profile ownership acquired (%s)", owner.label)
+    try:
+        await _main_owned(connection=connection, daemon_owner=owner)
+    finally:
+        log.info("Releasing Torque daemon profile ownership (%s)", owner.label)
+        _ACTIVE_DAEMON_OWNER = None
+        owner.release()
+
+
+async def _main_owned(*, connection=None, daemon_owner: ProfileDaemonOwner):
+    log.info(
+        "Torque starting (port=%d, daemon=%s)",
+        WS_PORT,
+        daemon_owner.label,
+    )
     profiling.configure_asyncio(asyncio.get_running_loop())
     cloud_connector_runtime = None
     db = TorqueDB(DB_FILE)
@@ -3283,6 +3319,7 @@ async def main(connection=None):
         event_ingest_client,
         event_bus,
         state,
+        daemon_identity=daemon_owner.label,
     )
     perceived_empty_detector = PerceivedEmptyDetector()
     log.info("Event bus, event-ingest client, health monitor, "
@@ -4000,7 +4037,11 @@ async def main(connection=None):
     # Also checkpoint when the terminal session is actually closed (tab closed)
     bridge.on_session_terminated = _on_agent_session_end
     event_ingest_drainer.start()
-    log.info("Durable event-ingest drainer started after EventBus callbacks")
+    log.info(
+        "Durable event-ingest drainer started after EventBus callbacks "
+        "(daemon=%s)",
+        daemon_owner.label,
+    )
 
     async def _state_payload(*, compact: bool = False) -> dict:
         # Prefill the per-repo branch cache before legacy state.to_dict()

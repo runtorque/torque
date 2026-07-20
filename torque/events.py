@@ -1262,7 +1262,12 @@ def _parse_profile_synthetic_event(raw: dict, cell) -> AgentEvent | None:
     )
 
 
-def agent_event_from_ingest_envelope(state, envelope: dict) -> AgentEvent | None:
+def agent_event_from_ingest_envelope(
+    state,
+    envelope: dict,
+    *,
+    daemon_identity: str = "",
+) -> AgentEvent | None:
     """Resolve a durable ingest envelope into an ``AgentEvent``.
 
     This intentionally mirrors the old ``/events`` request path: header
@@ -1287,8 +1292,12 @@ def agent_event_from_ingest_envelope(state, envelope: dict) -> AgentEvent | None
                     break
 
     if not cell:
-        log.debug("Event from unknown cell (id=%s, cwd=%s), discarding",
-                  cell_id, raw.get("cwd", ""))
+        log.debug(
+            "Event from unknown cell (id=%s, cwd=%s, daemon=%s), discarding",
+            cell_id,
+            raw.get("cwd", ""),
+            daemon_identity or "unknown",
+        )
         profiling.recorder().incr("events_dropped_unknown_cell")
         return None
 
@@ -1336,6 +1345,7 @@ class EventIngestDrainer:
         batch_size: int = 100,
         idle_interval: float = 0.05,
         error_interval: float = 1.0,
+        daemon_identity: str = "",
     ):
         self.client = client
         self.event_bus = event_bus
@@ -1343,6 +1353,7 @@ class EventIngestDrainer:
         self.batch_size = max(1, int(batch_size or 100))
         self.idle_interval = max(0.01, float(idle_interval or 0.05))
         self.error_interval = max(0.05, float(error_interval or 1.0))
+        self.daemon_identity = str(daemon_identity or "")
         self.cursor = 0
         self._task: asyncio.Task | None = None
         self._closed = False
@@ -1370,7 +1381,10 @@ class EventIngestDrainer:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                log.exception("Event-ingest drainer iteration failed")
+                log.exception(
+                    "Event-ingest drainer iteration failed (daemon=%s)",
+                    self.daemon_identity or "unknown",
+                )
                 await asyncio.sleep(self.error_interval)
                 continue
             if processed < self.batch_size:
@@ -1397,7 +1411,11 @@ class EventIngestDrainer:
         for row in rows:
             cursor = int(row.get("cursor") or 0)
             envelope = dict(row.get("event") or {})
-            event = agent_event_from_ingest_envelope(self.state, envelope)
+            event = agent_event_from_ingest_envelope(
+                self.state,
+                envelope,
+                daemon_identity=self.daemon_identity,
+            )
             if event is not None:
                 with profiling.timer("event_bus_emit_ms"):
                     await self.event_bus.emit(event)
