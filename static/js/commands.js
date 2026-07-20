@@ -49,6 +49,27 @@ function _dismissToast(el) {
   }, 180);
 }
 
+function _noticeToastSourceAgentId(notice) {
+  if (!notice
+      || notice.notice_type !== 'notification'
+      || String(notice.category || '') !== 'direct_message'
+      || String(notice.severity || '').toLowerCase() === 'error') {
+    return '';
+  }
+  var agentId = String(notice.agent_id || '').trim();
+  if (!agentId || !state || !state.agents) return '';
+  var agent = state.agents[agentId];
+  if (!agent || agent.cell_type !== 'agent') return '';
+  if (typeof _isTombstonedAgent === 'function' && _isTombstonedAgent(agent)) {
+    return '';
+  }
+  if (typeof _agentFocusVisibleRootAgentId === 'function'
+      && _agentFocusVisibleRootAgentId(agentId) !== agentId) {
+    return '';
+  }
+  return agentId;
+}
+
 function _showToast(message, level, opts) {
   opts = opts || {};
   var kind = String(level || 'info');
@@ -68,9 +89,30 @@ function _showToast(message, level, opts) {
   text.className = 'toast-message';
   text.textContent = String(message || '');
   content.appendChild(text);
+  if (typeof opts.onBodyAction === 'function') {
+    content.classList.add('toast-content--interactive');
+    content.setAttribute('role', 'button');
+    content.setAttribute('tabindex', '0');
+    content.setAttribute('aria-label', opts.bodyActionLabel || 'Open notification');
+    var runBodyAction = function(event) {
+      if (event && event.stopPropagation) event.stopPropagation();
+      opts.onBodyAction();
+      _dismissToast(el);
+    };
+    content.onclick = runBodyAction;
+    content.onkeydown = function(event) {
+      var key = event && (event.key || event.code);
+      if (key !== 'Enter' && key !== ' ' && key !== 'Spacebar' && key !== 'Space') return;
+      if (event && event.preventDefault) event.preventDefault();
+      runBodyAction(event);
+    };
+  }
   el.appendChild(content);
 
+  var actions = null;
   if (opts.actionLabel && typeof opts.onAction === 'function') {
+    actions = document.createElement('div');
+    actions.className = 'toast-actions';
     var action = document.createElement('button');
     action.type = 'button';
     action.className = 'toast-action';
@@ -80,7 +122,8 @@ function _showToast(message, level, opts) {
       opts.onAction();
       _dismissToast(el);
     };
-    el.appendChild(action);
+    actions.appendChild(action);
+    el.appendChild(actions);
   }
 
   var close = document.createElement('button');
@@ -127,6 +170,11 @@ function _showToast(message, level, opts) {
 function _showNoticeToast(notice) {
   if (!notice) return null;
   var isAlert = notice.notice_type === 'alert';
+  var sourceAgentId = _noticeToastSourceAgentId(notice);
+  var sourceAgent = sourceAgentId && state && state.agents
+    ? state.agents[sourceAgentId]
+    : null;
+  var sourceAgentLabel = String((sourceAgent && sourceAgent.name) || 'source agent');
   return _showToast(
     notice.message || notice.title || 'Torque',
     isAlert ? 'error' : (notice.severity || 'info'),
@@ -137,6 +185,15 @@ function _showNoticeToast(notice) {
       onAction: function() {
         if (typeof openInboxPopover === 'function') openInboxPopover();
       },
+      bodyActionLabel: sourceAgentId ? 'Open conversation with ' + sourceAgentLabel : '',
+      onBodyAction: sourceAgentId
+        ? function() {
+            var currentAgentId = _noticeToastSourceAgentId(notice);
+            if (currentAgentId && typeof focusAgent === 'function') {
+              focusAgent(currentAgentId);
+            }
+          }
+        : null,
     }
   );
 }
