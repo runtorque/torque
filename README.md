@@ -22,10 +22,10 @@ worktrees, three half-remembered prompts, and a lot of "where was I?" friction.
 
 Torque is a harness on top of **Claude Code** and **Codex**: it drives the
 CLIs you already run, so every agent uses your existing subscription plans — no
-extra API keys or per-token billing. I built it because the AI companies would
-rather lock me into *their* harnesses and *their* idea of how I should work.
-Torque is how I found to get the full value out of the subscriptions I already
-pay for, on my own terms, without conforming to a vendor's prescribed workflow.
+extra API keys or per-token billing. On top of the CLIs it adds the
+coordination layer they don't ship with: an isolated git worktree per agent, a
+shared task board with review gates, and an agent hierarchy that plans,
+dispatches, reviews, and merges the work.
 
 ## How it works
 
@@ -52,7 +52,7 @@ working context. Meanwhile the **kanban board** shows
 what every agent is doing at all times — every task, who owns it, and where it
 sits in the pipeline.
 
-## What you get:
+## What you get
 
 - A **chat-first workspace** where you talk to an **architect** that plans the
   work and runs the engineers and workers for you — backed by Claude Code and
@@ -246,7 +246,7 @@ desktop app and the standalone browser mode are the recommended entry points.
 Linux and Windows are follow-up targets: the daemon itself is portable, but
 the desktop shell, packaging, and operator workflows are still macOS-first.
 
-The project is on version `1.1.0`. See [Roadmap](docs/roadmap.md) for what's
+The project is on version `2.1.0`. See [Roadmap](docs/roadmap.md) for what's
 next.
 
 ## Disclaimer
