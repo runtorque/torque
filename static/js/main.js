@@ -1006,6 +1006,20 @@ function removeFocused() {
   if (!focusedItemId) return;
   const meta = _navMeta(focusedItemId);
   if (meta && meta.type === 'control') return;
+  const cell = state && state.agents ? state.agents[focusedItemId] : null;
+  const kind = cell && (cell.kind || '');
+  if (kind === 'architect' || kind === 'engineer') {
+    showConfirm(
+      'Architects and Engineers can be deleted from their card\'s right-click menu.',
+      {
+        title: 'Delete from the agent menu',
+        label: 'Got it',
+        variant: 'btn-primary',
+        role: 'alertdialog',
+      }
+    );
+    return;
+  }
   removeAgent(focusedItemId);
 }
 

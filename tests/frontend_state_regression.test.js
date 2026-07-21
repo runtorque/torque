@@ -27654,6 +27654,7 @@ test('agents-grid v1.6 uses one-line metrics, action threshold labels, empty-row
   assert.match(main.innerHTML, /data-drag-id="eng-empty"[\s\S]*cell-engineer-queue">queue: 0/);
   assert.match(main.innerHTML, /data-drag-id="eng-empty"[\s\S]*cell-engineer-activity[^>]*>queue_empty \(1m\)/);
   assert.match(main.innerHTML, /data-drag-id="eng-full"[\s\S]*cell-engineer-workers[\s\S]*1 worker/);
+  assert.doesNotMatch(main.innerHTML, /agent-card-state-(?:mix|dot|more)/);
   assert.match(main.innerHTML, /data-drag-id="eng-full"[\s\S]*cell-engineer-queue">queue: 0/);
   assert.match(main.innerHTML, /data-drag-id="eng-full"[\s\S]*cell-engineer-activity[^>]*>reviewing :222:2 \(1m\)/);
 
@@ -28503,9 +28504,10 @@ test('main render shows dismissed architect badge and architect rehire control',
   runInContext(context, `render();`);
 
   assert.match(main.innerHTML, /Paused Architect/);
-  assert.match(main.innerHTML, /class="cell[^"]*architect[^"]*dismissed"[^>]*data-drag-id="arch-dismissed"/);
+  assert.match(main.innerHTML, /class="cell[^"]*architect[^"]*has-footer-action[^"]*dismissed"[^>]*data-drag-id="arch-dismissed"/);
   assert.match(main.innerHTML, /cell-status dismissed/);
   assert.match(main.innerHTML, /cell-dismissed-badge/);
+  assert.match(main.innerHTML, /cell-relaunch cell-rehire/);
   assert.match(main.innerHTML, /rehireArchitect\('arch-dismissed'\)/);
   assert.doesNotMatch(main.innerHTML, /rehireEngineer\('arch-dismissed'\)/);
 });

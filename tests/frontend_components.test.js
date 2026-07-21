@@ -937,7 +937,7 @@ test('remaining count annotations use canonical density and semantic intent', ()
   assert.match(groupTabs, /agent-group-tab-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count/);
   assert.match(groupTabs, /agent-group-quick-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count/);
   assert.match(agentCard, /agent-card-state-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count/);
-  assert.match(agentCard, /agent-card-state-more ui-badge ui-badge--micro ui-badge--neutral ui-badge--count/);
+  assert.doesNotMatch(agentCard, /agent-card-state-(?:mix|dot|more)/);
   assert.match(agentCard, /cell-term-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count/);
   assert.match(render, /drawer-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count/);
   assert.match(detail, /detail-section-count ui-badge ui-badge--micro ui-badge--warning ui-badge--count/);

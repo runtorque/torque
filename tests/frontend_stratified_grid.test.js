@@ -526,7 +526,12 @@ test('stratified grid CSS defines an architect selector, explicit team owner, co
   assert.match(css, /\.engineer-row-workers\s*\{[^}]*padding-left:\s*0;[^}]*border-left:\s*0;/s);
   assert.doesNotMatch(css, /\.engineer-row-workers::before/);
   assert.match(css, /\.agent-grid \.engineer-row\.engineer-row--empty-workers \.engineer-row-workers\s*\{[^}]*display:\s*flex/s);
+  assert.match(css, /\.engineer-row-empty\s*\{[^}]*align-items:\s*center;[^}]*justify-content:\s*center;/s);
   assert.doesNotMatch(css, /\.engineer-row-empty\s*\{[^}]*border:/s);
+  assert.match(css, /\.cell-relaunch\s*\{[^}]*position:\s*absolute;[^}]*left:\s*6px;[^}]*right:\s*6px;[^}]*bottom:\s*16px;/s);
+  assert.match(css, /\.cell\.has-footer-action\s*\{[^}]*padding-bottom:\s*32px;/s);
+  assert.match(css, /\.cell-relaunch\.cell-rehire\s*\{[^}]*color:/s);
+  assert.doesNotMatch(css, /\.cell-relaunch\.cell-rehire\s*\{[^}]*(?:bottom|left|right|position):/s);
   assert.doesNotMatch(css, /\.agent-grid \.engineer-row\.engineer-row--empty-workers \.engineer-row-anchor\s*\{[^}]*width:\s*100%/s);
   assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-architect-column-width:\s*106px;/);
   assert.doesNotMatch(css, /\.principals-row\s*\{/);
