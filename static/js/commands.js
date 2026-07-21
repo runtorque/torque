@@ -1174,6 +1174,14 @@ function copyAgentId(id) {
   navigator.clipboard.writeText(id).then(function() { closeContextMenu(); });
 }
 
+function copyAgentName(id) {
+  const cell = state && state.agents ? state.agents[id] : null;
+  if (!cell) return;
+  navigator.clipboard.writeText(String(cell.name == null ? '' : cell.name)).then(function() {
+    closeContextMenu();
+  });
+}
+
 function _agentGridNewMenuItems(group) {
   const groupName = String(group || '').trim();
   if (!groupName) return [];
@@ -1227,8 +1235,8 @@ function _cellContextMenuItems(id) {
 
   const items = [
     { label: 'Edit\u2026', action: `openEditCell('${id}')` },
-    { label: 'Focus', action: `focusAgent('${id}')` },
   ];
+  let dismissItem = null;
   if (cell.cell_type === 'agent'
       && (cell.kind || '') === 'architect'
       && !isDismissedLifecycleCell) {
@@ -1264,11 +1272,11 @@ function _cellContextMenuItems(id) {
         action: `rehireEngineer('${id}')`,
       });
     } else {
-      items.push({
+      dismissItem = {
         label: 'Dismiss\u2026',
         action: `dismissEngineer('${id}')`,
         danger: true,
-      });
+      };
     }
   }
   if (cell.cell_type === 'agent' && (cell.kind || '') === 'architect') {
@@ -1278,11 +1286,11 @@ function _cellContextMenuItems(id) {
         action: `rehireArchitect('${id}')`,
       });
     } else {
-      items.push({
+      dismissItem = {
         label: 'Dismiss\u2026',
         action: `dismissArchitect('${id}')`,
         danger: true,
-      });
+      };
     }
   }
   /* Worktree submenu */
@@ -1290,7 +1298,8 @@ function _cellContextMenuItems(id) {
     if (cell.worktree_path) {
       items.push({ label: 'Worktree', submenu: `_showWorktreeSubmenu('${id}')` });
     } else {
-      if (gs.git_worktree) {
+      const kind = cell.kind || '';
+      if (gs.git_worktree && kind !== 'architect' && kind !== 'engineer') {
         items.push({ label: 'Create Worktree', action: `worktreeCreate('${id}')` });
       }
     }
@@ -1304,6 +1313,8 @@ function _cellContextMenuItems(id) {
   }
   items.push({ separator: true });
   items.push({ label: `Copy ID: ${id.slice(0, 8)}\u2026`, action: `copyAgentId('${id}')` });
+  items.push({ label: 'Copy Name', action: `copyAgentName('${id}')` });
+  if (dismissItem) items.push(dismissItem);
   items.push({ label: 'Delete', action: `removeAgent('${id}')`, danger: true });
   return items;
 }

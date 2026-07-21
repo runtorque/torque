@@ -1667,7 +1667,7 @@ body.runtime-embedded .agent-focus-header {
   display: flex;
   flex: 1 1 auto;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: center;
   min-width: 0;
   min-height: var(--agent-worker-card-height, 96px);
   color: var(--text-dim);
@@ -1935,24 +1935,6 @@ body.runtime-embedded .agent-focus-header {
   white-space: normal;
   pointer-events: none;
 }
-.agent-card-state-mix {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  margin-right: 4px;
-  vertical-align: -1px;
-}
-.agent-card-state-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  display: inline-block;
-  background: var(--text-dim);
-}
-.agent-card-state-dot--running { background: var(--green); }
-.agent-card-state-dot--idle,
-.agent-card-state-dot--empty { background: color-mix(in srgb, var(--text-dim) 74%, transparent); }
-.agent-card-state-dot--error { background: var(--red); }
 /* ------------------------------------------------------------------ */
 /* Menu popovers                                                       */
 /* ------------------------------------------------------------------ */
@@ -2221,10 +2203,22 @@ body.runtime-embedded .agent-focus-header {
   outline: none;
 }
 .cell-relaunch {
-  width: 100%; font-size: 9px; padding: 1px 0;
-  color: var(--text-dim); margin-top: 2px;
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 16px;
+  width: auto;
+  font-size: 9px;
+  padding: 1px 0;
+  color: var(--text-dim);
+  margin-top: 0;
   opacity: 0; transition: opacity .15s;
   pointer-events: none;
+}
+.cell.has-footer-action {
+  /* The action occupies its own row above bottom metadata, keeping relaunch
+     and rehire clear of the provider label and Agent Class/kind badge. */
+  padding-bottom: 32px;
 }
 .cell-relaunch:hover { color: var(--accent); }
 .cell-relaunch.cell-rehire {

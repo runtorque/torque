@@ -1705,6 +1705,28 @@ scope.
   off-agent and hidden/unfocused retention, error retention, and focus
   transitions that preserve unread state for unattended messages.
 
+### D-046 — Agent-card menus separate focus from destructive lifecycle actions
+
+- Date: 2026-07-21
+- Status: accepted
+- Decision: Agent cards focus on ordinary click, so their context menus omit a
+  redundant Focus action. Identity copy actions stay adjacent, lifecycle
+  Dismiss sits immediately before Delete, and principal cards direct keyboard
+  Delete/Backspace to a non-destructive explanation of the right-click flow.
+  Engineer summaries show only the numeric worker count, while footer actions
+  occupy a reserved row above card metadata.
+- Rationale: Shorter menus scan faster, principal deletion needs a more
+  deliberate path than a navigation key, and status dots plus overlapping
+  footer controls added ambiguity without adding actionable information.
+- Scope: Agent grid and canvas context menus, agent cards and hierarchy empty
+  states, and agent-grid keyboard deletion.
+- Constraints: Right-click authorization and confirmation, card click focus,
+  Worker/terminal keyboard deletion, lifecycle behavior, worktree behavior,
+  and editable/composer key guards remain unchanged.
+- Verification: Focused frontend regressions cover menu order and clipboard
+  payloads, role-specific worktree availability, empty/count markup and layout,
+  footer action clearance, and Delete/Backspace routing by kind and input state.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

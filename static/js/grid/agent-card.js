@@ -775,29 +775,6 @@ function _taskCycleState(task, agent) {
   return 'idle';
 }
 
-function _agentStatusMixClass(agent) {
-  const cls = typeof agentStatusClass === 'function' ? agentStatusClass(agent) : '';
-  if (cls === 'attention' || cls === 'disconnected') return 'error';
-  if (cls === 'working') return 'running';
-  return 'idle';
-}
-
-function _agentStatusMixDots(agents) {
-  const list = Array.isArray(agents) ? agents : [];
-  if (!list.length) {
-    return '<span class="agent-card-state-dot agent-card-state-dot--empty"></span>';
-  }
-  const shown = list.slice(0, 3);
-  let html = '';
-  for (const agent of shown) {
-    const mix = _agentStatusMixClass(agent);
-    html += '<span class="agent-card-state-dot agent-card-state-dot--' + esc(mix) + '"></span>';
-  }
-  if (list.length > shown.length) {
-    html += '<span class="agent-card-state-more ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">+' + esc(list.length - shown.length) + '</span>';
-  }
-  return html;
-}
 function _architectStatsForCard(architect, section) {
   const engineers = _architectEngineersForCard(architect && architect.id, section);
   const asks = _architectPendingAskTasks(architect);
@@ -901,7 +878,6 @@ function _renderEngineerCardBody(a, askingText) {
     + (identity ? (' title="' + esc('Agent Class: ' + identity.label + ' · base kind ' + (identity.baseKindLabel || 'Engineer')) + '"') : '')
     + '>' + esc(_agentCardPrimaryDisplayName(a)) + '</div>';
   html += '<div class="agent-card-line cell-engineer-workers">'
-    + '<span class="agent-card-state-mix">' + _agentStatusMixDots(workers) + '</span>'
     + '<span class="agent-card-state-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count">' + esc(String(workers.length) + ' ' + workerLabel) + '</span>'
     + '</div>';
   html += '<div class="agent-card-line cell-engineer-queue">'
@@ -987,6 +963,7 @@ function renderAgentCell(a, options) {
   if (_isArchitect) cls.push('architect');
   if (_isEngineerKind) cls.push('engineer');
   if (_isWorker) cls.push('worker');
+  if (_isDismissed || a.status === 'stopped') cls.push('has-footer-action');
   if (_isExecutionHierarchyOwner) cls.push('execution-hierarchy-owner');
   if (_isRetainedExecutionOwner) cls.push('retained-execution-owner');
   if (_isDismissed) cls.push('dismissed');

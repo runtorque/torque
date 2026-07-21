@@ -615,12 +615,23 @@ function _canvasShowEmptyMenu(x, y, groupName) {
   ]);
 }
 
+function _canvasCopyAgentValue(id, field) {
+  const cell = state && state.agents ? state.agents[id] : null;
+  if (!cell || typeof navigator === 'undefined' || !navigator.clipboard) return;
+  const value = field === 'name' ? String(cell.name == null ? '' : cell.name) : String(id);
+  navigator.clipboard.writeText(value).then(function() {
+    if (typeof closeContextMenu === 'function') closeContextMenu();
+  });
+}
+
 function _canvasFallbackCardMenuItems(id) {
   const safeId = esc(id);
+  const idArg = JSON.stringify(String(id));
   return [
     { label: 'Edit…', action: `openEditCell('${safeId}')` },
-    { label: 'Focus', action: `focusAgent('${safeId}')` },
     { separator: true },
+    { label: `Copy ID: ${String(id).slice(0, 8)}…`, action: `_canvasCopyAgentValue(${idArg}, 'id')` },
+    { label: 'Copy Name', action: `_canvasCopyAgentValue(${idArg}, 'name')` },
     { label: 'Delete', action: `removeAgent('${safeId}')`, danger: true },
   ];
 }
@@ -647,7 +658,7 @@ function _canvasShowCardMenu(x, y, kind, id, groupName) {
     : false;
 
   if (pause.applicable && !dismissed) {
-    _canvasInsertAfterFirst(items, 'Focus', {
+    _canvasInsertAfterFirst(items, 'Edit…', {
       label: pause.paused ? 'Resume event delivery' : 'Pause event delivery',
       action: pause.toggleAction,
     });

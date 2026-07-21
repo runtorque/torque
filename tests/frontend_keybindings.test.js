@@ -176,6 +176,10 @@ function createMainHarness() {
     openAddArchitectModal() { calls.push('architect'); },
     openAddTask(lane) { calls.push(['task', lane]); },
     removeAgent(id) { calls.push(['remove', id]); },
+    showConfirm(message, opts) {
+      calls.push(['confirm', message, opts]);
+      return Promise.resolve(true);
+    },
     _terminalComposeInputId(cellId) { return `terminal-compose-input-${cellId}`; },
     connect() {},
     setupDrag() {},
@@ -301,6 +305,76 @@ test('main keydown suppresses global shortcuts from contenteditable composer', (
   document._keydown(outsideDeleteEvent);
   assert.deepEqual(calls, [['remove', 'agent-1']]);
   assert.equal(outsideDeleteEvent.defaultPrevented, true);
+});
+
+test('Delete and Backspace route principal cards to a non-destructive menu notice', () => {
+  const { context, document, calls } = createMainHarness();
+  document.activeElement = document.body;
+
+  for (const kind of ['architect', 'engineer']) {
+    for (const key of ['Delete', 'Backspace']) {
+      calls.length = 0;
+      context.state.agents['agent-1'] = {
+        id: 'agent-1',
+        name: kind === 'architect' ? 'Productmind' : 'Panelsmith',
+        kind,
+        group: 'alpha',
+        cell_type: 'agent',
+      };
+      const event = keyEvent(key, { target: document.body });
+      document._keydown(event);
+
+      assert.equal(event.defaultPrevented, true, `${kind} ${key}`);
+      assert.equal(calls.some((call) => call[0] === 'remove'), false, `${kind} ${key}`);
+      assert.equal(calls.length, 1, `${kind} ${key}`);
+      assert.equal(calls[0][0], 'confirm');
+      assert.match(calls[0][1], /right-click menu/);
+      assert.deepEqual(JSON.parse(JSON.stringify(calls[0][2])), {
+        title: 'Delete from the agent menu',
+        label: 'Got it',
+        variant: 'btn-primary',
+        role: 'alertdialog',
+      });
+    }
+  }
+});
+
+test('Delete and Backspace still remove workers and terminals but not text in editable contexts', () => {
+  const { context, document, calls } = createMainHarness();
+
+  for (const cell of [
+    { id: 'agent-1', name: 'Worker', kind: 'worker', group: 'alpha', cell_type: 'agent' },
+    { id: 'agent-1', name: 'Shell', kind: 'terminal', group: 'alpha', cell_type: 'terminal' },
+  ]) {
+    for (const key of ['Delete', 'Backspace']) {
+      calls.length = 0;
+      context.state.agents['agent-1'] = cell;
+      document.activeElement = document.body;
+      const event = keyEvent(key, { target: document.body });
+      document._keydown(event);
+      assert.equal(event.defaultPrevented, true, `${cell.kind} ${key}`);
+      assert.deepEqual(calls, [['remove', 'agent-1']], `${cell.kind} ${key}`);
+    }
+  }
+
+  context.state.agents['agent-1'] = {
+    id: 'agent-1', name: 'Productmind', kind: 'architect', group: 'alpha', cell_type: 'agent',
+  };
+  const editableTargets = [
+    { tagName: 'INPUT', type: 'text' },
+    { tagName: 'TEXTAREA' },
+    { tagName: 'DIV', isContentEditable: true, classList: { contains() { return true; } } },
+  ];
+  for (const target of editableTargets) {
+    for (const key of ['Delete', 'Backspace']) {
+      calls.length = 0;
+      document.activeElement = target;
+      const event = keyEvent(key, { target });
+      document._keydown(event);
+      assert.equal(event.defaultPrevented, false, `${target.tagName} ${key}`);
+      assert.deepEqual(calls, [], `${target.tagName} ${key}`);
+    }
+  }
 });
 
 function createModalHarness() {
