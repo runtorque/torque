@@ -630,6 +630,7 @@ function _renderMainGrid(opts, renderMode) {
 
   if (mainHtmlChanged) {
     if (oldRects) _applyFlip(main, oldRects);
+    _applyArchitectReorderFlip(main);
     _restoreSurfaceState(main, mainState);
     _restoreActiveDetailInputFocus();
   }

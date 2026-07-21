@@ -140,8 +140,11 @@ function _buildHierarchicalAgentSections(agents) {
     rows: engineerRows(userEngineers),
   }];
 
-  const sortedArchitects = _sortAgentsByCreation(architects, indexById);
-  for (const architect of sortedArchitects) {
+  // `agents` arrives in the authoritative group-members order. Architect
+  // cards are directly reorderable, so preserve that order here rather than
+  // replacing it with creation time. Engineer/worker ordering remains on the
+  // existing creation-time contract below.
+  for (const architect of architects) {
     sections.push({
       key: 'architect:' + String(architect.id || ''),
       type: 'architect',
@@ -235,7 +238,9 @@ function _renderArchitectStrip(groupName, model, renderCell, opts) {
     + esc(String(architectSections.length))
     + '</span>'
     + '</div>';
-  html += '<div class="agent-architect-strip" data-agent-architect-strip data-agent-row-shape="architect-strip-row">';
+  html += '<div class="agent-architect-strip" data-agent-architect-strip'
+    + ' data-architect-group="' + esc(groupName || '') + '"'
+    + ' data-agent-row-shape="architect-strip-row">';
   for (const section of architectSections) {
     if (section && section.architect) {
       const architectId = String(section.architect.id || '');

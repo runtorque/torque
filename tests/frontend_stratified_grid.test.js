@@ -350,7 +350,7 @@ test('grid-level + New menu opens standalone architect, engineer, and worker flo
   ]);
 });
 
-test('stratified grid keeps Torque Steward in normal architect creation order', () => {
+test('stratified grid keeps Torque Steward in persisted architect group order', () => {
   const { context, sandbox, mainEl } = createHarness();
   sandbox.state.groups.torque = ['arch-old', 'arch-steward', 'arch-late'];
   sandbox.state.agents['arch-old'] = architect('arch-old', 'Torqly', 1);

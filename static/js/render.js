@@ -814,6 +814,97 @@ function toggleGroup(name) {
 
 /* FLIP animation — capture old positions, render, animate to new positions */
 let _flipUntil = 0;
+let _architectReorderFlip = null;
+
+function _agentGridReducedMotion() {
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function _architectCardRects(strip) {
+  const rects = {};
+  if (!strip || typeof strip.querySelectorAll !== 'function') return rects;
+  strip.querySelectorAll('[data-drag-id]').forEach(function(el) {
+    if (!el || String(el.dataset.agentKind || '') !== 'architect') return;
+    rects[String(el.dataset.dragId || '')] = el.getBoundingClientRect();
+  });
+  return rects;
+}
+
+function _queueArchitectReorderFlip(group, sourceOrder, expectedOrder, strip) {
+  _architectReorderFlip = {
+    group: String(group || ''),
+    sourceOrder: (sourceOrder || []).map(String),
+    expectedOrder: (expectedOrder || []).map(String),
+    rects: _architectCardRects(strip),
+    until: Date.now() + 3000,
+  };
+}
+
+function _architectOrderMatches(left, right) {
+  if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i++) {
+    if (String(left[i]) !== String(right[i])) return false;
+  }
+  return true;
+}
+
+function _visibleArchitectOrderForGroup(group) {
+  const ids = state && state.groups && Array.isArray(state.groups[group])
+    ? state.groups[group]
+    : [];
+  return ids.filter(function(id) {
+    const cell = state && state.agents ? state.agents[id] : null;
+    if (!cell || String(cell.kind || '') !== 'architect') return false;
+    return typeof _isTombstonedAgent !== 'function' || !_isTombstonedAgent(cell);
+  }).map(String);
+}
+
+function _applyArchitectReorderFlip(main) {
+  const pending = _architectReorderFlip;
+  if (!pending) return false;
+  if (Date.now() > pending.until) {
+    _architectReorderFlip = null;
+    return false;
+  }
+  const currentOrder = _visibleArchitectOrderForGroup(pending.group);
+  if (!_architectOrderMatches(currentOrder, pending.expectedOrder)) {
+    // A snapshot restoring the source order remains authoritative. Keep the
+    // queued positions briefly in case the move acknowledgement is merely
+    // delayed, but never leave transforms or marker classes behind.
+    if (!_architectOrderMatches(currentOrder, pending.sourceOrder)) {
+      _architectReorderFlip = null;
+    }
+    return false;
+  }
+
+  const cards = main && typeof main.querySelectorAll === 'function'
+    ? main.querySelectorAll('[data-agent-kind="architect"]')
+    : [];
+  const reduceMotion = _agentGridReducedMotion();
+  let animated = false;
+  cards.forEach(function(el) {
+    if (!el || String(el.dataset.dragGroup || '') !== pending.group) return;
+    if (el.classList) {
+      el.classList.remove('architect-dragging', 'architect-drop-before', 'architect-drop-after');
+    }
+    if (el.style) el.style.transform = '';
+    const oldRect = pending.rects[String(el.dataset.dragId || '')];
+    if (!oldRect || reduceMotion || typeof el.animate !== 'function') return;
+    const nextRect = el.getBoundingClientRect();
+    const dx = oldRect.left - nextRect.left;
+    const dy = oldRect.top - nextRect.top;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+    el.animate([
+      { transform: `translate(${dx}px, ${dy}px)` },
+      { transform: 'translate(0, 0)' },
+    ], { duration: 180, easing: 'cubic-bezier(.2,.8,.2,1)' });
+    animated = true;
+  });
+  _architectReorderFlip = null;
+  return animated;
+}
 
 function _surfacePanelApp(surface) {
   if (surface === 'board') return 'board';

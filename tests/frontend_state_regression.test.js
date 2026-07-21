@@ -1497,6 +1497,8 @@ function createDragDomElement({
   dropGroup = '',
   dropParent = '',
   groupName = '',
+  agentKind = '',
+  architectGroup = '',
   classNames = [],
   rect = {},
   parent = null,
@@ -1510,6 +1512,8 @@ function createDragDomElement({
   if (dropGroup) element.dataset.dropGroup = dropGroup;
   if (dropParent) element.dataset.dropParent = dropParent;
   if (groupName) element.dataset.groupName = groupName;
+  if (agentKind) element.dataset.agentKind = agentKind;
+  if (architectGroup) element.dataset.architectGroup = architectGroup;
   const bounds = Object.assign({
     top: 20,
     bottom: 80,
@@ -1544,6 +1548,66 @@ function fireGridDrag(main, dragElement, dropTarget, options = {}) {
   };
   main.listeners.drop(dropEvent);
   return { transfer, dropEvent };
+}
+
+function createArchitectDragFixture(main, document, ids, options = {}) {
+  const group = options.group || 'torque';
+  const strip = createDragDomElement({
+    architectGroup: group,
+    classNames: ['agent-architect-strip'],
+    parent: main,
+  });
+  strip.setAttribute('data-agent-architect-strip', 'true');
+  const cards = {};
+  ids.forEach(function(id, index) {
+    const customRect = options.rects && options.rects[id];
+    cards[id] = createDragDomElement({
+      dragId: id,
+      dragType: 'agent',
+      dragGroup: group,
+      agentKind: 'architect',
+      classNames: ['cell', 'architect'],
+      rect: customRect || {
+        left: 20 + (index * 140),
+        right: 140 + (index * 140),
+        width: 120,
+        top: 20,
+        bottom: 80,
+        height: 60,
+      },
+      parent: strip,
+    });
+  });
+  strip.setQuerySelectorAll('[data-drag-id]', ids.map((id) => cards[id]));
+  document.setSelectorAll(
+    '.architect-reorder-active, .architect-dragging, .architect-drop-before, .architect-drop-after',
+    [strip].concat(ids.map((id) => cards[id])),
+  );
+  document.setSelectorAll(
+    '.drop-before, .drop-after, .drop-target, .architect-drop-before, .architect-drop-after',
+    ids.map((id) => cards[id]),
+  );
+  document.setSelectorAll('.dragging', ids.map((id) => cards[id]));
+  return { strip, cards };
+}
+
+function seedArchitectDragState(sandbox, ids, group = 'torque') {
+  sandbox.state.groups = { [group]: ids.slice() };
+  sandbox.state.group_settings = { [group]: { collapsed_default: false } };
+  sandbox.state.children = {};
+  sandbox.state.agents = {};
+  ids.forEach(function(id, index) {
+    sandbox.state.agents[id] = {
+      id,
+      name: id,
+      kind: id.startsWith('eng-') ? 'engineer' : 'architect',
+      group,
+      cell_type: 'agent',
+      status: index === 1 ? 'stopped' : 'running',
+      dismissed_at: index === 2 ? 123 : 0,
+      created_at: index + 1,
+    };
+  });
 }
 
 function applyMoveAgentForDragState(state, id, targetGroup, before = '') {
@@ -27987,7 +28051,7 @@ test('main render falls back to state.groups ordering within hierarchy buckets w
   assert.match(main.innerHTML, /Bob[\s\S]*Worker B2[\s\S]*Worker B1[\s\S]*Alice[\s\S]*Worker A2[\s\S]*Worker A1[\s\S]*User Worker/);
 });
 
-test('main render orders sections user-first then architect creation order', () => {
+test('main render follows persisted group order for architects while preserving hierarchy ownership', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
 
@@ -28097,16 +28161,17 @@ test('main render orders sections user-first then architect creation order', () 
 
   // The flat strip renders Architects first; execution rows show the first execution-owning Architect by default.
   assert.deepEqual(jsonValue(context, `window._navAgents`), [
-    'arch-b',
     'arch-a',
-    'eng-hired-b',
+    'arch-b',
+    'eng-hired-a',
+    'worker-hired-a',
     'eng-user',
     'worker-user-owned',
     'worker-user',
   ]);
-  assert.match(main.innerHTML, /data-agent-architect-strip[\s\S]*Architect B[\s\S]*Architect A/);
-  assert.match(main.innerHTML, /data-agent-strata="architect-execution"[\s\S]*Alice B[\s\S]*Bob[\s\S]*Worker B[\s\S]*Loose Worker/);
-  assert.doesNotMatch(main.innerHTML, /Alice A[\s\S]*Worker A/);
+  assert.match(main.innerHTML, /data-agent-architect-strip[\s\S]*Architect A[\s\S]*Architect B/);
+  assert.match(main.innerHTML, /data-agent-strata="architect-execution"[\s\S]*Alice A[\s\S]*Worker A[\s\S]*Bob[\s\S]*Worker B[\s\S]*Loose Worker/);
+  assert.doesNotMatch(main.innerHTML, /Alice B/);
   assert.doesNotMatch(main.innerHTML, /principals-row/);
 });
 
@@ -29146,19 +29211,19 @@ test('main hierarchy ordering is stable when multiple agent deltas arrive in one
     });
   `);
 
-  // Flat strip ordering is stable; the default execution pane shows the first execution-owning Architect.
+  // Persisted group ordering drives the flat strip and its default execution owner.
   assert.deepEqual(jsonValue(context, `window._navAgents`), [
-    'arch-b',
     'arch-a',
-    'eng-b',
+    'arch-b',
+    'eng-a',
     'eng-user',
     'worker-user',
     'loose',
   ]);
   const mainHtml = document.getElementById('main').innerHTML;
-  assert.match(mainHtml, /data-agent-architect-strip[\s\S]*Architect B[\s\S]*Architect A/);
-  assert.match(mainHtml, /data-agent-strata="architect-execution"[\s\S]*Engineer B[\s\S]*User Engineer[\s\S]*User Worker[\s\S]*Loose/);
-  assert.doesNotMatch(mainHtml, /Engineer A/);
+  assert.match(mainHtml, /data-agent-architect-strip[\s\S]*Architect A[\s\S]*Architect B/);
+  assert.match(mainHtml, /data-agent-strata="architect-execution"[\s\S]*Engineer A[\s\S]*User Engineer[\s\S]*User Worker[\s\S]*Loose/);
+  assert.doesNotMatch(mainHtml, /Engineer B/);
   assert.doesNotMatch(mainHtml, /principals-row/);
 });
 
@@ -29253,6 +29318,213 @@ test('main grid drag reorders agents within a hierarchical row without changing 
     worker2Row: 'user:engineer:eng-1',
     worker2Owner: 'eng-1',
   });
+});
+
+test('architect drag emits exact before, after, and append move_agent payloads', () => {
+  const cases = [
+    {
+      label: 'before',
+      source: 'arch-c',
+      target: 'arch-a',
+      point: { clientX: 30, clientY: 40 },
+      expectedBefore: 'arch-a',
+    },
+    {
+      label: 'after',
+      source: 'arch-a',
+      target: 'arch-b',
+      point: { clientX: 270, clientY: 40 },
+      expectedBefore: 'arch-c',
+    },
+    {
+      label: 'append',
+      source: 'arch-a',
+      target: 'strip',
+      point: { clientX: 600, clientY: 180 },
+      expectedBefore: '',
+    },
+  ];
+
+  for (const item of cases) {
+    const { context, document, sandbox } = createMainGridDragHarness();
+    const main = document.getElementById('main');
+    seedArchitectDragState(sandbox, ['arch-a', 'eng-owned', 'arch-b', 'arch-c']);
+    runInContext(context, `setupDrag();`);
+    const fixture = createArchitectDragFixture(main, document, ['arch-a', 'arch-b', 'arch-c']);
+    const target = item.target === 'strip' ? fixture.strip : fixture.cards[item.target];
+
+    const { dropEvent } = fireGridDrag(main, fixture.cards[item.source], target, item.point);
+
+    assert.equal(dropEvent.defaultPrevented, true, item.label);
+    assert.deepEqual(jsonValue(context, `sendCalls`), [{
+      cmd: 'move_agent',
+      id: item.source,
+      target_group: 'torque',
+      before: item.expectedBefore,
+    }], item.label);
+    assert.equal(sandbox.state.agents['eng-owned'].hired_by_architect_id || '', '', item.label);
+  }
+});
+
+test('architect drag resolves wrapped rows, ignores same-position drops, and retains selection state', () => {
+  const { context, document, sandbox } = createMainGridDragHarness();
+  const main = document.getElementById('main');
+  seedArchitectDragState(sandbox, ['arch-a', 'arch-b', 'arch-c', 'arch-d']);
+  sandbox.selectedAgentId = 'arch-c';
+  runInContext(context, `selectedAgentId = 'arch-c'; focusedItemId = 'arch-b'; setupDrag();`);
+  const fixture = createArchitectDragFixture(main, document, ['arch-a', 'arch-b', 'arch-c', 'arch-d'], {
+    rects: {
+      'arch-a': { left: 20, right: 140, width: 120, top: 20, bottom: 80, height: 60 },
+      'arch-b': { left: 160, right: 280, width: 120, top: 20, bottom: 80, height: 60 },
+      'arch-c': { left: 20, right: 140, width: 120, top: 100, bottom: 160, height: 60 },
+      'arch-d': { left: 160, right: 280, width: 120, top: 100, bottom: 160, height: 60 },
+    },
+  });
+
+  // Right of B on row one means the insertion slot before the first card on
+  // row two, independent of horizontal coordinates on that next row.
+  fireGridDrag(main, fixture.cards['arch-a'], fixture.strip, { clientX: 270, clientY: 45 });
+  assert.deepEqual(jsonValue(context, `sendCalls[0]`), {
+    cmd: 'move_agent',
+    id: 'arch-a',
+    target_group: 'torque',
+    before: 'arch-c',
+  });
+  assert.deepEqual(jsonValue(context, `({ selectedAgentId: selectedAgentId, focusedItemId: focusedItemId })`), {
+    selectedAgentId: 'arch-c',
+    focusedItemId: 'arch-b',
+  });
+
+  const second = createMainGridDragHarness();
+  const secondMain = second.document.getElementById('main');
+  seedArchitectDragState(second.sandbox, ['arch-a', 'arch-b', 'arch-c']);
+  runInContext(second.context, `setupDrag();`);
+  const secondFixture = createArchitectDragFixture(secondMain, second.document, ['arch-a', 'arch-b', 'arch-c']);
+  fireGridDrag(secondMain, secondFixture.cards['arch-b'], secondFixture.cards['arch-a'], {
+    clientX: 130,
+    clientY: 40,
+  });
+  assert.deepEqual(jsonValue(second.context, `sendCalls`), [], 'same effective position is a no-op');
+});
+
+test('architect drag rejects cross-kind, cross-group, and one-card targets and cleans transient classes', () => {
+  const invalidCases = ['engineer', 'other-group'];
+  for (const invalidCase of invalidCases) {
+    const { context, document, sandbox } = createMainGridDragHarness();
+    const main = document.getElementById('main');
+    seedArchitectDragState(sandbox, ['arch-a', 'arch-b']);
+    runInContext(context, `setupDrag();`);
+    const fixture = createArchitectDragFixture(main, document, ['arch-a', 'arch-b']);
+    let target;
+    if (invalidCase === 'engineer') {
+      target = createDragDomElement({
+        dragId: 'eng-other',
+        dragType: 'agent',
+        dragGroup: 'torque',
+        agentKind: 'engineer',
+        classNames: ['cell', 'engineer'],
+        parent: main,
+      });
+    } else {
+      const other = createArchitectDragFixture(main, document, ['arch-z'], { group: 'other' });
+      target = other.cards['arch-z'];
+    }
+    const result = fireGridDrag(main, fixture.cards['arch-a'], target, { clientX: 30, clientY: 40 });
+    assert.notEqual(result.dropEvent.defaultPrevented, true, invalidCase);
+    assert.deepEqual(jsonValue(context, `sendCalls`), [], invalidCase);
+    main.listeners.dragend();
+    assert.equal(fixture.strip.classList.contains('architect-reorder-active'), false, invalidCase);
+    assert.equal(fixture.cards['arch-a'].classList.contains('architect-dragging'), false, invalidCase);
+  }
+
+  const single = createMainGridDragHarness();
+  const singleMain = single.document.getElementById('main');
+  seedArchitectDragState(single.sandbox, ['arch-a']);
+  runInContext(single.context, `setupDrag();`);
+  const singleFixture = createArchitectDragFixture(singleMain, single.document, ['arch-a']);
+  fireGridDrag(singleMain, singleFixture.cards['arch-a'], singleFixture.strip, { clientX: 500, clientY: 100 });
+  assert.deepEqual(jsonValue(single.context, `sendCalls`), []);
+});
+
+test('architect drag shows an insertion edge and clears markers on cancel or failed send', () => {
+  const { context, document, sandbox } = createMainGridDragHarness();
+  const main = document.getElementById('main');
+  seedArchitectDragState(sandbox, ['arch-a', 'arch-b', 'arch-c']);
+  runInContext(context, `setupDrag();`);
+  const fixture = createArchitectDragFixture(main, document, ['arch-a', 'arch-b', 'arch-c']);
+  const transfer = { effectAllowed: '', dropEffect: '', setData() {} };
+  main.listeners.dragstart({ target: fixture.cards['arch-a'], dataTransfer: transfer });
+  const over = {
+    target: fixture.cards['arch-c'],
+    dataTransfer: transfer,
+    clientX: 305,
+    clientY: 40,
+    preventDefault() { this.defaultPrevented = true; },
+  };
+  main.listeners.dragover(over);
+  assert.equal(over.defaultPrevented, true);
+  assert.equal(fixture.cards['arch-c'].classList.contains('architect-drop-before'), true);
+  assert.equal(fixture.cards['arch-a'].classList.contains('architect-dragging'), true);
+  main.listeners.dragend();
+  assert.equal(fixture.cards['arch-c'].classList.contains('architect-drop-before'), false);
+  assert.equal(fixture.cards['arch-a'].classList.contains('architect-dragging'), false);
+  assert.equal(fixture.strip.classList.contains('architect-reorder-active'), false);
+
+  const failed = createMainGridDragHarness();
+  const failedMain = failed.document.getElementById('main');
+  seedArchitectDragState(failed.sandbox, ['arch-a', 'arch-b']);
+  failed.sandbox.send = function() { return false; };
+  runInContext(failed.context, `setupDrag();`);
+  const failedFixture = createArchitectDragFixture(failedMain, failed.document, ['arch-a', 'arch-b']);
+  fireGridDrag(failedMain, failedFixture.cards['arch-b'], failedFixture.cards['arch-a'], {
+    clientX: 30,
+    clientY: 40,
+  });
+  assert.equal(jsonValue(failed.context, `_architectReorderFlip === null`), true);
+  assert.equal(failedFixture.strip.classList.contains('architect-reorder-active'), false);
+});
+
+test('architect reorder FLIP animates every displaced card and skips travel for reduced motion', () => {
+  function runCase(reduced) {
+    const { context, document, sandbox } = createMainGridDragHarness();
+    const main = document.getElementById('main');
+    seedArchitectDragState(sandbox, ['arch-a', 'arch-b', 'arch-c']);
+    sandbox.window.matchMedia = function() { return { matches: reduced }; };
+    const oldFixture = createArchitectDragFixture(main, document, ['arch-a', 'arch-b', 'arch-c']);
+    // Queue with the real old strip so its pre-mutation positions are retained.
+    context._queueArchitectReorderFlip(
+      'torque',
+      ['arch-a', 'arch-b', 'arch-c'],
+      ['arch-b', 'arch-a', 'arch-c'],
+      oldFixture.strip,
+    );
+    sandbox.state.groups.torque = ['arch-b', 'arch-a', 'arch-c'];
+    const nextFixture = createArchitectDragFixture(main, document, ['arch-b', 'arch-a', 'arch-c']);
+    const calls = [];
+    Object.values(nextFixture.cards).forEach(function(card) {
+      card.animate = function(frames, options) { calls.push({ id: card.dataset.dragId, frames, options }); };
+    });
+    main.setQuerySelectorAll('[data-agent-kind="architect"]', [
+      nextFixture.cards['arch-b'], nextFixture.cards['arch-a'], nextFixture.cards['arch-c'],
+    ]);
+    const animated = context._applyArchitectReorderFlip(main);
+    return { animated, calls };
+  }
+
+  const normal = runCase(false);
+  assert.equal(normal.animated, true);
+  assert.deepEqual(normal.calls.map((call) => call.id).sort(), ['arch-a', 'arch-b']);
+  assert.ok(normal.calls.every((call) => call.options.duration === 180));
+  assert.ok(normal.calls.every((call) => call.options.easing === 'cubic-bezier(.2,.8,.2,1)'));
+
+  const reduced = runCase(true);
+  assert.equal(reduced.animated, false);
+  assert.deepEqual(reduced.calls, []);
+
+  const css = appStylesheetSource();
+  assert.match(css, /architect-reorder-active/);
+  assert.match(css, /architect-drop-before/);
+  assert.match(css, /prefers-reduced-motion:\s*reduce[\s\S]*architect-dragging[\s\S]*transform:\s*none/);
 });
 
 test('readable text inside draggable cards temporarily opts out of drag startup', () => {

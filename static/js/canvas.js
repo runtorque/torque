@@ -85,7 +85,10 @@ function _canvasBuildTrees(groupName) {
   if (!state || !state.agents) return { trees, standalone };
 
   const all = [];
-  for (const id in state.agents) {
+  const persistedGroupOrder = groupName && state.groups && Array.isArray(state.groups[groupName])
+    ? state.groups[groupName]
+    : Object.keys(state.agents);
+  for (const id of persistedGroupOrder) {
     const cell = state.agents[id];
     if (!cell || cell.cell_type !== 'agent') continue;
     if (_canvasIsTombstoned(cell)) continue;
@@ -99,12 +102,9 @@ function _canvasBuildTrees(groupName) {
     if (av !== bv) return av - bv;
     return String(a.id || '').localeCompare(String(b.id || ''));
   };
-  const architectSort = function(a, b) {
-    return archByName(a, b);
-  };
-
   const architects = all.filter(function(a) { return (a.kind || '') === 'architect'; });
-  architects.sort(architectSort);
+  // `all` follows the persisted group-members list, matching the standard
+  // grid's Architect selector. New groups naturally begin in insertion order.
 
   for (const arch of architects) {
     const engineers = all.filter(function(e) {
