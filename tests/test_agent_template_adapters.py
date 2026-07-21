@@ -1452,22 +1452,28 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 value for value in config_values if value.startswith("hooks.state=")
             ]
             self.assertEqual(len(state_flags), 1)
-            session_source, session_entries = (
-                codex_adapter._codex_hook_trust_entries_for_source(
-                    "/config.toml",
-                    payload["hooks"],
-                )
-            )
-            self.assertEqual(session_source, "/config.toml")
             self.assertNotIn(str(generated_file), state_flags[0])
-            self.assertGreaterEqual(len(session_entries), 4)
-            for key, trusted_hash in session_entries:
-                self.assertIn(json.dumps(key), state_flags[0])
-                self.assertIn(json.dumps(trusted_hash), state_flags[0])
-            self.assertIn(json.dumps("/config.toml:session_start:0:0"), state_flags[0])
-            self.assertIn(json.dumps("/config.toml:pre_tool_use:0:0"), state_flags[0])
-            self.assertIn(json.dumps("/config.toml:permission_request:0:0"), state_flags[0])
-            self.assertIn(json.dumps("/config.toml:stop:0:0"), state_flags[0])
+            # Codex 0.144.x keys session-flag hook trust under the synthetic
+            # "/<session-flags>/config.toml" source; pre-0.144 used
+            # "/config.toml". Torque seeds trust for both variants so the Stop
+            # hook stays trusted (Active) across Codex versions rather than
+            # stalling behind the interactive "Hooks need review" gate.
+            for source in ("/<session-flags>/config.toml", "/config.toml"):
+                session_source, session_entries = (
+                    codex_adapter._codex_hook_trust_entries_for_source(
+                        source,
+                        payload["hooks"],
+                    )
+                )
+                self.assertEqual(session_source, source)
+                self.assertGreaterEqual(len(session_entries), 4)
+                for key, trusted_hash in session_entries:
+                    self.assertIn(json.dumps(key), state_flags[0])
+                    self.assertIn(json.dumps(trusted_hash), state_flags[0])
+                self.assertIn(json.dumps(f"{source}:session_start:0:0"), state_flags[0])
+                self.assertIn(json.dumps(f"{source}:pre_tool_use:0:0"), state_flags[0])
+                self.assertIn(json.dumps(f"{source}:permission_request:0:0"), state_flags[0])
+                self.assertIn(json.dumps(f"{source}:stop:0:0"), state_flags[0])
             self.assertNotIn("--dangerously-bypass-hook-trust", command)
             self.assertEqual(json.loads(hooks_file.read_text()), original)
             self.assertEqual(user_config.read_text(), 'model = "gpt-5"\n')

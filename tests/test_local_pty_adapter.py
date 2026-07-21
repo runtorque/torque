@@ -1280,13 +1280,18 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
                 value for value in config_values if value.startswith("hooks.state=")
             ]
             self.assertEqual(len(state_flags), 1)
-            self.assertIn(json.dumps("/config.toml:session_start:0:0"), state_flags[0])
-            self.assertIn(json.dumps("/config.toml:pre_tool_use:0:0"), state_flags[0])
-            self.assertIn(
-                json.dumps("/config.toml:permission_request:0:0"),
-                state_flags[0],
-            )
-            self.assertIn(json.dumps("/config.toml:stop:0:0"), state_flags[0])
+            # Codex 0.144.x keys session-flag hook trust under the synthetic
+            # "/<session-flags>/config.toml" source; pre-0.144 used
+            # "/config.toml". Torque seeds both so the Stop hook stays trusted
+            # (Active) across versions instead of stalling on "Hooks need review".
+            for source in ("/<session-flags>/config.toml", "/config.toml"):
+                self.assertIn(json.dumps(f"{source}:session_start:0:0"), state_flags[0])
+                self.assertIn(json.dumps(f"{source}:pre_tool_use:0:0"), state_flags[0])
+                self.assertIn(
+                    json.dumps(f"{source}:permission_request:0:0"),
+                    state_flags[0],
+                )
+                self.assertIn(json.dumps(f"{source}:stop:0:0"), state_flags[0])
             self.assertIn("trusted_hash = \"sha256:", state_flags[0])
             self.assertNotIn("--dangerously-bypass-hook-trust", launch_text)
             generated = Path(data_dir) / "codex" / "agents" / "agent-1" / "config.toml"

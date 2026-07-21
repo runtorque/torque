@@ -73,10 +73,21 @@ _CODEX_HOOK_EVENT_LABELS = {
 _CODEX_TORQUE_CONFIG_ROOT = "codex/agents"
 _CODEX_APPROVAL_SANDBOX_BYPASS_FLAG = "--dangerously-bypass-approvals-and-sandbox"
 # Codex represents configuration supplied by repeated `--config key=value`
-# session flags as an unmanaged synthetic config layer. Hook trust keys for
-# hooks supplied through those same flags must therefore use this synthetic
-# source path, not the Torque-owned file where we persist an audit copy.
-_CODEX_SESSION_FLAGS_HOOK_SOURCE_PATH = "/config.toml"
+# session flags as an unmanaged synthetic config layer ("session_flags"). Hook
+# trust keys for hooks supplied through those flags must use that layer's
+# synthetic source path (not the Torque-owned file where we persist an audit
+# copy). Codex derives the path from the layer name, and it has drifted across
+# releases: pre-0.144 used "/config.toml"; 0.144.x uses
+# "/<session-flags>/config.toml" (verified by trusting hooks in the TUI and
+# reading back the persisted hooks.state key). When the seeded trust key does
+# not match, Codex parks the hooks behind the interactive "Hooks need review"
+# gate (Active=0), which suppresses the Stop hook — so turn completion is never
+# reported and the agent stays stuck showing "running". Seed trust for every
+# known variant (harmless extra keys) so hooks stay pre-trusted across versions.
+_CODEX_SESSION_FLAGS_HOOK_SOURCE_PATHS = (
+    "/<session-flags>/config.toml",
+    "/config.toml",
+)
 
 
 
@@ -393,15 +404,18 @@ def _codex_config_cli_flags(config: dict, *, config_path: Path) -> list[str]:
             + ", ".join(_toml_inline_hook_group(group) for group in groups or [])
             + "]"
         )
-    _source, trust_entries = _codex_hook_trust_entries_for_source(
-        _CODEX_SESSION_FLAGS_HOOK_SOURCE_PATH,
-        config.get("hooks") or {},
-    )
+    trust_entries: list[tuple[str, str]] = []
+    for source in _CODEX_SESSION_FLAGS_HOOK_SOURCE_PATHS:
+        _source, entries = _codex_hook_trust_entries_for_source(
+            source,
+            config.get("hooks") or {},
+        )
+        trust_entries.extend(entries)
     if trust_entries:
         # Codex's CLI override parser splits override paths on '.' literally,
         # so keys containing `/config.toml` cannot be expressed as
         # `hooks.state.<key>.trusted_hash=...`. Override the whole state table
-        # instead; the inline TOML value preserves the synthetic source key.
+        # instead; the inline TOML value preserves the synthetic source keys.
         flags.append("hooks.state=" + _toml_inline_hook_state(trust_entries))
     result: list[str] = []
     for flag in flags:
