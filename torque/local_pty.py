@@ -1007,9 +1007,9 @@ class LocalPtyAdapter:
     ) -> bool:
         adapter = adapter or get_adapter(cell.agent_type)
         screen_text = await self._read_screen_text(session)
-        ready = bool(screen_text) and adapter.is_idle_composer_screen(screen_text)
+        ready = bool(screen_text) and adapter.is_input_ready_screen(screen_text)
         if not self._codex_idle_detector.observe(
-            cell, ready=ready, stable_polls=stable_polls, screen_text=screen_text,
+            cell, ready=ready, stable_polls=stable_polls,
         ):
             return False
         await self._emit_agent_session_end_detected(
