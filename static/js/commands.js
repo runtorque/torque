@@ -814,7 +814,13 @@ function setupDrag() {
     _architectDrag = null;
     document.querySelectorAll('.dragging')
       .forEach(el => el.classList.remove('dragging'));
-    if (!wasArchitectDrag) render();
+    // A fast move_agent acknowledgement may have updated authoritative state
+    // while WS rendering was suppressed by dragInProgress. Always run the
+    // normal memoized render after release: it projects that expected order
+    // and consumes the queued Architect FLIP. With a delayed acknowledgement
+    // the HTML is unchanged, so this is a no-op and the queued FLIP remains
+    // available for the later group_update render.
+    render();
   });
 
   main.addEventListener('dragover', (e) => {

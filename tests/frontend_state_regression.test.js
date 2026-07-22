@@ -29484,6 +29484,81 @@ test('architect drag shows an insertion edge and clears markers on cancel or fai
   assert.equal(failedFixture.strip.classList.contains('architect-reorder-active'), false);
 });
 
+test('architect dragend renders an acknowledgement that arrived while drag rendering was suppressed', () => {
+  const { context, document, sandbox } = createMainGridDragHarness();
+  const main = document.getElementById('main');
+  seedArchitectDragState(sandbox, ['arch-a', 'arch-b', 'arch-c']);
+  runInContext(context, `render(); setupDrag();`);
+  const oldFixture = createArchitectDragFixture(main, document, ['arch-a', 'arch-b', 'arch-c']);
+
+  fireGridDrag(main, oldFixture.cards['arch-b'], oldFixture.cards['arch-a'], {
+    clientX: 30,
+    clientY: 40,
+  });
+  assert.equal(jsonValue(context, `_architectReorderFlip !== null`), true);
+
+  // Model a local/fast group_update: websocket state is already authoritative,
+  // but its surface render was suppressed while dragInProgress remained true.
+  sandbox.state.groups.torque = ['arch-b', 'arch-a', 'arch-c'];
+  const nextFixture = createArchitectDragFixture(main, document, ['arch-b', 'arch-a', 'arch-c']);
+  const animations = [];
+  Object.values(nextFixture.cards).forEach(function(card) {
+    card.animate = function(frames, options) {
+      animations.push({ id: card.dataset.dragId, frames, options });
+    };
+  });
+  main.setQuerySelectorAll('[data-agent-kind="architect"]', [
+    nextFixture.cards['arch-b'], nextFixture.cards['arch-a'], nextFixture.cards['arch-c'],
+  ]);
+
+  main.listeners.dragend();
+
+  assert.deepEqual(
+    jsonValue(context, `window._navGridRows.find(function(row) { return row.rowType === 'architect-strip-row'; }).items.map(function(item) { return item.id; })`),
+    ['arch-b', 'arch-a', 'arch-c'],
+  );
+  assert.ok(
+    main.innerHTML.indexOf('data-drag-id="arch-b"')
+      < main.innerHTML.indexOf('data-drag-id="arch-a"'),
+    'dragend should immediately project the acknowledged Architect order',
+  );
+  assert.deepEqual(animations.map((animation) => animation.id).sort(), ['arch-a', 'arch-b']);
+  assert.equal(jsonValue(context, `_architectReorderFlip === null`), true);
+});
+
+test('architect dragend no-change render preserves a queued FLIP until a delayed acknowledgement', () => {
+  const { context, document, sandbox } = createMainGridDragHarness();
+  const main = document.getElementById('main');
+  seedArchitectDragState(sandbox, ['arch-a', 'arch-b', 'arch-c']);
+  runInContext(context, `render(); setupDrag();`);
+  const oldFixture = createArchitectDragFixture(main, document, ['arch-a', 'arch-b', 'arch-c']);
+
+  fireGridDrag(main, oldFixture.cards['arch-b'], oldFixture.cards['arch-a'], {
+    clientX: 30,
+    clientY: 40,
+  });
+  main.listeners.dragend();
+  assert.equal(jsonValue(context, `_architectReorderFlip !== null`), true);
+  assert.deepEqual(
+    jsonValue(context, `window._navGridRows.find(function(row) { return row.rowType === 'architect-strip-row'; }).items.map(function(item) { return item.id; })`),
+    ['arch-a', 'arch-b', 'arch-c'],
+  );
+
+  sandbox.state.groups.torque = ['arch-b', 'arch-a', 'arch-c'];
+  const nextFixture = createArchitectDragFixture(main, document, ['arch-b', 'arch-a', 'arch-c']);
+  const animations = [];
+  Object.values(nextFixture.cards).forEach(function(card) {
+    card.animate = function() { animations.push(card.dataset.dragId); };
+  });
+  main.setQuerySelectorAll('[data-agent-kind="architect"]', [
+    nextFixture.cards['arch-b'], nextFixture.cards['arch-a'], nextFixture.cards['arch-c'],
+  ]);
+  runInContext(context, `render();`);
+
+  assert.deepEqual(animations.sort(), ['arch-a', 'arch-b']);
+  assert.equal(jsonValue(context, `_architectReorderFlip === null`), true);
+});
+
 test('architect reorder FLIP animates every displaced card and skips travel for reduced motion', () => {
   function runCase(reduced) {
     const { context, document, sandbox } = createMainGridDragHarness();
