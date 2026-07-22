@@ -986,7 +986,7 @@ function renderAgentCell(a, options) {
     statusAttrs.push(`title="${esc(a.error_message || 'Needs attention')}"`);
   }
 
-  let h = `<div class="${cls.join(' ')}" draggable="true" data-drag-id="${a.id}" data-drag-type="agent" data-drag-group="${esc(a.group)}" data-nav-id="${esc(a.id)}"`;
+  let h = `<div class="${cls.join(' ')}" draggable="true" data-drag-id="${a.id}" data-drag-type="agent" data-drag-group="${esc(a.group)}" data-agent-kind="${esc(a.kind || '')}" data-nav-id="${esc(a.id)}"`;
   if (_isExecutionHierarchyOwner) h += ' data-execution-hierarchy-owner="true"';
   if (_isRetainedExecutionOwner) h += ' data-retained-execution-owner="true"';
   if (_isDismissed) h += ` data-dismissed-at="${esc(_agentDismissedAt(a))}"`;

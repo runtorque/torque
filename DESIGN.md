@@ -1727,6 +1727,35 @@ scope.
   payloads, role-specific worktree availability, empty/count markup and layout,
   footer action clearance, and Delete/Backspace routing by kind and input state.
 
+### D-047 — Architect selector order is direct, durable, and motion-coherent
+
+- Date: 2026-07-21
+- Status: accepted
+- Decision: Architect cards in a Group's labeled selector follow the persisted
+  Group member order in both Grid and Canvas. The selector supports same-Group,
+  Architect-only drag reordering, including wrapped rows and append space,
+  through the existing `move_agent` ordering authority. A lifted source and
+  insertion-edge cue explain the pending placement; after authoritative state
+  confirms a changed order, displaced Architect cards use a short transform-only
+  ease-out from their previous positions.
+- Rationale: Creation-time projection hid otherwise durable Group ordering and
+  made a successful drag appear ineffective. A single ordering authority keeps
+  Grid, keyboard traversal, Canvas, refresh, and restart behavior coherent,
+  while explicit insertion and confirmation motion make wrapped reordering
+  predictable without a full-grid jump.
+- Scope: Architect selector projection and drag interaction, Canvas Architect
+  tree ordering, Architect reorder FLIP treatment, and related frontend tests.
+- Constraints: Architect drag never reparents, changes Group membership, or
+  mutates hierarchy ownership, selection, focus, or expanded-team state. Other
+  agent, terminal, and Group drag contracts remain unchanged. Same-position and
+  one-card drops do not send mutations. Reduced-motion mode keeps insertion
+  cues but removes nonessential lift and reorder travel. Card dimensions,
+  four-column fit, and team-band geometry remain unchanged.
+- Verification: Frontend regressions protect persisted Grid/navigation and
+  Canvas order, exact before/after/append payloads, wrapped target resolution,
+  no-op and invalid-drop rejection, transient cleanup, displaced-card FLIP,
+  and reduced-motion behavior; state coverage protects save/load ordering.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

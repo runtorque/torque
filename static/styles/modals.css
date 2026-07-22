@@ -1695,6 +1695,31 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   opacity: 0.3; transition: opacity .15s;
   pointer-events: none;
 }
+.agent-architect-strip.architect-reorder-active {
+  outline: 1px dashed color-mix(in srgb, var(--accent) 48%, transparent);
+  outline-offset: 3px;
+  border-radius: var(--radius);
+}
+.cell.architect.dragging.architect-dragging {
+  opacity: .58;
+  transform: translateY(-3px) scale(1.015);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, .24);
+  transition: opacity .12s ease-out, transform .12s ease-out, box-shadow .12s ease-out;
+}
+.agent-architect-strip > .cell.architect-drop-before {
+  box-shadow: inset 3px 0 0 0 var(--accent),
+    -4px 0 10px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.agent-architect-strip > .cell.architect-drop-after {
+  box-shadow: inset -3px 0 0 0 var(--accent),
+    4px 0 10px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .cell.architect.dragging.architect-dragging {
+    transform: none;
+    transition: none;
+  }
+}
 .cell.drop-before { box-shadow: inset 3px 0 0 0 var(--accent); }
 .cell.drop-after { box-shadow: inset -3px 0 0 0 var(--accent); }
 .term-row.drop-before { box-shadow: inset 0 3px 0 0 var(--accent); }

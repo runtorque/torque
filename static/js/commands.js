@@ -674,6 +674,7 @@ async function removeGroup(group) {
  */
 let _dragId = null;
 let _dragType = null;
+let _architectDrag = null;
 let _textSelectionDragBypassInstalled = false;
 
 const TEXT_SELECTION_DRAG_SELECTORS = [
@@ -781,27 +782,66 @@ function setupDrag() {
     }
     _dragId = el.dataset.dragId;
     _dragType = el.dataset.dragType;
+    const dragCell = _dragType === 'agent' && state && state.agents
+      ? state.agents[_dragId]
+      : null;
+    if (dragCell && String(dragCell.kind || '') === 'architect') {
+      const group = String(dragCell.group || el.dataset.dragGroup || '');
+      const strip = el.closest('[data-agent-architect-strip]');
+      _architectDrag = { id: _dragId, group, strip, source: el };
+      if (strip && strip.classList) strip.classList.add('architect-reorder-active');
+    } else {
+      _architectDrag = null;
+    }
     dragInProgress = true;
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', _dragId);
     const dimEl = _dragType === 'group' ? el.closest('.group') || el : el;
-    requestAnimationFrame(() => dimEl.classList.add('dragging'));
+    requestAnimationFrame(() => {
+      dimEl.classList.add('dragging');
+      if (_architectDrag) dimEl.classList.add('architect-dragging');
+    });
   });
 
   main.addEventListener('dragend', () => {
+    const wasArchitectDrag = !!_architectDrag || !!_architectReorderFlip;
     _dragId = null;
     _dragType = null;
     dragInProgress = false;
-    _flipUntil = Date.now() + 500;
+    if (!wasArchitectDrag) _flipUntil = Date.now() + 500;
     _clearDropIndicators();
+    _clearArchitectDragTransient();
+    _architectDrag = null;
     document.querySelectorAll('.dragging')
       .forEach(el => el.classList.remove('dragging'));
+    // A fast move_agent acknowledgement may have updated authoritative state
+    // while WS rendering was suppressed by dragInProgress. Always run the
+    // normal memoized render after release: it projects that expected order
+    // and consumes the queued Architect FLIP. With a delayed acknowledgement
+    // the HTML is unchanged, so this is a no-op and the queued FLIP remains
+    // available for the later group_update render.
     render();
   });
 
   main.addEventListener('dragover', (e) => {
     if (!_dragId) return;
     _clearDropIndicators();
+
+    if (_architectDrag) {
+      const strip = e.target.closest('[data-agent-architect-strip]');
+      if (!strip || String(strip.dataset.architectGroup || '') !== _architectDrag.group) return;
+      const intent = _resolveArchitectDropIntent(
+        strip,
+        e.clientX,
+        e.clientY,
+        _architectDrag.id,
+      );
+      if (!intent) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      _showArchitectDropIntent(strip, intent);
+      return;
+    }
 
     if (_dragType === 'group') {
       const groupEl = e.target.closest('.group[data-group-name]');
@@ -839,6 +879,32 @@ function setupDrag() {
 
   main.addEventListener('drop', (e) => {
     if (!_dragId) return;
+
+    if (_architectDrag) {
+      const drag = _architectDrag;
+      const strip = e.target.closest('[data-agent-architect-strip]');
+      if (strip && String(strip.dataset.architectGroup || '') === drag.group) {
+        const intent = _resolveArchitectDropIntent(strip, e.clientX, e.clientY, drag.id);
+        if (intent) {
+          e.preventDefault();
+          const command = _architectMoveCommand(drag.id, drag.group, intent.before);
+          if (command) {
+            _queueArchitectReorderFlip(
+              drag.group,
+              command.sourceOrder,
+              command.expectedOrder,
+              strip,
+            );
+            if (send(command.payload) === false) _architectReorderFlip = null;
+          }
+        }
+      }
+      _clearDropIndicators();
+      _clearArchitectDragTransient();
+      _architectDrag = null;
+      return;
+    }
+
     e.preventDefault();
 
     if (_dragType === 'group') {
@@ -912,8 +978,121 @@ function setupDrag() {
 }
 
 function _clearDropIndicators() {
-  document.querySelectorAll('.drop-before, .drop-after, .drop-target')
-    .forEach(el => el.classList.remove('drop-before', 'drop-after', 'drop-target'));
+  document.querySelectorAll('.drop-before, .drop-after, .drop-target, .architect-drop-before, .architect-drop-after')
+    .forEach(el => el.classList.remove(
+      'drop-before', 'drop-after', 'drop-target',
+      'architect-drop-before', 'architect-drop-after',
+    ));
+}
+
+function _architectOrderInGroup(group) {
+  const ids = state && state.groups && Array.isArray(state.groups[group])
+    ? state.groups[group]
+    : [];
+  return ids.filter(function(id) {
+    const cell = state && state.agents ? state.agents[id] : null;
+    if (!cell || String(cell.kind || '') !== 'architect') return false;
+    return typeof _isTombstonedAgent !== 'function' || !_isTombstonedAgent(cell);
+  }).map(String);
+}
+
+function _architectCardsInStrip(strip, sourceId) {
+  if (!strip || typeof strip.querySelectorAll !== 'function') return [];
+  return Array.from(strip.querySelectorAll('[data-drag-id]')).filter(function(el) {
+    return el
+      && String(el.dataset.agentKind || '') === 'architect'
+      && String(el.dataset.dragId || '') !== String(sourceId || '');
+  });
+}
+
+function _resolveArchitectDropIntent(strip, clientX, clientY, sourceId) {
+  if (!strip) return null;
+  const cards = _architectCardsInStrip(strip, sourceId);
+  if (!cards.length) return { before: '', marker: null, side: 'after' };
+
+  for (let i = 0; i < cards.length; i++) {
+    const card = cards[i];
+    const rect = card.getBoundingClientRect();
+    const top = Number(rect.top || 0);
+    const bottom = Number(rect.bottom || (top + Number(rect.height || 0)));
+    const left = Number(rect.left || 0);
+    const right = Number(rect.right || (left + Number(rect.width || 0)));
+    const midX = left + ((right - left) / 2);
+    if (clientY < top || (clientY <= bottom && clientX < midX)) {
+      return {
+        before: String(card.dataset.dragId || ''),
+        marker: card,
+        side: 'before',
+      };
+    }
+    const next = cards[i + 1];
+    if (clientY <= bottom && (!next || clientY < Number(next.getBoundingClientRect().top || 0))) {
+      return {
+        before: next ? String(next.dataset.dragId || '') : '',
+        marker: card,
+        side: 'after',
+      };
+    }
+  }
+
+  return { before: '', marker: cards[cards.length - 1], side: 'after' };
+}
+
+function _showArchitectDropIntent(strip, intent) {
+  if (!strip || !intent) return;
+  if (strip.classList) strip.classList.add('architect-reorder-active');
+  if (!intent.marker || !intent.marker.classList) return;
+  intent.marker.classList.add(intent.side === 'before'
+    ? 'architect-drop-before'
+    : 'architect-drop-after');
+}
+
+function _architectMoveCommand(sourceId, group, beforeId) {
+  const sourceOrder = _architectOrderInGroup(group);
+  if (sourceOrder.length <= 1 || !sourceOrder.includes(String(sourceId || ''))) return null;
+  const remaining = sourceOrder.filter(id => id !== String(sourceId || ''));
+  let insertAt = beforeId ? remaining.indexOf(String(beforeId)) : remaining.length;
+  if (insertAt < 0) return null;
+  const expectedOrder = remaining.slice();
+  expectedOrder.splice(insertAt, 0, String(sourceId || ''));
+  if (_architectOrderMatches(sourceOrder, expectedOrder)) return null;
+  return {
+    payload: {
+      cmd: 'move_agent',
+      id: String(sourceId || ''),
+      target_group: String(group || ''),
+      before: beforeId ? String(beforeId) : '',
+    },
+    sourceOrder,
+    expectedOrder,
+  };
+}
+
+function _clearArchitectDragTransient() {
+  const tracked = _architectDrag
+    ? [_architectDrag.strip, _architectDrag.source]
+    : [];
+  tracked.forEach(function(el) {
+    if (!el || !el.classList) return;
+    el.classList.remove(
+      'architect-reorder-active',
+      'architect-dragging',
+      'architect-drop-before',
+      'architect-drop-after',
+    );
+    if (el.style) el.style.transform = '';
+  });
+  document.querySelectorAll('.architect-reorder-active, .architect-dragging, .architect-drop-before, .architect-drop-after')
+    .forEach(function(el) {
+      if (!el.classList) return;
+      el.classList.remove(
+        'architect-reorder-active',
+        'architect-dragging',
+        'architect-drop-before',
+        'architect-drop-after',
+      );
+      if (el.style) el.style.transform = '';
+    });
 }
 
 function _nextDragSibling(el) {

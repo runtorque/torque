@@ -346,7 +346,7 @@ test('canvas tree model excludes non-agent cells (e.g. terminals) and out-of-gro
   assert.equal(model.standalone.engineers.length, 0);
 });
 
-test('canvas tree model orders architects, engineers, and workers by created_at then id', () => {
+test('canvas tree model uses persisted architect order while sorting engineers and workers by creation', () => {
   const context = createContext();
   seed(context, [
     architect('arch-late', 'Late Architect', 20),
@@ -356,6 +356,9 @@ test('canvas tree model orders architects, engineers, and workers by created_at 
     worker('worker-z', 'Worker Z', 'eng-a', 8),
     worker('worker-y', 'Worker Y', 'eng-a', 7),
   ]);
+  context.state.groups.alpha = [
+    'arch-early', 'eng-b', 'eng-a', 'worker-z', 'worker-y', 'arch-late',
+  ];
 
   const model = buildTrees(context, 'alpha');
 
@@ -373,7 +376,7 @@ test('canvas tree model orders architects, engineers, and workers by created_at 
 });
 
 
-test('canvas tree model keeps Torque Steward in normal architect creation order', () => {
+test('canvas tree model keeps Torque Steward in normal persisted architect order', () => {
   const context = createContext();
   const steward = architect('arch-steward', 'Torque Steward', 30);
   steward.agent_class_id = 'torque-steward';
@@ -383,12 +386,13 @@ test('canvas tree model keeps Torque Steward in normal architect creation order'
     steward,
     architect('arch-late', 'Late Architect', 40),
   ]);
+  context.state.groups.alpha = ['arch-steward', 'arch-late', 'arch-early'];
 
   const model = buildTrees(context, 'alpha');
 
   assert.deepEqual(
     model.trees.map((t) => t.architect.id),
-    ['arch-early', 'arch-steward', 'arch-late'],
+    ['arch-steward', 'arch-late', 'arch-early'],
   );
 });
 

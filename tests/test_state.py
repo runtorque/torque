@@ -6055,3 +6055,47 @@ class TaskUpsertObserverTests(unittest.TestCase):
         state.board_update_task(task.id, task="Renamed")
 
         self.assertEqual(len(seen), count_before_unregister)
+
+
+class AgentGroupOrderPersistenceTests(unittest.TestCase):
+    def setUp(self):
+        _install_aiohttp_stub()
+        self.state_mod = importlib.import_module("torque.state")
+        self.state_mod = importlib.reload(self.state_mod)
+
+    def test_move_agent_architect_order_survives_database_reload(self):
+        from torque.db import TorqueDB
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db = TorqueDB(Path(tmp) / "torque.db")
+            db.init()
+            try:
+                state = self.state_mod.MatrixState(db=db)
+                state.groups["g"] = []
+                for aid in ("arch-a", "worker", "arch-b", "arch-c"):
+                    cell = self.state_mod.AgentCell(
+                        id=aid,
+                        name=aid,
+                        group="g",
+                        kind="worker" if aid == "worker" else "architect",
+                        cell_type="agent",
+                    )
+                    state.agents[aid] = cell
+                    state.groups["g"].append(aid)
+                    state._db_save_agent(cell)
+                state._db_save_groups()
+
+                state.move_agent("arch-c", "g", before="arch-a")
+                self.assertEqual(
+                    state.groups["g"],
+                    ["arch-c", "arch-a", "worker", "arch-b"],
+                )
+
+                reloaded = self.state_mod.MatrixState(db=db)
+                reloaded.load()
+                self.assertEqual(
+                    reloaded.groups["g"],
+                    ["arch-c", "arch-a", "worker", "arch-b"],
+                )
+            finally:
+                db.close()
