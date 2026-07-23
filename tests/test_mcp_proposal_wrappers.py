@@ -307,8 +307,47 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             req_id=20,
             agent_id=self.torqly.id,
         )
-        self.assertIn("route evidence", self._error_text(no_route))
+        no_route_text = self._error_text(no_route)
+        self.assertNotIn("Unknown tool", no_route_text)
+        self.assertIn("route evidence", no_route_text)
         self.assertEqual("", unrouted.assigned_architect_id)
+        self.assertEqual({}, unrouted.completion_evidence)
+        self.assertEqual([], unrouted.messages)
+
+        wrong_group = self.state.board_add_task(
+            "Wrong-group product task",
+            "other",
+            labels=["product-proposal", "proposal-only"],
+            created_by_architect_id=self.cross_group_architect.id,
+        )
+        wrong_group_denied = await self._call(
+            "task_claim",
+            {"task": wrong_group.id},
+            req_id=201,
+            agent_id=self.torqly.id,
+        )
+        wrong_group_text = self._error_text(wrong_group_denied)
+        self.assertNotIn("Unknown tool", wrong_group_text)
+        self.assertEqual("Task not found", wrong_group_text)
+        self.assertEqual("", wrong_group.assigned_architect_id)
+        self.assertEqual({}, wrong_group.completion_evidence)
+
+        ineligible = self.state.board_add_task(
+            "Ineligible non-product task",
+            "g",
+            created_by_architect_id=self.peer.id,
+        )
+        ineligible_denied = await self._call(
+            "task_claim",
+            {"task": ineligible.id},
+            req_id=202,
+            agent_id=self.torqly.id,
+        )
+        ineligible_text = self._error_text(ineligible_denied)
+        self.assertNotIn("Unknown tool", ineligible_text)
+        self.assertIn("not a product-proposal", ineligible_text)
+        self.assertEqual("", ineligible.assigned_architect_id)
+        self.assertEqual({}, ineligible.completion_evidence)
 
         normal_architect_task = self.state.board_add_task(
             "Normal architect task",
