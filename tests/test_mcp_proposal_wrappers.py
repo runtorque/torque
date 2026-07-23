@@ -270,6 +270,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             pickup_evidence["authorization"]["scope"],
         )
         self.assertEqual(route_id, pickup_evidence["authorization"]["route_message_id"])
+        self.assertTrue(pickup_evidence["authorization"]["route_thread_id"])
         self.assertIn(route_id, pickup_evidence["source"])
         self.assertEqual("architect_pickup", refreshed.messages[-1]["action"])
 
