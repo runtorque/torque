@@ -70,6 +70,11 @@ function _terminalComposeNodeTextLength(node) {
   if (node.nodeType === 3) return String(node.nodeValue || '').length;
   if (node.nodeType !== 1) return 0;
   if (node.getAttribute && node.getAttribute('data-attachment-token')) return 0;
+  // The space after an atomic attachment is a real, editable DOM boundary,
+  // but not draft text. Keeping it out of logical offsets lets attachment
+  // positions remain zero-width while still giving browsers somewhere stable
+  // to put a caret after a chip.
+  if (node.getAttribute && node.getAttribute('data-attachment-caret-host')) return 0;
   if (String(node.nodeName || '').toUpperCase() === 'BR') return 1;
   let total = 0;
   const children = node.childNodes || [];
@@ -84,29 +89,49 @@ function _terminalComposeRichHtml(cellId, text) {
   const value = String(text || '');
   let html = '';
   let cursor = 0;
-  for (let i = 0; i < entries.length; i++) {
-    const entry = entries[i] || {};
-    const token = String(entry.token || '');
-    if (!token) continue;
-    let pos = Number(entry.position);
+  for (let i = 0; i < entries.length;) {
+    const group = [];
+    const first = entries[i] || {};
+    let pos = Number(first.position);
     pos = Math.max(0, Math.min(value.length, Number.isFinite(pos) ? Math.floor(pos) : value.length));
+    while (i < entries.length) {
+      const entry = entries[i] || {};
+      const entryPos = Number(entry.position);
+      const normalizedPos = Math.max(0, Math.min(
+        value.length,
+        Number.isFinite(entryPos) ? Math.floor(entryPos) : value.length
+      ));
+      if (normalizedPos !== pos) break;
+      if (String(entry.token || '')) group.push(entry);
+      i += 1;
+    }
     if (pos > cursor) {
       html += _terminalComposeEscapeText(value.slice(cursor, pos));
       cursor = pos;
     }
-    const label = _terminalComposeAttachmentLabel(entry);
-    const title = entry.path ? String(entry.path) : label;
-    const tokenLabel = token || label;
-    const selected = String(_terminalComposeSelectedAttachmentByCell[String(cellId || '')] || '') === token;
-    html += '<span class="terminal-compose-attachment-chip terminal-compose-inline-attachment-chip'
-      + (selected ? ' selected' : '')
-      + '" contenteditable="false" role="button" tabindex="0"'
-      + ' data-attachment-token="' + esc(token) + '"'
-      + ' onclick="return terminalComposeAttachmentPreview(event, \'' + esc(cellId).replace(/'/g, "\\'") + '\', \'' + esc(token).replace(/'/g, "\\'") + '\')"'
-      + ' onkeydown="return terminalComposeAttachmentChipKeydown(event, \'' + esc(cellId).replace(/'/g, "\\'") + '\', \'' + esc(token).replace(/'/g, "\\'") + '\')"'
-      + ' title="' + esc(title) + '" aria-label="Preview attached image ' + esc(tokenLabel) + ' (' + esc(label) + ')">'
-      + esc(tokenLabel)
-      + '</span>';
+    for (let j = 0; j < group.length; j++) {
+      const entry = group[j];
+      const token = String(entry.token || '');
+      const label = _terminalComposeAttachmentLabel(entry);
+      const title = entry.path ? String(entry.path) : label;
+      const tokenLabel = token || label;
+      const selected = String(_terminalComposeSelectedAttachmentByCell[String(cellId || '')] || '') === token;
+      html += '<span class="terminal-compose-attachment-chip terminal-compose-inline-attachment-chip'
+        + (selected ? ' selected' : '')
+        + '" contenteditable="false" role="button" tabindex="0"'
+        + ' data-attachment-token="' + esc(token) + '"'
+        + ' onclick="return terminalComposeAttachmentPreview(event, \'' + esc(cellId).replace(/'/g, "\\'") + '\', \'' + esc(token).replace(/'/g, "\\'") + '\')"'
+        + ' onkeydown="return terminalComposeAttachmentChipKeydown(event, \'' + esc(cellId).replace(/'/g, "\\'") + '\', \'' + esc(token).replace(/'/g, "\\'") + '\')"'
+        + ' title="' + esc(title) + '" aria-label="Preview attached image ' + esc(tokenLabel) + ' (' + esc(label) + ')">'
+        + esc(tokenLabel)
+        + '</span>';
+      // A token needs a durable inline caret boundary. The final token may
+      // reuse a following ordinary whitespace character, otherwise emit one
+      // real space. This avoids accumulating separators across rerenders.
+      if (j < group.length - 1 || !/^\s/.test(value.slice(cursor))) {
+        html += '<span class="terminal-compose-attachment-caret-host" data-attachment-caret-host="true"> </span>';
+      }
+    }
   }
   html += _terminalComposeEscapeText(value.slice(cursor));
   return html;
@@ -203,7 +228,8 @@ function _terminalComposeSetRichSelection(input, start, end, direction, options)
         if (consumed === pos && afterAttachments
             && child.nodeType === 1
             && child.getAttribute
-            && child.getAttribute('data-attachment-token')) {
+            && (child.getAttribute('data-attachment-token')
+              || child.getAttribute('data-attachment-caret-host'))) {
           best = { node: input, offset: i + 1 };
         }
         continue;
@@ -288,6 +314,24 @@ function _terminalComposeSyncValueFromDom(input) {
       seen[token] = true;
       const entry = _terminalComposeAttachmentEntry(cellId, token);
       if (entry) entry.position = text.length;
+      return;
+    }
+    if (node.getAttribute && node.getAttribute('data-attachment-caret-host')) {
+      // The first character is the structural ordinary space rendered after
+      // an attachment. Text typed into this host belongs to the draft; strip
+      // only that one boundary character so a later canonical rerender can
+      // re-create exactly one space instead of accumulating them.
+      let hostText = '';
+      const hostChildren = node.childNodes || [];
+      for (let i = 0; i < hostChildren.length; i++) {
+        const child = hostChildren[i];
+        if (child && child.nodeType === 3) hostText += String(child.nodeValue || '');
+        else if (child && String(child.nodeName || '').toUpperCase() === 'BR') hostText += '\n';
+        else if (child && typeof child.textContent === 'string') hostText += child.textContent;
+      }
+      hostText = hostText.replace(/\u00a0/g, ' ');
+      if (hostText.charAt(0) === ' ') appendText(hostText.slice(1));
+      else appendText(hostText);
       return;
     }
     const name = String(node.nodeName || '').toUpperCase();

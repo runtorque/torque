@@ -14937,11 +14937,21 @@ test('terminal compose image drop displays chips and sends returned paths', asyn
   };
   context.__deleteChipEvt = deleteEvt;
   runInContext(context, `terminalComposeKeydown(__deleteChipEvt, 'agent-1');`);
-  assert.equal(deleteEvt.preventDefaultCalled, true);
-  assert.equal(deleteEvt.stopPropagationCalled, true);
+  // Preview selection is non-destructive: a caret elsewhere must not delete
+  // the selected image without a real adjacent rich-DOM boundary.
+  assert.equal(deleteEvt.preventDefaultCalled, false);
+  assert.equal(deleteEvt.stopPropagationCalled, false);
   assert.deepEqual(jsonValue(context, `_terminalComposeAttachments['agent-1'].entries.map(function(e) { return { token: e.token, path: e.path, position: e.position }; })`), [
+    { token: '[ Image #1 ]', path: firstPath, position: 'prefix-'.length },
     { token: '[ Image #2 ]', path: secondPath, position: 'prefix-'.length },
   ]);
+
+  context.__focusedChipDeleteEvt = {
+    key: 'Backspace',
+    preventDefault() {},
+    stopPropagation() {},
+  };
+  runInContext(context, `terminalComposeAttachmentChipKeydown(__focusedChipDeleteEvt, 'agent-1', '[ Image #1 ]');`);
 
   context.__submitEvt = {
     currentTarget: form,
@@ -15256,7 +15266,7 @@ test('terminal compose image drop renders inline attachment tokens in the editab
   ]);
   assert.equal(
     runInContext(context, `_terminalComposePayloadText('agent-1', ${JSON.stringify(input.value)})`),
-    'before ' + fullPath + 'after',
+    'before ' + fullPath + ' after',
   );
   assert.equal(button.disabled, false);
   assert.equal(input.focused, true);
@@ -15288,8 +15298,11 @@ test('terminal compose image drop renders inline attachment tokens in the editab
   };
   context.__inlineDeleteEvt = deleteEvt;
   runInContext(context, `terminalComposeKeydown(__inlineDeleteEvt, 'agent-1');`);
-  assert.equal(deleteEvt.preventDefaultCalled, true);
-  assert.equal(deleteEvt.stopPropagationCalled, true);
+  assert.equal(deleteEvt.preventDefaultCalled, false);
+  assert.equal(deleteEvt.stopPropagationCalled, false);
+  assert.notEqual(jsonValue(context, `_terminalComposeAttachments['agent-1'] || null`), null);
+
+  runInContext(context, `_terminalComposeRemoveAttachment('agent-1', '[ Image #1 ]');`);
   assert.equal(jsonValue(context, `_terminalComposeAttachments['agent-1'] || null`), null);
   assert.doesNotMatch(input.innerHTML, /terminal-compose-inline-attachment-chip/);
 
@@ -15358,8 +15371,9 @@ test('terminal compose inline image tokens stay text-like and serialize multiple
   };
   context.__inlineMultiDeleteEvt = deleteEvt;
   runInContext(context, `terminalComposeKeydown(__inlineMultiDeleteEvt, 'agent-1');`);
-  assert.equal(deleteEvt.preventDefaultCalled, true);
-  assert.equal(deleteEvt.stopPropagationCalled, true);
+  assert.equal(deleteEvt.preventDefaultCalled, false);
+  assert.equal(deleteEvt.stopPropagationCalled, false);
+  runInContext(context, `_terminalComposeRemoveAttachment('agent-1', '[ Image #1 ]');`);
   assert.deepEqual(jsonValue(context, `_terminalComposeAttachments['agent-1'].entries.map(function(e) { return { token: e.token, path: e.path, position: e.position }; })`), [
     { token: '[ Image #2 ]', path: '/tmp/two.jpg', position: 1 },
   ]);
@@ -15377,6 +15391,147 @@ test('terminal compose inline image tokens stay text-like and serialize multiple
   assert.equal(sandbox.sendCalls[0].cell_id, 'agent-1');
   assert.equal(sandbox.sendCalls[0].text, 'a/tmp/two.jpg b');
   assert.equal(jsonValue(context, `_terminalComposeAttachments['agent-1'] || null`), null);
+});
+
+test('terminal rich image tokens keep one inline caret host and delete only from the requested caret side', () => {
+  let selection = null;
+  const { context, document } = createEmbeddedTerminalHarness({
+    window: {
+      open() {},
+      getSelection() { return selection; },
+    },
+  });
+
+  function node(tagName, attrs = {}) {
+    const element = new FakeElement();
+    element.nodeType = 1;
+    element.nodeName = tagName;
+    Object.entries(attrs).forEach(([name, value]) => element.setAttribute(name, value));
+    return element;
+  }
+
+  function text(value) {
+    return { nodeType: 3, nodeValue: value, parentNode: null };
+  }
+
+  function setChildren(parent, children) {
+    parent.children = children;
+    parent.childNodes = children;
+    children.forEach((child, index) => {
+      child.parentNode = parent;
+      child.previousSibling = children[index - 1] || null;
+      child.nextSibling = children[index + 1] || null;
+    });
+  }
+
+  function makeRichDom(tokenCount = 1, hostText = ' ') {
+    const input = document.register('terminal-compose-input-agent-1');
+    input.nodeType = 1;
+    input.nodeName = 'DIV';
+    input.classList.add('terminal-compose-input');
+    input.dataset.cellId = 'agent-1';
+    input.setAttribute('contenteditable', 'true');
+    input.value = 'tail';
+    const children = [];
+    for (let i = 1; i <= tokenCount; i++) {
+      const chip = node('SPAN', { 'data-attachment-token': '[ Image #' + i + ' ]' });
+      chip.classList.add('terminal-compose-attachment-chip');
+      const host = node('SPAN', { 'data-attachment-caret-host': 'true' });
+      const hostNode = text(hostText);
+      setChildren(host, [hostNode]);
+      children.push(chip, host);
+    }
+    children.push(text('tail'));
+    setChildren(input, children);
+    selection = {
+      rangeCount: 1,
+      isCollapsed: true,
+      anchorNode: input,
+      anchorOffset: 0,
+      focusNode: input,
+      focusOffset: 0,
+      removeAllRanges() {},
+      addRange() {},
+    };
+    return input;
+  }
+
+  function register(count) {
+    runInContext(context, `
+      delete _terminalComposeAttachments['agent-1'];
+      delete _terminalComposeSelectedAttachmentByCell['agent-1'];
+      _terminalComposeRegisterAttachmentEntries('agent-1', Array.from({ length: ${count} }, function(_v, i) {
+        return { path: '/tmp/' + (i + 1) + '.png', filename: (i + 1) + '.png' };
+      }), 'tail', 0);
+    `);
+  }
+
+  function key(keyName, offset) {
+    selection.anchorOffset = offset;
+    selection.focusOffset = offset;
+    const event = {
+      key: keyName,
+      target: document.getElementById('terminal-compose-input-agent-1'),
+      metaKey: false,
+      ctrlKey: false,
+      altKey: false,
+      prevented: false,
+      preventDefault() { this.prevented = true; },
+      stopPropagation() {},
+    };
+    context.__richDeleteEvent = event;
+    runInContext(context, `terminalComposeKeydown(__richDeleteEvent, 'agent-1');`);
+    return event;
+  }
+
+  // Delete immediately before an image and Backspace immediately after it are
+  // the only token-removal directions. The host (offset 2) is the durable
+  // ordinary-space boundary after the chip.
+  makeRichDom(); register(1);
+  assert.equal(key('Delete', 0).prevented, true);
+  assert.equal(jsonValue(context, `_terminalComposeAttachments['agent-1'] || null`), null);
+
+  makeRichDom(); register(1);
+  assert.equal(key('Backspace', 0).prevented, false);
+  assert.equal(jsonValue(context, `_terminalComposeAttachments['agent-1'].entries.length`), 1);
+
+  makeRichDom(); register(1);
+  assert.equal(key('Backspace', 2).prevented, true);
+  assert.equal(jsonValue(context, `_terminalComposeAttachments['agent-1'] || null`), null);
+
+  makeRichDom(); register(1);
+  assert.equal(key('Delete', 2).prevented, false);
+  assert.equal(jsonValue(context, `_terminalComposeAttachments['agent-1'].entries.length`), 1);
+
+  // A clicked preview only affects styling/preview state, not destructive
+  // keyboard behavior at a distant caret.
+  makeRichDom(); register(1);
+  runInContext(context, `_terminalComposeSelectedAttachmentByCell['agent-1'] = '[ Image #1 ]';`);
+  assert.equal(key('Backspace', 3).prevented, false);
+  assert.equal(jsonValue(context, `_terminalComposeAttachments['agent-1'].entries.length`), 1);
+
+  // Adjacent images retain order and remove only the closest requested side.
+  makeRichDom(2); register(2);
+  assert.equal(key('Delete', 2).prevented, true);
+  assert.deepEqual(jsonValue(context, `_terminalComposeSortedAttachments('agent-1').map(function(e) { return e.token; })`), [
+    '[ Image #1 ]',
+  ]);
+
+  // Native text typed into the host is draft text, while the host's initial
+  // space is structural. Canonical rerenders and history-like value restores
+  // retain a single host and an outgoing path/text separator.
+  const input = makeRichDom(1, ' typed'); register(1);
+  assert.equal(runInContext(context, `_terminalComposeInputText(document.getElementById('terminal-compose-input-agent-1'))`), 'typedtail');
+  assert.equal(runInContext(context, `_terminalComposePayloadText('agent-1', 'typedtail')`), '/tmp/1.png typedtail');
+  // FakeElement does not parse assigned HTML back into DOM nodes like a real
+  // browser. From this point use its value-only path for rerender assertions.
+  delete input.childNodes;
+  runInContext(context, `_terminalComposeRenderRichInput(document.getElementById('terminal-compose-input-agent-1'));`);
+  assert.equal((input.innerHTML.match(/data-attachment-caret-host/g) || []).length, 1);
+  assert.match(input.innerHTML, /\[ Image #1 \]<\/span><span class="terminal-compose-attachment-caret-host"/);
+  runInContext(context, `_terminalComposeSetValue(document.getElementById('terminal-compose-input-agent-1'), 'agent-1', 'restored', { preserveAttachments: true });`);
+  assert.equal((input.innerHTML.match(/data-attachment-caret-host/g) || []).length, 1);
+  assert.equal(runInContext(context, `_terminalComposePayloadText('agent-1', 'restored')`), '/tmp/1.png restored');
 });
 
 test('terminal compose preserves image chip payload through history recall restore', async () => {

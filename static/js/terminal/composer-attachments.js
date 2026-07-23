@@ -305,6 +305,13 @@ function _terminalComposePayloadText(cellId, displayText) {
     out += text.slice(cursor, g.position);
     out += g.paths.join('\n');
     cursor = g.position;
+    // Attachment tokens have no logical text width. Renderers provide their
+    // own one-space caret host, so mirror that boundary in the outgoing
+    // message when real text immediately follows without inventing a trailing
+    // space for an image-only draft.
+    var nextPosition = gi + 1 < groups.length ? groups[gi + 1].position : text.length;
+    var following = text.slice(cursor, nextPosition);
+    if (following && !/^\s/.test(following)) out += ' ';
   }
   out += text.slice(cursor);
   return out;
@@ -414,6 +421,26 @@ function _terminalComposeSiblingAttachment(node) {
   return token ? node : null;
 }
 
+function _terminalComposeCaretHost(node) {
+  for (let current = node; current; current = current.parentNode) {
+    if (current.nodeType === 1 && current.getAttribute
+        && current.getAttribute('data-attachment-caret-host')) return current;
+  }
+  return null;
+}
+
+function _terminalComposePristineCaretHost(host) {
+  if (!host) return false;
+  let text = '';
+  const children = host.childNodes || [];
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i];
+    if (child && child.nodeType === 3) text += String(child.nodeValue || '');
+    else if (child && typeof child.textContent === 'string') text += child.textContent;
+  }
+  return text.replace(/\u00a0/g, ' ') === ' ';
+}
+
 function _terminalComposeAdjacentAttachmentNode(input, direction) {
   if (!_terminalComposeIsRichInput(input)
       || typeof window === 'undefined'
@@ -463,15 +490,29 @@ function _terminalComposeAdjacentAttachmentNode(input, direction) {
     return nextFromParent(n.parentNode);
   }
   let candidate = direction < 0 ? previousCandidate(node, offset) : nextCandidate(node, offset);
-  while (candidate && candidate.nodeType === 3 && !String(candidate.nodeValue || '').length) {
-    candidate = direction < 0
-      ? (candidate.previousSibling ? deepestLast(candidate.previousSibling) : previousFromParent(candidate.parentNode))
-      : (candidate.nextSibling ? deepestFirst(candidate.nextSibling) : nextFromParent(candidate.parentNode));
-  }
-  if (candidate && candidate.nodeType === 1) {
-    if (_terminalComposeSiblingAttachment(candidate)) return candidate;
-    const chip = candidate.closest ? candidate.closest('.terminal-compose-attachment-chip') : null;
-    if (chip && input.contains(chip)) return chip;
+  while (candidate) {
+    if (candidate.nodeType === 3 && !String(candidate.nodeValue || '').length) {
+      candidate = direction < 0
+        ? (candidate.previousSibling ? deepestLast(candidate.previousSibling) : previousFromParent(candidate.parentNode))
+        : (candidate.nextSibling ? deepestFirst(candidate.nextSibling) : nextFromParent(candidate.parentNode));
+      continue;
+    }
+    if (candidate.nodeType === 1) {
+      if (_terminalComposeSiblingAttachment(candidate)) return candidate;
+      const chip = candidate.closest ? candidate.closest('.terminal-compose-attachment-chip') : null;
+      if (chip && input.contains(chip)) return chip;
+    }
+    // Only Backspace may cross the untouched one-space host that follows a
+    // chip. Delete after that host is deliberately ordinary text deletion,
+    // never reverse-direction token deletion.
+    const host = _terminalComposeCaretHost(candidate);
+    if (direction < 0 && _terminalComposePristineCaretHost(host)) {
+      candidate = host.previousSibling
+        ? deepestLast(host.previousSibling)
+        : previousFromParent(host.parentNode);
+      continue;
+    }
+    return null;
   }
   return null;
 }
@@ -484,18 +525,17 @@ function _terminalComposeHandleAttachmentDeleteKey(evt, cellId) {
     : (document.getElementById ? document.getElementById(_terminalComposeInputId(cellId)) : null);
   if (!input) return false;
   const id = String(cellId || (input.dataset ? input.dataset.cellId : '') || '');
-  const selected = String(_terminalComposeSelectedAttachmentByCell[id] || '');
-  let entry = selected ? _terminalComposeAttachmentEntry(id, selected) : null;
   const selection = _terminalComposeSelectionOffsets(input);
-  if (!entry && selection.start === selection.end) {
-    const richNode = _terminalComposeAdjacentAttachmentNode(input, evt.key === 'Backspace' ? -1 : 1);
-    const richToken = richNode && richNode.getAttribute
-      ? richNode.getAttribute('data-attachment-token')
-      : '';
-    entry = richToken
-      ? _terminalComposeAttachmentEntry(id, richToken)
-      : _terminalComposeAttachmentAtCaret(input, evt.key === 'Backspace' ? -1 : 1);
-  }
+  if (selection.start !== selection.end) return false;
+  // Logical attachment positions are intentionally zero-width, so position
+  // arithmetic cannot tell which side of a token the caret occupies. Require
+  // a real rich-DOM adjacency instead; preview selection must never influence
+  // destructive keyboard behavior elsewhere in the draft.
+  const richNode = _terminalComposeAdjacentAttachmentNode(input, evt.key === 'Backspace' ? -1 : 1);
+  const richToken = richNode && richNode.getAttribute
+    ? richNode.getAttribute('data-attachment-token')
+    : '';
+  const entry = richToken ? _terminalComposeAttachmentEntry(id, richToken) : null;
   if (!entry) return false;
   if (typeof evt.preventDefault === 'function') evt.preventDefault();
   if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
