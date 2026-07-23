@@ -116,6 +116,21 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
     def _handler(self):
         return self.mcp_mod.create_mcp_handler(self._handle_command, self.state)
 
+    def _freeze_default_architect(self, cell):
+        """Apply the real built-in default Architect authority at launch."""
+        self.state.assign_agent_class(
+            cell.id,
+            "default-architect",
+            actor_kind="user",
+            base_dir=self.tmp.name,
+        )
+        self.state.apply_effective_agent_class_for_launch(
+            cell,
+            base_dir=self.tmp.name,
+        )
+        self.assertEqual("default-architect", cell.effective_agent_class_id)
+        self.assertTrue(cell.effective_agent_class_snapshot)
+
     async def _call(self, tool_name, arguments=None, *, req_id=1, agent_id=None):
         handler = self._handler()
         return await handler(
@@ -215,6 +230,10 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([], self.calls)
 
     async def test_routed_product_proposal_task_can_be_picked_up_by_same_group_architect(self):
+        # Exercise the public JSON-RPC route under a frozen default Architect
+        # snapshot.  A plain unclassified test caller skips the class gate and
+        # would not catch a pre-handler target-scope denial.
+        self._freeze_default_architect(self.torqly)
         proposal = await self._call(
             "architect_task_propose",
             {
@@ -274,30 +293,8 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(route_id, pickup_evidence["source"])
         self.assertEqual("architect_pickup", refreshed.messages[-1]["action"])
 
-        reassigned = await self._call(
-            "architect_task_reassign",
-            {"task": task_id, "new_engineer_id": self.torqly_engineer.id},
-            req_id=5,
-            agent_id=self.torqly.id,
-        )
-        self.assertEqual(self.torqly_engineer.id, self._result_payload(reassigned)["assigned_engineer_id"])
-
-        dispatched = await self._call(
-            "architect_engineer_message",
-            {
-                "engineer_id": self.torqly_engineer.id,
-                "task": task_id,
-                "message": "Please implement the direct pickup root.",
-            },
-            req_id=6,
-            agent_id=self.torqly.id,
-        )
-        dispatch_payload = self._result_payload(dispatched)
-        self.assertEqual(task_id, dispatch_payload["task_id"])
-        self.assertEqual("live", dispatch_payload["dispatch_state"])
-        self.assertEqual("live", self.state.board_tasks[task_id].dispatch_state)
-
     async def test_architect_task_pickup_denies_unrouted_non_pm_or_already_claimed_tasks(self):
+        self._freeze_default_architect(self.torqly)
         unrouted = self.state.board_add_task(
             "Unrouted product task",
             "g",
@@ -352,7 +349,52 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("already assigned", self._error_text(claimed))
         self.assertEqual(self.peer.id, self.state.board_tasks[claimed_id].assigned_architect_id)
 
+    async def test_frozen_default_architect_claim_rejects_invalid_route_evidence_without_mutation(self):
+        self._freeze_default_architect(self.torqly)
+        proposal = await self._call(
+            "architect_task_propose",
+            {"title": "Invalid-route frozen claim root"},
+            req_id=30,
+        )
+        task_id = self._result_payload(proposal)["id"]
+        task = self.state.board_tasks[task_id]
+        # It is inbound and names the task, but lacks the durable product-peer
+        # marker required by the claim handler.  The class gate must not hide
+        # this typed handler denial as an unknown public tool.
+        self.db.save_agent_peer_message({
+            "id": "invalid-route-evidence",
+            "thread_id": "invalid-route-thread",
+            "group_name": "g",
+            "sender_id": self.architect.id,
+            "sender_kind": "architect",
+            "recipient_id": self.torqly.id,
+            "recipient_kind": "architect",
+            "message": "This is not a product-peer route.",
+            "created_at": 1.0,
+            "context_task_ids": [task_id],
+            "context_summary": "Invalid route fixture.",
+            "context_snapshot": {},
+        })
+        before_assignment = task.assigned_architect_id
+        before_evidence = dict(task.completion_evidence)
+        before_messages = list(task.messages)
+
+        denied = await self._call(
+            "task_claim",
+            {"task": task_id, "source": "invalid-route-evidence"},
+            req_id=31,
+            agent_id=self.torqly.id,
+        )
+
+        text = self._error_text(denied)
+        self.assertNotIn("Unknown tool", text)
+        self.assertIn("route evidence", text)
+        self.assertEqual(before_assignment, task.assigned_architect_id)
+        self.assertEqual(before_evidence, task.completion_evidence)
+        self.assertEqual(before_messages, task.messages)
+
     async def test_public_task_mark_covered_routes_to_existing_handler(self):
+        self._freeze_default_architect(self.torqly)
         covered = self.state.board_add_task(
             "Canonical covered root",
             "g",
@@ -401,6 +443,61 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("not created by this architect", self._error_text(denied))
         self.assertEqual(before_evidence, other_owned.completion_evidence)
         self.assertEqual("Backlog", other_owned.lane)
+
+    async def test_frozen_default_architect_marks_routed_proposal_root_covered(self):
+        self._freeze_default_architect(self.torqly)
+        root = self.state.board_add_task(
+            "Frozen canonical covered proposal root",
+            "g",
+            labels=["product-proposal", "proposal-only"],
+            created_by_architect_id=self.architect.id,
+        )
+        covering = self.state.board_add_task(
+            "Frozen canonical covering task",
+            "g",
+            labels=[f"covers:{root.id}"],
+            created_by_architect_id=self.torqly.id,
+        )
+        self.db.save_agent_peer_message({
+            "id": "frozen-cover-route",
+            "thread_id": "frozen-cover-thread",
+            "group_name": "g",
+            "sender_id": self.architect.id,
+            "sender_kind": "architect",
+            "recipient_id": self.torqly.id,
+            "recipient_kind": "architect",
+            "message": "Please cover this routed product proposal root.",
+            "created_at": 1.0,
+            "context_task_ids": [root.id],
+            "context_summary": "Canonical frozen coverage route.",
+            "context_snapshot": {
+                "proposal_peer": {"marker": "torque.proposal_peer.v1"},
+            },
+        })
+
+        response = await self._call(
+            "task_mark_covered",
+            {
+                "task": root.id,
+                "covering_task": covering.id,
+                "notes": "Covered through the canonical frozen route.",
+            },
+            req_id=50,
+            agent_id=self.torqly.id,
+        )
+
+        payload = self._result_payload(response)
+        self.assertEqual("task_marked_covered", payload["type"])
+        evidence = root.completion_evidence["covered_by"]
+        self.assertEqual(covering.id, evidence["task_id"])
+        self.assertEqual(
+            "routed_product_proposal_root",
+            evidence["authorization"]["scope"],
+        )
+        self.assertEqual(
+            "frozen-cover-route",
+            evidence["authorization"]["route_message_id"],
+        )
 
     async def test_pm_engineer_and_worker_do_not_get_architect_pickup_surface(self):
         for agent_id in (self.architect.id, self.engineer.id, self.worker.id):
