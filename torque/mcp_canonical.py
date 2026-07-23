@@ -877,6 +877,51 @@ def canonicalize_tool_specs(
     return sorted(result, key=lambda spec: bool(spec.get("deferred")))
 
 
+def canonical_callable_handler_registry(
+    tools: Iterable[Mapping],
+) -> dict[str, tuple[str, ...]]:
+    """Index public names by their registered historical handlers.
+
+    MCP transports expose canonical names while the scoped dispatchers retain
+    their established, role-prefixed handler names.  Keep that translation in
+    one explicit registry rather than letting tools/list and tools/call each
+    rediscover it independently.
+    """
+
+    grouped: OrderedDict[str, list[str]] = OrderedDict()
+    for tool in tools:
+        handler = str(tool.get("name", "") or "").strip()
+        canonical = canonical_tool_name(handler)
+        if not handler or not canonical:
+            continue
+        candidates = grouped.setdefault(canonical, [])
+        if handler not in candidates:
+            candidates.append(handler)
+    return {
+        canonical: tuple(handlers)
+        for canonical, handlers in grouped.items()
+    }
+
+
+def canonical_registry_missing_handlers(
+    canonical_tools: Iterable[Mapping],
+    handler_registry: Mapping[str, Iterable[str]],
+) -> tuple[str, ...]:
+    """Return advertised public names which have no callable handler.
+
+    The check deliberately accepts a canonicalized catalog (including eager
+    and deferred entries), so callers can fail closed before advertising a
+    name that the runtime cannot normalize and dispatch.
+    """
+
+    missing = []
+    for tool in canonical_tools:
+        name = str(tool.get("name", "") or "").strip()
+        if name and not tuple(handler_registry.get(name, ())):
+            missing.append(name)
+    return tuple(sorted(set(missing)))
+
+
 def _is_proposal_variant(name: str) -> bool:
     suffix = strip_role_prefix(name)
     return (

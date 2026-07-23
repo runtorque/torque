@@ -45,6 +45,8 @@ from .mcp_tool_search import deferred_tool_specs, public_tool_spec
 from .mcp_tool_search import tool_search_response
 from .mcp_canonical import (
     authority_is_proposal_only,
+    canonical_callable_handler_registry,
+    canonical_registry_missing_handlers,
     canonical_tool_name,
     canonicalize_tool_specs,
     modernize_tool_authority,
@@ -868,6 +870,35 @@ ARCHITECT_TOOLS = [
 ALL_TOOLS = TOOLS + ARCHITECT_TOOLS + ENGINEER_TOOLS
 _ALL_TOOL_MAP = {t["name"]: t for t in ALL_TOOLS}
 
+# Public MCP names are canonical while dispatch remains intentionally routed
+# through the mature role-scoped handlers.  This registry is the explicit
+# bridge between those two contracts; it is also used by tools/call instead of
+# reconstructing a separate candidate list from the advertised surface.
+CANONICAL_CALLABLE_HANDLER_REGISTRY = canonical_callable_handler_registry(
+    ALL_TOOLS
+)
+
+
+def _assert_canonical_callable_registry() -> None:
+    """Fail closed if an Architect public schema has no registered handler."""
+
+    architect_surface = canonicalize_tool_specs(
+        ARCHITECT_TOOLS,
+        caller_kind="architect",
+    )
+    missing = canonical_registry_missing_handlers(
+        architect_surface,
+        CANONICAL_CALLABLE_HANDLER_REGISTRY,
+    )
+    if missing:
+        raise RuntimeError(
+            "Architect canonical MCP tools lack registered handlers: "
+            + ", ".join(missing)
+        )
+
+
+_assert_canonical_callable_registry()
+
 WORKER_TOOL_AUTHORITY_DEFINITIONS = authority_definitions_from_tool_specs(
     TOOLS,
     base_kinds={"worker", "engineer", "architect"},
@@ -1107,6 +1138,15 @@ def _canonical_tools_for_caller(state, cell_id: str) -> list[dict]:
             _effective_class_authority_for_cell(_cell)
         ),
     )
+    missing = canonical_registry_missing_handlers(
+        canonical,
+        CANONICAL_CALLABLE_HANDLER_REGISTRY,
+    )
+    if missing:
+        raise RuntimeError(
+            "Advertised canonical MCP tools lack registered handlers: "
+            + ", ".join(missing)
+        )
     return canonical
 
 
@@ -1157,10 +1197,14 @@ def _resolve_public_tool_call(
 
     authority = _effective_class_authority_for_cell(cell)
     canonical = canonical_tool_name(requested)
+    # Resolve only through the canonical callable registry.  The visible
+    # catalog and runtime now share this exact source of truth, which keeps a
+    # projected name such as task_claim or task_mark_covered from becoming an
+    # advertised-but-unknown operation.
     candidates = [
-        str(tool.get("name", "") or "").strip()
-        for tool in raw_tools
-        if canonical_tool_name(tool.get("name", "")) == canonical
+        handler
+        for handler in CANONICAL_CALLABLE_HANDLER_REGISTRY.get(canonical, ())
+        if handler in raw_names
     ]
     selected = select_legacy_tool(
         canonical,
