@@ -463,6 +463,48 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(covering.id, evidence["covered_by"]["task_id"])
         self.assertEqual("covered_by", self.state.board_tasks[covered.id].messages[-1]["action"])
 
+        user_root = self.state.board_add_task(
+            "Canonical user-owned covered root",
+            "g",
+        )
+        peer_covering = self.state.board_add_task(
+            "Peer-owned covering task",
+            "g",
+            created_by_architect_id=self.peer.id,
+        )
+        before_lane = user_root.lane
+        before_evidence = dict(user_root.completion_evidence)
+        before_messages = list(user_root.messages)
+        denied_peer_covering = await self._call(
+            "task_mark_covered",
+            {
+                "task": user_root.id,
+                "covering_task": peer_covering.id,
+                "notes": "Must remain blocked by frozen self scope.",
+            },
+            req_id=401,
+            agent_id=self.torqly.id,
+        )
+        self.assertIn("Unknown tool", self._error_text(denied_peer_covering))
+        self.assertEqual(before_lane, user_root.lane)
+        self.assertEqual(before_evidence, user_root.completion_evidence)
+        self.assertEqual(before_messages, user_root.messages)
+
+        denied_legacy_alias = await self._call(
+            "architect_task_mark_covered",
+            {
+                "task": user_root.id,
+                "covering_task_id": peer_covering.id,
+                "notes": "Legacy alias must retain the same frozen gate.",
+            },
+            req_id=402,
+            agent_id=self.torqly.id,
+        )
+        self.assertIn("Unknown tool", self._error_text(denied_legacy_alias))
+        self.assertEqual(before_lane, user_root.lane)
+        self.assertEqual(before_evidence, user_root.completion_evidence)
+        self.assertEqual(before_messages, user_root.messages)
+
         other_owned = self.state.board_add_task(
             "Other Architect task",
             "g",
