@@ -1502,14 +1502,6 @@ def _tool_argument_scope_denied(
                 scope=requested_scope,
             ):
                 return True
-        # A handler-scoped target is deliberately authorized by its domain
-        # handler rather than by the generic relationship classifier.  This
-        # is needed for narrowly-routed operations whose eligibility depends
-        # on durable evidence beyond creator ownership (for example, a
-        # product peer routing another Architect's proposal root).  The
-        # frozen ACL still has to grant the requirement's minimum scope when
-        # the tool is projected; this only avoids treating the raw target's
-        # ordinary relationship as the complete authorization decision.
         if requirement.handler_scoped or not requirement.target_argument:
             continue
         raw_target = arguments.get(requirement.target_argument, "")
