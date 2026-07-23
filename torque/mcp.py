@@ -1287,6 +1287,7 @@ def _task_target_scope(state, caller_cell, task) -> str:
             "agent_id",
             "assigned_engineer_id",
             "created_by_architect_id",
+            "assigned_architect_id",
             "created_by_engineer_id",
             "owner_engineer_id",
         )

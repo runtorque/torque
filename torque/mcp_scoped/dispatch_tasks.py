@@ -301,6 +301,8 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         task = task_state.board_tasks.get(tid)
         if not task:
             return "Task not found", True
+        if board_task_is_closed(task):
+            return "Task is already closed", True
         engineer_ident = str(args.get("new_engineer_id", "") or "").strip()
         if not engineer_ident:
             return "new_engineer_id is required", True

@@ -145,12 +145,12 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-    async def _list_tools(self):
+    async def _list_tools(self, *, agent_id=None):
         handler = self._handler()
         response = await handler(
             FakeRequest(
                 {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-                headers={"X-Torque-Cell-Id": self.architect.id},
+                headers={"X-Torque-Cell-Id": agent_id or self.architect.id},
             )
         )
         return {tool["name"] for tool in response.payload["result"]["tools"]}
@@ -292,6 +292,174 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(pickup_evidence["authorization"]["route_thread_id"])
         self.assertIn(route_id, pickup_evidence["source"])
         self.assertEqual("architect_pickup", refreshed.messages[-1]["action"])
+
+    async def test_frozen_default_architect_reassigns_claimed_product_root_canonically(self):
+        # The product manager creates and routes a peer-owned proposal root;
+        # the frozen default Architect claims it through the public route.
+        # This exercises tools/list followed by canonical tools/call rather
+        # than directly invoking the scoped compatibility handler.
+        self._freeze_default_architect(self.torqly)
+        proposal = await self._call(
+            "architect_task_propose",
+            {"title": "Canonical claimed-root reassignment"},
+            req_id=10,
+        )
+        task_id = self._result_payload(proposal)["id"]
+        routed = await self._call(
+            "architect_proposal_peer_message",
+            {
+                "architect_id": self.torqly.id,
+                "message": "Please claim and route this product root.",
+                "context_task_ids": [task_id],
+            },
+            req_id=11,
+        )
+        route_id = self._result_payload(routed)["message_id"]
+        claimed = await self._call(
+            "task_claim",
+            {"task": task_id, "source": f"Blueprint peer route {route_id}"},
+            req_id=12,
+            agent_id=self.torqly.id,
+        )
+        self.assertEqual("task_picked_up", self._result_payload(claimed)["type"])
+
+        tool_names = await self._list_tools(agent_id=self.torqly.id)
+        self.assertIn("task_reassign", tool_names)
+        self.assertNotIn("architect_task_reassign", tool_names)
+
+        response = await self._call(
+            "task_reassign",
+            {"task": task_id, "new_engineer_id": self.torqly_engineer.id},
+            req_id=13,
+            agent_id=self.torqly.id,
+        )
+        payload = self._result_payload(response)
+        self.assertEqual("ok", payload["type"])
+        self.assertEqual(task_id, payload["task_id"])
+        self.assertEqual(self.torqly_engineer.id, payload["assigned_engineer_id"])
+        task = self.state.board_tasks[task_id]
+        self.assertEqual(self.torqly.id, task.assigned_architect_id)
+        self.assertEqual(self.torqly_engineer.id, task.assigned_engineer_id)
+        self.assertEqual("Backlog", task.lane)
+        self.assertEqual("", task.agent_id)
+        self.assertEqual("queued", task.dispatch_state)
+
+    async def test_frozen_default_architect_reassign_denials_do_not_mutate(self):
+        self._freeze_default_architect(self.torqly)
+        owned = self.state.board_add_task(
+            "Frozen reassign denial root",
+            "g",
+            created_by_architect_id=self.torqly.id,
+        )
+        before = (owned.assigned_engineer_id, owned.updated_at)
+
+        non_hired = await self._call(
+            "task_reassign",
+            {"task": owned.id, "new_engineer_id": self.engineer.id},
+            req_id=14,
+            agent_id=self.torqly.id,
+        )
+        self.assertIn("error", non_hired.payload)
+        self.assertEqual(-32602, non_hired.payload["error"]["code"])
+        self.assertEqual(before, (owned.assigned_engineer_id, owned.updated_at))
+
+        unclaimed_peer_root = self.state.board_add_task(
+            "Unclaimed peer proposal root",
+            "g",
+            labels=["product-proposal", "proposal-only"],
+            created_by_architect_id=self.architect.id,
+        )
+        unclaimed_before = (
+            unclaimed_peer_root.assigned_architect_id,
+            unclaimed_peer_root.assigned_engineer_id,
+            unclaimed_peer_root.updated_at,
+        )
+        unclaimed = await self._call(
+            "task_reassign",
+            {"task": unclaimed_peer_root.id, "new_engineer_id": self.torqly_engineer.id},
+            req_id=141,
+            agent_id=self.torqly.id,
+        )
+        self.assertIn("error", unclaimed.payload)
+        self.assertEqual(-32602, unclaimed.payload["error"]["code"])
+        self.assertEqual(
+            unclaimed_before,
+            (
+                unclaimed_peer_root.assigned_architect_id,
+                unclaimed_peer_root.assigned_engineer_id,
+                unclaimed_peer_root.updated_at,
+            ),
+        )
+
+        closed = self.state.board_add_task(
+            "Closed frozen reassign root",
+            "g",
+            lane="Done",
+            created_by_architect_id=self.torqly.id,
+        )
+        closed_before = (closed.assigned_engineer_id, closed.updated_at)
+        closed_response = await self._call(
+            "task_reassign",
+            {"task": closed.id, "new_engineer_id": self.torqly_engineer.id},
+            req_id=15,
+            agent_id=self.torqly.id,
+        )
+        self.assertEqual("Task is already closed", self._error_text(closed_response))
+        self.assertEqual(
+            closed_before,
+            (closed.assigned_engineer_id, closed.updated_at),
+        )
+
+        cross_group = self.state.board_add_task(
+            "Cross-group frozen reassign root",
+            "other",
+            created_by_architect_id=self.torqly.id,
+        )
+        cross_group_before = (cross_group.assigned_engineer_id, cross_group.updated_at)
+        cross_group_response = await self._call(
+            "task_reassign",
+            {"task": cross_group.id, "new_engineer_id": self.torqly_engineer.id},
+            req_id=151,
+            agent_id=self.torqly.id,
+        )
+        self.assertEqual("Task not found", self._error_text(cross_group_response))
+        self.assertEqual(
+            cross_group_before,
+            (cross_group.assigned_engineer_id, cross_group.updated_at),
+        )
+
+        self.torqly_engineer.dismissed_at = 1.0
+        dismissed = await self._call(
+            "task_reassign",
+            {"task": owned.id, "new_engineer_id": self.torqly_engineer.id},
+            req_id=152,
+            agent_id=self.torqly.id,
+        )
+        dismissed_text = self._error_text(dismissed)
+        self.assertIn("dismissed", dismissed_text)
+        self.assertEqual(before, (owned.assigned_engineer_id, owned.updated_at))
+        self.torqly_engineer.dismissed_at = 0.0
+
+        malformed = await self._call(
+            "task_reassign",
+            {"task": "not-a-task", "new_engineer_id": self.torqly_engineer.id},
+            req_id=16,
+            agent_id=self.torqly.id,
+        )
+        self.assertEqual("Task not found", self._error_text(malformed))
+        self.assertEqual(before, (owned.assigned_engineer_id, owned.updated_at))
+
+        # The Product Manager's frozen class still lacks task.reassign; it
+        # must remain denied before a handler can mutate this task.
+        wrong_class = await self._call(
+            "task_reassign",
+            {"task": owned.id, "new_engineer_id": self.torqly_engineer.id},
+            req_id=17,
+            agent_id=self.architect.id,
+        )
+        self.assertIn("error", wrong_class.payload)
+        self.assertEqual(-32602, wrong_class.payload["error"]["code"])
+        self.assertEqual(before, (owned.assigned_engineer_id, owned.updated_at))
 
     async def test_architect_task_pickup_denies_unrouted_non_pm_or_already_claimed_tasks(self):
         self._freeze_default_architect(self.torqly)
