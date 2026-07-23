@@ -522,7 +522,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_task_pickup", "authority": {"requirements": [{"capability": "task.update","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
+        "name": "architect_task_pickup", "authority": {"requirements": [{"capability": "task.update","minimum_scope": "self","target_argument": "task","target_kind": "task","handler_scoped": True}]},
         "description": (
             "Claim a routed product-proposal product task in this architect's group "
             "without creating a covering duplicate. Requires durable inbound "
@@ -721,7 +721,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_task_mark_covered", "authority": {"requirements": [{"capability": "task.mark_covered","minimum_scope": "self","target_argument": "task","target_kind": "task"},{"capability": "task.mark_covered","minimum_scope": "self","target_argument": "covering_task_id","target_kind": "task"}]},
+        "name": "architect_task_mark_covered", "authority": {"requirements": [{"capability": "task.mark_covered","minimum_scope": "self","target_argument": "task","target_kind": "task","handler_scoped": True},{"capability": "task.mark_covered","minimum_scope": "self","target_argument": "covering_task","target_kind": "task"},{"capability": "task.mark_covered","minimum_scope": "self","target_argument": "covering_task_id","target_kind": "task"}]},
         "description": (
             "Mark a user-created task or a task created by this architect as "
             "covered by another visible task or PR. Also allows a product-proposal "

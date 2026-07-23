@@ -1502,7 +1502,7 @@ def _tool_argument_scope_denied(
                 scope=requested_scope,
             ):
                 return True
-        if not requirement.target_argument:
+        if requirement.handler_scoped or not requirement.target_argument:
             continue
         raw_target = arguments.get(requirement.target_argument, "")
         target_refs = raw_target if isinstance(raw_target, list) else [raw_target]
