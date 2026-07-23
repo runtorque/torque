@@ -15417,6 +15417,8 @@ test('terminal rich image tokens keep one inline caret host and delete only from
   function setChildren(parent, children) {
     parent.children = children;
     parent.childNodes = children;
+    parent.firstChild = children[0] || null;
+    parent.lastChild = children[children.length - 1] || null;
     children.forEach((child, index) => {
       child.parentNode = parent;
       child.previousSibling = children[index - 1] || null;
@@ -15436,6 +15438,9 @@ test('terminal rich image tokens keep one inline caret host and delete only from
     for (let i = 1; i <= tokenCount; i++) {
       const chip = node('SPAN', { 'data-attachment-token': '[ Image #' + i + ' ]' });
       chip.classList.add('terminal-compose-attachment-chip');
+      // Match a browser-rendered chip: traversal must not descend through
+      // this visible token text and lose its attachment ancestor.
+      setChildren(chip, [text('[ Image #' + i + ' ]')]);
       const host = node('SPAN', { 'data-attachment-caret-host': 'true' });
       const hostNode = text(hostText);
       setChildren(host, [hostNode]);

@@ -451,15 +451,21 @@ function _terminalComposeAdjacentAttachmentNode(input, direction) {
   let offset = selection.focusOffset;
   if (!node || !(input.contains(node) || node === input)) return null;
 
+  function attachmentAncestor(candidate) {
+    for (let current = candidate; current && current !== input; current = current.parentNode) {
+      if (_terminalComposeSiblingAttachment(current)) return current;
+    }
+    return null;
+  }
   function deepestLast(candidate) {
     let n = candidate;
-    while (n && n.lastChild) n = n.lastChild;
-    return n;
+    while (n && !attachmentAncestor(n) && n.lastChild) n = n.lastChild;
+    return attachmentAncestor(n) || n;
   }
   function deepestFirst(candidate) {
     let n = candidate;
-    while (n && n.firstChild) n = n.firstChild;
-    return n;
+    while (n && !attachmentAncestor(n) && n.firstChild) n = n.firstChild;
+    return attachmentAncestor(n) || n;
   }
   function previousCandidate(n, off) {
     if (n.nodeType === 3) {
