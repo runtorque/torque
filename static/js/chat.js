@@ -437,7 +437,7 @@ function chatMessageContextMenu(event, threadId, messageId) {
   var viewportWidth = (typeof window !== 'undefined' && window) ? Number(window.innerWidth || 0) : 0;
   menu.style.left = Math.max(0, viewportWidth ? Math.min(x, viewportWidth - 140) : x) + 'px';
   if (typeof openContextMenuSurface === 'function') {
-    openContextMenuSurface(menu, { invoker: event && event.currentTarget });
+    openContextMenuSurface(menu, { invoker: event && event.currentTarget, resetAnchor: true });
   } else if (menu.classList) {
     menu.classList.add('open');
   }

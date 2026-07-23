@@ -13505,6 +13505,43 @@ test('embedded terminal direct-message context menu copies raw message text', ()
   assert.equal(menu.classList.contains('open'), false);
 });
 
+test('terminal direct-message context menu resets its shared-menu anchor for each pointer invocation', () => {
+  const { context, document, sandbox } = setupTerminalDirectMessageClickHarness();
+  const menu = document.register('ctx-menu');
+  sandbox.window.innerWidth = 800;
+  sandbox.window.innerHeight = 1000;
+  menu.getBoundingClientRect = function() {
+    const left = Number.parseFloat(this.style.left) || 0;
+    const top = Number.parseFloat(this.style.top) || 0;
+    return { left, top, width: 188, height: 40, right: left + 188, bottom: top + 40 };
+  };
+  loadScript(context, 'static/js/commands.js');
+
+  const first = terminalClickEvent();
+  first.clientX = 700;
+  first.clientY = 100;
+  context.__terminalFirstCtxEvt = first;
+  runInContext(context, `terminalDirectMessageContextMenu(__terminalFirstCtxEvt, 'agent-1', 'dm-anchor');`);
+  assert.deepEqual(jsonValue(context, 'document.getElementById("ctx-menu")._contextMenuAnchor'), {
+    left: 660,
+    top: 100,
+  });
+  assert.equal(menu.style.left, '604px');
+  assert.equal(menu.style.top, '100px');
+
+  const second = terminalClickEvent();
+  second.clientX = 50;
+  second.clientY = 900;
+  context.__terminalSecondCtxEvt = second;
+  runInContext(context, `terminalDirectMessageContextMenu(__terminalSecondCtxEvt, 'agent-1', 'dm-anchor');`);
+  assert.deepEqual(jsonValue(context, 'document.getElementById("ctx-menu")._contextMenuAnchor'), {
+    left: 50,
+    top: 900,
+  });
+  assert.equal(menu.style.left, '50px');
+  assert.equal(menu.style.top, '900px');
+});
+
 test('embedded terminal direct-message fenced code blocks render independent copy buttons', () => {
   const { context, document, sandbox } = setupTerminalDirectMessageClickHarness();
   sandbox.state.direct_messages_by_agent['agent-1'] = [{
@@ -23462,6 +23499,43 @@ test('chat message context menu copies raw source text rather than rendered mark
   assert.equal(runInContext(context, `chatCopyMessage('thread-copy', 'thread-copy-msg');`), false);
   assert.equal(copied, raw);
   assert.equal(menu.classList.contains('open'), false);
+});
+
+test('chat message context menu resets its shared-menu anchor for each pointer invocation', () => {
+  const { context, document, sandbox } = createChatHarness();
+  const menu = document.register('ctx-menu');
+  sandbox.window.innerWidth = 800;
+  sandbox.window.innerHeight = 1000;
+  menu.getBoundingClientRect = function() {
+    const left = Number.parseFloat(this.style.left) || 0;
+    const top = Number.parseFloat(this.style.top) || 0;
+    return { left, top, width: 188, height: 40, right: left + 188, bottom: top + 40 };
+  };
+  loadScript(context, 'static/js/commands.js');
+
+  const first = terminalClickEvent();
+  first.clientX = 700;
+  first.clientY = 100;
+  context.__chatFirstCtxEvt = first;
+  runInContext(context, `chatMessageContextMenu(__chatFirstCtxEvt, 'thread-copy', 'thread-copy-msg');`);
+  assert.deepEqual(jsonValue(context, 'document.getElementById("ctx-menu")._contextMenuAnchor'), {
+    left: 660,
+    top: 100,
+  });
+  assert.equal(menu.style.left, '604px');
+  assert.equal(menu.style.top, '100px');
+
+  const second = terminalClickEvent();
+  second.clientX = 50;
+  second.clientY = 900;
+  context.__chatSecondCtxEvt = second;
+  runInContext(context, `chatMessageContextMenu(__chatSecondCtxEvt, 'thread-copy', 'thread-copy-msg');`);
+  assert.deepEqual(jsonValue(context, 'document.getElementById("ctx-menu")._contextMenuAnchor'), {
+    left: 50,
+    top: 900,
+  });
+  assert.equal(menu.style.left, '50px');
+  assert.equal(menu.style.top, '900px');
 });
 
 test('chat panel renders bubbles on the stable side for sender role', () => {
