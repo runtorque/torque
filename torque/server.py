@@ -5679,7 +5679,7 @@ async def main(connection=None):
     http_routes = build_http_routes(
         state=state,
         handle_command=handle_command,
-        state_payload=_state_payload,
+        runtime_payload=_runtime_payload, state_payload=_state_payload,
         supervisor_banner_state=supervisor_banner_state,
         bridge=bridge,
         terminal_clients=terminal_clients,
@@ -5720,6 +5720,7 @@ async def main(connection=None):
 
     app_server = web.Application()
     app_server.router.add_get("/", handle_index)
+    app_server.router.add_get("/api/runtime", http_routes.handle_runtime)
     app_server.router.add_get("/ws", handle_ws)
     app_server.router.add_get("/ws/terminal/{cell_id}", handle_terminal_ws)
     app_server.router.add_get("/logs", handle_logs)

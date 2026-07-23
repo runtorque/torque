@@ -16,7 +16,7 @@ const DESKTOP_DEFAULT_PROFILE: &str = "desktop";
 const DESKTOP_DEFAULT_PORT: u16 = 18933;
 const DESKTOP_MODE_SPAWN: &str = "spawn";
 const DESKTOP_MODE_ATTACH: &str = "attach";
-const STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 const PROBE_TIMEOUT: Duration = Duration::from_millis(750);
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 const STOP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -257,13 +257,17 @@ struct ApiData {
 }
 
 pub fn probe_runtime(port: u16, timeout: Duration) -> Option<RuntimePayload> {
-    let url = format!("http://127.0.0.1:{port}/api/cmd");
+    let url = format!("http://127.0.0.1:{port}/api/runtime");
     let agent = ureq::AgentBuilder::new().timeout(timeout).build();
-    let response = agent
-        .post(&url)
-        .set("Content-Type", "application/json")
-        .send_string(r#"{"cmd":"get_config"}"#)
-        .ok()?;
+    let response = match agent.get(&url).call() {
+        Ok(response) => response,
+        Err(ureq::Error::Status(404, _)) => agent
+            .post(&format!("http://127.0.0.1:{port}/api/cmd"))
+            .set("Content-Type", "application/json")
+            .send_string(r#"{"cmd":"get_config"}"#)
+            .ok()?,
+        Err(_) => return None,
+    };
     let mut raw = String::new();
     response.into_reader().read_to_string(&mut raw).ok()?;
     let payload: ApiResponse = serde_json::from_str(&raw).ok()?;
@@ -971,9 +975,7 @@ import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 class Handler(BaseHTTPRequestHandler):
-    def do_POST(self):
-        length = int(self.headers.get('Content-Length') or '0')
-        self.rfile.read(length)
+    def _respond(self):
         body = json.dumps({
             'ok': True,
             'data': {
@@ -990,6 +992,14 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def do_GET(self):
+        self._respond()
+
+    def do_POST(self):
+        length = int(self.headers.get('Content-Length') or '0')
+        self.rfile.read(length)
+        self._respond()
 
     def log_message(self, *_args):
         pass

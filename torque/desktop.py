@@ -28,7 +28,7 @@ WINDOW_TITLE = "Torque"
 WINDOW_WIDTH = 1440
 WINDOW_HEIGHT = 960
 WINDOW_MIN_SIZE = (1024, 720)
-STARTUP_TIMEOUT_SECS = 15.0
+STARTUP_TIMEOUT_SECS = 60.0
 PROBE_TIMEOUT_SECS = 0.75
 POLL_INTERVAL_SECS = 0.25
 
@@ -177,15 +177,30 @@ def _probe_runtime_payload(port: int,
                            timeout: float = PROBE_TIMEOUT_SECS,
                            urlopen=urllib.request.urlopen) -> dict | None:
     request = urllib.request.Request(
-        f"http://127.0.0.1:{port}/api/cmd",
-        data=json.dumps({"cmd": "get_config"}).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
+        f"http://127.0.0.1:{port}/api/runtime",
+        method="GET",
     )
     try:
         with urlopen(request, timeout=timeout) as response:
             raw = response.read().decode("utf-8")
         payload = json.loads(raw)
+    except urllib.error.HTTPError as exc:
+        status = exc.code
+        exc.close()
+        if status != 404:
+            return None
+        legacy_request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/cmd",
+            data=json.dumps({"cmd": "get_config"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urlopen(legacy_request, timeout=timeout) as response:
+                raw = response.read().decode("utf-8")
+            payload = json.loads(raw)
+        except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+            return None
     except (urllib.error.URLError, TimeoutError, ValueError, OSError):
         return None
 

@@ -40,6 +40,7 @@ class EventRoutes:
 @dataclass(frozen=True, slots=True)
 class HttpRoutes:
     handle_index: Any
+    handle_runtime: Any
     handle_ws: Any
     handle_terminal_ws: Any
     handle_api_cmd: Any
@@ -350,6 +351,7 @@ def build_http_routes(
     *,
     state,
     handle_command,
+    runtime_payload,
     state_payload,
     supervisor_banner_state,
     bridge,
@@ -370,6 +372,7 @@ def build_http_routes(
     tail_log_entries,
     ui_client_id_from_request,
 ) -> HttpRoutes:
+    _runtime_payload = runtime_payload
     _state_payload = state_payload
     ATTACHMENTS_DIR = attachments_dir
     DATA_DIR = data_dir
@@ -387,6 +390,15 @@ def build_http_routes(
     async def handle_index(_request):
             from .config import WEBVIEW_FILE  # re-read after init_paths
             return web.FileResponse(WEBVIEW_FILE)
+
+    async def handle_runtime(_request):
+            """Return lightweight runtime identity for launcher readiness probes."""
+            return web.json_response({
+                "ok": True,
+                "data": {
+                    "runtime": _runtime_payload(bridge=bridge, state=state),
+                },
+            })
 
     async def handle_ws(request):
             # heartbeat: aiohttp sends a WS ping every 30s and closes the
@@ -941,6 +953,7 @@ def build_http_routes(
 
     return HttpRoutes(
         handle_index=handle_index,
+        handle_runtime=handle_runtime,
         handle_ws=handle_ws,
         handle_terminal_ws=handle_terminal_ws,
         handle_api_cmd=handle_api_cmd,

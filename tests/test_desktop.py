@@ -1,6 +1,7 @@
 import importlib
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest import mock
 
@@ -149,6 +150,83 @@ class DesktopLauncherTests(unittest.TestCase):
             settings.data_dir,
             Path("/tmp/home/.torque/profiles/desktop-dev"),
         )
+
+    def test_runtime_probe_uses_lightweight_endpoint(self):
+        requests = []
+        response_payload = (
+            b'{"ok":true,"data":{"runtime":{"standalone":true,'
+            b'"profile":"default","port":18933}}}'
+        )
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return response_payload
+
+        def fake_urlopen(request, timeout):
+            requests.append((request, timeout))
+            return FakeResponse()
+
+        runtime = self.desktop_mod._probe_runtime_payload(
+            18933,
+            urlopen=fake_urlopen,
+        )
+
+        self.assertTrue(runtime["standalone"])
+        self.assertEqual(runtime["profile"], "default")
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(
+            requests[0][0].full_url,
+            "http://127.0.0.1:18933/api/runtime",
+        )
+        self.assertEqual(requests[0][0].get_method(), "GET")
+
+    def test_runtime_probe_falls_back_for_older_daemon(self):
+        requests = []
+        response_payload = (
+            b'{"ok":true,"data":{"runtime":{"standalone":true,'
+            b'"profile":"default","port":18933}}}'
+        )
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return response_payload
+
+        def fake_urlopen(request, timeout):
+            requests.append((request, timeout))
+            if len(requests) == 1:
+                raise urllib.error.HTTPError(
+                    request.full_url,
+                    404,
+                    "Not Found",
+                    {},
+                    None,
+                )
+            return FakeResponse()
+
+        runtime = self.desktop_mod._probe_runtime_payload(
+            18933,
+            urlopen=fake_urlopen,
+        )
+
+        self.assertTrue(runtime["standalone"])
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(
+            requests[1][0].full_url,
+            "http://127.0.0.1:18933/api/cmd",
+        )
+        self.assertEqual(requests[1][0].get_method(), "POST")
 
     def test_desktop_specific_env_overrides_general_torque_runtime_values(self):
         settings = self.desktop_mod.resolve_desktop_settings(
