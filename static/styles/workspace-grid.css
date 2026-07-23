@@ -608,6 +608,10 @@ body.terminal-direct-messages-resizing .terminal-direct-messages-resizer-grip {
   border-color: color-mix(in srgb, var(--accent) 46%, transparent);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
+.terminal-compose-attachment-caret-host {
+  display: inline;
+  white-space: pre;
+}
 .terminal-compose-reply {
   display: flex;
   align-items: center;
