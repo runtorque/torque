@@ -397,7 +397,8 @@ Menus and compact popovers use the canonical API in
 `static/styles/components.css`:
 
 - `.ui-popover` defines the raised boundary, 10px corners, shadow, and viewport
-  height limit.
+  height limit. Context menus keep all rows inside that boundary: when their
+  content exceeds the usable viewport, the menu itself scrolls vertically.
 - `.ui-menu-item` defines 28px rows with shared hover and keyboard-focus states.
 - `.is-selected` or `aria-checked="true"` applies the selected state;
   `.ui-menu-item--danger` applies destructive intent without turning the whole
