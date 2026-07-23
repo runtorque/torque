@@ -255,7 +255,7 @@ function _boardRenderCardMenu(taskId, invoker) {
   menu.innerHTML = html;
   menu.onclick = _boardHandleCardMenuClick;
   if (typeof openContextMenuSurface === 'function') {
-    openContextMenuSurface(menu, { invoker: invoker });
+    openContextMenuSurface(menu, { invoker: invoker, resetAnchor: true });
   } else {
     menu.classList.add('open');
   }
@@ -267,7 +267,7 @@ function boardCardMenu(evt, taskId) {
   var menu = document.getElementById('ctx-menu');
   if (!menu) return;
   menu.style.top = evt.clientY + 'px';
-  menu.style.left = Math.min(evt.clientX, window.innerWidth - 140) + 'px';
+  menu.style.left = evt.clientX + 'px';
   _boardRenderCardMenu(taskId, evt.currentTarget || evt.target || null);
 }
 

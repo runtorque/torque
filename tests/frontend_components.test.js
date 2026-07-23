@@ -787,6 +787,8 @@ test('transient menus restore focus on Escape and support keyboard traversal', (
 
   assert.match(groups, /event\.key === 'Escape'[\s\S]*?closeAgentGroupQuickSwitcher\(true\)/);
   assert.match(commands, /function closeContextMenu\(options\)[\s\S]*?document\.getElementById\(invokerId\)[\s\S]*?options\.restoreFocus !== false[\s\S]*?focusTarget\.focus\(\)/);
+  assert.match(commands, /function openContextMenuSurface\(menu, options\)[\s\S]*?positionContextMenuSurface\(menu\)[\s\S]*?firstItem\.focus\(\)/);
+  assert.match(commands, /window\.addEventListener\('resize',[\s\S]*?menu\.classList\.contains\('open'\)[\s\S]*?positionContextMenuSurface\(menu\)/);
   assert.match(commands, /function contextMenuKeydown\(event\)[\s\S]*?ArrowDown[\s\S]*?ArrowUp[\s\S]*?items\[index\]\.focus\(\)/);
   assert.match(source('static/js/board/card-rendering.js'), /id="board-task-actions-' \+ t\.id \+ '" class="board-card-menu-btn"/);
   assert.match(filters, /dd\.addEventListener\('keydown'[\s\S]*?e\.key !== 'Escape'[\s\S]*?_boardCloseFilterDropdown\(\{ restoreFocus: true \}\)/);

@@ -1132,10 +1132,40 @@ function normalizeContextMenuMarkup(menu) {
   return menu;
 }
 
+// Keep the one shared context-menu surface inside the viewport after its
+// caller has installed the complete menu.  In particular, do not base the
+// vertical position on an unconstrained content height: CSS bounds tall menus
+// and makes their contents scroll within this same surface.
+function positionContextMenuSurface(menu) {
+  if (!menu || typeof menu.getBoundingClientRect !== 'function') return;
+  const edge = 8;
+  const viewportWidth = Number(window.innerWidth) || 0;
+  const viewportHeight = Number(window.innerHeight) || 0;
+  const rect = menu.getBoundingClientRect();
+  const anchor = menu._contextMenuAnchor || {};
+  const requestedLeft = Number.isFinite(anchor.left)
+    ? anchor.left
+    : (Number.parseFloat(menu.style.left) || rect.left || edge);
+  const requestedTop = Number.isFinite(anchor.top)
+    ? anchor.top
+    : (Number.parseFloat(menu.style.top) || rect.top || edge);
+  const maxLeft = Math.max(edge, viewportWidth - rect.width - edge);
+  const maxTop = Math.max(edge, viewportHeight - rect.height - edge);
+
+  menu.style.left = Math.max(edge, Math.min(requestedLeft, maxLeft)) + 'px';
+  menu.style.top = Math.max(edge, Math.min(requestedTop, maxTop)) + 'px';
+}
+
 function openContextMenuSurface(menu, options) {
   options = options || {};
   if (!menu) return;
   normalizeContextMenuMarkup(menu);
+  if (!menu._contextMenuAnchor || options.resetAnchor) {
+    menu._contextMenuAnchor = {
+      left: Number.parseFloat(menu.style.left),
+      top: Number.parseFloat(menu.style.top),
+    };
+  }
   if (options.invoker) _contextMenuInvoker = options.invoker;
   else if (!_contextMenuInvoker) _contextMenuInvoker = document.activeElement || null;
   if (_contextMenuInvoker && _contextMenuInvoker.id) {
@@ -1148,11 +1178,7 @@ function openContextMenuSurface(menu, options) {
     _contextMenuInvoker.setAttribute('aria-expanded', 'true');
   }
   requestAnimationFrame(function() {
-    if (typeof menu.getBoundingClientRect === 'function') {
-      const rect = menu.getBoundingClientRect();
-      if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 4) + 'px';
-      if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 4) + 'px';
-    }
+    positionContextMenuSurface(menu);
     const firstItem = menu.querySelector('button:not(:disabled):not(.ui-menu-label)');
     if (firstItem && typeof firstItem.focus === 'function') firstItem.focus();
   });
@@ -1172,6 +1198,7 @@ function closeContextMenu(options) {
   }
   _contextMenuInvoker = null;
   _contextMenuInvokerId = '';
+  menu._contextMenuAnchor = null;
   if (options.restoreFocus !== false && focusTarget && typeof focusTarget.focus === 'function') {
     focusTarget.focus();
   }
@@ -1198,7 +1225,14 @@ function showContextMenu(x, y, items, options) {
   menu.innerHTML = html;
   menu.style.left = x + 'px';
   menu.style.top = y + 'px';
-  openContextMenuSurface(menu, { invoker: _contextMenuInvoker });
+  openContextMenuSurface(menu, { invoker: _contextMenuInvoker, resetAnchor: true });
+}
+
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('resize', function() {
+    const menu = document.getElementById('ctx-menu');
+    if (menu && menu.classList.contains('open')) positionContextMenuSurface(menu);
+  });
 }
 
 function contextMenuKeydown(event) {

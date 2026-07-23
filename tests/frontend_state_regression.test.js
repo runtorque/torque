@@ -4917,6 +4917,57 @@ test('boardCardMenu uses a dependency picker instead of inline blocker rows', ()
   assert.match(menu.innerHTML, /ctx-button-wrap/);
 });
 
+test('tall Board card menus stay in one viewport-bounded scroll surface', () => {
+  const resizeListeners = [];
+  const { sandbox, document } = createSandbox();
+  sandbox.window = {
+    innerWidth: 300,
+    innerHeight: 200,
+    open() {},
+    addEventListener(type, handler) {
+      if (type === 'resize') resizeListeners.push(handler);
+    },
+  };
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/commands.js');
+  loadBoardScripts(context);
+
+  const menu = document.register('ctx-menu');
+  menu.getBoundingClientRect = function() {
+    const left = Number.parseFloat(this.style.left) || 0;
+    const top = Number.parseFloat(this.style.top) || 0;
+    // This represents the CSS-clamped, internally-scrollable menu surface,
+    // not its taller natural content height.
+    return { left, top, width: 280, height: 184, right: left + 280, bottom: top + 184 };
+  };
+  context.state.board_lanes = [
+    'Backlog', 'To Do', 'In Progress', 'Review', 'Blocked', 'Ready for release',
+    'Release verification', 'Done',
+  ];
+  context.state.board_tasks = {
+    tall: { id: 'tall', task: 'Constrained menu task', lane: 'Backlog', group: 'alpha' },
+  };
+
+  context.boardCardMenu({ preventDefault() {}, clientX: 292, clientY: 194 }, 'tall');
+
+  assert.equal(menu.classList.contains('open'), true);
+  assert.equal(menu.style.left, '12px');
+  assert.equal(menu.style.top, '8px');
+  // All generated actions, including later lane actions and Delete, remain in
+  // the one #ctx-menu payload rather than a detached follow-on surface.
+  assert.match(menu.innerHTML, /Move to Release verification/);
+  assert.match(menu.innerHTML, /Move to Done/);
+  assert.match(menu.innerHTML, /Copy ID:/);
+  assert.match(menu.innerHTML, /Delete/);
+
+  sandbox.window.innerWidth = 500;
+  sandbox.window.innerHeight = 400;
+  assert.equal(resizeListeners.length, 1);
+  resizeListeners[0]();
+  assert.equal(menu.style.left, '212px');
+  assert.equal(menu.style.top, '194px');
+});
+
 test('boardCardMenu offers mark verified only for completed tasks awaiting verification', () => {
   const { context, document } = createBoardHarness();
   const menu = document.register('ctx-menu');
@@ -13452,6 +13503,43 @@ test('embedded terminal direct-message context menu copies raw message text', ()
   assert.equal(runInContext(context, `terminalDirectMessageCopy('agent-1', 'dm-anchor');`), false);
   assert.equal(copied, 'Anchored [docs](https://example.com)');
   assert.equal(menu.classList.contains('open'), false);
+});
+
+test('terminal direct-message context menu resets its shared-menu anchor for each pointer invocation', () => {
+  const { context, document, sandbox } = setupTerminalDirectMessageClickHarness();
+  const menu = document.register('ctx-menu');
+  sandbox.window.innerWidth = 800;
+  sandbox.window.innerHeight = 1000;
+  menu.getBoundingClientRect = function() {
+    const left = Number.parseFloat(this.style.left) || 0;
+    const top = Number.parseFloat(this.style.top) || 0;
+    return { left, top, width: 188, height: 40, right: left + 188, bottom: top + 40 };
+  };
+  loadScript(context, 'static/js/commands.js');
+
+  const first = terminalClickEvent();
+  first.clientX = 700;
+  first.clientY = 100;
+  context.__terminalFirstCtxEvt = first;
+  runInContext(context, `terminalDirectMessageContextMenu(__terminalFirstCtxEvt, 'agent-1', 'dm-anchor');`);
+  assert.deepEqual(jsonValue(context, 'document.getElementById("ctx-menu")._contextMenuAnchor'), {
+    left: 660,
+    top: 100,
+  });
+  assert.equal(menu.style.left, '604px');
+  assert.equal(menu.style.top, '100px');
+
+  const second = terminalClickEvent();
+  second.clientX = 50;
+  second.clientY = 900;
+  context.__terminalSecondCtxEvt = second;
+  runInContext(context, `terminalDirectMessageContextMenu(__terminalSecondCtxEvt, 'agent-1', 'dm-anchor');`);
+  assert.deepEqual(jsonValue(context, 'document.getElementById("ctx-menu")._contextMenuAnchor'), {
+    left: 50,
+    top: 900,
+  });
+  assert.equal(menu.style.left, '50px');
+  assert.equal(menu.style.top, '900px');
 });
 
 test('embedded terminal direct-message fenced code blocks render independent copy buttons', () => {
@@ -23413,6 +23501,43 @@ test('chat message context menu copies raw source text rather than rendered mark
   assert.equal(menu.classList.contains('open'), false);
 });
 
+test('chat message context menu resets its shared-menu anchor for each pointer invocation', () => {
+  const { context, document, sandbox } = createChatHarness();
+  const menu = document.register('ctx-menu');
+  sandbox.window.innerWidth = 800;
+  sandbox.window.innerHeight = 1000;
+  menu.getBoundingClientRect = function() {
+    const left = Number.parseFloat(this.style.left) || 0;
+    const top = Number.parseFloat(this.style.top) || 0;
+    return { left, top, width: 188, height: 40, right: left + 188, bottom: top + 40 };
+  };
+  loadScript(context, 'static/js/commands.js');
+
+  const first = terminalClickEvent();
+  first.clientX = 700;
+  first.clientY = 100;
+  context.__chatFirstCtxEvt = first;
+  runInContext(context, `chatMessageContextMenu(__chatFirstCtxEvt, 'thread-copy', 'thread-copy-msg');`);
+  assert.deepEqual(jsonValue(context, 'document.getElementById("ctx-menu")._contextMenuAnchor'), {
+    left: 660,
+    top: 100,
+  });
+  assert.equal(menu.style.left, '604px');
+  assert.equal(menu.style.top, '100px');
+
+  const second = terminalClickEvent();
+  second.clientX = 50;
+  second.clientY = 900;
+  context.__chatSecondCtxEvt = second;
+  runInContext(context, `chatMessageContextMenu(__chatSecondCtxEvt, 'thread-copy', 'thread-copy-msg');`);
+  assert.deepEqual(jsonValue(context, 'document.getElementById("ctx-menu")._contextMenuAnchor'), {
+    left: 50,
+    top: 900,
+  });
+  assert.equal(menu.style.left, '50px');
+  assert.equal(menu.style.top, '900px');
+});
+
 test('chat panel renders bubbles on the stable side for sender role', () => {
   const { context, document } = createChatHarness();
   const architect = { id: 'arch-1', kind: 'architect', name: 'Architect One', group: 'alpha' };
@@ -25049,10 +25174,10 @@ test('engineer and architect group settings use sub-tabs instead of collapsible 
   assert.match(css, /\.gs-subpane\.active\s*\{\s*display:\s*block;\s*\}/);
 });
 
-test('context menu constrains width and clamps wrapped task-title rows', () => {
+test('context menu keeps tall Board actions in a bounded scroll surface and clamps wrapped labels', () => {
   const css = appStylesheetSource();
 
-  assert.match(css, /#ctx-menu\s*\{[^}]*max-width:\s*min\(320px,\s*calc\(100vw - 8px\)\);/);
+  assert.match(css, /#ctx-menu\s*\{[^}]*max-width:\s*min\(320px,\s*calc\(100vw - 16px\)\);[^}]*max-height:\s*calc\(100vh - 16px\);[^}]*overflow-x:\s*hidden;[^}]*overflow-y:\s*auto;[^}]*overscroll-behavior:\s*contain;/);
   assert.match(css, /#ctx-menu button\.ctx-button-wrap\s*\{[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere;[^}]*-webkit-line-clamp:\s*2;/);
 });
 
