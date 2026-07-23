@@ -93,6 +93,24 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
                 )
             except ValueError as exc:
                 return {"type": "error", "message": str(exc)}
+        if payload.get("cmd") == "board_mark_task_covered":
+            try:
+                return self.state.board_mark_task_covered(
+                    payload.get("id", ""),
+                    covering_task_id=payload.get("covering_task_id", ""),
+                    pr_url=payload.get("pr_url", ""),
+                    sha=payload.get("sha", ""),
+                    tests_run=payload.get("tests_run", ""),
+                    evidence=payload.get("evidence", ""),
+                    notes=payload.get("notes", ""),
+                    actor_name=payload.get("actor_name", ""),
+                    actor_id=payload.get("actor_id", ""),
+                    actor_kind=payload.get("actor_kind", ""),
+                    authorization=payload.get("authorization", {}),
+                    move_to_done=bool(payload.get("move_to_done", False)),
+                )
+            except ValueError as exc:
+                return {"type": "error", "message": str(exc)}
         return {"type": "ok"}
 
     def _handler(self):
@@ -224,10 +242,11 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         route_id = self._result_payload(routed)["message_id"]
 
         pickup = await self._call(
-            "architect_task_pickup",
+            "task_claim",
             {
                 "task": task_id,
                 "reason": "Accepted as original implementation root.",
+                "source": f"Blueprint peer message {route_id}",
             },
             req_id=4,
             agent_id=self.torqly.id,
@@ -251,6 +270,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             pickup_evidence["authorization"]["scope"],
         )
         self.assertEqual(route_id, pickup_evidence["authorization"]["route_message_id"])
+        self.assertIn(route_id, pickup_evidence["source"])
         self.assertEqual("architect_pickup", refreshed.messages[-1]["action"])
 
         reassigned = await self._call(
@@ -284,7 +304,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             created_by_architect_id=self.architect.id,
         )
         no_route = await self._call(
-            "architect_task_pickup",
+            "task_claim",
             {"task": unrouted.id},
             req_id=20,
             agent_id=self.torqly.id,
@@ -299,7 +319,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             created_by_architect_id=self.torqly.id,
         )
         normal = await self._call(
-            "architect_task_pickup",
+            "task_claim",
             {"task": normal_architect_task.id},
             req_id=21,
             agent_id=self.full_peer.id,
@@ -323,13 +343,63 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             req_id=23,
         )
         claimed = await self._call(
-            "architect_task_pickup",
+            "task_claim",
             {"task": claimed_id},
             req_id=24,
             agent_id=self.torqly.id,
         )
         self.assertIn("already assigned", self._error_text(claimed))
         self.assertEqual(self.peer.id, self.state.board_tasks[claimed_id].assigned_architect_id)
+
+    async def test_public_task_mark_covered_routes_to_existing_handler(self):
+        covered = self.state.board_add_task(
+            "Canonical covered root",
+            "g",
+            created_by_architect_id=self.torqly.id,
+        )
+        covering = self.state.board_add_task(
+            "Canonical covering task",
+            "g",
+            created_by_architect_id=self.torqly.id,
+        )
+
+        response = await self._call(
+            "task_mark_covered",
+            {
+                "task": covered.id,
+                "covering_task": covering.id,
+                "notes": "Canonical public handler registration coverage.",
+                "move_to_done": True,
+            },
+            req_id=40,
+            agent_id=self.torqly.id,
+        )
+        payload = self._result_payload(response)
+        self.assertEqual("task_marked_covered", payload["type"])
+        self.assertEqual("Done", self.state.board_tasks[covered.id].lane)
+        evidence = self.state.board_tasks[covered.id].completion_evidence
+        self.assertEqual(covering.id, evidence["covered_by"]["task_id"])
+        self.assertEqual("covered_by", self.state.board_tasks[covered.id].messages[-1]["action"])
+
+        other_owned = self.state.board_add_task(
+            "Other Architect task",
+            "g",
+            created_by_architect_id=self.peer.id,
+        )
+        before_evidence = dict(other_owned.completion_evidence)
+        denied = await self._call(
+            "task_mark_covered",
+            {
+                "task": other_owned.id,
+                "covering_task": covering.id,
+                "notes": "Must remain denied.",
+            },
+            req_id=41,
+            agent_id=self.torqly.id,
+        )
+        self.assertIn("not created by this architect", self._error_text(denied))
+        self.assertEqual(before_evidence, other_owned.completion_evidence)
+        self.assertEqual("Backlog", other_owned.lane)
 
     async def test_pm_engineer_and_worker_do_not_get_architect_pickup_surface(self):
         for agent_id in (self.architect.id, self.engineer.id, self.worker.id):

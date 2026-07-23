@@ -13,6 +13,7 @@ install_aiohttp_stub(include_json_helpers=True)
 
 from torque.mcp import (
     ALL_TOOLS,
+    CANONICAL_CALLABLE_HANDLER_REGISTRY,
     _canonical_tools_for_caller,
     _resolve_public_tool_call,
     _visible_tools,
@@ -20,6 +21,7 @@ from torque.mcp import (
 from torque.mcp_canonical import (
     ARCHITECT_EAGER_TOOL_NAMES,
     ENGINEER_EAGER_TOOL_NAMES,
+    canonical_registry_missing_handlers,
     canonical_tool_name,
 )
 from torque.mcp_tool_search import public_tool_spec, tool_search_response
@@ -163,6 +165,39 @@ class CanonicalMCPContractTests(unittest.TestCase):
                     for tool in tools[len(eager):]
                 ))
                 self.assertFalse(set(names) & legacy_names)
+
+    def test_architect_advertised_catalog_has_callable_registered_handlers(self):
+        """Eager/deferred public names must share the runtime handler registry."""
+
+        tools = _canonical_tools_for_caller(_State("architect"), "caller")
+        self.assertEqual(
+            (),
+            canonical_registry_missing_handlers(
+                tools,
+                CANONICAL_CALLABLE_HANDLER_REGISTRY,
+            ),
+        )
+
+        eager = {tool["name"] for tool in tools if not tool.get("deferred")}
+        deferred = {tool["name"] for tool in tools if tool.get("deferred")}
+        for public_name, expected_handler in {
+            "task_claim": "architect_task_pickup",
+            "task_mark_covered": "architect_task_mark_covered",
+        }.items():
+            with self.subTest(public_name=public_name):
+                self.assertIn(public_name, eager)
+                self.assertNotIn(public_name, deferred)
+                self.assertIn(
+                    expected_handler,
+                    CANONICAL_CALLABLE_HANDLER_REGISTRY[public_name],
+                )
+                resolved, _translated = _resolve_public_tool_call(
+                    _State("architect"),
+                    "caller",
+                    public_name,
+                    {"task": "TORQUE:fixture"},
+                )
+                self.assertEqual(expected_handler, resolved)
 
     def test_architect_core_orchestration_categories_are_eager(self):
         tools = {
