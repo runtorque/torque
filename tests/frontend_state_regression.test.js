@@ -4498,6 +4498,81 @@ test('board cards render assigned engineer identity badges inline with metadata'
   assert.match(panel.innerHTML, /boardFocusAgent\('eng-1'\)/);
 });
 
+test('agent_upsert patches visible Board assigned-engineer status without a Board rerender', () => {
+  const { sandbox, document } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/ws.js');
+  loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/grid/group-tabs.js');
+  loadScript(context, 'static/js/grid/agent-card.js');
+  loadScript(context, 'static/js/grid/terminal-row.js');
+  loadScript(context, 'static/js/grid/sections.js');
+  loadScript(context, 'static/js/agent-detail.js');
+  loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
+  loadBoardScripts(context);
+  runInContext(context, `
+    var __boardRenderCalls = 0;
+    render = function() {};
+    renderBoard = function() { __boardRenderCalls++; };
+    _currentGroup = function() { return 'alpha'; };
+    _expectedSeq = 1;
+    state.agents = {
+      'eng-1': {
+        id: 'eng-1', name: 'Builder', kind: 'engineer', group: 'alpha',
+        cell_type: 'agent', agent_type: 'codex', status: 'running',
+        activity: 'thinking', activity_detail: 'Thinking',
+      },
+    };
+    state.board_tasks = {
+      'task-1': {
+        id: 'task-1', group: 'alpha', task: 'Keep status current', lane: 'In Progress',
+        assigned_engineer_id: 'eng-1',
+      },
+    };
+  `);
+
+  const card = new FakeElement('board-card-task-1');
+  card.classList.add('board-card', 'board-card-selected', 'board-card-hovered', 'board-card-dragging');
+  const laneBody = new FakeElement('board-lane-body');
+  laneBody.scrollTop = 91;
+  const chip = new FakeElement('assigned-engineer-chip');
+  const avatar = new FakeElement('assigned-engineer-avatar');
+  avatar.className = 'board-card-assigned-engineer-avatar working';
+  avatar.setAttribute('data-assigned-engineer-status', 'working');
+  chip.setQuerySelector('.board-card-assigned-engineer-avatar', avatar);
+  card.appendChild(chip);
+  const selector = runInContext(context, `_boardAssignedEngineerSelector('eng-1')`);
+  document.setSelectorAll(selector, [chip]);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{ op: 'agent_upsert', id: 'eng-1', status: 'idle' }],
+  });
+
+  assert.equal(jsonValue(context, `state.agents['eng-1'].status`), 'idle');
+  assert.equal(avatar.className, 'board-card-assigned-engineer-avatar idle');
+  assert.equal(avatar.dataset.assignedEngineerStatus, 'idle');
+  assert.equal(card.classList.contains('board-card-selected'), true,
+    'targeted status patch must preserve Board card selection');
+  assert.equal(card.classList.contains('board-card-hovered'), true,
+    'targeted status patch must preserve Board hover state');
+  assert.equal(card.classList.contains('board-card-dragging'), true,
+    'targeted status patch must preserve an in-flight Board drag state');
+  assert.equal(laneBody.scrollTop, 91,
+    'targeted status patch must not disturb the Board lane viewport');
+  assert.equal(runInContext(context, '__boardRenderCalls'), 0,
+    'a lifecycle-only agent delta must not rebuild the Board');
+
+  context._handleDelta({
+    seq: 2,
+    ops: [{ op: 'agent_upsert', id: 'eng-1', activity_detail: 'Still stale' }],
+  });
+  assert.equal(avatar.className, 'board-card-assigned-engineer-avatar idle');
+  assert.equal(runInContext(context, '__boardRenderCalls'), 0,
+    'activity-only churn must not rebuild or repatch the Board status badge');
+});
+
 test('_boardTaskScheduleMeta distinguishes scheduled, due-soon, and overdue states', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);

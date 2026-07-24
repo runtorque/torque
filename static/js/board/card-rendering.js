@@ -603,6 +603,11 @@ function _boardAgentStatus(agentId) {
   return agentStatusClass ? agentStatusClass(a) : '';
 }
 
+function _boardAssignedEngineerStatus(agent) {
+  if (!agent) return 'missing';
+  return (agentStatusClass && agentStatusClass(agent)) || 'idle';
+}
+
 function _boardAgentForId(agentId) {
   agentId = String(agentId || '').trim();
   if (!agentId || !state || !state.agents) return null;
@@ -626,7 +631,7 @@ function _boardAssignedEngineerBadgeHtml(task) {
   var engineer = _boardAgentForId(engineerId);
   var displayName = _boardAgentDisplayName(engineerId) || engineerId;
   var initial = String(displayName || '?').trim().charAt(0).toUpperCase() || '?';
-  var status = engineer ? (_boardAgentStatus(engineerId) || 'idle') : 'missing';
+  var status = _boardAssignedEngineerStatus(engineer);
   var cls = 'board-card-control-chip board-card-assigned-engineer';
   if (!engineer) cls += ' board-card-assigned-engineer-missing';
   var attrs = ' data-assigned-engineer-id="' + esc(engineerId) + '"'
@@ -637,9 +642,51 @@ function _boardAssignedEngineerBadgeHtml(task) {
   }
   return '<span class="' + esc(cls) + '"' + attrs + '>'
     + '<span class="board-card-assigned-engineer-avatar '
-      + esc(status) + '" aria-hidden="true">' + esc(initial) + '</span>'
+      + esc(status) + '" data-assigned-engineer-status="' + esc(status)
+      + '" aria-hidden="true">' + esc(initial) + '</span>'
     + '<span class="board-card-assigned-engineer-name">' + esc(displayName) + '</span>'
     + '</span>';
+}
+
+function _boardAssignedEngineerSelector(agentId) {
+  var value = String(agentId || '');
+  if (!value) return '';
+  if (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function') {
+    return '.board-card-assigned-engineer[data-assigned-engineer-id="' + CSS.escape(value) + '"]';
+  }
+  return '.board-card-assigned-engineer[data-assigned-engineer-id="'
+    + value.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]';
+}
+
+function _boardPatchAssignedEngineerStatusAgentDeltas(changes) {
+  if (!changes || !changes.length || typeof document === 'undefined'
+      || typeof document.querySelectorAll !== 'function') return false;
+  var patched = false;
+  for (var i = 0; i < changes.length; i++) {
+    var change = changes[i] || {};
+    var previous = change.previous || null;
+    var next = change.next || null;
+    var agentId = String(change.id || (next && next.id) || (previous && previous.id) || '');
+    if (!agentId
+        || _boardAssignedEngineerStatus(previous) === _boardAssignedEngineerStatus(next)) continue;
+    var selector = _boardAssignedEngineerSelector(agentId);
+    if (!selector) continue;
+    var badges = document.querySelectorAll(selector);
+    var status = _boardAssignedEngineerStatus(next);
+    for (var bi = 0; bi < badges.length; bi++) {
+      var badge = badges[bi];
+      if (!badge || typeof badge.querySelector !== 'function') continue;
+      var avatar = badge.querySelector('.board-card-assigned-engineer-avatar');
+      if (!avatar) continue;
+      avatar.className = 'board-card-assigned-engineer-avatar ' + status;
+      if (avatar.dataset) avatar.dataset.assignedEngineerStatus = status;
+      if (typeof avatar.setAttribute === 'function') {
+        avatar.setAttribute('data-assigned-engineer-status', status);
+      }
+      patched = true;
+    }
+  }
+  return patched;
 }
 
 function _boardTaskDispatchStateValue(task) {
