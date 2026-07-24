@@ -1084,8 +1084,8 @@ function _renderBoardCard(t, childrenOf, depth, renderState) {
     + ' ondragover="boardCardDragOver(event)"'
     + ' ondragleave="boardCardDragLeave(event)"'
     + ' ondrop="boardCardDrop(event)"'
-    + ' onmouseenter="boardCardMouseEnter(\'' + t.id + '\')"'
-    + ' onmouseleave="boardCardMouseLeave(\'' + t.id + '\')"'
+    + ' onmouseenter="boardCardMouseEnter(\'' + t.id + '\', event)"'
+    + ' onmouseleave="boardCardMouseLeave(\'' + t.id + '\', event)"'
     + ' onclick="boardFocusTask(\'' + t.id + '\', event)"'
     + ' oncontextmenu="boardCardMenu(event,\'' + t.id + '\')"'
     + ' ondblclick="openEditTask(\'' + t.id + '\')">';

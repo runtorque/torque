@@ -263,12 +263,20 @@ function _boardRenderCardMenu(taskId, invoker) {
 }
 
 function boardCardMenu(evt, taskId) {
+  // macOS turns Ctrl+primary-click into a contextmenu event after the click.
+  // The click is an additive selection gesture, not a request for this menu.
+  if (evt && (evt.ctrlKey || evt.metaKey)) {
+    evt.preventDefault();
+    if (evt.stopPropagation) evt.stopPropagation();
+    return false;
+  }
   evt.preventDefault();
   var menu = document.getElementById('ctx-menu');
-  if (!menu) return;
+  if (!menu) return false;
   menu.style.top = evt.clientY + 'px';
   menu.style.left = evt.clientX + 'px';
   _boardRenderCardMenu(taskId, evt.currentTarget || evt.target || null);
+  return false;
 }
 
 function _boardCopyTextToClipboard(text, onDone) {

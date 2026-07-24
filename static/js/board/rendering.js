@@ -41,11 +41,28 @@ function boardToggleTaskCollapse(taskId) {
   renderBoard();
 }
 
-function boardCardMouseEnter(taskId) {
-  _boardHoveredTask = taskId || '';
+function _boardSetHoveredCardClass(card, hovered) {
+  if (!card || !card.classList) return;
+  card.classList.toggle('board-card-hovered', !!hovered);
+  card.classList.toggle('is-hovered', !!hovered);
 }
 
-function boardCardMouseLeave(taskId) {
+function boardCardMouseEnter(taskId, evt) {
+  // Reconcile this directly rather than re-rendering the Board.  A render
+  // here would disturb scroll, inline drafts, and focus during normal pointer
+  // movement; leaving the old class behind makes its quick controls linger.
+  if (typeof document !== 'undefined' && document.querySelectorAll) {
+    var hoveredCards = document.querySelectorAll('.board-card.board-card-hovered');
+    for (var i = 0; i < hoveredCards.length; i++) {
+      _boardSetHoveredCardClass(hoveredCards[i], false);
+    }
+  }
+  _boardHoveredTask = taskId || '';
+  _boardSetHoveredCardClass(evt && (evt.currentTarget || evt.target), !!taskId);
+}
+
+function boardCardMouseLeave(taskId, evt) {
+  _boardSetHoveredCardClass(evt && (evt.currentTarget || evt.target), false);
   if (_boardHoveredTask === taskId) _boardHoveredTask = '';
 }
 

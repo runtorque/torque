@@ -3829,6 +3829,130 @@ test('boardCardDrop moves tasks across lanes in the wide embedded layout', () =>
   });
 });
 
+test('board card additive selection toggles with Ctrl/Cmd while preserving Shift ranges', () => {
+  const { context } = createBoardHarness();
+  context.state.board_lanes = ['Backlog'];
+  context.state.board_tasks = {
+    one: { id: 'one', group: 'alpha', task: 'One', lane: 'Backlog', position: 4 },
+    two: { id: 'two', group: 'alpha', task: 'Two', lane: 'Backlog', position: 3 },
+    three: { id: 'three', group: 'alpha', task: 'Three', lane: 'Backlog', position: 2 },
+    four: { id: 'four', group: 'alpha', task: 'Four', lane: 'Backlog', position: 1 },
+  };
+  runInContext(context, `
+    _boardSelectedLane = 'Backlog';
+    _boardSelectedTasks = { one: true, three: true };
+    _boardLastSelectedTask = 'one';
+    renderBoard = function() {};
+  `);
+
+  context.boardFocusTask('two', { ctrlKey: true });
+  assert.deepEqual(jsonValue(context, `_boardSelectedTasks`), { one: true, two: true, three: true });
+
+  context.boardFocusTask('two', { ctrlKey: true });
+  assert.deepEqual(jsonValue(context, `_boardSelectedTasks`), { one: true, three: true });
+
+  context.boardFocusTask('two', { metaKey: true });
+  context.boardFocusTask('four', { shiftKey: true });
+  assert.deepEqual(
+    jsonValue(context, `_boardSelectedTasks`),
+    { one: true, two: true, three: true, four: true },
+    'Shift range remains additive after Cmd/Ctrl selection',
+  );
+
+  context.boardFocusTask('three', {});
+  assert.deepEqual(jsonValue(context, `_boardSelectedTasks`), {});
+  assert.equal(jsonValue(context, `_boardFocusedTask`), 'three');
+});
+
+test('board Ctrl-click context menu is suppressed without changing ordinary right-click behavior', () => {
+  const { context, document } = createBoardHarness();
+  const menu = document.register('ctx-menu');
+  context.menuCalls = 0;
+  runInContext(context, `
+    _boardRenderCardMenu = function() { menuCalls++; };
+  `);
+
+  const ctrlEvent = {
+    ctrlKey: true,
+    preventDefault() { this.prevented = true; },
+    stopPropagation() { this.stopped = true; },
+  };
+  assert.equal(context.boardCardMenu(ctrlEvent, 'task'), false);
+  assert.equal(ctrlEvent.prevented, true);
+  assert.equal(ctrlEvent.stopped, true);
+  assert.equal(context.menuCalls, 0, 'macOS Ctrl-click must not flash a card menu');
+
+  const rightClickEvent = {
+    clientX: 30,
+    clientY: 40,
+    currentTarget: menu,
+    preventDefault() { this.prevented = true; },
+  };
+  assert.equal(context.boardCardMenu(rightClickEvent, 'task'), false);
+  assert.equal(rightClickEvent.prevented, true);
+  assert.equal(context.menuCalls, 1, 'ordinary context menus remain available');
+});
+
+test('board card drags start from readable content but never interactive descendants', () => {
+  const { context } = createBoardHarness();
+  const card = new FakeElement();
+  card.classList.add('board-card');
+  const title = new FakeElement();
+  title.classList.add('board-card-title');
+  card.appendChild(title);
+  const transfer = {
+    effectAllowed: '',
+    data: {},
+    setData(type, value) { this.data[type] = value; },
+  };
+
+  context.boardCardDragStart({ target: title, dataTransfer: transfer }, 'task');
+  assert.equal(jsonValue(context, `_boardDragId`), 'task');
+  assert.equal(transfer.effectAllowed, 'move');
+  assert.deepEqual(transfer.data, { 'text/plain': 'task' });
+  assert.equal(card.classList.contains('dragging'), true);
+
+  context.boardCardDragEnd({});
+  const quickButton = new FakeElement();
+  quickButton.tagName = 'BUTTON';
+  quickButton.classList.add('board-card-quick-btn');
+  card.appendChild(quickButton);
+  const interactiveEvent = {
+    target: quickButton,
+    dataTransfer: transfer,
+    preventDefault() { this.prevented = true; },
+  };
+  context.boardCardDragStart(interactiveEvent, 'task');
+  assert.equal(interactiveEvent.prevented, true);
+  assert.equal(jsonValue(context, `_boardDragId`), '');
+});
+
+test('board hover transitions reconcile card chrome directly without a Board render', () => {
+  const { context, document } = createBoardHarness();
+  const first = new FakeElement();
+  first.classList.add('board-card', 'board-card-hovered', 'is-hovered');
+  const second = new FakeElement();
+  second.classList.add('board-card');
+  document.setSelectorAll('.board-card.board-card-hovered', [first]);
+  context.renders = 0;
+  runInContext(context, `
+    _boardHoveredTask = 'first';
+    renderBoard = function() { renders++; };
+  `);
+
+  context.boardCardMouseEnter('second', { currentTarget: second });
+  assert.equal(first.classList.contains('board-card-hovered'), false);
+  assert.equal(first.classList.contains('is-hovered'), false);
+  assert.equal(second.classList.contains('board-card-hovered'), true);
+  assert.equal(second.classList.contains('is-hovered'), true);
+  assert.equal(jsonValue(context, `_boardHoveredTask`), 'second');
+  assert.equal(context.renders, 0);
+
+  context.boardCardMouseLeave('first', { currentTarget: first });
+  assert.equal(second.classList.contains('board-card-hovered'), true,
+    'a delayed leave from A must not collapse B');
+});
+
 test('board card density persists per group and keeps key signals rendered', () => {
   const { context, document } = createBoardHarness({ stubCards: false });
   const panel = document.register('panel-board');
@@ -29914,6 +30038,20 @@ test('readable text inside draggable cards temporarily opts out of drag startup'
 
   document.listeners.mousedown({ button: 0, target: card });
   assert.equal(card.getAttribute('draggable'), 'true');
+
+  const boardCard = createDragDomElement({
+    classNames: ['board-card'],
+    parent: main,
+  });
+  boardCard.setAttribute('draggable', 'true');
+  const boardTitle = createDragDomElement({
+    classNames: ['board-card-title'],
+    parent: boardCard,
+  });
+  document.listeners.mousedown({ button: 0, target: boardTitle });
+  assert.equal(boardCard.getAttribute('draggable'), 'true',
+    'Board title drags must remain enabled instead of opting into text selection');
+  assert.equal(boardCard.getAttribute('data-selection-drag-disabled'), null);
 });
 
 test('legacy terminal rows are not draggable or reparentable from the UI', () => {

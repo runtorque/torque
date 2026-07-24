@@ -30,11 +30,38 @@ function _closeCtxMenu() {
 
 /* ---- Card drag and drop --------------------------------------------- */
 
+function _boardCardDragSourceIsInteractive(target) {
+  for (var node = target; node; node = node.parentElement || node.parentNode) {
+    if (node.classList && node.classList.contains('board-card')) break;
+    var tagName = String(node.tagName || '').toUpperCase();
+    if (tagName === 'A' || tagName === 'BUTTON' || tagName === 'INPUT'
+        || tagName === 'SELECT' || tagName === 'TEXTAREA') return true;
+    if (node.getAttribute && (node.getAttribute('contenteditable') === 'true'
+        || node.getAttribute('onclick'))) return true;
+    if (node.classList && (
+      node.classList.contains('board-card-collapse-btn')
+      || node.classList.contains('board-card-menu-btn')
+      || node.classList.contains('board-card-id-copy')
+      || node.classList.contains('board-card-quick-controls')
+      || node.classList.contains('board-card-quick-editor')
+      || node.classList.contains('board-card-control-chip')
+      || node.classList.contains('board-card-activity-clickable')
+    )) return true;
+  }
+  return false;
+}
+
 function boardCardDragStart(e, id) {
+  if (_boardCardDragSourceIsInteractive(e && e.target)) {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
+    return;
+  }
   _boardDragId = id;
-  e.dataTransfer.effectAllowed = 'move';
-  e.dataTransfer.setData('text/plain', id);
-  var card = e.target.closest('.board-card');
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', id);
+  }
+  var card = e.target && e.target.closest ? e.target.closest('.board-card') : null;
   if (card) setTimeout(function() { card.classList.add('dragging'); }, 0);
 }
 

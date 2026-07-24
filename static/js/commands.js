@@ -754,6 +754,9 @@ function _setupTextSelectionDragBypass() {
     let target = e.target || null;
     if (target && target.nodeType === 3) target = target.parentElement || target.parentNode;
     if (!target || _closestSelectionControl(target)) return;
+    // Board cards intentionally drag from their readable, non-interactive
+    // content. Other draggable chrome keeps the text-selection escape hatch.
+    if (_closestSelectionMatch(target, ['.board-card'])) return;
     if (!_closestSelectionMatch(target, TEXT_SELECTION_DRAG_SELECTORS)) return;
     const draggable = _closestSelectionMatch(target, ['[draggable="true"]']);
     if (!draggable) return;
