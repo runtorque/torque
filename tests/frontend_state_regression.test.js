@@ -21987,6 +21987,113 @@ test('renderAgentCell clears green dot for idle Session ended awareness agent', 
   assert.match(html, /Session ended/);
 });
 
+test('Codex running-to-idle delta suppresses stale activity across grid and canvas cards', () => {
+  const { sandbox, document } = createSandbox();
+  document.register('main');
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/ws.js');
+  loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/grid/group-tabs.js');
+  loadScript(context, 'static/js/grid/agent-card.js');
+  loadScript(context, 'static/js/grid/terminal-row.js');
+  loadScript(context, 'static/js/grid/sections.js');
+  loadScript(context, 'static/js/agent-detail.js');
+  loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
+  loadScript(context, 'static/js/canvas.js');
+  runInContext(context, `
+    focusedItemId = null;
+    getFilterByWindow = function() { return false; };
+  `);
+  runInContext(context, `
+    state.children = {};
+    state.board_tasks = {};
+    state.agents = {
+      'codex-worker': {
+        id: 'codex-worker',
+        name: 'Codex Worker',
+        kind: 'worker',
+        group: 'alpha',
+        cell_type: 'agent',
+        agent_type: 'codex',
+        status: 'running',
+        activity: 'thinking',
+        activity_detail: 'Thinking',
+      },
+    };
+  `);
+
+  let grid = runInContext(context, `renderAgentCell(state.agents['codex-worker'])`);
+  let canvas = runInContext(context, `_canvasRenderWorkerCard(state.agents['codex-worker'])`);
+  assert.match(grid, /class="cell-status working"/);
+  assert.match(grid, /title="Codex Worker \(running\) — Thinking"/);
+  assert.match(canvas, /canvas-card-worker is-running/);
+
+  const idleDelta = { op: 'agent_upsert', id: 'codex-worker', status: 'idle' };
+  const invalidations = context._deltaSurfaceInvalidations([idleDelta], [{
+    agent: jsonValue(context, `state.agents['codex-worker']`),
+    group: 'alpha',
+  }]);
+  assert.equal(invalidations.main, true,
+    'lifecycle deltas must rerender the visible grid/canvas without a snapshot');
+  context._applyDelta([idleDelta]);
+
+  grid = runInContext(context, `renderAgentCell(state.agents['codex-worker'])`);
+  canvas = runInContext(context, `_canvasRenderWorkerCard(state.agents['codex-worker'])`);
+  assert.equal(jsonValue(context, `state.agents['codex-worker'].activity`), 'thinking',
+    'the regression must cover a stale transient activity value');
+  assert.match(grid, /class="cell-status idle"/);
+  assert.doesNotMatch(grid, /class="cell-status working"/);
+  assert.match(grid, /title="Codex Worker \(idle\) — Thinking"/,
+    'the hover tooltip and dot use the same authoritative idle lifecycle state');
+  assert.match(canvas, /canvas-card-worker is-idle/);
+  assert.doesNotMatch(canvas, /canvas-card-worker is-running/);
+
+  // A late partial activity delta must retain the newer explicit idle status.
+  context._applyDelta([{
+    op: 'agent_upsert',
+    id: 'codex-worker',
+    activity: 'tool_call',
+    activity_detail: 'Running: git status',
+  }]);
+  assert.equal(jsonValue(context, `state.agents['codex-worker'].status`), 'idle');
+  assert.equal(runInContext(context, `agentStatusClass(state.agents['codex-worker'])`), 'idle');
+
+  // A subsequent real turn still becomes working, then returns to idle when
+  // the adapter clears its transient activity fields.
+  context._applyDelta([{
+    op: 'agent_upsert', id: 'codex-worker', status: 'running', activity: 'writing', activity_detail: 'Writing',
+  }]);
+  assert.equal(runInContext(context, `agentStatusClass(state.agents['codex-worker'])`), 'working');
+  context._applyDelta([{
+    op: 'agent_upsert', id: 'codex-worker', status: 'idle', activity: '', activity_detail: '',
+  }]);
+  assert.equal(runInContext(context, `agentStatusClass(state.agents['codex-worker'])`), 'idle');
+});
+
+test('agent status precedence preserves lifecycle, attention, dismissal, and legacy activity fallback', () => {
+  const { context } = createMainRenderHarness();
+  context.state.children = {};
+  context.state.board_tasks = {};
+
+  for (const activity of ['tool_call', 'thinking', 'writing', 'waiting']) {
+    assert.equal(context.agentStatusClass({ agent_type: 'codex', status: 'running', activity }), 'working');
+    assert.equal(context.agentStatusClass({ agent_type: 'codex', status: 'idle', activity }), 'idle');
+    assert.equal(context.agentStatusClass({ agent_type: 'codex', activity }), 'working',
+      'legacy activity-only deltas retain their working fallback');
+  }
+  assert.equal(context.agentStatusClass({ agent_type: 'codex', status: 'error', activity: 'writing' }), 'disconnected');
+  assert.equal(context.agentStatusClass({ agent_type: 'codex', status: 'stopped', activity: 'waiting' }), 'disconnected');
+  assert.equal(context.agentStatusClass({ agent_type: 'codex', status: 'idle', activity: 'thinking', needs_attention: true }), 'attention');
+
+  const dismissed = context.renderAgentCell({
+    id: 'dismissed-codex', name: 'Dismissed Codex', kind: 'engineer', group: 'alpha',
+    cell_type: 'agent', agent_type: 'codex', status: 'idle', activity: 'thinking', dismissed_at: 1,
+  });
+  assert.match(dismissed, /class="cell-status dismissed"/,
+    'dismissed card precedence remains above the shared lifecycle dot');
+});
+
 test('renderAgentCell shows context-window meter only when usage is available with thresholds', () => {
   const { context } = createMainRenderHarness();
   context.state.children = {};
