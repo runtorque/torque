@@ -1557,14 +1557,10 @@ function agentStatusClass(a) {
   const status = String(a.status || '').trim().toLowerCase();
   /* Disconnected (tab closed) */
   if (status === 'stopped' || status === 'error') return 'disconnected';
-  /*
-   * A live session is working even when an awareness adapter has not emitted
-   * a transient activity value yet (for example while Codex is thinking
-   * before its first tool hook).  The hover tooltip already uses status, so
-   * keep the dot aligned with that source of truth.
-   */
+  /* Authoritative lifecycle state takes precedence over transient activity. */
   if (status === 'running') return 'working';
-  /* For legacy awareness-agent deltas, activity can still indicate work */
+  if (status === 'idle') return 'idle';
+  /* Only legacy deltas without a usable lifecycle state fall back to activity. */
   if (a.agent_type) {
     if (a.activity) return 'working';
   }

@@ -1510,6 +1510,27 @@ function _collectBoardTaskDeltaChanges(ops, hints) {
   return changes;
 }
 
+function _collectBoardAgentDeltaChanges(ops, hints) {
+  const changes = [];
+  for (let i = 0; i < (ops || []).length; i++) {
+    const op = ops[i] || {};
+    if (op.op !== 'agent_upsert' && op.op !== 'agent_remove') continue;
+    const id = op.id || '';
+    const hint = hints && hints[i] ? hints[i] : {};
+    const previous = hint.agent || null;
+    const next = (op.op === 'agent_remove' || !state || !state.agents)
+      ? null
+      : _cloneBoardDeltaTask(state.agents[id]);
+    changes.push({
+      op: op.op,
+      id: id,
+      previous: previous,
+      next: next,
+    });
+  }
+  return changes;
+}
+
 function _opTouchesGroup(op, group, hint) {
   if (!op || !group) return true;
   const hintedGroup = (hint && hint.group) ? hint.group : '';

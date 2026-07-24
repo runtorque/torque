@@ -338,6 +338,7 @@ function _handleDelta(msg) {
   const selectedAgentGroupSynced = _selectedAgentGroupSyncedDuringDelta;
   _selectedAgentGroupSyncedDuringDelta = false;
   const taskDeltaChanges = _collectBoardTaskDeltaChanges(msg.ops, opGroupHints);
+  const agentDeltaChanges = _collectBoardAgentDeltaChanges(msg.ops, opGroupHints);
   if (taskDeltaChanges.length
       && typeof _agentPanelInvalidateWorkerTaskCacheForDeltas === 'function') {
     _agentPanelInvalidateWorkerTaskCacheForDeltas(taskDeltaChanges);
@@ -345,6 +346,10 @@ function _handleDelta(msg) {
   if (taskDeltaChanges.length
       && typeof _boardPatchDispatchStateTaskDeltas === 'function') {
     _boardPatchDispatchStateTaskDeltas(taskDeltaChanges);
+  }
+  if (agentDeltaChanges.length
+      && typeof _boardPatchAssignedEngineerStatusAgentDeltas === 'function') {
+    _boardPatchAssignedEngineerStatusAgentDeltas(agentDeltaChanges);
   }
   if (invalidations.board && typeof _boardQueueTaskDeltas === 'function') {
     _boardQueueTaskDeltas(
