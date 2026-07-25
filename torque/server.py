@@ -9,6 +9,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import sys
 import time
 import uuid
@@ -3303,6 +3304,16 @@ async def main(connection=None):
         )
         if reaped:
             log.info("Reaped %d orphaned sidecar(s) at startup", len(reaped))
+        # Also reap leaked embedding ProcessPoolExecutor workers reparented to
+        # init by an earlier unclean daemon death (PPID 1 — see reaper docs).
+        reaped_workers = await asyncio.to_thread(
+            sidecar_reaper.reap_orphaned_mp_workers
+        )
+        if reaped_workers:
+            log.info(
+                "Reaped %d orphaned multiprocessing worker(s) at startup",
+                len(reaped_workers),
+            )
     except Exception:
         log.exception("Orphaned-sidecar reap at startup failed (non-fatal)")
 
@@ -5769,6 +5780,24 @@ async def main(connection=None):
         log.info("HTTP/WS server listening on %s:%d", BIND_HOST, WS_PORT)
 
         log.info("Open http://127.0.0.1:%d/ in a browser", WS_PORT)
+
+        # Route OS-signal termination (app restart/upgrade, quit, `kill`) through
+        # the graceful cleanup in the `finally` below.  Without this, SIGTERM/
+        # SIGINT bypass cleanup entirely, leaving the embedding
+        # ProcessPoolExecutor worker blocked on its input queue and reparented to
+        # launchd — leaking ~4 GB per restart.  Mirrors the SIGTERM/SIGINT
+        # handling already in pty_supervisor and event_ingest_daemon.
+        _stop_loop = asyncio.get_running_loop()
+
+        def _request_daemon_stop(signum: int) -> None:
+            log.info("Received signal %s; initiating graceful daemon shutdown",
+                     signum)
+            daemon_stop_event.set()
+
+        for _stop_sig in (signal.SIGTERM, signal.SIGINT):
+            with contextlib.suppress(NotImplementedError):
+                _stop_loop.add_signal_handler(
+                    _stop_sig, _request_daemon_stop, _stop_sig)
 
         await daemon_stop_event.wait()
     finally:

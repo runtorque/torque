@@ -145,6 +145,67 @@ class ReapTests(unittest.TestCase):
         self.assertEqual(sorted(s.pid for s in reaped), [100, 200])
 
 
+class OrphanedMpWorkerTests(unittest.TestCase):
+    # ps_output for the ppid-aware discovery is "<pid> <ppid> <command>".
+    _SPAWN = (
+        "/opt/homebrew/.../Python -c from multiprocessing.spawn import "
+        "spawn_main; spawn_main(tracker_fd=30, pipe_handle=45) "
+        "--multiprocessing-fork"
+    )
+
+    def test_discovers_only_ppid1_workers(self):
+        ps_output = "\n".join([
+            f"  100    1 {self._SPAWN}",   # orphaned → reap
+            f"  200 4985 {self._SPAWN}",   # live parent → in use, spare
+        ])
+        found = sidecar_reaper.discover_orphaned_mp_workers(ps_output=ps_output)
+        self.assertEqual([w.pid for w in found], [100])
+
+    def test_ignores_non_multiprocessing_ppid1_processes(self):
+        ps_output = "\n".join([
+            "  111    1 /sbin/launchd",
+            "  222    1 /usr/bin/python3 /Users/me/.torque/app/torque.py",
+        ])
+        self.assertEqual(
+            sidecar_reaper.discover_orphaned_mp_workers(ps_output=ps_output), []
+        )
+
+    def test_reaps_resource_tracker_orphans(self):
+        ps_output = (
+            "  333    1 /usr/bin/python3 -c from "
+            "multiprocessing.resource_tracker import main;main(4)"
+        )
+        found = sidecar_reaper.discover_orphaned_mp_workers(ps_output=ps_output)
+        self.assertEqual([w.pid for w in found], [333])
+
+    def test_excludes_current_process(self):
+        ps_output = f"{os.getpid()}    1 {self._SPAWN}"
+        self.assertEqual(
+            sidecar_reaper.discover_orphaned_mp_workers(ps_output=ps_output), []
+        )
+
+    def test_reap_kills_only_orphans(self):
+        ps_output = "\n".join([
+            f"  100    1 {self._SPAWN}",
+            f"  200 4985 {self._SPAWN}",
+        ])
+        killed = []
+        reaped = sidecar_reaper.reap_orphaned_mp_workers(
+            ps_output=ps_output, killer=killed.append
+        )
+        self.assertEqual(killed, [100])
+        self.assertEqual([w.pid for w in reaped], [100])
+
+    def test_reap_dry_run_kills_nothing(self):
+        ps_output = f"  100    1 {self._SPAWN}"
+        killed = []
+        reaped = sidecar_reaper.reap_orphaned_mp_workers(
+            ps_output=ps_output, dry_run=True, killer=killed.append
+        )
+        self.assertEqual(killed, [])
+        self.assertEqual([w.pid for w in reaped], [100])
+
+
 class EndToEndReapTests(unittest.TestCase):
     """Spawn a real sidecar into a temp dir; assert teardown leaves none."""
 

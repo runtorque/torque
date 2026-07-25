@@ -244,6 +244,112 @@ def reap_orphaned_sidecars(
     return reaped
 
 
+# ProcessPoolExecutor (embedding inference) spawns Python multiprocessing
+# helper processes. When the spawning daemon dies uncleanly (SIGKILL, crash,
+# power loss — anything that skips graceful ``terminate_workers``), the worker
+# blocks forever on its input queue and is reparented to init (PPID 1), each
+# pinning the worker's full RSS (GBs, for torch/SentenceTransformer state).
+# Unlike the sidecars above there is no ``--data-dir`` to key on, so these are
+# identified structurally: a multiprocessing spawn/resource-tracker process
+# whose parent is gone.
+_MP_WORKER_RE = re.compile(
+    r"multiprocessing\.spawn|--multiprocessing-fork|multiprocessing\.resource_tracker"
+)
+
+
+@dataclass(frozen=True)
+class OrphanedWorker:
+    pid: int
+    command: str
+
+
+def _run_ps_with_ppid() -> str:
+    """Return ``ps`` output as ``<pid> <ppid> <command>`` lines."""
+    try:
+        proc = subprocess.run(
+            ["ps", "-axww", "-o", "pid=,ppid=,command="],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("sidecar reaper: ps (ppid) failed: %s", exc)
+        return ""
+    return proc.stdout or ""
+
+
+def discover_orphaned_mp_workers(
+    ps_output: Optional[str] = None,
+) -> list[OrphanedWorker]:
+    """Enumerate leaked multiprocessing workers reparented to init (PPID 1).
+
+    Requiring ``PPID == 1`` is the safety invariant: a ProcessPoolExecutor
+    worker with a live parent is in use by some running daemon (this one or a
+    co-resident profile) and is never touched. Only a worker whose spawning
+    process has already died gets reparented to PID 1, where it blocks forever
+    on a queue nobody writes to — safe to kill regardless of which app spawned
+    it.
+    """
+    text = ps_output if ps_output is not None else _run_ps_with_ppid()
+    self_pid = os.getpid()
+    found: list[OrphanedWorker] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        parts = line.split(None, 2)
+        if len(parts) < 3:
+            continue
+        pid_s, ppid_s, command = parts
+        if not pid_s.isdigit() or not ppid_s.isdigit():
+            continue
+        pid = int(pid_s)
+        if pid == self_pid or int(ppid_s) != 1:
+            continue
+        if not _MP_WORKER_RE.search(command):
+            continue
+        found.append(OrphanedWorker(pid=pid, command=command))
+    return found
+
+
+def reap_orphaned_mp_workers(
+    *,
+    dry_run: bool = False,
+    ps_output: Optional[str] = None,
+    killer: Optional[Callable[[int], None]] = None,
+) -> list[OrphanedWorker]:
+    """Terminate leaked multiprocessing workers reparented to init.
+
+    Complements ``reap_orphaned_sidecars`` for the embedding
+    ``ProcessPoolExecutor`` worker, which has no ``--data-dir`` and only leaks
+    on unclean daemon death (the graceful SIGTERM path now reaps it directly).
+    """
+    orphans = discover_orphaned_mp_workers(ps_output=ps_output)
+    kill = killer or _terminate_pid
+    reaped: list[OrphanedWorker] = []
+    for worker in orphans:
+        if dry_run:
+            reaped.append(worker)
+            continue
+        try:
+            kill(worker.pid)
+        except Exception:
+            log.exception(
+                "sidecar reaper: failed to terminate mp worker pid=%s",
+                worker.pid,
+            )
+            continue
+        reaped.append(worker)
+    if reaped and not dry_run:
+        log.info(
+            "sidecar reaper: terminated %d orphaned multiprocessing worker(s): %s",
+            len(reaped),
+            ", ".join(str(w.pid) for w in reaped),
+        )
+    return reaped
+
+
 def reap_sidecars_for_data_dir(
     data_dir: Path | str,
     *,
