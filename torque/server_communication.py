@@ -934,6 +934,76 @@ def _user_agent_restart_response(target,
         payload["audit_message_id"] = str(audit_row.get("id", "") or "")
     return payload
 
+
+def _user_agent_restart_result_message_id(requested_id: str) -> str:
+    """Return the stable terminal-audit id for one idempotent restart."""
+    requested_id = str(requested_id or "").strip()
+    return f"{requested_id}:restart-result" if requested_id else ""
+
+
+def _user_agent_restart_terminal_audit(
+        state: MatrixState,
+        target,
+        requested_row: dict) -> dict | None:
+    """Find the durable terminal audit linked to one idempotent restart."""
+    if not getattr(state, "db", None):
+        return None
+    requested_id = str(requested_row.get("id", "") or "").strip()
+    request_snapshot = requested_row.get("context_snapshot", {}) or {}
+    result_id = str(
+        request_snapshot.get("restart_result_message_id", "") or ""
+    ).strip()
+    if result_id:
+        result = state.db.load_direct_message(result_id)
+        if result:
+            return result
+    if not requested_id:
+        return None
+    rows = state.db.load_direct_messages_for_agent(target.id, limit=100)
+    candidates = []
+    for row in rows:
+        snapshot = row.get("context_snapshot", {}) or {}
+        if (
+            str(snapshot.get("slash_command", "") or "") == "restart"
+            and str(snapshot.get("restart_request_message_id", "") or "")
+            == requested_id
+            and str(snapshot.get("restart_status", "") or "")
+            in {"succeeded", "failed"}
+        ):
+            candidates.append(row)
+    if not candidates:
+        return None
+    return max(
+        candidates,
+        key=lambda row: (float(row.get("created_at", 0) or 0), str(row.get("id", "") or "")),
+    )
+
+
+def _replay_user_agent_restart_result(
+        state: MatrixState,
+        target,
+        requested_row: dict) -> dict:
+    """Replay the completed restart result without running lifecycle work."""
+    audit = _user_agent_restart_terminal_audit(state, target, requested_row)
+    snapshot = (audit or {}).get("context_snapshot", {}) or {}
+    status = str(snapshot.get("restart_status", "") or "requested")
+    message = str(
+        snapshot.get("restart_message", "")
+        or snapshot.get("restart_reason", "")
+        or ""
+    )
+    payload = _user_agent_restart_response(
+        target,
+        status=status,
+        requested_row=requested_row,
+        audit_row=audit,
+        message=message,
+    )
+    if status == "failed":
+        payload["type"] = "error"
+    payload["deduped"] = True
+    return payload
+
 async def _handle_user_agent_restart_command(
         data: dict,
         state: MatrixState,
@@ -958,13 +1028,7 @@ async def _handle_user_agent_restart_command(
                         "user_agent_message"
                     ),
                 }
-            payload = _user_agent_restart_response(
-                target,
-                status=str(snapshot.get("restart_status", "requested") or "requested"),
-                requested_row=existing,
-            )
-            payload["deduped"] = True
-            return payload
+            return _replay_user_agent_restart_result(state, target, existing)
     requested = _save_user_agent_system_audit_message(
         state,
         target,
@@ -974,17 +1038,28 @@ async def _handle_user_agent_restart_command(
         context_snapshot={
             "slash_command": "restart",
             "restart_status": "requested",
+            "restart_result_message_id": (
+                _user_agent_restart_result_message_id(requested_id)
+            ),
         },
+    )
+    result_message_id = _user_agent_restart_result_message_id(
+        str((requested or {}).get("id", "") or "")
     )
     if not callable(restart_agent):
         audit = _save_user_agent_system_audit_message(
             state,
             target,
             "User /restart failed: agent restart is unavailable.",
+            message_id=result_message_id,
             context_snapshot={
                 "slash_command": "restart",
                 "restart_status": "failed",
                 "restart_reason": "restart_unavailable",
+                "restart_message": "Agent restart is unavailable",
+                "restart_request_message_id": str(
+                    (requested or {}).get("id", "") or ""
+                ),
             },
         )
         payload = _user_agent_restart_response(
@@ -1002,10 +1077,15 @@ async def _handle_user_agent_restart_command(
             state,
             target,
             "User /restart failed: target agent is dismissed.",
+            message_id=result_message_id,
             context_snapshot={
                 "slash_command": "restart",
                 "restart_status": "failed",
                 "restart_reason": "agent_dismissed",
+                "restart_message": "Target agent is dismissed",
+                "restart_request_message_id": str(
+                    (requested or {}).get("id", "") or ""
+                ),
             },
         )
         payload = _user_agent_restart_response(
@@ -1034,10 +1114,15 @@ async def _handle_user_agent_restart_command(
             state,
             target,
             f"User /restart failed: {reason}",
+            message_id=result_message_id,
             context_snapshot={
                 "slash_command": "restart",
                 "restart_status": "failed",
                 "restart_reason": reason,
+                "restart_message": reason,
+                "restart_request_message_id": str(
+                    (requested or {}).get("id", "") or ""
+                ),
             },
         )
         payload = _user_agent_restart_response(
@@ -1056,10 +1141,15 @@ async def _handle_user_agent_restart_command(
             state,
             target,
             f"User /restart failed: {reason}",
+            message_id=result_message_id,
             context_snapshot={
                 "slash_command": "restart",
                 "restart_status": "failed",
                 "restart_reason": reason,
+                "restart_message": reason,
+                "restart_request_message_id": str(
+                    (requested or {}).get("id", "") or ""
+                ),
             },
         )
         payload = _user_agent_restart_response(
@@ -1077,9 +1167,13 @@ async def _handle_user_agent_restart_command(
         state,
         target,
         f"User /restart succeeded for {target.name or target.id}.",
+        message_id=result_message_id,
         context_snapshot={
             "slash_command": "restart",
             "restart_status": "succeeded",
+            "restart_request_message_id": str(
+                (requested or {}).get("id", "") or ""
+            ),
         },
     )
     return _user_agent_restart_response(

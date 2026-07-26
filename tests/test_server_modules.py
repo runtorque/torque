@@ -3582,6 +3582,47 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             restart_agent=fake_restart,
         )
         self.assertEqual(repeated['type'], 'agent_restart')
+        self.assertEqual(repeated['status'], 'succeeded')
+        self.assertTrue(repeated['deduped'])
+        self.assertEqual(len(restart_calls), 1)
+        self.assertEqual(len(self.db.load_direct_messages_for_agent(worker.id)), 2)
+
+    async def test_user_agent_restart_idempotency_replays_failed_terminal_result(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id='agent-1', name='Worker', group='g', cell_type='agent',
+            kind='worker', session_id='session-1', status='running',
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+        restart_calls = []
+
+        async def fake_send_prompt(*_args, **_kwargs):
+            return None
+
+        async def failed_restart(payload):
+            restart_calls.append(dict(payload))
+            return {'type': 'error', 'message': 'provider relaunch failed'}
+
+        payload = {
+            'cmd': 'user_agent_message',
+            'agent_id': worker.id,
+            'message': '/restart',
+            'idempotency_key': 'restart-failed-submit',
+        }
+        first = await self.server_mod._handle_user_agent_message_command(
+            payload, state, fake_send_prompt, restart_agent=failed_restart,
+        )
+        repeated = await self.server_mod._handle_user_agent_message_command(
+            payload, state, fake_send_prompt, restart_agent=failed_restart,
+        )
+
+        self.assertEqual(first['type'], 'error')
+        self.assertEqual(first['status'], 'failed')
+        self.assertEqual(first['message'], 'provider relaunch failed')
+        self.assertEqual(repeated['type'], 'error')
+        self.assertEqual(repeated['status'], 'failed')
+        self.assertEqual(repeated['message'], 'provider relaunch failed')
         self.assertTrue(repeated['deduped'])
         self.assertEqual(len(restart_calls), 1)
         self.assertEqual(len(self.db.load_direct_messages_for_agent(worker.id)), 2)
