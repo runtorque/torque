@@ -723,6 +723,17 @@ def _should_handoff_shared_worktree(owner, *,
 
 def _agent_message_loop_defer_reason(agent) -> str:
     """Return a stable reason when /loop delivery would interrupt work."""
+    # ``status`` is the authoritative lifecycle signal.  Provider activity
+    # events can arrive after a session_end event, leaving an idle cell with
+    # stale ``thinking``/``tool_call``/``writing`` activity.  Do not let that
+    # transient tail keep a due loop deferred forever.  Keep all other
+    # statuses on the legacy activity fallback: availability is still handled
+    # by the normal delivery path (including its offline stop behavior).
+    status = str(getattr(agent, "status", "") or "").strip().lower()
+    if status == "running":
+        return "agent_busy"
+    if status == "idle":
+        return ""
     activity = str(getattr(agent, "activity", "") or "").strip()
     if activity and activity != "waiting":
         return "agent_busy"
