@@ -3967,8 +3967,10 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(loop_ops), 1)
         self.assertEqual(loop_ops[0]['loop']['deferred_reason'], 'agent_busy')
 
-        worker.activity = ''
-        worker.activity_detail = ''
+        # A provider session_end can authoritatively mark the cell idle before
+        # a late activity event clears this transient state.  The scheduler
+        # must use that lifecycle signal rather than defer forever.
+        worker.status = 'idle'
         fired = await server_dispatch._fire_due_agent_message_loops(
             state,
             handle_command,
@@ -3985,6 +3987,8 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(fired), 1)
         self.assertEqual(duplicate, [])
         self.assertEqual(len(sent), 1)
+        self.assertEqual(worker.activity, 'tool_call')
+        self.assertEqual(worker.activity_detail, 'sleep 120')
         self.assertIn('please report after sleep', sent[0][1])
         updated = state.agent_message_loops[loop.id]
         self.assertEqual(updated.run_count, 1)
@@ -3992,6 +3996,37 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updated.next_run_at, 105.0)
         self.assertEqual(updated.deferred_at, 0)
         self.assertEqual(updated.deferred_reason, '')
+
+    def test_agent_message_loop_defer_reason_uses_lifecycle_before_activity(self):
+        server_dispatch = importlib.import_module('torque.server_dispatch')
+        server_dispatch = importlib.reload(server_dispatch)
+
+        def reason(status='', activity='', **kwargs):
+            return server_dispatch._agent_message_loop_defer_reason(
+                self.state_mod.AgentCell(
+                    id='agent-1', name='Worker', group='g',
+                    status=status, activity=activity, **kwargs,
+                )
+            )
+
+        # Explicit running is busy regardless of the activity snapshot.
+        for activity in ('', 'thinking', 'tool_call', 'writing', 'waiting'):
+            self.assertEqual(reason('running', activity), 'agent_busy')
+
+        # Explicit idle wins over stale provider activity tails.
+        for activity in ('', 'thinking', 'tool_call', 'writing', 'waiting'):
+            self.assertEqual(reason('idle', activity), '')
+
+        # Missing and unrecognized lifecycle values retain legacy activity
+        # fallback behavior.  Terminal/waiting lifecycle values are likewise
+        # left for the existing delivery/offline handling path.
+        for status in ('', 'unknown', 'stopped', 'error', 'waiting'):
+            self.assertEqual(reason(status, 'thinking'), 'agent_busy')
+            self.assertEqual(reason(status, 'waiting'), '')
+            self.assertEqual(reason(status, ''), '')
+
+        # Attention alone has never been a scheduler busy signal.
+        self.assertEqual(reason('idle', '', needs_attention=True), '')
 
     async def test_due_agent_message_loop_cancel_while_deferred_prevents_later_delivery(self):
         state = self._make_state()
