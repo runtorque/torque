@@ -15877,6 +15877,14 @@ test('terminal compose slash command autocomplete filters and fills without send
       kind: 'worker',
     },
   };
+  sandbox.state.user_dm_commands = [
+    { id: 'compact', label: '/compact', usage: '/compact', insert: '/compact', help: 'Ask the agent to compact its context before continuing.', search: 'compact /compact context summary' },
+    { id: 'restart', label: '/restart', usage: '/restart', insert: '/restart', help: 'Restart only this DM agent with a fresh session.', search: 'restart /restart relaunch fresh session current dm agent' },
+    { id: 'loop', label: '/loop every <interval> <message>', usage: '/loop every 10m check status', insert: '/loop every 10m ', help: 'Start a recurring user message. Use 1m–24h with s/m/h units, then add the message.', search: 'loop every interval message recurring schedule /loop every' },
+    { id: 'loop-cancel', label: '/loop cancel', usage: '/loop cancel', insert: '/loop cancel', help: 'Cancel the active user-message loop for this agent.', search: 'loop cancel stop recurring schedule /loop cancel' },
+    { id: 'status', label: '/status', usage: '/status', insert: '/status', help: 'Show Torque status without prompting the agent.', search: 'status /status activity task attention loop worktree' },
+    { id: 'commands', label: '/commands', usage: '/commands', insert: '/commands', help: 'List supported direct-message slash commands.', search: 'commands /commands help slash command catalog' },
+  ];
 
   const form = new FakeElement('compose-form');
   form.classList.add('terminal-compose');
@@ -15911,6 +15919,8 @@ test('terminal compose slash command autocomplete filters and fills without send
   assert.match(slashDropdown.innerHTML, /\/restart/);
   assert.match(slashDropdown.innerHTML, /\/loop every <interval> <message>/);
   assert.match(slashDropdown.innerHTML, /\/loop cancel/);
+  assert.match(slashDropdown.innerHTML, /\/status/);
+  assert.match(slashDropdown.innerHTML, /\/commands/);
   assert.match(slashDropdown.innerHTML, /recurring user message/i);
   assert.equal(sandbox.sendCalls.length, 0);
 
@@ -16021,6 +16031,28 @@ test('terminal compose slash command autocomplete filters and fills without send
   assert.equal(sandbox.sendCalls[1].cmd, 'user_agent_message');
   assert.equal(sandbox.sendCalls[1].agent_id, 'agent-1');
   assert.equal(sandbox.sendCalls[1].message, '/not-a-command');
+});
+
+test('terminal compose slash autocomplete safely hides when the backend catalog is missing', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness();
+  sandbox.state.agents = {
+    'agent-1': { id: 'agent-1', name: 'Builder', group: 'Torque', cell_type: 'agent', kind: 'worker' },
+  };
+  const form = new FakeElement('compose-form');
+  const input = document.register('terminal-compose-input-agent-1');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  input.dataset.agentId = 'agent-1';
+  const slashDropdown = document.register('terminal-compose-slash-dropdown-agent-1');
+  slashDropdown.style.display = 'none';
+  form.appendChild(input);
+  form.appendChild(slashDropdown);
+  input.value = '/status';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  context.terminalComposeInput(input);
+  assert.equal(slashDropdown.style.display, 'none');
+  assert.equal(sandbox.sendCalls.length, 0);
 });
 
 test('terminal compose ticket typeahead filters tasks and inserts selected reference', () => {

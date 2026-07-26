@@ -3391,6 +3391,115 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(other_row['message_type'], 'message')
         self.assertEqual(unsupported_row['message_type'], 'message')
 
+    async def test_user_dm_registry_status_and_commands_are_durable_read_only(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id='agent-1', name='Worker <unsafe>', group='g',
+            cell_type='agent', kind='worker', session_id='session-1',
+            status='idle', activity='thinking',
+            activity_detail='Reviewing [task] *carefully*',
+            last_progress_at=100.0, needs_attention=True,
+            worktree_path='/tmp/worktree', worktree_branch='feature/status',
+            worktree_dirty=True, worktree_ahead=2, worktree_behind=1,
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+        task = state.board_add_task(
+            'A [task] title that is deliberately long ' + ('x' * 220),
+            'g', lane='In Progress', id='G:1', agent_id=worker.id,
+        )
+        task.health_state = 'warning'
+        state.agent_message_loop_add(
+            agent_id=worker.id, group_name='g', interval_seconds=60,
+            message='check progress', now=1.0,
+        )
+        sent = []
+
+        async def fake_send_prompt(*args, **kwargs):
+            sent.append((args, kwargs))
+
+        before = (
+            worker.status, worker.activity, worker.current_task_id,
+            worker.worktree_dirty, len(state.agent_message_loops),
+        )
+        status = await self.server_mod._handle_user_agent_message_command(
+            {'agent_id': worker.id, 'message': '  /status  ',
+             'idempotency_key': 'status-idempotency'}, state, fake_send_prompt,
+        )
+        repeated = await self.server_mod._handle_user_agent_message_command(
+            {'agent_id': worker.id, 'message': '/status',
+             'idempotency_key': 'status-idempotency'}, state, fake_send_prompt,
+        )
+        commands = await self.server_mod._handle_user_agent_message_command(
+            {'agent_id': worker.id, 'message': '/commands',
+             'idempotency_key': 'commands-idempotency'}, state, fake_send_prompt,
+        )
+
+        self.assertEqual(status['type'], 'ok')
+        self.assertFalse(status['deduped'])
+        self.assertTrue(repeated['deduped'])
+        self.assertEqual(status['message_id'], repeated['message_id'])
+        self.assertEqual(commands['type'], 'ok')
+        self.assertEqual(sent, [])
+        self.assertEqual(before, (
+            worker.status, worker.activity, worker.current_task_id,
+            worker.worktree_dirty, len(state.agent_message_loops),
+        ))
+        status_row = self.db.load_direct_message(status['message_id'])
+        self.assertEqual(status_row['sender_kind'], 'system')
+        self.assertEqual(status_row['context_snapshot']['slash_command'], 'status')
+        self.assertIn('Agent status', status_row['message'])
+        self.assertIn('Task:', status_row['message'])
+        self.assertIn('/loop: active every `1m`', status_row['message'])
+        self.assertLess(len(status_row['message']), 1400)
+        self.assertIn('\\[task\\]', status_row['message'])
+        commands_row = self.db.load_direct_message(commands['message_id'])
+        self.assertIn('/compact', commands_row['message'])
+        self.assertIn('/status', commands_row['message'])
+        self.assertIn('/commands', commands_row['message'])
+
+    async def test_user_dm_registry_exact_negative_cases_remain_normal_messages(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id='agent-1', name='Worker', group='g', cell_type='agent',
+            kind='worker', session_id='session-1', status='idle',
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+        sent = []
+
+        async def fake_send_prompt(cell, prompt, **kwargs):
+            sent.append(prompt)
+            async def delivered():
+                return None
+            return asyncio.create_task(delivered())
+
+        for index, message in enumerate((
+            '/status extra', '/commands please', '/STATUS', '/loopy',
+            '`/status`', '/compact please', '/restart now',
+        )):
+            result = await self.server_mod._handle_user_agent_message_command(
+                {'agent_id': worker.id, 'message': message,
+                 'idempotency_key': f'normal-{index}'}, state, fake_send_prompt,
+            )
+            self.assertEqual(result['type'], 'ok')
+        self.assertEqual(len(sent), 7)
+        self.assertTrue(all('## Message from the User' in prompt for prompt in sent))
+
+    def test_user_dm_command_catalog_and_parser_are_closed_and_snapshot_backed(self):
+        registry = importlib.import_module('torque.commands.user_dm')
+        catalog = registry.user_dm_command_catalog()
+        self.assertEqual([item['id'] for item in catalog], [
+            'compact', 'restart', 'loop', 'loop-cancel', 'status', 'commands',
+        ])
+        self.assertEqual(registry.parse_user_dm_command(' /status ').id, 'status')
+        self.assertEqual(registry.parse_user_dm_command('/loop every 1m hi').id, 'loop')
+        self.assertEqual(registry.parse_user_dm_command('/loop cancel').id, 'loop-cancel')
+        self.assertIsNone(registry.parse_user_dm_command('/status now'))
+        self.assertIsNone(registry.parse_user_dm_command('/STATUS'))
+        state = self._make_state()
+        self.assertEqual(state.to_dict()['user_dm_commands'], catalog)
+
     async def test_user_agent_restart_slash_restarts_only_current_target_and_audits(self):
         state = self._make_state()
         worker = self.state_mod.AgentCell(
@@ -3460,6 +3569,22 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             if row['context_snapshot'].get('slash_command') == 'restart'
         ]
         self.assertEqual(sorted(statuses), ['requested', 'succeeded'])
+
+        repeated = await self.server_mod._handle_user_agent_message_command(
+            {
+                'cmd': 'user_agent_message',
+                'agent_id': worker.id,
+                'message': '/restart',
+                'idempotency_key': 'restart-submit',
+            },
+            state,
+            fake_send_prompt,
+            restart_agent=fake_restart,
+        )
+        self.assertEqual(repeated['type'], 'agent_restart')
+        self.assertTrue(repeated['deduped'])
+        self.assertEqual(len(restart_calls), 1)
+        self.assertEqual(len(self.db.load_direct_messages_for_agent(worker.id)), 2)
 
     async def test_user_agent_restart_slash_failure_and_non_exact_inputs_are_safe(self):
         state = self._make_state()
