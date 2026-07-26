@@ -952,8 +952,14 @@ function _terminalComposeSlashTrigger(input) {
 function _terminalComposeSlashCandidates(query) {
   var needle = String(query || '').trim().toLowerCase().replace(/\s+/g, ' ');
   var results = [];
-  for (var i = 0; i < TERMINAL_COMPOSE_SLASH_COMMANDS.length; i++) {
-    var item = TERMINAL_COMPOSE_SLASH_COMMANDS[i];
+  // The backend catalog is the only command contract.  Missing/invalid
+  // catalog data deliberately yields no dropdown, while normal DM sending
+  // continues unchanged for offline or older snapshots.
+  var catalog = state && Array.isArray(state.user_dm_commands)
+    ? state.user_dm_commands
+    : [];
+  for (var i = 0; i < catalog.length; i++) {
+    var item = catalog[i] || {};
     var search = String((item.search || '') + ' ' + (item.label || '') + ' ' + (item.usage || ''))
       .toLowerCase()
       .replace(/^\//, '')

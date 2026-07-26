@@ -9,6 +9,7 @@ import re
 import time
 import uuid
 from dataclasses import asdict
+from datetime import datetime, timezone
 from typing import Optional
 
 from .commands.board import _resolve_task_id
@@ -20,6 +21,7 @@ from .server_agent_common import _resolve_agent_id
 from .server_agent_operations import _agent_dismissed_at
 from .server_artifacts import describe_task_artifact_for_digest
 from .state import BoardTask, MatrixState, task_counts_as_done, task_is_closed
+from .commands.user_dm import user_dm_command_catalog
 
 
 GUIDANCE_HINT_USER_DIRECT_REPLY = "user_message.reply_hint"
@@ -557,16 +559,21 @@ def _save_user_agent_system_audit_message(
         message: str,
         *,
         context_snapshot: dict | None = None,
+        message_id: str = "",
+        idempotency_key: str = "",
+        thread_id: str = "",
+        reply_to_id: str = "",
         now: float | None = None) -> dict | None:
     """Persist a visible system/audit row in the user↔agent DM lane."""
     if not getattr(state, "db", None) or not target:
         return None
     ts = float(now if now is not None else time.time())
     row = {
-        "id": "msg-" + uuid.uuid4().hex[:12],
-        "thread_id": canonical_user_agent_thread_id(target.id),
-        "reply_to_id": "",
-        "idempotency_key": "",
+        "id": str(message_id or "").strip() or "msg-" + uuid.uuid4().hex[:12],
+        "thread_id": str(thread_id or "").strip()
+            or canonical_user_agent_thread_id(target.id),
+        "reply_to_id": str(reply_to_id or "").strip(),
+        "idempotency_key": str(idempotency_key or "").strip(),
         "group_name": str(getattr(target, "group", "") or "").strip(),
         "sender_id": "system",
         "sender_kind": "system",
@@ -586,6 +593,225 @@ def _save_user_agent_system_audit_message(
         "delivered_at": ts,
     }
     return state.save_direct_message(row)
+
+
+def _user_dm_display_text(value, *, limit: int = 160) -> str:
+    """Bound dynamic status text and quote it safely for the DM markdown view."""
+    text = " ".join(str(value or "").split())
+    if len(text) > limit:
+        text = text[:max(0, limit - 1)].rstrip() + "…"
+    # Direct-message rendering is the canonical markdown sanitizer.  Escape
+    # dynamic values too so task/activity text cannot become status markup.
+    return re.sub(r"([\\`*_{}\[\]()#+.!|>-])", r"\\\1", text)
+
+
+def _user_dm_status_time(value: float, *, now: float) -> str:
+    try:
+        timestamp = float(value or 0)
+    except (TypeError, ValueError):
+        return ""
+    if timestamp <= 0:
+        return ""
+    age = max(0, int(now - timestamp))
+    if age < 60:
+        age_label = f"{age}s ago"
+    elif age < 3600:
+        age_label = f"{age // 60}m ago"
+    elif age < 86400:
+        age_label = f"{age // 3600}h ago"
+    else:
+        age_label = f"{age // 86400}d ago"
+    return datetime.fromtimestamp(timestamp, timezone.utc).strftime(
+        "%Y-%m-%d %H:%M UTC"
+    ) + f" ({age_label})"
+
+
+def _user_dm_status_message(state: MatrixState, target, *, now: float | None = None) -> str:
+    """Format a bounded, non-mutating operator status response for one agent."""
+    ts = float(now if now is not None else time.time())
+    lines = ["**Agent status**"]
+    name = _user_dm_display_text(getattr(target, "name", ""), limit=96)
+    kind = _user_dm_display_text(getattr(target, "kind", ""), limit=48)
+    class_id = _user_dm_display_text(
+        getattr(target, "effective_agent_class_id", "")
+        or getattr(target, "agent_class_id", ""),
+        limit=80,
+    )
+    identity = " · ".join(
+        part for part in (
+            f"`{name}`" if name else "",
+            f"kind `{kind}`" if kind else "",
+            f"class `{class_id}`" if class_id else "",
+        ) if part
+    )
+    if identity:
+        lines.append(f"- Agent: {identity}")
+
+    lifecycle = _user_dm_display_text(getattr(target, "status", ""), limit=48)
+    activity = _user_dm_display_text(getattr(target, "activity", ""), limit=48)
+    detail = _user_dm_display_text(getattr(target, "activity_detail", ""), limit=180)
+    lifecycle_parts = []
+    if lifecycle:
+        lifecycle_parts.append(f"lifecycle `{lifecycle}`")
+    if activity:
+        lifecycle_parts.append(f"activity `{activity}`")
+    if detail:
+        lifecycle_parts.append(f"{detail}")
+    if lifecycle_parts:
+        lines.append("- " + " · ".join(lifecycle_parts))
+
+    get_task = getattr(state, "agent_current_task", None)
+    task = get_task(target.id) if callable(get_task) else None
+    if task:
+        task_parts = [f"`{_user_dm_display_text(task.id, limit=64)}`"]
+        title = _user_dm_display_text(getattr(task, "task", ""), limit=180)
+        if title:
+            task_parts.append(title)
+        lane = _user_dm_display_text(getattr(task, "lane", ""), limit=64)
+        health = _user_dm_display_text(getattr(task, "health_state", ""), limit=64)
+        if lane:
+            task_parts.append(f"lane `{lane}`")
+        if health:
+            task_parts.append(f"health `{health}`")
+        lines.append("- Task: " + " · ".join(task_parts))
+
+    progress = _user_dm_status_time(getattr(target, "last_progress_at", 0), now=ts)
+    if progress:
+        lines.append(f"- Last progress: `{progress}`")
+
+    attention = bool(getattr(target, "needs_attention", False))
+    pending_asks = []
+    for candidate in getattr(state, "board_tasks", {}).values():
+        labels = getattr(candidate, "labels", []) or []
+        if (
+            "torque:human" in labels
+            and str(getattr(candidate, "reply_agent_id", "") or "") == target.id
+            and str(getattr(candidate, "lane", "")) not in {"Done", "Archived"}
+        ):
+            pending_asks.append(candidate)
+    if attention or pending_asks:
+        indicators = []
+        if attention:
+            indicators.append("needs attention")
+        if pending_asks:
+            indicators.append("blocking ask pending")
+        lines.append("- Attention: " + " · ".join(indicators))
+
+    get_loop = getattr(state, "active_agent_message_loop_for_agent", None)
+    loop = get_loop(target.id) if callable(get_loop) else None
+    if loop:
+        interval = int(getattr(loop, "interval_seconds", 0) or 0)
+        interval_label = _format_user_agent_loop_interval(interval) if interval else ""
+        if interval_label:
+            lines.append(f"- /loop: active every `{interval_label}`")
+        else:
+            lines.append("- /loop: active")
+
+    branch = _user_dm_display_text(
+        getattr(target, "worktree_branch", "") or getattr(target, "current_branch", ""),
+        limit=160,
+    )
+    has_worktree = bool(
+        branch or getattr(target, "worktree_path", "")
+        or getattr(target, "worktree_repo_root", "")
+    )
+    if has_worktree:
+        worktree_parts = [f"branch `{branch}`"] if branch else []
+        worktree_parts.append(
+            "dirty" if bool(getattr(target, "worktree_dirty", False)) else "clean"
+        )
+        worktree_parts.append(f"ahead {int(getattr(target, 'worktree_ahead', 0) or 0)}")
+        worktree_parts.append(f"behind {int(getattr(target, 'worktree_behind', 0) or 0)}")
+        if bool(getattr(target, "worktree_merged", False)):
+            worktree_parts.append("merged")
+        lines.append("- Worktree: " + " · ".join(worktree_parts))
+    return "\n".join(lines)
+
+
+def _user_dm_commands_message() -> str:
+    """Render the authoritative command catalog in the same DM lane."""
+    lines = ["**Supported direct-message commands**"]
+    for command in user_dm_command_catalog():
+        usage = _user_dm_display_text(command.get("usage", ""), limit=160)
+        help_text = _user_dm_display_text(command.get("help", ""), limit=220)
+        if usage and help_text:
+            lines.append(f"- `{usage}` — {help_text}")
+        elif usage:
+            lines.append(f"- `{usage}`")
+    return "\n".join(lines)
+
+
+def _user_agent_read_only_command_response(
+        data: dict,
+        state: MatrixState,
+        target,
+        command_id: str) -> dict:
+    """Persist one idempotent system response without delivering a prompt."""
+    from .commands.user_dm import user_dm_command_by_id
+
+    command = user_dm_command_by_id(command_id)
+    if not command:
+        return {"type": "error", "message": "Unsupported direct-message command"}
+    # The target may have been removed after endpoint resolution.  Do not
+    # recreate or mutate anything while reporting that harmless race.
+    current = state.get_active_agent(getattr(target, "id", ""))
+    if current is not target or getattr(current, "cell_type", "") != "agent":
+        return {"type": "error", "message": "Agent is no longer available"}
+    idempotency_key = _user_agent_message_idempotency_key(data)
+    message_id = _user_direct_message_id_from_idempotency_key(idempotency_key)
+    if not message_id:
+        message_id = "msg-" + uuid.uuid4().hex[:12]
+    existing = state.db.load_direct_message(message_id) if idempotency_key else None
+    if existing:
+        snapshot = existing.get("context_snapshot", {}) or {}
+        if (
+            str(existing.get("recipient_id", "") or "") != target.id
+            or str(existing.get("sender_kind", "") or "") != "system"
+            or str(snapshot.get("slash_command", "") or "") != command.id
+        ):
+            return {
+                "type": "error",
+                "message": "idempotency key was reused for a different user_agent_message",
+            }
+        append_direct = getattr(state, "append_direct_message_to_caches", None)
+        if callable(append_direct):
+            append_direct(existing)
+        return {
+            "type": "ok",
+            "message_id": message_id,
+            "thread_id": str(existing.get("thread_id", "") or ""),
+            "agent_id": target.id,
+            "delivered": True,
+            "buffered": False,
+            "deduped": True,
+        }
+    content = (
+        _user_dm_status_message(state, target)
+        if command.id == "status"
+        else _user_dm_commands_message()
+    )
+    saved = _save_user_agent_system_audit_message(
+        state,
+        target,
+        content,
+        message_id=message_id,
+        idempotency_key=idempotency_key,
+        context_snapshot={
+            "slash_command": command.id,
+            "command_response": command.id,
+        },
+    )
+    if not saved:
+        return {"type": "error", "message": "Failed to save command response"}
+    return {
+        "type": "ok",
+        "message_id": str(saved.get("id", "") or ""),
+        "thread_id": str(saved.get("thread_id", "") or ""),
+        "agent_id": target.id,
+        "delivered": True,
+        "buffered": False,
+        "deduped": False,
+    }
 
 def _save_user_agent_loop_audit_message(
         state: MatrixState,
@@ -708,31 +934,132 @@ def _user_agent_restart_response(target,
         payload["audit_message_id"] = str(audit_row.get("id", "") or "")
     return payload
 
+
+def _user_agent_restart_result_message_id(requested_id: str) -> str:
+    """Return the stable terminal-audit id for one idempotent restart."""
+    requested_id = str(requested_id or "").strip()
+    return f"{requested_id}:restart-result" if requested_id else ""
+
+
+def _user_agent_restart_terminal_audit(
+        state: MatrixState,
+        target,
+        requested_row: dict) -> dict | None:
+    """Find the durable terminal audit linked to one idempotent restart."""
+    if not getattr(state, "db", None):
+        return None
+    requested_id = str(requested_row.get("id", "") or "").strip()
+    request_snapshot = requested_row.get("context_snapshot", {}) or {}
+    result_id = str(
+        request_snapshot.get("restart_result_message_id", "") or ""
+    ).strip()
+    if result_id:
+        result = state.db.load_direct_message(result_id)
+        if result:
+            return result
+    if not requested_id:
+        return None
+    rows = state.db.load_direct_messages_for_agent(target.id, limit=100)
+    candidates = []
+    for row in rows:
+        snapshot = row.get("context_snapshot", {}) or {}
+        if (
+            str(snapshot.get("slash_command", "") or "") == "restart"
+            and str(snapshot.get("restart_request_message_id", "") or "")
+            == requested_id
+            and str(snapshot.get("restart_status", "") or "")
+            in {"succeeded", "failed"}
+        ):
+            candidates.append(row)
+    if not candidates:
+        return None
+    return max(
+        candidates,
+        key=lambda row: (float(row.get("created_at", 0) or 0), str(row.get("id", "") or "")),
+    )
+
+
+def _replay_user_agent_restart_result(
+        state: MatrixState,
+        target,
+        requested_row: dict) -> dict:
+    """Replay the completed restart result without running lifecycle work."""
+    audit = _user_agent_restart_terminal_audit(state, target, requested_row)
+    snapshot = (audit or {}).get("context_snapshot", {}) or {}
+    status = str(snapshot.get("restart_status", "") or "requested")
+    message = str(
+        snapshot.get("restart_message", "")
+        or snapshot.get("restart_reason", "")
+        or ""
+    )
+    payload = _user_agent_restart_response(
+        target,
+        status=status,
+        requested_row=requested_row,
+        audit_row=audit,
+        message=message,
+    )
+    if status == "failed":
+        payload["type"] = "error"
+    payload["deduped"] = True
+    return payload
+
 async def _handle_user_agent_restart_command(
         data: dict,
         state: MatrixState,
         target,
         restart_agent) -> dict:
     """Handle the exact user-DM /restart slash command for one target."""
-    del data  # Currently no command arguments are accepted for /restart.
+    idempotency_key = _user_agent_message_idempotency_key(data)
+    requested_id = _user_direct_message_id_from_idempotency_key(idempotency_key)
+    if idempotency_key and requested_id:
+        existing = state.db.load_direct_message(requested_id)
+        if existing:
+            snapshot = existing.get("context_snapshot", {}) or {}
+            if (
+                str(existing.get("sender_kind", "") or "") != "system"
+                or str(existing.get("recipient_id", "") or "") != target.id
+                or str(snapshot.get("slash_command", "") or "") != "restart"
+            ):
+                return {
+                    "type": "error",
+                    "message": (
+                        "idempotency key was reused for a different "
+                        "user_agent_message"
+                    ),
+                }
+            return _replay_user_agent_restart_result(state, target, existing)
     requested = _save_user_agent_system_audit_message(
         state,
         target,
         f"User requested /restart for {target.name or target.id}.",
+        message_id=requested_id,
+        idempotency_key=idempotency_key,
         context_snapshot={
             "slash_command": "restart",
             "restart_status": "requested",
+            "restart_result_message_id": (
+                _user_agent_restart_result_message_id(requested_id)
+            ),
         },
+    )
+    result_message_id = _user_agent_restart_result_message_id(
+        str((requested or {}).get("id", "") or "")
     )
     if not callable(restart_agent):
         audit = _save_user_agent_system_audit_message(
             state,
             target,
             "User /restart failed: agent restart is unavailable.",
+            message_id=result_message_id,
             context_snapshot={
                 "slash_command": "restart",
                 "restart_status": "failed",
                 "restart_reason": "restart_unavailable",
+                "restart_message": "Agent restart is unavailable",
+                "restart_request_message_id": str(
+                    (requested or {}).get("id", "") or ""
+                ),
             },
         )
         payload = _user_agent_restart_response(
@@ -750,10 +1077,15 @@ async def _handle_user_agent_restart_command(
             state,
             target,
             "User /restart failed: target agent is dismissed.",
+            message_id=result_message_id,
             context_snapshot={
                 "slash_command": "restart",
                 "restart_status": "failed",
                 "restart_reason": "agent_dismissed",
+                "restart_message": "Target agent is dismissed",
+                "restart_request_message_id": str(
+                    (requested or {}).get("id", "") or ""
+                ),
             },
         )
         payload = _user_agent_restart_response(
@@ -782,10 +1114,15 @@ async def _handle_user_agent_restart_command(
             state,
             target,
             f"User /restart failed: {reason}",
+            message_id=result_message_id,
             context_snapshot={
                 "slash_command": "restart",
                 "restart_status": "failed",
                 "restart_reason": reason,
+                "restart_message": reason,
+                "restart_request_message_id": str(
+                    (requested or {}).get("id", "") or ""
+                ),
             },
         )
         payload = _user_agent_restart_response(
@@ -804,10 +1141,15 @@ async def _handle_user_agent_restart_command(
             state,
             target,
             f"User /restart failed: {reason}",
+            message_id=result_message_id,
             context_snapshot={
                 "slash_command": "restart",
                 "restart_status": "failed",
                 "restart_reason": reason,
+                "restart_message": reason,
+                "restart_request_message_id": str(
+                    (requested or {}).get("id", "") or ""
+                ),
             },
         )
         payload = _user_agent_restart_response(
@@ -825,9 +1167,13 @@ async def _handle_user_agent_restart_command(
         state,
         target,
         f"User /restart succeeded for {target.name or target.id}.",
+        message_id=result_message_id,
         context_snapshot={
             "slash_command": "restart",
             "restart_status": "succeeded",
+            "restart_request_message_id": str(
+                (requested or {}).get("id", "") or ""
+            ),
         },
     )
     return _user_agent_restart_response(

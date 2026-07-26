@@ -47,6 +47,7 @@ from .behavior_overlay import (
     version_summary,
 )
 from .db import TorqueDB
+from .commands.user_dm import user_dm_command_catalog
 from .idea_briefs import (
     IDEA_BRIEF_TEXT_FIELDS,
     idea_brief_contract_metadata,
@@ -3609,6 +3610,9 @@ class MatrixState(
             "schedules": {
                 sid: asdict(s) for sid, s in self.schedules.items()
             },
+            # Backend-owned catalog keeps terminal autocomplete in lockstep
+            # with user→agent command recognition and discovery.
+            "user_dm_commands": user_dm_command_catalog(),
             "agent_message_loops": self.agent_message_loops_snapshot(),
             "auto_dispatch_queues": {
                 group: [asdict(entry) for entry in entries]
@@ -3929,6 +3933,7 @@ class MatrixState(
             "schedules": {
                 sid: asdict(s) for sid, s in self.schedules.items()
             },
+            "user_dm_commands": user_dm_command_catalog(),
             "agent_message_loops": self.agent_message_loops_snapshot(),
             "auto_dispatch_queues": {
                 group: [asdict(entry) for entry in entries]

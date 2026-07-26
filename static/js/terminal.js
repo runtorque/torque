@@ -71,41 +71,6 @@ var TERMINAL_COMPOSE_ATTACHMENT_MIME_TYPES = {
   'image/webp': true,
   'image/gif': true,
 };
-var TERMINAL_COMPOSE_SLASH_COMMANDS = [
-  {
-    id: 'compact',
-    label: '/compact',
-    usage: '/compact',
-    insert: '/compact',
-    help: 'Ask the agent to compact its context before continuing.',
-    search: 'compact /compact context summary',
-  },
-  {
-    id: 'restart',
-    label: '/restart',
-    usage: '/restart',
-    insert: '/restart',
-    help: 'Restart only this DM agent with a fresh session.',
-    search: 'restart /restart relaunch fresh session current dm agent',
-  },
-  {
-    id: 'loop-every',
-    label: '/loop every <interval> <message>',
-    usage: '/loop every 10m check status',
-    insert: '/loop every 10m ',
-    help: 'Start a recurring user message. Use 1m–24h with s/m/h units, then add the message.',
-    search: 'loop every interval message recurring schedule /loop every',
-  },
-  {
-    id: 'loop-cancel',
-    label: '/loop cancel',
-    usage: '/loop cancel',
-    insert: '/loop cancel',
-    help: 'Cancel the active user-message loop for this agent.',
-    search: 'loop cancel stop recurring schedule /loop cancel',
-  },
-];
-
 var XTERM_SCROLLBACK_DEFAULT = 2000;
 var XTERM_SCROLLBACK_MIN = 100;
 var XTERM_SCROLLBACK_MAX = 100000;

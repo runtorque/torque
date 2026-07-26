@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import hashlib
+import inspect
 import json
 import mimetypes
 import os
@@ -194,6 +195,7 @@ from .server_agent_common import (
     _resolve_agent_id,
     _should_show_guidance_hint,
 )
+from .commands.user_dm import parse_user_dm_command
 from .server_communication import (
     GUIDANCE_HINT_USER_DIRECT_REPLY,
     USER_AGENT_LOOP_MIN_INTERVAL_SECONDS,
@@ -229,6 +231,7 @@ from .server_communication import (
     _restore_user_agent_restart_focus,
     _user_agent_restart_response,
     _handle_user_agent_restart_command,
+    _user_agent_read_only_command_response,
     _replay_buffered_cross_kind_messages,
     _make_agent_session_start_handler,
     _inherit_assigned_engineer_for_derived_task,
@@ -1986,20 +1989,31 @@ async def _handle_user_agent_message_command(data, state: MatrixState,
             "message": "Direct message store is unavailable",
         }
     stripped_message = message_text.strip()
-    if stripped_message == "/loop" or stripped_message.startswith("/loop "):
-        return _handle_user_agent_loop_command(
-            data,
-            state,
-            target,
-            stripped_message,
-        )
-    if stripped_message == "/restart" and not bool(data.get("_loop_delivery")):
-        return await _handle_user_agent_restart_command(
-            data,
-            state,
-            target,
-            restart_agent,
-        )
+    command = parse_user_dm_command(stripped_message)
+    if command:
+        # Registry-owned recognition keeps these trusted convenience actions
+        # closed: unsupported slash-like prose still follows normal delivery.
+        command_handlers = {
+            "loop": lambda: _handle_user_agent_loop_command(
+                data, state, target, stripped_message),
+            "loop-cancel": lambda: _handle_user_agent_loop_command(
+                data, state, target, stripped_message),
+            "restart": lambda: _handle_user_agent_restart_command(
+                data, state, target, restart_agent),
+            "status": lambda: _user_agent_read_only_command_response(
+                data, state, target, "status"),
+            "commands": lambda: _user_agent_read_only_command_response(
+                data, state, target, "commands"),
+        }
+        handler = command_handlers.get(command.id)
+        if handler and not (
+            bool(data.get("_loop_delivery"))
+            and command.id in {"restart", "status", "commands"}
+        ):
+            result = handler()
+            if inspect.isawaitable(result):
+                return await result
+            return result
 
     idempotency_key = _user_agent_message_idempotency_key(data)
     message_id = _user_direct_message_id_from_idempotency_key(idempotency_key)
@@ -2012,7 +2026,7 @@ async def _handle_user_agent_message_command(data, state: MatrixState,
     recipient_name = str(getattr(target, "name", "") or "").strip()
     message_type = "message"
     context_snapshot = {}
-    if stripped_message == "/compact":
+    if command and command.id == "compact":
         message_text = "/compact"
         message_type = "slash_command"
         context_snapshot = {"slash_command": "compact"}
