@@ -526,6 +526,7 @@ async def _queue_user_direct_message_to_agent(
             prime_input_ready=True,
             settled_submit=True,
             wait_for_delivery=True,
+            user_direct_message_id=message_id,
         )
     except Exception as exc:
         reason = str(exc).strip() or type(exc).__name__ or "delivery_failed"
@@ -547,6 +548,11 @@ async def _queue_user_direct_message_to_agent(
             reason="no_session",
             emit=emit,
         ) or row
+    # Esc may have cancelled this queued row while its predecessor drained.
+    # Never overwrite that durable outcome with a late delivery completion.
+    current = state.db.load_direct_message(message_id) if getattr(state, "db", None) else None
+    if str((current or {}).get("delivery_state", "")) == "cancelled":
+        return current
     return state.update_direct_message_delivery(
         message_id,
         "delivered",
@@ -2156,7 +2162,8 @@ def _handle_digest_pause_resume_command(
 async def _queue_cell_prompt_send(cell, prompt: str, send_prompt, *,
                                   prime_input_ready: bool = False,
                                   settled_submit: bool = False,
-                                  wait_for_delivery: bool = False) -> bool:
+                                  wait_for_delivery: bool = False,
+                                  user_direct_message_id: str = "") -> bool:
     """Queue prompt delivery for a live cell without blocking fast controls."""
     if not cell or not getattr(cell, "session_id", ""):
         return False
@@ -2166,6 +2173,7 @@ async def _queue_cell_prompt_send(cell, prompt: str, send_prompt, *,
         background=True,
         prime_input_ready=prime_input_ready,
         settled_submit=settled_submit,
+        user_direct_message_id=user_direct_message_id,
     )
     if wait_for_delivery and delivery is not None:
         await delivery

@@ -35,7 +35,7 @@ AGENT_OPERATION_COMMAND_NAMES = frozenset({
     "architect_peer_message", "architect_task_update",
     "add_agent", "add_terminal", "remove_agent", "update_agent",
     "focus_agent", "send_text", "send_user_message",
-    "user_agent_message", "relaunch_agent", "restart_agent",
+    "user_agent_message", "user_agent_turn_cancel", "relaunch_agent", "restart_agent",
     "move_group", "move_agent", "reparent_terminal", "reorder_child",
     "clear_agent_context",
 }) | BEHAVIOR_OVERLAY_MUTATION_COMMAND_NAMES
@@ -75,6 +75,7 @@ class AgentOperationRuntime:
     handle_send_user_message_command: Any
     handle_set_engineer_specializations_command: Any
     handle_user_agent_message_command: Any
+    handle_user_agent_turn_cancel_command: Any
     is_designated_engineer: Any
     new_agent_prompt_sequence: Any
     normalize_engineer_specialization_selection: Any
@@ -140,6 +141,7 @@ async def handle_agent_operation_command(
     _handle_send_user_message_command = runtime.handle_send_user_message_command
     _handle_set_engineer_specializations_command = runtime.handle_set_engineer_specializations_command
     _handle_user_agent_message_command = runtime.handle_user_agent_message_command
+    _handle_user_agent_turn_cancel_command = runtime.handle_user_agent_turn_cancel_command
     _is_designated_engineer = runtime.is_designated_engineer
     _new_agent_prompt_sequence = runtime.new_agent_prompt_sequence
     _normalize_engineer_specialization_selection = runtime.normalize_engineer_specialization_selection
@@ -645,6 +647,10 @@ async def handle_agent_operation_command(
             _send_agent_prompt,
             restart_agent=_restart_agent_session,
         )
+
+    elif cmd == "user_agent_turn_cancel":
+        result = await _handle_user_agent_turn_cancel_command(
+            data, state, _send_agent_prompt)
 
     elif cmd == "relaunch_agent":
         result = await _handle_relaunch_agent_command(

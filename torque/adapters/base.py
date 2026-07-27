@@ -160,6 +160,13 @@ class AgentAdapter:
         """
         return None
 
+    def get_interrupt_key(self) -> str | None:
+        """Return this provider's verified active-turn interrupt key, if any.
+
+        The runtime owns writing this key; callers never get a raw PTY API.
+        """
+        return None
+
     def get_submit_key(self) -> str:
         """Return the key sequence that submits text in the adapter's TUI."""
         return "\r"

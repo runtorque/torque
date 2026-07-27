@@ -14530,6 +14530,64 @@ test('embedded terminal agent-targeted compose submits durable direct message on
   assert.equal(button.disabled, true);
 });
 
+test('empty DM Escape requests one cancellation only for a non-repeat event', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1', cell_type: 'agent', kind: 'worker',
+      session_id: 'sess-1', status: 'running',
+    },
+  };
+  const input = document.register('terminal-compose-input-agent-1');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  input.value = '';
+  runInContext(context, `
+    _terminalDirectMessageActiveTurnByAgent['agent-1'] = {
+      sessionId: 'sess-1', idempotencyKey: 'submitted-key'
+    };
+  `);
+  function escape(repeat) {
+    return {
+      key: 'Escape', repeat, target: input,
+      preventDefault() {}, stopPropagation() {},
+    };
+  }
+  // A native repeat delivered on its own never starts cancellation.
+  context.__repeatOnly = escape(true);
+  runInContext(context, `terminalComposeKeydown(__repeatOnly, 'agent-1');`);
+  assert.equal(sandbox.sendCalls.length, 0);
+
+  context.__firstEscape = escape(false);
+  runInContext(context, `terminalComposeKeydown(__firstEscape, 'agent-1');`);
+  assert.equal(sandbox.sendCalls.length, 1);
+  assert.deepEqual(
+    {
+      cmd: sandbox.sendCalls[0].cmd,
+      agent_id: sandbox.sendCalls[0].agent_id,
+      session_id: sandbox.sendCalls[0].session_id,
+      turn_idempotency_key: sandbox.sendCalls[0].turn_idempotency_key,
+    },
+    { cmd: 'user_agent_turn_cancel', agent_id: 'agent-1', session_id: 'sess-1', turn_idempotency_key: 'submitted-key' },
+  );
+  // Native repeats after the first press never emit a second cancel request.
+  context.__repeatAfter = escape(true);
+  runInContext(context, `terminalComposeKeydown(__repeatAfter, 'agent-1');`);
+  assert.equal(sandbox.sendCalls.length, 1);
+
+  // Higher-priority reply dismissal and an unsent draft consume Escape first.
+  runInContext(context, `_terminalDirectMessageReplyToByAgent['agent-1'] = 'msg-reply';`);
+  context.__replyEscape = escape(false);
+  runInContext(context, `terminalComposeKeydown(__replyEscape, 'agent-1');`);
+  assert.equal(sandbox.sendCalls.length, 1);
+  input.value = 'unsent';
+  context.__draftEscape = escape(false);
+  runInContext(context, `terminalComposeKeydown(__draftEscape, 'agent-1');`);
+  assert.equal(sandbox.sendCalls.length, 1);
+});
+
 test('embedded terminal raw terminal compose still submits send_user_message', () => {
   const { context, document, sandbox } = createEmbeddedTerminalHarness({
     loadRenderHelpers: true,
@@ -15828,10 +15886,11 @@ test('terminal rich composer wraps around image tokens and leaves native repeat 
     'repeated native input is serialized after attachment-bearing prose',
   );
 
-  // Repeat handling deliberately delegates cadence and input insertion to the
-  // browser; do not grow a JavaScript repeat loop or an event.repeat branch.
+  // Repeat handling delegates printable-key cadence and input insertion to the
+  // browser. Escape is the sole safety exception: repeat Esc must not request
+  // an active-turn cancellation.
   const keydownSource = composerSource.slice(composerSource.indexOf('function terminalComposeKeydown'));
-  assert.doesNotMatch(keydownSource, /(?:evt|event)\.repeat|setInterval|setTimeout/);
+  assert.doesNotMatch(keydownSource, /setInterval|setTimeout/);
 
   // The same printable key sequence is equally unhandled in a plain draft.
   delete input.childNodes;

@@ -1389,6 +1389,8 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertEqual(worker.worktree_path, worktree_path)
 
 
+
+
 class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
@@ -7604,3 +7606,101 @@ class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 {"settled_submit": True},
             )],
         )
+    async def test_cancel_user_direct_turn_preserves_three_prompt_queue_order(self):
+        state = self.state_mod.MatrixState()
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        sent = []
+        class FakeBridge:
+            async def send_text(self, session_id, payload, **kwargs):
+                sent.append(payload)
+                if payload == "first\r":
+                    entered.set()
+                    await release.wait()
+        class FakeTemplateManager: pass
+        service = self.server_agent_mod.AgentLaunchService(
+            state=state, connection=None, bridge=FakeBridge(),
+            worktree_mgr=None, template_mgr=FakeTemplateManager())
+        cell = self.state_mod.AgentCell(id="agent-1", name="agent", group="g",
+            cell_type="agent", session_id="session-1", status="idle")
+        state.agents[cell.id] = cell
+        first = await service.send_agent_prompt(cell, "first", background=True)
+        await entered.wait()
+        middle = await service.send_agent_prompt(cell, "second", background=True,
+            user_direct_message_id="msg-user")
+        third = await service.send_agent_prompt(cell, "third", background=True)
+        result = await service.cancel_user_direct_turn(cell, message_id="msg-user",
+            session_id="session-1")
+        self.assertEqual(result["outcome"], "cancelled_queued")
+        await asyncio.sleep(0)
+        self.assertEqual(sent, ["first\r"])
+        release.set()
+        await asyncio.gather(first, middle, third)
+        self.assertEqual(sent, ["first\r", "third\r"])
+
+
+    async def test_cancel_user_direct_turn_uses_verified_bridge_interrupt_only(self):
+        state = self.state_mod.MatrixState()
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        interrupted = []
+        class FakeBridge:
+            async def send_text(self, session_id, payload, **kwargs):
+                entered.set()
+                await release.wait()
+            async def interrupt_active_turn(self, session_id):
+                interrupted.append(session_id)
+                return True
+        class FakeTemplateManager: pass
+        service = self.server_agent_mod.AgentLaunchService(
+            state=state, connection=None, bridge=FakeBridge(),
+            worktree_mgr=None, template_mgr=FakeTemplateManager())
+        cell = self.state_mod.AgentCell(id="agent-1", name="agent", group="g",
+            cell_type="agent", session_id="session-1", status="idle")
+        state.agents[cell.id] = cell
+        task = await service.send_agent_prompt(cell, "active", background=True,
+            user_direct_message_id="msg-user")
+        await entered.wait()
+        # A mismatched live session is reported safely before the turn is
+        # retired; it must never reach the provider interrupt primitive.
+        self.assertEqual((await service.cancel_user_direct_turn(cell,
+            message_id="msg-user", session_id="other"))["outcome"], "session_replaced")
+        self.assertEqual(interrupted, [])
+        result = await service.cancel_user_direct_turn(cell, message_id="msg-user",
+            session_id="session-1")
+        self.assertEqual(result["outcome"], "interrupted")
+        self.assertEqual(interrupted, ["session-1"])
+        # A successful interrupt retires the correlation, so retries cannot
+        # interrupt any later provider turn (even with the original session).
+        self.assertEqual((await service.cancel_user_direct_turn(cell,
+            message_id="msg-user", session_id="session-1"))["outcome"], "no_active_turn")
+        self.assertEqual(interrupted, ["session-1"])
+        release.set()
+        await task
+
+    async def test_completed_user_dm_cannot_interrupt_later_generic_turn(self):
+        state = self.state_mod.MatrixState()
+        interrupted = []
+        class FakeBridge:
+            async def send_text(self, session_id, payload, **kwargs):
+                return None
+            async def interrupt_active_turn(self, session_id):
+                interrupted.append(session_id)
+                return True
+        class FakeTemplateManager: pass
+        service = self.server_agent_mod.AgentLaunchService(
+            state=state, connection=None, bridge=FakeBridge(),
+            worktree_mgr=None, template_mgr=FakeTemplateManager())
+        cell = self.state_mod.AgentCell(id="agent-1", name="agent", group="g",
+            cell_type="agent", session_id="session-1", status="idle")
+        state.agents[cell.id] = cell
+        old = await service.send_agent_prompt(cell, "old", background=True,
+            user_direct_message_id="msg-old")
+        await old
+        self.assertTrue(old.done())
+        generic = await service.send_agent_prompt(cell, "later generic", background=True)
+        await generic
+        result = await service.cancel_user_direct_turn(cell, message_id="msg-old",
+            session_id="session-1")
+        self.assertEqual(result["outcome"], "no_active_turn")
+        self.assertEqual(interrupted, [])

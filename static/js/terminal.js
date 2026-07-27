@@ -45,6 +45,8 @@ let _terminalDirectMessageVisibleCountByAgent = Object.create(null);
 // DM panel appear to "scroll up" and forced constant manual scroll-down.
 let _terminalDirectMessagePinnedToTailByAgent = Object.create(null);
 let _terminalDirectMessageIdempotencyCounter = 0;
+// The latest submitted DM per target; Esc uses this exact session/key only.
+let _terminalDirectMessageActiveTurnByAgent = Object.create(null);
 let _terminalDirectMessagesResizeDrag = null;
 let _terminalDirectMessagePointerDown = null;
 let _lastAppliedXtermScrollback = null;

@@ -1876,15 +1876,21 @@ function terminalComposeSubmit(evt, cellId) {
   if (directAgent && directAgent.id) {
     directAgentId = String(directAgent.id || '');
     replyToId = String(_terminalDirectMessageReplyToByAgent[directAgentId] || '');
+    const idempotencyKey = _terminalComposeNextIdempotencyKey(directAgentId);
     const payload = {
       cmd: 'user_agent_message',
       agent_id: directAgentId,
       message: text,
       thread_id: 'user-agent:user:' + directAgentId,
-      idempotency_key: _terminalComposeNextIdempotencyKey(directAgentId),
+      idempotency_key: idempotencyKey,
     };
     if (replyToId) payload.reply_to_id = replyToId;
     sent = _terminalComposeSendPayload(payload);
+    if (sent && directAgent.session_id) {
+      _terminalDirectMessageActiveTurnByAgent[directAgentId] = {
+        sessionId: String(directAgent.session_id), idempotencyKey: idempotencyKey,
+      };
+    }
   } else {
     sent = _terminalComposeSendPayload({ cmd: 'send_user_message', cell_id: id, text: text });
   }
@@ -1898,6 +1904,26 @@ function terminalComposeSubmit(evt, cellId) {
   terminalComposeClear(id);
   if (directAgent && typeof renderTerminalWorkspace === 'function') renderTerminalWorkspace();
   return false;
+}
+
+function _terminalComposeRequestActiveTurnCancel(input, cellId) {
+  const directAgent = _terminalComposeDirectAgentForCellId(cellId);
+  if (!directAgent || !directAgent.id) return false;
+  const turn = _terminalDirectMessageActiveTurnByAgent[String(directAgent.id)] || {};
+  if (!turn.sessionId || turn.sessionId !== String(directAgent.session_id || '') || !turn.idempotencyKey) {
+    _terminalComposeSetError(input, 'No active submitted message is available to cancel.');
+    return true;
+  }
+  if (turn.cancelRequested) return true;
+  turn.cancelRequested = true;
+  const sent = _terminalComposeSendPayload({
+    cmd: 'user_agent_turn_cancel', agent_id: String(directAgent.id),
+    session_id: turn.sessionId, turn_idempotency_key: turn.idempotencyKey,
+    idempotency_key: _terminalComposeNextIdempotencyKey(String(directAgent.id)),
+  });
+  if (!sent) turn.cancelRequested = false;
+  _terminalComposeSetError(input, sent ? 'Cancelling the active message…' : 'Cancellation was not sent — connection is unavailable.');
+  return true;
 }
 
 function terminalComposeKeydown(evt, cellId) {
@@ -1943,13 +1969,20 @@ function terminalComposeKeydown(evt, cellId) {
   if (evt.key === 'Escape') {
     if (typeof evt.preventDefault === 'function') evt.preventDefault();
     if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
-    const input = evt.target && typeof evt.target.value === 'string'
+    const input = evt.target && (typeof evt.target.value === 'string' || _terminalComposeIsRichInput(evt.target))
       ? evt.target
       : (document.getElementById ? document.getElementById(_terminalComposeInputId(cellId)) : null);
-    if (_terminalComposeRestoreRecallDraft(input, cellId)) {
+    if (_terminalComposeRestoreRecallDraft(input, cellId)) return;
+    const directAgent = _terminalComposeDirectAgentForCellId(cellId);
+    if (directAgent && _terminalDirectMessageReplyToByAgent[String(directAgent.id)]) {
+      delete _terminalDirectMessageReplyToByAgent[String(directAgent.id)];
+      if (typeof renderTerminalWorkspace === 'function') renderTerminalWorkspace({ suppressTerminalFocus: true });
       return;
     }
-    terminalComposeClear(cellId);
+    const hasDraft = !!String(_terminalComposeInputText(input) || '').length
+      || _terminalComposeSortedAttachments(cellId).length > 0;
+    if (hasDraft) { terminalComposeClear(cellId); return; }
+    if (!evt.repeat) _terminalComposeRequestActiveTurnCancel(input, cellId);
     return;
   }
   if (evt.key === 'Enter' && !evt.shiftKey) {

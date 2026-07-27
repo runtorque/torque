@@ -231,6 +231,10 @@ class AgentLaunchService:
         self._background_prompt_tasks: set[asyncio.Task] = set()
         self._prompt_queue_tails: dict[str, asyncio.Task] = {}
         self._prompt_queue_optimistic_baselines: dict[str, dict] = {}
+        # Bounded records only for user-originated direct-message turns.
+        self._user_direct_turns: dict[str, dict] = {}
+        # Exactly one provider turn may be Esc-interruptible per PTY session.
+        self._active_user_direct_turn_by_session: dict[str, str] = {}
 
     def _runtime_terminal_backend(self) -> str:
         return "pty"
@@ -880,8 +884,13 @@ class AgentLaunchService:
                                 persist: bool = False,
                                 background: bool = False,
                                 prime_input_ready: bool = False,
-                                settled_submit: bool = False):
-        """Send a prompt to a cell session, optionally delayed/queued."""
+                                settled_submit: bool = False,
+                                user_direct_message_id: str = ""):
+        """Send a prompt to a cell session, optionally delayed/queued.
+
+        ``user_direct_message_id`` is intentionally narrow: it tracks only a
+        durable operator DM so that Esc cannot target any other prompt source.
+        """
         payload = prompt if prompt.endswith("\r") else prompt + "\r"
         target_session_id = cell.session_id or ""
         previous = self._prompt_queue_tails.get(target_session_id)
@@ -951,6 +960,12 @@ class AgentLaunchService:
                         pass
                 if delay:
                     await asyncio.sleep(delay)
+                turn = self._user_direct_turns.get(user_direct_message_id)
+                if turn and turn.get("task") is task_ref and turn.get("cancel_requested"):
+                    # Do not cancel this task: successors await this task, so
+                    # completing it only after ``previous`` preserves A→B→C.
+                    await _rollback_optimistic_running()
+                    return
                 if not target_session_id or cell.session_id != target_session_id:
                     # Silent-drop guard (TORQUE:165 observability). A cell
                     # whose session_id went empty or changed between
@@ -972,6 +987,19 @@ class AgentLaunchService:
                         and hasattr(self.bridge, "prime_input_ready"):
                     self.bridge.prime_input_ready(target_session_id)
                 send_started_at = time.time()
+                # Any subsequent non-DM submission supersedes the previous
+                # DM turn; Esc must never target that later generic work.
+                if not user_direct_message_id:
+                    self._active_user_direct_turn_by_session.pop(
+                        target_session_id, None)
+                turn = self._user_direct_turns.get(user_direct_message_id)
+                if turn and turn.get("task") is task_ref:
+                    # The provider submit has begun; a verified adapter may
+                    # now own an interrupt, but only while this remains the
+                    # active exact DM correlation for the session.
+                    turn["delivery_started"] = True
+                    self._active_user_direct_turn_by_session[target_session_id] = (
+                        user_direct_message_id)
                 if settled_submit:
                     await self.bridge.send_text(
                         target_session_id,
@@ -1005,12 +1033,22 @@ class AgentLaunchService:
                     self.state._db_save_agent(cell)
                 await self.state.broadcast()
             except Exception:
+                if (user_direct_message_id
+                        and self._active_user_direct_turn_by_session.get(
+                            target_session_id) == user_direct_message_id):
+                    self._active_user_direct_turn_by_session.pop(
+                        target_session_id, None)
                 await _rollback_optimistic_running()
                 raise
             finally:
                 if target_session_id \
                         and self._prompt_queue_tails.get(target_session_id) is task_ref:
-                    self._prompt_queue_tails.pop(target_session_id, None)
+                    # A queued cancellation must not let a newer prompt leapfrog
+                    # the previous queue tail.
+                    if previous and not previous.done():
+                        self._prompt_queue_tails[target_session_id] = previous
+                    else:
+                        self._prompt_queue_tails.pop(target_session_id, None)
                     self._prompt_queue_optimistic_baselines.pop(
                         target_session_id, None)
                 if task_ref is not None:
@@ -1019,6 +1057,14 @@ class AgentLaunchService:
         task_ref = asyncio.create_task(_run())
         if target_session_id:
             self._prompt_queue_tails[target_session_id] = task_ref
+        if user_direct_message_id and target_session_id:
+            self._user_direct_turns[user_direct_message_id] = {
+                "cell_id": str(getattr(cell, "id", "") or ""),
+                "session_id": target_session_id,
+                "task": task_ref,
+                "delivery_started": False,
+                "cancel_requested": False,
+            }
 
         if background:
             self._background_prompt_tasks.add(task_ref)
@@ -1026,6 +1072,44 @@ class AgentLaunchService:
             return task_ref
         else:
             await task_ref
+
+    async def cancel_user_direct_turn(self, cell, *, message_id: str,
+                                      session_id: str) -> dict:
+        """Cancel exactly one tracked user DM turn, never a generic PTY task."""
+        turn = self._user_direct_turns.get(str(message_id or ""))
+        if not turn or turn.get("cell_id") != str(getattr(cell, "id", "") or ""):
+            return {"outcome": "no_active_turn"}
+        if not session_id or turn.get("session_id") != session_id or getattr(cell, "session_id", "") != session_id:
+            return {"outcome": "session_replaced"}
+        if not turn.get("delivery_started"):
+            # Preserve every successor's dependency on this task. Marking the
+            # task lets it complete in queue order without ever sending B.
+            turn["cancel_requested"] = True
+            return {"outcome": "cancelled_queued"}
+        if self._active_user_direct_turn_by_session.get(session_id) != message_id:
+            return {"outcome": "no_active_turn"}
+        if getattr(cell, "status", "") != "running":
+            return {"outcome": "no_active_turn"}
+        interrupt = getattr(self.bridge, "interrupt_active_turn", None)
+        if not callable(interrupt):
+            return {"outcome": "unsupported_provider"}
+        try:
+            interrupted = await interrupt(session_id)
+        except Exception:
+            log.exception("Active user DM interrupt failed for cell=%s", cell.id)
+            return {"outcome": "interrupt_failed"}
+        if not interrupted:
+            return {"outcome": "unsupported_provider"}
+        self._active_user_direct_turn_by_session.pop(session_id, None)
+        self._user_direct_turns.pop(str(message_id or ""), None)
+        return {"outcome": "interrupted"}
+
+    def retire_user_direct_turn(self, cell) -> None:
+        """Retire the sole Esc correlation when the provider turn ends."""
+        session_id = str(getattr(cell, "session_id", "") or "")
+        message_id = self._active_user_direct_turn_by_session.pop(session_id, "")
+        if message_id:
+            self._user_direct_turns.pop(message_id, None)
 
     @staticmethod
     def _log_background_prompt_failure(task: asyncio.Task) -> None:

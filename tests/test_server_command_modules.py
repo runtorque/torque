@@ -275,7 +275,7 @@ EXPECTED_AGENT_OPERATION_COMMANDS = {
     "architect_peer_message", "architect_task_update",
     "add_agent", "add_terminal", "remove_agent", "update_agent",
     "focus_agent", "send_text", "send_user_message",
-    "user_agent_message", "relaunch_agent", "restart_agent",
+    "user_agent_message", "user_agent_turn_cancel", "relaunch_agent", "restart_agent",
     "move_group", "move_agent", "reparent_terminal", "reorder_child",
     "clear_agent_context",
 } | EXPECTED_BEHAVIOR_OVERLAY_MUTATION_COMMANDS

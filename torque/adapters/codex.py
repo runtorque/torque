@@ -946,6 +946,10 @@ def _codex_context_and_provider_usage_from_raw(
 
 
 class CodexAdapter(AgentAdapter):
+    def get_interrupt_key(self) -> str | None:
+        # Codex TUI uses Escape to stop the currently generating turn.
+        return "\x1b"
+
     name = "codex"
     display_name = "Codex"
     default_command = "codex"
