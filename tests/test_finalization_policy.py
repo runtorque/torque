@@ -254,3 +254,49 @@ class FinalizationLaneRemovalRegressionTests(unittest.TestCase):
         self.assertEqual(legacy.lane, "Done")
         self.assertEqual(review.lane, "Done")
         self.assertNotEqual(root.lane, "Done")
+
+class FinalizationProductionAdmissionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_board_operation_admits_explicit_policy_and_gates_done(self):
+        _install_aiohttp_stub()
+        from dataclasses import fields
+        from torque.commands.board_operations import BoardOperationRuntime, handle_board_operation_command
+        from torque.state import MatrixState
+
+        state = MatrixState()
+        state.groups["g"] = []
+        async def base_dir(*_args, **_kwargs):
+            return ""
+        values = {field.name: None for field in fields(BoardOperationRuntime)}
+        values.update({
+            "state": state,
+            "resolve_base_dir": base_dir,
+            "resolve_deliverable_for_create": lambda *_args, **_kwargs: {"required": False, "type": "", "format": "", "artifact_title": ""},
+            "normalize_external_link": lambda *_args: {"provider": "", "external_id": "", "external_url": ""},
+            "is_canonical_task_id": lambda _value: True,
+            "is_draft_task_token": lambda _value: False,
+            "engineer_tombstoned_error": lambda _value: {"type": "error"},
+            "finalize_task_attachments": lambda attachments, artifacts, **_kwargs: (attachments, artifacts),
+        })
+        runtime = BoardOperationRuntime(**values)
+        root_result = await handle_board_operation_command({
+            "cmd": "board_add_task", "id": "TORQUE:940", "task": "Policy root", "group": "g",
+            "finalization_mode": "review_only",
+            "required_review_gates": [{"id": "audit", "role": "audit", "review_task_id": "TORQUE:940:1"}],
+            "finalization_boundary": {"artifact_digest": "d", "artifact_version": "v", "source_identity": "e", "immutable": True},
+        }, runtime)
+        self.assertEqual(root_result["type"], "board_task_added")
+        root = state.board_tasks["TORQUE:940"]
+        self.assertEqual(root.finalization_mode, "review_only")
+        self.assertFalse(state.evaluate_task_finalization(root.id)["eligible"])
+        state.board_move_task(root.id, "Done")
+        self.assertNotEqual(root.lane, "Done")
+        review_result = await handle_board_operation_command({
+            "cmd": "board_add_task", "id": "TORQUE:940:1", "task": "Review", "group": "g",
+            "parent_task_id": root.id, "pipeline_root_id": root.id,
+        }, runtime)
+        self.assertEqual(review_result["type"], "board_task_added")
+        review = state.board_tasks["TORQUE:940:1"]
+        state.record_finalization_review(review.id, gate_id="audit", verdict="ship",
+            has_blocking_issues=False, required_follow_up_resolved=True, boundary="d|v|e")
+        state.board_move_task(review.id, "Done")
+        self.assertEqual(root.lane, "Done")
