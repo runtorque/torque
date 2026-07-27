@@ -38,6 +38,7 @@ from .state import AgentCell, MatrixState
 from .terminal_adapter import (
     TerminalCapabilities,
     TerminalInputDeliveryError,
+    TerminalInputUnavailableError,
     TerminalLaunchContext,
 )
 from .worktree import ensure_git_exclude
@@ -463,15 +464,32 @@ class LocalPtyAdapter:
             adapter.get_input_chunks(body)
             if adapter else ([body] if body else [])
         )
-        for chunk in chunks:
-            if not await self.write_input(session_id, chunk):
+        delivery_started = False
+
+        async def _write_prompt_part(data: str, *, part: str) -> None:
+            nonlocal delivery_started
+            try:
+                delivered = await self.write_input(session_id, data)
+            except TerminalInputUnavailableError as exc:
+                if delivery_started:
+                    # This individual write was preflighted, but an earlier
+                    # prompt chunk reached the PTY. The whole prompt is now
+                    # partial and successors must remain blocked.
+                    raise TerminalInputDeliveryError(
+                        f"terminal input delivery stopped after a partial "
+                        f"prompt for {session_id} before {part}") from exc
+                raise
+            if not delivered:
                 raise TerminalInputDeliveryError(
-                    f"terminal session {session_id} closed before input delivery")
+                    f"terminal session {session_id} closed before {part}")
+            if data:
+                delivery_started = True
+
+        for chunk in chunks:
+            await _write_prompt_part(chunk, part="input delivery")
         if body and (settled_submit or "\n" in body):
             await asyncio.sleep(submit_delay)
-        if not await self.write_input(session_id, submit_key):
-            raise TerminalInputDeliveryError(
-                f"terminal session {session_id} closed before submit delivery")
+        await _write_prompt_part(submit_key, part="submit delivery")
         if cell:
             self._mark_codex_turn_submitted(cell, session, clear_screen=True)
         return True
@@ -1680,7 +1698,7 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
 
     async def write_input(self, session_id: str, data: str) -> bool:
         if self._supervisor_restart_active():
-            raise TerminalInputDeliveryError(
+            raise TerminalInputUnavailableError(
                 f"PTY supervisor restart is active; input for {session_id} "
                 "was not delivered")
         session = self._sessions.get(session_id)
@@ -1690,7 +1708,9 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
             return True
         if self._write_breaker_should_skip(session_id):
             # Breaker open: fail fast without a (likely-stalling) round-trip.
-            raise TerminalInputDeliveryError(
+            # No client write was attempted, so a later cooldown probe may
+            # safely follow this failed prompt in the same session queue.
+            raise TerminalInputUnavailableError(
                 f"terminal input delivery is paused for {session_id}: "
                 "the PTY write breaker is open")
         payload = data.encode("utf-8", errors="ignore")

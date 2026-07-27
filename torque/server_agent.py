@@ -23,7 +23,10 @@ from .agent_classes import append_agent_class_prompt_block
 from .behavior_overlay import behavior_overlay_block_marker, split_behavior_overlay_blocks
 from .config import log
 from .state import normalize_codex_fast_mode
-from .terminal_adapter import TerminalInputDeliveryError
+from .terminal_adapter import (
+    TerminalInputDeliveryError,
+    TerminalInputUnavailableError,
+)
 from .identity import prepend_agent_identity_anchor
 from .runner_backends import normalize_runner_backend
 
@@ -961,6 +964,11 @@ class AgentLaunchService:
                         await previous
                     except asyncio.CancelledError:
                         pass
+                    except TerminalInputUnavailableError:
+                        # The predecessor failed before any write started.
+                        # Preserve FIFO ordering, but let this later retry
+                        # attempt delivery after the adapter recovers.
+                        pass
                     except TerminalInputDeliveryError:
                         # A predecessor may have delivered a prefix. Do not
                         # write or submit anything else to that PTY session.
@@ -1055,7 +1063,8 @@ class AgentLaunchService:
                     self.state._db_save_agent(cell)
                 await self.state.broadcast()
             except TerminalInputDeliveryError as exc:
-                if target_session_id:
+                if (target_session_id
+                        and not isinstance(exc, TerminalInputUnavailableError)):
                     self._prompt_queue_delivery_errors.setdefault(
                         target_session_id, exc)
                 if (user_direct_message_id

@@ -583,6 +583,35 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(writes, ["do not submit"])
         self.assertEqual(marks, [])
 
+    async def test_send_text_converts_later_no_write_failure_after_prefix_to_partial(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("Torque")
+        cell = state.add_agent(
+            name="Claude", group="Torque", terminal_backend="pty",
+            command="claude", directory="/tmp")
+        cell.agent_type = "claude-code"
+        cell.session_id = "partial-send"
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+        adapter._sessions[cell.session_id] = SimpleNamespace(cell_id=cell.id)
+        adapter._input_ready_sessions.add(cell.session_id)
+        writes = []
+
+        async def write_until_restart(_session_id, data):
+            writes.append(data)
+            if len(writes) == 2:
+                raise self.pty_mod.TerminalInputUnavailableError(
+                    "PTY supervisor restart is active; input was not delivered")
+            return True
+
+        adapter.write_input = write_until_restart
+
+        with self.assertRaises(self.pty_mod.TerminalInputDeliveryError) as caught:
+            await adapter.send_text(cell.session_id, "line one\nline two")
+
+        self.assertNotIsInstance(
+            caught.exception, self.pty_mod.TerminalInputUnavailableError)
+        self.assertEqual(writes, ["line one", "\n"])
+
     async def test_shutdown_closes_live_sessions(self):
         state = self.state_mod.MatrixState()
         state.add_group("Torque")

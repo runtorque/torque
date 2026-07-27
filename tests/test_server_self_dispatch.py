@@ -7479,6 +7479,91 @@ class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("session-1", service._prompt_queue_delivery_errors)
         self.assertNotIn("session-2", service._prompt_queue_delivery_errors)
 
+    async def test_restart_preflight_failure_allows_queued_recovered_retry(self):
+        state = self.state_mod.MatrixState()
+        no_delivery = self.server_agent_mod.TerminalInputUnavailableError
+        first_send_entered = asyncio.Event()
+        release_restart = asyncio.Event()
+        attempts = []
+
+        class FakeBridge:
+            async def send_text(self, session_id, payload, **kwargs):
+                del kwargs
+                attempts.append((session_id, payload))
+                if payload == "first\r":
+                    first_send_entered.set()
+                    await release_restart.wait()
+                    raise no_delivery(
+                        "PTY supervisor restart is active; input was not delivered")
+
+        class FakeTemplateManager:
+            pass
+
+        service = self.server_agent_mod.AgentLaunchService(
+            state=state, connection=None, bridge=FakeBridge(),
+            worktree_mgr=None, template_mgr=FakeTemplateManager())
+        cell = self.state_mod.AgentCell(
+            id="agent-1", name="agent", group="g", cell_type="agent",
+            session_id="session-1", status="idle")
+        state.agents[cell.id] = cell
+
+        first = await service.send_agent_prompt(cell, "first", background=True)
+        await asyncio.wait_for(first_send_entered.wait(), timeout=1.0)
+        recovered_retry = await service.send_agent_prompt(
+            cell, "recovered retry", background=True)
+        release_restart.set()
+
+        results = await asyncio.gather(first, recovered_retry,
+                                       return_exceptions=True)
+        self.assertIsInstance(results[0], no_delivery)
+        self.assertIsNone(results[1])
+        self.assertEqual(
+            attempts,
+            [("session-1", "first\r"),
+             ("session-1", "recovered retry\r")],
+        )
+        self.assertNotIn("session-1", service._prompt_queue_delivery_errors)
+
+    async def test_breaker_preflight_failure_allows_cooldown_half_open_retry(self):
+        state = self.state_mod.MatrixState()
+        no_delivery = self.server_agent_mod.TerminalInputUnavailableError
+        attempts = []
+        breaker_open = True
+
+        class FakeBridge:
+            async def send_text(self, session_id, payload, **kwargs):
+                del kwargs
+                attempts.append((session_id, payload))
+                if breaker_open:
+                    raise no_delivery(
+                        "terminal input delivery is paused: the PTY write "
+                        "breaker is open")
+
+        class FakeTemplateManager:
+            pass
+
+        service = self.server_agent_mod.AgentLaunchService(
+            state=state, connection=None, bridge=FakeBridge(),
+            worktree_mgr=None, template_mgr=FakeTemplateManager())
+        cell = self.state_mod.AgentCell(
+            id="agent-1", name="agent", group="g", cell_type="agent",
+            session_id="session-1", status="idle")
+        state.agents[cell.id] = cell
+
+        with self.assertRaises(no_delivery):
+            await service.send_agent_prompt(cell, "before cooldown")
+        self.assertNotIn("session-1", service._prompt_queue_delivery_errors)
+
+        breaker_open = False
+        await service.send_agent_prompt(cell, "half-open probe")
+
+        self.assertEqual(
+            attempts,
+            [("session-1", "before cooldown\r"),
+             ("session-1", "half-open probe\r")],
+        )
+        self.assertNotIn("session-1", service._prompt_queue_delivery_errors)
+
     async def test_background_prompt_task_is_retained_until_send_completes(self):
         state = self.state_mod.MatrixState()
         bridge_started = asyncio.Event()

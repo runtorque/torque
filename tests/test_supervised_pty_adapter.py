@@ -193,7 +193,7 @@ class SupervisedPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await adapter.write_input(session_id, ""))
 
         adapter._supervisor_restart_deadline = time.time() + 1
-        with self.assertRaises(self.pty_mod.TerminalInputDeliveryError):
+        with self.assertRaises(self.pty_mod.TerminalInputUnavailableError):
             await adapter.write_input(session_id, "payload")
         adapter._supervisor_restart_deadline = 0
 
@@ -201,7 +201,7 @@ class SupervisedPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
             "fails": adapter.WRITE_BREAKER_THRESHOLD,
             "opened_at": time.monotonic(),
         }
-        with self.assertRaises(self.pty_mod.TerminalInputDeliveryError):
+        with self.assertRaises(self.pty_mod.TerminalInputUnavailableError):
             await adapter.write_input(session_id, "payload")
         adapter._write_breaker.clear()
 
@@ -250,19 +250,26 @@ class SupervisedPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(sid, adapter.supervisor_write_breaker_snapshot())
         self.assertTrue(cell.needs_attention)
 
-        # While open, further writes short-circuit (no new round-trips).
+        # While open, further writes are verified no-write failures and
+        # short-circuit without new supervisor round-trips.
         for _ in range(5):
-            with self.assertRaises(self.pty_mod.TerminalInputDeliveryError):
+            with self.assertRaises(self.pty_mod.TerminalInputUnavailableError):
                 await adapter.write_input(sid, "x")
         self.assertEqual(attempts["n"], adapter.WRITE_BREAKER_THRESHOLD)
 
-        # After the cooldown, a single probe write is allowed through.
+        # After the cooldown, the normal half-open probe is allowed through.
+        class RecoveredClient:
+            async def write_input(self, session_id, payload):
+                attempts["n"] += 1
+                return {"type": "ok"}
+
+        adapter._client = RecoveredClient()
         adapter._write_breaker[sid]["opened_at"] = (
             time.monotonic() - adapter.WRITE_BREAKER_COOLDOWN_SECONDS - 1
         )
-        with self.assertRaises(self.pty_mod.TerminalInputDeliveryError):
-            await adapter.write_input(sid, "x")
+        self.assertTrue(await adapter.write_input(sid, "x"))
         self.assertEqual(attempts["n"], adapter.WRITE_BREAKER_THRESHOLD + 1)
+        self.assertNotIn(sid, adapter._write_breaker)
 
     async def test_close_session_marks_cell_stopped(self):
         state, adapter = await self._make_adapter()

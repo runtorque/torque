@@ -41,13 +41,21 @@ class TerminalLaunchContext:
 
 
 class TerminalInputDeliveryError(RuntimeError):
-    """A terminal accepted an input request but could not deliver it fully.
+    """A terminal may have started an input delivery but could not finish it.
 
     ``write_input`` deliberately distinguishes this from a session that is
-    already gone: callers receive ``False`` for the latter intentional no-op,
-    and this exception for a failed attempted delivery.  That distinction is
-    important for agent-bound messages: silently treating either case as a
-    successful write can submit a truncated prompt.
+    already gone: callers receive ``False`` for the latter intentional no-op.
+    This exception means the write may have delivered a prefix, so callers
+    must not submit a successor on that same session.
+    """
+
+
+class TerminalInputUnavailableError(TerminalInputDeliveryError):
+    """A verified preflight failure where no input delivery was attempted.
+
+    This remains a visible prompt failure, rather than a success-shaped drop,
+    but queueing callers may safely continue with a later retry because no
+    prefix could have reached the terminal.
     """
 
 
@@ -102,8 +110,9 @@ class TerminalAdapter(Protocol):
     async def send_text(self, session_id: str, text: str) -> bool:
         """Send text/keystrokes; return whether a live session received it.
 
-        Raises :class:`TerminalInputDeliveryError` when a started delivery
-        fails, so a caller never mistakes a partial prompt for success.
+        Raises :class:`TerminalInputDeliveryError` when delivery may have
+        started but cannot finish, or :class:`TerminalInputUnavailableError`
+        when a preflight availability check proves that no input was sent.
         """
         ...
 
@@ -116,7 +125,9 @@ class TerminalAdapter(Protocol):
         the session is absent/closed.
 
         Empty input is a successful no-op.  An attempted write that cannot
-        deliver every byte must raise :class:`TerminalInputDeliveryError`.
+        deliver every byte must raise :class:`TerminalInputDeliveryError`;
+        a preflight failure that attempted no write raises
+        :class:`TerminalInputUnavailableError`.
         """
         ...
 
