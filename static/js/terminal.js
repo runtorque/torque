@@ -14,6 +14,10 @@ let _terminalComposeDrafts = Object.create(null);
 let _terminalComposeAttachments = Object.create(null);
 let _terminalComposeErrors = Object.create(null);
 let _terminalComposeRecall = Object.create(null);
+// Semantic, per-composer draft history. It intentionally remains in-memory like
+// drafts: a sent message or daemon restart can never be resurrected with undo.
+let _terminalComposeHistory = Object.create(null);
+let _terminalComposeReleasedPreviewUrls = Object.create(null);
 let _terminalComposeHeights = Object.create(null);
 // Terminal-flicker Phase 1: per-cell memo of the inputs the last autoresize
 // ran with (text content + stored user height). Every delta-driven render pass
@@ -63,6 +67,8 @@ var TERMINAL_DIRECT_MESSAGES_MAX_HEIGHT_FALLBACK = 420;
 var TERMINAL_DIRECT_MESSAGE_CLICK_DRAG_THRESHOLD_PX = 4;
 var TERMINAL_DIRECT_MESSAGE_CLICK_DRAG_DURATION_MS = 650;
 
+var TERMINAL_COMPOSE_HISTORY_MAX_ENTRIES = 64;
+var TERMINAL_COMPOSE_HISTORY_MAX_BYTES = 256 * 1024;
 var TERMINAL_COMPOSE_MIN_HEIGHT = 68;
 var TERMINAL_COMPOSE_DEFAULT_MAX_HEIGHT = 96;
 var TERMINAL_COMPOSE_MAX_HEIGHT_FALLBACK = 260;

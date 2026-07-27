@@ -1192,10 +1192,16 @@ function _runTextShortcutCommand(command, target) {
 }
 
 function _handleTextEditingShortcut(e) {
-  if (!e || !e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return false;
+  if (!e || e.altKey || e.isComposing) return false;
   var target = _textShortcutEditingTarget(e.target)
     || _textShortcutEditingTarget(document.activeElement);
   if (!target) return false;
+  // Rich terminal composers own semantic undo/redo. Never claim success from
+  // deprecated execCommand: that history is invalidated by chip DOM rendering.
+  if (typeof terminalComposeUndoRedoShortcut === 'function'
+      && terminalComposeUndoRedoShortcut(e, target)) return true;
+  // Other text inputs keep their existing native/macOS contract unchanged.
+  if (!e.metaKey || e.ctrlKey) return false;
 
   var key = String(e.key || '').toLowerCase();
   var command = '';

@@ -320,6 +320,7 @@ function _terminalComposePayloadText(cellId, displayText) {
 function _terminalComposeInsertAttachments(input, entries) {
   if (!input || !entries || !entries.length) return;
   var cellId = input.dataset ? (input.dataset.cellId || '') : '';
+  _terminalComposeHistoryPrepare(input, 'attachment');
   var value = _terminalComposeInputText(input);
   var selection = _terminalComposeSelectionOffsets(input);
   var start = selection.start;
@@ -352,13 +353,14 @@ function _terminalComposeRemoveAttachment(cellId, token) {
   const id = String(cellId || '');
   const stateForCell = id ? _terminalComposeAttachments[id] : null;
   if (!stateForCell || !Array.isArray(stateForCell.entries)) return false;
+  const input = document.getElementById ? document.getElementById(_terminalComposeInputId(id)) : null;
+  _terminalComposeHistoryPrepare(input, 'attachment');
   const needle = String(token || '');
   let removed = false;
   let removedPosition = 0;
   stateForCell.entries = stateForCell.entries.filter(function(entry) {
     if (!entry || String(entry.token || '') !== needle) return true;
     removedPosition = Math.max(0, Number(entry.position) || 0);
-    _terminalComposeRevokePreviewUrl(_terminalComposeAttachmentPreviewUrl(entry));
     removed = true;
     return false;
   });
@@ -367,7 +369,6 @@ function _terminalComposeRemoveAttachment(cellId, token) {
     delete _terminalComposeSelectedAttachmentByCell[id];
   }
   _terminalComposeRefreshAttachmentChips(id);
-  const input = document.getElementById ? document.getElementById(_terminalComposeInputId(id)) : null;
   if (input) {
     _terminalComposeRenderRichInput(input, { preserveSelection: false });
     if (_terminalComposeIsRichInput(input)) {
@@ -376,6 +377,7 @@ function _terminalComposeRemoveAttachment(cellId, token) {
     _terminalComposeSetButtonState(input);
     if (typeof input.focus === 'function') input.focus();
   }
+  if (input) _terminalComposeHistoryCommit(input, 'attachment');
   return removed;
 }
 
