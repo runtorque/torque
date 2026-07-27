@@ -23,6 +23,13 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         ).strip() == "creator-proposal-only"
     )
 
+    def creator_task_allowed(task) -> bool:
+        return (
+            not is_creator_proposal_mode
+            or str(getattr(task, "created_by_architect_id", "") or "").strip()
+            == str(caller_id or "").strip()
+        )
+
     if tool_name == "task_create":
         if caller_kind == "architect":
             title = str(args.get("title", "") or "").strip()
@@ -227,7 +234,7 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         caller_id_str = str(caller_id or "").strip()
         creator_class = _task_created_by_classifier(task)
         if is_creator_proposal_mode:
-            if str(getattr(task, "created_by_architect_id", "") or "").strip() != caller_id_str:
+            if not creator_task_allowed(task):
                 return "Authorization denied: task is outside Product Manager creator/self scope", True
         elif creator_class != "user" and not _architect_task_owned_by_caller(
                 task,
@@ -331,7 +338,12 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         old_engineer_id = _effective_assigned_engineer_id(task)
 
         if caller_kind == "architect":
-            if not _architect_task_owned_by_caller(task, caller_id_str):
+            if is_creator_proposal_mode and not creator_task_allowed(task):
+                return "Authorization denied: task is outside Product Manager creator/self scope", True
+            if (
+                    not is_creator_proposal_mode
+                    and not _architect_task_owned_by_caller(task, caller_id_str)
+            ):
                 return "Task was not created by this architect", True
             if is_creator_proposal_mode:
                 engineer_id, engineer_error = _resolve_group_engineer(
@@ -474,6 +486,8 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         if not tid:
             return "Task not found", True
         task = real_state.board_tasks.get(tid)
+        if is_creator_proposal_mode and not creator_task_allowed(task):
+            return "Authorization denied: task is outside Product Manager creator/self scope", True
         if (
                 caller_kind == "engineer"
                 and not real_state.engineer_can_access_task(
@@ -513,6 +527,8 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
             return "Task not found", True
 
         caller_id_str = str(caller_id or "").strip()
+        if is_creator_proposal_mode and not creator_task_allowed(task):
+            return "Authorization denied: task is outside Product Manager creator/self scope", True
         if caller_kind == "engineer":
             if not real_state.engineer_can_access_task(
                 caller_id_str,
@@ -602,6 +618,9 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         tid = _resolve_task(state, args.get("task", ""))
         if not tid:
             return "Task not found", True
+        task = real_state.board_tasks.get(tid)
+        if is_creator_proposal_mode and not creator_task_allowed(task):
+            return "Authorization denied: task is outside Product Manager creator/self scope", True
         actor_name = getattr(_engineer_cell, "name", "") or caller_kind
         payload = {
             "cmd": "board_verify_task",
@@ -649,6 +668,8 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         task = state.board_tasks.get(tid)
         if not task:
             return "Task not found", True
+        if is_creator_proposal_mode and not creator_task_allowed(task):
+            return "Authorization denied: task is outside Product Manager creator/self scope", True
         requested_new_lane = str(args.get("new_lane", "") or "").strip()
         requested_lane = str(args.get("lane", "") or "").strip()
         if (
@@ -697,8 +718,15 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         task = real_state.board_tasks.get(tid)
         if caller_kind == "architect" and (
                 not task
-                or not _architect_task_owned_by_caller(
-                    task, str(caller_id or "").strip()
+                or (
+                    is_creator_proposal_mode
+                    and not creator_task_allowed(task)
+                )
+                or (
+                    not is_creator_proposal_mode
+                    and not _architect_task_owned_by_caller(
+                        task, str(caller_id or "").strip()
+                    )
                 )):
             return "Authorization denied: task is outside creator/self scope", True
         payload = {

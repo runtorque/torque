@@ -247,6 +247,23 @@ def _task_target_scope(state, caller_cell, task) -> str:
     if not caller_cell or not task:
         return "global"
     caller_id = str(getattr(caller_cell, "id", "") or "").strip()
+    metadata = (
+        getattr(caller_cell, "effective_agent_class_snapshot", {}) or {}
+    ).get("metadata", {}) or {}
+    creator_proposal_mode = (
+        str(getattr(caller_cell, "kind", "") or "").strip() == "architect"
+        and str(metadata.get("task_authority_mode", "") or "").strip()
+        == "creator-proposal-only"
+    )
+    # Creator-proposal authority is narrower than the normal Architect task
+    # relationship: assignment is not ownership.  Do not let assignment or a
+    # worker/Engineer relationship turn a peer-created task into ``self``.
+    if creator_proposal_mode and str(
+            getattr(task, "created_by_architect_id", "") or ""
+    ).strip() != caller_id:
+        caller_group = str(getattr(caller_cell, "group", "") or "").strip()
+        task_group = str(getattr(task, "group", "") or "").strip()
+        return "group" if caller_group and caller_group == task_group else "global"
     owner_ids = {
         str(getattr(task, field, "") or "").strip()
         for field in (
@@ -475,6 +492,18 @@ def _handler_scoped_target_scope(
     metadata = (
         getattr(caller_cell, "effective_agent_class_snapshot", {}) or {}
     ).get("metadata", {}) or {}
+    creator_proposal_mode = (
+        str(metadata.get("task_authority_mode", "") or "").strip()
+        == "creator-proposal-only"
+    )
+    if (
+            creator_proposal_mode
+            and tool_name != "architect_task_pickup"
+            and requirement.target_kind == "task"
+            and str(getattr(target, "created_by_architect_id", "") or "").strip()
+            != caller_id
+    ):
+        return scope
     # A class may declare the bounded creator-proposal task authority mode.
     # Its reassignment handler independently enforces a same-group Engineer
     # target and caller-owned task; retain that platform check while allowing
