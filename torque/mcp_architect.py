@@ -811,6 +811,27 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_task_coverage_reconcile", "authority": {"requirements": [{"capability": "task.mark_covered", "minimum_scope": "self", "target_argument": "task_ids", "target_kind": "task", "handler_scoped": True}]},
+        "description": (
+            "NOT YET AVAILABLE: recognized strict task-coverage reconciliation "
+            "operation. It activates only after TORQUE:1228 is merged and "
+            "this caller session is relaunched, because tool projection and "
+            "authority are frozen for the session. This provisional route "
+            "performs no board or state mutation."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task_ids": {"type": "array", "minItems": 1, "maxItems": 25,
+                             "items": {"type": "string"},
+                             "description": "Explicit bounded task IDs or aliases."},
+                "apply": {"type": "boolean", "description": "Reserved for TORQUE:1228; currently unavailable."},
+                "dry_run_token": {"type": "string", "description": "Reserved for TORQUE:1228; currently unavailable."},
+            },
+            "required": ["task_ids"],
+        },
+    },
+    {
         "name": "architect_ask", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Ask the user a blocking product/scope question. Creates a "

@@ -144,7 +144,7 @@ class CanonicalMCPContractTests(unittest.TestCase):
     def test_default_surfaces_are_unique_canonical_and_bounded(self):
         limits = {
             "worker": (24, 24),
-            "engineer": (56, 75),
+            "engineer": (57, 75),
             "architect": (55, 100),
         }
         legacy_names = {tool["name"] for tool in ALL_TOOLS}
@@ -183,6 +183,7 @@ class CanonicalMCPContractTests(unittest.TestCase):
         for public_name, expected_handler in {
             "task_claim": "architect_task_pickup",
             "task_mark_covered": "architect_task_mark_covered",
+            "task_coverage_reconcile": "architect_task_coverage_reconcile",
         }.items():
             with self.subTest(public_name=public_name):
                 self.assertIn(public_name, eager)
@@ -198,6 +199,51 @@ class CanonicalMCPContractTests(unittest.TestCase):
                     {"task": "TORQUE:fixture"},
                 )
                 self.assertEqual(expected_handler, resolved)
+
+    def test_coverage_reconcile_discovery_and_selection_are_truthful(self):
+        """Discovery presents the provisional route before a planner calls it."""
+        docs = Path("docs/reference/mcp-tools.md").read_text(encoding="utf-8")
+        self.assertIn("task_coverage_reconcile", docs)
+        self.assertIn("TORQUE:1228 is merged and the caller session is relaunched", docs)
+
+        for kind, expected_handler in (
+            ("architect", "architect_task_coverage_reconcile"),
+            ("engineer", "engineer_task_coverage_reconcile"),
+        ):
+            with self.subTest(kind=kind):
+                specs = {
+                    tool["name"]: tool
+                    for tool in _canonical_tools_for_caller(_State(kind), "caller")
+                }
+                spec = specs["task_coverage_reconcile"]
+                self.assertFalse(spec.get("deferred"))
+                # This human-readable description is the initial planning
+                # surface, rather than hidden activation metadata.
+                for fragment in (
+                    "NOT YET AVAILABLE",
+                    "TORQUE:1228 is merged",
+                    "session is relaunched",
+                ):
+                    self.assertIn(fragment, spec["description"])
+                self._assert_routes_to_schema(
+                    kind,
+                    "task_coverage_reconcile",
+                    {"task_ids": ["TORQUE:fixture"]},
+                    expected_handler,
+                )
+
+        # The historical hygiene operation remains a separate public route
+        # with its established inventory/apply/limit shape.
+        self.assertEqual(
+            canonical_tool_name("architect_proposal_root_backlog_hygiene"),
+            "proposal_root_backlog_hygiene",
+        )
+        self._assert_routes_to_schema(
+            "architect",
+            "proposal_root_backlog_hygiene",
+            {"apply": False, "task_ids": ["TORQUE:fixture"], "limit": 1},
+            "architect_proposal_root_backlog_hygiene",
+        )
 
     def test_architect_core_orchestration_categories_are_eager(self):
         tools = {
@@ -378,16 +424,17 @@ class CanonicalMCPContractTests(unittest.TestCase):
                 "worktree_adopt",
             },
             {
-                "task_mark_covered", "task_reassign",
-                "agent_launch_settings", "agent_close", "agent_relaunch",
+                "task_mark_covered", "task_coverage_reconcile",
+                "task_reassign", "agent_launch_settings", "agent_close",
+                "agent_relaunch",
             },
         )
 
-        self.assertEqual(len(eager), 56)
+        self.assertEqual(len(eager), 57)
         self.assertEqual(eager, ENGINEER_EAGER_TOOL_NAMES)
         initial_projection = _visible_tools(_State("engineer"), "caller")
         self.assertEqual(
-            {tool["name"] for tool in initial_projection[:56]},
+            {tool["name"] for tool in initial_projection[:57]},
             ENGINEER_EAGER_TOOL_NAMES,
         )
         for category in categories:

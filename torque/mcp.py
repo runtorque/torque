@@ -24,7 +24,6 @@ from .capability_catalog import (
 from .mcp_authority import (
     EffectiveAuthority,
     AuthorityValidationError,
-    SCOPE_RANK,
     authority_definition_map,
     authority_definitions_from_tool_specs,
     audit_tool_authority_coverage,
@@ -40,6 +39,15 @@ from .mcp_engineer import (
     _dispatch_engineer_tool,
     engineer_tools_for_cell,
 )
+from .mcp_public_call_authorization import (
+    PublicCallAuthorizationDependencies,
+    _PUBLIC_TOOL_CALL_AUTHORIZED,
+    _PUBLIC_TOOL_CALL_UNAUTHORIZED,
+    _classify_public_tool_call as _classify_public_tool_call_with_dependencies,
+    _resolve_public_tool_call as _resolve_public_tool_call_with_dependencies,
+    _resolve_scoped_resource,
+    _scoped_resource_relationship,
+)
 from .mcp_tool_search import deferred_tool_specs, public_tool_spec
 from .mcp_tool_search import tool_search_response
 from .mcp_canonical import (
@@ -49,8 +57,6 @@ from .mcp_canonical import (
     canonical_tool_name,
     canonicalize_tool_specs,
     modernize_tool_authority,
-    select_legacy_tool,
-    translate_canonical_arguments,
 )
 from .help_docs import dispatch_help_tool, help_tool_specs
 from .mcp_tools_shared import (
@@ -68,10 +74,6 @@ from .mcp_retry import (
     strip_mcp_idempotency_args,
 )
 from .server_artifacts import serialize_task_for_mcp
-from .mcp_engineer_tools.shared import (
-    resolve_agent as resolve_mcp_agent,
-    resolve_task as resolve_mcp_task,
-)
 
 log = logging.getLogger("torque")
 
@@ -1039,369 +1041,49 @@ def _deferred_tools_for_caller(state, cell_id: str):
     return deferred_tool_specs(_canonical_tools_for_caller(state, cell_id))
 
 
+_PUBLIC_CALL_AUTHORIZATION_DEPENDENCIES = PublicCallAuthorizationDependencies(
+    raw_tools_for_caller=_raw_tools_for_caller,
+    effective_class_authority_for_cell=_effective_class_authority_for_cell,
+    visible_tools=_visible_tools,
+    all_tool_map=_ALL_TOOL_MAP,
+    canonical_callable_handler_registry=CANONICAL_CALLABLE_HANDLER_REGISTRY,
+    engineer_architect_chain_tool_names=ENGINEER_ARCHITECT_CHAIN_TOOL_NAMES,
+    tool_authority_definitions=MCP_TOOL_AUTHORITY_DEFINITIONS,
+    tool_allowed_by_authority=mcp_tool_allowed_by_authority,
+)
+
+
 def _resolve_public_tool_call(
     state,
     cell_id: str,
     name: str,
     arguments: dict,
 ) -> tuple[str, dict]:
-    """Resolve a canonical public call to an authority-projected operation.
-
-    Historical names are accepted as a hidden migration bridge, but only
-    canonical names are advertised.
-    """
-
-    requested = str(name or "").strip()
-    raw_tools, cell, caller_kind = _raw_tools_for_caller(state, cell_id)
-    raw_names = {
-        str(tool.get("name", "") or "").strip()
-        for tool in raw_tools
-    }
-    if requested in raw_names:
-        return requested, dict(arguments or {})
-    if requested in _ALL_TOOL_MAP:
-        return "", dict(arguments or {})
-
-    authority = _effective_class_authority_for_cell(cell)
-    canonical = canonical_tool_name(requested)
-    # Resolve only through the canonical callable registry.  The visible
-    # catalog and runtime now share this exact source of truth, which keeps a
-    # projected name such as task_claim or task_mark_covered from becoming an
-    # advertised-but-unknown operation.
-    candidates = [
-        handler
-        for handler in CANONICAL_CALLABLE_HANDLER_REGISTRY.get(canonical, ())
-        if handler in raw_names
-    ]
-    selected = select_legacy_tool(
-        canonical,
-        candidates,
+    """Preserve the legacy facade for public-call resolution."""
+    return _resolve_public_tool_call_with_dependencies(
+        state,
+        cell_id,
+        name,
         arguments,
-        caller_kind=caller_kind or "worker",
-        authority=authority,
-    )
-    if not selected:
-        return "", dict(arguments or {})
-    translated = translate_canonical_arguments(
-        canonical,
-        selected,
-        arguments,
-        caller_kind=caller_kind or "worker",
-    )
-    if (
-        canonical == "supervisor_message"
-        and not str(translated.get("architect_id", "") or "").strip()
-        and cell is not None
-    ):
-        translated["architect_id"] = str(
-            getattr(cell, "hired_by_architect_id", "") or ""
-        ).strip()
-    return selected, translated
-
-
-def _tool_hidden_for_caller(tool_name: str, caller_kind: str, caller_cell) -> bool:
-    """Return True when a known tool is intentionally scoped out."""
-    name = str(tool_name or "").strip()
-    if caller_kind == "engineer" and name in ENGINEER_ARCHITECT_CHAIN_TOOL_NAMES:
-        return not bool(
-            str(getattr(caller_cell, "hired_by_architect_id", "") or "").strip()
-        )
-    return False
-
-
-def _tool_denied_by_effective_authority(tool_name: str, caller_cell) -> bool:
-    authority = _effective_class_authority_for_cell(caller_cell)
-    return bool(
-        authority is not None
-        and not mcp_tool_allowed_by_authority(tool_name, authority)
+        _PUBLIC_CALL_AUTHORIZATION_DEPENDENCIES,
     )
 
 
-def _agent_target_scope(caller_cell, target_cell) -> str:
-    """Return the generic caller-to-agent ACL relationship scope."""
-
-    if not caller_cell or not target_cell:
-        return "global"
-    caller_id = str(getattr(caller_cell, "id", "") or "").strip()
-    target_id = str(getattr(target_cell, "id", "") or "").strip()
-    if caller_id and caller_id == target_id:
-        return "self"
-    caller_kind = str(getattr(caller_cell, "kind", "") or "").strip()
-    if caller_kind == "architect" and str(
-        getattr(target_cell, "hired_by_architect_id", "") or ""
-    ).strip() == caller_id:
-        return "children"
-    if caller_kind == "engineer" and str(
-        getattr(target_cell, "owner_engineer_id", "") or ""
-    ).strip() == caller_id:
-        return "children"
-    caller_group = str(getattr(caller_cell, "group", "") or "").strip()
-    target_group = str(getattr(target_cell, "group", "") or "").strip()
-    if caller_group and caller_group == target_group:
-        return "group"
-    return "global"
-
-
-def _task_target_scope(state, caller_cell, task) -> str:
-    """Return the generic caller-to-task ACL relationship scope."""
-
-    if not caller_cell or not task:
-        return "global"
-    caller_id = str(getattr(caller_cell, "id", "") or "").strip()
-    owner_ids = {
-        str(getattr(task, field, "") or "").strip()
-        for field in (
-            "agent_id",
-            "assigned_engineer_id",
-            "created_by_architect_id",
-            "assigned_architect_id",
-            "created_by_engineer_id",
-            "owner_engineer_id",
-        )
-    }
-    owner_ids.discard("")
-    if caller_id in owner_ids:
-        return "self"
-    for owner_id in owner_ids:
-        target_cell = state.agents.get(owner_id)
-        if target_cell and _agent_target_scope(caller_cell, target_cell) == "children":
-            return "children"
-    caller_group = str(getattr(caller_cell, "group", "") or "").strip()
-    task_group = str(getattr(task, "group", "") or "").strip()
-    if caller_group and caller_group == task_group:
-        return "group"
-    return "global"
-
-
-def _record_target_scope(state, caller_cell, record: dict | None) -> str:
-    """Return scope for a persisted planning/artifact record."""
-
-    if not caller_cell or not isinstance(record, dict):
-        return "global"
-    caller_id = str(getattr(caller_cell, "id", "") or "").strip()
-    owner_ids = {
-        str(record.get(field, "") or "").strip()
-        for field in (
-            "architect_id",
-            "created_by_architect_id",
-            "created_by_id",
-            "owner_id",
-        )
-    }
-    owner_ids.discard("")
-    if caller_id in owner_ids:
-        return "self"
-    owner_scopes = []
-    for owner_id in owner_ids:
-        owner = state.agents.get(owner_id)
-        if owner is not None:
-            owner_scopes.append(_agent_target_scope(caller_cell, owner))
-    if owner_scopes:
-        return min(owner_scopes, key=lambda scope: SCOPE_RANK[scope])
-    caller_group = str(getattr(caller_cell, "group", "") or "").strip()
-    record_group = str(
-        record.get("group_name", record.get("group", "")) or ""
-    ).strip()
-    if caller_group and caller_group == record_group:
-        return "group"
-    return "global"
-
-
-def _event_target_scope(state, caller_cell, event: dict | None) -> str:
-    """Return the narrowest caller relationship represented by an event."""
-
-    if not caller_cell or not isinstance(event, dict):
-        return "global"
-    caller_id = str(getattr(caller_cell, "id", "") or "").strip()
-    if caller_id and caller_id in {
-        str(event.get("cell_id", "") or "").strip(),
-        str(event.get("created_by_architect_id", "") or "").strip(),
-    }:
-        return "self"
-    scopes = []
-    task_id = str(event.get("task_id", "") or "").strip()
-    task = state.board_tasks.get(task_id) if task_id else None
-    if task is not None:
-        scopes.append(_task_target_scope(state, caller_cell, task))
-    for field in (
-        "cell_id",
-        "assigned_engineer_id",
-        "owner_engineer_id",
-        "peer_architect_id",
-    ):
-        target_id = str(event.get(field, "") or "").strip()
-        target = state.agents.get(target_id) if target_id else None
-        if target is not None:
-            scopes.append(_agent_target_scope(caller_cell, target))
-    if scopes:
-        return min(scopes, key=lambda scope: SCOPE_RANK[scope])
-    caller_group = str(getattr(caller_cell, "group", "") or "").strip()
-    event_group = str(event.get("group", "") or "").strip()
-    if caller_group and caller_group == event_group:
-        return "group"
-    return "global"
-
-
-def _semantic_recall_target_scope(
+def _classify_public_tool_call(
     state,
-    caller_cell,
-    result: dict | None,
-) -> str:
-    """Return scope for one semantic recall result's internal ACL anchors."""
-
-    if not caller_cell or not isinstance(result, dict):
-        return "global"
-    caller_id = str(getattr(caller_cell, "id", "") or "").strip()
-    owner_id = str(result.get("_acl_owner_id", "") or "").strip()
-    participant_ids = {
-        str(item or "").strip()
-        for item in (result.get("_acl_participant_ids", []) or [])
-        if str(item or "").strip()
-    }
-    if caller_id and caller_id in ({owner_id} | participant_ids):
-        return "self"
-    source_type = str(result.get("source_type", "") or "").strip()
-    source_id = str(result.get("source_id", "") or "").strip()
-    if source_type == "task" and source_id:
-        task = state.board_tasks.get(source_id)
-        if task is not None:
-            return _task_target_scope(state, caller_cell, task)
-    if source_type == "decision" and source_id:
-        decision = state.load_decision(source_id)
-        if decision is not None:
-            return _record_target_scope(state, caller_cell, decision)
-
-    scopes = []
-    for agent_id in ({owner_id} | participant_ids) - {""}:
-        agent = state.agents.get(agent_id)
-        if agent is not None:
-            scopes.append(_agent_target_scope(caller_cell, agent))
-    if scopes:
-        return min(scopes, key=lambda scope: SCOPE_RANK[scope])
-    caller_group = str(getattr(caller_cell, "group", "") or "").strip()
-    result_group = str(result.get("group", "") or "").strip()
-    if caller_group and caller_group == result_group:
-        return "group"
-    return "global"
-
-
-def _resolve_scoped_resource(state, caller_cell, resource_kind: str, reference):
-    """Resolve one descriptor-declared resource without widening visibility."""
-
-    reference = str(reference or "").strip()
-    if not reference:
-        return None
-    if resource_kind == "task":
-        task_id = resolve_mcp_task(state, reference)
-        return state.board_tasks.get(task_id) if task_id else None
-    if resource_kind == "agent":
-        agent_id = resolve_mcp_agent(state, reference)
-        return state.agents.get(agent_id) if agent_id else None
-    group = str(getattr(caller_cell, "group", "") or "").strip()
-    if resource_kind == "scratchpad_note":
-        note_id = state.resolve_scratchpad_note_id(reference, group=group)
-        return state.load_scratchpad_note(note_id) if note_id else None
-    if resource_kind == "mind_map":
-        map_id = state.resolve_mind_map_id(reference, group=group)
-        return state.load_mind_map(map_id, include_counts=True) if map_id else None
-    if resource_kind == "idea_brief":
-        brief_id = state.resolve_idea_brief_id(reference, group=group)
-        return state.load_idea_brief(brief_id) if brief_id else None
-    if resource_kind == "area":
-        area_id = state.resolve_area_id(reference, group=group)
-        return state.load_area(area_id) if area_id else None
-    if resource_kind == "initiative":
-        initiative_id = state.resolve_initiative_id(reference, group=group)
-        return state.load_initiative(initiative_id) if initiative_id else None
-    if resource_kind == "decision":
-        return state.load_decision(reference)
-    if resource_kind == "message_peer":
-        db = getattr(state, "db", None)
-        loader = getattr(db, "load_agent_peer_message", None)
-        message = loader(reference) if callable(loader) else None
-        if not isinstance(message, dict):
-            return None
-        caller_id = str(getattr(caller_cell, "id", "") or "").strip()
-        sender_id = str(message.get("sender_id", "") or "").strip()
-        recipient_id = str(message.get("recipient_id", "") or "").strip()
-        peer_id = recipient_id if sender_id == caller_id else sender_id
-        return state.agents.get(peer_id)
-    return None
-
-
-def _scoped_resource_relationship(state, caller_cell, resource_kind: str, resource):
-    if resource_kind == "task":
-        return _task_target_scope(state, caller_cell, resource)
-    if resource_kind == "event":
-        return _event_target_scope(state, caller_cell, resource)
-    if resource_kind == "semantic_recall":
-        return _semantic_recall_target_scope(state, caller_cell, resource)
-    if resource_kind in {"agent", "message_peer"}:
-        return _agent_target_scope(caller_cell, resource)
-    return _record_target_scope(state, caller_cell, resource)
-
-
-def _tool_argument_scope_denied(
-    state,
-    tool_name: str,
+    cell_id: str,
+    requested_tool_name: str,
     arguments: dict,
-    caller_cell,
-) -> bool:
-    """Authorize concrete MCP targets against the frozen class ACL.
+) -> tuple[str, str, dict, object, str]:
+    """Preserve the legacy facade for public-call classification."""
+    return _classify_public_tool_call_with_dependencies(
+        state,
+        cell_id,
+        requested_tool_name,
+        arguments,
+        _PUBLIC_CALL_AUTHORIZATION_DEPENDENCIES,
+    )
 
-    Existing handler ownership checks are still applied after this generic
-    gate.  The two checks are intersected so the ACL can narrow behavior but
-    can never broaden the handler's platform ceiling.
-    """
-
-    authority = _effective_class_authority_for_cell(caller_cell)
-    if authority is None or not isinstance(arguments, dict):
-        return False
-    tool_authority = MCP_TOOL_AUTHORITY_DEFINITIONS.get(tool_name)
-    if not tool_authority:
-        return True
-    for requirement in tool_authority.requirements:
-        if requirement.scope_argument:
-            requested_scope = str(
-                arguments.get(requirement.scope_argument, "") or ""
-            ).strip().lower()
-            if requested_scope and not authority.allows(
-                requirement.capability,
-                scope=requested_scope,
-            ):
-                return True
-        if requirement.handler_scoped or not requirement.target_argument:
-            continue
-        raw_target = arguments.get(requirement.target_argument, "")
-        target_refs = raw_target if isinstance(raw_target, list) else [raw_target]
-        for raw_ref in target_refs:
-            target_ref = str(raw_ref or "").strip()
-            if not target_ref:
-                continue
-            target = _resolve_scoped_resource(
-                state,
-                caller_cell,
-                requirement.target_kind,
-                target_ref,
-            )
-            target_scope = (
-                _scoped_resource_relationship(
-                    state,
-                    caller_cell,
-                    requirement.target_kind,
-                    target,
-                )
-                if target is not None
-                else ""
-            )
-            # Unknown targets remain the handler's responsibility. Once a
-            # concrete target resolves, the class ACL is enforced first.
-            if target_scope and not authority.allows(
-                requirement.capability,
-                scope=target_scope,
-            ):
-                return True
-    return False
 
 
 def _result_collection_at_path(payload, path: str):
@@ -2042,16 +1724,18 @@ async def dispatch_mcp_rpc_body(
         )
         raw_arguments = params.get("arguments", {}) if isinstance(params, dict) else {}
         arguments = strip_mcp_idempotency_args(raw_arguments)
-        tool_name, arguments = _resolve_public_tool_call(
+        (
+            call_classification,
+            tool_name,
+            arguments,
+            caller_cell,
+            caller_kind,
+        ) = _classify_public_tool_call(
             state,
             cell_id,
             requested_tool_name,
             arguments,
         )
-        caller_cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
-        caller_kind = str(
-            getattr(caller_cell, "kind", "") or ""
-        ).strip() if caller_cell else ""
         if caller_cell and state.agent_is_tombstoned(caller_cell):
             return (
                 _jsonrpc_error(req_id, -32602, f"Agent {cell_id} is tombstoned"),
@@ -2061,18 +1745,7 @@ async def dispatch_mcp_rpc_body(
             caller_kind in {"architect", "engineer"}
             and _claim_session_wake(cell_id, mcp_session_id)
         )
-        if (
-            not tool_name
-            or
-            _tool_hidden_for_caller(tool_name, caller_kind, caller_cell)
-            or _tool_denied_by_effective_authority(tool_name, caller_cell)
-            or _tool_argument_scope_denied(
-                state,
-                tool_name,
-                arguments,
-                caller_cell,
-            )
-        ):
+        if call_classification != _PUBLIC_TOOL_CALL_AUTHORIZED:
             if session_wake_pending:
                 _queue_session_wake_entry(
                     state,
@@ -2080,14 +1753,11 @@ async def dispatch_mcp_rpc_body(
                     caller_kind=caller_kind,
                     first_tool_call_ts=first_tool_call_ts,
                 )
-            return (
-                _jsonrpc_error(
-                    req_id,
-                    -32602,
-                    f"Unknown tool: {requested_tool_name}",
-                ),
-                200,
-            )
+            if call_classification == _PUBLIC_TOOL_CALL_UNAUTHORIZED:
+                message = f"Known tool is not authorized: {requested_tool_name}"
+            else:
+                message = f"Unknown tool: {requested_tool_name}"
+            return _jsonrpc_error(req_id, -32602, message), 200
         write_tool = is_mcp_write_tool(tool_name)
         idempotency_key = ""
         request_hash = ""

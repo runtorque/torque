@@ -44,7 +44,7 @@ the bounded boot core before indexing specialty schemas.
 ### Engineer eager core
 
 For a fresh full-authority hired Engineer, the maintained eager budget is
-exactly 56 canonical operations. A restricted Engineer receives only the
+exactly 57 canonical operations. A restricted Engineer receives only the
 intersection of this set and its frozen Agent Class authority, and
 relationship-specific operations such as `supervisor_message` are projected
 only when the caller has the required relationship:
@@ -56,7 +56,7 @@ only when the caller has the required relationship:
 | Memory and context | `memory_publish`, `memory_list`, `memory_get`, `memory_set_pin`, `memory_link`, `semantic_recall`, `journal_write`, `journal_list` |
 | Execution flow | `stream_list`, `stream_get`, `action_list`, `action_get`, `hint_set_state`, `event_delivery_update` |
 | Worktree and release | `worktree_diff`, `worktree_checkpoint`, `worktree_advance_boundary`, `worktree_rebase`, `worktree_create_pr`, `worktree_merge`, `worktree_remove`, `worktree_adopt` |
-| Task and agent operations | `task_mark_covered`, `task_reassign`, `agent_launch_settings`, `agent_close`, `agent_relaunch` |
+| Task and agent operations | `task_mark_covered`, `task_coverage_reconcile` (**NOT YET AVAILABLE** until TORQUE:1228 is merged and the caller session is relaunched), `task_reassign`, `agent_launch_settings`, `agent_close`, `agent_relaunch` |
 
 Eager classification changes boot availability, not authorization or handler
 semantics. Frozen Agent Class capability checks still filter `tools/list`, and
@@ -74,7 +74,7 @@ this Torque projection and remain lazy/provider-managed.
 
 ### Architect eager core
 
-For a full-authority Architect, the maintained eager budget is exactly 53
+For a full-authority Architect, the maintained eager budget is exactly 54
 canonical operations. A restricted Architect receives only the intersection
 of this set and its frozen Agent Class authority:
 
@@ -82,7 +82,7 @@ of this set and its frozen Agent Class authority:
 | --- | --- |
 | Boot and orientation | `context`, `tool_search`, `help_query`, `help_get`, `board_summary`, `boot_summary`, `event_list`, `agent_list`, `area_list`, `area_get`, `initiative_list`, `initiative_get` |
 | Communication | `raise`, `user_message`, `peer_list`, `peer_message`, `peer_inbox`, `peer_reply`, `agent_message`, `agent_reply`, `agent_ask_get`, `agent_ask_answer` |
-| Task routing and evidence | `task_list`, `task_get`, `task_chain`, `task_claim`, `task_create`, `task_update`, `task_reassign`, `task_move`, `task_mark_covered`, `task_verify` |
+| Task routing and evidence | `task_list`, `task_get`, `task_chain`, `task_claim`, `task_create`, `task_update`, `task_reassign`, `task_move`, `task_mark_covered`, `task_coverage_reconcile` (**NOT YET AVAILABLE** until TORQUE:1228 is merged and the caller session is relaunched), `task_verify` |
 | Durable context | `journal_write`, `journal_list`, `decision_list`, `decision_get`, `decision_create`, `decision_update`, `decision_link`, `memory_publish`, `memory_list`, `memory_get`, `memory_set_pin`, `memory_link`, `semantic_recall` |
 | Execution flow | `attention_digest`, `group_health_brief`, `wave_summary`, `completion_audit`, `worktree_merge`, `worktree_rebase`, `worktree_create_pr`, `worktree_diff` |
 
@@ -208,7 +208,8 @@ does not guess a reply target from historical conversation rows.
 | `task_move` | Move a task between lanes. |
 | `task_dispatch` | Dispatch one task or an ordered batch. |
 | `task_mark_covered` | Record review/root-task coverage. |
-| `task_coverage_reconcile` | Reconcile uncovered proposal roots. |
+| `task_coverage_reconcile` | **NOT YET AVAILABLE** recognized strict reconciliation route; no mutation until **TORQUE:1228 is merged and the caller session is relaunched** (projection/authority are frozen per session). |
+| `proposal_root_backlog_hygiene` | Inventory covered product-proposal roots and optionally finalize eligible roots. |
 | `task_artifact_upload` | Attach an artifact to a visible task. |
 | `task_verify` | Record tests, deploy, restart, and smoke evidence. |
 | `task_progress` | Report current Worker activity. |
