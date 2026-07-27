@@ -1982,7 +1982,7 @@ function terminalComposeKeydown(evt, cellId) {
     const hasDraft = !!String(_terminalComposeInputText(input) || '').length
       || _terminalComposeSortedAttachments(cellId).length > 0;
     if (hasDraft) { terminalComposeClear(cellId); return; }
-    _terminalComposeRequestActiveTurnCancel(input, cellId);
+    if (!evt.repeat) _terminalComposeRequestActiveTurnCancel(input, cellId);
     return;
   }
   if (evt.key === 'Enter' && !evt.shiftKey) {
