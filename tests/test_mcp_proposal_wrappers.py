@@ -446,7 +446,10 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             req_id=16,
             agent_id=self.torqly.id,
         )
-        self.assertEqual("Task not found", self._error_text(malformed))
+        self.assertEqual(
+            "Known tool is not authorized: task_reassign",
+            self._error_text(malformed),
+        )
         self.assertEqual(before, (owned.assigned_engineer_id, owned.updated_at))
 
         # The Product Manager's frozen class still lacks task.reassign; it

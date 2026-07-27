@@ -1439,7 +1439,7 @@ def _tool_argument_scope_denied(
     """
 
     authority = _effective_class_authority_for_cell(caller_cell)
-    if authority is None or not isinstance(arguments, dict):
+    if not isinstance(arguments, dict):
         return False
     tool_authority = MCP_TOOL_AUTHORITY_DEFINITIONS.get(tool_name)
     if not tool_authority:
@@ -1449,9 +1449,13 @@ def _tool_argument_scope_denied(
             requested_scope = str(
                 arguments.get(requirement.scope_argument, "") or ""
             ).strip().lower()
-            if requested_scope and not authority.allows(
-                requirement.capability,
-                scope=requested_scope,
+            if (
+                authority is not None
+                and requested_scope
+                and not authority.allows(
+                    requirement.capability,
+                    scope=requested_scope,
+                )
             ):
                 return True
         if requirement.handler_scoped or not requirement.target_argument:
@@ -1459,6 +1463,11 @@ def _tool_argument_scope_denied(
         raw_target = arguments.get(requirement.target_argument, "")
         target_refs = raw_target if isinstance(raw_target, list) else [raw_target]
         for raw_ref in target_refs:
+            # Batch dispatch declares ``tasks`` as its target argument, with
+            # each target carried by an entry's ``task`` field. Do not treat
+            # the entry object itself as a reference.
+            if isinstance(raw_ref, dict) and requirement.target_kind == "task":
+                raw_ref = raw_ref.get("task", "")
             target_ref = str(raw_ref or "").strip()
             if not target_ref:
                 continue
@@ -1478,11 +1487,17 @@ def _tool_argument_scope_denied(
                 if target is not None
                 else ""
             )
-            # Unknown targets remain the handler's responsibility. Once a
-            # concrete target resolves, the class ACL is enforced first.
-            if target_scope and not authority.allows(
-                requirement.capability,
-                scope=target_scope,
+            # Exact canonical calls that are actually projected must not leak
+            # whether a declared target exists. A nonempty unresolved target
+            # therefore receives the same pre-handler refusal as a resolved
+            # target outside the frozen authority scope. Empty optional
+            # targets remain the handler's concern.
+            if target is None or (
+                authority is not None
+                and not authority.allows(
+                    requirement.capability,
+                    scope=target_scope,
+                )
             ):
                 return True
     return False
