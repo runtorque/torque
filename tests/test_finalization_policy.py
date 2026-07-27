@@ -182,6 +182,44 @@ class FinalizationDoneBypassRegressionTests(unittest.TestCase):
         self.assertFalse(result["eligible"])
         self.assertEqual(root.finalization_audit[-1]["caller"], "board_move_task")
 
+    def test_atomic_candidate_root_update_cannot_bypass_done_admission(self):
+        parent = self.state.board_add_task("Parent", "g", id="TORQUE:916")
+        child = self.state.board_add_task(
+            "Derived child", "g", id="TORQUE:916:1", parent_task_id=parent.id,
+            pipeline_root_id=parent.id,
+        )
+        result = self.state.board_update_task(
+            child.id,
+            pipeline_root_id="missing-root",
+            lane="Done",
+            finalization_mode="review_only",
+            required_review_gates=[{
+                "id": "audit", "role": "audit",
+                "review_task_id": "TORQUE:916:2",
+            }],
+            finalization_boundary={
+                "artifact_digest": "digest", "artifact_version": "v1",
+                "source_identity": "artifact", "immutable": True,
+            },
+        )
+        self.assertFalse(result["eligible"])
+        self.assertNotEqual(child.lane, "Done")
+        self.assertEqual(child.finalization_mode, "legacy")
+        self.assertEqual(child.pipeline_root_id, parent.id)
+        self.assertEqual(child.finalization_audit[-1]["caller"], "board_update_task")
+
+    def test_policy_to_legacy_update_retracts_stale_status_projection(self):
+        root = self._ineligible_root("TORQUE:917")
+        self.assertTrue(root.finalization_status)
+        self.state.board_update_task(
+            root.id,
+            finalization_mode="legacy",
+            required_review_gates=[],
+            finalization_boundary={},
+        )
+        self.assertEqual(root.finalization_mode, "legacy")
+        self.assertEqual(root.finalization_status, {})
+
     def test_state_update_cannot_combine_done_with_new_policy(self):
         root = self.state.board_add_task("Legacy root", "g", id="TORQUE:913")
         result = self.state.board_update_task(
@@ -435,3 +473,25 @@ class FinalizationProductionAdmissionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(already_done_result["type"], "finalization_blocked")
         self.assertEqual(already_done.lane, "Done")
         self.assertEqual(already_done.finalization_mode, "legacy")
+
+        parent = state.board_add_task("Parent", "g", id="TORQUE:943")
+        child = state.board_add_task(
+            "Child", "g", id="TORQUE:943:1", parent_task_id=parent.id,
+            pipeline_root_id=parent.id,
+        )
+        candidate_result = await handle_board_operation_command({
+            "cmd": "board_update_task", "id": child.id,
+            "pipeline_root_id": "missing-root", "lane": "Done",
+            "finalization_mode": "review_only",
+            "required_review_gates": [{
+                "id": "security", "role": "security",
+                "review_task_id": "TORQUE:943:2",
+            }],
+            "finalization_boundary": {
+                "artifact_digest": "digest", "artifact_version": "v1",
+                "source_identity": "artifact", "immutable": True,
+            },
+        }, runtime)
+        self.assertEqual(candidate_result["type"], "finalization_blocked")
+        self.assertNotEqual(child.lane, "Done")
+        self.assertEqual(child.finalization_mode, "legacy")

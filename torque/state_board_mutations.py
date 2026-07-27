@@ -611,20 +611,43 @@ class BoardMutationMixin:
         self._db_save_task(root)
         return result
 
-    def _is_finalization_root(self, task: BoardTask) -> bool:
-        root_id = str(getattr(task, "pipeline_root_id", "") or "").strip()
+    def _is_finalization_root_for_pipeline_root(
+            self, task: BoardTask, pipeline_root_id: str) -> bool:
+        root_id = str(pipeline_root_id or "").strip()
         # A nonempty root reference is a descendant relationship only when it
         # resolves to a real task.  Treat malformed/missing references as the
         # task's own root for finalization purposes; otherwise a policy root
         # could set ``pipeline_root_id='missing'`` and evade every Done guard.
         return not root_id or root_id == task.id or root_id not in self.board_tasks
 
+    def _is_finalization_root(self, task: BoardTask) -> bool:
+        return self._is_finalization_root_for_pipeline_root(
+            task, getattr(task, "pipeline_root_id", "")
+        )
+
+    def _is_candidate_finalization_root(
+            self, task: BoardTask, fields: dict) -> bool:
+        """Resolve finalization ownership from the requested atomic update."""
+        return self._is_finalization_root_for_pipeline_root(
+            task, fields.get(
+                "pipeline_root_id", getattr(task, "pipeline_root_id", "")
+            )
+        )
+
     def _refresh_finalization_root_projection(self, task: BoardTask) -> dict:
         """Persist/emit root status after any structurally relevant child change."""
         root_id = str(getattr(task, "pipeline_root_id", "") or "").strip()
         root = self.board_tasks.get(root_id, task) if root_id else task
         if normalize_mode(getattr(root, "finalization_mode", "legacy")) == "legacy":
-            return {}
+            # Policy removal must retract the compact projection immediately;
+            # otherwise a legacy card keeps a stale Reviewing/Ready badge.
+            if getattr(root, "finalization_status", {}):
+                root.finalization_status = {}
+                root.updated_at = datetime.now(timezone.utc).isoformat()
+                self._emit("task_upsert", **asdict(root))
+                self._db_save_task(root)
+            return {"eligible": True, "mode": "legacy", "stage": "legacy",
+                    "boundary": "", "missing_gates": [], "explanations": []}
         before = dict(getattr(root, "finalization_status", {}) or {})
         result = self._sync_finalization_projection(root)
         if root is not task or before != root.finalization_status:
@@ -769,10 +792,14 @@ class BoardMutationMixin:
             "finalization_mode", "required_review_gates", "finalization_boundary",
         }
         policy_update = bool(policy_fields & set(fields))
+        # Root ownership is part of the candidate transaction.  Checking the
+        # persisted child first would let one atomic request replace its valid
+        # root with ``self``/an unknown root, add a policy, and enter Done
+        # without any evaluation or audit.
         candidate_done_check = (
-            self._is_finalization_root(task)
-            and policy_update
-            and new_lane == "Done"
+            new_lane == "Done"
+            and (policy_update or "pipeline_root_id" in fields)
+            and self._is_candidate_finalization_root(task, fields)
         )
         candidate_result = None
         if candidate_done_check:
