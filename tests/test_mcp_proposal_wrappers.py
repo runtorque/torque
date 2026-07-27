@@ -479,8 +479,10 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             agent_id=self.torqly.id,
         )
         no_route_text = self._error_text(no_route)
-        self.assertNotIn("Unknown tool", no_route_text)
-        self.assertIn("route evidence", no_route_text)
+        self.assertEqual(
+            "Known tool is not authorized: task_claim",
+            no_route_text,
+        )
         self.assertEqual("", unrouted.assigned_architect_id)
         self.assertEqual({}, unrouted.completion_evidence)
         self.assertEqual([], unrouted.messages)
@@ -498,8 +500,10 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             agent_id=self.torqly.id,
         )
         wrong_group_text = self._error_text(wrong_group_denied)
-        self.assertNotIn("Unknown tool", wrong_group_text)
-        self.assertEqual("Task not found", wrong_group_text)
+        self.assertEqual(
+            "Known tool is not authorized: task_claim",
+            wrong_group_text,
+        )
         self.assertEqual("", wrong_group.assigned_architect_id)
         self.assertEqual({}, wrong_group.completion_evidence)
 
@@ -515,8 +519,10 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             agent_id=self.torqly.id,
         )
         ineligible_text = self._error_text(ineligible_denied)
-        self.assertNotIn("Unknown tool", ineligible_text)
-        self.assertIn("not a product-proposal", ineligible_text)
+        self.assertEqual(
+            "Known tool is not authorized: task_claim",
+            ineligible_text,
+        )
         self.assertEqual("", ineligible.assigned_architect_id)
         self.assertEqual({}, ineligible.completion_evidence)
 
@@ -556,7 +562,10 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             req_id=24,
             agent_id=self.torqly.id,
         )
-        self.assertIn("already assigned", self._error_text(claimed))
+        self.assertEqual(
+            "Known tool is not authorized: task_claim",
+            self._error_text(claimed),
+        )
         self.assertEqual(self.peer.id, self.state.board_tasks[claimed_id].assigned_architect_id)
 
     async def test_frozen_default_architect_claim_rejects_invalid_route_evidence_without_mutation(self):
@@ -597,8 +606,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         )
 
         text = self._error_text(denied)
-        self.assertNotIn("Unknown tool", text)
-        self.assertIn("route evidence", text)
+        self.assertEqual("Known tool is not authorized: task_claim", text)
         self.assertEqual(before_assignment, task.assigned_architect_id)
         self.assertEqual(before_evidence, task.completion_evidence)
         self.assertEqual(before_messages, task.messages)
@@ -696,7 +704,10 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             req_id=41,
             agent_id=self.torqly.id,
         )
-        self.assertIn("not created by this architect", self._error_text(denied))
+        self.assertEqual(
+            "Known tool is not authorized: task_mark_covered",
+            self._error_text(denied),
+        )
         self.assertEqual(before_evidence, other_owned.completion_evidence)
         self.assertEqual("Backlog", other_owned.lane)
 

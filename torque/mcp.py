@@ -1121,40 +1121,24 @@ def _classify_public_tool_call(
     """
 
     requested = str(requested_tool_name or "").strip()
+    tool_name, translated_arguments = _resolve_public_tool_call(
+        state,
+        cell_id,
+        requested,
+        arguments,
+    )
     caller_cell = (
         state.agents.get(str(cell_id or "").strip()) if cell_id else None
     )
     caller_kind = str(
         getattr(caller_cell, "kind", "") or ""
     ).strip() if caller_cell else ""
-    visible_names = {
-        str(tool.get("name", "") or "").strip()
-        for tool in _visible_tools(state, cell_id)
-    }
     projected_canonical_name = (
         requested == canonical_tool_name(requested)
-        and requested in visible_names
-    )
-
-    # Public transport accepts only exact canonical names that this caller's
-    # catalog projects.  Raw handler names and retired aliases remain
-    # available to internal compatibility callers through
-    # ``_resolve_public_tool_call``, but must never become an unadvertised
-    # public dispatch path merely because their handler is authorized.
-    if not projected_canonical_name:
-        return (
-            _PUBLIC_TOOL_CALL_UNKNOWN,
-            "",
-            dict(arguments or {}),
-            caller_cell,
-            caller_kind,
-        )
-
-    tool_name, translated_arguments = _resolve_public_tool_call(
-        state,
-        cell_id,
-        requested,
-        arguments,
+        and requested in {
+            str(tool.get("name", "") or "").strip()
+            for tool in _visible_tools(state, cell_id)
+        }
     )
 
     # An unresolved call or a missing handler is never a public operation.
@@ -1441,6 +1425,77 @@ def _scoped_resource_relationship(state, caller_cell, resource_kind: str, resour
     return _record_target_scope(state, caller_cell, resource)
 
 
+def _handler_scoped_target_scope(
+    state,
+    tool_name: str,
+    arguments: dict,
+    caller_cell,
+    requirement,
+    target,
+) -> str:
+    """Return the frozen ACL scope for a declared handler-scoped target.
+
+    A small number of Architect handlers have a deliberately narrow,
+    evidence-backed exception to normal task ownership.  Reuse that
+    side-effect-free authorization predicate at the transport boundary so a
+    valid routed product-proposal call remains authorized, while every other
+    nonempty target is denied before its handler can disclose it.
+    """
+
+    scope = _scoped_resource_relationship(
+        state,
+        caller_cell,
+        requirement.target_kind,
+        target,
+    )
+    if (
+        not requirement.handler_scoped
+        or requirement.target_kind != "task"
+        or str(getattr(caller_cell, "kind", "") or "").strip() != "architect"
+    ):
+        return scope
+
+    caller_id = str(getattr(caller_cell, "id", "") or "").strip()
+    if not caller_id:
+        return scope
+    # Keep this exception tied to the exact legacy handlers whose documented
+    # contract permits a routed product proposal owned by another architect.
+    # The predicates inspect persisted route evidence only; they do not
+    # mutate state or dispatch a handler.
+    if tool_name == "architect_task_pickup":
+        from .mcp_scoped.proposals import (
+            _routed_product_proposal_root_pickup_authorization,
+        )
+
+        authorization, _error = (
+            _routed_product_proposal_root_pickup_authorization(
+                state,
+                caller_id,
+                target,
+            )
+        )
+        return "self" if authorization else scope
+    if tool_name == "architect_task_mark_covered":
+        from .mcp_scoped.proposals import (
+            _routed_product_root_coverage_authorization,
+        )
+
+        covering_ref = str(
+            arguments.get("covering_task", "")
+            or arguments.get("covering_task_id", "")
+            or ""
+        ).strip()
+        covering_id = resolve_mcp_task(state, covering_ref) if covering_ref else ""
+        authorization, _error = _routed_product_root_coverage_authorization(
+            state,
+            caller_id,
+            target,
+            covering_id,
+        )
+        return "self" if authorization else scope
+    return scope
+
+
 def _tool_argument_scope_denied(
     state,
     tool_name: str,
@@ -1498,10 +1553,12 @@ def _tool_argument_scope_denied(
                 target_ref,
             )
             target_scope = (
-                _scoped_resource_relationship(
+                _handler_scoped_target_scope(
                     state,
+                    tool_name,
+                    arguments,
                     caller_cell,
-                    requirement.target_kind,
+                    requirement,
                     target,
                 )
                 if target is not None

@@ -237,6 +237,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                 "acl_mode": "allow",
                 "capabilities": {
                     "task.read": "self",
+                    "task.update": "self",
                     "task.mark_covered": "self",
                     "task.reassign": "children",
                 },
@@ -311,7 +312,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             tool["name"] for tool in listed.payload["result"]["tools"]
         }
         self.assertTrue(
-            {"task_get", "task_mark_covered", "task_reassign"}
+            {"task_get", "task_claim", "task_mark_covered", "task_reassign"}
             <= restricted_names
         )
         self.assertIn("task_coverage_reconcile", restricted_names)
@@ -328,6 +329,36 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             "missing-covering",
             "task_mark_covered",
             {"task": own_task.id, "covering_task": "TORQUE:missing-covering"},
+        )
+        peer_primary_covered = await call(
+            "peer-primary-covered",
+            "task_mark_covered",
+            {"task": peer_task.id, "covering_task": own_task.id},
+        )
+        missing_primary_covered = await call(
+            "missing-primary-covered",
+            "task_mark_covered",
+            {"task": "TORQUE:missing-primary", "covering_task": own_task.id},
+        )
+        peer_claim = await call(
+            "peer-claim",
+            "task_claim",
+            {"task": peer_task.id},
+        )
+        missing_claim = await call(
+            "missing-claim",
+            "task_claim",
+            {"task": "TORQUE:missing-claim"},
+        )
+        coverage_peer_second = await call(
+            "coverage-peer-second",
+            "task_coverage_reconcile",
+            {"task_ids": [own_task.id, peer_task.id]},
+        )
+        coverage_missing_first = await call(
+            "coverage-missing-first",
+            "task_coverage_reconcile",
+            {"task_ids": ["TORQUE:missing-coverage", own_task.id]},
         )
         missing_first_target = await call(
             "missing-first-target",
@@ -353,12 +384,30 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         missing_task_text = error_text(missing_task)
         unfrozen_missing_task_text = error_text(unfrozen_missing_task)
         missing_covering_text = error_text(missing_covering)
+        peer_primary_covered_text = error_text(peer_primary_covered)
+        missing_primary_covered_text = error_text(missing_primary_covered)
+        peer_claim_text = error_text(peer_claim)
+        missing_claim_text = error_text(missing_claim)
+        coverage_peer_second_text = error_text(coverage_peer_second)
+        coverage_missing_first_text = error_text(coverage_missing_first)
         missing_first_text = error_text(missing_first_target)
         missing_second_text = error_text(missing_second_target)
         self.assertEqual(expected["task_get"], peer_text)
         self.assertEqual(peer_text, missing_task_text)
         self.assertEqual(peer_text, unfrozen_missing_task_text)
         self.assertEqual(expected["task_mark_covered"], missing_covering_text)
+        self.assertEqual(missing_covering_text, peer_primary_covered_text)
+        self.assertEqual(peer_primary_covered_text, missing_primary_covered_text)
+        self.assertEqual(
+            "Known tool is not authorized: task_claim",
+            peer_claim_text,
+        )
+        self.assertEqual(peer_claim_text, missing_claim_text)
+        self.assertEqual(
+            "Known tool is not authorized: task_coverage_reconcile",
+            coverage_peer_second_text,
+        )
+        self.assertEqual(coverage_peer_second_text, coverage_missing_first_text)
         self.assertEqual(expected["task_reassign"], missing_first_text)
         self.assertEqual(missing_first_text, missing_second_text)
         self.assertEqual([], calls)
