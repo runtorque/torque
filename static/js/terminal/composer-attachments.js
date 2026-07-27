@@ -320,6 +320,7 @@ function _terminalComposePayloadText(cellId, displayText) {
 function _terminalComposeInsertAttachments(input, entries) {
   if (!input || !entries || !entries.length) return;
   var cellId = input.dataset ? (input.dataset.cellId || '') : '';
+  _terminalComposeHistoryPrepare(input, 'attachment');
   var value = _terminalComposeInputText(input);
   var selection = _terminalComposeSelectionOffsets(input);
   var start = selection.start;
@@ -328,13 +329,20 @@ function _terminalComposeInsertAttachments(input, entries) {
   end = Math.max(start, Math.min(value.length, end));
   if (end > start) _terminalComposeSetInputText(input, value.slice(0, start) + value.slice(end));
   if (cellId) _terminalComposeDrafts[cellId] = _terminalComposeInputText(input);
-  _terminalComposeRegisterAttachmentEntries(
+  var registered = _terminalComposeRegisterAttachmentEntries(
     cellId,
     entries,
     _terminalComposeInputText(input),
     start
   );
+  var stateForCell = cellId ? _terminalComposeAttachments[cellId] : null;
+  if (stateForCell && registered.length) {
+    stateForCell.pending_render_tokens = Object.create(null);
+    registered.forEach(function(entry) { stateForCell.pending_render_tokens[entry.token] = true; });
+  }
   var cursor = start;
+  // Render before syncing the semantic draft: a browser then exposes the new
+  // zero-width chips to DOM traversal instead of pruning them as unseen.
   _terminalComposeRenderRichInput(input, { preserveSelection: false });
   if (_terminalComposeIsRichInput(input)) {
     _terminalComposeSetRichSelection(input, cursor, cursor, 'none', { afterAttachments: true });
@@ -345,6 +353,10 @@ function _terminalComposeInsertAttachments(input, entries) {
     input.selectionEnd = cursor;
   }
   terminalComposeInput(input);
+  // Generic UI/input updates can read the draft more than once. Retain the
+  // registration grace until all of those reads complete, then return normal
+  // DOM-driven deletion semantics.
+  if (stateForCell) delete stateForCell.pending_render_tokens;
   if (typeof input.focus === 'function') input.focus();
 }
 
@@ -352,13 +364,14 @@ function _terminalComposeRemoveAttachment(cellId, token) {
   const id = String(cellId || '');
   const stateForCell = id ? _terminalComposeAttachments[id] : null;
   if (!stateForCell || !Array.isArray(stateForCell.entries)) return false;
+  const input = document.getElementById ? document.getElementById(_terminalComposeInputId(id)) : null;
+  _terminalComposeHistoryPrepare(input, 'attachment');
   const needle = String(token || '');
   let removed = false;
   let removedPosition = 0;
   stateForCell.entries = stateForCell.entries.filter(function(entry) {
     if (!entry || String(entry.token || '') !== needle) return true;
     removedPosition = Math.max(0, Number(entry.position) || 0);
-    _terminalComposeRevokePreviewUrl(_terminalComposeAttachmentPreviewUrl(entry));
     removed = true;
     return false;
   });
@@ -366,8 +379,8 @@ function _terminalComposeRemoveAttachment(cellId, token) {
   if (_terminalComposeSelectedAttachmentByCell[id] === needle) {
     delete _terminalComposeSelectedAttachmentByCell[id];
   }
+  if (input) _terminalComposeHistoryCommit(input, 'attachment');
   _terminalComposeRefreshAttachmentChips(id);
-  const input = document.getElementById ? document.getElementById(_terminalComposeInputId(id)) : null;
   if (input) {
     _terminalComposeRenderRichInput(input, { preserveSelection: false });
     if (_terminalComposeIsRichInput(input)) {
