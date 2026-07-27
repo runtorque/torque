@@ -3802,6 +3802,7 @@ async def main(connection=None):
 
     async def _on_agent_session_end(cell):
         """Handle agent turn completion: auto-checkpoint."""
+        agent_launch.retire_user_direct_turn(cell)
         state.history_snapshot_tokens(cell)
         # Auto-checkpoint
         if cell.worktree_path and cell.cell_type == "agent":

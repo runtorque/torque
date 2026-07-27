@@ -7606,12 +7606,17 @@ class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 {"settled_submit": True},
             )],
         )
-    async def test_cancel_user_direct_turn_cancels_queued_prompt_without_delivery(self):
+    async def test_cancel_user_direct_turn_preserves_three_prompt_queue_order(self):
         state = self.state_mod.MatrixState()
+        entered = asyncio.Event()
+        release = asyncio.Event()
         sent = []
         class FakeBridge:
             async def send_text(self, session_id, payload, **kwargs):
-                sent.append((session_id, payload, kwargs))
+                sent.append(payload)
+                if payload == "first\r":
+                    entered.set()
+                    await release.wait()
         class FakeTemplateManager: pass
         service = self.server_agent_mod.AgentLaunchService(
             state=state, connection=None, bridge=FakeBridge(),
@@ -7619,13 +7624,20 @@ class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
         cell = self.state_mod.AgentCell(id="agent-1", name="agent", group="g",
             cell_type="agent", session_id="session-1", status="idle")
         state.agents[cell.id] = cell
-        task = await service.send_agent_prompt(cell, "queued", background=True,
-            delay=60, user_direct_message_id="msg-user")
+        first = await service.send_agent_prompt(cell, "first", background=True)
+        await entered.wait()
+        middle = await service.send_agent_prompt(cell, "second", background=True,
+            user_direct_message_id="msg-user")
+        third = await service.send_agent_prompt(cell, "third", background=True)
         result = await service.cancel_user_direct_turn(cell, message_id="msg-user",
             session_id="session-1")
         self.assertEqual(result["outcome"], "cancelled_queued")
-        self.assertTrue(task.cancelled())
-        self.assertEqual(sent, [])
+        await asyncio.sleep(0)
+        self.assertEqual(sent, ["first\r"])
+        release.set()
+        await asyncio.gather(first, middle, third)
+        self.assertEqual(sent, ["first\r", "third\r"])
+
 
     async def test_cancel_user_direct_turn_uses_verified_bridge_interrupt_only(self):
         state = self.state_mod.MatrixState()
@@ -7657,4 +7669,31 @@ class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
             message_id="msg-user", session_id="other"))["outcome"], "session_replaced")
         release.set()
         await task
+
+    async def test_completed_user_dm_cannot_interrupt_later_generic_turn(self):
+        state = self.state_mod.MatrixState()
+        interrupted = []
+        class FakeBridge:
+            async def send_text(self, session_id, payload, **kwargs):
+                return None
+            async def interrupt_active_turn(self, session_id):
+                interrupted.append(session_id)
+                return True
+        class FakeTemplateManager: pass
+        service = self.server_agent_mod.AgentLaunchService(
+            state=state, connection=None, bridge=FakeBridge(),
+            worktree_mgr=None, template_mgr=FakeTemplateManager())
+        cell = self.state_mod.AgentCell(id="agent-1", name="agent", group="g",
+            cell_type="agent", session_id="session-1", status="idle")
+        state.agents[cell.id] = cell
+        old = await service.send_agent_prompt(cell, "old", background=True,
+            user_direct_message_id="msg-old")
+        await old
+        self.assertTrue(old.done())
+        generic = await service.send_agent_prompt(cell, "later generic", background=True)
+        await generic
+        result = await service.cancel_user_direct_turn(cell, message_id="msg-old",
+            session_id="session-1")
+        self.assertEqual(result["outcome"], "no_active_turn")
+        self.assertEqual(interrupted, [])
 

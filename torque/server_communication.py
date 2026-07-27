@@ -548,6 +548,11 @@ async def _queue_user_direct_message_to_agent(
             reason="no_session",
             emit=emit,
         ) or row
+    # Esc may have cancelled this queued row while its predecessor drained.
+    # Never overwrite that durable outcome with a late delivery completion.
+    current = state.db.load_direct_message(message_id) if getattr(state, "db", None) else None
+    if str((current or {}).get("delivery_state", "")) == "cancelled":
+        return current
     return state.update_direct_message_delivery(
         message_id,
         "delivered",
