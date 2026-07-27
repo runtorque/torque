@@ -3557,6 +3557,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             kind='worker', session_id='session-1', status='idle',
             context_window={
                 'source': 'codex_transcript', 'model': 'gpt-5.4',
+                'session_id': 'session-secret', 'reasoning_output_tokens': 999,
                 'used_tokens': 147732, 'limit_tokens': 258400,
             },
             provider_usage={
@@ -3622,6 +3623,8 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('codex_transcript · gpt-5.4', row['message'])
         self.assertIn('Provider 5-hour: `0%` used', row['message'])
         self.assertIn('Provider 7-day: `42%` used', row['message'])
+        self.assertNotIn('session-secret', row['message'])
+        self.assertNotIn('999', row['message'])
         self.assertNotIn('99%', row['message'])
         self.assertEqual(len(state.direct_messages_by_agent[worker.id]), 1)
         self.assertNotIn(other.id, state.direct_messages_by_agent)
