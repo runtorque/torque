@@ -22055,19 +22055,21 @@ test('renderAgentCell status dot follows running/idle/error status for awareness
     status: 'running',
   });
   assert.match(runningHtml, /class="cell-status working"/);
-  assert.match(runningHtml, /title="Worker Status \(running\)"/);
+  assert.match(runningHtml, /title="Worker Status \(running\) — working/);
 
   const idleHtml = context.renderAgentCell({
     ...baseAgent,
     status: 'idle',
   });
   assert.match(idleHtml, /class="cell-status idle"/);
+  assert.match(idleHtml, /cell-worker-activity" title="idle">idle<\/div>/);
 
   const errorHtml = context.renderAgentCell({
     ...baseAgent,
     status: 'error',
   });
   assert.match(errorHtml, /class="cell-status disconnected"/);
+  assert.match(errorHtml, /cell-worker-activity" title="error">error<\/div>/);
 });
 
 test('renderAgentCell clears green dot for idle Session ended awareness agent', () => {
@@ -22091,7 +22093,8 @@ test('renderAgentCell clears green dot for idle Session ended awareness agent', 
 
   assert.match(html, /class="cell-status idle"/);
   assert.doesNotMatch(html, /class="cell-status working"/);
-  assert.match(html, /Session ended/);
+  assert.match(html, /cell-worker-activity" title="idle">idle<\/div>/);
+  assert.doesNotMatch(html, /Session ended/);
 });
 
 test('Codex running-to-idle delta suppresses stale activity across grid and canvas cards', () => {
@@ -22151,8 +22154,10 @@ test('Codex running-to-idle delta suppresses stale activity across grid and canv
     'the regression must cover a stale transient activity value');
   assert.match(grid, /class="cell-status idle"/);
   assert.doesNotMatch(grid, /class="cell-status working"/);
-  assert.match(grid, /title="Codex Worker \(idle\) — Thinking"/,
-    'the hover tooltip and dot use the same authoritative idle lifecycle state');
+  assert.match(grid, /title="Codex Worker \(idle\) — idle"/,
+    'the hover tooltip, action copy, and dot use the same authoritative idle lifecycle state');
+  assert.doesNotMatch(grid, /Thinking|Running: git status/,
+    'idle cards must not present a stale adapter detail as current work');
   assert.match(canvas, /canvas-card-worker is-idle/);
   assert.doesNotMatch(canvas, /canvas-card-worker is-running/);
 
@@ -22176,6 +22181,68 @@ test('Codex running-to-idle delta suppresses stale activity across grid and canv
     op: 'agent_upsert', id: 'codex-worker', status: 'idle', activity: '', activity_detail: '',
   }]);
   assert.equal(runInContext(context, `agentStatusClass(state.agents['codex-worker'])`), 'idle');
+});
+
+test('canvas status class and copy honor dismissed and attention lifecycle precedence', () => {
+  const { context } = createMainRenderHarness();
+  loadScript(context, 'static/js/canvas.js');
+  context.state.children = {};
+  context.state.board_tasks = {};
+
+  const staleJournal = {
+    status: 'running',
+    activity: 'tool_call',
+    activity_detail: 'Using mcp__torque__journal_write',
+    mcp_messages: [{
+      action: 'tool_start',
+      tool_name: 'mcp__torque__journal_write',
+      timestamp: Date.now() / 1000,
+    }],
+  };
+  for (const kind of ['engineer', 'architect']) {
+    const dismissed = Object.assign({
+      id: 'canvas-dismissed-' + kind,
+      name: 'Canvas dismissed ' + kind,
+      kind,
+      group: 'alpha',
+      cell_type: 'agent',
+      dismissed_at: 1,
+    }, staleJournal);
+    assert.equal(context._canvasStatusClass(dismissed).split(' ')[0], 'is-stopped',
+      kind + ' dismissal must override its persisted running status for the canvas dot');
+    assert.equal(context._canvasStatusLine(dismissed), 'dismissed',
+      kind + ' dismissal must override stale activity_detail for the canvas status row');
+    const html = kind === 'engineer'
+      ? context._canvasRenderEngineerCard(dismissed)
+      : context._canvasRenderArchitectCard(dismissed);
+    assert.match(html, /canvas-card[^\"]* is-stopped/);
+    assert.match(html, /canvas-card-status-line" title="dismissed">dismissed<\/div>/);
+    assert.doesNotMatch(html, /Journaling|journal_write|Using mcp__/);
+  }
+
+  const attention = Object.assign({
+    id: 'canvas-attention',
+    name: 'Canvas attention',
+    kind: 'worker',
+    group: 'alpha',
+    cell_type: 'agent',
+    needs_attention: true,
+    error_message: 'Needs operator input',
+  }, staleJournal);
+  assert.equal(context._canvasStatusClass(attention).split(' ')[0], 'is-error',
+    'canvas attention uses its established red error/attention class before raw activity');
+  assert.equal(context._canvasStatusLine(attention), 'needs attention');
+  const attentionHtml = context._canvasRenderWorkerCard(attention);
+  assert.match(attentionHtml, /canvas-card[^\"]* is-error/);
+  assert.match(attentionHtml, /canvas-card-status-line" title="needs attention">needs attention<\/div>/);
+  assert.doesNotMatch(attentionHtml, /Journaling|journal_write|Using mcp__/);
+
+  const running = Object.assign({
+    id: 'canvas-running', name: 'Canvas running', kind: 'worker', group: 'alpha', cell_type: 'agent',
+  }, staleJournal);
+  assert.equal(context._canvasStatusClass(running).split(' ')[0], 'is-running');
+  assert.equal(context._canvasStatusLine(running), 'Using mcp__torque__journal_write',
+    'genuinely running, non-attention agents retain legitimate adapter detail');
 });
 
 test('agent status precedence preserves lifecycle, attention, dismissal, and legacy activity fallback', () => {
@@ -27013,7 +27080,8 @@ test('embedded runtime reuses the shared group, cell, and terminal UI', () => {
   assert.doesNotMatch(main.innerHTML, /group-hdr|group-toggle|group-body-inner/);
   assert.doesNotMatch(main.innerHTML, /sidebar-group/);
   assert.match(main.innerHTML, /Runner/);
-  assert.match(main.innerHTML, /Reviewing patch/);
+  assert.match(main.innerHTML, /cell-engineer-activity" title="idle">idle<\/div>/);
+  assert.doesNotMatch(main.innerHTML, /Reviewing patch/);
   assert.match(main.innerHTML, /Runner terminals/);
   assert.match(main.innerHTML, /Shell Child/);
   assert.match(main.innerHTML, /Shell Root/);
@@ -28339,7 +28407,8 @@ test('agents-grid v1.6 uses one-line metrics, action threshold labels, empty-row
   assert.doesNotMatch(main.innerHTML, /engineer-row-empty-rail/);
   assert.match(main.innerHTML, /data-drag-id="eng-empty"[\s\S]*cell-engineer-workers[\s\S]*0 workers/);
   assert.match(main.innerHTML, /data-drag-id="eng-empty"[\s\S]*cell-engineer-queue">queue: 0/);
-  assert.match(main.innerHTML, /data-drag-id="eng-empty"[\s\S]*cell-engineer-activity[^>]*>queue_empty \(1m\)/);
+  assert.match(main.innerHTML, /data-drag-id="eng-empty"[\s\S]*cell-engineer-activity[^>]*>idle/,
+    'an explicit idle lifecycle must hide stale heartbeat/event history from the current action slot');
   assert.match(main.innerHTML, /data-drag-id="eng-full"[\s\S]*cell-engineer-workers[\s\S]*1 worker/);
   assert.doesNotMatch(main.innerHTML, /agent-card-state-(?:mix|dot|more)/);
   assert.match(main.innerHTML, /data-drag-id="eng-full"[\s\S]*cell-engineer-queue">queue: 0/);
@@ -28382,6 +28451,10 @@ test('agent card humanizes MCP tool activity labels without exposing raw ids', (
     ['mcp__torque__engineer_task_dispatch', 'Dispatching'],
     ['mcp__torque__engineer_merge', 'Merging'],
     ['mcp__torque__architect_journal', 'Journaling'],
+    ['mcp__torque__journal_write', 'Journaling'],
+    ['mcp__torque__torque_journal_write', 'Journaling'],
+    ['mcp__torque__engineer_journal_write', 'Journaling'],
+    ['mcp__torque__architect_journal_write', 'Journaling'],
     ['mcp__torque__architect_message_engineer', 'Messaging engineer'],
     ['mcp__claude-in-chrome__navigate', 'Navigating'],
     ['mcp__random-server__some_new_tool', 'Some new tool'],
@@ -28425,6 +28498,100 @@ test('agent card humanizes MCP tool activity labels without exposing raw ids', (
 
   assert.match(rawToolHtml, /cell-worker-activity" title="Journaling">Journaling<\/div>/);
   assert.doesNotMatch(rawToolHtml, /cell-worker-activity[^>]*mcp__torque__architect_journal/);
+});
+
+test('agent card current action and tooltip honor lifecycle before stale MCP history across kinds', () => {
+  const { context, sandbox } = createMainRenderHarness();
+  sandbox.state.children = {};
+  sandbox.state.board_tasks = {};
+
+  const now = Date.now() / 1000;
+  const staleJournal = {
+    activity: 'tool_call',
+    activity_detail: 'Using mcp__torque__journal_write',
+    last_progress_at: now,
+    mcp_messages: [{
+      action: 'tool_start',
+      tool_name: 'mcp__torque__journal_write',
+      timestamp: now,
+    }],
+  };
+  const cardKinds = ['worker', 'engineer', 'architect', 'agent'];
+  for (const kind of cardKinds) {
+    const agent = Object.assign({
+      id: 'lifecycle-' + kind,
+      name: 'Lifecycle ' + kind,
+      kind,
+      group: 'alpha',
+      cell_type: 'agent',
+      agent_type: 'codex',
+      status: 'idle',
+    }, staleJournal);
+    const html = context.renderAgentCell(agent);
+    assert.match(html, /(?:cell-worker|cell-engineer|cell-architect|cell-generic)-activity" title="idle">idle<\/div>/,
+      kind + ' card must render explicit idle instead of the last MCP tool');
+    assert.match(html, new RegExp('title="Lifecycle ' + kind + ' \\(idle\\) — idle"'),
+      kind + ' card tooltip must use the same lifecycle-first copy');
+    assert.doesNotMatch(html, /Journaling|journal_write|Using mcp__/,
+      kind + ' card must not present durable MCP history as current work');
+  }
+
+  for (const status of ['stopped', 'error']) {
+    const html = context.renderAgentCell(Object.assign({
+      id: 'lifecycle-' + status,
+      name: 'Lifecycle ' + status,
+      kind: 'worker',
+      group: 'alpha',
+      cell_type: 'agent',
+      agent_type: 'codex',
+      status,
+    }, staleJournal));
+    assert.match(html, new RegExp('cell-worker-activity" title="' + status + '">' + status + '<\\/div>'));
+    assert.match(html, new RegExp('title="Lifecycle ' + status + ' \\(' + status + '\\) — ' + status + '"'));
+    assert.doesNotMatch(html, /Journaling|journal_write/);
+  }
+
+  const dismissed = context.renderAgentCell(Object.assign({
+    id: 'lifecycle-dismissed', name: 'Lifecycle dismissed', kind: 'engineer', group: 'alpha',
+    cell_type: 'agent', agent_type: 'codex', status: 'running', dismissed_at: 1,
+  }, staleJournal));
+  assert.match(dismissed, /cell-engineer-activity" title="dismissed">dismissed<\/div>/);
+  assert.match(dismissed, /title="Lifecycle dismissed \(dismissed\) — dismissed"/);
+  assert.doesNotMatch(dismissed, /Journaling|journal_write/);
+
+  const attention = context.renderAgentCell(Object.assign({
+    id: 'lifecycle-attention', name: 'Lifecycle attention', kind: 'worker', group: 'alpha',
+    cell_type: 'agent', agent_type: 'codex', status: 'idle', needs_attention: true,
+    error_message: 'Needs operator input',
+  }, staleJournal));
+  assert.match(attention, /class="cell-status attention"/,
+    'attention retains its established precedence over lifecycle/action presentation');
+  assert.match(attention, /cell-worker-activity" title="needs attention">needs attention<\/div>/);
+  assert.match(attention, /title="Lifecycle attention \(idle\) — Needs operator input"/);
+  assert.doesNotMatch(attention, /Journaling|journal_write/);
+
+  const running = context.renderAgentCell(Object.assign({
+    id: 'lifecycle-running', name: 'Lifecycle running', kind: 'worker', group: 'alpha',
+    cell_type: 'agent', agent_type: 'codex', status: 'running',
+  }, staleJournal));
+  assert.match(running, /cell-worker-activity" title="Journaling">Journaling<\/div>/,
+    'a genuinely running agent continues to show its active canonical MCP tool');
+  assert.match(running, /title="Lifecycle running \(running\) — Journaling"/);
+
+  const legacy = context.renderAgentCell(Object.assign({
+    id: 'lifecycle-legacy', name: 'Lifecycle legacy', kind: 'worker', group: 'alpha',
+    cell_type: 'agent', agent_type: 'codex', status: 'unknown-legacy-status',
+  }, staleJournal));
+  assert.match(legacy, /cell-worker-activity" title="Journaling">Journaling<\/div>/,
+    'missing or unusable lifecycle status retains the documented activity fallback');
+
+  runInContext(context, `_embeddedRuntimeEnabled = function() { return true; };`);
+  const generic = Object.assign({
+    id: 'lifecycle-generic-subtitle', name: 'Lifecycle generic subtitle', kind: 'agent', group: 'alpha',
+    cell_type: 'agent', agent_type: 'codex', status: 'idle', current_path: '/tmp/truthful-idle',
+  }, staleJournal);
+  assert.equal(context._agentCellSubtitle(generic), '/tmp/truthful-idle',
+    'generic cards must not place stale activity_detail in their separate subtitle slot');
 });
 
 test('classic runtime keeps the shared left rail filtered to the current window', () => {

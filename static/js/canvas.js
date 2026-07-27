@@ -352,9 +352,17 @@ function _canvasRenderLooseWorkersBar(workers) {
 }
 
 function _canvasStatusClass(cell) {
-  const status = String(cell && cell.status || '').toLowerCase();
+  // The grid's lifecycle helper knows about persisted dismissals, whose raw
+  // status can remain "running".  Canvas must use that same authority before
+  // deciding the dot color/class.
+  const lifecycle = typeof _agentCardExplicitLifecycleStatus === 'function'
+    ? _agentCardExplicitLifecycleStatus(cell) : '';
+  const status = lifecycle || String(cell && cell.status || '').toLowerCase();
   const classes = [];
-  if (status === 'error') classes.push('is-error');
+  // Canvas has no separate attention color class; is-error is its existing
+  // red/attention presentation and mirrors the grid's attention precedence.
+  if (cell && cell.needs_attention) classes.push('is-error');
+  else if (status === 'error') classes.push('is-error');
   else if (status === 'stopped' || status === 'dismissed') classes.push('is-stopped');
   else if (status === 'running') classes.push('is-running');
   else if (status === 'idle') classes.push('is-idle');
@@ -374,6 +382,14 @@ function _canvasStatusClass(cell) {
 
 function _canvasActivityDetail(cell) {
   if (!cell) return '';
+  // Keep the canvas auxiliary detail aligned with the shared card lifecycle
+  // rule.  A completed MCP call can outlive the running turn in activity_detail.
+  const lifecycle = typeof _agentCardExplicitLifecycleStatus === 'function'
+    ? _agentCardExplicitLifecycleStatus(cell) : '';
+  if (cell.needs_attention || (lifecycle && lifecycle !== 'running')) {
+    return typeof _agentCardCurrentOrLastActionLabel === 'function'
+      ? _agentCardCurrentOrLastActionLabel(cell) : (lifecycle || 'needs attention');
+  }
   const detail = String(cell.activity_detail || '').trim();
   if (detail) return detail;
   if (typeof _agentCardCurrentOrLastActionLabel === 'function') {
@@ -393,26 +409,31 @@ function _canvasActivityDetail(cell) {
  * activity_detail as-is for the running case.
  *
  *   running + activity_detail  -> '<detail>'          (adapter-prefixed)
- *   stopped / dismissed        -> 'stopped'
- *   error                      -> 'Error: <msg>'
- *   idle + recent action label -> '<label> (Nm)'      (past-event helper)
+ *   stopped / dismissed        -> lifecycle label
+ *   attention / error          -> shared lifecycle/action label
+ *   idle                       -> 'idle' (never stale recent history)
  *   running, no detail         -> 'Working'
  *   nothing                    -> 'idle'
  */
 function _canvasStatusLine(cell) {
   if (!cell) return 'idle';
-  const status = String(cell.status || '').toLowerCase();
+  const lifecycle = typeof _agentCardExplicitLifecycleStatus === 'function'
+    ? _agentCardExplicitLifecycleStatus(cell) : '';
+  const status = lifecycle || String(cell.status || '').toLowerCase();
+  const actionLabel = typeof _agentCardCurrentOrLastActionLabel === 'function'
+    ? _agentCardCurrentOrLastActionLabel(cell) : '';
+
+  // Attention and explicit non-running lifecycle states must be rendered
+  // before raw adapter detail.  In particular, dismissals intentionally keep
+  // their persisted status until cleanup, so status alone is not sufficient.
+  if (cell.needs_attention || (lifecycle && lifecycle !== 'running')) {
+    return actionLabel || lifecycle || 'needs attention';
+  }
   if (status === 'stopped' || status === 'dismissed') return 'stopped';
-  if (status === 'error') {
-    const err = String(cell.error_message || '').trim();
-    return err ? 'Error: ' + err : 'Error';
-  }
-  const liveDetail = String(cell.activity_detail || '').trim();
+  if (status === 'error') return actionLabel || 'error';
+  const liveDetail = _canvasActivityDetail(cell);
   if (status === 'running' && liveDetail) return liveDetail;
-  if (typeof _agentCardCurrentOrLastActionLabel === 'function') {
-    const a = _agentCardCurrentOrLastActionLabel(cell);
-    if (a) return a;
-  }
+  if (actionLabel) return actionLabel;
   if (status === 'running') return 'Working';
   return 'idle';
 }

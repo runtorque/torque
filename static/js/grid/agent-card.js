@@ -174,6 +174,10 @@ var _AGENT_CARD_TOOL_LABELS = {
   engineer_agent_close: 'Closing agent',
 
   journal: 'Journaling',
+  // journal_write is the canonical public write tool.  Keep the more
+  // specific journal/read aliases below intact; friendly server/role prefixes
+  // are stripped by _humanizeBareToolLabel before this lookup.
+  journal_write: 'Journaling',
   journal_read: 'Reading journal',
   task_dispatch: 'Dispatching',
   batch_dispatch: 'Dispatching batch',
@@ -642,6 +646,36 @@ function _agentCardFallbackActionText(agent) {
   return 'idle';
 }
 
+/*
+ * Lifecycle status is the authoritative answer to whether an action is
+ * current.  Activity detail and MCP messages are durable-ish recent history:
+ * adapters can leave either behind after their lifecycle transition.  Do not
+ * let them turn an explicitly idle or stopped card back into a present-tense
+ * tool call.  Unknown/legacy statuses deliberately return an empty value so
+ * the established activity fallback remains available to old providers.
+ */
+function _agentCardExplicitLifecycleStatus(agent) {
+  if (!agent) return '';
+  const dismissed = typeof _isLifecycleDismissedAgent === 'function'
+    ? _isLifecycleDismissedAgent(agent)
+    : (String(agent.status || '').trim().toLowerCase() === 'dismissed');
+  if (dismissed) return 'dismissed';
+  const status = String(agent.status || '').trim().toLowerCase();
+  return /^(running|idle|stopped|error|dismissed)$/.test(status) ? status : '';
+}
+
+function _agentCardLifecycleActionLabel(agent) {
+  if (!agent) return '';
+  // Match the status dot's attention-first precedence before consulting the
+  // lifecycle status itself.
+  if (agent.needs_attention) return 'needs attention';
+  const status = _agentCardExplicitLifecycleStatus(agent);
+  if (status === 'idle' || status === 'stopped' || status === 'dismissed' || status === 'error') {
+    return status;
+  }
+  return '';
+}
+
 function _agentCardActionCandidate(text, timestamp, priority) {
   const value = _humanizeToolLabel(text);
   if (!value) return null;
@@ -737,11 +771,9 @@ function _agentCardLastActionInfo(agent) {
 }
 
 function _agentCardCurrentOrLastActionLabel(agent) {
+  const lifecycleLabel = _agentCardLifecycleActionLabel(agent);
+  if (lifecycleLabel) return lifecycleLabel;
   const info = _agentCardLastActionInfo(agent);
-  // The status dot already conveys idle state — don't surface the literal
-  // "idle" text in the action line. Returning empty leaves the line slot in
-  // place (preserves uniform card height) but renders no content.
-  if (info.text === 'idle') return '';
   if (!info.timestamp) return info.text;
   const age = Math.max(0, Math.floor((Date.now() / 1000) - info.timestamp));
   if (age < 60) return info.text;
@@ -806,7 +838,11 @@ function _agentCellSubtitle(a) {
   const task = _getAgentTask(a.id);
   if (task && task.task) return task.task;
   if (!_embeddedRuntimeEnabled()) return '';
-  return a.activity_detail
+  // A generic card has no kind-specific activity field.  It must therefore
+  // observe the same lifecycle rule before placing stale detail in its task
+  // slot.
+  const lifecycle = _agentCardExplicitLifecycleStatus(a);
+  return (lifecycle === 'running' || !lifecycle ? a.activity_detail : '')
     || _formatDisplayPath(
       a.current_path || a.directory || '',
       a.git_root || a.worktree_repo_root || ''
@@ -969,10 +1005,12 @@ function renderAgentCell(a, options) {
   if (_isDismissed) cls.push('dismissed');
 
   const statusCls = _isDismissed ? 'dismissed' : agentStatusClass(a);
-  const titleParts = [a.name, `(${a.status})`];
+  const lifecycleStatus = _agentCardExplicitLifecycleStatus(a);
+  const actionLabel = _agentCardCurrentOrLastActionLabel(a);
+  const titleParts = [a.name, `(${lifecycleStatus || a.status})`];
   if (_isDismissed) titleParts.push('\u2014 dismissed');
   if (a.needs_attention && a.error_message) titleParts.push(`\u2014 ${a.error_message}`);
-  else if (a.activity_detail) titleParts.push(`\u2014 ${a.activity_detail}`);
+  else if (!_isDismissed && actionLabel) titleParts.push(`\u2014 ${actionLabel}`);
   const statusClasses = ['cell-status', statusCls];
   const statusAttrs = [];
   const showDoneFlourish = !!(doneFlourish && statusCls !== 'attention');
