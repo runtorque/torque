@@ -168,6 +168,18 @@ USER_DM_COMMANDS: tuple[UserDMCommand, ...] = (
         search="unwatch cancel task completion notify /unwatch",
     ),
     UserDMCommand(
+        id="usage",
+        label="/usage",
+        usage="/usage",
+        insert="/usage",
+        help="Show this agent's current context and provider quota without prompting it.",
+        aliases=("/usage",),
+        grammar="exact",
+        execution_mode="read_only_response",
+        safety="read_only_target_snapshot_no_prompt",
+        search="usage /usage context window provider quota limits reset",
+    ),
+    UserDMCommand(
         id="status",
         label="/status",
         usage="/status",

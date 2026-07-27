@@ -2014,6 +2014,8 @@ async def _handle_user_agent_message_command(data, state: MatrixState,
                 data, state, target, restart_agent),
             "status": lambda: _user_agent_read_only_command_response(
                 data, state, target, "status"),
+            "usage": lambda: _user_agent_read_only_command_response(
+                data, state, target, "usage"),
             "commands": lambda: _user_agent_read_only_command_response(
                 data, state, target, "commands"),
             "watch": lambda: _handle_task_watch_command(data, state, target, stripped_message, "watch"),
@@ -2026,7 +2028,7 @@ async def _handle_user_agent_message_command(data, state: MatrixState,
         handler = command_handlers.get(command.id)
         if handler and not (
             bool(data.get("_loop_delivery"))
-                and command.id in {"restart", "status", "commands", "watch", "watches", "unwatch", "remind", "remind-cancel", "reminders"}
+                and command.id in {"restart", "status", "usage", "commands", "watch", "watches", "unwatch", "remind", "remind-cancel", "reminders"}
         ):
             result = handler()
             if inspect.isawaitable(result):

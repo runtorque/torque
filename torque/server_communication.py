@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
 import re
 import time
 import uuid
@@ -737,6 +738,166 @@ def _user_dm_status_message(state: MatrixState, target, *, now: float | None = N
     return "\n".join(lines)
 
 
+def _user_dm_usage_number(value, *, positive: bool = False) -> int | None:
+    """Return a finite whole telemetry count without coercing malformed input."""
+    if isinstance(value, bool):
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(numeric) or numeric < 0 or not numeric.is_integer():
+        return None
+    result = int(numeric)
+    # A context window is necessarily bounded; this prevents hostile snapshots
+    # from creating an unbounded decimal rendering work item.
+    if result > 10 ** 12:
+        return None
+    return result if not positive or result > 0 else None
+
+
+def _user_dm_usage_label(value, *, source: bool = False) -> str:
+    """Keep optional snapshot labels bounded and free of markup/secrets."""
+    text = str(value or "").strip()
+    if not text or len(text) > 96:
+        return ""
+    if source:
+        # These are the only current operator-visible context sources.
+        return text if text in {"codex_transcript", "claude_statusline"} else ""
+    return text if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}", text) else ""
+
+
+def _user_dm_usage_reset_timestamp(value, *, now: float) -> float | None:
+    """Parse one bounded future reset time; stale/malformed values are absent."""
+    if isinstance(value, bool):
+        return None
+    timestamp = None
+    if isinstance(value, (int, float)):
+        numeric = float(value)
+        if math.isfinite(numeric) and numeric > 0:
+            timestamp = numeric / 1000 if numeric > 100_000_000_000 else numeric
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text or len(text) > 80:
+            return None
+        try:
+            numeric = float(text)
+        except (TypeError, ValueError, OverflowError):
+            numeric = None
+        if numeric is not None:
+            if math.isfinite(numeric) and numeric > 0:
+                timestamp = numeric / 1000 if numeric > 100_000_000_000 else numeric
+        else:
+            try:
+                if text.endswith("Z"):
+                    text = text[:-1] + "+00:00"
+                timestamp = datetime.fromisoformat(text).timestamp()
+            except (TypeError, ValueError, OverflowError):
+                return None
+    if timestamp is None or not math.isfinite(timestamp) or timestamp <= now:
+        return None
+    try:
+        datetime.fromtimestamp(timestamp, timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None
+    return timestamp
+
+
+def _user_dm_usage_reset_display(timestamp: float, *, now: float) -> str:
+    """Use a fixed UTC absolute time plus a compact future-relative label."""
+    seconds = max(0, int(math.ceil(timestamp - now)))
+    if seconds < 60:
+        relative = "in <1m"
+    elif seconds < 3600:
+        relative = f"in {int(math.ceil(seconds / 60))}m"
+    elif seconds < 86400:
+        relative = f"in {seconds // 3600}h" + (
+            f" {int(math.ceil((seconds % 3600) / 60))}m"
+            if seconds % 3600 else ""
+        )
+    else:
+        relative = f"in {seconds // 86400}d" + (
+            f" {seconds % 86400 // 3600}h"
+            if seconds % 86400 >= 3600 else ""
+        )
+    return datetime.fromtimestamp(timestamp, timezone.utc).strftime(
+        "%Y-%m-%d %H:%M UTC"
+    ) + f" ({relative})"
+
+
+def _user_dm_usage_context_line(target) -> tuple[str, bool]:
+    context = getattr(target, "context_window", None)
+    if not isinstance(context, dict) or not context:
+        return "- Context window: Not reported", False
+    used = _user_dm_usage_number(context.get("used_tokens"))
+    limit = _user_dm_usage_number(context.get("limit_tokens"), positive=True)
+    if used is None or limit is None:
+        return "- Context window: Unavailable", False
+    percent = (used / limit) * 100
+    if not math.isfinite(percent) or percent < 0:
+        return "- Context window: Unavailable", False
+    labels = [
+        _user_dm_usage_label(context.get("source"), source=True),
+        _user_dm_usage_label(context.get("model")),
+    ]
+    label = " · ".join(part for part in labels if part)
+    prefix = f"- Context window ({label})" if label else "- Context window"
+    return (
+        f"{prefix}: `{used:,}` / `{limit:,}` tokens "
+        f"({percent:.2f}% used)",
+        True,
+    )
+
+
+def _user_dm_usage_provider_line(target, *, window_id: str, label: str,
+                                 now: float) -> tuple[str, bool]:
+    usage = getattr(target, "provider_usage", None)
+    if not isinstance(usage, dict):
+        return f"- Provider {label}: Not reported", False
+    window = usage.get(window_id)
+    if not isinstance(window, dict):
+        return f"- Provider {label}: Not reported", False
+    if window.get("available") is not True:
+        return f"- Provider {label}: Unavailable", False
+    try:
+        percent = float(window.get("used_percentage"))
+    except (TypeError, ValueError, OverflowError):
+        percent = float("nan")
+    if not math.isfinite(percent) or percent < 0:
+        return f"- Provider {label}: Unavailable", False
+    # The provider-usage contract is a 0–100 integer percentage.  Preserve
+    # that contract for legacy/raw snapshots rather than exposing over-range
+    # provider payloads as a fabricated quota value.
+    percent = min(100.0, percent)
+    reset = _user_dm_usage_reset_timestamp(window.get("resets_at"), now=now)
+    if reset is None:
+        return f"- Provider {label}: Unavailable", False
+    return (
+        f"- Provider {label}: `{int(math.floor(percent + 0.5))}%` used · "
+        f"resets `{_user_dm_usage_reset_display(reset, now=now)}`",
+        True,
+    )
+
+
+def _user_dm_usage_message(target, *, now: float | None = None) -> str:
+    """Format only the exact target's current bounded usage snapshot."""
+    ts = float(now if now is not None else time.time())
+    lines = ["**Agent usage**"]
+    context_line, has_context = _user_dm_usage_context_line(target)
+    lines.append(context_line)
+    five_hour_line, has_five_hour = _user_dm_usage_provider_line(
+        target, window_id="five_hour", label="5-hour", now=ts,
+    )
+    lines.append(five_hour_line)
+    seven_day_line, has_seven_day = _user_dm_usage_provider_line(
+        target, window_id="seven_day", label="7-day", now=ts,
+    )
+    lines.append(seven_day_line)
+    if not (has_context or has_five_hour or has_seven_day):
+        lines.append("- No current usage is reported for this agent.")
+    return "\n".join(lines)
+
+
 def _user_dm_commands_message(target=None) -> str:
     """Render the authoritative command catalog in the same DM lane."""
     lines = ["**Supported direct-message commands**"]
@@ -863,6 +1024,8 @@ def _user_agent_read_only_command_response(
     content = (
         _user_dm_status_message(state, target)
         if command.id == "status"
+        else _user_dm_usage_message(target)
+        if command.id == "usage"
         else _user_dm_commands_message(target)
     )
     saved = _save_user_agent_system_audit_message(

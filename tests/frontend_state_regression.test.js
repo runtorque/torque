@@ -16069,6 +16069,7 @@ test('terminal compose slash command autocomplete filters and fills without send
     { id: 'watch', label: '/watch <task-id> [<task-id> ...]', usage: '/watch TORQUE:123 TORQUE:124', insert: '/watch ', help: 'Notify once when all named tasks are Done.', search: 'watch task completion notify done /watch' },
     { id: 'watches', label: '/watches', usage: '/watches', insert: '/watches', help: "List this agent's active task-completion watches.", search: 'watches active task completion notify /watches' },
     { id: 'unwatch', label: '/unwatch <watch-id|all>', usage: '/unwatch watch-abc123 or /unwatch all', insert: '/unwatch ', help: 'Cancel one active task-completion watch.', search: 'unwatch cancel task completion notify /unwatch' },
+    { id: 'usage', label: '/usage', usage: '/usage', insert: '/usage', help: "Show this agent's current context and provider quota without prompting it.", search: 'usage /usage context window provider quota limits reset' },
     { id: 'status', label: '/status', usage: '/status', insert: '/status', help: 'Show Torque status without prompting the agent.', search: 'status /status activity task attention loop worktree' },
     { id: 'commands', label: '/commands', usage: '/commands', insert: '/commands', help: 'List supported direct-message slash commands.', search: 'commands /commands help slash command catalog' },
   ];
@@ -16113,6 +16114,8 @@ test('terminal compose slash command autocomplete filters and fills without send
   assert.match(slashDropdown.innerHTML, /\/watch <task-id>/);
   assert.match(slashDropdown.innerHTML, /\/watches/);
   assert.match(slashDropdown.innerHTML, /\/unwatch <watch-id/);
+  assert.match(slashDropdown.innerHTML, /\/usage/);
+  assert.match(slashDropdown.innerHTML, /current context and provider quota/i);
   assert.match(slashDropdown.innerHTML, /\/status/);
   assert.match(slashDropdown.innerHTML, /\/commands/);
   assert.match(slashDropdown.innerHTML, /recurring user message/i);
@@ -16198,6 +16201,22 @@ test('terminal compose slash command autocomplete filters and fills without send
   assert.equal(input.value, '/loop every 10m ');
   assert.equal(input.selectionStart, input.value.length);
   assert.equal(input.selectionEnd, input.value.length);
+  assert.equal(sandbox.sendCalls.length, 0);
+
+  input.value = '/usage';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  context.terminalComposeInput(input);
+  assert.equal(slashDropdown.style.display, '');
+  assert.match(slashDropdown.innerHTML, /\/usage/);
+  const enterUsage = keyEvent('Enter');
+  context.__enterUsage = enterUsage;
+  runInContext(context, `terminalComposeKeydown(__enterUsage, 'agent-1');`);
+  assert.equal(enterUsage.preventDefaultCalled, true);
+  assert.equal(input.value, '/usage');
+  assert.equal(input.selectionStart, input.value.length);
+  assert.equal(input.selectionEnd, input.value.length);
+  assert.equal(input.focused, true);
   assert.equal(sandbox.sendCalls.length, 0);
 
   input.value = '/res';
