@@ -792,6 +792,16 @@ class BoardMutationMixin:
             "finalization_mode", "required_review_gates", "finalization_boundary",
         }
         policy_update = bool(policy_fields & set(fields))
+        # Projection ownership may change in the same mutation as policy
+        # removal (for example, when a former root is reparented).  Remember
+        # the transition against the task itself before resolving the
+        # post-update root, so a legacy card can never retain its old policy
+        # badge merely because it now points at another root.
+        retract_task_finalization_projection = (
+            "finalization_mode" in fields
+            and normalize_mode(getattr(task, "finalization_mode", "legacy")) != "legacy"
+            and normalize_mode(fields.get("finalization_mode")) == "legacy"
+        )
         # Root ownership is part of the candidate transaction.  Checking the
         # persisted child first would let one atomic request replace its valid
         # root with ``self``/an unknown root, add a policy, and enter Done
@@ -829,6 +839,8 @@ class BoardMutationMixin:
         for key, value in fields.items():
             if key in valid:
                 setattr(task, key, value)
+        if retract_task_finalization_projection:
+            task.finalization_status = {}
         if candidate_result is not None:
             # The candidate was accepted and is now the actual task.  Record
             # the successful Done admission after applying it so its audit and

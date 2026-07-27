@@ -220,6 +220,23 @@ class FinalizationDoneBypassRegressionTests(unittest.TestCase):
         self.assertEqual(root.finalization_mode, "legacy")
         self.assertEqual(root.finalization_status, {})
 
+    def test_policy_to_legacy_reparent_retracts_former_root_projection(self):
+        parent = self.state.board_add_task("Parent", "g", id="TORQUE:918")
+        root = self._ineligible_root("TORQUE:919")
+        self.assertEqual(root.finalization_status["mode"], "review_only")
+
+        self.state.board_update_task(
+            root.id,
+            pipeline_root_id=parent.id,
+            finalization_mode="legacy",
+            required_review_gates=[],
+            finalization_boundary={},
+        )
+
+        self.assertEqual(root.pipeline_root_id, parent.id)
+        self.assertEqual(root.finalization_mode, "legacy")
+        self.assertEqual(root.finalization_status, {})
+
     def test_state_update_cannot_combine_done_with_new_policy(self):
         root = self.state.board_add_task("Legacy root", "g", id="TORQUE:913")
         result = self.state.board_update_task(
