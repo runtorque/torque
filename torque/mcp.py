@@ -21,7 +21,7 @@ from . import __version__
 from .capability_catalog import (
     CAPABILITY_CATALOG,
 )
-from .agent_classes import is_frozen_product_manager_class
+from .agent_classes import has_frozen_platform_task_authority_mode
 from .mcp_authority import (
     EffectiveAuthority,
     AuthorityValidationError,
@@ -988,7 +988,7 @@ def _raw_tools_for_caller(state, cell_id: str) -> tuple[list[dict], object, str]
     # includes the four current-task reporters and derive.  These retain their
     # normal current-task semantics (and can therefore be inert when no task is
     # assigned); they are deliberately not inherited by other Architects.
-    if caller_kind == "architect" and is_frozen_product_manager_class(cell):
+    if caller_kind == "architect" and has_frozen_platform_task_authority_mode(cell, "creator-proposal-only"):
         product_manager_current_task_tools = {
             "torque_done",
             "torque_blocked",
@@ -1775,7 +1775,7 @@ async def dispatch_mcp_rpc_body(
                     first_tool_call_ts=first_tool_call_ts,
                 )
             if call_classification == _PUBLIC_TOOL_CALL_UNAUTHORIZED:
-                is_creator_proposal_mode = is_frozen_product_manager_class(caller_cell)
+                is_creator_proposal_mode = has_frozen_platform_task_authority_mode(caller_cell, "creator-proposal-only")
                 if is_creator_proposal_mode:
                     return (
                         _jsonrpc_error(

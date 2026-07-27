@@ -1,6 +1,6 @@
 """Domain dispatcher extracted from :mod:`torque.mcp_tools_shared`."""
 
-from torque.agent_classes import is_frozen_product_manager_class
+from torque.agent_classes import has_frozen_platform_task_authority_mode
 from torque.mcp_scoped.dispatch_context import ScopedDispatchContext, UNHANDLED
 from torque.mcp_scoped.dispatch_runtime import *  # noqa: F403
 
@@ -19,7 +19,7 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
     tool_name = normalize_tool_name(name, tool_prefix)
     is_creator_proposal_mode = (
         caller_kind == "architect"
-        and is_frozen_product_manager_class(_engineer_cell)
+        and has_frozen_platform_task_authority_mode(_engineer_cell, "creator-proposal-only")
     )
 
     def creator_task_allowed(task) -> bool:

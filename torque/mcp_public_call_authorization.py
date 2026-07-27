@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from .agent_classes import is_frozen_product_manager_class
+from .agent_classes import has_frozen_platform_task_authority_mode
 from .mcp_authority import SCOPE_RANK
 from .mcp_canonical import (
     canonical_tool_name,
@@ -248,7 +248,7 @@ def _task_target_scope(state, caller_cell, task) -> str:
     if not caller_cell or not task:
         return "global"
     caller_id = str(getattr(caller_cell, "id", "") or "").strip()
-    creator_proposal_mode = is_frozen_product_manager_class(caller_cell)
+    creator_proposal_mode = has_frozen_platform_task_authority_mode(caller_cell, "creator-proposal-only")
     # Creator-proposal authority is narrower than the normal Architect task
     # relationship: assignment is not ownership.  Do not let assignment or a
     # worker/Engineer relationship turn a peer-created task into ``self``.
@@ -483,7 +483,7 @@ def _handler_scoped_target_scope(
     caller_id = str(getattr(caller_cell, "id", "") or "").strip()
     if not caller_id:
         return scope
-    creator_proposal_mode = is_frozen_product_manager_class(caller_cell)
+    creator_proposal_mode = has_frozen_platform_task_authority_mode(caller_cell, "creator-proposal-only")
     if (
             creator_proposal_mode
             and tool_name != "architect_task_pickup"
