@@ -13,6 +13,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 try:
     from helpers import install_aiohttp_stub
@@ -147,6 +148,75 @@ class SupervisedPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await adapter.shutdown()
 
+    async def test_write_input_delivers_oversized_payload_byte_for_byte(self):
+        state, adapter = await self._make_adapter()
+        try:
+            state.add_group("Torque")
+            cell = state.add_terminal(
+                name="Term oversized",
+                group="Torque",
+                terminal_backend="pty",
+                command="stty -echo -icanon min 1 time 0; cat",
+            )
+            payload = "SUP-BEGIN-" + ("y" * (128 * 1024)) + "-SUP-END"
+            received = []
+            complete = asyncio.Event()
+
+            async def on_output(cell_id, _session_id, text):
+                if cell_id != cell.id:
+                    return
+                received.append(text)
+                if "-SUP-END" in "".join(received):
+                    complete.set()
+
+            adapter.on_terminal_output = on_output
+            await adapter.create_session(cell)
+            await asyncio.sleep(0.2)
+            self.assertTrue(await adapter.write_input(cell.session_id, payload))
+            await asyncio.wait_for(complete.wait(), timeout=5)
+            output = "".join(received)
+            self.assertEqual(output[output.index("SUP-BEGIN-"):], payload)
+        finally:
+            await adapter.shutdown()
+
+    async def test_write_input_contract_fails_restart_breaker_and_backpressure(self):
+        state = self.state_mod.MatrixState()
+        adapter = self.pty_mod.SupervisedPtyAdapter(state, self.sock_path)
+        session_id = "contract-session"
+        adapter._sessions[session_id] = SimpleNamespace(
+            closed=False, cell_id="not-a-cell")
+
+        self.assertFalse(await adapter.write_input("missing", "payload"))
+        adapter._sessions["closed"] = SimpleNamespace(
+            closed=True, cell_id="not-a-cell")
+        self.assertFalse(await adapter.write_input("closed", "payload"))
+        self.assertTrue(await adapter.write_input(session_id, ""))
+
+        adapter._supervisor_restart_deadline = time.time() + 1
+        with self.assertRaises(self.pty_mod.TerminalInputUnavailableError):
+            await adapter.write_input(session_id, "payload")
+        adapter._supervisor_restart_deadline = 0
+
+        adapter._write_breaker[session_id] = {
+            "fails": adapter.WRITE_BREAKER_THRESHOLD,
+            "opened_at": time.monotonic(),
+        }
+        with self.assertRaises(self.pty_mod.TerminalInputUnavailableError):
+            await adapter.write_input(session_id, "payload")
+        adapter._write_breaker.clear()
+
+        class BackpressureClient:
+            async def write_input(self, _session_id, _payload):
+                return {
+                    "type": "error",
+                    "code": "write_backpressure",
+                    "message": "wrote 3/9 bytes",
+                }
+
+        adapter._client = BackpressureClient()
+        with self.assertRaises(self.pty_mod.TerminalInputDeliveryError):
+            await adapter.write_input(session_id, "payload")
+
     async def test_write_breaker_opens_short_circuits_and_recovers(self):
         import types
         state = self.state_mod.MatrixState()
@@ -174,22 +244,32 @@ class SupervisedPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
         # Consecutive failures open the breaker at the threshold.
         for _ in range(adapter.WRITE_BREAKER_THRESHOLD):
-            await adapter.write_input(sid, "x")
+            with self.assertRaises(self.pty_mod.TerminalInputDeliveryError):
+                await adapter.write_input(sid, "x")
         self.assertEqual(attempts["n"], adapter.WRITE_BREAKER_THRESHOLD)
         self.assertIn(sid, adapter.supervisor_write_breaker_snapshot())
         self.assertTrue(cell.needs_attention)
 
-        # While open, further writes short-circuit (no new round-trips).
+        # While open, further writes are verified no-write failures and
+        # short-circuit without new supervisor round-trips.
         for _ in range(5):
-            await adapter.write_input(sid, "x")
+            with self.assertRaises(self.pty_mod.TerminalInputUnavailableError):
+                await adapter.write_input(sid, "x")
         self.assertEqual(attempts["n"], adapter.WRITE_BREAKER_THRESHOLD)
 
-        # After the cooldown, a single probe write is allowed through.
+        # After the cooldown, the normal half-open probe is allowed through.
+        class RecoveredClient:
+            async def write_input(self, session_id, payload):
+                attempts["n"] += 1
+                return {"type": "ok"}
+
+        adapter._client = RecoveredClient()
         adapter._write_breaker[sid]["opened_at"] = (
             time.monotonic() - adapter.WRITE_BREAKER_COOLDOWN_SECONDS - 1
         )
-        await adapter.write_input(sid, "x")
+        self.assertTrue(await adapter.write_input(sid, "x"))
         self.assertEqual(attempts["n"], adapter.WRITE_BREAKER_THRESHOLD + 1)
+        self.assertNotIn(sid, adapter._write_breaker)
 
     async def test_close_session_marks_cell_stopped(self):
         state, adapter = await self._make_adapter()

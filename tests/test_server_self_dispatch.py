@@ -7427,6 +7427,143 @@ class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service._prompt_queue_tails, {})
         self.assertEqual(service._prompt_queue_optimistic_baselines, {})
 
+    async def test_partial_delivery_blocks_successors_but_not_other_sessions(self):
+        state = self.state_mod.MatrixState()
+        delivery_error = self.server_agent_mod.TerminalInputDeliveryError
+        first_send_entered = asyncio.Event()
+        release_failure = asyncio.Event()
+        attempts = []
+
+        class FakeBridge:
+            async def send_text(self, session_id, payload, **kwargs):
+                del kwargs
+                attempts.append((session_id, payload))
+                if session_id == "session-1":
+                    first_send_entered.set()
+                    await release_failure.wait()
+                    raise delivery_error("wrote 3/9 bytes")
+
+        class FakeTemplateManager:
+            pass
+
+        service = self.server_agent_mod.AgentLaunchService(
+            state=state, connection=None, bridge=FakeBridge(),
+            worktree_mgr=None, template_mgr=FakeTemplateManager())
+        affected = self.state_mod.AgentCell(
+            id="agent-1", name="affected", group="g", cell_type="agent",
+            session_id="session-1", status="idle")
+        unaffected = self.state_mod.AgentCell(
+            id="agent-2", name="unaffected", group="g", cell_type="agent",
+            session_id="session-2", status="idle")
+        state.agents[affected.id] = affected
+        state.agents[unaffected.id] = unaffected
+
+        first = await service.send_agent_prompt(affected, "first", background=True)
+        await asyncio.wait_for(first_send_entered.wait(), timeout=1.0)
+        successor = await service.send_agent_prompt(
+            affected, "successor", background=True)
+        other_session = await service.send_agent_prompt(
+            unaffected, "other", background=True)
+        await other_session
+
+        release_failure.set()
+        results = await asyncio.gather(first, successor, return_exceptions=True)
+
+        self.assertTrue(all(isinstance(result,
+                                       self.server_agent_mod.TerminalInputDeliveryError)
+                            for result in results))
+        self.assertEqual(
+            attempts,
+            [("session-1", "first\r"), ("session-2", "other\r")],
+        )
+        self.assertIn("session-1", service._prompt_queue_delivery_errors)
+        self.assertNotIn("session-2", service._prompt_queue_delivery_errors)
+
+    async def test_restart_preflight_failure_allows_queued_recovered_retry(self):
+        state = self.state_mod.MatrixState()
+        no_delivery = self.server_agent_mod.TerminalInputUnavailableError
+        first_send_entered = asyncio.Event()
+        release_restart = asyncio.Event()
+        attempts = []
+
+        class FakeBridge:
+            async def send_text(self, session_id, payload, **kwargs):
+                del kwargs
+                attempts.append((session_id, payload))
+                if payload == "first\r":
+                    first_send_entered.set()
+                    await release_restart.wait()
+                    raise no_delivery(
+                        "PTY supervisor restart is active; input was not delivered")
+
+        class FakeTemplateManager:
+            pass
+
+        service = self.server_agent_mod.AgentLaunchService(
+            state=state, connection=None, bridge=FakeBridge(),
+            worktree_mgr=None, template_mgr=FakeTemplateManager())
+        cell = self.state_mod.AgentCell(
+            id="agent-1", name="agent", group="g", cell_type="agent",
+            session_id="session-1", status="idle")
+        state.agents[cell.id] = cell
+
+        first = await service.send_agent_prompt(cell, "first", background=True)
+        await asyncio.wait_for(first_send_entered.wait(), timeout=1.0)
+        recovered_retry = await service.send_agent_prompt(
+            cell, "recovered retry", background=True)
+        release_restart.set()
+
+        results = await asyncio.gather(first, recovered_retry,
+                                       return_exceptions=True)
+        self.assertIsInstance(results[0], no_delivery)
+        self.assertIsNone(results[1])
+        self.assertEqual(
+            attempts,
+            [("session-1", "first\r"),
+             ("session-1", "recovered retry\r")],
+        )
+        self.assertNotIn("session-1", service._prompt_queue_delivery_errors)
+
+    async def test_breaker_preflight_failure_allows_cooldown_half_open_retry(self):
+        state = self.state_mod.MatrixState()
+        no_delivery = self.server_agent_mod.TerminalInputUnavailableError
+        attempts = []
+        breaker_open = True
+
+        class FakeBridge:
+            async def send_text(self, session_id, payload, **kwargs):
+                del kwargs
+                attempts.append((session_id, payload))
+                if breaker_open:
+                    raise no_delivery(
+                        "terminal input delivery is paused: the PTY write "
+                        "breaker is open")
+
+        class FakeTemplateManager:
+            pass
+
+        service = self.server_agent_mod.AgentLaunchService(
+            state=state, connection=None, bridge=FakeBridge(),
+            worktree_mgr=None, template_mgr=FakeTemplateManager())
+        cell = self.state_mod.AgentCell(
+            id="agent-1", name="agent", group="g", cell_type="agent",
+            session_id="session-1", status="idle")
+        state.agents[cell.id] = cell
+
+        with self.assertRaises(no_delivery):
+            await service.send_agent_prompt(cell, "before cooldown")
+        self.assertNotIn("session-1", service._prompt_queue_delivery_errors)
+
+        breaker_open = False
+        await service.send_agent_prompt(cell, "half-open probe")
+
+        self.assertEqual(
+            attempts,
+            [("session-1", "before cooldown\r"),
+             ("session-1", "half-open probe\r")],
+        )
+        self.assertNotIn("session-1", service._prompt_queue_delivery_errors)
+
     async def test_background_prompt_task_is_retained_until_send_completes(self):
         state = self.state_mod.MatrixState()
         bridge_started = asyncio.Event()
@@ -7668,6 +7805,14 @@ class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(interrupted, [])
         result = await service.cancel_user_direct_turn(cell, message_id="msg-user",
             session_id="session-1")
+        # The bridge has not confirmed the submit yet, so this remains a
+        # queued cancellation rather than an interruptible provider turn.
+        self.assertEqual(result["outcome"], "cancelled_queued")
+        self.assertEqual(interrupted, [])
+        release.set()
+        await task
+        result = await service.cancel_user_direct_turn(cell, message_id="msg-user",
+            session_id="session-1")
         self.assertEqual(result["outcome"], "interrupted")
         self.assertEqual(interrupted, ["session-1"])
         # A successful interrupt retires the correlation, so retries cannot
@@ -7675,8 +7820,71 @@ class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await service.cancel_user_direct_turn(cell,
             message_id="msg-user", session_id="session-1"))["outcome"], "no_active_turn")
         self.assertEqual(interrupted, ["session-1"])
-        release.set()
-        await task
+
+    async def test_failed_direct_delivery_never_marks_turn_submitted_or_active(self):
+        state = self.state_mod.MatrixState()
+        delivery_error = self.server_agent_mod.TerminalInputDeliveryError
+        attempts = []
+
+        class FakeBridge:
+            async def send_text(self, session_id, payload, **kwargs):
+                del kwargs
+                attempts.append((session_id, payload))
+                raise delivery_error("wrote 3/9 bytes")
+
+        class FakeTemplateManager:
+            pass
+
+        service = self.server_agent_mod.AgentLaunchService(
+            state=state, connection=None, bridge=FakeBridge(),
+            worktree_mgr=None, template_mgr=FakeTemplateManager())
+        cell = self.state_mod.AgentCell(
+            id="agent-1", name="agent", group="g", cell_type="agent",
+            session_id="session-1", status="idle")
+        state.agents[cell.id] = cell
+
+        with self.assertRaises(self.server_agent_mod.TerminalInputDeliveryError):
+            await service.send_agent_prompt(
+                cell, "direct", user_direct_message_id="msg-direct")
+
+        self.assertEqual(attempts, [("session-1", "direct\r")])
+        self.assertFalse(service._user_direct_turns["msg-direct"]["delivery_started"])
+        self.assertNotIn("session-1", service._active_user_direct_turn_by_session)
+
+    async def test_poisoned_generic_failure_keeps_prior_direct_interrupt_available(self):
+        state = self.state_mod.MatrixState()
+        delivery_error = self.server_agent_mod.TerminalInputDeliveryError
+        interrupted = []
+
+        class FakeBridge:
+            async def send_text(self, session_id, payload, **kwargs):
+                del kwargs
+                if payload == "generic\r":
+                    raise delivery_error("wrote 3/9 bytes")
+            async def interrupt_active_turn(self, session_id):
+                interrupted.append(session_id)
+                return True
+
+        class FakeTemplateManager:
+            pass
+
+        service = self.server_agent_mod.AgentLaunchService(
+            state=state, connection=None, bridge=FakeBridge(),
+            worktree_mgr=None, template_mgr=FakeTemplateManager())
+        cell = self.state_mod.AgentCell(
+            id="agent-1", name="agent", group="g", cell_type="agent",
+            session_id="session-1", status="idle")
+        state.agents[cell.id] = cell
+
+        await service.send_agent_prompt(
+            cell, "direct", user_direct_message_id="msg-direct")
+        with self.assertRaises(self.server_agent_mod.TerminalInputDeliveryError):
+            await service.send_agent_prompt(cell, "generic")
+
+        result = await service.cancel_user_direct_turn(
+            cell, message_id="msg-direct", session_id="session-1")
+        self.assertEqual(result["outcome"], "interrupted")
+        self.assertEqual(interrupted, ["session-1"])
 
     async def test_completed_user_dm_cannot_interrupt_later_generic_turn(self):
         state = self.state_mod.MatrixState()

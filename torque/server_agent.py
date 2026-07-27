@@ -23,6 +23,10 @@ from .agent_classes import append_agent_class_prompt_block
 from .behavior_overlay import behavior_overlay_block_marker, split_behavior_overlay_blocks
 from .config import log
 from .state import normalize_codex_fast_mode
+from .terminal_adapter import (
+    TerminalInputDeliveryError,
+    TerminalInputUnavailableError,
+)
 from .identity import prepend_agent_identity_anchor
 from .runner_backends import normalize_runner_backend
 
@@ -231,6 +235,10 @@ class AgentLaunchService:
         self._background_prompt_tasks: set[asyncio.Task] = set()
         self._prompt_queue_tails: dict[str, asyncio.Task] = {}
         self._prompt_queue_optimistic_baselines: dict[str, dict] = {}
+        # A partial terminal write leaves the provider composer unsafe. Keep
+        # the session poisoned until it is replaced, so a later prompt cannot
+        # append to an orphaned prefix and accidentally submit it.
+        self._prompt_queue_delivery_errors: dict[str, TerminalInputDeliveryError] = {}
         # Bounded records only for user-originated direct-message turns.
         self._user_direct_turns: dict[str, dict] = {}
         # Exactly one provider turn may be Esc-interruptible per PTY session.
@@ -956,8 +964,21 @@ class AgentLaunchService:
                         await previous
                     except asyncio.CancelledError:
                         pass
+                    except TerminalInputUnavailableError:
+                        # The predecessor failed before any write started.
+                        # Preserve FIFO ordering, but let this later retry
+                        # attempt delivery after the adapter recovers.
+                        pass
+                    except TerminalInputDeliveryError:
+                        # A predecessor may have delivered a prefix. Do not
+                        # write or submit anything else to that PTY session.
+                        raise
                     except Exception:
                         pass
+                if target_session_id in self._prompt_queue_delivery_errors:
+                    # The same session has a known partial-delivery failure.
+                    # It must be replaced before callers can safely retry.
+                    raise self._prompt_queue_delivery_errors[target_session_id]
                 if delay:
                     await asyncio.sleep(delay)
                 turn = self._user_direct_turns.get(user_direct_message_id)
@@ -987,27 +1008,36 @@ class AgentLaunchService:
                         and hasattr(self.bridge, "prime_input_ready"):
                     self.bridge.prime_input_ready(target_session_id)
                 send_started_at = time.time()
-                # Any subsequent non-DM submission supersedes the previous
-                # DM turn; Esc must never target that later generic work.
-                if not user_direct_message_id:
-                    self._active_user_direct_turn_by_session.pop(
-                        target_session_id, None)
-                turn = self._user_direct_turns.get(user_direct_message_id)
-                if turn and turn.get("task") is task_ref:
-                    # The provider submit has begun; a verified adapter may
-                    # now own an interrupt, but only while this remains the
-                    # active exact DM correlation for the session.
-                    turn["delivery_started"] = True
-                    self._active_user_direct_turn_by_session[target_session_id] = (
-                        user_direct_message_id)
                 if settled_submit:
-                    await self.bridge.send_text(
+                    delivered = await self.bridge.send_text(
                         target_session_id,
                         payload,
                         settled_submit=True,
                     )
                 else:
-                    await self.bridge.send_text(target_session_id, payload)
+                    delivered = await self.bridge.send_text(
+                        target_session_id, payload)
+                if delivered is False:
+                    # The adapter reports False only for an already-gone
+                    # session. Treat it as a failed delivery rather than
+                    # recording a submitted direct-message turn.
+                    raise TerminalInputDeliveryError(
+                        f"terminal session {target_session_id} is unavailable "
+                        "for prompt delivery")
+                turn = self._user_direct_turns.get(user_direct_message_id)
+                if turn and turn.get("task") is task_ref:
+                    # The adapter returned only after delivering the full
+                    # submit. Until then a failed or partial write must never
+                    # create an interruptible/submitted DM correlation.
+                    turn["delivery_started"] = True
+                    self._active_user_direct_turn_by_session[target_session_id] = (
+                        user_direct_message_id)
+                elif not user_direct_message_id:
+                    # A generic prompt supersedes a prior DM only after its
+                    # own submit is known to be fully delivered. On a partial
+                    # write, retain that DM's adapter-owned interrupt key.
+                    self._active_user_direct_turn_by_session.pop(
+                        target_session_id, None)
                 completion_landed_during_send = (
                     getattr(cell, "status", "") != "running"
                     and not getattr(cell, "activity", "")
@@ -1032,6 +1062,18 @@ class AgentLaunchService:
                 if persist:
                     self.state._db_save_agent(cell)
                 await self.state.broadcast()
+            except TerminalInputDeliveryError as exc:
+                if (target_session_id
+                        and not isinstance(exc, TerminalInputUnavailableError)):
+                    self._prompt_queue_delivery_errors.setdefault(
+                        target_session_id, exc)
+                if (user_direct_message_id
+                        and self._active_user_direct_turn_by_session.get(
+                            target_session_id) == user_direct_message_id):
+                    self._active_user_direct_turn_by_session.pop(
+                        target_session_id, None)
+                await _rollback_optimistic_running()
+                raise
             except Exception:
                 if (user_direct_message_id
                         and self._active_user_direct_turn_by_session.get(

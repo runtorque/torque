@@ -40,6 +40,25 @@ class TerminalLaunchContext:
     active_session_id: str = ""
 
 
+class TerminalInputDeliveryError(RuntimeError):
+    """A terminal may have started an input delivery but could not finish it.
+
+    ``write_input`` deliberately distinguishes this from a session that is
+    already gone: callers receive ``False`` for the latter intentional no-op.
+    This exception means the write may have delivered a prefix, so callers
+    must not submit a successor on that same session.
+    """
+
+
+class TerminalInputUnavailableError(TerminalInputDeliveryError):
+    """A verified preflight failure where no input delivery was attempted.
+
+    This remains a visible prompt failure, rather than a success-shaped drop,
+    but queueing callers may safely continue with a later retry because no
+    prefix could have reached the terminal.
+    """
+
+
 @runtime_checkable
 class TerminalAdapter(Protocol):
     """Interface for controlling a terminal emulator."""
@@ -88,16 +107,28 @@ class TerminalAdapter(Protocol):
         """Apply name and tab color changes to a live session."""
         ...
 
-    async def send_text(self, session_id: str, text: str) -> None:
-        """Send text/keystrokes to a terminal session."""
+    async def send_text(self, session_id: str, text: str) -> bool:
+        """Send text/keystrokes; return whether a live session received it.
+
+        Raises :class:`TerminalInputDeliveryError` when delivery may have
+        started but cannot finish, or :class:`TerminalInputUnavailableError`
+        when a preflight availability check proves that no input was sent.
+        """
         ...
 
     async def interrupt_active_turn(self, session_id: str) -> bool:
         """Interrupt the active provider turn when the adapter supports it."""
         ...
 
-    async def write_input(self, session_id: str, data: str) -> None:
-        """Write raw terminal input bytes without submit handling."""
+    async def write_input(self, session_id: str, data: str) -> bool:
+        """Write all raw terminal input bytes, returning ``False`` only when
+        the session is absent/closed.
+
+        Empty input is a successful no-op.  An attempted write that cannot
+        deliver every byte must raise :class:`TerminalInputDeliveryError`;
+        a preflight failure that attempted no write raises
+        :class:`TerminalInputUnavailableError`.
+        """
         ...
 
     async def reorder_tabs(self) -> None:
