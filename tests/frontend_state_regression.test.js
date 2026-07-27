@@ -22183,6 +22183,68 @@ test('Codex running-to-idle delta suppresses stale activity across grid and canv
   assert.equal(runInContext(context, `agentStatusClass(state.agents['codex-worker'])`), 'idle');
 });
 
+test('canvas status class and copy honor dismissed and attention lifecycle precedence', () => {
+  const { context } = createMainRenderHarness();
+  loadScript(context, 'static/js/canvas.js');
+  context.state.children = {};
+  context.state.board_tasks = {};
+
+  const staleJournal = {
+    status: 'running',
+    activity: 'tool_call',
+    activity_detail: 'Using mcp__torque__journal_write',
+    mcp_messages: [{
+      action: 'tool_start',
+      tool_name: 'mcp__torque__journal_write',
+      timestamp: Date.now() / 1000,
+    }],
+  };
+  for (const kind of ['engineer', 'architect']) {
+    const dismissed = Object.assign({
+      id: 'canvas-dismissed-' + kind,
+      name: 'Canvas dismissed ' + kind,
+      kind,
+      group: 'alpha',
+      cell_type: 'agent',
+      dismissed_at: 1,
+    }, staleJournal);
+    assert.equal(context._canvasStatusClass(dismissed).split(' ')[0], 'is-stopped',
+      kind + ' dismissal must override its persisted running status for the canvas dot');
+    assert.equal(context._canvasStatusLine(dismissed), 'dismissed',
+      kind + ' dismissal must override stale activity_detail for the canvas status row');
+    const html = kind === 'engineer'
+      ? context._canvasRenderEngineerCard(dismissed)
+      : context._canvasRenderArchitectCard(dismissed);
+    assert.match(html, /canvas-card[^\"]* is-stopped/);
+    assert.match(html, /canvas-card-status-line" title="dismissed">dismissed<\/div>/);
+    assert.doesNotMatch(html, /Journaling|journal_write|Using mcp__/);
+  }
+
+  const attention = Object.assign({
+    id: 'canvas-attention',
+    name: 'Canvas attention',
+    kind: 'worker',
+    group: 'alpha',
+    cell_type: 'agent',
+    needs_attention: true,
+    error_message: 'Needs operator input',
+  }, staleJournal);
+  assert.equal(context._canvasStatusClass(attention).split(' ')[0], 'is-error',
+    'canvas attention uses its established red error/attention class before raw activity');
+  assert.equal(context._canvasStatusLine(attention), 'needs attention');
+  const attentionHtml = context._canvasRenderWorkerCard(attention);
+  assert.match(attentionHtml, /canvas-card[^\"]* is-error/);
+  assert.match(attentionHtml, /canvas-card-status-line" title="needs attention">needs attention<\/div>/);
+  assert.doesNotMatch(attentionHtml, /Journaling|journal_write|Using mcp__/);
+
+  const running = Object.assign({
+    id: 'canvas-running', name: 'Canvas running', kind: 'worker', group: 'alpha', cell_type: 'agent',
+  }, staleJournal);
+  assert.equal(context._canvasStatusClass(running).split(' ')[0], 'is-running');
+  assert.equal(context._canvasStatusLine(running), 'Using mcp__torque__journal_write',
+    'genuinely running, non-attention agents retain legitimate adapter detail');
+});
+
 test('agent status precedence preserves lifecycle, attention, dismissal, and legacy activity fallback', () => {
   const { context } = createMainRenderHarness();
   context.state.children = {};
