@@ -1121,24 +1121,40 @@ def _classify_public_tool_call(
     """
 
     requested = str(requested_tool_name or "").strip()
-    tool_name, translated_arguments = _resolve_public_tool_call(
-        state,
-        cell_id,
-        requested,
-        arguments,
-    )
     caller_cell = (
         state.agents.get(str(cell_id or "").strip()) if cell_id else None
     )
     caller_kind = str(
         getattr(caller_cell, "kind", "") or ""
     ).strip() if caller_cell else ""
+    visible_names = {
+        str(tool.get("name", "") or "").strip()
+        for tool in _visible_tools(state, cell_id)
+    }
     projected_canonical_name = (
         requested == canonical_tool_name(requested)
-        and requested in {
-            str(tool.get("name", "") or "").strip()
-            for tool in _visible_tools(state, cell_id)
-        }
+        and requested in visible_names
+    )
+
+    # Public transport accepts only exact canonical names that this caller's
+    # catalog projects.  Raw handler names and retired aliases remain
+    # available to internal compatibility callers through
+    # ``_resolve_public_tool_call``, but must never become an unadvertised
+    # public dispatch path merely because their handler is authorized.
+    if not projected_canonical_name:
+        return (
+            _PUBLIC_TOOL_CALL_UNKNOWN,
+            "",
+            dict(arguments or {}),
+            caller_cell,
+            caller_kind,
+        )
+
+    tool_name, translated_arguments = _resolve_public_tool_call(
+        state,
+        cell_id,
+        requested,
+        arguments,
     )
 
     # An unresolved call or a missing handler is never a public operation.
@@ -1458,7 +1474,11 @@ def _tool_argument_scope_denied(
                 )
             ):
                 return True
-        if requirement.handler_scoped or not requirement.target_argument:
+        # ``handler_scoped`` retains the handler's business-rule authority
+        # ceiling, but does not waive public transport's target
+        # non-disclosure boundary. Every declared, nonempty target must be
+        # resolved and checked before a handler can distinguish it.
+        if not requirement.target_argument:
             continue
         raw_target = arguments.get(requirement.target_argument, "")
         target_refs = raw_target if isinstance(raw_target, list) else [raw_target]
