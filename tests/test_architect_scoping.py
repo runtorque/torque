@@ -1741,6 +1741,15 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             item["id"] for item in sections["unhealthy_tasks"]["items"]
         }
         self.assertIn(unhealthy.id, unhealthy_ids)
+        unhealthy_item = next(
+            item for item in sections["unhealthy_tasks"]["items"]
+            if item["id"] == unhealthy.id
+        )
+        self.assertEqual(unhealthy_item["assigned_engineer_id"], hired.id)
+        self.assertEqual(unhealthy_item["health_state"], "stalled")
+        self.assertEqual(
+            unhealthy_item["health_since"], "2026-04-07T13:00:00+00:00"
+        )
         unhealthy_stream_task_ids = {
             task["id"]
             for stream in sections["unhealthy_streams"]["items"]

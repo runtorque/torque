@@ -205,42 +205,15 @@ class NotificationManager:
         )
 
     def on_task_health_alert(self, task_id: str, health_state: str):
-        """Queue a task-health notification when a task becomes risky."""
-        task = self._state.board_tasks.get(task_id)
-        if not task:
-            return
+        """Keep task health out of the operator notification channel.
 
-        gs = self._state.get_group_settings(task.group)
-        if not gs.notify_on_attention:
-            return
-
-        kind = _health_notification_kind(health_state)
-        if not kind:
-            return
-
-        item = {
-            "group": task.group,
-            "cell_name": _task_subject(task.task),
-            "kind": kind,
-            "noun": "tasks",
-        }
-        self._publish_operator_notice(
-            notice_type="alert",
-            severity="warning",
-            category="task_health",
-            title=f"{_task_subject(task.task)} {kind}",
-            message=f"{_task_subject(task.task)} is {kind}.",
-            source="task_health",
-            group_name=task.group,
-            task_id=task.id,
-            action_kind="open_task",
-            action_payload={"task_id": task.id},
-            dedupe_key=f"task-health:{task.id}:{health_state}",
-        )
-        if not gs.notifications:
-            return
-        self._pending.append(item)
-        self._schedule_flush()
+        Health remains available to the owning Engineer and assigned Architect
+        through their scoped task-health and attention-digest surfaces.  It is
+        not an operator action item, so neither an operator notice nor a
+        desktop notification is emitted here.  Keep this callback as a no-op
+        because the task-health event pipeline calls it best-effort.
+        """
+        return
 
     def _publish_operator_notice(self, **kwargs) -> dict | None:
         publisher = getattr(
@@ -331,14 +304,6 @@ def _build_body(items: list[dict]) -> str:
     return ", ".join(parts)
 
 
-def _health_notification_kind(health_state: str) -> str:
-    if health_state == "idle-risk":
-        return "at risk"
-    if health_state in ("stalled", "thrashing"):
-        return health_state
-    return ""
-
-
 def _is_agent_to_user_direct_message(row: dict) -> bool:
     sender_kind = str((row or {}).get("sender_kind", "") or "").strip()
     recipient_kind = str((row or {}).get("recipient_kind", "") or "").strip()
@@ -358,12 +323,6 @@ def _first_line(message: str) -> str:
         return ""
     return text.splitlines()[0].strip()
 
-
-def _task_subject(title: str) -> str:
-    title = (title or "").strip()
-    if len(title) > 40:
-        title = title[:37].rstrip() + "..."
-    return f'Task "{title or "untitled"}"'
 
 
 async def _send_notification(title: str, body: str):

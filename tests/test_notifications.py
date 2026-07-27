@@ -279,45 +279,69 @@ class NotificationManagerTests(unittest.IsolatedAsyncioTestCase):
             for message in logs.output
         ))
 
-    async def test_task_health_alerts_batch_with_task_noun(self):
+    async def test_task_health_alerts_do_not_publish_or_batch_operator_notifications(self):
         state = self._make_state()
-        stalled = state.board_add_task(
+        state.board_add_task(
             "Investigate silent worker",
             "g",
             lane="In Progress",
             id="task-1",
         )
-        self.assertIsNotNone(stalled)
-        thrashing = state.board_add_task(
+        state.board_add_task(
             "Stabilize retry loop",
             "g",
             lane="In Progress",
             id="task-2",
         )
-        self.assertIsNotNone(thrashing)
 
         manager = self.notifications_mod.NotificationManager(state)
-        sent = []
-        orig_send = self.notifications_mod._send_notification
+        notices = []
+        state.publish_operator_notice_best_effort = lambda **kwargs: notices.append(kwargs)
 
-        async def fake_send(title, body):
-            sent.append((title, body))
+        manager.on_task_health_alert("task-1", "stalled")
+        manager.on_task_health_alert("task-2", "thrashing")
 
-        self.notifications_mod._send_notification = fake_send
-        try:
-            manager.on_task_health_alert("task-1", "stalled")
-            manager.on_task_health_alert("task-2", "thrashing")
-            await manager._flush(manager._pending[:])
-        finally:
-            self.notifications_mod._send_notification = orig_send
+        self.assertEqual(notices, [])
+        self.assertEqual(manager._pending, [])
+
+    async def test_task_health_suppression_leaves_other_operator_alerts_unchanged(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Alpha",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+        )
+        state.agents[cell.id] = cell
+        notices = []
+        state.publish_operator_notice_best_effort = lambda **kwargs: notices.append(kwargs)
+        # Operator notices are durable even when desktop fanout is disabled;
+        # disable the latter to keep this unit test local.
+        state.group_settings["g"].notifications = False
+        manager = self.notifications_mod.NotificationManager(state)
+
+        manager.on_event(self.base_mod.AgentEvent(
+            cell_id=cell.id,
+            timestamp=1.0,
+            event_type="waiting",
+        ))
+        manager.on_direct_user_message({
+            "id": "message-1",
+            "group_name": "g",
+            "sender_id": cell.id,
+            "sender_kind": "worker",
+            "sender_name": cell.name,
+            "recipient_id": "user",
+            "recipient_kind": "user",
+            "message": "Need an operator decision.",
+            "message_type": "message",
+        })
 
         self.assertEqual(
-            sent,
+            [(notice["category"], notice["dedupe_key"]) for notice in notices],
             [
-                (
-                    "Torque — g",
-                    'Task "Investigate silent worker" stalled, '
-                    'Task "Stabilize retry loop" thrashing',
-                ),
+                ("agent", "agent:agent-1:1.0:waiting"),
+                ("direct_message", "direct-message:message-1"),
             ],
         )
