@@ -85,10 +85,20 @@ class TaskWatchPersistenceMixin:
         self._conn.commit()
         return bool(cursor.rowcount)
 
+    def claim_task_watch_notice_delivery(self, watch_id: str, *, attempted_at: float) -> bool:
+        """Final delivery gate, ordered atomically against scope invalidation."""
+        cursor = self._conn.execute(
+            "UPDATE task_watches SET outbox_state='notifying', outbox_attempted_at=?, updated_at=? "
+            "WHERE id=? AND status='fired' AND outbox_state='sending'",
+            (attempted_at, attempted_at, str(watch_id or '').strip()),
+        )
+        self._conn.commit()
+        return bool(cursor.rowcount)
+
     def reset_sending_task_watch_outboxes(self) -> int:
         cursor = self._conn.execute(
             "UPDATE task_watches SET outbox_state='pending', updated_at=? "
-            "WHERE status='fired' AND outbox_state='sending'", (time.time(),)
+            "WHERE status='fired' AND outbox_state IN ('sending', 'notifying')", (time.time(),)
         )
         self._conn.commit()
         return int(cursor.rowcount or 0)
@@ -121,7 +131,8 @@ class TaskWatchPersistenceMixin:
         cursor = self._conn.execute(
             "UPDATE task_watches SET status='cancelled', cancelled_at=?, "
             "outbox_state='cancelled', updated_at=? "
-            "WHERE requester_agent_id=? AND status IN ('active', 'fired')",
+            "WHERE requester_agent_id=? AND (status='active' OR "
+            "(status='fired' AND outbox_state IN ('pending', 'sending')))",
             (cancelled_at, cancelled_at, str(requester_agent_id or '').strip()),
         )
         self._conn.commit()
@@ -137,7 +148,8 @@ class TaskWatchPersistenceMixin:
         cursor = self._conn.execute(
             "UPDATE task_watches SET status='cancelled', cancelled_at=?, "
             "outbox_state='cancelled', updated_at=? "
-            "WHERE group_name=? AND status IN ('active', 'fired')",
+            "WHERE group_name=? AND (status='active' OR "
+            "(status='fired' AND outbox_state IN ('pending', 'sending')))",
             (cancelled_at, cancelled_at, str(group_name or '').strip()),
         )
         self._conn.commit()

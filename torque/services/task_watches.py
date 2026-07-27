@@ -157,8 +157,8 @@ class TaskWatchService:
 
     def deliver_outbox(self, watch, *, now=None):
         if (not self._has_watch_api(
-                    "claim_task_watch_outbox", "load_operator_notice_for_dedupe",
-                    "update_task_watch")
+                    "claim_task_watch_outbox", "claim_task_watch_notice_delivery",
+                    "load_operator_notice_for_dedupe", "update_task_watch")
                 or not watch or watch.get("status") != "fired"):
             return
         now = float(now if now is not None else time.time())
@@ -168,6 +168,16 @@ class TaskWatchService:
             self.invalidate_requester(watch.get("requester_agent_id", ""), now=now)
             return
         if not self._db.claim_task_watch_outbox(watch["id"], attempted_at=now):
+            return
+        # Scope invalidation can race after the first outbox claim.  Recheck it
+        # and atomically claim the final notification gate; an invalidator that
+        # wins while this row is sending changes the state to cancelled first.
+        tasks = [self._state.board_tasks.get(task_id)
+                 for task_id in watch.get("task_ids", [])]
+        if not tasks or any(not self._visible(watch, task) for task in tasks):
+            self.invalidate_requester(watch.get("requester_agent_id", ""), now=now)
+            return
+        if not self._db.claim_task_watch_notice_delivery(watch["id"], attempted_at=now):
             return
         try:
             task_ids = list(watch.get("task_ids") or [])

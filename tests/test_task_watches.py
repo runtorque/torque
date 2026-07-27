@@ -162,3 +162,43 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
         response = await self._command('/unwatch ' + watch['id'], 'race')
         self.assertIn('No matching active', self.db.load_direct_message(response['message_id'])['message'])
         self.assertEqual(self.db.load_task_watch(watch['id'])['status'], 'fired')
+
+    async def test_reconcile_retries_crashed_final_delivery_gate(self):
+        """A crash after the final gate remains a durable, retryable outbox."""
+        self.state.board_move_task('G:1', 'Done')
+        original_gate = self.db.claim_task_watch_notice_delivery
+
+        def crash_after_final_gate(watch_id, *, attempted_at):
+            if original_gate(watch_id, attempted_at=attempted_at):
+                raise SystemExit('simulated process stop')
+            return False
+
+        self.db.claim_task_watch_notice_delivery = crash_after_final_gate
+        with self.assertRaises(SystemExit):
+            self.state.create_task_watch(target=self.agent, task_ids=['G:1'])
+        watch = self.db.list_task_watches(requester_agent_id='agent', status='fired')[0]
+        self.assertEqual(watch['outbox_state'], 'notifying')
+        self.db.claim_task_watch_notice_delivery = original_gate
+        self.state.reconcile_task_watches()
+        self.assertEqual(self.db.load_task_watch(watch['id'])['outbox_state'], 'sent')
+        self.assertEqual(len(self.db.list_operator_notices()), 1)
+        self.assertIsNotNone(self.db.load_direct_message(watch['id'] + ':complete'))
+
+    async def test_lifecycle_invalidation_winning_after_outbox_claim_never_notifies(self):
+        """The final DB gate orders requester teardown before Inbox delivery."""
+        self.state.board_move_task('G:1', 'Done')
+        original_gate = self.db.claim_task_watch_notice_delivery
+
+        def invalidate_before_notice_gate(watch_id, *, attempted_at):
+            # This runs after the pending->sending claim, at the formerly unsafe
+            # interleaving boundary, but before any notice/thread side effect.
+            self.state.remove_agent(self.agent.id)
+            return original_gate(watch_id, attempted_at=attempted_at)
+
+        self.db.claim_task_watch_notice_delivery = invalidate_before_notice_gate
+        watch = self.state.create_task_watch(target=self.agent, task_ids=['G:1'])
+        stored = self.db.load_task_watch(watch['id'])
+        self.assertEqual(stored['status'], 'cancelled')
+        self.assertEqual(stored['outbox_state'], 'cancelled')
+        self.assertEqual(self.db.list_operator_notices(), [])
+        self.assertIsNone(self.db.load_direct_message(watch['id'] + ':complete'))
