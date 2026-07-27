@@ -388,6 +388,8 @@ COMPACT_BOARD_TASK_FIELDS = (
     "deliverable_type",
     "requires_review",
     "pre_approved_by",
+    "finalization_mode",
+    "finalization_status",
 )
 
 
@@ -983,6 +985,13 @@ class BoardTask:
     # transition. Workers cannot self-grant the bypass.
     requires_review: bool = False
     pre_approved_by: str = ""
+    # Explicit opt-in finalization contract. Legacy rows deliberately keep
+    # ``legacy`` and no policy so migrations never reopen historical work.
+    finalization_mode: str = "legacy"  # legacy | merge | review_only
+    required_review_gates: list = field(default_factory=list)
+    finalization_boundary: dict = field(default_factory=dict)
+    finalization_audit: list = field(default_factory=list)
+    finalization_status: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -2088,6 +2097,22 @@ def _normalize_verification_fields(fields: dict) -> None:
         fields["completion_evidence"] = _normalize_completion_evidence(
             fields.get("completion_evidence")
         )
+    # Finalization policy is explicit structured state; malformed state remains
+    # visible as an empty/corrupt contract and fails closed in the evaluator.
+    if "finalization_mode" in fields:
+        from .finalization import normalize_mode
+        fields["finalization_mode"] = normalize_mode(fields.get("finalization_mode"))
+    if "required_review_gates" in fields:
+        from .finalization import normalize_required_review_gates
+        fields["required_review_gates"] = normalize_required_review_gates(fields.get("required_review_gates"))
+    if "finalization_boundary" in fields:
+        from .finalization import normalize_boundary
+        fields["finalization_boundary"] = normalize_boundary(fields.get("finalization_boundary"), fields.get("finalization_mode", "legacy"))
+    if "finalization_audit" in fields:
+        from .finalization import normalize_audit
+        fields["finalization_audit"] = normalize_audit(fields.get("finalization_audit"))
+    if "finalization_status" in fields and not isinstance(fields.get("finalization_status"), dict):
+        fields["finalization_status"] = {}
 
 
 def _normalize_worktree_boundary(boundary) -> dict:

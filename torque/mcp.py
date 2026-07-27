@@ -351,6 +351,19 @@ TOOLS = [
                     "type": "boolean",
                     "description": "Whether live smoke remains pending operator-side.",
                 },
+                "finalization_review": {
+                    "type": "object",
+                    "description": "Typed finalization-review evidence for this declared review task; prose is not accepted.",
+                    "properties": {
+                        "gate_id": {"type": "string"},
+                        "verdict": {"type": "string", "enum": ["ship", "block", "needs_followup", "unknown"]},
+                        "has_blocking_issues": {"type": "boolean"},
+                        "required_follow_up_resolved": {"type": "boolean"},
+                        "boundary": {"type": "string"},
+                    },
+                    "required": ["gate_id", "verdict", "has_blocking_issues", "required_follow_up_resolved", "boundary"],
+                    "additionalProperties": False,
+                },
             },
         },
     },
@@ -1845,6 +1858,8 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
             payload["verification_state"] = args.get("state", "")
         if "notes" in args:
             payload["verification_notes"] = args.get("notes", "")
+        if "finalization_review" in args:
+            payload["finalization_review"] = args.get("finalization_review")
         for key in (
             "tests_run",
             "manual_smoke_done",

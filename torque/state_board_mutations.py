@@ -10,6 +10,7 @@ from typing import Optional
 
 from .artifacts import normalize_artifacts, normalize_attachments
 from .task_ids import format_root_task_id, is_canonical_task_id, parse_task_id
+from .finalization import audit_entry, evaluate_finalization, normalize_mode, status_projection
 from .state import (
     ARCHIVED_LANE,
     _ENGINEER_MESSAGE_EXPIRY_NOTE,
@@ -137,6 +138,21 @@ class BoardMutationMixin:
                 "created_at", "updated_at", "lane_entered_at")},
         )
         self.board_tasks[tid] = bt
+        # Creation is a Done attempt too.  An opt-in root never enters Done
+        # until the same canonical evaluator accepts it; derived review tasks
+        # remain free to close normally and drive their parent cascade.
+        if (lane == "Done" and self._is_finalization_root(bt)
+                and normalize_mode(getattr(bt, "finalization_mode", "legacy")) != "legacy"):
+            # Keep the task out of Done even transiently while we audit the
+            # requested transition.  A client can never observe an ineligible
+            # policy root in Done and then watch it be repaired.
+            fallback_lane = "Backlog" if "Backlog" in self.board_lanes else self.board_lanes[0]
+            bt.lane = fallback_lane
+            bt.position = self._board_next_lane_position(fallback_lane, exclude_id=tid)
+            if self._prepare_finalization_done(bt, caller="board_add_task"):
+                bt.lane = "Done"
+                bt.position = self._board_next_lane_position("Done", exclude_id=tid)
+        self._refresh_finalization_root_projection(bt)
         if alias_id and alias_id != tid:
             self.task_id_aliases[alias_id] = tid
             self._db_save_task_id_alias(alias_id)
@@ -515,6 +531,207 @@ class BoardMutationMixin:
             "architect_pickup": pickup,
         }
 
+    def evaluate_task_finalization(self, tid: str) -> dict:
+        """Public canonical evaluator projection for all board/API callers."""
+        return evaluate_finalization(self, self.resolve_task_alias(tid))
+
+    def record_finalization_review(
+            self, review_task_id: str, *, gate_id: str, verdict: str,
+            has_blocking_issues: bool, required_follow_up_resolved: bool,
+            boundary: str, executed: bool = True) -> dict:
+        """Persist an explicit review execution record for a declared gate.
+
+        Callers must supply typed verdict/follow-up facts; this routine never
+        parses review prose and does not grant any authority itself.
+        """
+        review = self.board_tasks.get(self.resolve_task_alias(review_task_id))
+        if not review:
+            raise ValueError("Review task not found")
+        root_id = str(getattr(review, "pipeline_root_id", "") or review.id)
+        root = self.board_tasks.get(root_id)
+        if not root:
+            raise ValueError("Finalization root not found")
+        matching_gate = next((
+            gate for gate in getattr(root, "required_review_gates", [])
+            if isinstance(gate, dict)
+            and str(gate.get("id") or "") == str(gate_id or "")
+            and str(gate.get("review_task_id") or "") == review.id
+        ), None)
+        if not matching_gate:
+            raise ValueError("Review task is not the declared finalization gate")
+        if verdict not in {"ship", "block", "needs_followup", "unknown"}:
+            raise ValueError("Invalid structured review verdict")
+        if not isinstance(has_blocking_issues, bool) or not isinstance(required_follow_up_resolved, bool):
+            raise ValueError("Review blocker and follow-up fields must be booleans")
+        if not isinstance(boundary, str) or not boundary.strip():
+            raise ValueError("Review evidence boundary is required")
+        evidence = dict(getattr(review, "completion_evidence", {}) or {})
+        evidence["finalization_review"] = {
+            "gate_id": str(gate_id), "verdict": str(verdict or "").lower(),
+            "has_blocking_issues": bool(has_blocking_issues),
+            "required_follow_up_resolved": bool(required_follow_up_resolved),
+            "boundary": str(boundary or ""), "executed": bool(executed),
+        }
+        review.completion_evidence = evidence
+        self._sync_finalization_projection(root)
+        review.updated_at = datetime.now(timezone.utc).isoformat()
+        root.updated_at = review.updated_at
+        self._emit("task_upsert", **asdict(review))
+        self._emit("task_upsert", **asdict(root))
+        self._db_save_task(review)
+        self._db_save_task(root)
+        return self.evaluate_task_finalization(root.id)
+
+    def record_merge_finalization(
+            self, tid: str, *, mode: str, reference: str, reviewed_head_sha: str,
+            merged_sha: str, origin_verified: bool, reviewed_tree: str,
+            merged_tree: str, equal: bool) -> dict:
+        """Attach guarded merge facts to the immutable policy boundary."""
+        task = self.board_tasks.get(self.resolve_task_alias(tid))
+        if not task:
+            raise ValueError("Task not found")
+        root_id = str(getattr(task, "pipeline_root_id", "") or task.id)
+        root = self.board_tasks.get(root_id, task)
+        if normalize_mode(getattr(root, "finalization_mode", "legacy")) != "merge":
+            raise ValueError("Task does not use merge finalization")
+        boundary = dict(getattr(root, "finalization_boundary", {}) or {})
+        boundary["finalization"] = {
+            "mode": str(mode or ""), "reference": str(reference or ""),
+            "reviewed_head_sha": str(reviewed_head_sha or ""),
+            "merged_sha": str(merged_sha or ""),
+            "origin_verified": bool(origin_verified),
+            "tree_equality": {"equal": bool(equal),
+                              "reviewed_tree": str(reviewed_tree or ""),
+                              "merged_tree": str(merged_tree or "")},
+        }
+        root.finalization_boundary = boundary
+        result = self._sync_finalization_projection(root)
+        root.updated_at = datetime.now(timezone.utc).isoformat()
+        self._emit("task_upsert", **asdict(root))
+        self._db_save_task(root)
+        return result
+
+    def _is_finalization_root_for_pipeline_root(
+            self, task: BoardTask, pipeline_root_id: str) -> bool:
+        root_id = str(pipeline_root_id or "").strip()
+        # A nonempty root reference is a descendant relationship only when it
+        # resolves to a real task.  Treat malformed/missing references as the
+        # task's own root for finalization purposes; otherwise a policy root
+        # could set ``pipeline_root_id='missing'`` and evade every Done guard.
+        return not root_id or root_id == task.id or root_id not in self.board_tasks
+
+    def _is_finalization_root(self, task: BoardTask) -> bool:
+        return self._is_finalization_root_for_pipeline_root(
+            task, getattr(task, "pipeline_root_id", "")
+        )
+
+    def _is_candidate_finalization_root(
+            self, task: BoardTask, fields: dict) -> bool:
+        """Resolve finalization ownership from the requested atomic update."""
+        return self._is_finalization_root_for_pipeline_root(
+            task, fields.get(
+                "pipeline_root_id", getattr(task, "pipeline_root_id", "")
+            )
+        )
+
+    def _refresh_finalization_root_projection(self, task: BoardTask) -> dict:
+        """Persist/emit root status after any structurally relevant child change."""
+        root_id = str(getattr(task, "pipeline_root_id", "") or "").strip()
+        root = self.board_tasks.get(root_id, task) if root_id else task
+        if normalize_mode(getattr(root, "finalization_mode", "legacy")) == "legacy":
+            # Policy removal must retract the compact projection immediately;
+            # otherwise a legacy card keeps a stale Reviewing/Ready badge.
+            if getattr(root, "finalization_status", {}):
+                root.finalization_status = {}
+                root.updated_at = datetime.now(timezone.utc).isoformat()
+                self._emit("task_upsert", **asdict(root))
+                self._db_save_task(root)
+            return {"eligible": True, "mode": "legacy", "stage": "legacy",
+                    "boundary": "", "missing_gates": [], "explanations": []}
+        before = dict(getattr(root, "finalization_status", {}) or {})
+        result = self._sync_finalization_projection(root)
+        if root is not task or before != root.finalization_status:
+            root.updated_at = datetime.now(timezone.utc).isoformat()
+            self._emit("task_upsert", **asdict(root))
+            self._db_save_task(root)
+        return result
+
+    def _prepare_finalization_done(self, task: BoardTask, *, caller: str) -> bool:
+        allowed, _result = self._finalization_done_allowed(task, caller=caller)
+        return allowed
+
+    def _sync_finalization_projection(self, task: BoardTask) -> dict:
+        root_id = str(getattr(task, "pipeline_root_id", "") or "").strip()
+        root = self.board_tasks.get(root_id, task) if root_id else task
+        if normalize_mode(getattr(root, "finalization_mode", "legacy")) == "legacy":
+            return {"eligible": True, "mode": "legacy", "stage": "legacy", "boundary": "", "missing_gates": [], "explanations": []}
+        result = evaluate_finalization(self, root)
+        root.finalization_status = status_projection(result)
+        return result
+
+    def _finalization_done_allowed(self, task: BoardTask, *, caller: str) -> tuple[bool, dict]:
+        """Evaluate/audit the root immediately before any Done mutation."""
+        root_id = str(getattr(task, "pipeline_root_id", "") or "").strip()
+        root = self.board_tasks.get(root_id, task) if root_id else task
+        result = self._sync_finalization_projection(root)
+        if normalize_mode(getattr(root, "finalization_mode", "legacy")) == "legacy":
+            return True, result
+        outcome = "success" if result.get("eligible") else "blocked"
+        entry = audit_entry(result, caller=caller, outcome=outcome)
+        audit = list(getattr(root, "finalization_audit", []) or [])
+        # Repeated identical attempts are bounded and idempotent enough for
+        # retries: do not append duplicate caller/outcome/boundary/code rows.
+        if not audit or any(audit[-1].get(key) != entry.get(key) for key in ("caller", "outcome", "boundary", "missing_gates")):
+            audit.append(entry)
+            root.finalization_audit = audit[-40:]
+        root.updated_at = datetime.now(timezone.utc).isoformat()
+        self._emit("task_upsert", **asdict(root))
+        self._db_save_task(root)
+        return bool(result.get("eligible")), result
+
+    def _candidate_finalization_done_allowed(
+            self, task: BoardTask, fields: dict, *, caller: str) -> tuple[bool, dict]:
+        """Evaluate an atomic policy/Done update before mutating the root.
+
+        Board updates can carry a lane and the explicit finalization contract in
+        one request.  Evaluating the persisted task first would see its legacy
+        mode and allow a subsequent policy write to leave an ineligible root in
+        Done.  Evaluate a detached candidate in the task index instead, then
+        only apply the request when that exact post-update root is eligible.
+        """
+        candidate = copy.deepcopy(task)
+        valid = set(BoardTask.__dataclass_fields__) - {"id", "slug", "created_at"}
+        for key, value in fields.items():
+            if key in valid:
+                setattr(candidate, key, value)
+
+        # ``evaluate_finalization`` resolves roots through ``board_tasks``.
+        # Temporarily substitute only the detached candidate; it is a pure
+        # evaluation and never emits or persists the candidate state.
+        self.board_tasks[task.id] = candidate
+        try:
+            result = evaluate_finalization(self, candidate)
+        finally:
+            self.board_tasks[task.id] = task
+
+        if result.get("eligible"):
+            return True, result
+
+        # A rejected candidate still records the attempted finalization with
+        # the candidate mode/boundary.  The legacy task itself remains legacy
+        # and is never transiently written with the requested policy.
+        entry = audit_entry(result, caller=caller, outcome="blocked")
+        audit = list(getattr(task, "finalization_audit", []) or [])
+        if not audit or any(
+                audit[-1].get(key) != entry.get(key)
+                for key in ("caller", "outcome", "boundary", "missing_gates")):
+            audit.append(entry)
+            task.finalization_audit = audit[-40:]
+        task.updated_at = datetime.now(timezone.utc).isoformat()
+        self._emit("task_upsert", **asdict(task))
+        self._db_save_task(task)
+        return False, result
+
     def board_update_task(self, tid: str, **fields):
         tid = self.resolve_task_alias(tid)
         task = self.board_tasks.get(tid)
@@ -571,6 +788,42 @@ class BoardMutationMixin:
         lane_changed = "lane" in fields and new_lane != old_lane
         if "lane" in fields and new_lane not in self.board_lanes:
             return
+        policy_fields = {
+            "finalization_mode", "required_review_gates", "finalization_boundary",
+        }
+        policy_update = bool(policy_fields & set(fields))
+        # Projection ownership may change in the same mutation as policy
+        # removal (for example, when a former root is reparented).  Remember
+        # the transition against the task itself before resolving the
+        # post-update root, so a legacy card can never retain its old policy
+        # badge merely because it now points at another root.
+        retract_task_finalization_projection = (
+            "finalization_mode" in fields
+            and normalize_mode(getattr(task, "finalization_mode", "legacy")) != "legacy"
+            and normalize_mode(fields.get("finalization_mode")) == "legacy"
+        )
+        # Root ownership is part of the candidate transaction.  Checking the
+        # persisted child first would let one atomic request replace its valid
+        # root with ``self``/an unknown root, add a policy, and enter Done
+        # without any evaluation or audit.
+        candidate_done_check = (
+            new_lane == "Done"
+            and (policy_update or "pipeline_root_id" in fields)
+            and self._is_candidate_finalization_root(task, fields)
+        )
+        candidate_result = None
+        if candidate_done_check:
+            allowed, candidate_result = self._candidate_finalization_done_allowed(
+                task, fields, caller="board_update_task"
+            )
+            if not allowed:
+                return candidate_result
+        elif lane_changed and new_lane == "Done" and self._is_finalization_root(task):
+            allowed, _result = self._finalization_done_allowed(
+                task, caller="board_update_task"
+            )
+            if not allowed:
+                return _result
         if lane_changed and (new_lane == ARCHIVED_LANE or old_lane == ARCHIVED_LANE):
             archive_position = fields.pop("position", None)
             fields.pop("lane", None)
@@ -586,8 +839,24 @@ class BoardMutationMixin:
         for key, value in fields.items():
             if key in valid:
                 setattr(task, key, value)
+        if retract_task_finalization_projection:
+            task.finalization_status = {}
+        if candidate_result is not None:
+            # The candidate was accepted and is now the actual task.  Record
+            # the successful Done admission after applying it so its audit and
+            # projection persist with the non-legacy contract.
+            entry = audit_entry(candidate_result, caller="board_update_task",
+                                outcome="success")
+            audit = list(getattr(task, "finalization_audit", []) or [])
+            if not audit or any(
+                    audit[-1].get(key) != entry.get(key)
+                    for key in ("caller", "outcome", "boundary", "missing_gates")):
+                audit.append(entry)
+                task.finalization_audit = audit[-40:]
         if "task" in fields:
             task.slug = self._unique_task_slug(task.task, exclude_id=tid)
+        # Status projection is derived, compact data rather than advisory prose.
+        self._refresh_finalization_root_projection(task)
         from datetime import datetime, timezone
         now_iso = datetime.now(timezone.utc).isoformat()
         task.updated_at = now_iso
@@ -618,6 +887,7 @@ class BoardMutationMixin:
                     *self._tasks_by_agent.get(task.agent_id, set())
                 )
             self._unindex_task(task)
+            self._refresh_finalization_root_projection(task)
             self.auto_dispatch_queue_remove_task(tid)
             self._emit("task_remove", id=tid, group=task.group)
             self._db_delete_task(tid)
@@ -643,6 +913,12 @@ class BoardMutationMixin:
             if clear_status and task.status:
                 self.board_update_task(tid, status="")
             return
+        if lane == "Done" and task.lane != "Done" and self._is_finalization_root(task):
+            allowed, result = self._finalization_done_allowed(
+                task, caller="board_move_task"
+            )
+            if not allowed:
+                return result
         if clear_status:
             task.status = ""
         if lane == ARCHIVED_LANE:
@@ -660,6 +936,7 @@ class BoardMutationMixin:
             position=position,
             clear_attention=(lane == "Done"),
         )
+        self._refresh_finalization_root_projection(task)
         if lane == "Done":
             self.board_cascade_done(tid, recompute=False)
         self.recompute_task_health()
@@ -704,6 +981,12 @@ class BoardMutationMixin:
             return False
         if "Done" not in self.board_lanes:
             return False
+        if self._is_finalization_root(task):
+            allowed, _result = self._finalization_done_allowed(
+                task, caller="expire_engineer_message_task"
+            )
+            if not allowed:
+                return False
 
         now = datetime.now(timezone.utc)
         changed = self._append_engineer_message_expiry_note(
@@ -825,6 +1108,11 @@ class BoardMutationMixin:
                 continue
             if self.task_has_unresolved_descendants(parent.id):
                 break
+            allowed, _result = self._finalization_done_allowed(
+                parent, caller="board_cascade_done"
+            )
+            if not allowed:
+                break
 
             parent.status = ""
             self._board_apply_archive_state(
@@ -861,6 +1149,7 @@ class BoardMutationMixin:
             position=position,
             unlink_agent=True,
         )
+        self._refresh_finalization_root_projection(task)
         if archived_from_lane == "Done":
             self.expire_engineer_message_descendants(tid)
         parent = self.board_tasks.get(task.parent_task_id)
@@ -958,6 +1247,12 @@ class BoardMutationMixin:
         target_lane = lane or task.archived_from_lane or "Done"
         if target_lane == ARCHIVED_LANE or target_lane not in self.board_lanes:
             target_lane = "Done" if "Done" in self.board_lanes else self.board_lanes[0]
+        if target_lane == "Done" and self._is_finalization_root(task):
+            allowed, result = self._finalization_done_allowed(
+                task, caller="board_unarchive_task"
+            )
+            if not allowed:
+                return result
         self._board_apply_archive_state(
             task,
             lane=target_lane,
@@ -966,6 +1261,7 @@ class BoardMutationMixin:
             position=position,
             clear_attention=(target_lane == "Done"),
         )
+        self._refresh_finalization_root_projection(task)
         self.recompute_task_health()
 
     def board_reorder_task(self, tid: str, position: int):
@@ -1015,27 +1311,73 @@ class BoardMutationMixin:
         if (name in _RESERVED_LANES or name not in self.board_lanes
                 or len(self.board_lanes) <= 1):
             return
+        remaining_lanes = [lane for lane in self.board_lanes if lane != name]
+        target = move_tasks_to if move_tasks_to in remaining_lanes \
+            else remaining_lanes[0]
+        moving_tasks = [task for task in self.board_tasks.values()
+                        if task.lane == name]
+        # Preflight the complete batch before removing its source lane.  This
+        # keeps a denied policy root in its truthful lane and avoids a partial
+        # lane-removal mutation with stranded cards.
+        blocked: list[dict] = []
+        policy_roots = [task for task in moving_tasks
+                        if self._is_finalization_root(task)]
+        if target == "Done":
+            for task in policy_roots:
+                result = evaluate_finalization(self, task)
+                if not result.get("eligible"):
+                    # The canonical guard appends the bounded blocked audit and
+                    # refreshes the compact projection without moving anything.
+                    _allowed, audited = self._finalization_done_allowed(
+                        task, caller="board_remove_lane"
+                    )
+                    blocked.append({
+                        "task_id": task.id,
+                        "missing_gates": list(audited.get("missing_gates", [])),
+                    })
+        if blocked:
+            return {
+                "type": "finalization_blocked",
+                "lane": name,
+                "target_lane": target,
+                "blocked": blocked,
+            }
+
+        if target == "Done":
+            # Success audits occur only for the atomic batch that is actually
+            # about to enter Done, never for a lane-removal attempt later
+            # refused because another root was ineligible.
+            for task in policy_roots:
+                allowed, _result = self._finalization_done_allowed(
+                    task, caller="board_remove_lane"
+                )
+                if not allowed:  # defensive re-evaluation before mutation
+                    return {"type": "finalization_blocked", "lane": name,
+                            "target_lane": target, "blocked": [{
+                                "task_id": task.id,
+                                "missing_gates": list(_result.get("missing_gates", [])),
+                            }]}
+
         from datetime import datetime, timezone
         self.board_lanes.remove(name)
-        target = move_tasks_to if move_tasks_to in self.board_lanes \
-            else self.board_lanes[0]
         now_iso = datetime.now(timezone.utc).isoformat()
         max_pos = max(
             (t.position for t in self.board_tasks.values()
              if t.lane == target),
             default=-1,
         )
-        for t in self.board_tasks.values():
-            if t.lane == name:
-                max_pos += 1
-                t.lane = target
-                t.position = max_pos
-                t.updated_at = now_iso
-                t.lane_entered_at = now_iso
-                self._emit("task_upsert", **asdict(t))
-                self._db_save_task(t)
+        for task in moving_tasks:
+            max_pos += 1
+            task.lane = target
+            task.position = max_pos
+            task.updated_at = now_iso
+            task.lane_entered_at = now_iso
+            self._refresh_finalization_root_projection(task)
+            self._emit("task_upsert", **asdict(task))
+            self._db_save_task(task)
         self._emit("lanes_update", lanes=list(self.board_lanes))
         self._db_save_lanes()
+        return {"type": "lane_removed", "lane": name, "target_lane": target}
 
     def board_reorder_lanes(self, lanes: list[str]):
         if set(lanes) != set(self.board_lanes):

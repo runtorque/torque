@@ -9,6 +9,8 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from ..finalization import normalize_boundary, normalize_mode, normalize_required_review_gates
+
 
 BOARD_OPERATION_COMMAND_NAMES = frozenset({
     "board_sync_preflight", "board_sync_list_projects", "board_sync_task",
@@ -222,6 +224,9 @@ async def handle_board_operation_command(
             dispatch_state=data.get("dispatch_state", ""),
             assigned_engineer_id=data.get("assigned_engineer_id", ""),
             assigned_architect_id=data.get("assigned_architect_id", ""),
+            parent_task_id=data.get("parent_task_id", ""),
+            pipeline_depth=data.get("pipeline_depth", 0),
+            pipeline_root_id=data.get("pipeline_root_id", ""),
             created_by_engineer_id=data.get("created_by_engineer_id", ""),
             suggested_specialization=data.get(
                 "suggested_specialization", ""),
@@ -236,11 +241,33 @@ async def handle_board_operation_command(
                 "verification_summary", {}),
             completion_evidence=data.get(
                 "completion_evidence", {}),
+            finalization_mode=data.get("finalization_mode", "legacy"),
+            required_review_gates=data.get("required_review_gates", []),
+            finalization_boundary=data.get("finalization_boundary", {}),
         )
+        requested_mode = str(data.get("finalization_mode", "legacy") or "legacy")
+        normalized_mode = normalize_mode(requested_mode)
+        if requested_mode.strip().lower().replace("-", "_") != normalized_mode:
+            result = {"type": "error", "message": "Invalid finalization_mode"}
+        elif normalized_mode != "legacy":
+            gates = normalize_required_review_gates(
+                data.get("required_review_gates", []))
+            boundary = normalize_boundary(
+                data.get("finalization_boundary", {}), normalized_mode)
+            if not gates or any(not gate.get("review_task_id") for gate in gates):
+                result = {"type": "error", "message": "Explicit finalization policy requires ordered gates with review_task_id"}
+            elif not boundary:
+                result = {"type": "error", "message": "Explicit finalization policy requires immutable boundary"}
+            else:
+                add_kwargs["finalization_mode"] = normalized_mode
+                add_kwargs["required_review_gates"] = gates
+                add_kwargs["finalization_boundary"] = boundary
         assigned_cell = state.agents.get(
             str(add_kwargs.get("assigned_engineer_id", "") or "").strip()
         )
-        if assigned_cell and state.agent_is_tombstoned(assigned_cell):
+        if result:
+            pass
+        elif assigned_cell and state.agent_is_tombstoned(assigned_cell):
             result = _engineer_tombstoned_error(assigned_cell.id)
         else:
             # Resolve deliverable contract from action + explicit kwarg
@@ -356,6 +383,31 @@ async def handle_board_operation_command(
             fields["provider"] = link["provider"]
             fields["external_id"] = link["external_id"]
             fields["external_url"] = link["external_url"]
+        policy_fields = {
+            "finalization_mode", "required_review_gates", "finalization_boundary",
+        }
+        if policy_fields & set(fields):
+            current_mode = getattr(_update_task, "finalization_mode", "legacy")
+            requested_mode = str(fields.get("finalization_mode", current_mode) or "legacy")
+            normalized_mode = normalize_mode(requested_mode)
+            if requested_mode.strip().lower().replace("-", "_") != normalized_mode:
+                return {"type": "error", "message": "Invalid finalization_mode"}
+            if normalized_mode != "legacy":
+                gates = normalize_required_review_gates(fields.get(
+                    "required_review_gates",
+                    getattr(_update_task, "required_review_gates", []),
+                ))
+                boundary = normalize_boundary(fields.get(
+                    "finalization_boundary",
+                    getattr(_update_task, "finalization_boundary", {}),
+                ), normalized_mode)
+                if not gates or any(not gate.get("review_task_id") for gate in gates):
+                    return {"type": "error", "message": "Explicit finalization policy requires ordered gates with review_task_id"}
+                if not boundary:
+                    return {"type": "error", "message": "Explicit finalization policy requires immutable boundary"}
+                fields["required_review_gates"] = gates
+                fields["finalization_boundary"] = boundary
+            fields["finalization_mode"] = normalized_mode
         assigned_update = str(
             fields.get("assigned_engineer_id", "") or ""
         ).strip()
@@ -377,33 +429,42 @@ async def handle_board_operation_command(
                 "message": "Agent is tombstoned",
             }
         else:
-            state.board_update_task(tid, **fields)
-            if board_sync_manager:
-                board_sync_manager.enqueue_for_local_change(
-                    tid,
-                    reason="task_update",
-                    fields=fields.keys(),
+            update_result = state.board_update_task(tid, **fields)
+            if (isinstance(update_result, dict)
+                    and not update_result.get("eligible", True)):
+                result = {
+                    "type": "finalization_blocked",
+                    "task_id": tid,
+                    "finalization": update_result,
+                    "missing_gates": list(update_result.get("missing_gates", [])),
+                }
+            else:
+                if board_sync_manager:
+                    board_sync_manager.enqueue_for_local_change(
+                        tid,
+                        reason="task_update",
+                        fields=fields.keys(),
+                    )
+                # Auto-dispatch if agent_id was set and agent is idle
+                _new_aid = fields.get("agent_id", "")
+                if _new_aid:
+                    _tsk = state.board_tasks.get(tid)
+                    _cell = state.agents.get(_new_aid)
+                    if (_tsk and _cell
+                            and _tsk.lane == "To Do"
+                            and not state.agent_is_busy(_new_aid)
+                            and _cell.cell_type == "agent"
+                            and state.board_deps_met(_tsk)):
+                        await handle_command({
+                            "cmd": "dispatch_task",
+                            "id": tid, "agent_id": _new_aid})
+                await _maybe_auto_resume_targets(
+                    state,
+                    handle_command,
+                    _panel_event,
+                    targets=_update_resume_targets,
+                    group=_update_task.group if _update_task else "",
                 )
-            # Auto-dispatch if agent_id was set and agent is idle
-            _new_aid = fields.get("agent_id", "")
-            if _new_aid:
-                _tsk = state.board_tasks.get(tid)
-                _cell = state.agents.get(_new_aid)
-                if (_tsk and _cell
-                        and _tsk.lane == "To Do"
-                        and not state.agent_is_busy(_new_aid)
-                        and _cell.cell_type == "agent"
-                        and state.board_deps_met(_tsk)):
-                    await handle_command({
-                        "cmd": "dispatch_task",
-                        "id": tid, "agent_id": _new_aid})
-            await _maybe_auto_resume_targets(
-                state,
-                handle_command,
-                _panel_event,
-                targets=_update_resume_targets,
-                group=_update_task.group if _update_task else "",
-            )
 
     elif cmd == "board_mark_task_covered":
         tid = _resolve_task_id(state, data.get("id", ""))

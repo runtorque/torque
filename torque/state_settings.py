@@ -955,6 +955,12 @@ class StateSettingsMixin:
             return False
 
         from datetime import datetime, timezone
+        if task.lane != "Done" and self._is_finalization_root(task):
+            allowed, _result = self._finalization_done_allowed(
+                task, caller="expire_orphaned_ask"
+            )
+            if not allowed:
+                return False
         parent = self.board_tasks.get(task.parent_task_id)
         now = datetime.now(timezone.utc)
         now_iso = now.isoformat()
@@ -992,6 +998,7 @@ class StateSettingsMixin:
 
         if changed:
             task.updated_at = now_iso
+            self._refresh_finalization_root_projection(task)
             if emit:
                 self._emit("task_upsert", **asdict(task))
             self._db_save_task(task)
