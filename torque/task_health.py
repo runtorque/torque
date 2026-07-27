@@ -301,7 +301,7 @@ def _compute_local_health(task: Any, tasks_by_id: dict[str, Any] | _HealthIndexe
         details["reasons"] = ["message_churn"]
         return TaskHealthSnapshot(state=HEALTH_THRASHING, details=details)
 
-    if not _is_monitored_task(task):
+    if not _is_monitored_task(task, agent):
         details["reasons"] = ["not_active"]
         return TaskHealthSnapshot(state=HEALTH_HEALTHY, details=details)
 
@@ -356,11 +356,10 @@ def next_task_health_deadline(task: Any, tasks_by_id: dict[str, Any] | _HealthIn
     if thrash_deadline:
         deadlines.append(thrash_deadline)
 
-    live_deadline = _live_work_signal_deadline(agent, now_ts)
-    if live_deadline:
-        deadlines.append(live_deadline)
-
-    if _is_monitored_task(task):
+    if _is_monitored_task(task, agent):
+        live_deadline = _live_work_signal_deadline(agent, now_ts)
+        if live_deadline:
+            deadlines.append(live_deadline)
         last_activity_ts = _task_last_activity_ts(task, agent)
         if last_activity_ts is None:
             return min(deadlines) if deadlines else None
@@ -375,9 +374,22 @@ def next_task_health_deadline(task: Any, tasks_by_id: dict[str, Any] | _HealthIn
     return min(future_deadlines) if future_deadlines else None
 
 
-def _is_monitored_task(task: Any) -> bool:
-    lane = getattr(task, "lane", "")
-    return lane == "In Progress" or bool(getattr(task, "agent_id", ""))
+def _is_monitored_task(task: Any, agent: Any | None) -> bool:
+    """Return whether this task has dispatched work that can go silent.
+
+    ``agent_id`` records assignment, while ``dispatch_state`` records whether
+    the task was actually sent.  The agent's runtime status then distinguishes
+    an active dispatch from an idle, stopped, or missing agent left attached to
+    the task after a work round closes.
+    """
+    dispatch_state = str(
+        getattr(task, "dispatch_state", "") or ""
+    ).strip().lower()
+    return (
+        dispatch_state == "live"
+        and agent is not None
+        and getattr(agent, "status", "") == "running"
+    )
 
 
 def _has_unmet_dependencies(task: Any, tasks_by_id: dict[str, Any]) -> bool:
