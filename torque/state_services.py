@@ -45,6 +45,30 @@ class StateServicesMixin:
     def operator_notice_summary(self) -> dict:
         return self._operator_notice_service.summary()
 
+    def create_task_watch(self, **kwargs):
+        return self._task_watch_service.create(**kwargs)
+
+    def list_task_watches(self, target, **kwargs):
+        return self._task_watch_service.list_active(target, **kwargs)
+
+    def cancel_task_watch(self, target, value: str, **kwargs) -> int:
+        return self._task_watch_service.cancel(target, value, **kwargs)
+
+    def reconcile_task_watches(self, **kwargs) -> None:
+        return self._task_watch_service.reconcile(**kwargs)
+
+    def invalidate_task_watch_requester(self, requester_agent_id: str, **kwargs) -> int:
+        return self._task_watch_service.invalidate_requester(
+            requester_agent_id,
+            **kwargs,
+        )
+
+    def invalidate_task_watch_group(self, group_name: str, **kwargs) -> int:
+        return self._task_watch_service.invalidate_group(group_name, **kwargs)
+
+    def evaluate_task_watches_for_task(self, task_id: str, **kwargs) -> None:
+        return self._task_watch_service.evaluate_for_task(task_id, **kwargs)
+
     def _emit_initiative(self, initiative: dict | None) -> None:
         self._initiative_service._emit_initiative(initiative)
 

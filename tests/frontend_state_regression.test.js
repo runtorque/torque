@@ -16050,6 +16050,9 @@ test('terminal compose slash command autocomplete filters and fills without send
     { id: 'restart', label: '/restart', usage: '/restart', insert: '/restart', help: 'Restart only this DM agent with a fresh session.', search: 'restart /restart relaunch fresh session current dm agent' },
     { id: 'loop', label: '/loop every <interval> <message>', usage: '/loop every 10m check status', insert: '/loop every 10m ', help: 'Start a recurring user message. Use 1m–24h with s/m/h units, then add the message.', search: 'loop every interval message recurring schedule /loop every' },
     { id: 'loop-cancel', label: '/loop cancel', usage: '/loop cancel', insert: '/loop cancel', help: 'Cancel the active user-message loop for this agent.', search: 'loop cancel stop recurring schedule /loop cancel' },
+    { id: 'watch', label: '/watch <task-id> [<task-id> ...]', usage: '/watch TORQUE:123 TORQUE:124', insert: '/watch ', help: 'Notify once when all named tasks are Done.', search: 'watch task completion notify done /watch' },
+    { id: 'watches', label: '/watches', usage: '/watches', insert: '/watches', help: "List this agent's active task-completion watches.", search: 'watches active task completion notify /watches' },
+    { id: 'unwatch', label: '/unwatch <watch-id|all>', usage: '/unwatch watch-abc123 or /unwatch all', insert: '/unwatch ', help: 'Cancel one active task-completion watch.', search: 'unwatch cancel task completion notify /unwatch' },
     { id: 'status', label: '/status', usage: '/status', insert: '/status', help: 'Show Torque status without prompting the agent.', search: 'status /status activity task attention loop worktree' },
     { id: 'commands', label: '/commands', usage: '/commands', insert: '/commands', help: 'List supported direct-message slash commands.', search: 'commands /commands help slash command catalog' },
   ];
@@ -16088,6 +16091,9 @@ test('terminal compose slash command autocomplete filters and fills without send
   assert.match(slashDropdown.innerHTML, /\/restart/);
   assert.match(slashDropdown.innerHTML, /\/loop every <interval> <message>/);
   assert.match(slashDropdown.innerHTML, /\/loop cancel/);
+  assert.match(slashDropdown.innerHTML, /\/watch <task-id>/);
+  assert.match(slashDropdown.innerHTML, /\/watches/);
+  assert.match(slashDropdown.innerHTML, /\/unwatch <watch-id/);
   assert.match(slashDropdown.innerHTML, /\/status/);
   assert.match(slashDropdown.innerHTML, /\/commands/);
   assert.match(slashDropdown.innerHTML, /recurring user message/i);

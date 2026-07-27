@@ -599,6 +599,8 @@ class BoardMutationMixin:
                 )
         self._emit("task_upsert", **asdict(task))
         self._db_save_task(task)
+        if lane_changed:
+            self.evaluate_task_watches_for_task(task.id)
         if lane_changed and new_lane == "Done":
             self.board_cascade_done(tid, recompute=False)
         self.recompute_task_health()
@@ -619,6 +621,8 @@ class BoardMutationMixin:
             self.auto_dispatch_queue_remove_task(tid)
             self._emit("task_remove", id=tid, group=task.group)
             self._db_delete_task(tid)
+            # A deleted task must invalidate watches without exposing its title.
+            self.reconcile_task_watches()
             # Clean up dependency references in other tasks
             for t in self.board_tasks.values():
                 if tid in t.depends_on:

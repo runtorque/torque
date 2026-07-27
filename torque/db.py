@@ -168,6 +168,7 @@ from torque.persistence.reliability import (
     sqlite_retry_backoff as _sqlite_retry_backoff,
 )
 from torque.persistence.operator_notices import OperatorNoticePersistenceMixin
+from torque.persistence.task_watches import TaskWatchPersistenceMixin
 from torque.persistence.initiatives import (
     INITIATIVE_COLUMNS,
     INITIATIVE_LINK_COLUMNS,
@@ -576,6 +577,7 @@ class TorqueDB(
         AIPersistenceMixin,
         ReliabilityPersistenceMixin,
         OperatorNoticePersistenceMixin,
+        TaskWatchPersistenceMixin,
         PlaybookPersistenceMixin,
         AgentHistoryPersistenceMixin,
         BehaviorOverlayPersistenceMixin,

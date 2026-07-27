@@ -15,7 +15,7 @@ import json
 import sqlite3
 from typing import Callable, Iterable
 
-SCHEMA_VERSION = "21"
+SCHEMA_VERSION = "23"
 
 
 @dataclass(frozen=True)
@@ -3115,6 +3115,45 @@ def _migration_0021_operator_inbox(
     )
 
 
+def _migration_0022_task_watches(
+    conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Create durable one-shot all-Done task watches."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS task_watches (
+            id TEXT PRIMARY KEY, requester_agent_id TEXT NOT NULL DEFAULT '',
+            thread_id TEXT NOT NULL DEFAULT '', group_name TEXT NOT NULL DEFAULT '',
+            task_ids TEXT NOT NULL DEFAULT '[]', created_at REAL NOT NULL DEFAULT 0,
+            expires_at REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active',
+            fired_at REAL NOT NULL DEFAULT 0, cancelled_at REAL NOT NULL DEFAULT 0,
+            dedupe_key TEXT NOT NULL DEFAULT '', outbox_state TEXT NOT NULL DEFAULT 'pending',
+            outbox_attempted_at REAL NOT NULL DEFAULT 0, updated_at REAL NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_task_watches_active
+            ON task_watches(requester_agent_id, status, expires_at, created_at);
+        CREATE INDEX IF NOT EXISTS idx_task_watches_outbox
+            ON task_watches(status, outbox_state, updated_at);
+    """)
+
+
+def _migration_0023_task_watch_request_keys(
+    conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Link idempotent /watch requests to their durable watch before audit I/O."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(task_watches)")}
+    if "request_idempotency_key" not in columns:
+        conn.execute(
+            "ALTER TABLE task_watches ADD COLUMN request_idempotency_key TEXT NOT NULL DEFAULT ''"
+        )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_task_watches_request_key "
+        "ON task_watches(request_idempotency_key) "
+        "WHERE request_idempotency_key != ''"
+    )
+
+
 SCHEMA_MIGRATIONS = (
     SchemaMigration(
         1,
@@ -3267,6 +3306,22 @@ SCHEMA_MIGRATIONS = (
         "operator_inbox",
         "operator-alert-notification-inbox-v1",
         _migration_0021_operator_inbox,
+        phase="post_init",
+        repair_on_boot=True,
+    ),
+    SchemaMigration(
+        22,
+        "task_watches",
+        "one-shot-task-watch-storage-v1",
+        _migration_0022_task_watches,
+        phase="post_init",
+        repair_on_boot=True,
+    ),
+    SchemaMigration(
+        23,
+        "task_watch_request_keys",
+        "one-shot-task-watch-request-key-v1",
+        _migration_0023_task_watch_request_keys,
         phase="post_init",
         repair_on_boot=True,
     ),

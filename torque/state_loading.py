@@ -439,6 +439,7 @@ class StateLoadingMixin:
                         self.engineer_worklog[gname] = entries
             cleaned = self.cleanup_orphaned_attention(emit=False)
             self.recompute_task_health(emit=False, persist=False)
+            self.reconcile_task_watches()
             if cleaned["asks"] or cleaned["engineer_questions"]:
                 log.info(
                     "Expired %d orphaned ask(s) and cleared %d stale engineer question(s)",

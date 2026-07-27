@@ -407,3 +407,6 @@ class BoardHealthMixin:
             task.lane_entered_at = now_iso
         self._emit("task_upsert", **asdict(task))
         self._db_save_task(task)
+        # Task watches are event-driven; this central transition path also
+        # covers direct moves, archive/unarchive, and done cascades.
+        self.evaluate_task_watches_for_task(task.id)
