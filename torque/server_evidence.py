@@ -1115,6 +1115,37 @@ def _record_merge_completion_evidence(
             getattr(task, "completion_evidence", {}) or {},
             update,
         )
+        # New opt-in policy roots require an explicit machine tree-parity
+        # object.  Do not manufacture it from merge prose or SHA coincidence.
+        # Older merge evidence remains advisory and legacy-compatible.
+        finalization_boundary = getattr(task, "finalization_boundary", {}) or {}
+        parity = result.get("tree_equality")
+        if (
+                getattr(task, "finalization_mode", "legacy") == "merge"
+                and isinstance(finalization_boundary, dict)
+                and isinstance(parity, dict)
+                and parity.get("equal") is True
+                and str(parity.get("reviewed_tree") or "").strip()
+                and str(parity.get("merged_tree") or "").strip()):
+            policy_mode = str(result.get("mode") or "").strip().lower()
+            if policy_mode in {"pull_request", "pull-request"}:
+                policy_mode = "pr"
+            if policy_mode not in {"pr", "direct"}:
+                policy_mode = "direct"
+            state.record_merge_finalization(
+                task.id,
+                mode=policy_mode,
+                reference=str(result.get("pr_url") or result.get("url")
+                              or ("merge:" + merge_sha)),
+                reviewed_head_sha=str(
+                    result.get("reviewed_head_sha")
+                    or parity.get("reviewed_head_sha") or ""),
+                merged_sha=merge_sha,
+                origin_verified=bool(origin.get("verified")),
+                reviewed_tree=str(parity.get("reviewed_tree") or ""),
+                merged_tree=str(parity.get("merged_tree") or ""),
+                equal=True,
+            )
         _save_completion_evidence_task(state, task)
         _auto_resolve_product_proposal_roots_and_enqueue(
             state,

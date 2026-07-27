@@ -1191,6 +1191,16 @@ function _renderBoardCard(t, childrenOf, depth, renderState) {
     meta += '<span class="' + esc(_boardMetadataBadgeClass('board-card-status', 'success'))
       + '">' + esc(t.status) + '</span>';
   }
+  var finalization = t.finalization_status || {};
+  if (showExecutionState && finalization.label) {
+    var finalizationMissing = Array.isArray(finalization.missing_gates)
+      ? finalization.missing_gates.slice(0, 4).join(', ')
+      : '';
+    meta += '<span class="' + esc(_boardMetadataBadgeClass(
+      'board-card-status', finalization.eligible ? 'success' : 'warning'
+    )) + '" title="' + esc(finalizationMissing) + '">'
+      + esc(finalization.label) + '</span>';
+  }
   var healthState = _boardTaskHealthState(t);
   var healthLabel = _boardTaskHealthLabel(t);
   if (showExecutionState && healthState !== 'healthy'

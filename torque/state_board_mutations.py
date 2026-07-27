@@ -10,6 +10,7 @@ from typing import Optional
 
 from .artifacts import normalize_artifacts, normalize_attachments
 from .task_ids import format_root_task_id, is_canonical_task_id, parse_task_id
+from .finalization import audit_entry, evaluate_finalization, normalize_mode, status_projection
 from .state import (
     ARCHIVED_LANE,
     _ENGINEER_MESSAGE_EXPIRY_NOTE,
@@ -515,6 +516,105 @@ class BoardMutationMixin:
             "architect_pickup": pickup,
         }
 
+    def evaluate_task_finalization(self, tid: str) -> dict:
+        """Public canonical evaluator projection for all board/API callers."""
+        return evaluate_finalization(self, self.resolve_task_alias(tid))
+
+    def record_finalization_review(
+            self, review_task_id: str, *, gate_id: str, verdict: str,
+            has_blocking_issues: bool, required_follow_up_resolved: bool,
+            boundary: str, executed: bool = True) -> dict:
+        """Persist an explicit review execution record for a declared gate.
+
+        Callers must supply typed verdict/follow-up facts; this routine never
+        parses review prose and does not grant any authority itself.
+        """
+        review = self.board_tasks.get(self.resolve_task_alias(review_task_id))
+        if not review:
+            raise ValueError("Review task not found")
+        root_id = str(getattr(review, "pipeline_root_id", "") or review.id)
+        root = self.board_tasks.get(root_id)
+        if not root:
+            raise ValueError("Finalization root not found")
+        declared = {gate["id"] for gate in getattr(root, "required_review_gates", [])
+                    if isinstance(gate, dict) and gate.get("id")}
+        if str(gate_id or "") not in declared:
+            raise ValueError("Review gate is not declared on finalization root")
+        evidence = dict(getattr(review, "completion_evidence", {}) or {})
+        evidence["finalization_review"] = {
+            "gate_id": str(gate_id), "verdict": str(verdict or "").lower(),
+            "has_blocking_issues": bool(has_blocking_issues),
+            "required_follow_up_resolved": bool(required_follow_up_resolved),
+            "boundary": str(boundary or ""), "executed": bool(executed),
+        }
+        review.completion_evidence = evidence
+        self._sync_finalization_projection(root)
+        review.updated_at = datetime.now(timezone.utc).isoformat()
+        root.updated_at = review.updated_at
+        self._emit("task_upsert", **asdict(review))
+        self._emit("task_upsert", **asdict(root))
+        self._db_save_task(review)
+        self._db_save_task(root)
+        return self.evaluate_task_finalization(root.id)
+
+    def record_merge_finalization(
+            self, tid: str, *, mode: str, reference: str, reviewed_head_sha: str,
+            merged_sha: str, origin_verified: bool, reviewed_tree: str,
+            merged_tree: str, equal: bool) -> dict:
+        """Attach guarded merge facts to the immutable policy boundary."""
+        task = self.board_tasks.get(self.resolve_task_alias(tid))
+        if not task:
+            raise ValueError("Task not found")
+        root_id = str(getattr(task, "pipeline_root_id", "") or task.id)
+        root = self.board_tasks.get(root_id, task)
+        if normalize_mode(getattr(root, "finalization_mode", "legacy")) != "merge":
+            raise ValueError("Task does not use merge finalization")
+        boundary = dict(getattr(root, "finalization_boundary", {}) or {})
+        boundary["finalization"] = {
+            "mode": str(mode or ""), "reference": str(reference or ""),
+            "reviewed_head_sha": str(reviewed_head_sha or ""),
+            "merged_sha": str(merged_sha or ""),
+            "origin_verified": bool(origin_verified),
+            "tree_equality": {"equal": bool(equal),
+                              "reviewed_tree": str(reviewed_tree or ""),
+                              "merged_tree": str(merged_tree or "")},
+        }
+        root.finalization_boundary = boundary
+        result = self._sync_finalization_projection(root)
+        root.updated_at = datetime.now(timezone.utc).isoformat()
+        self._emit("task_upsert", **asdict(root))
+        self._db_save_task(root)
+        return result
+
+    def _sync_finalization_projection(self, task: BoardTask) -> dict:
+        root_id = str(getattr(task, "pipeline_root_id", "") or "").strip()
+        root = self.board_tasks.get(root_id, task) if root_id else task
+        if normalize_mode(getattr(root, "finalization_mode", "legacy")) == "legacy":
+            return {"eligible": True, "mode": "legacy", "stage": "legacy", "boundary": "", "missing_gates": [], "explanations": []}
+        result = evaluate_finalization(self, root)
+        root.finalization_status = status_projection(result)
+        return result
+
+    def _finalization_done_allowed(self, task: BoardTask, *, caller: str) -> tuple[bool, dict]:
+        """Evaluate/audit the root immediately before any Done mutation."""
+        root_id = str(getattr(task, "pipeline_root_id", "") or "").strip()
+        root = self.board_tasks.get(root_id, task) if root_id else task
+        result = self._sync_finalization_projection(root)
+        if normalize_mode(getattr(root, "finalization_mode", "legacy")) == "legacy":
+            return True, result
+        outcome = "success" if result.get("eligible") else "blocked"
+        entry = audit_entry(result, caller=caller, outcome=outcome)
+        audit = list(getattr(root, "finalization_audit", []) or [])
+        # Repeated identical attempts are bounded and idempotent enough for
+        # retries: do not append duplicate caller/outcome/boundary/code rows.
+        if not audit or any(audit[-1].get(key) != entry.get(key) for key in ("caller", "outcome", "boundary", "missing_gates")):
+            audit.append(entry)
+            root.finalization_audit = audit[-40:]
+        root.updated_at = datetime.now(timezone.utc).isoformat()
+        self._emit("task_upsert", **asdict(root))
+        self._db_save_task(root)
+        return bool(result.get("eligible")), result
+
     def board_update_task(self, tid: str, **fields):
         tid = self.resolve_task_alias(tid)
         task = self.board_tasks.get(tid)
@@ -571,6 +671,13 @@ class BoardMutationMixin:
         lane_changed = "lane" in fields and new_lane != old_lane
         if "lane" in fields and new_lane not in self.board_lanes:
             return
+        if lane_changed and new_lane == "Done" and not str(
+                getattr(task, "pipeline_root_id", "") or "").strip():
+            allowed, _result = self._finalization_done_allowed(
+                task, caller="board_update_task"
+            )
+            if not allowed:
+                return _result
         if lane_changed and (new_lane == ARCHIVED_LANE or old_lane == ARCHIVED_LANE):
             archive_position = fields.pop("position", None)
             fields.pop("lane", None)
@@ -588,6 +695,12 @@ class BoardMutationMixin:
                 setattr(task, key, value)
         if "task" in fields:
             task.slug = self._unique_task_slug(task.task, exclude_id=tid)
+        # Status projection is derived, compact data rather than advisory prose.
+        root_id = str(getattr(task, "pipeline_root_id", "") or "").strip()
+        if root_id and root_id in self.board_tasks:
+            self._sync_finalization_projection(self.board_tasks[root_id])
+        elif normalize_mode(getattr(task, "finalization_mode", "legacy")) != "legacy":
+            self._sync_finalization_projection(task)
         from datetime import datetime, timezone
         now_iso = datetime.now(timezone.utc).isoformat()
         task.updated_at = now_iso
@@ -643,6 +756,13 @@ class BoardMutationMixin:
             if clear_status and task.status:
                 self.board_update_task(tid, status="")
             return
+        if lane == "Done" and task.lane != "Done" and not str(
+                getattr(task, "pipeline_root_id", "") or "").strip():
+            allowed, result = self._finalization_done_allowed(
+                task, caller="board_move_task"
+            )
+            if not allowed:
+                return result
         if clear_status:
             task.status = ""
         if lane == ARCHIVED_LANE:
@@ -824,6 +944,11 @@ class BoardMutationMixin:
                 pid = next_pid
                 continue
             if self.task_has_unresolved_descendants(parent.id):
+                break
+            allowed, _result = self._finalization_done_allowed(
+                parent, caller="board_cascade_done"
+            )
+            if not allowed:
                 break
 
             parent.status = ""

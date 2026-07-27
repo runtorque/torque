@@ -65,6 +65,11 @@ _BOARD_TASK_COLUMNS = (
     "deliverable_artifact_title",
     "requires_review",
     "pre_approved_by",
+    "finalization_mode",
+    "required_review_gates",
+    "finalization_boundary",
+    "finalization_audit",
+    "finalization_status",
 )
 
 _BOARD_TASK_INSERT_SQL = """
@@ -95,6 +100,10 @@ def _serialize_board_task(task):
     completion_evidence = json.dumps(d.pop("completion_evidence", {}))
     worktree_boundary = json.dumps(d.pop("worktree_boundary", {}))
     board_sync = json.dumps(d.pop("board_sync", {}))
+    required_review_gates = json.dumps(d.pop("required_review_gates", []))
+    finalization_boundary = json.dumps(d.pop("finalization_boundary", {}))
+    finalization_audit = json.dumps(d.pop("finalization_audit", []))
+    finalization_status = json.dumps(d.pop("finalization_status", {}))
     group_name = d.pop("group", d.pop("group_name", ""))
     assigned_engineer_id = (
         d.get("assigned_engineer_id", "")
@@ -161,6 +170,11 @@ def _serialize_board_task(task):
         d.get("deliverable_artifact_title", "") or "",
         1 if d.get("requires_review", False) else 0,
         d.get("pre_approved_by", "") or "",
+        d.get("finalization_mode", "legacy") or "legacy",
+        required_review_gates,
+        finalization_boundary,
+        finalization_audit,
+        finalization_status,
     )
 
 
@@ -200,6 +214,17 @@ def decode_board_task_row(row, cols):
     )
     d["worktree_boundary"] = _json_loads(d.get("worktree_boundary", "{}"), {})
     d["board_sync"] = _json_loads(d.get("board_sync", "{}"), {})
+    d["required_review_gates"] = _json_loads(d.get("required_review_gates", "[]"), [])
+    d["finalization_boundary"] = _json_loads(d.get("finalization_boundary", "{}"), {})
+    d["finalization_audit"] = _json_loads(d.get("finalization_audit", "[]"), [])
+    d["finalization_status"] = _json_loads(d.get("finalization_status", "{}"), {})
+    from .finalization import normalize_audit, normalize_boundary, normalize_mode, normalize_required_review_gates
+    d["finalization_mode"] = normalize_mode(d.get("finalization_mode", "legacy"))
+    d["required_review_gates"] = normalize_required_review_gates(d["required_review_gates"])
+    d["finalization_boundary"] = normalize_boundary(d["finalization_boundary"], d["finalization_mode"])
+    d["finalization_audit"] = normalize_audit(d["finalization_audit"])
+    if not isinstance(d["finalization_status"], dict):
+        d["finalization_status"] = {}
     if not isinstance(d["board_sync"], dict):
         d["board_sync"] = {}
     d.setdefault(

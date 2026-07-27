@@ -439,6 +439,11 @@ BOARD_TASK_COMPLETION_COLUMNS = {
     "deliverable_artifact_title": "TEXT NOT NULL DEFAULT ''",
     "requires_review": "INTEGER NOT NULL DEFAULT 0",
     "pre_approved_by": "TEXT NOT NULL DEFAULT ''",
+    "finalization_mode": "TEXT NOT NULL DEFAULT 'legacy'",
+    "required_review_gates": "TEXT NOT NULL DEFAULT '[]'",
+    "finalization_boundary": "TEXT NOT NULL DEFAULT '{}'",
+    "finalization_audit": "TEXT NOT NULL DEFAULT '[]'",
+    "finalization_status": "TEXT NOT NULL DEFAULT '{}'",
 }
 
 AGENT_RUNTIME_COLUMNS = {
@@ -1093,7 +1098,12 @@ CREATE TABLE IF NOT EXISTS board_tasks (
     deliverable_format TEXT NOT NULL DEFAULT '',
     deliverable_artifact_title TEXT NOT NULL DEFAULT '',
     requires_review INTEGER NOT NULL DEFAULT 0,
-    pre_approved_by TEXT NOT NULL DEFAULT ''
+    pre_approved_by TEXT NOT NULL DEFAULT '',
+    finalization_mode TEXT NOT NULL DEFAULT 'legacy',
+    required_review_gates TEXT NOT NULL DEFAULT '[]',
+    finalization_boundary TEXT NOT NULL DEFAULT '{}',
+    finalization_audit TEXT NOT NULL DEFAULT '[]',
+    finalization_status TEXT NOT NULL DEFAULT '{}'
 );
 
 CREATE TABLE IF NOT EXISTS schedules (
@@ -2987,6 +2997,20 @@ def _migration_0015_board_task_completion_contract(
     _ensure_columns(conn, "board_tasks", BOARD_TASK_COMPLETION_COLUMNS)
 
 
+def _migration_0025_finalization_policy_contract(
+    conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Add opt-in canonical finalization state without touching history."""
+    _ensure_columns(conn, "board_tasks", {
+        "finalization_mode": "TEXT NOT NULL DEFAULT 'legacy'",
+        "required_review_gates": "TEXT NOT NULL DEFAULT '[]'",
+        "finalization_boundary": "TEXT NOT NULL DEFAULT '{}'",
+        "finalization_audit": "TEXT NOT NULL DEFAULT '[]'",
+        "finalization_status": "TEXT NOT NULL DEFAULT '{}'",
+    })
+
+
 def _migration_0016_agent_group_operational_contract(
     conn: sqlite3.Connection,
     _backfill_agent_history,
@@ -3341,6 +3365,14 @@ SCHEMA_MIGRATIONS = (
         "one_shot_reminders",
         "durable-user-one-shot-reminders-v1",
         _migration_0024_one_shot_reminders,
+        phase="post_init",
+        repair_on_boot=True,
+    ),
+    SchemaMigration(
+        25,
+        "finalization_policy_contract",
+        "canonical-finalization-policy-v1",
+        _migration_0025_finalization_policy_contract,
         phase="post_init",
         repair_on_boot=True,
     ),

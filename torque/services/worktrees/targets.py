@@ -121,18 +121,24 @@ def _maybe_auto_move_merged_task_to_done(
         elif task_counts_as_done(task):
             decision["reason"] = f"task {task.id} already counts as done"
         else:
-            state.board_move_task(task.id, "Done")
-            if task.status:
-                task.status = ""
-                task.updated_at = datetime.now(timezone.utc).isoformat()
-                state._emit("task_upsert", **asdict(task))
-                state._db_save_task(task)
-            state.history_complete_task(cell.id, task.id, "done")
-            decision.update({
-                "moved": True,
-                "task_id": task.id,
-                "reason": "moved sole linked task to Done",
-            })
+            gate_result = state.board_move_task(task.id, "Done")
+            if not task_counts_as_done(task):
+                missing = (gate_result or {}).get("missing_gates", []) if isinstance(gate_result, dict) else []
+                decision["reason"] = "finalization gates block Done" + (
+                    ": " + ", ".join(missing[:3]) if missing else ""
+                )
+            else:
+                if task.status:
+                    task.status = ""
+                    task.updated_at = datetime.now(timezone.utc).isoformat()
+                    state._emit("task_upsert", **asdict(task))
+                    state._db_save_task(task)
+                state.history_complete_task(cell.id, task.id, "done")
+                decision.update({
+                    "moved": True,
+                    "task_id": task.id,
+                    "reason": "moved sole linked task to Done",
+                })
 
     if decision["moved"]:
         log.info(
