@@ -33,7 +33,15 @@ const _PROVIDER_CUSTOM_VALUE = '__custom__';
 
 function _providerModels(providerName) {
   const meta = providerName ? _findProviderMeta(providerName) : null;
-  return meta && Array.isArray(meta.models) ? meta.models : [];
+  if (!meta || !Array.isArray(meta.models)) return [];
+  const seen = new Set();
+  return meta.models.filter((model) => {
+    if (!model || typeof model !== 'object') return false;
+    const modelId = String(model.id || model.model || '').trim();
+    if (!modelId || seen.has(modelId)) return false;
+    seen.add(modelId);
+    return true;
+  });
 }
 
 function _findProviderModel(providerName, modelId) {

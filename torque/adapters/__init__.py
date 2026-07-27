@@ -11,6 +11,19 @@ from .gemini_cli import GeminiCliAdapter
 from .generic import GenericAdapter
 from ..provider_catalog import discover_codex_models
 
+
+# Claude Code does not provide a stable, account-aware model-list command.
+# Keep its selector useful with the supported Torque catalog, without making a
+# provider call or implying that every listed model is enabled for an account.
+_CLAUDE_CODE_MODELS: tuple[dict[str, str], ...] = (
+    {"id": "claude-haiku-4-5"},
+    {"id": "claude-sonnet-4-6"},
+    {"id": "claude-sonnet-5"},
+    {"id": "claude-opus-4-8"},
+    {"id": "claude-opus-5"},
+    {"id": "claude-fable-5"},
+)
+
 ADAPTERS: list[AgentAdapter] = [
     ClaudeCodeAdapter(),
     CodexAdapter(),
@@ -57,6 +70,9 @@ def get_providers() -> list[dict]:
             "command": adapter.default_command,
             "reasoning_efforts": adapter.get_reasoning_effort_options(),
         }
+        if adapter.name == "claude-code":
+            provider["models"] = copy.deepcopy(_CLAUDE_CODE_MODELS)
+            provider["model_catalog_source"] = "built-in"
         models = _provider_models_cache.get(adapter.name)
         if models:
             provider["models"] = copy.deepcopy(models)
