@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from .agent_classes import has_frozen_platform_task_authority_mode
 from .mcp_authority import SCOPE_RANK
 from .mcp_canonical import (
     canonical_tool_name,
@@ -247,6 +248,16 @@ def _task_target_scope(state, caller_cell, task) -> str:
     if not caller_cell or not task:
         return "global"
     caller_id = str(getattr(caller_cell, "id", "") or "").strip()
+    creator_proposal_mode = has_frozen_platform_task_authority_mode(caller_cell, "creator-proposal-only")
+    # Creator-proposal authority is narrower than the normal Architect task
+    # relationship: assignment is not ownership.  Do not let assignment or a
+    # worker/Engineer relationship turn a peer-created task into ``self``.
+    if creator_proposal_mode and str(
+            getattr(task, "created_by_architect_id", "") or ""
+    ).strip() != caller_id:
+        caller_group = str(getattr(caller_cell, "group", "") or "").strip()
+        task_group = str(getattr(task, "group", "") or "").strip()
+        return "group" if caller_group and caller_group == task_group else "global"
     owner_ids = {
         str(getattr(task, field, "") or "").strip()
         for field in (
@@ -465,7 +476,6 @@ def _handler_scoped_target_scope(
     )
     if (
         not requirement.handler_scoped
-        or requirement.target_kind != "task"
         or str(getattr(caller_cell, "kind", "") or "").strip() != "architect"
     ):
         return scope
@@ -473,6 +483,27 @@ def _handler_scoped_target_scope(
     caller_id = str(getattr(caller_cell, "id", "") or "").strip()
     if not caller_id:
         return scope
+    creator_proposal_mode = has_frozen_platform_task_authority_mode(caller_cell, "creator-proposal-only")
+    if (
+            creator_proposal_mode
+            and tool_name != "architect_task_pickup"
+            and requirement.target_kind == "task"
+            and str(getattr(target, "created_by_architect_id", "") or "").strip()
+            != caller_id
+    ):
+        return scope
+    # A class may declare the bounded creator-proposal task authority mode.
+    # Its reassignment handler independently enforces a same-group Engineer
+    # target and caller-owned task; retain that platform check while allowing
+    # the agent-target descriptor to represent this intentionally narrow route.
+    if (
+            tool_name == "architect_task_reassign"
+            and requirement.target_kind == "agent"
+            and creator_proposal_mode
+            and str(getattr(target, "group", "") or "").strip()
+            == str(getattr(caller_cell, "group", "") or "").strip()
+    ):
+        return "self"
     # Keep this exception tied to the exact legacy handlers whose documented
     # contract permits a routed product proposal owned by another architect.
     # The predicates inspect persisted route evidence only; they do not

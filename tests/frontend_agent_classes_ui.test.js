@@ -378,7 +378,7 @@ function sampleClasses() {
       warnings: ['old-worker is archived/disabled and cannot be assigned or launched until re-enabled.'], external_connector_caveat: 'External connector caveat.',
     },
     {
-      id: 'product-manager', version: '3', base_kind: 'architect', display_name: 'Product Manager',
+      id: 'product-manager', version: '5', base_kind: 'architect', display_name: 'Product Manager',
       primary_identity_label: 'Product Manager', secondary_base_kind_label: 'Architect-derived',
       lifecycle: 'draft', builtin: true, custom: false, source: 'builtin', status: 'draft', scratch_only: true, launchable: true,
       agent_class_schema_version: 5,
@@ -426,7 +426,7 @@ test('Agent Class manager renders class list, PM operator access summary, archiv
 
   run(context, `agentClassManagerSelect('product-manager')`);
   run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(sampleClasses()[3])} })`);
-  assert.match(classUi(document, panel), /Product Manager@3/);
+  assert.match(classUi(document, panel), /Product Manager@5/);
   assert.match(classUi(document, panel), /Primary identity[\s\S]*Product Manager/);
   assert.match(classUi(document, panel), /Advanced\/Internal diagnostics/);
   assert.match(classUi(document, panel), /draft/);
@@ -519,7 +519,7 @@ test('Agent Class manager presents approved Product Manager dogfood state with c
     warnings: [
       'External connectors are not governed by Agent Classes in Wave 7; manage connector access separately.',
       'External connector exposure is not governed or enforced by Agent Classes in Wave 7; manage connector access separately.',
-      'Product Manager cannot dispatch, merge, deploy, administer, use raw tool picker authority, or message engineers/workers directly.',
+      'Product Manager may dispatch only creator-owned product proposals; it cannot hire, merge, deploy, administer, use raw tool picker authority, or message engineers/workers directly.',
     ],
     external_connector_caveat: 'External connector exposure is not governed or enforced by Agent Classes in Wave 7; manage connector access separately.',
     restrictions: [
@@ -535,7 +535,7 @@ test('Agent Class manager presents approved Product Manager dogfood state with c
   run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(pm)} })`);
 
   const html = classUi(document, panel);
-  assert.match(html, /Product Manager@3/);
+  assert.match(html, /Product Manager@5/);
   assert.match(html, /What this class can do/);
   assert.match(html, /ACL mode[\s\S]*allow/);
   assert.match(html, /Allowed actions[\s\S]*Read own context/);

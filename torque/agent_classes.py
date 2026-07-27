@@ -28,12 +28,34 @@ from .capability_catalog import (
 )
 from .mcp_authority import (
     AuthorityValidationError,
+    EffectiveAuthority,
     canonical_capability_ids,
     compile_agent_class_acl,
     registry_hash,
 )
 
 BUILTIN_CLASS_DIR = Path(__file__).resolve().parent / "builtin_agent_classes"
+def has_frozen_platform_task_authority_mode(cell: Any, mode: str) -> bool:
+    """Return whether a trusted built-in snapshot enables a task mode.
+
+    Class metadata is intentionally authorable by custom classes.  Platform
+    task-mode refinements therefore trust the marker only when snapshot
+    freezing recorded it as a built-in class, and require that the persisted
+    effective id agrees with the frozen definition id.
+    """
+
+    if str(getattr(cell, "kind", "") or "").strip() != "architect":
+        return False
+    snapshot = getattr(cell, "effective_agent_class_snapshot", {}) or {}
+    if not isinstance(snapshot, dict) or not bool(snapshot.get("builtin", False)):
+        return False
+    effective_id = str(getattr(cell, "effective_agent_class_id", "") or "").strip()
+    if not effective_id or str(snapshot.get("id", "") or "").strip() != effective_id:
+        return False
+    return str(
+        (snapshot.get("metadata", {}) or {}).get("task_authority_mode", "")
+        or ""
+    ).strip() == str(mode or "").strip()
 
 
 @dataclass(frozen=True)
@@ -290,6 +312,32 @@ def _acl_mapping(data: dict[str, Any]) -> dict[str, Any]:
     return dict(value or {}) if isinstance(value, dict) else {}
 
 
+def _trusted_platform_creator_proposal_mode(
+    data: "AgentClassDefinition | dict[str, Any]",
+) -> bool:
+    """Whether trusted built-in class data enables the dispatch extension.
+
+    The marker lives in generally authorable metadata, so it is only authority
+    bearing when class loading has identified the definition as built-in.  This
+    deliberately keys on mode, not a named class identity.
+    """
+
+    if isinstance(data, AgentClassDefinition):
+        builtin = data.builtin
+        base_kind = data.base_kind
+        metadata = data.metadata or {}
+    else:
+        builtin = bool(data.get("builtin", False))
+        base_kind = str(data.get("base_kind", "") or "").strip()
+        metadata = data.get("metadata", {}) if isinstance(data.get("metadata"), dict) else {}
+    return (
+        bool(builtin)
+        and base_kind == "architect"
+        and str(metadata.get("task_authority_mode", "") or "").strip()
+        == "creator-proposal-only"
+    )
+
+
 def _compiled_authority_for_data(
     data: "AgentClassDefinition | dict[str, Any]",
 ) -> dict[str, Any]:
@@ -306,6 +354,17 @@ def _compiled_authority_for_data(
             acl=acl,
             capabilities=CAPABILITY_CATALOG,
         )
+        if _trusted_platform_creator_proposal_mode(data):
+            # Dispatch is a platform-owned, launch-frozen extension for the
+            # trusted creator-proposal mode.  It is intentionally unavailable
+            # to ordinary Architect ACL authoring, including custom classes.
+            capabilities = dict(authority.capabilities)
+            capabilities["task.dispatch"] = "self"
+            authority = EffectiveAuthority(
+                base_kind=authority.base_kind,
+                mode=authority.mode,
+                capabilities=dict(sorted(capabilities.items())),
+            )
     except AuthorityValidationError:
         return {
             "mode": str(acl.get("mode", "") or ""),
@@ -632,6 +691,9 @@ def effective_authority_snapshot_for_class(
             "base_kinds": sorted(definition.base_kinds),
             "scopes": list(definition.scopes),
             "ceilings": dict(sorted(definition.ceilings.items())),
+            "agent_class_base_kinds": sorted(
+                definition.agent_class_base_kinds or ()
+            ),
         }
         for capability_id, definition in sorted(CAPABILITY_CATALOG.items())
     }
@@ -1271,8 +1333,10 @@ def _class_status_from_preview(class_preview: dict[str, Any]) -> str:
                 else None
             )
             for capability_id, definition in CAPABILITY_CATALOG.items()
-            if definition.available_to(base_kind)
+            if definition.authorable_by_agent_class(base_kind)
         }
+        if _trusted_platform_creator_proposal_mode(class_preview):
+            expected["task.dispatch"] = "self"
         actual = dict(effective.get("capabilities") or {})
         return "full" if actual == expected else "restricted"
     return "full"
@@ -1451,7 +1515,7 @@ def agent_class_prompt_block_for_cell(cell: Any) -> str:
     status = str(snapshot.get("status", "") or "").strip()
     # Default/full classes intentionally add no prompt text so unassigned base
     # kinds preserve existing behavior by construction.
-    if not prompt_text and class_id.startswith("default-") and status == "full" and lifecycle == "stable":
+    if not prompt_text and class_id.startswith("default-") and lifecycle == "stable":
         return ""
     lines = [
         "## Agent Class",

@@ -224,6 +224,10 @@ class AgentClassRegistryTests(unittest.TestCase):
             "self",
         )
         self.assertEqual(
+            preview["effective_authority"]["capabilities"]["task.dispatch"],
+            "self",
+        )
+        self.assertEqual(
             preview["effective_authority"]["capabilities"]["message.peer"],
             "group",
         )
@@ -717,7 +721,7 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         )
         self.assertEqual(class_status["assigned_class_version"], "2")
         self.assertEqual(class_status["effective_class_version"], "2")
-        self.assertEqual(class_status["next_launch_class_version"], "3")
+        self.assertEqual(class_status["next_launch_class_version"], "5")
         self.assertTrue(class_status["pending_next_launch"])
         self.assertTrue(class_status["apply_state"]["relaunch_required"])
 
@@ -854,6 +858,12 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
             )
             self.assertTrue(authority.capabilities)
             self.assertEqual(authority.mode, "deny")
+            if kind == "architect":
+                self.assertNotIn("task.dispatch", authority.capabilities)
+            elif kind == "engineer":
+                self.assertEqual("children", authority.capabilities["task.dispatch"])
+            else:
+                self.assertNotIn("task.dispatch", authority.capabilities)
             self.assertEqual(agent_class_prompt_block_for_cell(cell), "")
 
     def test_class_prompt_block_and_template_context_are_compact(self):

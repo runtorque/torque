@@ -40,6 +40,7 @@ _ARCHITECT_WORKTREE_SOURCE_NAMES = {
 }
 
 _ARCHITECT_TASK_EXECUTION_SOURCE_NAMES = {
+    "engineer_task_upload_artifact",
     "engineer_task_verify",
 }
 
@@ -682,7 +683,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_task_reassign", "authority": {"requirements": [{"capability": "task.reassign","minimum_scope": "children","target_argument": "task","target_kind": "task"},{"capability": "task.reassign","minimum_scope": "children","target_argument": "new_engineer_id","target_kind": "agent"}]},
+        "name": "architect_task_reassign", "authority": {"requirements": [{"capability": "task.reassign","minimum_scope": "self","target_argument": "task","target_kind": "task"},{"capability": "task.reassign","minimum_scope": "self","target_argument": "new_engineer_id","target_kind": "agent","handler_scoped": True}]},
         "description": (
             "Reassign a task created by this architect to another visible engineer."
         ),
@@ -696,6 +697,25 @@ _ARCHITECT_TOOL_SPECS = [
                 },
             },
             "required": ["task", "new_engineer_id"],
+        },
+    },
+    {
+        "name": "architect_task_dispatch", "authority": {"requirements": [{"capability": "task.dispatch","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
+        "description": (
+            "Dispatch a task created by this architect to a new Worker. "
+            "Product Manager authority is restricted to its own product proposals; "
+            "all normal dispatch safety gates remain active."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string", "description": "Task ID or alias."},
+                "name": {"type": "string", "description": "Optional worker name."},
+                "command": {"type": "string", "description": "Optional worker command override."},
+                "model": {"type": "string", "description": "Optional worker model override."},
+                "reasoning_effort": {"type": "string", "description": "Optional reasoning-effort override."},
+            },
+            "required": ["task"],
         },
     },
     {

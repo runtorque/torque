@@ -43,6 +43,10 @@ class CapabilityDefinition:
     base_kinds: frozenset[str] = frozenset()
     scopes: tuple[str, ...] = ()
     ceilings: Mapping[str, str] = field(default_factory=dict)
+    # ``None`` means every runtime-available base kind may author this ACL
+    # capability.  A non-empty set reserves an otherwise runtime-valid
+    # capability for platform-owned frozen authority extensions.
+    agent_class_base_kinds: frozenset[str] | None = None
 
     @property
     def scoped(self) -> bool:
@@ -56,6 +60,15 @@ class CapabilityDefinition:
         if self.scoped:
             return bool(self.maximum_scope_for(base_kind))
         return base_kind in self.base_kinds
+
+    def authorable_by_agent_class(self, base_kind: str) -> bool:
+        """Whether ordinary Agent Class ACLs may select this capability."""
+
+        base_kind = str(base_kind or "").strip()
+        return self.available_to(base_kind) and (
+            self.agent_class_base_kinds is None
+            or base_kind in self.agent_class_base_kinds
+        )
 
 
 @dataclass(frozen=True)
@@ -653,7 +666,7 @@ def evaluate_capability_acl(
     effective: dict[str, str | None] = {}
     if mode == "deny":
         for capability_id, definition in capabilities.items():
-            if not definition.available_to(base_kind):
+            if not definition.authorable_by_agent_class(base_kind):
                 continue
             effective[capability_id] = (
                 definition.maximum_scope_for(base_kind)
@@ -698,6 +711,16 @@ def evaluate_capability_acl(
         if not definition.available_to(base_kind):
             raise AuthorityValidationError(
                 f"capability {capability_id} is outside the {base_kind} ceiling"
+            )
+        if not definition.authorable_by_agent_class(base_kind):
+            # A deny ACL may retain an explicit platform-capability denial as
+            # documentation; it cannot add a capability absent from the
+            # ordinary Agent Class authority baseline.
+            if mode == "deny":
+                continue
+            raise AuthorityValidationError(
+                f"capability {capability_id} is outside the {base_kind} "
+                "Agent Class ceiling"
             )
 
         raw_scope_present = "scope" in raw_rule and bool(

@@ -21,6 +21,7 @@ from . import __version__
 from .capability_catalog import (
     CAPABILITY_CATALOG,
 )
+from .agent_classes import has_frozen_platform_task_authority_mode
 from .mcp_authority import (
     EffectiveAuthority,
     AuthorityValidationError,
@@ -983,6 +984,26 @@ def _raw_tools_for_caller(state, cell_id: str) -> tuple[list[dict], object, str]
             if str(tool.get("name", "") or "").strip() in shared_names
         ]
     tools = list(_authority_project_tools(base_tools, authority))
+    # Product Manager is Architect-derived, but its explicit task_* grant
+    # includes the four current-task reporters and derive.  These retain their
+    # normal current-task semantics (and can therefore be inert when no task is
+    # assigned); they are deliberately not inherited by other Architects.
+    if caller_kind == "architect" and has_frozen_platform_task_authority_mode(cell, "creator-proposal-only"):
+        product_manager_current_task_tools = {
+            "torque_done",
+            "torque_blocked",
+            "torque_error",
+            "torque_progress",
+            "torque_derive",
+        }
+        tools.extend(_authority_project_tools(
+            [
+                tool for tool in TOOLS
+                if str(tool.get("name", "") or "").strip()
+                in product_manager_current_task_tools
+            ],
+            authority,
+        ))
     if caller_kind == "engineer":
         tools.extend(_authority_project_tools(
             engineer_tools_for_cell(cell, state),
@@ -1754,6 +1775,17 @@ async def dispatch_mcp_rpc_body(
                     first_tool_call_ts=first_tool_call_ts,
                 )
             if call_classification == _PUBLIC_TOOL_CALL_UNAUTHORIZED:
+                is_creator_proposal_mode = has_frozen_platform_task_authority_mode(caller_cell, "creator-proposal-only")
+                if is_creator_proposal_mode:
+                    return (
+                        _jsonrpc_error(
+                            req_id,
+                            -32003,
+                            "Authorization denied: target is outside Product "
+                            "Manager creator/self scope",
+                        ),
+                        200,
+                    )
                 message = f"Known tool is not authorized: {requested_tool_name}"
             else:
                 message = f"Unknown tool: {requested_tool_name}"

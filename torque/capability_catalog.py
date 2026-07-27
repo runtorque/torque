@@ -51,6 +51,7 @@ def _scoped(
     ceilings: dict[str, str],
     scopes: Iterable[str] = SCOPE_ORDER,
     risk: str = "normal",
+    agent_class_base_kinds: Iterable[str] | None = None,
 ) -> CapabilityDefinition:
     return CapabilityDefinition(
         id=capability_id,
@@ -59,6 +60,10 @@ def _scoped(
         risk=risk,
         scopes=tuple(scopes),
         ceilings=dict(ceilings),
+        agent_class_base_kinds=(
+            frozenset(agent_class_base_kinds)
+            if agent_class_base_kinds is not None else None
+        ),
     )
 
 
@@ -171,7 +176,7 @@ CAPABILITY_CATALOG: dict[str, CapabilityDefinition] = {
             "task.reassign",
             "Reassign tasks",
             "Change task ownership within the caller's routing ceiling.",
-            scopes=("children", "group"),
+            scopes=("self", "children", "group"),
             ceilings={"engineer": "group", "architect": "children"},
             risk="high",
         ),
@@ -194,9 +199,10 @@ CAPABILITY_CATALOG: dict[str, CapabilityDefinition] = {
             "task.dispatch",
             "Dispatch tasks",
             "Dispatch executable tasks to eligible Workers.",
-            scopes=("children",),
-            ceilings={"engineer": "children"},
+            scopes=("self", "children"),
+            ceilings={"engineer": "children", "architect": "self"},
             risk="critical",
+            agent_class_base_kinds={"engineer"},
         ),
         _scoped(
             "task.verify",
@@ -542,7 +548,11 @@ def validate_capability_catalog(
         if tuple(sorted(definition.scopes, key=SCOPE_RANK.get)) != definition.scopes:
             errors.append(f"scopes are not ordered for {capability_id}")
         unknown_kinds = sorted(
-            (set(definition.base_kinds) | set(definition.ceilings)) - BASE_KINDS
+            (
+                set(definition.base_kinds)
+                | set(definition.ceilings)
+                | set(definition.agent_class_base_kinds or ())
+            ) - BASE_KINDS
         )
         if unknown_kinds:
             errors.append(
@@ -580,7 +590,8 @@ def capability_catalog_for_base_kind(base_kind: str) -> list[dict]:
     result = []
     for definition in sorted(CAPABILITY_CATALOG.values(), key=lambda item: item.id):
         available_kinds = sorted(
-            kind for kind in BASE_KINDS if definition.available_to(kind)
+            kind for kind in BASE_KINDS
+            if definition.authorable_by_agent_class(kind)
         )
         if base_kind and base_kind not in available_kinds:
             continue

@@ -1,5 +1,6 @@
 """Domain dispatcher extracted from :mod:`torque.mcp_tools_shared`."""
 
+from torque.agent_classes import has_frozen_platform_task_authority_mode
 from torque.mcp_scoped.dispatch_context import ScopedDispatchContext, UNHANDLED
 from torque.mcp_scoped.dispatch_runtime import *  # noqa: F403
 
@@ -16,6 +17,17 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
     _engineer_cell = ctx.caller_cell
     _engineer_group = ctx.caller_group
     tool_name = normalize_tool_name(name, tool_prefix)
+    is_creator_proposal_mode = (
+        caller_kind == "architect"
+        and has_frozen_platform_task_authority_mode(_engineer_cell, "creator-proposal-only")
+    )
+
+    def creator_task_allowed(task) -> bool:
+        return (
+            not is_creator_proposal_mode
+            or str(getattr(task, "created_by_architect_id", "") or "").strip()
+            == str(caller_id or "").strip()
+        )
 
     if tool_name == "task_create":
         if caller_kind == "architect":
@@ -220,9 +232,12 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
             return "Task not found", True
         caller_id_str = str(caller_id or "").strip()
         creator_class = _task_created_by_classifier(task)
-        if creator_class != "user" and not _architect_task_owned_by_caller(
-            task,
-            caller_id_str,
+        if is_creator_proposal_mode:
+            if not creator_task_allowed(task):
+                return "Authorization denied: task is outside Product Manager creator/self scope", True
+        elif creator_class != "user" and not _architect_task_owned_by_caller(
+                task,
+                caller_id_str,
         ):
             return "Task was not created by this architect", True
 
@@ -254,6 +269,18 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
                     continue
                 normalized_labels.append(label)
                 seen_labels.add(label)
+            if (
+                    is_creator_proposal_mode
+                    and {"product-proposal", "proposal-only"}.issubset(
+                        set(getattr(task, "labels", []) or [])
+                    )
+                    and not {"product-proposal", "proposal-only"}.issubset(
+                        set(normalized_labels)
+                    )):
+                return (
+                    "Product Manager updates must retain product-proposal and "
+                    "proposal-only labels"
+                ), True
             patch["labels"] = normalized_labels
             updated_fields.append("labels")
         if "action_name" in args:
@@ -310,11 +337,21 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         old_engineer_id = _effective_assigned_engineer_id(task)
 
         if caller_kind == "architect":
-            if not _architect_task_owned_by_caller(task, caller_id_str):
+            if is_creator_proposal_mode and not creator_task_allowed(task):
+                return "Authorization denied: task is outside Product Manager creator/self scope", True
+            if (
+                    not is_creator_proposal_mode
+                    and not _architect_task_owned_by_caller(task, caller_id_str)
+            ):
                 return "Task was not created by this architect", True
-            engineer_id, engineer_error = _resolve_architect_hired_engineer(
-                real_state, caller_id, engineer_ident
-            )
+            if is_creator_proposal_mode:
+                engineer_id, engineer_error = _resolve_group_engineer(
+                    real_state, caller_id, engineer_ident
+                )
+            else:
+                engineer_id, engineer_error = _resolve_architect_hired_engineer(
+                    real_state, caller_id, engineer_ident
+                )
         else:
             caller_group = _caller_group(real_state, caller_id_str)
             if str(getattr(task, "group", "") or "").strip() != caller_group:
@@ -448,6 +485,8 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         if not tid:
             return "Task not found", True
         task = real_state.board_tasks.get(tid)
+        if is_creator_proposal_mode and not creator_task_allowed(task):
+            return "Authorization denied: task is outside Product Manager creator/self scope", True
         if (
                 caller_kind == "engineer"
                 and not real_state.engineer_can_access_task(
@@ -487,6 +526,8 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
             return "Task not found", True
 
         caller_id_str = str(caller_id or "").strip()
+        if is_creator_proposal_mode and not creator_task_allowed(task):
+            return "Authorization denied: task is outside Product Manager creator/self scope", True
         if caller_kind == "engineer":
             if not real_state.engineer_can_access_task(
                 caller_id_str,
@@ -576,6 +617,9 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         tid = _resolve_task(state, args.get("task", ""))
         if not tid:
             return "Task not found", True
+        task = real_state.board_tasks.get(tid)
+        if is_creator_proposal_mode and not creator_task_allowed(task):
+            return "Authorization denied: task is outside Product Manager creator/self scope", True
         actor_name = getattr(_engineer_cell, "name", "") or caller_kind
         payload = {
             "cmd": "board_verify_task",
@@ -623,6 +667,8 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         task = state.board_tasks.get(tid)
         if not task:
             return "Task not found", True
+        if is_creator_proposal_mode and not creator_task_allowed(task):
+            return "Authorization denied: task is outside Product Manager creator/self scope", True
         requested_new_lane = str(args.get("new_lane", "") or "").strip()
         requested_lane = str(args.get("lane", "") or "").strip()
         if (
@@ -668,6 +714,20 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         tid = _resolve_task(state, args.get("task", ""))
         if not tid:
             return "Task not found", True
+        task = real_state.board_tasks.get(tid)
+        if caller_kind == "architect" and (
+                not task
+                or (
+                    is_creator_proposal_mode
+                    and not creator_task_allowed(task)
+                )
+                or (
+                    not is_creator_proposal_mode
+                    and not _architect_task_owned_by_caller(
+                        task, str(caller_id or "").strip()
+                    )
+                )):
+            return "Authorization denied: task is outside creator/self scope", True
         payload = {
             "cmd": "dispatch_task",
             "id": tid,
@@ -700,8 +760,9 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
             payload["agent_id"] = agent_id
         else:
             payload["create_agent"] = True
-            payload["_created_by_engineer_id"] = _engineer_cell.id
-            payload["owner_engineer_id"] = str(caller_id or "").strip()
+            if caller_kind == "engineer":
+                payload["_created_by_engineer_id"] = _engineer_cell.id
+                payload["owner_engineer_id"] = str(caller_id or "").strip()
             if _engineer_cell:
                 if _engineer_cell.session_id:
                     payload["target_session_id"] = _engineer_cell.session_id

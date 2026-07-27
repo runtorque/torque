@@ -7,6 +7,7 @@ description: Default full-authority Architect class.
 lifecycle: stable
 acl:
   mode: deny
-  rules: []
+  rules:
+  - capability: task.dispatch
 metadata:
   default_for_base_kind: architect

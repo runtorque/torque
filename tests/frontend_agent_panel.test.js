@@ -3804,7 +3804,7 @@ test('agent panel renders Product Manager dogfood state as compact capability AC
       'External connectors are not governed by Agent Classes/Profile policy in Wave 7; manage connector access separately.',
       'External connector exposure is not governed or enforced by Agent Classes in Wave 7; manage connector access separately.',
       'Raw Architect tools are denied; use proposal-oriented Architect tools only.',
-      'Product Manager cannot dispatch, merge, deploy, administer, use raw tool picker authority, or message engineers/workers directly.',
+      'Product Manager may dispatch only creator-owned product proposals; it cannot hire, merge, deploy, administer, use raw tool picker authority, or message engineers/workers directly.',
     ],
     external_connector_caveat: 'External connector exposure is not governed or enforced by Agent Classes in Wave 7; manage connector access separately.',
     runtime_enforcement: 'launch_frozen_effective_authority',
