@@ -138,6 +138,21 @@ class BoardMutationMixin:
                 "created_at", "updated_at", "lane_entered_at")},
         )
         self.board_tasks[tid] = bt
+        # Creation is a Done attempt too.  An opt-in root never enters Done
+        # until the same canonical evaluator accepts it; derived review tasks
+        # remain free to close normally and drive their parent cascade.
+        if (lane == "Done" and self._is_finalization_root(bt)
+                and normalize_mode(getattr(bt, "finalization_mode", "legacy")) != "legacy"):
+            # Keep the task out of Done even transiently while we audit the
+            # requested transition.  A client can never observe an ineligible
+            # policy root in Done and then watch it be repaired.
+            fallback_lane = "Backlog" if "Backlog" in self.board_lanes else self.board_lanes[0]
+            bt.lane = fallback_lane
+            bt.position = self._board_next_lane_position(fallback_lane, exclude_id=tid)
+            if self._prepare_finalization_done(bt, caller="board_add_task"):
+                bt.lane = "Done"
+                bt.position = self._board_next_lane_position("Done", exclude_id=tid)
+        self._refresh_finalization_root_projection(bt)
         if alias_id and alias_id != tid:
             self.task_id_aliases[alias_id] = tid
             self._db_save_task_id_alias(alias_id)
@@ -536,10 +551,20 @@ class BoardMutationMixin:
         root = self.board_tasks.get(root_id)
         if not root:
             raise ValueError("Finalization root not found")
-        declared = {gate["id"] for gate in getattr(root, "required_review_gates", [])
-                    if isinstance(gate, dict) and gate.get("id")}
-        if str(gate_id or "") not in declared:
-            raise ValueError("Review gate is not declared on finalization root")
+        matching_gate = next((
+            gate for gate in getattr(root, "required_review_gates", [])
+            if isinstance(gate, dict)
+            and str(gate.get("id") or "") == str(gate_id or "")
+            and str(gate.get("review_task_id") or "") == review.id
+        ), None)
+        if not matching_gate:
+            raise ValueError("Review task is not the declared finalization gate")
+        if verdict not in {"ship", "block", "needs_followup", "unknown"}:
+            raise ValueError("Invalid structured review verdict")
+        if not isinstance(has_blocking_issues, bool) or not isinstance(required_follow_up_resolved, bool):
+            raise ValueError("Review blocker and follow-up fields must be booleans")
+        if not isinstance(boundary, str) or not boundary.strip():
+            raise ValueError("Review evidence boundary is required")
         evidence = dict(getattr(review, "completion_evidence", {}) or {})
         evidence["finalization_review"] = {
             "gate_id": str(gate_id), "verdict": str(verdict or "").lower(),
@@ -585,6 +610,28 @@ class BoardMutationMixin:
         self._emit("task_upsert", **asdict(root))
         self._db_save_task(root)
         return result
+
+    def _is_finalization_root(self, task: BoardTask) -> bool:
+        root_id = str(getattr(task, "pipeline_root_id", "") or "").strip()
+        return not root_id or root_id == task.id
+
+    def _refresh_finalization_root_projection(self, task: BoardTask) -> dict:
+        """Persist/emit root status after any structurally relevant child change."""
+        root_id = str(getattr(task, "pipeline_root_id", "") or "").strip()
+        root = self.board_tasks.get(root_id, task) if root_id else task
+        if normalize_mode(getattr(root, "finalization_mode", "legacy")) == "legacy":
+            return {}
+        before = dict(getattr(root, "finalization_status", {}) or {})
+        result = self._sync_finalization_projection(root)
+        if root is not task or before != root.finalization_status:
+            root.updated_at = datetime.now(timezone.utc).isoformat()
+            self._emit("task_upsert", **asdict(root))
+            self._db_save_task(root)
+        return result
+
+    def _prepare_finalization_done(self, task: BoardTask, *, caller: str) -> bool:
+        allowed, _result = self._finalization_done_allowed(task, caller=caller)
+        return allowed
 
     def _sync_finalization_projection(self, task: BoardTask) -> dict:
         root_id = str(getattr(task, "pipeline_root_id", "") or "").strip()
@@ -671,8 +718,7 @@ class BoardMutationMixin:
         lane_changed = "lane" in fields and new_lane != old_lane
         if "lane" in fields and new_lane not in self.board_lanes:
             return
-        if lane_changed and new_lane == "Done" and not str(
-                getattr(task, "pipeline_root_id", "") or "").strip():
+        if lane_changed and new_lane == "Done" and self._is_finalization_root(task):
             allowed, _result = self._finalization_done_allowed(
                 task, caller="board_update_task"
             )
@@ -696,11 +742,7 @@ class BoardMutationMixin:
         if "task" in fields:
             task.slug = self._unique_task_slug(task.task, exclude_id=tid)
         # Status projection is derived, compact data rather than advisory prose.
-        root_id = str(getattr(task, "pipeline_root_id", "") or "").strip()
-        if root_id and root_id in self.board_tasks:
-            self._sync_finalization_projection(self.board_tasks[root_id])
-        elif normalize_mode(getattr(task, "finalization_mode", "legacy")) != "legacy":
-            self._sync_finalization_projection(task)
+        self._refresh_finalization_root_projection(task)
         from datetime import datetime, timezone
         now_iso = datetime.now(timezone.utc).isoformat()
         task.updated_at = now_iso
@@ -731,6 +773,7 @@ class BoardMutationMixin:
                     *self._tasks_by_agent.get(task.agent_id, set())
                 )
             self._unindex_task(task)
+            self._refresh_finalization_root_projection(task)
             self.auto_dispatch_queue_remove_task(tid)
             self._emit("task_remove", id=tid, group=task.group)
             self._db_delete_task(tid)
@@ -756,8 +799,7 @@ class BoardMutationMixin:
             if clear_status and task.status:
                 self.board_update_task(tid, status="")
             return
-        if lane == "Done" and task.lane != "Done" and not str(
-                getattr(task, "pipeline_root_id", "") or "").strip():
+        if lane == "Done" and task.lane != "Done" and self._is_finalization_root(task):
             allowed, result = self._finalization_done_allowed(
                 task, caller="board_move_task"
             )
@@ -780,6 +822,7 @@ class BoardMutationMixin:
             position=position,
             clear_attention=(lane == "Done"),
         )
+        self._refresh_finalization_root_projection(task)
         if lane == "Done":
             self.board_cascade_done(tid, recompute=False)
         self.recompute_task_health()
@@ -986,6 +1029,7 @@ class BoardMutationMixin:
             position=position,
             unlink_agent=True,
         )
+        self._refresh_finalization_root_projection(task)
         if archived_from_lane == "Done":
             self.expire_engineer_message_descendants(tid)
         parent = self.board_tasks.get(task.parent_task_id)
@@ -1083,6 +1127,12 @@ class BoardMutationMixin:
         target_lane = lane or task.archived_from_lane or "Done"
         if target_lane == ARCHIVED_LANE or target_lane not in self.board_lanes:
             target_lane = "Done" if "Done" in self.board_lanes else self.board_lanes[0]
+        if target_lane == "Done" and self._is_finalization_root(task):
+            allowed, result = self._finalization_done_allowed(
+                task, caller="board_unarchive_task"
+            )
+            if not allowed:
+                return result
         self._board_apply_archive_state(
             task,
             lane=target_lane,
@@ -1091,6 +1141,7 @@ class BoardMutationMixin:
             position=position,
             clear_attention=(target_lane == "Done"),
         )
+        self._refresh_finalization_root_projection(task)
         self.recompute_task_health()
 
     def board_reorder_task(self, tid: str, position: int):

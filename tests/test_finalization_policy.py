@@ -117,3 +117,103 @@ class FinalizationPolicyPersistenceTests(unittest.TestCase):
                 self.assertEqual(tasks["new"]["finalization_boundary"]["artifact_digest"], "d")
             finally:
                 db.close()
+
+class FinalizationDoneBypassRegressionTests(unittest.TestCase):
+    def setUp(self):
+        _install_aiohttp_stub()
+        from torque.state import MatrixState
+        self.state = MatrixState()
+        self.state.groups["g"] = []
+
+    def _ineligible_root(self, task_id="TORQUE:910"):
+        return self.state.board_add_task(
+            "Audit root", "g", id=task_id, finalization_mode="review_only",
+            required_review_gates=[{"id": "audit", "role": "audit", "review_task_id": task_id + ":1"}],
+            finalization_boundary={"artifact_digest": "digest", "artifact_version": "v1", "source_identity": "artifact", "immutable": True},
+        )
+
+    def test_unarchive_to_done_cannot_bypass_finalization(self):
+        root = self._ineligible_root()
+        self.state.board_archive_task(root.id)
+        result = self.state.board_unarchive_task(root.id, lane="Done")
+        self.assertEqual(root.lane, "Archived")
+        self.assertFalse(result["eligible"])
+        self.assertEqual(root.finalization_audit[-1]["caller"], "board_unarchive_task")
+
+    def test_creation_in_done_cannot_bypass_finalization(self):
+        root = self.state.board_add_task(
+            "Audit root", "g", id="TORQUE:911", lane="Done", finalization_mode="review_only",
+            required_review_gates=[{"id": "audit", "role": "audit", "review_task_id": "TORQUE:911:1"}],
+            finalization_boundary={"artifact_digest": "digest", "artifact_version": "v1", "source_identity": "artifact", "immutable": True},
+        )
+        self.assertNotEqual(root.lane, "Done")
+        self.assertFalse(self.state.evaluate_task_finalization(root.id)["eligible"])
+        self.assertEqual(root.finalization_audit[-1]["caller"], "board_add_task")
+
+    def test_typed_review_record_refreshes_root_projection(self):
+        root = self._ineligible_root("TORQUE:912")
+        review = self.state.board_add_task(
+            "Audit review", "g", id="TORQUE:912:1", parent_task_id=root.id,
+            pipeline_root_id=root.id, action_name="feature/review", agent_id="reviewer",
+            dispatch_state="live",
+        )
+        self.assertEqual(root.finalization_status["label"], "Fixing blockers")
+        result = self.state.record_finalization_review(
+            review.id, gate_id="audit", verdict="ship", has_blocking_issues=False,
+            required_follow_up_resolved=True, boundary="digest|v1|artifact",
+        )
+        self.assertIn("relevant_descendant_open:TORQUE:912:1", result["missing_gates"])
+        self.state.board_move_task(review.id, "Done")
+        self.assertEqual(root.finalization_status["label"], "Ready to finalize")
+
+class FinalizationReviewReportFlowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_verify_report_records_typed_review_evidence_without_prose(self):
+        _install_aiohttp_stub()
+        from dataclasses import fields
+        from torque.commands.ai_reports import AIReportCommandRuntime, handle_ai_report_command
+        from torque.state import AgentCell, MatrixState
+
+        state = MatrixState()
+        state.groups["g"] = []
+        reviewer = AgentCell(id="reviewer", name="Reviewer", group="g", cell_type="agent")
+        state.agents[reviewer.id] = reviewer
+        state.groups["g"].append(reviewer.id)
+        root = state.board_add_task(
+            "Root", "g", id="TORQUE:920", finalization_mode="review_only",
+            required_review_gates=[{"id": "security", "role": "security", "review_task_id": "TORQUE:920:1"}],
+            finalization_boundary={"artifact_digest": "d", "artifact_version": "v", "source_identity": "evidence", "immutable": True},
+        )
+        review = state.board_add_task(
+            "Review", "g", id="TORQUE:920:1", parent_task_id=root.id,
+            pipeline_root_id=root.id, action_name="feature/review", agent_id=reviewer.id,
+            dispatch_state="live",
+        )
+        reviewer.current_task_id = review.id
+
+        async def noop_async(*_args, **_kwargs):
+            return None
+        values = {field.name: None for field in fields(AIReportCommandRuntime)}
+        values.update({
+            "state": state,
+            "capture_auto_resume_targets": lambda *_args, **_kwargs: [],
+            "resolve_ai_report_task": lambda *_args, **_kwargs: review,
+            "promote_task_for_active_report": lambda *_args, **_kwargs: None,
+            "apply_verification_report": lambda task, _payload, _actor, _save, root_task=None: ("typed review evidence", root_task),
+            "append_mcp_message": lambda *_args, **_kwargs: None,
+            "panel_event": lambda *_args, **_kwargs: None,
+            "maybe_auto_resume_targets": noop_async,
+        })
+        result = await handle_ai_report_command({
+            "cell_id": reviewer.id, "action": "verify",
+            "finalization_review": {
+                "gate_id": "security", "verdict": "ship",
+                "has_blocking_issues": False,
+                "required_follow_up_resolved": True,
+                "boundary": "d|v|evidence",
+            },
+        }, AIReportCommandRuntime(**values))
+        self.assertEqual(result["type"], "finalization_review_recorded")
+        self.assertEqual(
+            review.completion_evidence["finalization_review"]["verdict"], "ship")
+        # The legacy free-form review evidence is not used as finalization evidence.
+        self.assertNotIn("review", review.completion_evidence)

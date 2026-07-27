@@ -632,6 +632,31 @@ async def handle_ai_report_command(
                 result = {"type": "error",
                           "message": "No linked task to verify"}
             else:
+                finalization_review_result = None
+                finalization_review = data.get("finalization_review")
+                if finalization_review is not None:
+                    required_review_keys = {
+                        "gate_id", "verdict", "has_blocking_issues",
+                        "required_follow_up_resolved", "boundary",
+                    }
+                    if (not isinstance(finalization_review, dict)
+                            or set(finalization_review) != required_review_keys):
+                        return {
+                            "type": "error",
+                            "message": "finalization_review must contain exactly the typed gate, verdict, blocker, follow-up, and boundary fields",
+                        }
+                    try:
+                        finalization_review_result = state.record_finalization_review(
+                            task.id,
+                            gate_id=finalization_review["gate_id"],
+                            verdict=finalization_review["verdict"],
+                            has_blocking_issues=finalization_review["has_blocking_issues"],
+                            required_follow_up_resolved=finalization_review["required_follow_up_resolved"],
+                            boundary=finalization_review["boundary"],
+                            executed=True,
+                        )
+                    except (TypeError, ValueError) as exc:
+                        return {"type": "error", "message": str(exc)}
                 payload = {}
                 for key in (
                     "verification_mode",
@@ -693,10 +718,16 @@ async def handle_ai_report_command(
                     verify_msg, task_id=task.id,
                 )
                 result = {
-                    "type": "verification_updated",
+                    "type": (
+                        "finalization_review_recorded"
+                        if finalization_review_result is not None
+                        else "verification_updated"
+                    ),
                     "task_id": task.id,
                     "message": verify_msg,
                 }
+                if finalization_review_result is not None:
+                    result["finalization"] = finalization_review_result
                 await _maybe_auto_resume_targets(
                     state,
                     handle_command,
