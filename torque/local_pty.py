@@ -11,6 +11,7 @@ import pty
 import shlex
 import shutil
 import signal
+import select
 import tempfile
 import time
 import urllib.parse
@@ -34,7 +35,11 @@ from .pty_core import (
 from .server_agent import mcp_entrypoint_for_cell, mcp_env_vars_for_cell
 from .session_end_backstop import CodexIdleSessionEndDetector
 from .state import AgentCell, MatrixState
-from .terminal_adapter import TerminalCapabilities, TerminalLaunchContext
+from .terminal_adapter import (
+    TerminalCapabilities,
+    TerminalInputDeliveryError,
+    TerminalLaunchContext,
+)
 from .worktree import ensure_git_exclude
 
 
@@ -61,6 +66,75 @@ class _PtySession:
 
     def __post_init__(self) -> None:
         self.screen = _TerminalScreenBuffer(cols=self.cols, rows=self.rows)
+
+
+# Keep the local adapter's deadline aligned with the supervisor's contract.
+# A PTY master must be non-blocking for this bound to be meaningful: a child
+# that stops reading stdin otherwise can hold an asyncio worker thread in a
+# blocking ``os.write`` indefinitely.
+WRITE_DEADLINE_SECONDS = 5.0
+
+
+def _select_read_chunk(fd: int, closed) -> bytes:
+    """Wait for a non-blocking PTY master to become readable in a thread."""
+    while not closed():
+        try:
+            readable, _, _ = select.select([fd], [], [], 1.0)
+        except InterruptedError:
+            continue
+        except (OSError, ValueError):
+            return b""
+        if not readable:
+            continue
+        try:
+            return os.read(fd, 4096)
+        except BlockingIOError:
+            continue
+        except OSError as exc:
+            if exc.errno in (errno.EIO, errno.EBADF):
+                return b""
+            if exc.errno == errno.EINTR:
+                continue
+            raise
+    return b""
+
+
+def _bounded_pty_write(fd: int, data: bytes, deadline: float) -> int:
+    """Deliver ``data`` to a non-blocking PTY, up to ``deadline``.
+
+    ``os.write`` is permitted to make a short write even after ``select``
+    marks the descriptor writable.  Keep writing the remaining view and
+    retry transient EAGAIN/EINTR rather than silently losing the tail.
+    ``0`` is treated as no progress and returned as a failed delivery.
+    """
+    view = memoryview(data)
+    written = 0
+    while written < len(view):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            _, writable, _ = select.select([], [fd], [], remaining)
+        except InterruptedError:
+            continue
+        except (OSError, ValueError):
+            break
+        if not writable:
+            continue
+        try:
+            count = os.write(fd, view[written:])
+        except BlockingIOError:
+            continue
+        except InterruptedError:
+            continue
+        except OSError as exc:
+            if exc.errno in (errno.EAGAIN, errno.EWOULDBLOCK, errno.EINTR):
+                continue
+            raise
+        if count <= 0:
+            break
+        written += count
+    return written
 
 
 class LocalPtyAdapter:
@@ -148,6 +222,7 @@ class LocalPtyAdapter:
 
         master_fd, slave_fd = pty.openpty()
         _pty_set_winsize(master_fd, 120, 32)
+        os.set_blocking(master_fd, False)
         try:
             process = await asyncio.create_subprocess_exec(
                 *prep["shell_argv"],
@@ -321,7 +396,7 @@ class LocalPtyAdapter:
 
     async def close_session(self, session_id: str) -> None:
         session = self._sessions.get(session_id)
-        if not session or session.closed:
+        if not session or getattr(session, "closed", False):
             return
         session.closed = True
         self._input_ready_sessions.discard(session_id)
@@ -373,16 +448,15 @@ class LocalPtyAdapter:
         await self.state.broadcast()
 
     async def send_text(self, session_id: str, text: str, *,
-                        settled_submit: bool = False) -> None:
+                        settled_submit: bool = False) -> bool:
         session = self._sessions.get(session_id)
-        if not session:
-            return
+        if not session or getattr(session, "closed", False):
+            return False
         cell = self.state.agents.get(session.cell_id)
         adapter = get_adapter(cell.agent_type) if cell and cell.agent_type else None
         submit_key = adapter.get_submit_key() if adapter else "\r"
         submit_delay = adapter.get_multiline_submit_delay() if adapter else 0.3
         if cell:
-            self._mark_codex_turn_submitted(cell)
             await self._wait_for_input_ready(session, cell)
         body = text.rstrip("\r\n")
         chunks = (
@@ -390,34 +464,50 @@ class LocalPtyAdapter:
             if adapter else ([body] if body else [])
         )
         for chunk in chunks:
-            await self.write_input(session_id, chunk)
+            if not await self.write_input(session_id, chunk):
+                raise TerminalInputDeliveryError(
+                    f"terminal session {session_id} closed before input delivery")
         if body and (settled_submit or "\n" in body):
             await asyncio.sleep(submit_delay)
-        await self.write_input(session_id, submit_key)
+        if not await self.write_input(session_id, submit_key):
+            raise TerminalInputDeliveryError(
+                f"terminal session {session_id} closed before submit delivery")
         if cell:
             self._mark_codex_turn_submitted(cell, session, clear_screen=True)
+        return True
 
     async def interrupt_active_turn(self, session_id: str) -> bool:
         """Ask the verified provider adapter to interrupt its active turn."""
         session = self._sessions.get(session_id)
-        if not session or session.closed:
+        if not session or getattr(session, "closed", False):
             return False
         cell = self.state.agents.get(session.cell_id)
         adapter = get_adapter(cell.agent_type) if cell and cell.agent_type else None
         interrupt_key = adapter.get_interrupt_key() if adapter else None
         if not interrupt_key:
             return False
-        await self.write_input(session_id, interrupt_key)
-        return True
+        return await self.write_input(session_id, interrupt_key)
 
-    async def write_input(self, session_id: str, data: str) -> None:
+    async def write_input(self, session_id: str, data: str) -> bool:
         session = self._sessions.get(session_id)
-        if not session or session.closed:
-            return
+        if not session or getattr(session, "closed", False):
+            return False
         if not data:
-            return
+            return True
         payload = data.encode("utf-8", errors="ignore")
-        await asyncio.to_thread(os.write, session.master_fd, payload)
+        deadline = time.monotonic() + WRITE_DEADLINE_SECONDS
+        try:
+            written = await asyncio.to_thread(
+                _bounded_pty_write, session.master_fd, payload, deadline)
+        except OSError as exc:
+            raise TerminalInputDeliveryError(
+                f"failed to write terminal input for {session_id}: {exc}") from exc
+        if written != len(payload):
+            raise TerminalInputDeliveryError(
+                f"terminal input delivery timed out for {session_id}: "
+                f"wrote {written}/{len(payload)} bytes before "
+                f"{WRITE_DEADLINE_SECONDS:.0f}s deadline")
+        return True
 
     async def reorder_tabs(self) -> None:
         return
@@ -676,12 +766,11 @@ class LocalPtyAdapter:
         session_id = session.session_id
         try:
             while True:
-                try:
-                    chunk = await asyncio.to_thread(os.read, session.master_fd, 4096)
-                except OSError as exc:
-                    if exc.errno in (errno.EIO, errno.EBADF):
-                        break
-                    raise
+                chunk = await asyncio.to_thread(
+                    _select_read_chunk,
+                    session.master_fd,
+                    lambda: session.closed,
+                )
                 if not chunk:
                     text = session.decoder.decode(b"", final=True)
                     if text:
@@ -1469,7 +1558,7 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
             )
             return
         session = self._sessions.get(session_id)
-        if not session or session.closed:
+        if not session or getattr(session, "closed", False):
             return
         session.closed = True
         self._input_ready_sessions.discard(session_id)
@@ -1589,17 +1678,21 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
             if st.get("opened_at")
         }
 
-    async def write_input(self, session_id: str, data: str) -> None:
+    async def write_input(self, session_id: str, data: str) -> bool:
         if self._supervisor_restart_active():
-            return
+            raise TerminalInputDeliveryError(
+                f"PTY supervisor restart is active; input for {session_id} "
+                "was not delivered")
         session = self._sessions.get(session_id)
-        if not session or session.closed:
-            return
+        if not session or getattr(session, "closed", False):
+            return False
         if not data:
-            return
+            return True
         if self._write_breaker_should_skip(session_id):
-            # Breaker open: drop fast without a (likely-stalling) round-trip.
-            return
+            # Breaker open: fail fast without a (likely-stalling) round-trip.
+            raise TerminalInputDeliveryError(
+                f"terminal input delivery is paused for {session_id}: "
+                "the PTY write breaker is open")
         payload = data.encode("utf-8", errors="ignore")
         try:
             result = await self._client.write_input(session_id, payload)
@@ -1608,13 +1701,15 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
                     result.get("message")
                     or result.get("code")
                     or "supervisor write failed")
-        except Exception:
+        except Exception as exc:
             self._write_breaker_record_failure(session_id)
             log.warning(
-                "Supervisor write failed for %s — dropping input",
-                session_id)
-            return
+                "Supervisor write failed for %s", session_id)
+            raise TerminalInputDeliveryError(
+                f"supervisor failed to deliver terminal input for {session_id}: "
+                f"{exc}") from exc
         self._write_breaker_record_success(session_id)
+        return True
 
     async def resize_session(
         self, session_id: str, cols: int, rows: int,

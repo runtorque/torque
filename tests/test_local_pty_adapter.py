@@ -483,6 +483,106 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
             await adapter.close_session(cell.session_id)
 
+    def test_bounded_pty_write_retries_short_eagain_and_eintr_until_complete(self):
+        payload = b"oversized-agent-message"
+        writes = []
+
+        def partial_write(_fd, data):
+            writes.append(bytes(data))
+            if len(writes) == 1:
+                raise InterruptedError()
+            if len(writes) == 2:
+                raise BlockingIOError()
+            return min(3, len(data))
+
+        with mock.patch.object(
+                self.pty_mod.select, "select", return_value=([], [7], [])), \
+             mock.patch.object(self.pty_mod.os, "write", side_effect=partial_write):
+            written = self.pty_mod._bounded_pty_write(
+                7, payload, self.pty_mod.time.monotonic() + 1)
+
+        self.assertEqual(written, len(payload))
+        # Each successful partial write starts at the byte not delivered by
+        # the previous call; none of the message tail is discarded.
+        successful_views = writes[2:]
+        self.assertEqual(successful_views[0], payload)
+        self.assertEqual(successful_views[-1], payload[-2:])
+
+    async def test_write_input_contract_distinguishes_empty_and_gone_sessions(self):
+        state = self.state_mod.MatrixState()
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+        self.assertFalse(await adapter.write_input("missing", "payload"))
+        adapter._sessions["closed"] = SimpleNamespace(closed=True, master_fd=-1)
+        self.assertFalse(await adapter.write_input("closed", "payload"))
+        adapter._sessions["empty"] = SimpleNamespace(closed=False, master_fd=-1)
+        self.assertTrue(await adapter.write_input("empty", ""))
+
+    async def test_write_input_delivers_oversized_payload_byte_for_byte(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("Torque")
+        cell = state.add_terminal(
+            name="Terminal oversized",
+            group="Torque",
+            terminal_backend="pty",
+            command="stty -echo -icanon min 1 time 0; cat",
+        )
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+        payload = "LOCAL-BEGIN-" + ("x" * (128 * 1024)) + "-LOCAL-END"
+        received = []
+        complete = asyncio.Event()
+
+        async def on_output(cell_id, _session_id, text):
+            if cell_id != cell.id:
+                return
+            received.append(text)
+            if "-LOCAL-END" in "".join(received):
+                complete.set()
+
+        adapter.on_terminal_output = on_output
+        await adapter.start()
+        await adapter.create_session(cell)
+        try:
+            # ``command`` is typed into the interactive shell during create.
+            # Let its raw-mode setup take effect before filling the PTY.
+            await asyncio.sleep(0.2)
+            self.assertTrue(await adapter.write_input(cell.session_id, payload))
+            await asyncio.wait_for(complete.wait(), timeout=5)
+            output = "".join(received)
+            self.assertEqual(output[output.index("LOCAL-BEGIN-"):], payload)
+        finally:
+            await adapter.close_session(cell.session_id)
+
+    async def test_send_text_stops_before_submit_and_codex_mark_on_delivery_failure(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("Torque")
+        cell = state.add_agent(
+            name="Codex",
+            group="Torque",
+            terminal_backend="pty",
+            command="codex",
+            directory="/tmp",
+        )
+        cell.agent_type = "codex"
+        cell.session_id = "failed-send"
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+        adapter._sessions[cell.session_id] = SimpleNamespace(cell_id=cell.id)
+        adapter._input_ready_sessions.add(cell.session_id)
+        writes = []
+        marks = []
+
+        async def failing_write(_session_id, data):
+            writes.append(data)
+            raise self.pty_mod.TerminalInputDeliveryError("short write")
+
+        adapter.write_input = failing_write
+        adapter._mark_codex_turn_submitted = lambda *args, **kwargs: marks.append(args)
+
+        with self.assertRaises(self.pty_mod.TerminalInputDeliveryError):
+            await adapter.send_text(cell.session_id, "do not submit")
+
+        self.assertEqual(writes, ["do not submit"])
+        self.assertEqual(marks, [])
+
     async def test_shutdown_closes_live_sessions(self):
         state = self.state_mod.MatrixState()
         state.add_group("Torque")
@@ -583,6 +683,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
         async def fake_write_input(session_id, data):
             writes.append((session_id, data))
+            return True
 
         adapter.write_input = fake_write_input
 
@@ -622,6 +723,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
         async def fake_write_input(session_id, data):
             writes.append((session_id, data))
+            return True
 
         adapter.write_input = fake_write_input
         adapter._input_ready_sessions.add(cell.session_id)
@@ -657,6 +759,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
         async def fake_write_input(session_id, data):
             writes.append((session_id, data))
+            return True
 
         delays = []
 
@@ -699,6 +802,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
         async def fake_write_input(session_id, data):
             writes.append((session_id, data))
+            return True
 
         delays = []
 
@@ -759,6 +863,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
         async def fake_write_input(session_id, data):
             writes.append((session_id, data))
+            return True
 
         async def fake_read_screen_text(session):
             nonlocal screen_reads
@@ -818,6 +923,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
         async def fake_write_input(session_id, data):
             writes.append((session_id, data))
+            return True
 
         delays = []
 
@@ -884,6 +990,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
         async def fake_write_input(session_id, data):
             writes.append((session_id, data))
+            return True
 
         async def fail_wait_for(awaitable, timeout):
             if hasattr(awaitable, "close"):
@@ -1040,6 +1147,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
         async def fake_write_input(session_id, data):
             writes.append((session_id, data))
+            return True
 
         delays = []
 
