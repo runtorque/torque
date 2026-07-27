@@ -609,8 +609,12 @@ body.terminal-direct-messages-resizing .terminal-direct-messages-resizer-grip {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .terminal-compose-attachment-caret-host {
+  /* Keep the structural boundary space while letting browser-owned text after
+     an atomic chip wrap exactly like ordinary composer text. */
   display: inline;
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .terminal-compose-reply {
   display: flex;
@@ -658,6 +662,7 @@ body.terminal-direct-messages-resizing .terminal-direct-messages-resizer-grip {
   resize: none;
   overflow-y: auto;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-word;
   background: rgba(13,17,23,.58);
   color: var(--text);

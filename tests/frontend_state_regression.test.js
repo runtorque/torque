@@ -15738,6 +15738,113 @@ test('terminal rich image tokens keep one inline caret host and delete only from
   assert.equal(runInContext(context, `_terminalComposePayloadText('agent-1', 'restored')`), '/tmp/1.png restored');
 });
 
+test('terminal rich composer wraps around image tokens and leaves native repeat untouched', () => {
+  const { context, document } = createEmbeddedTerminalHarness();
+  const css = appStylesheetSource();
+  const composerSource = fs.readFileSync(path.join(repoRoot, 'static/js/terminal/composer.js'), 'utf8');
+  const hostRule = css.match(/\.terminal-compose-attachment-caret-host\s*\{[^}]+\}/);
+  const composerRule = css.match(/\.terminal-compose-input\s*\{[^}]+\}/);
+
+  // Regression reproduction: the old `white-space: pre` host received text
+  // typed after an atomic chip, making that whole tail a single unwrappable
+  // run. Keep a real boundary space while allowing ordinary prose and a long
+  // unbroken run to wrap instead of overflowing horizontally.
+  assert.ok(hostRule, 'inline image caret-host rule exists');
+  assert.ok(composerRule, 'rich composer rule exists');
+  assert.match(hostRule[0], /white-space:\s*pre-wrap\s*;/);
+  assert.match(hostRule[0], /overflow-wrap:\s*anywhere\s*;/);
+  assert.doesNotMatch(hostRule[0], /white-space:\s*pre\s*;/);
+  assert.match(composerRule[0], /overflow-wrap:\s*anywhere\s*;/);
+
+  const input = document.register('terminal-compose-input-agent-1');
+  input.nodeType = 1;
+  input.nodeName = 'DIV';
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  input.setAttribute('contenteditable', 'true');
+  const longUnbroken = 'x'.repeat(512);
+  const draft = 'before middle after ' + longUnbroken;
+  input.value = draft;
+  document.activeElement = input;
+  runInContext(context, `
+    _terminalComposeRegisterAttachmentEntries('agent-1', [
+      { path: '/tmp/before.png', filename: 'before.png' },
+      { path: '/tmp/between.png', filename: 'between.png' }
+    ], ${JSON.stringify('before middle after ' + 'x'.repeat(512))}, 0);
+    _terminalComposeAttachments['agent-1'].entries[1].position = 7;
+    _terminalComposeRenderRichInput(document.getElementById('terminal-compose-input-agent-1'));
+  `);
+  const firstToken = input.innerHTML.indexOf('[ Image #1 ]');
+  const middle = input.innerHTML.indexOf('before ');
+  const secondToken = input.innerHTML.indexOf('[ Image #2 ]');
+  const trailing = input.innerHTML.indexOf('middle after ');
+  assert.ok(firstToken >= 0 && firstToken < middle, 'token before prose stays inline');
+  assert.ok(middle < secondToken && secondToken < trailing, 'token between prose stays inline');
+  assert.match(input.innerHTML, new RegExp(longUnbroken),
+    'long unbroken prose remains browser text and is covered by overflow-wrap');
+  assert.equal((input.innerHTML.match(/data-attachment-caret-host/g) || []).length, 2,
+    'each atomic token keeps exactly one stable caret boundary');
+
+  // Browser key-repeat sends repeated keydown/input pairs. The composer must
+  // not cancel or synthesize printable keys; verify letters/numbers have the
+  // same native path as spaces and punctuation for both plain and token drafts.
+  function keyEvent(key, repeat) {
+    return {
+      key,
+      repeat,
+      target: input,
+      shiftKey: false,
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      prevented: false,
+      stopped: false,
+      preventDefault() { this.prevented = true; },
+      stopPropagation() { this.stopped = true; },
+    };
+  }
+  const richHtml = input.innerHTML;
+  for (const key of ['a', '7', ' ', ':', ',']) {
+    for (const repeat of [false, true, true]) {
+      const event = keyEvent(key, repeat);
+      context.__repeatEvent = event;
+      runInContext(context, `terminalComposeKeydown(__repeatEvent, 'agent-1');`);
+      assert.equal(event.prevented, false, `${key} repeat is not cancelled in token draft`);
+      assert.equal(event.stopped, false, `${key} repeat is not intercepted in token draft`);
+    }
+  }
+  assert.equal(input.innerHTML, richHtml, 'keydown leaves browser-owned rich DOM untouched');
+  // Model the matching native input events: each repeated printable input
+  // updates the draft but no JavaScript loop generates extra characters.
+  delete input.childNodes;
+  const nativeRepeatText = 'aa77  ::,,';
+  for (const character of nativeRepeatText) {
+    input.value += character;
+    runInContext(context, `terminalComposeInput(document.getElementById('terminal-compose-input-agent-1'));`);
+  }
+  assert.equal(
+    jsonValue(context, `_terminalComposeDrafts['agent-1']`),
+    draft + nativeRepeatText,
+    'repeated native input is serialized after attachment-bearing prose',
+  );
+
+  // Repeat handling deliberately delegates cadence and input insertion to the
+  // browser; do not grow a JavaScript repeat loop or an event.repeat branch.
+  const keydownSource = composerSource.slice(composerSource.indexOf('function terminalComposeKeydown'));
+  assert.doesNotMatch(keydownSource, /(?:evt|event)\.repeat|setInterval|setTimeout/);
+
+  // The same printable key sequence is equally unhandled in a plain draft.
+  delete input.childNodes;
+  input.value = 'plain';
+  for (const key of ['a', '7', ' ', ':', ',']) {
+    const event = keyEvent(key, true);
+    context.__plainRepeatEvent = event;
+    runInContext(context, `terminalComposeKeydown(__plainRepeatEvent, 'agent-1');`);
+    assert.equal(event.prevented, false, `${key} repeat is not cancelled in plain draft`);
+    assert.equal(event.stopped, false, `${key} repeat is not intercepted in plain draft`);
+  }
+});
+
 test('terminal compose preserves image chip payload through history recall restore', async () => {
   async function runRecallRestoreFlow(restoreKey) {
     const uploads = [];
