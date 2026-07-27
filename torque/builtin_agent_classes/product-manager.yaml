@@ -1,6 +1,6 @@
 agent_class_schema_version: 5
 id: product-manager
-version: '4'
+version: '5'
 display_name: Product Manager
 description: Product planning and intake agent with PM-safe authority; approved for live dogfood
   while remaining authority-bounded.
@@ -65,7 +65,6 @@ acl:
     - task.update
     - task.move
     - task.mark_covered
-    - task.dispatch
     - task.verify
     - task.artifact.write
     - task.report

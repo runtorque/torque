@@ -378,7 +378,7 @@ function sampleClasses() {
       warnings: ['old-worker is archived/disabled and cannot be assigned or launched until re-enabled.'], external_connector_caveat: 'External connector caveat.',
     },
     {
-      id: 'product-manager', version: '4', base_kind: 'architect', display_name: 'Product Manager',
+      id: 'product-manager', version: '5', base_kind: 'architect', display_name: 'Product Manager',
       primary_identity_label: 'Product Manager', secondary_base_kind_label: 'Architect-derived',
       lifecycle: 'draft', builtin: true, custom: false, source: 'builtin', status: 'draft', scratch_only: true, launchable: true,
       agent_class_schema_version: 5,
@@ -426,7 +426,7 @@ test('Agent Class manager renders class list, PM operator access summary, archiv
 
   run(context, `agentClassManagerSelect('product-manager')`);
   run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(sampleClasses()[3])} })`);
-  assert.match(classUi(document, panel), /Product Manager@4/);
+  assert.match(classUi(document, panel), /Product Manager@5/);
   assert.match(classUi(document, panel), /Primary identity[\s\S]*Product Manager/);
   assert.match(classUi(document, panel), /Advanced\/Internal diagnostics/);
   assert.match(classUi(document, panel), /draft/);
@@ -535,7 +535,7 @@ test('Agent Class manager presents approved Product Manager dogfood state with c
   run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(pm)} })`);
 
   const html = classUi(document, panel);
-  assert.match(html, /Product Manager@4/);
+  assert.match(html, /Product Manager@5/);
   assert.match(html, /What this class can do/);
   assert.match(html, /ACL mode[\s\S]*allow/);
   assert.match(html, /Allowed actions[\s\S]*Read own context/);

@@ -375,12 +375,16 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         custom_snapshot["id"] = "custom-productish"
         custom_snapshot["builtin"] = False
         custom_snapshot["metadata"]["task_authority_mode"] = "creator-proposal-only"
+        custom_snapshot["effective_authority"]["capabilities"].pop(
+            "task.dispatch", None
+        )
         self.architect.effective_agent_class_id = "custom-productish"
         self.architect.effective_agent_class_snapshot = custom_snapshot
 
         tool_names = await self._list_tools()
         self.assertNotIn("task_progress", tool_names)
         self.assertNotIn("task_derive", tool_names)
+        self.assertNotIn("task_dispatch", tool_names)
 
         peer_engineer = self._add_agent(
             "engineer-peer",

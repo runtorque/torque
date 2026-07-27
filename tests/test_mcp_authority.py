@@ -99,7 +99,36 @@ class MCPAuthorityPrimitiveTests(unittest.TestCase):
             architect["message.subordinate"]["maximum_scope"],
             "children",
         )
-        self.assertEqual(architect["task.dispatch"]["maximum_scope"], "self")
+        self.assertNotIn("task.dispatch", architect)
+
+    def test_platform_dispatch_is_not_authorable_by_architect_classes(self):
+        architect_deny = compile_agent_class_acl(
+            base_kind="architect",
+            acl={"mode": "deny", "rules": []},
+            capabilities=CAPABILITY_CATALOG,
+        )
+        self.assertNotIn("task.dispatch", architect_deny.capabilities)
+        with self.assertRaisesRegex(AuthorityValidationError, "Agent Class ceiling"):
+            compile_agent_class_acl(
+                base_kind="architect",
+                acl={
+                    "mode": "allow",
+                    "rules": [{"capability": "task.dispatch", "scope": "self"}],
+                },
+                capabilities=CAPABILITY_CATALOG,
+            )
+        engineer_deny = compile_agent_class_acl(
+            base_kind="engineer",
+            acl={"mode": "deny", "rules": []},
+            capabilities=CAPABILITY_CATALOG,
+        )
+        worker_deny = compile_agent_class_acl(
+            base_kind="worker",
+            acl={"mode": "deny", "rules": []},
+            capabilities=CAPABILITY_CATALOG,
+        )
+        self.assertEqual("children", engineer_deny.capabilities["task.dispatch"])
+        self.assertNotIn("task.dispatch", worker_deny.capabilities)
 
     def test_coverage_audit_reports_every_drift_type(self):
         report = audit_tool_authority_coverage(
