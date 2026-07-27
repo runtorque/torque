@@ -565,6 +565,16 @@ def default_ai_index_corpus() -> dict[str, bool]:
     return {key: True for key in AI_INDEX_CORPUS_KEYS}
 
 
+def normalize_codex_fast_mode(value, *, strict: bool = True) -> str:
+    """Normalize the persisted three-state Codex Fast launch preference."""
+    mode = str(value or "inherit").strip().lower()
+    if mode not in {"inherit", "on", "off"}:
+        if strict:
+            raise ValueError("codex fast mode must be inherit, on, or off")
+        return "inherit"
+    return mode
+
+
 def normalize_ai_generation_provider(value, *, strict: bool = True) -> str:
     provider = str(value or "").strip().lower()
     if provider not in AI_GENERATION_PROVIDERS:
@@ -2186,11 +2196,13 @@ class GroupSettings:
     agent_boot_command: str = ""  # override default boot command (e.g. "codex")
     agent_model: str = ""  # default model override when provider supports it
     agent_reasoning_effort: str = ""  # default reasoning-effort override
+    agent_fast_mode: str = "inherit"  # Codex Fast: inherit | on | off
     # Worker launch overrides. Empty strings inherit the agent_* group default.
     worker_provider: str = ""  # adapter override for workers (empty = use group default)
     worker_boot_command: str = ""  # boot command override for workers (empty = use group default)
     worker_model: str = ""  # model override for workers (empty = use group default)
     worker_reasoning_effort: str = ""  # reasoning override for workers (empty = use group default)
+    worker_fast_mode: str = "inherit"  # Codex Fast: inherit | on | off
     git_worktree: bool = False
     worktree_base_dir: str = ".torque/worktrees"  # directory for worktrees (relative to repo)
     worktree_base_branch: str = ""  # branch to fork from (empty = current HEAD)
@@ -2242,6 +2254,7 @@ class GroupSettings:
     architect_provider: str = ""
     architect_model: str = ""
     architect_reasoning_effort: str = ""
+    architect_fast_mode: str = "inherit"  # Codex Fast: inherit | on | off
     architect_directory: str = ""
     architect_profile: str = ""
     architect_shell: str = ""
@@ -2275,6 +2288,7 @@ class ArchitectSettings:
     architect_provider: str = ""
     architect_model: str = ""
     architect_reasoning_effort: str = ""
+    architect_fast_mode: str = "inherit"  # Codex Fast: inherit | on | off
     architect_directory: str = ""
     architect_profile: str = ""
     architect_shell: str = ""
@@ -2327,6 +2341,7 @@ class EngineerSettings:
     engineer_boot_command: str = ""        # boot command override (empty = use provider default)
     engineer_model: str = ""               # model override for the designated engineer
     engineer_reasoning_effort: str = ""    # reasoning-effort override for the designated engineer
+    engineer_fast_mode: str = "inherit"  # Codex Fast: inherit | on | off
     engineer_directory: str = ""           # directory override for the designated engineer
     engineer_profile: str = ""             # iTerm profile override for the designated engineer
     engineer_shell: str = ""               # shell override for the designated engineer

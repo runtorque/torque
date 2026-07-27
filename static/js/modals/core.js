@@ -530,6 +530,7 @@ function onGsProviderChange(currentEffort) {
       : currentEffort
   );
   refreshGsInheritedLaunchPlaceholders();
+  _syncCodexFastMode('gs-agent-fast-mode-row', providerName);
   if (!_getProviderValue('gs-worker-provider')) {
     onGsWorkerProviderChange();
   }
@@ -549,6 +550,7 @@ function onAddProviderChange(currentEffort) {
   cmdRow.classList.remove('hidden');
   document.getElementById('add-model-row').classList.remove('hidden');
   document.getElementById('add-reasoning-row').classList.remove('hidden');
+  _syncCodexFastMode('add-fast-mode-row', _getProviderValue('add-provider-select') || _runtimeDefaultProviderName());
   if (v === '__custom__') {
     label.textContent = 'Boot command';
     input.placeholder = 'e.g. npm run dev';
@@ -584,6 +586,7 @@ function onGsEngineerProviderChange(currentEffort) {
     true
   );
   refreshGsInheritedLaunchPlaceholders();
+  _syncCodexFastMode('gs-engineer-fast-mode-row', _engineerProviderForReasoning());
 }
 
 function onGsWorkerProviderChange(currentEffort) {
@@ -603,6 +606,7 @@ function onGsWorkerProviderChange(currentEffort) {
     true
   );
   refreshGsInheritedLaunchPlaceholders();
+  _syncCodexFastMode('gs-worker-fast-mode-row', _workerProviderForReasoning());
 }
 
 function onGsArchitectProviderChange(currentEffort) {
@@ -620,6 +624,7 @@ function onGsArchitectProviderChange(currentEffort) {
     true
   );
   refreshGsInheritedLaunchPlaceholders();
+  _syncCodexFastMode('gs-architect-fast-mode-row', _architectProviderForReasoning());
 }
 
 /* -- Hint popover (for ? buttons) ---------------------------------------- */
@@ -1261,3 +1266,9 @@ function submitGroup() {
 }
 
 /* -- Add Engineer ----------------------------------------------------- */
+
+function _syncCodexFastMode(rowId, provider) {
+  const row = document.getElementById(rowId);
+  if (!row) return;
+  row.classList.toggle('hidden', String(provider || '').trim().toLowerCase() !== 'codex');
+}

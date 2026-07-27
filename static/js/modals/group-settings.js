@@ -683,10 +683,12 @@ function _groupSettingsPromptPreviewPayload() {
     agent_boot_command: document.getElementById('gs-agent-boot-cmd').value.trim(),
     agent_model: _getModelValue('gs-agent-model'),
     agent_reasoning_effort: _getReasoningEffortValue('gs-agent-reasoning-effort'),
+    agent_fast_mode: document.getElementById('gs-agent-fast-mode').value,
     worker_provider: _getProviderValue('gs-worker-provider'),
     worker_boot_command: document.getElementById('gs-worker-boot-command').value.trim(),
     worker_model: _getModelValue('gs-worker-model'),
     worker_reasoning_effort: _getReasoningEffortValue('gs-worker-reasoning-effort'),
+    worker_fast_mode: document.getElementById('gs-worker-fast-mode').value,
     agent_directory: document.getElementById('gs-agent-directory').value.trim(),
     agent_shell: document.getElementById('gs-agent-shell').value,
     engineer_merge_mode: document.getElementById('gs-engineer-merge-mode').value,
@@ -701,6 +703,7 @@ function _engineerSettingsPromptPreviewPayload() {
     engineer_boot_command: document.getElementById('gs-engineer-boot-cmd').value.trim(),
     engineer_model: _getModelValue('gs-engineer-model'),
     engineer_reasoning_effort: _getReasoningEffortValue('gs-engineer-reasoning-effort'),
+    engineer_fast_mode: document.getElementById('gs-engineer-fast-mode').value,
     engineer_directory: document.getElementById('gs-engineer-directory').value.trim(),
     engineer_shell: document.getElementById('gs-engineer-shell').value,
     custom_instructions: document.getElementById('gs-engineer-custom-instructions').value,
@@ -723,6 +726,7 @@ function _architectSettingsPromptPreviewPayload() {
     architect_boot_command: document.getElementById('gs-architect-boot-cmd').value.trim(),
     architect_model: _getModelValue('gs-architect-model'),
     architect_reasoning_effort: _getReasoningEffortValue('gs-architect-reasoning-effort'),
+    architect_fast_mode: document.getElementById('gs-architect-fast-mode').value,
     architect_directory: document.getElementById('gs-architect-directory').value.trim(),
     architect_shell: document.getElementById('gs-architect-shell').value,
     architect_custom_instructions: document.getElementById('gs-architect-custom-instructions').value,
@@ -1242,6 +1246,7 @@ function _defaultArchitectSettings() {
     architect_provider: '',
     architect_model: '',
     architect_reasoning_effort: '',
+    architect_fast_mode: 'inherit',
     architect_directory: '',
     architect_shell: '',
     architect_custom_instructions: '',
@@ -1393,6 +1398,8 @@ function _showGroupSettings(group, data) {
   _populateProviderSelect('gs-worker-provider', s.worker_provider || '', true);
   document.getElementById('gs-worker-boot-command').value = s.worker_boot_command || '';
   document.getElementById('gs-worker-model').value = s.worker_model || '';
+  _setSelectValue('gs-agent-fast-mode', s.agent_fast_mode, 'inherit');
+  _setSelectValue('gs-worker-fast-mode', s.worker_fast_mode, 'inherit');
   onGsProviderChange(s.agent_reasoning_effort || '');
   onGsWorkerProviderChange(s.worker_reasoning_effort || '');
   _setSelectValue('gs-worktree-mode', s.git_worktree ? 'isolated' : 'shared', 'shared');
@@ -1460,6 +1467,7 @@ function _showGroupSettings(group, data) {
   _populateProviderSelect('gs-engineer-provider', ws.engineer_provider || '', true);
   document.getElementById('gs-engineer-boot-cmd').value = ws.engineer_boot_command || '';
   document.getElementById('gs-engineer-model').value = ws.engineer_model || '';
+  _setSelectValue('gs-engineer-fast-mode', ws.engineer_fast_mode, 'inherit');
   document.getElementById('gs-engineer-directory').value = ws.engineer_directory || '';
   document.getElementById('gs-engineer-shell').value = ws.engineer_shell || '';
   document.getElementById('gs-engineer-custom-instructions').value = ws.custom_instructions || '';
@@ -1519,6 +1527,7 @@ function _showGroupSettings(group, data) {
   );
   document.getElementById('gs-architect-boot-cmd').value = architectSettings.architect_boot_command || '';
   document.getElementById('gs-architect-model').value = architectSettings.architect_model || '';
+  _setSelectValue('gs-architect-fast-mode', architectSettings.architect_fast_mode, 'inherit');
   document.getElementById('gs-architect-directory').value = architectSettings.architect_directory || '';
   document.getElementById('gs-architect-shell').value = architectSettings.architect_shell || '';
   document.getElementById('gs-architect-custom-instructions').value = architectSettings.architect_custom_instructions || '';
@@ -1637,10 +1646,12 @@ function submitGroupSettings() {
     agent_boot_command: document.getElementById('gs-agent-boot-cmd').value.trim(),
     agent_model: _getModelValue('gs-agent-model'),
     agent_reasoning_effort: _getReasoningEffortValue('gs-agent-reasoning-effort'),
+    agent_fast_mode: document.getElementById('gs-agent-fast-mode').value,
     worker_provider: _getProviderValue('gs-worker-provider'),
     worker_boot_command: document.getElementById('gs-worker-boot-command').value.trim(),
     worker_model: _getModelValue('gs-worker-model'),
     worker_reasoning_effort: _getReasoningEffortValue('gs-worker-reasoning-effort'),
+    worker_fast_mode: document.getElementById('gs-worker-fast-mode').value,
     agent_env_vars: _textToEnv('gs-agent-env-vars'),
     agent_env_file: document.getElementById('gs-agent-env-file').value.trim(),
     git_worktree: document.getElementById('gs-worktree-mode').value === 'isolated',
@@ -1683,6 +1694,7 @@ function submitGroupSettings() {
     engineer_boot_command: document.getElementById('gs-engineer-boot-cmd').value.trim(),
     engineer_model: _getModelValue('gs-engineer-model'),
     engineer_reasoning_effort: _getReasoningEffortValue('gs-engineer-reasoning-effort'),
+    engineer_fast_mode: document.getElementById('gs-engineer-fast-mode').value,
     engineer_directory: document.getElementById('gs-engineer-directory').value.trim(),
     engineer_shell: document.getElementById('gs-engineer-shell').value,
     custom_instructions: document.getElementById('gs-engineer-custom-instructions').value,
@@ -1704,6 +1716,7 @@ function submitGroupSettings() {
     architect_boot_command: document.getElementById('gs-architect-boot-cmd').value.trim(),
     architect_model: _getModelValue('gs-architect-model'),
     architect_reasoning_effort: _getReasoningEffortValue('gs-architect-reasoning-effort'),
+    architect_fast_mode: document.getElementById('gs-architect-fast-mode').value,
     architect_directory: document.getElementById('gs-architect-directory').value.trim(),
     architect_shell: document.getElementById('gs-architect-shell').value,
     architect_custom_instructions: document.getElementById('gs-architect-custom-instructions').value,

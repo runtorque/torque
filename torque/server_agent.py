@@ -22,6 +22,7 @@ from .artifacts import (
 from .agent_classes import append_agent_class_prompt_block
 from .behavior_overlay import behavior_overlay_block_marker, split_behavior_overlay_blocks
 from .config import log
+from .state import normalize_codex_fast_mode
 from .identity import prepend_agent_identity_anchor
 from .runner_backends import normalize_runner_backend
 
@@ -308,6 +309,15 @@ class AgentLaunchService:
             index += 1
         return f"{base} {index}"
 
+    @staticmethod
+    def _resolve_fast_mode(*values) -> str:
+        """Resolve launch preference from most to least specific scope."""
+        for value in values:
+            mode = normalize_codex_fast_mode(value, strict=False)
+            if mode != "inherit":
+                return mode
+        return "inherit"
+
     def resolve_agent_launch_config(self, group: str, *,
                                     base_dir: str = "",
                                     explicit_template: str = "",
@@ -397,6 +407,13 @@ class AgentLaunchService:
             "agent_type": effective_agent_type,
             "runner_backend": runner_backend,
             "command": command.strip(),
+            "fast_mode": self._resolve_fast_mode(
+                resolved.get("fast_mode"), getattr(gs, "agent_fast_mode", "inherit"),
+            ),
+            # Preserve template/per-launch specificity for kind resolvers.
+            "fast_mode_override": normalize_codex_fast_mode(
+                resolved.get("fast_mode"), strict=False,
+            ),
             "profile": profile,
             "directory": directory,
             "shell": shell,
@@ -463,6 +480,10 @@ class AgentLaunchService:
             overrides=merged,
             apply_group_default_role=False,
         )
+        resolved["fast_mode"] = self._resolve_fast_mode(
+            resolved.get("fast_mode_override"), getattr(ws, "engineer_fast_mode", "inherit"),
+            getattr(gs := self.state.get_group_settings(group), "agent_fast_mode", "inherit"),
+        )
         resolved["worktree"] = False
         return resolved
 
@@ -489,13 +510,18 @@ class AgentLaunchService:
             elif value is None:
                 continue
             merged[key] = value
-        return self.resolve_agent_launch_config(
+        resolved = self.resolve_agent_launch_config(
             group,
             base_dir=base_dir,
             explicit_template=explicit_template,
             overrides=merged,
             apply_group_default_role=True,
         )
+        resolved["fast_mode"] = self._resolve_fast_mode(
+            resolved.get("fast_mode_override"), getattr(gs, "worker_fast_mode", "inherit"),
+            getattr(gs, "agent_fast_mode", "inherit"),
+        )
+        return resolved
 
     def resolve_architect_launch_config(self, group: str, *,
                                       base_dir: str = "",
@@ -527,6 +553,10 @@ class AgentLaunchService:
             explicit_template=explicit_template,
             overrides=merged,
             apply_group_default_role=False,
+        )
+        resolved["fast_mode"] = self._resolve_fast_mode(
+            resolved.get("fast_mode_override"), getattr(ws, "architect_fast_mode", "inherit"),
+            getattr(self.state.get_group_settings(group), "agent_fast_mode", "inherit"),
         )
         resolved["worktree"] = False
         return resolved
@@ -697,6 +727,7 @@ class AgentLaunchService:
                         group, name)
             return None
         cell.session_resume = bool(launch_cfg.get("session_resume", True))
+        cell.fast_mode = normalize_codex_fast_mode(launch_cfg.get("fast_mode"), strict=False)
         cell.idle_timeout = int(launch_cfg.get("idle_timeout", 0) or 0)
         cell.kind = str(kind or "").strip()
         cell.persistent = bool(persistent)

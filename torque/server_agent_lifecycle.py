@@ -755,6 +755,7 @@ async def _handle_relaunch_agent_command(
             launch_cfg["agent_type"] = cell.agent_type
     cell.session_resume = bool(
         launch_cfg.get("session_resume", cell.session_resume))
+    cell.fast_mode = str(launch_cfg.get("fast_mode", "inherit") or "inherit")
     cell.idle_timeout = int(
         launch_cfg.get("idle_timeout", cell.idle_timeout) or 0)
     if cell.cell_type == "agent":
@@ -977,6 +978,7 @@ async def _handle_restart_agent_command(
     )
     cell.session_resume = bool(
         launch_cfg.get("session_resume", cell.session_resume))
+    cell.fast_mode = str(launch_cfg.get("fast_mode", "inherit") or "inherit")
     cell.idle_timeout = int(
         launch_cfg.get("idle_timeout", cell.idle_timeout) or 0)
     cell.command = launch_cfg.get("command") or cell.command

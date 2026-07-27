@@ -248,13 +248,13 @@ class DigestPersistenceMixin:
                  pending_note_kind, pending_note_set_at,
                  pending_note_actor_id, enabled_events,
                  engineer_provider, engineer_boot_command,
-                 engineer_model, engineer_reasoning_effort,
+                 engineer_model, engineer_reasoning_effort, engineer_fast_mode,
                  engineer_directory, engineer_profile,
                  engineer_shell, engineer_tab_color,
                  pending_question_set_at,
                  pending_question_actor_id,
                  engineer_can_override_worker_provider)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             group_name,
             settings.get("push_interval", 60),
@@ -280,6 +280,7 @@ class DigestPersistenceMixin:
             settings.get("engineer_boot_command", ""),
             settings.get("engineer_model", ""),
             settings.get("engineer_reasoning_effort", ""),
+            settings.get("engineer_fast_mode", "inherit"),
             settings.get("engineer_directory", ""),
             settings.get("engineer_profile", ""),
             settings.get("engineer_shell", ""),
@@ -357,7 +358,7 @@ class DigestPersistenceMixin:
             "pending_question, pending_note, pending_note_kind, "
             "pending_note_set_at, pending_note_actor_id, enabled_events, "
             "engineer_provider, engineer_boot_command, "
-            "engineer_model, engineer_reasoning_effort, "
+            "engineer_model, engineer_reasoning_effort, engineer_fast_mode, "
             "engineer_directory, engineer_profile, "
             "engineer_shell, engineer_tab_color, "
             "pending_question_set_at, "
@@ -406,14 +407,15 @@ class DigestPersistenceMixin:
             "engineer_boot_command": row[20] if len(row) > 20 else "",
             "engineer_model": row[21] if len(row) > 21 else "",
             "engineer_reasoning_effort": row[22] if len(row) > 22 else "",
-            "engineer_directory": row[23] if len(row) > 23 else "",
-            "engineer_profile": row[24] if len(row) > 24 else "",
-            "engineer_shell": row[25] if len(row) > 25 else "",
-            "engineer_tab_color": row[26] if len(row) > 26 else "",
-            "pending_question_set_at": row[27] if len(row) > 27 else 0.0,
-            "pending_question_actor_id": row[28] if len(row) > 28 else "",
+            "engineer_fast_mode": row[23] if len(row) > 23 else "inherit",
+            "engineer_directory": row[24] if len(row) > 24 else "",
+            "engineer_profile": row[25] if len(row) > 25 else "",
+            "engineer_shell": row[26] if len(row) > 26 else "",
+            "engineer_tab_color": row[27] if len(row) > 27 else "",
+            "pending_question_set_at": row[28] if len(row) > 28 else 0.0,
+            "pending_question_actor_id": row[29] if len(row) > 29 else "",
             "engineer_can_override_worker_provider": (
-                bool(row[29]) if len(row) > 29 else True
+                bool(row[30]) if len(row) > 30 else True
             ),
         }
 
@@ -486,7 +488,7 @@ class DigestPersistenceMixin:
             "pending_question, pending_note, pending_note_kind, "
             "pending_note_set_at, pending_note_actor_id, enabled_events, "
             "engineer_provider, engineer_boot_command, "
-            "engineer_model, engineer_reasoning_effort, "
+            "engineer_model, engineer_reasoning_effort, engineer_fast_mode, "
             "engineer_directory, engineer_profile, "
             "engineer_shell, engineer_tab_color, "
             "pending_question_set_at, "
@@ -535,14 +537,15 @@ class DigestPersistenceMixin:
                 "engineer_boot_command": row[20] if len(row) > 20 else "",
                 "engineer_model": row[21] if len(row) > 21 else "",
                 "engineer_reasoning_effort": row[22] if len(row) > 22 else "",
-                "engineer_directory": row[23] if len(row) > 23 else "",
-                "engineer_profile": row[24] if len(row) > 24 else "",
-                "engineer_shell": row[25] if len(row) > 25 else "",
-                "engineer_tab_color": row[26] if len(row) > 26 else "",
-                "pending_question_set_at": row[27] if len(row) > 27 else 0.0,
-                "pending_question_actor_id": row[28] if len(row) > 28 else "",
+                "engineer_fast_mode": row[23] if len(row) > 23 else "inherit",
+                "engineer_directory": row[24] if len(row) > 24 else "",
+                "engineer_profile": row[25] if len(row) > 25 else "",
+                "engineer_shell": row[26] if len(row) > 26 else "",
+                "engineer_tab_color": row[27] if len(row) > 27 else "",
+                "pending_question_set_at": row[28] if len(row) > 28 else 0.0,
+                "pending_question_actor_id": row[29] if len(row) > 29 else "",
                 "engineer_can_override_worker_provider": (
-                    bool(row[29]) if len(row) > 29 else True
+                    bool(row[30]) if len(row) > 30 else True
                 ),
             }
         return result

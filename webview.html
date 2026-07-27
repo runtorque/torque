@@ -146,6 +146,11 @@
             <select id="add-reasoning-effort" onchange="_onReasoningEffortSelectChange('add-reasoning-effort')"></select>
             <input id="add-reasoning-effort-custom" class="provider-custom-input hidden" aria-label="Custom reasoning effort" placeholder="Enter a reasoning effort" autocomplete="off">
           </div>
+          <div id="add-fast-mode-row" class="hidden">
+            <label for="add-fast-mode">Codex Fast startup</label>
+            <select id="add-fast-mode"><option value="inherit">Inherit</option><option value="on">Fast on</option><option value="off">Fast off</option></select>
+            <div class="settings-field-help">Applies when this session starts.</div>
+          </div>
           <div id="add-args-row" class="hidden">
             <label for="add-args-input">Arguments</label>
             <input id="add-args-input" placeholder="e.g. --watch" autocomplete="off">
@@ -327,6 +332,11 @@
         <label for="engineer-launch-reasoning-effort">Reasoning effort</label>
         <select id="engineer-launch-reasoning-effort" onchange="_onReasoningEffortSelectChange('engineer-launch-reasoning-effort')"></select>
         <input id="engineer-launch-reasoning-effort-custom" class="provider-custom-input hidden" aria-label="Custom reasoning effort" placeholder="Enter a reasoning effort" autocomplete="off">
+        <div id="engineer-launch-fast-mode-row" class="hidden">
+          <label for="engineer-launch-fast-mode">Codex Fast startup</label>
+          <select id="engineer-launch-fast-mode"><option value="inherit">Inherit shared default</option><option value="on">Fast on</option><option value="off">Fast off</option></select>
+          <div class="settings-field-help">Applies on the next fresh launch or relaunch.</div>
+        </div>
         <label for="engineer-launch-custom-instructions">Custom instructions</label>
         <textarea id="engineer-launch-custom-instructions" rows="5" placeholder="Instructions appended after Torque's built-in Engineer policy..."></textarea>
         <label>Specializations
@@ -590,6 +600,11 @@
                 <select id="gs-agent-reasoning-effort" onchange="_onReasoningEffortSelectChange('gs-agent-reasoning-effort');refreshGsInheritedLaunchPlaceholders()"></select>
                 <input id="gs-agent-reasoning-effort-custom" class="provider-custom-input hidden" aria-label="Custom default reasoning effort" placeholder="Enter a reasoning effort" autocomplete="off" oninput="refreshGsInheritedLaunchPlaceholders()">
               </div>
+              <div id="gs-agent-fast-mode-row" class="settings-field hidden">
+                <label for="gs-agent-fast-mode">Codex Fast startup</label>
+                <select id="gs-agent-fast-mode"><option value="inherit">Inherit</option><option value="on">Fast on</option><option value="off">Fast off</option></select>
+                <div class="settings-field-help">Applies on the next fresh launch or relaunch.</div>
+              </div>
               <div id="gs-agent-boot-cmd-row" class="settings-field settings-field--wide settings-field--secondary hidden">
                 <label for="gs-agent-boot-cmd">Command override <span class="label-hint">advanced</span></label>
                 <input id="gs-agent-boot-cmd" placeholder="e.g. my-agent-cli" autocomplete="off" oninput="refreshGsInheritedLaunchPlaceholders()">
@@ -747,6 +762,11 @@
               <label for="gs-worker-reasoning-effort">Reasoning effort</label>
               <select id="gs-worker-reasoning-effort" onchange="_onReasoningEffortSelectChange('gs-worker-reasoning-effort')"></select>
               <input id="gs-worker-reasoning-effort-custom" class="provider-custom-input hidden" aria-label="Custom worker reasoning effort" placeholder="Enter a reasoning effort" autocomplete="off">
+            </div>
+            <div id="gs-worker-fast-mode-row" class="settings-field hidden">
+              <label for="gs-worker-fast-mode">Codex Fast startup</label>
+              <select id="gs-worker-fast-mode"><option value="inherit">Inherit shared default</option><option value="on">Fast on</option><option value="off">Fast off</option></select>
+              <div class="settings-field-help">Applies on the next fresh launch or relaunch.</div>
             </div>
             <div class="settings-field settings-field--wide settings-field--secondary">
               <label for="gs-worker-boot-command">Command override <span class="label-hint">advanced</span></label>
@@ -975,6 +995,11 @@
               <label for="gs-engineer-reasoning-effort">Reasoning effort</label>
               <select id="gs-engineer-reasoning-effort" onchange="_onReasoningEffortSelectChange('gs-engineer-reasoning-effort')"></select>
               <input id="gs-engineer-reasoning-effort-custom" class="provider-custom-input hidden" aria-label="Custom engineer reasoning effort" placeholder="Enter a reasoning effort" autocomplete="off">
+            </div>
+            <div id="gs-engineer-fast-mode-row" class="settings-field hidden">
+              <label for="gs-engineer-fast-mode">Codex Fast startup</label>
+              <select id="gs-engineer-fast-mode"><option value="inherit">Inherit shared default</option><option value="on">Fast on</option><option value="off">Fast off</option></select>
+              <div class="settings-field-help">Applies on the next fresh launch or relaunch.</div>
             </div>
             <div class="settings-field settings-field--wide settings-field--secondary">
               <label for="gs-engineer-boot-cmd">Command override <span class="label-hint">advanced</span></label>
@@ -1231,6 +1256,11 @@
               <label for="gs-architect-reasoning-effort">Reasoning effort</label>
               <select id="gs-architect-reasoning-effort" onchange="_onReasoningEffortSelectChange('gs-architect-reasoning-effort')"></select>
               <input id="gs-architect-reasoning-effort-custom" class="provider-custom-input hidden" aria-label="Custom architect reasoning effort" placeholder="Enter a reasoning effort" autocomplete="off">
+            </div>
+            <div id="gs-architect-fast-mode-row" class="settings-field hidden">
+              <label for="gs-architect-fast-mode">Codex Fast startup</label>
+              <select id="gs-architect-fast-mode"><option value="inherit">Inherit shared default</option><option value="on">Fast on</option><option value="off">Fast off</option></select>
+              <div class="settings-field-help">Applies on the next fresh launch or relaunch.</div>
             </div>
             <div class="settings-field settings-field--wide settings-field--secondary">
               <label for="gs-architect-boot-cmd">Command override <span class="label-hint">advanced</span></label>

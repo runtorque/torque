@@ -198,6 +198,7 @@ function _defaultEngineerLaunchSettings() {
     engineer_boot_command: '',
     engineer_model: '',
     engineer_reasoning_effort: '',
+    engineer_fast_mode: 'inherit',
     custom_instructions: '',
     autonomy_mode: 'dispatch_when_clear',
     default_worker_concurrency: 2,
@@ -249,6 +250,9 @@ function onEngineerLaunchProviderChange(currentEffort) {
       ? _getReasoningEffortValue('engineer-launch-reasoning-effort')
       : currentEffort
   );
+  if (typeof _syncCodexFastMode === 'function') {
+    _syncCodexFastMode('engineer-launch-fast-mode-row', _engineerLaunchProviderForReasoning(group));
+  }
 }
 
 function openEngineerLaunchDialog(group, agentId) {
@@ -295,6 +299,9 @@ function openEngineerLaunchDialog(group, agentId) {
   );
   document.getElementById('engineer-launch-boot-cmd').value = ws.engineer_boot_command || '';
   document.getElementById('engineer-launch-model').value = ws.engineer_model || '';
+  if (document.getElementById('engineer-launch-fast-mode')) {
+    _setSelectValue('engineer-launch-fast-mode', ws.engineer_fast_mode, 'inherit');
+  }
   document.getElementById('engineer-launch-custom-instructions').value = ws.custom_instructions || '';
   _setSelectValue('engineer-launch-autonomy-mode', ws.autonomy_mode, 'dispatch_when_clear');
   _setSelectValue(
@@ -347,13 +354,15 @@ function submitEngineerLaunchDialog() {
     : null;
   if (_engineerLaunchContext.mode === 'create' && typeof agentClassPickerSubmitSelection === 'function' && !createClassState) return;
   const notificationSettings = _getEngineerLaunchNotificationSettings();
-  send({
+  const fastMode = document.getElementById('engineer-launch-fast-mode');
+  const launchSettings = {
     cmd: 'engineer_update_settings',
     group: group,
     engineer_provider: _getProviderValue('engineer-launch-provider'),
     engineer_boot_command: document.getElementById('engineer-launch-boot-cmd').value.trim(),
     engineer_model: _getModelValue('engineer-launch-model'),
     engineer_reasoning_effort: _getReasoningEffortValue('engineer-launch-reasoning-effort'),
+    ...(fastMode ? { engineer_fast_mode: fastMode.value || 'inherit' } : {}),
     custom_instructions: document.getElementById('engineer-launch-custom-instructions').value,
     autonomy_mode: document.getElementById('engineer-launch-autonomy-mode').value,
     default_worker_concurrency: parseInt(document.getElementById('engineer-launch-default-worker-concurrency').value, 10) || 2,
@@ -365,7 +374,8 @@ function submitEngineerLaunchDialog() {
     max_interval: notificationSettings.max_interval,
     heartbeat_interval: notificationSettings.heartbeat_interval,
     enabled_events: notificationSettings.enabled_events,
-  });
+  };
+  send(launchSettings);
 
   const specializations = (_engineerLaunchContext.specializations || []).slice();
   const engineerId = _engineerLaunchContext.agent_id;
