@@ -329,16 +329,20 @@ function _terminalComposeInsertAttachments(input, entries) {
   end = Math.max(start, Math.min(value.length, end));
   if (end > start) _terminalComposeSetInputText(input, value.slice(0, start) + value.slice(end));
   if (cellId) _terminalComposeDrafts[cellId] = _terminalComposeInputText(input);
-  _terminalComposeRegisterAttachmentEntries(
+  var registered = _terminalComposeRegisterAttachmentEntries(
     cellId,
     entries,
     _terminalComposeInputText(input),
     start
   );
+  var stateForCell = cellId ? _terminalComposeAttachments[cellId] : null;
+  if (stateForCell && registered.length) {
+    stateForCell.pending_render_tokens = Object.create(null);
+    registered.forEach(function(entry) { stateForCell.pending_render_tokens[entry.token] = true; });
+  }
   var cursor = start;
-  // Commit the semantic model before canonicalizing innerHTML. This also keeps
-  // DOM shims that do not parse assigned markup from looking like a chip delete.
-  terminalComposeInput(input);
+  // Render before syncing the semantic draft: a browser then exposes the new
+  // zero-width chips to DOM traversal instead of pruning them as unseen.
   _terminalComposeRenderRichInput(input, { preserveSelection: false });
   if (_terminalComposeIsRichInput(input)) {
     _terminalComposeSetRichSelection(input, cursor, cursor, 'none', { afterAttachments: true });
@@ -348,6 +352,11 @@ function _terminalComposeInsertAttachments(input, entries) {
     input.selectionStart = cursor;
     input.selectionEnd = cursor;
   }
+  terminalComposeInput(input);
+  // Generic UI/input updates can read the draft more than once. Retain the
+  // registration grace until all of those reads complete, then return normal
+  // DOM-driven deletion semantics.
+  if (stateForCell) delete stateForCell.pending_render_tokens;
   if (typeof input.focus === 'function') input.focus();
 }
 

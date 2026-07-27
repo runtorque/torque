@@ -355,8 +355,10 @@ function _terminalComposeSyncValueFromDom(input) {
   if (text.endsWith('\n')) text = text.slice(0, -1);
   input.value = text;
   if (stateForCell && Array.isArray(stateForCell.entries)) {
+    var pendingTokens = stateForCell.pending_render_tokens || null;
     stateForCell.entries = stateForCell.entries.filter(function(entry) {
-      if (!entry || seen[String(entry.token || '')]) return !!entry;
+      var token = String(entry && entry.token || '');
+      if (!entry || seen[token] || (pendingTokens && pendingTokens[token])) return !!entry;
       _terminalComposeHistoryRelease(cellId, [entry]);
       return false;
     });
@@ -450,9 +452,30 @@ function _terminalComposeHistoryCommit(input, kind) {
   var coalesce = action === 'typing' || action === 'delete' || action === 'edit'; if (!coalesce || h.lastKind !== action) h.past.push(h.present); h.present = next; h.future = []; h.lastKind = action; _terminalComposeHistoryPrune(id); _terminalComposeHistoryRelease(id, discarded);
 }
 function _terminalComposeHistoryApply(input, snapshot) {
-  if (!input || !snapshot) return false; var id = String(input.dataset && input.dataset.cellId || ''), previous = _terminalComposeHistoryCloneEntries((_terminalComposeAttachments[id] || {}).entries);
-  if (snapshot.entries && snapshot.entries.length) _terminalComposeAttachments[id] = { next: snapshot.next || 1, entries: _terminalComposeHistoryCloneEntries(snapshot.entries) }; else delete _terminalComposeAttachments[id];
-  _terminalComposeSetInputText(input, snapshot.text || ''); _terminalComposeDrafts[id] = String(snapshot.text || ''); _terminalComposeSetRichSelection(input, snapshot.selection && snapshot.selection.start || 0, snapshot.selection && snapshot.selection.end || 0, snapshot.selection && snapshot.selection.direction || 'none', { afterAttachments: true }); _terminalComposeAutoResizeInvalidate(id); _terminalComposeAutoResize(input); _terminalComposeSetButtonState(input); _terminalComposeRefreshAttachmentChips(id); _terminalComposeHistoryRelease(id, previous); return true;
+  if (!input || !snapshot) return false;
+  var id = String(input.dataset && input.dataset.cellId || '');
+  var previous = _terminalComposeHistoryCloneEntries((_terminalComposeAttachments[id] || {}).entries);
+  if (snapshot.entries && snapshot.entries.length) {
+    _terminalComposeAttachments[id] = { next: snapshot.next || 1, entries: _terminalComposeHistoryCloneEntries(snapshot.entries) };
+    _terminalComposeAttachments[id].pending_render_tokens = Object.create(null);
+    _terminalComposeAttachments[id].entries.forEach(function(entry) {
+      _terminalComposeAttachments[id].pending_render_tokens[entry.token] = true;
+    });
+  } else {
+    delete _terminalComposeAttachments[id];
+  }
+  _terminalComposeSetInputText(input, snapshot.text || '');
+  _terminalComposeDrafts[id] = String(snapshot.text || '');
+  _terminalComposeSetRichSelection(input, snapshot.selection && snapshot.selection.start || 0,
+    snapshot.selection && snapshot.selection.end || 0,
+    snapshot.selection && snapshot.selection.direction || 'none', { afterAttachments: true });
+  _terminalComposeAutoResizeInvalidate(id);
+  _terminalComposeAutoResize(input);
+  _terminalComposeSetButtonState(input);
+  _terminalComposeRefreshAttachmentChips(id);
+  if (_terminalComposeAttachments[id]) delete _terminalComposeAttachments[id].pending_render_tokens;
+  _terminalComposeHistoryRelease(id, previous);
+  return true;
 }
 function terminalComposeUndoRedo(input, redo) { if (!input || !_terminalComposeIsRichInput(input)) return false; var id = String(input.dataset && input.dataset.cellId || ''), h = _terminalComposeHistoryState(id, input), source = h && (redo ? h.future : h.past); if (!source || !source.length) return false; var target = source.pop(); (redo ? h.past : h.future).push(h.present); h.present = target; h.pending = ''; h.lastKind = ''; return _terminalComposeHistoryApply(input, target); }
 function _terminalComposeHistoryReset(cellId, input) {

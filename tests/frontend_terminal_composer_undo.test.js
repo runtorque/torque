@@ -126,3 +126,17 @@ test('compositionend commits Chrome composition-only lifecycle as one undoable t
   assert.equal(h.c.terminalComposeUndoRedo(input, false), true);
   assert.equal(input.value, '');
 });
+
+test('attachment insertion survives rich DOM sync before undo and redo', () => {
+  const h = harness(), input = h.input('a', 'left right');
+  input.childNodes = [{ nodeType: 3, nodeValue: 'left right' }];
+  input.selectionStart = input.selectionEnd = 5;
+  h.c._terminalComposeHistoryState('a', input);
+  h.c._terminalComposeInsertAttachments(input, [{ path: '/safe/a.png', filename: 'a.png', preview_url: 'blob:a' }]);
+  assert.equal(h.get('_terminalComposeAttachments.a.entries.length'), 1);
+  assert.equal(h.get('_terminalComposeHistory.a.past.length'), 1);
+  assert.equal(h.c.terminalComposeUndoRedo(input, false), true);
+  assert.equal(h.get('_terminalComposeAttachments.a'), undefined);
+  assert.equal(h.c.terminalComposeUndoRedo(input, true), true);
+  assert.equal(h.get('_terminalComposeAttachments.a.entries[0].token'), '[ Image #1 ]');
+});
