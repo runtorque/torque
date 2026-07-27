@@ -653,7 +653,11 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             req_id=401,
             agent_id=self.torqly.id,
         )
-        self.assertIn("Unknown tool", self._error_text(denied_peer_covering))
+        # The public canonical name is projected to this caller, so its
+        # target-scope refusal must be truthful rather than non-disclosing.
+        denied_text = self._error_text(denied_peer_covering)
+        self.assertIn("Known tool is not authorized", denied_text)
+        self.assertNotIn("Unknown tool", denied_text)
         self.assertEqual(before_lane, user_root.lane)
         self.assertEqual(before_evidence, user_root.completion_evidence)
         self.assertEqual(before_messages, user_root.messages)
