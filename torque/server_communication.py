@@ -2178,3 +2178,68 @@ async def _queue_cell_prompt_send(cell, prompt: str, send_prompt, *,
     if wait_for_delivery and delivery is not None:
         await delivery
     return True
+
+# Local task-watch command helpers.  They deliberately persist only a system
+# result row and never call send_prompt, preserving DM queue/lifecycle state.
+def _watch_local_response(data: dict, state: MatrixState, target, command_id: str, content: str) -> dict:
+    idempotency_key = _user_agent_message_idempotency_key(data)
+    message_id = _user_direct_message_id_from_idempotency_key(idempotency_key) or "msg-" + uuid.uuid4().hex[:12]
+    existing = state.db.load_direct_message(message_id) if idempotency_key else None
+    if existing:
+        snapshot = existing.get("context_snapshot", {}) or {}
+        if (str(existing.get("recipient_id", "")) != target.id or snapshot.get("slash_command") != command_id):
+            return {"type": "error", "message": "idempotency key was reused for a different user_agent_message"}
+        append = getattr(state, "append_direct_message_to_caches", None)
+        if callable(append): append(existing)
+        return {"type": "ok", "message_id": message_id, "thread_id": existing.get("thread_id", ""), "agent_id": target.id, "delivered": True, "buffered": False, "deduped": True}
+    saved = _save_user_agent_system_audit_message(state, target, content, message_id=message_id, idempotency_key=idempotency_key, context_snapshot={"slash_command": command_id, "command_response": command_id})
+    if not saved: return {"type": "error", "message": "Failed to save command response"}
+    return {"type": "ok", "message_id": saved["id"], "thread_id": saved["thread_id"], "agent_id": target.id, "delivered": True, "buffered": False, "deduped": False}
+
+def _handle_task_watch_command(data: dict, state: MatrixState, target, message_text: str, command_id: str) -> dict:
+    # Idempotency is checked before every mutation, including immediate fire.
+    key = _user_agent_message_idempotency_key(data)
+    mid = _user_direct_message_id_from_idempotency_key(key)
+    if mid and state.db.load_direct_message(mid):
+        return _watch_local_response(data, state, target, command_id, "")
+    raw = str(message_text or "").strip()
+    # Case variants/mixed forms are recognized but intentionally rejected locally.
+    expected = "/" + command_id
+    if not raw.startswith(expected) or (len(raw) > len(expected) and not raw[len(expected)].isspace()):
+        return _watch_local_response(data, state, target, command_id, f"Usage: {expected}" + (" <task-id> [<task-id> ...]" if command_id == "watch" else (" <watch-id|all>" if command_id == "unwatch" else "")))
+    rest = raw[len(expected):].strip()
+    if command_id == "watches":
+        if rest: return _watch_local_response(data, state, target, command_id, "Usage: /watches")
+        watches = state.list_task_watches(target)
+        lines = ["**Active task watches**"]
+        for watch in watches[:100]:
+            visible = [state.board_tasks.get(task_id) for task_id in watch.get("task_ids", [])]
+            if any(not task or getattr(task, "group", "") != target.group for task in visible): continue
+            done = sum(1 for task in visible if task_counts_as_done(task))
+            titles = ", ".join(f"`{_user_dm_display_text(task.id, limit=48)}` {_user_dm_display_text(task.task, limit=72)}" for task in visible)
+            expiry = datetime.fromtimestamp(watch["expires_at"], timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            lines.append(f"- `{watch['id']}` · {done}/{len(visible)} Done · expires {expiry} · {titles}")
+        if len(lines) == 1: lines.append("- No active task watches.")
+        return _watch_local_response(data, state, target, command_id, "\n".join(lines))
+    if command_id == "unwatch":
+        if not rest or len(rest.split()) != 1 or (rest != "all" and not re.fullmatch(r"watch-[a-f0-9]{12}", rest)):
+            return _watch_local_response(data, state, target, command_id, "Usage: /unwatch <watch-id|all>")
+        count = state.cancel_task_watch(target, rest)
+        detail = "Cancelled all active task watches." if rest == "all" else (f"Cancelled task watch `{rest}`." if count else "No matching active task watch.")
+        return _watch_local_response(data, state, target, command_id, detail)
+    refs = rest.split()
+    if not refs or len(refs) > 20:
+        return _watch_local_response(data, state, target, command_id, "Usage: /watch <task-id> [<task-id> ...] (1–20 unique task IDs)")
+    canonical = []
+    for ref in refs:
+        resolved = state.resolve_board_task_id(ref)
+        task = state.board_tasks.get(resolved) if resolved else None
+        if (not task or getattr(task, "group", "") != target.group
+                or (getattr(task, "lane", "") == "Archived" and not task_counts_as_done(task))):
+            return _watch_local_response(data, state, target, command_id, "Task references must name visible tasks in this agent's group.")
+        canonical.append(resolved)
+    if len(set(canonical)) != len(canonical):
+        return _watch_local_response(data, state, target, command_id, "Each watched task must be unique.")
+    try: watch = state.create_task_watch(target=target, task_ids=canonical)
+    except ValueError as exc: return _watch_local_response(data, state, target, command_id, str(exc))
+    return _watch_local_response(data, state, target, command_id, f"Watching {len(canonical)} task(s) until all are Done: `{watch['id']}`.")

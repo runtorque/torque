@@ -231,6 +231,7 @@ from .server_communication import (
     _save_user_agent_loop_audit_message,
     _user_agent_loop_response,
     _handle_user_agent_loop_command,
+    _handle_task_watch_command,
     _restore_user_agent_restart_focus,
     _user_agent_restart_response,
     _handle_user_agent_restart_command,
@@ -2014,11 +2015,14 @@ async def _handle_user_agent_message_command(data, state: MatrixState,
                 data, state, target, "status"),
             "commands": lambda: _user_agent_read_only_command_response(
                 data, state, target, "commands"),
+            "watch": lambda: _handle_task_watch_command(data, state, target, stripped_message, "watch"),
+            "watches": lambda: _handle_task_watch_command(data, state, target, stripped_message, "watches"),
+            "unwatch": lambda: _handle_task_watch_command(data, state, target, stripped_message, "unwatch"),
         }
         handler = command_handlers.get(command.id)
         if handler and not (
             bool(data.get("_loop_delivery"))
-            and command.id in {"restart", "status", "commands"}
+            and command.id in {"restart", "status", "commands", "watch", "watches", "unwatch"}
         ):
             result = handler()
             if inspect.isawaitable(result):

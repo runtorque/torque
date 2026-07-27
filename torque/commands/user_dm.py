@@ -96,6 +96,42 @@ USER_DM_COMMANDS: tuple[UserDMCommand, ...] = (
         search="loop cancel stop recurring schedule /loop cancel",
     ),
     UserDMCommand(
+        id="watch",
+        label="/watch <task-id> [<task-id> ...]",
+        usage="/watch TORQUE:123 TORQUE:124",
+        insert="/watch ",
+        help="Notify once when all named tasks are Done.",
+        aliases=("/watch",),
+        grammar="/watch followed by 1–20 unique task IDs",
+        execution_mode="local_task_watch",
+        safety="requester_scoped_no_prompt",
+        search="watch task completion notify done /watch",
+    ),
+    UserDMCommand(
+        id="watches",
+        label="/watches",
+        usage="/watches",
+        insert="/watches",
+        help="List this agent's active task-completion watches.",
+        aliases=("/watches",),
+        grammar="exact",
+        execution_mode="local_task_watch",
+        safety="requester_scoped_no_prompt",
+        search="watches active task completion notify /watches",
+    ),
+    UserDMCommand(
+        id="unwatch",
+        label="/unwatch <watch-id|all>",
+        usage="/unwatch watch-abc123 or /unwatch all",
+        insert="/unwatch ",
+        help="Cancel one active task-completion watch or all of this agent's watches.",
+        aliases=("/unwatch",),
+        grammar="/unwatch followed by a watch id or all",
+        execution_mode="local_task_watch",
+        safety="requester_scoped_no_prompt",
+        search="unwatch cancel task completion notify /unwatch",
+    ),
+    UserDMCommand(
         id="status",
         label="/status",
         usage="/status",
@@ -177,4 +213,12 @@ def parse_user_dm_command(message: str) -> UserDMCommand | None:
             return command
     if text == "/loop" or text.startswith("/loop "):
         return _BY_ID["loop"]
+    # Watch verbs intentionally claim their own malformed/case-variant forms
+    # so those never become provider prompts.  Unrelated slash prose such as
+    # /watchdog remains an ordinary direct message.
+    for verb in ("watch", "watches", "unwatch"):
+        lower = text.lower()
+        token = "/" + verb
+        if lower == token or (lower.startswith(token) and len(lower) > len(token) and lower[len(token)].isspace()):
+            return _BY_ID[verb]
     return None
