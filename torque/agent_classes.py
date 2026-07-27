@@ -312,6 +312,41 @@ def _acl_mapping(data: dict[str, Any]) -> dict[str, Any]:
     return dict(value or {}) if isinstance(value, dict) else {}
 
 
+_GROUP_BOARD_TASK_CAPABILITIES = frozenset({
+    "task.update",
+    "task.move",
+    "task.mark_covered",
+    "task.verify",
+    "task.reassign",
+    "task.report",
+})
+
+
+def _trusted_platform_group_board_authority_mode(
+    data: "AgentClassDefinition | dict[str, Any]",
+) -> bool:
+    """Whether a trusted built-in snapshot gets the PM board extension.
+
+    Metadata is custom-class authorable, so this remains authority-bearing
+    only after built-in class loading/freeze has verified the definition.
+    """
+
+    if isinstance(data, AgentClassDefinition):
+        builtin = data.builtin
+        base_kind = data.base_kind
+        metadata = data.metadata or {}
+    else:
+        builtin = bool(data.get("builtin", False))
+        base_kind = str(data.get("base_kind", "") or "").strip()
+        metadata = data.get("metadata", {}) if isinstance(data.get("metadata"), dict) else {}
+    return (
+        bool(builtin)
+        and base_kind == "architect"
+        and str(metadata.get("task_authority_mode", "") or "").strip()
+        == "group-board-authority"
+    )
+
+
 def _trusted_platform_creator_proposal_mode(
     data: "AgentClassDefinition | dict[str, Any]",
 ) -> bool:
@@ -354,12 +389,22 @@ def _compiled_authority_for_data(
             acl=acl,
             capabilities=CAPABILITY_CATALOG,
         )
+        capabilities = dict(authority.capabilities)
         if _trusted_platform_creator_proposal_mode(data):
             # Dispatch is a platform-owned, launch-frozen extension for the
             # trusted creator-proposal mode.  It is intentionally unavailable
             # to ordinary Architect ACL authoring, including custom classes.
-            capabilities = dict(authority.capabilities)
             capabilities["task.dispatch"] = "self"
+        if _trusted_platform_group_board_authority_mode(data):
+            # Product Manager's full same-group board authority is likewise a
+            # platform-owned frozen extension. Ordinary Architect ACLs retain
+            # their narrower authoring ceilings even though runtime handlers
+            # can enforce this trusted group scope.
+            capabilities.update({
+                capability_id: "group"
+                for capability_id in _GROUP_BOARD_TASK_CAPABILITIES
+            })
+        if capabilities != dict(authority.capabilities):
             authority = EffectiveAuthority(
                 base_kind=authority.base_kind,
                 mode=authority.mode,
@@ -1328,7 +1373,7 @@ def _class_status_from_preview(class_preview: dict[str, Any]) -> str:
         ).strip()
         expected = {
             capability_id: (
-                definition.maximum_scope_for(base_kind)
+                definition.maximum_agent_class_scope_for(base_kind)
                 if definition.scoped
                 else None
             )
@@ -1337,6 +1382,11 @@ def _class_status_from_preview(class_preview: dict[str, Any]) -> str:
         }
         if _trusted_platform_creator_proposal_mode(class_preview):
             expected["task.dispatch"] = "self"
+        if _trusted_platform_group_board_authority_mode(class_preview):
+            expected.update({
+                capability_id: "group"
+                for capability_id in _GROUP_BOARD_TASK_CAPABILITIES
+            })
         actual = dict(effective.get("capabilities") or {})
         return "full" if actual == expected else "restricted"
     return "full"

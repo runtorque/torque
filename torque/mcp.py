@@ -988,7 +988,10 @@ def _raw_tools_for_caller(state, cell_id: str) -> tuple[list[dict], object, str]
     # includes the four current-task reporters and derive.  These retain their
     # normal current-task semantics (and can therefore be inert when no task is
     # assigned); they are deliberately not inherited by other Architects.
-    if caller_kind == "architect" and has_frozen_platform_task_authority_mode(cell, "creator-proposal-only"):
+    if caller_kind == "architect" and any(
+            has_frozen_platform_task_authority_mode(cell, mode)
+            for mode in ("creator-proposal-only", "group-board-authority")
+    ):
         product_manager_current_task_tools = {
             "torque_done",
             "torque_blocked",
@@ -1775,14 +1778,21 @@ async def dispatch_mcp_rpc_body(
                     first_tool_call_ts=first_tool_call_ts,
                 )
             if call_classification == _PUBLIC_TOOL_CALL_UNAUTHORIZED:
-                is_creator_proposal_mode = has_frozen_platform_task_authority_mode(caller_cell, "creator-proposal-only")
-                if is_creator_proposal_mode:
+                is_creator_proposal_mode = has_frozen_platform_task_authority_mode(
+                    caller_cell, "creator-proposal-only")
+                is_group_board_authority_mode = (
+                    has_frozen_platform_task_authority_mode(
+                        caller_cell, "group-board-authority"))
+                if is_creator_proposal_mode or is_group_board_authority_mode:
+                    scope = (
+                        "creator/self" if is_creator_proposal_mode else "group"
+                    )
                     return (
                         _jsonrpc_error(
                             req_id,
                             -32003,
                             "Authorization denied: target is outside Product "
-                            "Manager creator/self scope",
+                            f"Manager {scope} scope",
                         ),
                         200,
                     )

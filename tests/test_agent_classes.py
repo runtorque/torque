@@ -30,7 +30,7 @@ from torque.capability_catalog import CAPABILITY_CATALOG
 from torque.mcp import (
     mcp_tool_allowed_by_authority,
 )
-from torque.mcp_authority import effective_authority_from_snapshot
+from torque.mcp_authority import compile_agent_class_acl, effective_authority_from_snapshot
 from torque.db import TorqueDB
 from torque.state import AgentCell, MatrixState
 
@@ -223,10 +223,20 @@ class AgentClassRegistryTests(unittest.TestCase):
             preview["effective_authority"]["capabilities"]["task.propose"],
             "self",
         )
-        self.assertEqual(
-            preview["effective_authority"]["capabilities"]["task.dispatch"],
-            "self",
-        )
+        for capability in (
+                "task.read", "task.update", "task.move", "task.mark_covered",
+                "task.verify", "task.reassign", "task.report"):
+            self.assertEqual(
+                preview["effective_authority"]["capabilities"][capability],
+                "group",
+                capability,
+            )
+        for capability in ("task.dispatch", "engineer.hire", "worktree.merge", "deploy.read"):
+            self.assertNotIn(
+                capability,
+                preview["effective_authority"]["capabilities"],
+                capability,
+            )
         self.assertEqual(
             preview["effective_authority"]["capabilities"]["message.peer"],
             "group",
@@ -372,6 +382,31 @@ class AgentClassRegistryTests(unittest.TestCase):
         codes = {issue.code for issue in issues}
         self.assertIn("invalid_capability_acl", codes)
 
+
+    def test_custom_architect_acls_cannot_author_pm_group_board_extension(self):
+        capabilities = (
+            "task.update", "task.move", "task.mark_covered", "task.verify",
+            "task.reassign", "task.report",
+        )
+        bare_deny = compile_agent_class_acl(
+            base_kind="architect",
+            acl={"mode": "deny", "rules": []},
+            capabilities=CAPABILITY_CATALOG,
+        )
+        self.assertEqual("self", bare_deny.capabilities["task.update"])
+        self.assertEqual("children", bare_deny.capabilities["task.reassign"])
+        with self.assertRaisesRegex(ValueError, "exceeds the architect ceiling"):
+            compile_agent_class_acl(
+                base_kind="architect",
+                acl={
+                    "mode": "allow",
+                    "rules": [
+                        {"capability": capability, "scope": "group"}
+                        for capability in capabilities
+                    ],
+                },
+                capabilities=CAPABILITY_CATALOG,
+            )
 
     def test_invalid_config_rejects_raw_tools_terminal_profile_confusion_and_bad_draft(self):
         _definition, issues = validate_class_data(
@@ -721,7 +756,7 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         )
         self.assertEqual(class_status["assigned_class_version"], "2")
         self.assertEqual(class_status["effective_class_version"], "2")
-        self.assertEqual(class_status["next_launch_class_version"], "5")
+        self.assertEqual(class_status["next_launch_class_version"], "6")
         self.assertTrue(class_status["pending_next_launch"])
         self.assertTrue(class_status["apply_state"]["relaunch_required"])
 
