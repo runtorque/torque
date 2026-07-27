@@ -82,3 +82,29 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('Cancelled all', self.db.load_direct_message(response['message_id'])['message'])
         self.assertEqual(self.db.load_task_watch(one['id'])['status'], 'cancelled')
         self.assertEqual(self.db.load_task_watch(two['id'])['status'], 'active')
+
+    async def test_halfway_thread_failure_retries_without_notice_recurrence(self):
+        self.state.board_move_task('G:1', 'Done')
+        original = self.state.save_direct_message
+        def fail_thread_row(record):
+            if record.get('id', '').endswith(':complete'):
+                raise RuntimeError('thread store unavailable after notice commit')
+            return original(record)
+        self.state.save_direct_message = fail_thread_row
+        watch = self.state.create_task_watch(target=self.agent, task_ids=['G:1'])
+        notice = self.db.load_operator_notice_for_dedupe(watch['dedupe_key'])
+        self.assertEqual(watch['status'], 'fired')
+        self.assertEqual(self.db.load_task_watch(watch['id'])['outbox_state'], 'pending')
+        self.assertEqual(notice['occurrence_count'], 1)
+        self.assertIsNone(self.db.load_direct_message(watch['id'] + ':complete'))
+        notice_events = len([op for op in self.state._delta_ops
+                             if op.get('op') == 'operator_notice_upsert'])
+        self.state.save_direct_message = original
+        self.state.reconcile_task_watches()
+        notice = self.db.load_operator_notice_for_dedupe(watch['dedupe_key'])
+        self.assertEqual(self.db.load_task_watch(watch['id'])['outbox_state'], 'sent')
+        self.assertEqual(notice['occurrence_count'], 1)
+        self.assertEqual(len([op for op in self.state._delta_ops
+                              if op.get('op') == 'operator_notice_upsert']), notice_events)
+        self.assertEqual(len([row for row in self.db.load_direct_messages_for_thread(watch['thread_id'])
+                              if row['id'] == watch['id'] + ':complete']), 1)

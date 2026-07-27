@@ -112,12 +112,22 @@ class TaskWatchService:
             task_ids = list(watch.get("task_ids") or [])
             title = "Watched tasks completed"
             message = "All watched tasks are Done: " + ", ".join(task_ids)
-            self._state.publish_operator_notice(
-                notice_type="notification", severity="success", category="task_watch",
-                title=title, message=message, group_name=watch["group_name"], task_id=task_ids[0] if task_ids else "",
-                action_kind="open_task", action_payload={"task_id": task_ids[0] if task_ids else ""},
-                dedupe_key=watch["dedupe_key"], broadcast=True,
+            # OperatorNoticeService intentionally treats a repeated publish as
+            # a recurrence.  A task watch outbox must instead *ensure* its one
+            # occurrence before retrying later effects (the durable thread row).
+            existing_notice = self._db.load_operator_notice_for_dedupe(
+                watch["dedupe_key"]
             )
+            if not existing_notice:
+                self._state.publish_operator_notice(
+                    notice_type="notification", severity="success",
+                    category="task_watch", title=title, message=message,
+                    group_name=watch["group_name"],
+                    task_id=task_ids[0] if task_ids else "",
+                    action_kind="open_task",
+                    action_payload={"task_id": task_ids[0] if task_ids else ""},
+                    dedupe_key=watch["dedupe_key"], broadcast=True,
+                )
             target = self._state.get_active_agent(watch["requester_agent_id"])
             if target:
                 row = self._state.save_direct_message({
