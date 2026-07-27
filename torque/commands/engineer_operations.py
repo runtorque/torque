@@ -51,6 +51,7 @@ class EngineerOperationRuntime:
     direct_ask_mirror_source_key: Any
     engineer_buffer: Any
     save_direct_ask_mirror: Any
+    send_optimistic_agent_text: Any
     state: Any
 
 
@@ -79,6 +80,7 @@ async def handle_engineer_operation_command(
     direct_ask_mirror_source_key = runtime.direct_ask_mirror_source_key
     engineer_buffer = runtime.engineer_buffer
     save_direct_ask_mirror = runtime.save_direct_ask_mirror
+    send_optimistic_agent_text = runtime.send_optimistic_agent_text
     state = runtime.state
     cmd = str(data.get("cmd", "") or "").strip()
     result = None
@@ -143,9 +145,12 @@ async def handle_engineer_operation_command(
                 ack_required=bool(data.get("ack_required", False)),
             )
             try:
-                if hasattr(bridge, "prime_input_ready"):
-                    bridge.prime_input_ready(target.session_id)
-                await bridge.send_text(target.session_id, formatted)
+                await send_optimistic_agent_text(
+                    state,
+                    bridge,
+                    target,
+                    formatted,
+                )
                 result = {"type": "ok", "delivered": True}
             except Exception as exc:
                 log.exception(

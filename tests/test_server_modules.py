@@ -2742,6 +2742,20 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             template_mgr=FakeTemplateManager(),
         )
 
+    def _make_engineer_operation_runtime(self, state, bridge):
+        return self.server_mod._build_engineer_operation_runtime(
+            deliver_engineer_reply_and_resume=None,
+            panel_event=None,
+            send_agent_prompt=None,
+            send_engineer_message_to_agent=None,
+            bridge=bridge,
+            critical_idempotency_key='',
+            critical_request_hash='',
+            db=self.db,
+            engineer_buffer=None,
+            state=state,
+        )
+
     def _add_engineer_and_worker(self, state, *, current_task_id=''):
         engineer = self.state_mod.AgentCell(
             id='engineer-1',
@@ -4619,6 +4633,191 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['delivery_state'], 'delivered')
         self.assertEqual(worker.status, 'running')
 
+    async def test_mcp_message_marks_agent_running_before_delivery_finishes(self):
+        state = self._make_state()
+        architect = self.state_mod.AgentCell(
+            id='architect-1',
+            name='Architect',
+            group='g',
+            cell_type='agent',
+            kind='architect',
+            session_id='session-1',
+            status='idle',
+        )
+        state.agents[architect.id] = architect
+        state.groups['g'] = [architect.id]
+        send_entered = asyncio.Event()
+        release_delivery = asyncio.Event()
+
+        class BlockingBridge:
+            async def send_text(self, _session_id, _text):
+                send_entered.set()
+                await release_delivery.wait()
+
+        delivery_task = asyncio.create_task(
+            self.server_mod.inject_mcp_message(
+                state,
+                BlockingBridge(),
+                architect,
+                'Review the peer update.',
+                sender_name='Blueprint',
+                sender_kind='architect',
+                action='architect_message',
+            )
+        )
+
+        await asyncio.wait_for(send_entered.wait(), timeout=1.0)
+        self.assertFalse(delivery_task.done())
+        self.assertEqual(architect.status, 'running')
+        self.assertGreater(architect.last_progress_at, 0)
+        self.assertGreaterEqual(state._seq, 1)
+
+        release_delivery.set()
+        await delivery_task
+        self.assertEqual(architect.status, 'running')
+        self.assertEqual(
+            architect.mcp_messages[0]['action'],
+            'architect_message',
+        )
+
+    async def test_live_mcp_command_broadcasts_running_before_delivery_finishes(self):
+        state = self._make_state()
+        architect = self.state_mod.AgentCell(
+            id='architect-1',
+            name='Architect',
+            group='g',
+            cell_type='agent',
+            kind='architect',
+            session_id='session-1',
+            status='idle',
+        )
+        state.agents[architect.id] = architect
+        state.groups['g'] = [architect.id]
+        send_entered = asyncio.Event()
+        release_delivery = asyncio.Event()
+        sent = []
+        broadcasts = []
+
+        async def capture_broadcast():
+            broadcasts.append([
+                dict(op) for op in state._delta_ops
+            ])
+            state._delta_ops.clear()
+
+        state.broadcast = capture_broadcast
+        state._db_save_agent = mock.Mock()
+
+        class BlockingBridge:
+            async def send_text(self, session_id, prompt):
+                sent.append((session_id, prompt))
+                send_entered.set()
+                await release_delivery.wait()
+
+        command_task = asyncio.create_task(
+            self.server_mod.handle_engineer_operation_command(
+                {
+                    'cmd': 'inject_mcp_message',
+                    'agent_id': architect.id,
+                    'message': 'Review the live peer route.',
+                    'sender_name': 'Blueprint',
+                    'sender_kind': 'architect',
+                    'message_id': 'peer-live-1',
+                },
+                self._make_engineer_operation_runtime(
+                    state,
+                    BlockingBridge(),
+                ),
+            )
+        )
+
+        await asyncio.wait_for(send_entered.wait(), timeout=1.0)
+        self.assertFalse(command_task.done())
+        self.assertEqual(architect.status, 'running')
+        self.assertEqual(len(broadcasts), 1)
+        running_upserts = [
+            op for op in broadcasts[0]
+            if op.get('op') == 'agent_upsert'
+            and op.get('id') == architect.id
+        ]
+        self.assertTrue(running_upserts)
+        self.assertEqual(running_upserts[-1]['status'], 'running')
+        self.assertEqual(sent[0][0], architect.session_id)
+        self.assertIn(
+            '## Message from Blueprint (architect)',
+            sent[0][1],
+        )
+        state._db_save_agent.assert_not_called()
+
+        release_delivery.set()
+        result = await command_task
+        self.assertEqual(result, {'type': 'ok', 'delivered': True})
+        self.assertEqual(architect.status, 'running')
+
+    async def test_live_mcp_command_failure_restores_and_broadcasts_baseline(self):
+        state = self._make_state()
+        architect = self.state_mod.AgentCell(
+            id='architect-1',
+            name='Architect',
+            group='g',
+            cell_type='agent',
+            kind='architect',
+            session_id='session-1',
+            status='idle',
+            last_progress_at=123.0,
+            last_heartbeat_at=124.0,
+        )
+        state.agents[architect.id] = architect
+        state.groups['g'] = [architect.id]
+        baseline = state.snapshot_agent_optimistic_state(architect)
+        broadcasts = []
+
+        async def capture_broadcast():
+            broadcasts.append([
+                dict(op) for op in state._delta_ops
+            ])
+            state._delta_ops.clear()
+
+        state.broadcast = capture_broadcast
+        state._db_save_agent = mock.Mock()
+
+        class FailingBridge:
+            async def send_text(self, _session_id, _prompt):
+                raise RuntimeError('terminal unavailable')
+
+        result = await self.server_mod.handle_engineer_operation_command(
+            {
+                'cmd': 'inject_mcp_message',
+                'agent_id': architect.id,
+                'message': 'Review the live peer route.',
+                'sender_name': 'Blueprint',
+                'sender_kind': 'architect',
+                'message_id': 'peer-live-failure',
+            },
+            self._make_engineer_operation_runtime(
+                state,
+                FailingBridge(),
+            ),
+        )
+
+        self.assertEqual(result['type'], 'error')
+        self.assertIn('terminal unavailable', result['message'])
+        self.assertEqual(
+            state.snapshot_agent_optimistic_state(architect),
+            baseline,
+        )
+        self.assertEqual(len(broadcasts), 2)
+        statuses = []
+        for batch in broadcasts:
+            upserts = [
+                op for op in batch
+                if op.get('op') == 'agent_upsert'
+                and op.get('id') == architect.id
+            ]
+            self.assertTrue(upserts)
+            statuses.append(upserts[-1]['status'])
+        self.assertEqual(statuses, ['running', 'idle'])
+        state._db_save_agent.assert_not_called()
+
     async def test_user_agent_message_compact_reply_guidance_and_replay(self):
         state = self._make_state()
         state.group_settings['g'] = self.state_mod.GroupSettings(
@@ -5130,6 +5329,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(recipient.mcp_messages[0]['delivered'])
         self.assertFalse(recipient.mcp_messages[0]['buffered'])
         self.assertTrue(sender.mcp_messages[0]['delivered'])
+        self.assertEqual(recipient.status, 'running')
 
     async def test_replay_buffered_architect_peer_message_failure_stays_buffered(self):
         state = self._make_state()
@@ -5190,6 +5390,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             recipient.mcp_messages[0]['delivery_reason'],
             'replay_failed',
         )
+        self.assertEqual(recipient.status, 'stopped')
 
     async def test_session_start_hook_replays_buffered_architect_peer_message(self):
         state = self._make_state()
@@ -5218,7 +5419,11 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         broadcasts = []
 
         async def fake_broadcast():
-            broadcasts.append(True)
+            row = self.db.load_agent_peer_message('msg-wake-peer')
+            broadcasts.append((
+                recipient.status,
+                row['delivery_state'],
+            ))
 
         state.broadcast = fake_broadcast
         scheduled = []
@@ -5255,7 +5460,13 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bridge.primed, ['session-b'])
         self.assertEqual(bridge.sent[0][0], 'session-b')
         self.assertIn('Wake replay regression.', bridge.sent[0][1])
-        self.assertEqual(broadcasts, [True])
+        self.assertEqual(
+            broadcasts,
+            [
+                ('running', 'buffered'),
+                ('running', 'delivered'),
+            ],
+        )
         persisted = self.db.load_agent_peer_message('msg-wake-peer')
         self.assertEqual(persisted['delivery_state'], 'delivered')
         self.assertEqual(persisted['delivery_reason'], '')

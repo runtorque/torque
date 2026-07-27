@@ -105,6 +105,38 @@ def _format_engineer_message_prompt(message: str, task_id: str,
         reply_required=reply_required,
     )
 
+async def send_optimistic_agent_text(
+        state: MatrixState, bridge, target, prompt: str) -> None:
+    """Send one live agent prompt with a shared optimistic Running edge."""
+    optimistic_baseline = state.snapshot_agent_optimistic_state(target)
+    optimistic_at = time.time()
+    optimistic_marked = state.mark_agent_optimistic_running(
+        target,
+        optimistic_at,
+        emit=True,
+        persist=False,
+    )
+    if optimistic_marked:
+        await state.broadcast()
+    try:
+        if hasattr(bridge, "prime_input_ready"):
+            bridge.prime_input_ready(target.session_id)
+        await bridge.send_text(target.session_id, prompt)
+    except Exception:
+        if (
+            optimistic_marked
+            and getattr(target, "status", "") == "running"
+            and not getattr(target, "activity", "")
+            and float(getattr(target, "last_progress_at", 0) or 0) <= optimistic_at
+        ):
+            if state.restore_agent_optimistic_state(
+                    target,
+                    optimistic_baseline,
+                    emit=True,
+                    persist=False):
+                await state.broadcast()
+        raise
+
 async def inject_mcp_message(state: MatrixState, bridge, target, message: str, *,
                              sender_name: str = "Torque",
                              sender_kind: str = "system",
@@ -112,10 +144,10 @@ async def inject_mcp_message(state: MatrixState, bridge, target, message: str, *
                              task_id: str = "") -> None:
     if not target or not target.session_id:
         raise ValueError("Target agent is not running")
-    if hasattr(bridge, "prime_input_ready"):
-        bridge.prime_input_ready(target.session_id)
-    await bridge.send_text(
-        target.session_id,
+    await send_optimistic_agent_text(
+        state,
+        bridge,
+        target,
         _format_mcp_message_prompt(
             message,
             sender_name=sender_name,
@@ -1346,9 +1378,12 @@ async def _replay_buffered_cross_kind_messages(
             ack_required=bool(entry.get("ack_required", False)),
         )
         try:
-            if hasattr(bridge, "prime_input_ready"):
-                bridge.prime_input_ready(target.session_id)
-            await bridge.send_text(target.session_id, formatted)
+            await send_optimistic_agent_text(
+                state,
+                bridge,
+                target,
+                formatted,
+            )
         except Exception:
             log.exception(
                 "Failed to replay buffered MCP message %s to %s",

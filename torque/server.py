@@ -211,6 +211,7 @@ from .server_communication import (
     _format_mcp_message_prompt,
     _format_engineer_message_prompt,
     inject_mcp_message,
+    send_optimistic_agent_text,
     _format_injected_mcp_message_prompt,
     _mark_cross_kind_message_delivery,
     _peer_message_row_replay_entry,
@@ -2796,6 +2797,7 @@ def _build_engineer_operation_runtime(
         direct_ask_mirror_source_key=direct_ask_mirror_source_key,
         engineer_buffer=engineer_buffer,
         save_direct_ask_mirror=save_direct_ask_mirror,
+        send_optimistic_agent_text=send_optimistic_agent_text,
         state=state,
     )
 
