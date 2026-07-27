@@ -150,6 +150,38 @@ class FinalizationDoneBypassRegressionTests(unittest.TestCase):
         self.assertFalse(self.state.evaluate_task_finalization(root.id)["eligible"])
         self.assertEqual(root.finalization_audit[-1]["caller"], "board_add_task")
 
+    def test_unknown_pipeline_root_cannot_bypass_policy_creation_in_done(self):
+        root = self.state.board_add_task(
+            "Malformed policy root", "g", id="TORQUE:911:malformed",
+            lane="Done", pipeline_root_id="missing-root",
+            finalization_mode="review_only",
+            required_review_gates=[{
+                "id": "audit", "role": "audit",
+                "review_task_id": "TORQUE:911:malformed:1",
+            }],
+            finalization_boundary={
+                "artifact_digest": "digest", "artifact_version": "v1",
+                "source_identity": "artifact", "immutable": True,
+            },
+        )
+        self.assertNotEqual(root.lane, "Done")
+        self.assertFalse(self.state.evaluate_task_finalization(root.id)["eligible"])
+        self.assertEqual(root.finalization_audit[-1]["caller"], "board_add_task")
+
+        legacy = self.state.board_add_task(
+            "Malformed legacy root", "g", id="TORQUE:911:legacy",
+            lane="Done", pipeline_root_id="missing-root",
+        )
+        self.assertEqual(legacy.lane, "Done")
+
+    def test_unknown_pipeline_root_update_cannot_bypass_subsequent_done_move(self):
+        root = self._ineligible_root("TORQUE:915")
+        self.state.board_update_task(root.id, pipeline_root_id="missing-root")
+        result = self.state.board_move_task(root.id, "Done")
+        self.assertNotEqual(root.lane, "Done")
+        self.assertFalse(result["eligible"])
+        self.assertEqual(root.finalization_audit[-1]["caller"], "board_move_task")
+
     def test_state_update_cannot_combine_done_with_new_policy(self):
         root = self.state.board_add_task("Legacy root", "g", id="TORQUE:913")
         result = self.state.board_update_task(

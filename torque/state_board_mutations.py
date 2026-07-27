@@ -613,7 +613,11 @@ class BoardMutationMixin:
 
     def _is_finalization_root(self, task: BoardTask) -> bool:
         root_id = str(getattr(task, "pipeline_root_id", "") or "").strip()
-        return not root_id or root_id == task.id
+        # A nonempty root reference is a descendant relationship only when it
+        # resolves to a real task.  Treat malformed/missing references as the
+        # task's own root for finalization purposes; otherwise a policy root
+        # could set ``pipeline_root_id='missing'`` and evade every Done guard.
+        return not root_id or root_id == task.id or root_id not in self.board_tasks
 
     def _refresh_finalization_root_projection(self, task: BoardTask) -> dict:
         """Persist/emit root status after any structurally relevant child change."""
