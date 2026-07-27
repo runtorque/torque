@@ -6,7 +6,7 @@ import time
 TASK_WATCH_COLUMNS = (
     "id", "requester_agent_id", "thread_id", "group_name", "task_ids",
     "created_at", "expires_at", "status", "fired_at", "cancelled_at",
-    "dedupe_key", "outbox_state", "outbox_attempted_at", "updated_at",
+    "dedupe_key", "request_idempotency_key", "outbox_state", "outbox_attempted_at", "updated_at",
 )
 
 def _decode_task_watch(row):
@@ -37,6 +37,45 @@ class TaskWatchPersistenceMixin:
         row = self._conn.execute(f"SELECT {', '.join(TASK_WATCH_COLUMNS)} FROM task_watches WHERE id=?", (str(watch_id or "").strip(),)).fetchone()
         return _decode_task_watch(row)
 
+    def load_task_watch_by_request_key(self, request_idempotency_key: str):
+        key = str(request_idempotency_key or "").strip()
+        if not key:
+            return None
+        row = self._conn.execute(
+            f"SELECT {', '.join(TASK_WATCH_COLUMNS)} FROM task_watches "
+            "WHERE request_idempotency_key=?", (key,)
+        ).fetchone()
+        return _decode_task_watch(row)
+
+    def iter_task_watches(
+        self, *, requester_agent_id: str = "", status: str = "", page_size: int = 500
+    ):
+        """Traverse every matching row with a stable created/id keyset."""
+        page_size = max(1, min(int(page_size), 1000))
+        after_created, after_id = -1.0, ""
+        while True:
+            clauses, params = [], []
+            if requester_agent_id:
+                clauses.append("requester_agent_id=?"); params.append(str(requester_agent_id))
+            if status:
+                clauses.append("status=?"); params.append(str(status))
+            clauses.append("(created_at>? OR (created_at=? AND id>?))")
+            params.extend((after_created, after_created, after_id))
+            rows = self._conn.execute(
+                f"SELECT {', '.join(TASK_WATCH_COLUMNS)} FROM task_watches WHERE "
+                + " AND ".join(clauses)
+                + " ORDER BY created_at ASC, id ASC LIMIT ?",
+                (*params, page_size),
+            ).fetchall()
+            items = [item for item in (_decode_task_watch(row) for row in rows) if item]
+            if not items:
+                return
+            for item in items:
+                yield item
+            if len(items) < page_size:
+                return
+            after_created, after_id = items[-1]["created_at"], items[-1]["id"]
+
     def list_task_watches(self, *, requester_agent_id: str = "", status: str = "", limit: int = 100):
         clauses, params = [], []
         if requester_agent_id:
@@ -48,7 +87,7 @@ class TaskWatchPersistenceMixin:
         return [item for item in (_decode_task_watch(row) for row in rows) if item]
 
     def update_task_watch(self, watch_id: str, patch: dict, *, only_status: str = ""):
-        allowed = set(TASK_WATCH_COLUMNS) - {"id", "requester_agent_id", "created_at"}
+        allowed = set(TASK_WATCH_COLUMNS) - {"id", "requester_agent_id", "created_at", "request_idempotency_key"}
         items = []
         for key, value in dict(patch or {}).items():
             if key not in allowed: continue

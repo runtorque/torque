@@ -5,6 +5,7 @@ it never owns a timer or polling loop.  A fired row is durable before its outbox
 is delivered, and stable notice/message ids make reconciliation idempotent.
 """
 from __future__ import annotations
+import sqlite3
 import time
 import uuid
 from datetime import datetime, timezone
@@ -57,23 +58,57 @@ class TaskWatchService:
             cancelled_at=float(now if now is not None else time.time()),
         )
 
-    def create(self, *, target, task_ids: list[str], now: float | None = None):
+    def _recover_request_watch(self, watch, *, now: float):
+        """Resume a durable request after its command-result audit was lost."""
+        if watch.get("status") == "active":
+            self.evaluate_watch(watch, now=now)
+        watch = self._db.load_task_watch(watch["id"]) or watch
+        if watch.get("status") == "fired" and watch.get("outbox_state") != "sent":
+            self.deliver_outbox(watch, now=now)
+        return self._db.load_task_watch(watch["id"]) or watch
+
+    def create(
+        self, *, target, task_ids: list[str], now: float | None = None,
+        request_idempotency_key: str = "",
+    ):
         if not self._has_watch_api(
                 "list_task_watches", "save_task_watch", "load_task_watch",
                 "update_task_watch", "claim_task_watch_fired"):
             raise ValueError("Task watch store is unavailable")
         now = float(now if now is not None else time.time())
+        request_key = str(request_idempotency_key or "").strip()
+        if request_key and not self._has_watch_api("load_task_watch_by_request_key"):
+            raise ValueError("Task watch store is unavailable")
+        existing = self._db.load_task_watch_by_request_key(request_key) if request_key else None
+        if existing:
+            if (existing.get("requester_agent_id") != target.id
+                    or existing.get("group_name") != target.group
+                    or existing.get("task_ids") != list(task_ids)):
+                raise ValueError("idempotency key was reused for a different user_agent_message")
+            return self._recover_request_watch(existing, now=now)
         active = self._db.list_task_watches(requester_agent_id=target.id, status="active", limit=WATCH_MAX_ACTIVE + 1)
         if len(active) >= WATCH_MAX_ACTIVE: raise ValueError("At most 100 active watches are allowed for this agent")
         watch_id = "watch-" + uuid.uuid4().hex[:12]
-        watch = self._db.save_task_watch({
+        payload = {
             "id": watch_id, "requester_agent_id": target.id,
             "thread_id": canonical_user_agent_thread_id(target.id), "group_name": target.group,
             "task_ids": list(task_ids), "created_at": now, "expires_at": now + WATCH_EXPIRY_SECONDS,
             "status": "active", "fired_at": 0, "cancelled_at": 0,
-            "dedupe_key": "task-watch:" + watch_id, "outbox_state": "pending",
+            "dedupe_key": "task-watch:" + watch_id,
+            "request_idempotency_key": request_key, "outbox_state": "pending",
             "outbox_attempted_at": 0, "updated_at": now,
-        })
+        }
+        try:
+            watch = self._db.save_task_watch(payload)
+        except sqlite3.IntegrityError:
+            existing = self._db.load_task_watch_by_request_key(request_key) if request_key else None
+            if not existing:
+                raise
+            if (existing.get("requester_agent_id") != target.id
+                    or existing.get("group_name") != target.group
+                    or existing.get("task_ids") != list(task_ids)):
+                raise ValueError("idempotency key was reused for a different user_agent_message")
+            return self._recover_request_watch(existing, now=now)
         self.evaluate_watch(watch, now=now)
         return self._db.load_task_watch(watch_id)
 
@@ -105,10 +140,10 @@ class TaskWatchService:
 
     def prune(self, *, now=None):
         if not self._has_watch_api(
-                "list_task_watches", "claim_task_watch_cancelled"):
+                "iter_task_watches", "claim_task_watch_cancelled"):
             return 0
         now = float(now if now is not None else time.time()); count=0
-        for watch in self._db.list_task_watches(status="active", limit=10000):
+        for watch in self._db.iter_task_watches(status="active"):
             requester = self._state.get_active_agent(watch.get("requester_agent_id", ""))
             tasks = [self._state.board_tasks.get(task_id) for task_id in watch.get("task_ids", [])]
             if (watch.get("expires_at", 0) <= now or not requester
@@ -118,10 +153,10 @@ class TaskWatchService:
         return count
 
     def evaluate_for_task(self, task_id: str, *, now=None):
-        if not self._has_watch_api("list_task_watches"):
+        if not self._has_watch_api("iter_task_watches"):
             return
         now = float(now if now is not None else time.time())
-        for watch in self._db.list_task_watches(status="active", limit=10000):
+        for watch in self._db.iter_task_watches(status="active"):
             if task_id in watch.get("task_ids", []): self.evaluate_watch(watch, now=now)
 
     def evaluate_watch(self, watch, *, now=None):
@@ -144,15 +179,15 @@ class TaskWatchService:
 
     def reconcile(self, *, now=None):
         if not self._has_watch_api(
-                "list_task_watches", "reset_sending_task_watch_outboxes"):
+                "iter_task_watches", "reset_sending_task_watch_outboxes"):
             return
         self.prune(now=now)
         # A daemon crash can leave a claimed outbox mid-delivery.  The notice
         # and thread ids are stable, so returning it to pending is safe.
         self._db.reset_sending_task_watch_outboxes()
-        for watch in self._db.list_task_watches(status="active", limit=10000):
+        for watch in self._db.iter_task_watches(status="active"):
             self.evaluate_watch(watch, now=now)
-        for watch in self._db.list_task_watches(status="fired", limit=10000):
+        for watch in self._db.iter_task_watches(status="fired"):
             if watch.get("outbox_state") != "sent": self.deliver_outbox(watch, now=now)
 
     def deliver_outbox(self, watch, *, now=None):

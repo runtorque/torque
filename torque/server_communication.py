@@ -2201,7 +2201,12 @@ def _handle_task_watch_command(data: dict, state: MatrixState, target, message_t
     key = _user_agent_message_idempotency_key(data)
     mid = _user_direct_message_id_from_idempotency_key(key)
     if mid and state.db.load_direct_message(mid):
-        return _watch_local_response(data, state, target, command_id, "")
+        # A durable /watch request may predate its audit row after a partial
+        # failure.  Continue through canonical parsing so a reused key cannot
+        # create (or mask) a conflicting watch request.
+        load_request = getattr(state.db, "load_task_watch_by_request_key", None)
+        if command_id != "watch" or not callable(load_request) or not load_request(key):
+            return _watch_local_response(data, state, target, command_id, "")
     raw = str(message_text or "").strip()
     # Case variants/mixed forms are recognized but intentionally rejected locally.
     expected = "/" + command_id
@@ -2249,6 +2254,15 @@ def _handle_task_watch_command(data: dict, state: MatrixState, target, message_t
         canonical.append(resolved)
     if len(set(canonical)) != len(canonical):
         return _watch_local_response(data, state, target, command_id, "Each watched task must be unique.")
-    try: watch = state.create_task_watch(target=target, task_ids=canonical)
-    except ValueError as exc: return _watch_local_response(data, state, target, command_id, str(exc))
-    return _watch_local_response(data, state, target, command_id, f"Watching {len(canonical)} task(s) until all are Done: `{watch['id']}`.")
+    try:
+        watch = state.create_task_watch(
+            target=target, task_ids=canonical, request_idempotency_key=key,
+        )
+    except ValueError as exc:
+        if str(exc) == "idempotency key was reused for a different user_agent_message":
+            return {"type": "error", "message": str(exc)}
+        return _watch_local_response(data, state, target, command_id, str(exc))
+    return _watch_local_response(
+        data, state, target, command_id,
+        f"Watching {len(canonical)} task(s) until all are Done: `{watch['id']}`.",
+    )

@@ -15,7 +15,7 @@ import json
 import sqlite3
 from typing import Callable, Iterable
 
-SCHEMA_VERSION = "22"
+SCHEMA_VERSION = "23"
 
 
 @dataclass(frozen=True)
@@ -3137,6 +3137,23 @@ def _migration_0022_task_watches(
     """)
 
 
+def _migration_0023_task_watch_request_keys(
+    conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Link idempotent /watch requests to their durable watch before audit I/O."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(task_watches)")}
+    if "request_idempotency_key" not in columns:
+        conn.execute(
+            "ALTER TABLE task_watches ADD COLUMN request_idempotency_key TEXT NOT NULL DEFAULT ''"
+        )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_task_watches_request_key "
+        "ON task_watches(request_idempotency_key) "
+        "WHERE request_idempotency_key != ''"
+    )
+
+
 SCHEMA_MIGRATIONS = (
     SchemaMigration(
         1,
@@ -3297,6 +3314,14 @@ SCHEMA_MIGRATIONS = (
         "task_watches",
         "one-shot-task-watch-storage-v1",
         _migration_0022_task_watches,
+        phase="post_init",
+        repair_on_boot=True,
+    ),
+    SchemaMigration(
+        23,
+        "task_watch_request_keys",
+        "one-shot-task-watch-request-key-v1",
+        _migration_0023_task_watch_request_keys,
         phase="post_init",
         repair_on_boot=True,
     ),

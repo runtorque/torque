@@ -1,5 +1,6 @@
 import asyncio
 import tempfile
+import time
 import unittest
 from pathlib import Path
 try:
@@ -108,6 +109,82 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
                               if op.get('op') == 'operator_notice_upsert']), notice_events)
         self.assertEqual(len([row for row in self.db.load_direct_messages_for_thread(watch['thread_id'])
                               if row['id'] == watch['id'] + ':complete']), 1)
+
+    async def test_watch_retry_after_audit_failure_reuses_durable_request_watch(self):
+        self.state.board_move_task('G:1', 'Done')
+        original = self.state.save_direct_message
+
+        def fail_watch_audit(row):
+            if (row.get('context_snapshot') or {}).get('command_response') == 'watch':
+                raise RuntimeError('audit write failed')
+            return original(row)
+
+        self.state.save_direct_message = fail_watch_audit
+        with self.assertRaises(RuntimeError):
+            await self._command('/watch G:1', 'request-retry')
+        watch = self.db.list_task_watches(requester_agent_id='agent')[0]
+        self.assertEqual(len(self.db.list_task_watches(requester_agent_id='agent')), 1)
+        self.assertEqual(len(self.db.list_operator_notices()), 1)
+        self.assertIsNotNone(self.db.load_direct_message(watch['id'] + ':complete'))
+        self.state.save_direct_message = original
+        retried = await self._command('/watch G:1', 'request-retry')
+        self.assertEqual(retried['type'], 'ok')
+        self.assertEqual(len(self.db.list_task_watches(requester_agent_id='agent')), 1)
+        self.assertEqual(len(self.db.list_operator_notices()), 1)
+        self.assertEqual(len([row for row in self.db.load_direct_messages_for_thread(watch['thread_id'])
+                              if row['id'] == watch['id'] + ':complete']), 1)
+        again = await self._command('/watch G:1', 'request-retry')
+        self.assertTrue(again['deduped'])
+
+    async def test_watch_retry_after_audit_crash_is_recovered_without_duplicates(self):
+        self.state.board_move_task('G:1', 'Done')
+        original = self.state.save_direct_message
+
+        def crash_watch_audit(row):
+            if (row.get('context_snapshot') or {}).get('command_response') == 'watch':
+                raise SystemExit('simulated audit-process crash')
+            return original(row)
+
+        self.state.save_direct_message = crash_watch_audit
+        with self.assertRaises(SystemExit):
+            await self._command('/watch G:1', 'request-crash')
+        watch = self.db.list_task_watches(requester_agent_id='agent')[0]
+        self.state.save_direct_message = original
+        retried = await self._command('/watch G:1', 'request-crash')
+        self.assertEqual(retried['type'], 'ok')
+        self.assertEqual(len(self.db.list_task_watches(requester_agent_id='agent')), 1)
+        self.assertEqual(len(self.db.list_operator_notices()), 1)
+        self.assertEqual(len([row for row in self.db.load_direct_messages_for_thread(watch['thread_id'])
+                              if row['id'] == watch['id'] + ':complete']), 1)
+        conflict = await self._command('/watch G:2', 'request-crash')
+        self.assertEqual(conflict['type'], 'error')
+        self.assertEqual(len(self.db.list_task_watches(requester_agent_id='agent')), 1)
+
+    def _save_paged_watch(self, watch_id, *, expires_at, status='active'):
+        now = time.time()
+        return self.db.save_task_watch({
+            'id': watch_id, 'requester_agent_id': 'agent',
+            'thread_id': 'user:agent', 'group_name': 'g', 'task_ids': ['G:1'],
+            'created_at': now, 'expires_at': expires_at, 'status': status,
+            'fired_at': 0, 'cancelled_at': 0, 'dedupe_key': 'task-watch:' + watch_id,
+            'request_idempotency_key': '', 'outbox_state': 'pending',
+            'outbox_attempted_at': 0, 'updated_at': now,
+        })
+
+    async def test_global_watch_scans_paginate_past_one_thousand_without_duplicates(self):
+        for index in range(1001):
+            self._save_paged_watch(f'page-fire-{index:04}', expires_at=time.time() + 3600)
+        self.state.board_move_task('G:1', 'Done')
+        self.assertEqual(self.db.load_task_watch('page-fire-1000')['status'], 'fired')
+        self.assertIsNotNone(self.db.load_operator_notice_for_dedupe('task-watch:page-fire-1000'))
+        self.assertEqual(self.db._conn.execute('SELECT COUNT(*) FROM operator_notices').fetchone()[0], 1001)
+        self.state.reconcile_task_watches()
+        self.assertEqual(self.db._conn.execute('SELECT COUNT(*) FROM operator_notices').fetchone()[0], 1001)
+        for index in range(1001):
+            self._save_paged_watch(f'page-expire-{index:04}', expires_at=1)
+        self.state.reconcile_task_watches(now=2)
+        self.assertEqual(self.db.load_task_watch('page-expire-1000')['status'], 'cancelled')
+        self.assertEqual(self.db._conn.execute('SELECT COUNT(*) FROM operator_notices').fetchone()[0], 1001)
 
     async def test_minimal_db_keeps_event_driven_evaluation_a_safe_noop(self):
         class MinimalDB:
