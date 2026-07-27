@@ -25,6 +25,7 @@ class UserDMCommand:
     execution_mode: str
     safety: str
     search: str
+    providers: tuple[str, ...] = ()
 
 
 # This is deliberately data rather than frontend metadata.  The server uses
@@ -41,6 +42,19 @@ USER_DM_COMMANDS: tuple[UserDMCommand, ...] = (
         execution_mode="provider_passthrough",
         safety="narrow_provider_session_passthrough",
         search="compact /compact context summary",
+    ),
+    UserDMCommand(
+        id="fast",
+        label="/fast",
+        usage="/fast",
+        insert="/fast",
+        help="Toggle Codex Fast mode for this agent.",
+        aliases=("/fast",),
+        grammar="exact",
+        execution_mode="provider_passthrough",
+        safety="codex_provider_exact_only",
+        search="fast /fast codex fast mode",
+        providers=("codex",),
     ),
     UserDMCommand(
         id="restart",
@@ -110,8 +124,20 @@ USER_DM_COMMANDS: tuple[UserDMCommand, ...] = (
 _BY_ID = {command.id: command for command in USER_DM_COMMANDS}
 
 
-def user_dm_command_catalog() -> list[dict]:
-    """Return the safe snapshot/API projection consumed by the composer."""
+def user_dm_command_supports_provider(
+        command: UserDMCommand, provider: str) -> bool:
+    """Return whether a catalog command is safe for an effective provider."""
+    normalized = str(provider or "").strip().lower()
+    return not command.providers or normalized in command.providers
+
+
+def user_dm_command_catalog(*, provider: str | None = None) -> list[dict]:
+    """Return the safe snapshot/API projection consumed by the composer.
+
+    A provider-scoped caller receives only commands safely supported by that
+    target.  The unscoped snapshot retains provider metadata so the composer
+    can make the same target-specific choice without inventing a second menu.
+    """
     return [
         {
             "id": command.id,
@@ -124,8 +150,10 @@ def user_dm_command_catalog() -> list[dict]:
             "execution_mode": command.execution_mode,
             "safety": command.safety,
             "search": command.search,
+            "providers": list(command.providers),
         }
         for command in USER_DM_COMMANDS
+        if provider is None or user_dm_command_supports_provider(command, provider)
     ]
 
 

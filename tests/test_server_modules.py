@@ -3391,6 +3391,97 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(other_row['message_type'], 'message')
         self.assertEqual(unsupported_row['message_type'], 'message')
 
+    async def test_user_agent_fast_is_literal_idempotent_and_provider_scoped(self):
+        state = self._make_state()
+        codex = self.state_mod.AgentCell(
+            id='codex-1', name='Codex', group='g', cell_type='agent',
+            kind='worker', agent_type='codex', session_id='session-codex',
+            status='idle',
+        )
+        other = self.state_mod.AgentCell(
+            id='other-1', name='Other', group='g', cell_type='agent',
+            kind='worker', agent_type='claude-code', session_id='session-other',
+            status='idle',
+        )
+        state.agents[codex.id] = codex
+        state.agents[other.id] = other
+        state.groups['g'] = [codex.id, other.id]
+        sent = []
+
+        async def fake_send_prompt(cell, prompt, **kwargs):
+            sent.append((cell.id, prompt, kwargs))
+            async def delivered():
+                return None
+            return asyncio.create_task(delivered())
+
+        payload = {
+            'agent_id': codex.id,
+            'message': '/fast',
+            'thread_id': 'codex-thread',
+            'idempotency_key': 'fast-browser-submit',
+        }
+        first = await self.server_mod._handle_user_agent_message_command(
+            dict(payload), state, fake_send_prompt,
+        )
+        repeated = await self.server_mod._handle_user_agent_message_command(
+            dict(payload), state, fake_send_prompt,
+        )
+        commands = await self.server_mod._handle_user_agent_message_command(
+            {'agent_id': codex.id, 'message': '/commands',
+             'idempotency_key': 'codex-commands'}, state, fake_send_prompt,
+        )
+        unsupported = await self.server_mod._handle_user_agent_message_command(
+            {'agent_id': other.id, 'message': '/fast',
+             'idempotency_key': 'other-fast'}, state, fake_send_prompt,
+        )
+        unsupported_retry = await self.server_mod._handle_user_agent_message_command(
+            {'agent_id': other.id, 'message': '/fast',
+             'idempotency_key': 'other-fast'}, state, fake_send_prompt,
+        )
+        natural = await self.server_mod._handle_user_agent_message_command(
+            {'agent_id': codex.id, 'message': '/fast please',
+             'idempotency_key': 'fast-natural'}, state, fake_send_prompt,
+        )
+        upper = await self.server_mod._handle_user_agent_message_command(
+            {'agent_id': codex.id, 'message': '/FAST',
+             'idempotency_key': 'fast-upper'}, state, fake_send_prompt,
+        )
+
+        self.assertEqual(first['type'], 'ok')
+        self.assertFalse(first['deduped'])
+        self.assertTrue(repeated['deduped'])
+        self.assertEqual(first['message_id'], repeated['message_id'])
+        self.assertEqual(first['thread_id'], 'user-agent:user:codex-1')
+        self.assertEqual(sent[0][0], codex.id)
+        self.assertEqual(sent[0][1], '/fast')
+        self.assertEqual(len(sent), 3)
+        fast_row = self.db.load_direct_message(first['message_id'])
+        self.assertEqual(fast_row['message'], '/fast')
+        self.assertEqual(fast_row['message_type'], 'slash_command')
+        self.assertEqual(fast_row['context_snapshot']['slash_command'], 'fast')
+        self.assertEqual(fast_row['thread_id'], 'user-agent:user:codex-1')
+        commands_row = self.db.load_direct_message(commands['message_id'])
+        self.assertIn('/fast', commands_row['message'])
+        self.assertEqual(unsupported['type'], 'ok')
+        self.assertFalse(unsupported['deduped'])
+        self.assertTrue(unsupported_retry['deduped'])
+        unsupported_row = self.db.load_direct_message(unsupported['message_id'])
+        self.assertEqual(unsupported_row['sender_kind'], 'system')
+        self.assertEqual(unsupported_row['context_snapshot'], {
+            'slash_command': 'fast', 'command_response': 'unsupported_provider',
+        })
+        self.assertIn('only for Codex agents', unsupported_row['message'])
+        self.assertNotIn(other.id, [target_id for target_id, _, _ in sent])
+        self.assertEqual(natural['type'], 'ok')
+        self.assertEqual(upper['type'], 'ok')
+        self.assertIn('/fast please', sent[1][1])
+        self.assertIn('/FAST', sent[2][1])
+        other_commands = await self.server_mod._handle_user_agent_message_command(
+            {'agent_id': other.id, 'message': '/commands',
+             'idempotency_key': 'other-commands'}, state, fake_send_prompt,
+        )
+        self.assertNotIn('/fast', self.db.load_direct_message(other_commands['message_id'])['message'])
+
     async def test_user_dm_registry_status_and_commands_are_durable_read_only(self):
         state = self._make_state()
         worker = self.state_mod.AgentCell(
@@ -3490,11 +3581,19 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         registry = importlib.import_module('torque.commands.user_dm')
         catalog = registry.user_dm_command_catalog()
         self.assertEqual([item['id'] for item in catalog], [
-            'compact', 'restart', 'loop', 'loop-cancel', 'status', 'commands',
+            'compact', 'fast', 'restart', 'loop', 'loop-cancel', 'status', 'commands',
         ])
+        self.assertEqual(next(item for item in catalog if item['id'] == 'fast')['providers'], ['codex'])
+        self.assertEqual([item['id'] for item in registry.user_dm_command_catalog(provider='codex')], [
+            'compact', 'fast', 'restart', 'loop', 'loop-cancel', 'status', 'commands',
+        ])
+        self.assertNotIn('fast', [item['id'] for item in registry.user_dm_command_catalog(provider='claude-code')])
         self.assertEqual(registry.parse_user_dm_command(' /status ').id, 'status')
         self.assertEqual(registry.parse_user_dm_command('/loop every 1m hi').id, 'loop')
         self.assertEqual(registry.parse_user_dm_command('/loop cancel').id, 'loop-cancel')
+        self.assertEqual(registry.parse_user_dm_command(' /fast ').id, 'fast')
+        self.assertIsNone(registry.parse_user_dm_command('/fast please'))
+        self.assertIsNone(registry.parse_user_dm_command('/FAST'))
         self.assertIsNone(registry.parse_user_dm_command('/status now'))
         self.assertIsNone(registry.parse_user_dm_command('/STATUS'))
         state = self._make_state()

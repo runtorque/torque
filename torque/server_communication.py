@@ -21,7 +21,7 @@ from .server_agent_common import _resolve_agent_id
 from .server_agent_operations import _agent_dismissed_at
 from .server_artifacts import describe_task_artifact_for_digest
 from .state import BoardTask, MatrixState, task_counts_as_done, task_is_closed
-from .commands.user_dm import user_dm_command_catalog
+from .commands.user_dm import user_dm_command_by_id, user_dm_command_catalog
 
 
 GUIDANCE_HINT_USER_DIRECT_REPLY = "user_message.reply_hint"
@@ -365,7 +365,7 @@ def _format_user_direct_message_prompt(
         context_snapshot = {}
     if (
         message_type == "slash_command"
-        and context_snapshot.get("slash_command") == "compact"
+        and context_snapshot.get("slash_command") in {"compact", "fast"}
     ):
         return message
     tool_name = _user_direct_message_reply_tool(recipient_kind)
@@ -728,10 +728,11 @@ def _user_dm_status_message(state: MatrixState, target, *, now: float | None = N
     return "\n".join(lines)
 
 
-def _user_dm_commands_message() -> str:
+def _user_dm_commands_message(target=None) -> str:
     """Render the authoritative command catalog in the same DM lane."""
     lines = ["**Supported direct-message commands**"]
-    for command in user_dm_command_catalog():
+    provider = getattr(target, "agent_type", "") if target else None
+    for command in user_dm_command_catalog(provider=provider):
         usage = _user_dm_display_text(command.get("usage", ""), limit=160)
         help_text = _user_dm_display_text(command.get("help", ""), limit=220)
         if usage and help_text:
@@ -739,6 +740,71 @@ def _user_dm_commands_message() -> str:
         elif usage:
             lines.append(f"- `{usage}`")
     return "\n".join(lines)
+
+
+def _user_agent_unsupported_command_response(
+        data: dict,
+        state: MatrixState,
+        target,
+        command_id: str) -> dict:
+    """Persist a bounded local response for a provider-incompatible command."""
+    command = user_dm_command_by_id(command_id)
+    if not command:
+        return {"type": "error", "message": "Unsupported direct-message command"}
+    current = state.get_active_agent(getattr(target, "id", ""))
+    if current is not target or getattr(current, "cell_type", "") != "agent":
+        return {"type": "error", "message": "Agent is no longer available"}
+    idempotency_key = _user_agent_message_idempotency_key(data)
+    message_id = _user_direct_message_id_from_idempotency_key(idempotency_key)
+    if not message_id:
+        message_id = "msg-" + uuid.uuid4().hex[:12]
+    existing = state.db.load_direct_message(message_id) if idempotency_key else None
+    if existing:
+        snapshot = existing.get("context_snapshot", {}) or {}
+        if (
+            str(existing.get("recipient_id", "") or "") != target.id
+            or str(existing.get("sender_kind", "") or "") != "system"
+            or str(snapshot.get("slash_command", "") or "") != command.id
+            or str(snapshot.get("command_response", "") or "") != "unsupported_provider"
+        ):
+            return {
+                "type": "error",
+                "message": "idempotency key was reused for a different user_agent_message",
+            }
+        append_direct = getattr(state, "append_direct_message_to_caches", None)
+        if callable(append_direct):
+            append_direct(existing)
+        return {
+            "type": "ok",
+            "message_id": message_id,
+            "thread_id": str(existing.get("thread_id", "") or ""),
+            "agent_id": target.id,
+            "delivered": True,
+            "buffered": False,
+            "deduped": True,
+        }
+    saved = _save_user_agent_system_audit_message(
+        state,
+        target,
+        "This command is available only for Codex agents.",
+        message_id=message_id,
+        idempotency_key=idempotency_key,
+        context_snapshot={
+            "slash_command": command.id,
+            "command_response": "unsupported_provider",
+        },
+    )
+    if not saved:
+        return {"type": "error", "message": "Failed to save command response"}
+    return {
+        "type": "ok",
+        "message_id": str(saved.get("id", "") or ""),
+        "thread_id": str(saved.get("thread_id", "") or ""),
+        "agent_id": target.id,
+        "delivered": True,
+        "buffered": False,
+        "deduped": False,
+    }
 
 
 def _user_agent_read_only_command_response(
@@ -788,7 +854,7 @@ def _user_agent_read_only_command_response(
     content = (
         _user_dm_status_message(state, target)
         if command.id == "status"
-        else _user_dm_commands_message()
+        else _user_dm_commands_message(target)
     )
     saved = _save_user_agent_system_audit_message(
         state,
