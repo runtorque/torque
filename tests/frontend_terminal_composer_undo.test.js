@@ -109,3 +109,17 @@ test('initial IME composition remains native and commits one undoable transactio
   assert.equal(h.c.terminalComposeUndoRedo(input, false), true);
   assert.equal(input.value, '');
 });
+
+test('compositionend commits Chrome composition-only lifecycle as one undoable transaction', () => {
+  const h = harness(), input = h.input('a', '');
+  h.c._terminalComposeHistoryState('a', input);
+  const start = { currentTarget: input, isComposing: true, inputType: 'insertCompositionText',
+    preventDefault() { this.prevented = true; } };
+  h.c.terminalComposeBeforeInput(start);
+  input.value = 'あ';
+  h.c.terminalComposeInput(input, { isComposing: true });
+  h.c.terminalComposeCompositionEnd(input, {});
+  assert.equal(start.prevented, undefined, 'composition start remains native');
+  assert.equal(h.c.terminalComposeUndoRedo(input, false), true);
+  assert.equal(input.value, '');
+});

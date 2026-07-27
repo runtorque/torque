@@ -464,6 +464,15 @@ function _terminalComposeHistoryReset(cellId, input) {
   if (input && _terminalComposeIsRichInput(input)) _terminalComposeHistoryState(id, input);
 }
 function terminalComposeUndoRedoShortcut(evt, target) { if (!evt || evt.isComposing || evt.altKey || (!evt.metaKey && !evt.ctrlKey) || (evt.metaKey && evt.ctrlKey) || String(evt.key || '').toLowerCase() !== 'z') return false; var input = target || evt.target; if (!_terminalComposeIsRichInput(input) || !(input.classList && input.classList.contains('terminal-compose-input'))) return false; if (evt.preventDefault) evt.preventDefault(); if (evt.stopPropagation) evt.stopPropagation(); terminalComposeUndoRedo(input, !!evt.shiftKey); return true; }
+function terminalComposeCompositionEnd(input, evt) {
+  if (!_terminalComposeIsRichInput(input)) return;
+  var h = _terminalComposeHistoryState(input.dataset && input.dataset.cellId, input);
+  // Chrome may end composition without a final non-composing input event.
+  // Commit the browser-owned final DOM once; a later normal input is harmless
+  // because its snapshot equals the committed semantic draft.
+  if (h && h.composing) terminalComposeInput(input, { isComposing: false, compositionEnd: true });
+}
+
 function terminalComposeBeforeInput(evt) {
   var input = evt && (evt.currentTarget || evt.target);
   if (!_terminalComposeIsRichInput(input)) return;
@@ -1730,6 +1739,7 @@ function _renderTerminalCompose(root, cell) {
     + ' aria-label="' + esc(placeholder) + '"'
     + ' onbeforeinput="terminalComposeBeforeInput(event)"'
     + ' oninput="terminalComposeInput(this, event)"'
+    + ' oncompositionend="terminalComposeCompositionEnd(this, event)"'
     + ' onkeydown="terminalComposeKeydown(event, \'' + esc(cellId) + '\')"'
     + ' onpaste="return terminalComposePaste(event, \'' + esc(cellId) + '\')"'
     + ' ondragenter="terminalComposeDragenter(event, \'' + esc(cellId) + '\')"'
