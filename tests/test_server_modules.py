@@ -4619,6 +4619,53 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['delivery_state'], 'delivered')
         self.assertEqual(worker.status, 'running')
 
+    async def test_mcp_message_marks_agent_running_before_delivery_finishes(self):
+        state = self._make_state()
+        architect = self.state_mod.AgentCell(
+            id='architect-1',
+            name='Architect',
+            group='g',
+            cell_type='agent',
+            kind='architect',
+            session_id='session-1',
+            status='idle',
+        )
+        state.agents[architect.id] = architect
+        state.groups['g'] = [architect.id]
+        send_entered = asyncio.Event()
+        release_delivery = asyncio.Event()
+
+        class BlockingBridge:
+            async def send_text(self, _session_id, _text):
+                send_entered.set()
+                await release_delivery.wait()
+
+        delivery_task = asyncio.create_task(
+            self.server_mod.inject_mcp_message(
+                state,
+                BlockingBridge(),
+                architect,
+                'Review the peer update.',
+                sender_name='Blueprint',
+                sender_kind='architect',
+                action='architect_message',
+            )
+        )
+
+        await asyncio.wait_for(send_entered.wait(), timeout=1.0)
+        self.assertFalse(delivery_task.done())
+        self.assertEqual(architect.status, 'running')
+        self.assertGreater(architect.last_progress_at, 0)
+        self.assertGreaterEqual(state._seq, 1)
+
+        release_delivery.set()
+        await delivery_task
+        self.assertEqual(architect.status, 'running')
+        self.assertEqual(
+            architect.mcp_messages[0]['action'],
+            'architect_message',
+        )
+
     async def test_user_agent_message_compact_reply_guidance_and_replay(self):
         state = self._make_state()
         state.group_settings['g'] = self.state_mod.GroupSettings(
@@ -5130,6 +5177,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(recipient.mcp_messages[0]['delivered'])
         self.assertFalse(recipient.mcp_messages[0]['buffered'])
         self.assertTrue(sender.mcp_messages[0]['delivered'])
+        self.assertEqual(recipient.status, 'running')
 
     async def test_replay_buffered_architect_peer_message_failure_stays_buffered(self):
         state = self._make_state()
@@ -5190,6 +5238,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             recipient.mcp_messages[0]['delivery_reason'],
             'replay_failed',
         )
+        self.assertEqual(recipient.status, 'idle')
 
     async def test_session_start_hook_replays_buffered_architect_peer_message(self):
         state = self._make_state()

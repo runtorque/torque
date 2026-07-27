@@ -22495,6 +22495,34 @@ test('canvas status class and copy honor dismissed and attention lifecycle prece
     'genuinely running, non-attention agents retain legitimate adapter detail');
 });
 
+test('canvas shows the same live action for user-DM and peer-message wakes while idle stays idle', () => {
+  const { context } = createMainRenderHarness();
+  loadScript(context, 'static/js/canvas.js');
+  const liveAction = 'Using mcp__torque__task_progress';
+  const userDmWake = {
+    id: 'user-dm-wake',
+    status: 'running',
+    activity: 'tool_call',
+    activity_detail: liveAction,
+  };
+  const peerMessageWake = {
+    id: 'peer-message-wake',
+    status: 'running',
+    activity: 'tool_call',
+    activity_detail: liveAction,
+  };
+  const genuinelyIdle = {
+    id: 'genuinely-idle',
+    status: 'idle',
+    activity: '',
+    activity_detail: '',
+  };
+
+  assert.equal(context._canvasStatusLine(userDmWake), liveAction);
+  assert.equal(context._canvasStatusLine(peerMessageWake), liveAction);
+  assert.equal(context._canvasStatusLine(genuinelyIdle), 'idle');
+});
+
 test('agent status precedence preserves lifecycle, attention, dismissal, and legacy activity fallback', () => {
   const { context } = createMainRenderHarness();
   context.state.children = {};

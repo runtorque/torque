@@ -112,17 +112,42 @@ async def inject_mcp_message(state: MatrixState, bridge, target, message: str, *
                              task_id: str = "") -> None:
     if not target or not target.session_id:
         raise ValueError("Target agent is not running")
-    if hasattr(bridge, "prime_input_ready"):
-        bridge.prime_input_ready(target.session_id)
-    await bridge.send_text(
-        target.session_id,
-        _format_mcp_message_prompt(
-            message,
-            sender_name=sender_name,
-            sender_kind=sender_kind,
-            task_id=task_id,
-        ),
+    optimistic_baseline = state.snapshot_agent_optimistic_state(target)
+    optimistic_at = time.time()
+    optimistic_marked = state.mark_agent_optimistic_running(
+        target,
+        optimistic_at,
+        emit=True,
+        persist=False,
     )
+    if optimistic_marked:
+        await state.broadcast()
+    try:
+        if hasattr(bridge, "prime_input_ready"):
+            bridge.prime_input_ready(target.session_id)
+        await bridge.send_text(
+            target.session_id,
+            _format_mcp_message_prompt(
+                message,
+                sender_name=sender_name,
+                sender_kind=sender_kind,
+                task_id=task_id,
+            ),
+        )
+    except Exception:
+        if (
+            optimistic_marked
+            and getattr(target, "status", "") == "running"
+            and not getattr(target, "activity", "")
+            and float(getattr(target, "last_progress_at", 0) or 0) <= optimistic_at
+        ):
+            if state.restore_agent_optimistic_state(
+                    target,
+                    optimistic_baseline,
+                    emit=True,
+                    persist=False):
+                await state.broadcast()
+        raise
     _append_mcp_message(target, action, message)
     state._emit_agent(target)
 
@@ -1345,6 +1370,14 @@ async def _replay_buffered_cross_kind_messages(
             recipient_anchor=recipient_anchor,
             ack_required=bool(entry.get("ack_required", False)),
         )
+        optimistic_baseline = state.snapshot_agent_optimistic_state(target)
+        optimistic_at = time.time()
+        optimistic_marked = state.mark_agent_optimistic_running(
+            target,
+            optimistic_at,
+            emit=True,
+            persist=False,
+        )
         try:
             if hasattr(bridge, "prime_input_ready"):
                 bridge.prime_input_ready(target.session_id)
@@ -1375,6 +1408,18 @@ async def _replay_buffered_cross_kind_messages(
                     message_id,
                     delivered=False,
                     reason="replay_failed",
+                )
+            if (
+                optimistic_marked
+                and getattr(target, "status", "") == "running"
+                and not getattr(target, "activity", "")
+                and float(getattr(target, "last_progress_at", 0) or 0) <= optimistic_at
+            ):
+                state.restore_agent_optimistic_state(
+                    target,
+                    optimistic_baseline,
+                    emit=True,
+                    persist=False,
                 )
             continue
         if _is_canonical_peer_replay_entry(entry):
