@@ -1001,13 +1001,21 @@ class AgentLaunchService:
                     self.bridge.prime_input_ready(target_session_id)
                 send_started_at = time.time()
                 if settled_submit:
-                    await self.bridge.send_text(
+                    delivered = await self.bridge.send_text(
                         target_session_id,
                         payload,
                         settled_submit=True,
                     )
                 else:
-                    await self.bridge.send_text(target_session_id, payload)
+                    delivered = await self.bridge.send_text(
+                        target_session_id, payload)
+                if delivered is False:
+                    # The adapter reports False only for an already-gone
+                    # session. Treat it as a failed delivery rather than
+                    # recording a submitted direct-message turn.
+                    raise TerminalInputDeliveryError(
+                        f"terminal session {target_session_id} is unavailable "
+                        "for prompt delivery")
                 turn = self._user_direct_turns.get(user_direct_message_id)
                 if turn and turn.get("task") is task_ref:
                     # The adapter returned only after delivering the full
