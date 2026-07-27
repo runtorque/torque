@@ -465,7 +465,6 @@ def _handler_scoped_target_scope(
     )
     if (
         not requirement.handler_scoped
-        or requirement.target_kind != "task"
         or str(getattr(caller_cell, "kind", "") or "").strip() != "architect"
     ):
         return scope
@@ -473,6 +472,22 @@ def _handler_scoped_target_scope(
     caller_id = str(getattr(caller_cell, "id", "") or "").strip()
     if not caller_id:
         return scope
+    metadata = (
+        getattr(caller_cell, "effective_agent_class_snapshot", {}) or {}
+    ).get("metadata", {}) or {}
+    # A class may declare the bounded creator-proposal task authority mode.
+    # Its reassignment handler independently enforces a same-group Engineer
+    # target and caller-owned task; retain that platform check while allowing
+    # the agent-target descriptor to represent this intentionally narrow route.
+    if (
+            tool_name == "architect_task_reassign"
+            and requirement.target_kind == "agent"
+            and str(metadata.get("task_authority_mode", "") or "").strip()
+            == "creator-proposal-only"
+            and str(getattr(target, "group", "") or "").strip()
+            == str(getattr(caller_cell, "group", "") or "").strip()
+    ):
+        return "self"
     # Keep this exception tied to the exact legacy handlers whose documented
     # contract permits a routed product proposal owned by another architect.
     # The predicates inspect persisted route evidence only; they do not

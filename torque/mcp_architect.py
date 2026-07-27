@@ -683,7 +683,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_task_reassign", "authority": {"requirements": [{"capability": "task.reassign","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
+        "name": "architect_task_reassign", "authority": {"requirements": [{"capability": "task.reassign","minimum_scope": "self","target_argument": "task","target_kind": "task"},{"capability": "task.reassign","minimum_scope": "self","target_argument": "new_engineer_id","target_kind": "agent","handler_scoped": True}]},
         "description": (
             "Reassign a task created by this architect to another visible engineer."
         ),

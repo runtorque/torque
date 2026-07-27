@@ -271,15 +271,23 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("must retain", self._error_text(stripped))
         self.assertTrue({"product-proposal", "proposal-only"}.issubset(task.labels))
 
+        reassigned = await self._call(
+            "task_reassign",
+            {"task": task_id, "new_engineer_id": self.engineer.id},
+            req_id=4,
+        )
+        self.assertEqual(self.engineer.id, self._result_payload(reassigned)["assigned_engineer_id"])
+        self.assertEqual(self.engineer.id, task.assigned_engineer_id)
+
         dispatched = await self._call(
             "task_dispatch", {"task": task_id, "name": "pm-record-worker"},
-            req_id=4,
+            req_id=5,
         )
         self.assertEqual("ok", self._result_payload(dispatched)["type"])
         self.assertEqual("dispatch_task", self.calls[-1]["cmd"])
 
         moved = await self._call(
-            "task_move", {"task": task_id, "new_lane": "Done"}, req_id=5
+            "task_move", {"task": task_id, "new_lane": "Done"}, req_id=6
         )
         self.assertEqual("task_moved", self._result_payload(moved)["type"])
         self.assertEqual("Done", task.lane)
@@ -288,7 +296,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             "Peer-owned record", "g", created_by_architect_id=self.peer.id
         )
         denied = await self._call(
-            "task_update", {"task": peer_task.id, "title": "Nope"}, req_id=6
+            "task_update", {"task": peer_task.id, "title": "Nope"}, req_id=7
         )
         self.assertIn("error", denied.payload)
         self.assertEqual(-32003, denied.payload["error"]["code"])
@@ -425,7 +433,8 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             req_id=14,
             agent_id=self.torqly.id,
         )
-        self.assertIn("engineer not found in scope", self._error_text(non_hired))
+        self.assertIn("error", non_hired.payload)
+        self.assertEqual(-32602, non_hired.payload["error"]["code"])
         self.assertEqual(before, (owned.assigned_engineer_id, owned.updated_at))
 
         unclaimed_peer_root = self.state.board_add_task(

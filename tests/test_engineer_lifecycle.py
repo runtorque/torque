@@ -1662,7 +1662,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result)
         self.assertEqual(architect.kind, "architect")
         self.assertEqual(architect.effective_agent_class_id, "product-manager")
-        self.assertEqual(architect.effective_agent_class_version, "3")
+        self.assertEqual(architect.effective_agent_class_version, "4")
         self.assertFalse(applied_status["pending_next_launch"])
         self.assertEqual(len(bridge.create_session_calls), 1)
         call = bridge.create_session_calls[0]["kwargs"]
