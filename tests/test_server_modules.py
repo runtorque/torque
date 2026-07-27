@@ -5419,7 +5419,11 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         broadcasts = []
 
         async def fake_broadcast():
-            broadcasts.append(True)
+            row = self.db.load_agent_peer_message('msg-wake-peer')
+            broadcasts.append((
+                recipient.status,
+                row['delivery_state'],
+            ))
 
         state.broadcast = fake_broadcast
         scheduled = []
@@ -5456,7 +5460,13 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bridge.primed, ['session-b'])
         self.assertEqual(bridge.sent[0][0], 'session-b')
         self.assertIn('Wake replay regression.', bridge.sent[0][1])
-        self.assertEqual(broadcasts, [True])
+        self.assertEqual(
+            broadcasts,
+            [
+                ('running', 'buffered'),
+                ('running', 'delivered'),
+            ],
+        )
         persisted = self.db.load_agent_peer_message('msg-wake-peer')
         self.assertEqual(persisted['delivery_state'], 'delivered')
         self.assertEqual(persisted['delivery_reason'], '')
