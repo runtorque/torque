@@ -7704,4 +7704,3 @@ class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
             session_id="session-1")
         self.assertEqual(result["outcome"], "no_active_turn")
         self.assertEqual(interrupted, [])
-
