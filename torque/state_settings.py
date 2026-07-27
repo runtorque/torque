@@ -18,7 +18,7 @@ from .state import (
     asdict, board_task_is_closed, datetime,
     emit_engineer_ask_resolved_event,
     emit_engineer_awaiting_human_input_event,
-    log, normalize_architect_autonomy_mode,
+    log, normalize_architect_autonomy_mode, normalize_codex_fast_mode,
     normalize_architect_digest_verbosity,
     normalize_architect_enabled_events,
     normalize_architect_journal_checkpoint_frequency,
@@ -131,9 +131,14 @@ class StateSettingsMixin:
                     fields["architect_enabled_events"]
                 )
             )
+        if "architect_fast_mode" in fields:
+            fields["architect_fast_mode"] = normalize_codex_fast_mode(
+                fields["architect_fast_mode"], strict=strict
+            )
         for key in (
                 "architect_boot_command", "architect_provider",
                 "architect_model", "architect_reasoning_effort",
+                "architect_fast_mode",
                 "architect_directory", "architect_profile",
                 "architect_shell", "architect_tab_color",
                 "architect_custom_instructions"):
@@ -250,9 +255,12 @@ class StateSettingsMixin:
                 elif key == "board_sync_github":
                     value = _normalize_board_sync_github_settings(value)
                 elif key in {
-                        "agent_model", "agent_reasoning_effort",
+                        "agent_fast_mode", "worker_fast_mode"}:
+                    value = normalize_codex_fast_mode(value, strict=True)
+                elif key in {
+                        "agent_model", "agent_reasoning_effort", "agent_fast_mode",
                         "worker_provider", "worker_boot_command",
-                        "worker_model", "worker_reasoning_effort"}:
+                        "worker_model", "worker_reasoning_effort", "worker_fast_mode"}:
                     value = str(value or "").strip()
                 elif key in (
                         set(ArchitectSettings.__dataclass_fields__) - {"group"}):
@@ -586,8 +594,11 @@ class StateSettingsMixin:
                 return 0.0
         if key in {"pending_question_actor_id", "pending_note_actor_id"}:
             return str(value or "").strip()
+        if key == "engineer_fast_mode":
+            return normalize_codex_fast_mode(value, strict=True)
         if key in {
                 "engineer_model", "engineer_reasoning_effort",
+                "engineer_fast_mode",
                 "engineer_directory", "engineer_profile",
                 "engineer_shell", "engineer_tab_color"}:
             return str(value or "").strip()

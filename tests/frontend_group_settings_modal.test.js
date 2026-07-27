@@ -2424,3 +2424,27 @@ test('GS Engineer + New specialization Escape pops nested only (closeModals)', (
   const stackAfter = vm.runInContext('_modalStack.length', context);
   assert.equal(stackAfter, 0, 'modal stack must be empty after pop');
 });
+
+test('Codex Fast controls preserve three-state values and hide for other providers', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+  seedProviders(context, [
+    { name: 'codex', display_name: 'Codex', command: 'codex', reasoning_efforts: [] },
+    { name: 'claude-code', display_name: 'Claude Code', command: 'claude', reasoning_efforts: [] },
+  ]);
+  vm.runInContext(`_showGroupSettings('alpha', {
+    settings: { agent_provider: 'codex', agent_fast_mode: 'on', worker_fast_mode: 'off' },
+    engineer_settings: { engineer_provider: 'codex', engineer_fast_mode: 'on' },
+    architect_settings: { architect_provider: 'claude-code', architect_fast_mode: 'off' },
+    profiles: ['Default']
+  })`, context);
+  assert.equal(ensure('gs-agent-fast-mode').value, 'on');
+  assert.equal(ensure('gs-worker-fast-mode').value, 'off');
+  assert.equal(ensure('gs-engineer-fast-mode').value, 'on');
+  assert.equal(ensure('gs-agent-fast-mode-row').classList.contains('hidden'), false);
+  assert.equal(ensure('gs-architect-fast-mode-row').classList.contains('hidden'), true);
+  ensure('gs-agent-provider').value = 'claude-code';
+  vm.runInContext('onGsProviderChange()', context);
+  assert.equal(ensure('gs-agent-fast-mode-row').classList.contains('hidden'), true);
+});

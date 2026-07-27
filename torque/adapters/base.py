@@ -132,13 +132,14 @@ class AgentAdapter:
 
     def prepare_launch_command(self, cell, working_dir: str, command: str, *,
                                mcp_entrypoint: str = "",
-                               mcp_env: dict[str, str] | None = None) -> str:
+                               mcp_env: dict[str, str] | None = None,
+                               fast_mode: str = "inherit") -> str:
         """Prepare adapter-owned launch config and return the command to run.
 
         Most adapters install any filesystem config through ``install_hooks`` or
         ``install_mcp_config`` and do not need to alter the boot command.
         """
-        del cell, working_dir, mcp_entrypoint, mcp_env
+        del cell, working_dir, mcp_entrypoint, mcp_env, fast_mode
         return command
 
     def refresh_agent_config(self, cell, working_dir: str, *,

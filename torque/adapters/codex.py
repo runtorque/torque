@@ -228,6 +228,42 @@ def _split_boot_args(boot_cmd: str) -> tuple[list[str], str]:
     return (opts, prompt)
 
 
+def _codex_opts_with_fast_mode(opts: list[str], fast_mode: str) -> list[str]:
+    """Apply Torque's explicit Fast preference without duplicate service tiers.
+
+    An explicit preference owns ``service_tier`` and supersedes a custom
+    command's conflicting config value. ``inherit`` deliberately leaves every
+    caller supplied config flag byte-for-byte intact.
+    """
+    fast_mode = str(fast_mode or "inherit").strip().lower()
+    if fast_mode not in {"on", "off"}:
+        return list(opts)
+    filtered: list[str] = []
+    i = 0
+    while i < len(opts):
+        part = opts[i]
+        value = ""
+        next_is_value = part in {"-c", "--config"} and i + 1 < len(opts)
+        if next_is_value:
+            value = opts[i + 1]
+        elif part.startswith("-c="):
+            value = part[3:]
+        elif part.startswith("--config="):
+            value = part[len("--config="):]
+        if value.strip().startswith("service_tier="):
+            i += 2 if next_is_value else 1
+            continue
+        filtered.append(part)
+        if next_is_value:
+            filtered.append(opts[i + 1])
+            i += 2
+        else:
+            i += 1
+    tier = "priority" if fast_mode == "on" else "default"
+    filtered.extend(["-c", f"service_tier={tier}"])
+    return filtered
+
+
 def _codex_opts_with_approval_sandbox_bypass(opts: list[str]) -> list[str]:
     """Return Codex CLI opts with Torque's required non-interactive bypass.
 
@@ -423,26 +459,28 @@ def _codex_config_cli_flags(config: dict, *, config_path: Path) -> list[str]:
     return result
 
 
-def _append_codex_config_cli_flags(command: str, config: dict, config_path: Path) -> str:
+def _append_codex_config_cli_flags(command: str, config: dict, config_path: Path, *, fast_mode: str = "inherit") -> str:
     parts = shlex.split(command) if command else ["codex"]
     if not parts:
         parts = ["codex"]
     flags = _codex_config_cli_flags(config, config_path=config_path)
     opts, prompt = _split_boot_args(command or parts[0])
     opts = _codex_opts_with_approval_sandbox_bypass(opts)
+    opts = _codex_opts_with_fast_mode(opts, fast_mode)
     assembled = [parts[0], *opts, *flags]
     if prompt:
         assembled.append(prompt)
     return " ".join(shlex.quote(p) for p in assembled)
 
 
-def _codex_resume_config_cli_command(command: str, config: dict, config_path: Path) -> str:
+def _codex_resume_config_cli_command(command: str, config: dict, config_path: Path, *, fast_mode: str = "inherit") -> str:
     parts = shlex.split(command) if command else ["codex"]
     if not parts:
         parts = ["codex"]
     flags = _codex_config_cli_flags(config, config_path=config_path)
     opts, prompt = _split_boot_args(command or parts[0])
     opts = _codex_opts_with_approval_sandbox_bypass(opts)
+    opts = _codex_opts_with_fast_mode(opts, fast_mode)
     assembled = [parts[0], "resume", *opts, *flags]
     rendered = " ".join(shlex.quote(p) for p in assembled)
     rendered += ' "$@"'
@@ -1133,7 +1171,8 @@ class CodexAdapter(AgentAdapter):
 
     def prepare_launch_command(self, cell, working_dir: str, command: str, *,
                                mcp_entrypoint: str = "",
-                               mcp_env: dict[str, str] | None = None) -> str:
+                               mcp_env: dict[str, str] | None = None,
+                               fast_mode: str = "inherit") -> str:
         """Generate per-agent config and a short Torque-owned launch shim.
 
         The effective Codex invocation still uses explicit ``--config``
@@ -1145,6 +1184,7 @@ class CodexAdapter(AgentAdapter):
         running with no Codex child.
         """
         del mcp_entrypoint, mcp_env
+        fast_mode = getattr(cell, "fast_mode", fast_mode)
         try:
             config_file, payload = self._agent_config_payload(cell, working_dir)
             config_file.parent.mkdir(parents=True, exist_ok=True)
@@ -1155,9 +1195,9 @@ class CodexAdapter(AgentAdapter):
                 )
             )
             full_command = _append_codex_config_cli_flags(
-                command or "codex", payload, config_file)
+                command or "codex", payload, config_file, fast_mode=fast_mode)
             resume_command = _codex_resume_config_cli_command(
-                command or "codex", payload, config_file)
+                command or "codex", payload, config_file, fast_mode=fast_mode)
             launch_script = _codex_agent_launch_script_file(getattr(cell, "id", ""))
             launch_script.write_text(
                 "#!/bin/sh\n"

@@ -15,17 +15,17 @@ except ModuleNotFoundError:
 class _FakeState:
     def __init__(self, *, agent_directory="", default_directory="",
                  engineer_provider="", engineer_boot_command="",
-                 engineer_model="", engineer_reasoning_effort="",
+                 engineer_model="", engineer_reasoning_effort="", engineer_fast_mode="inherit",
                  engineer_directory="", engineer_profile="",
                  engineer_shell="", engineer_tab_color="",
                  architect_provider="", architect_boot_command="",
-                 architect_model="", architect_reasoning_effort="",
+                 architect_model="", architect_reasoning_effort="", architect_fast_mode="inherit",
                  architect_directory="", architect_profile="",
                  architect_shell="", architect_tab_color="",
                  worker_provider="", worker_boot_command="",
-                 worker_model="", worker_reasoning_effort="",
+                 worker_model="", worker_reasoning_effort="", worker_fast_mode="inherit",
                  agent_provider="", agent_boot_command="",
-                 agent_model="", agent_reasoning_effort="",
+                 agent_model="", agent_reasoning_effort="", agent_fast_mode="inherit",
                  agent_tab_color="", tab_color="",
                  default_agent_template="",
                  default_command="claude", git_worktree=False):
@@ -36,11 +36,13 @@ class _FakeState:
             agent_boot_command=agent_boot_command,
             agent_model=agent_model,
             agent_reasoning_effort=agent_reasoning_effort,
+            agent_fast_mode=agent_fast_mode,
             default_agent_template=default_agent_template,
             worker_provider=worker_provider,
             worker_boot_command=worker_boot_command,
             worker_model=worker_model,
             worker_reasoning_effort=worker_reasoning_effort,
+            worker_fast_mode=worker_fast_mode,
             agent_tab_color=agent_tab_color,
             tab_color=tab_color,
             agent_terminal_profile="",
@@ -66,6 +68,7 @@ class _FakeState:
             engineer_boot_command=engineer_boot_command,
             engineer_model=engineer_model,
             engineer_reasoning_effort=engineer_reasoning_effort,
+            engineer_fast_mode=engineer_fast_mode,
             engineer_directory=engineer_directory,
             engineer_profile=engineer_profile,
             engineer_shell=engineer_shell,
@@ -76,6 +79,7 @@ class _FakeState:
             architect_boot_command=architect_boot_command,
             architect_model=architect_model,
             architect_reasoning_effort=architect_reasoning_effort,
+            architect_fast_mode=architect_fast_mode,
             architect_directory=architect_directory,
             architect_profile=architect_profile,
             architect_shell=architect_shell,
@@ -215,6 +219,22 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         resolved = await service.resolve_base_dir("backend")
 
         self.assertEqual(resolved, "")
+
+    def test_fast_mode_resolution_prefers_per_launch_then_kind_then_group(self):
+        service = self._launch_service(
+            _FakeState(agent_fast_mode="on", worker_fast_mode="off",
+                       engineer_fast_mode="off", architect_fast_mode="on"),
+            _FakeBridge(),
+        )
+        self.assertEqual(service.resolve_worker_launch_config("backend")["fast_mode"], "off")
+        self.assertEqual(service.resolve_engineer_launch_config("backend")["fast_mode"], "off")
+        self.assertEqual(service.resolve_architect_launch_config("backend")["fast_mode"], "on")
+        self.assertEqual(
+            service.resolve_worker_launch_config(
+                "backend", overrides={"fast_mode": "on"}
+            )["fast_mode"],
+            "on",
+        )
 
     def test_resolve_engineer_launch_config_prefers_engineer_specific_overrides(self):
         service = self.server_agent_mod.AgentLaunchService(

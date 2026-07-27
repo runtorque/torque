@@ -182,6 +182,9 @@ function _showAddModal(mode, group, config) {
     _populateProviderSelect('add-provider-select', resolved.provider || gs.agent_provider || '', true);
     document.getElementById('add-cmd-input').value = resolved.command || '';
     document.getElementById('add-model-input').value = resolved.model || '';
+    if (document.getElementById('add-fast-mode')) {
+      _setSelectValue('add-fast-mode', resolved.fast_mode, 'inherit');
+    }
     onAddProviderChange(resolved.reasoning_effort || '');
   }
 
@@ -384,6 +387,8 @@ function submitAdd() {
     const reasoningEffort = _getReasoningEffortValue('add-reasoning-effort');
     if (model) msg.model = model;
     if (reasoningEffort) msg.reasoning_effort = reasoningEffort;
+    const fastMode = document.getElementById('add-fast-mode');
+    if (fastMode) msg.fast_mode = fastMode.value || 'inherit';
     /* worktree overrides */
     const wtEnabled = document.getElementById('add-wt-enabled').checked;
     msg.worktree = wtEnabled;
