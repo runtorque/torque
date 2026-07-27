@@ -15875,10 +15875,12 @@ test('terminal compose slash command autocomplete filters and fills without send
       group: 'Torque',
       cell_type: 'agent',
       kind: 'worker',
+      agent_type: 'codex',
     },
   };
   sandbox.state.user_dm_commands = [
     { id: 'compact', label: '/compact', usage: '/compact', insert: '/compact', help: 'Ask the agent to compact its context before continuing.', search: 'compact /compact context summary' },
+    { id: 'fast', label: '/fast', usage: '/fast', insert: '/fast', help: 'Toggle Codex Fast mode for this agent.', search: 'fast /fast codex fast mode', providers: ['codex'] },
     { id: 'restart', label: '/restart', usage: '/restart', insert: '/restart', help: 'Restart only this DM agent with a fresh session.', search: 'restart /restart relaunch fresh session current dm agent' },
     { id: 'loop', label: '/loop every <interval> <message>', usage: '/loop every 10m check status', insert: '/loop every 10m ', help: 'Start a recurring user message. Use 1m–24h with s/m/h units, then add the message.', search: 'loop every interval message recurring schedule /loop every' },
     { id: 'loop-cancel', label: '/loop cancel', usage: '/loop cancel', insert: '/loop cancel', help: 'Cancel the active user-message loop for this agent.', search: 'loop cancel stop recurring schedule /loop cancel' },
@@ -15916,6 +15918,7 @@ test('terminal compose slash command autocomplete filters and fills without send
   assert.equal(slashDropdown.style.display, '');
   assert.equal(taskDropdown.style.display, 'none');
   assert.match(slashDropdown.innerHTML, /\/compact/);
+  assert.match(slashDropdown.innerHTML, /\/fast/);
   assert.match(slashDropdown.innerHTML, /\/restart/);
   assert.match(slashDropdown.innerHTML, /\/loop every <interval> <message>/);
   assert.match(slashDropdown.innerHTML, /\/loop cancel/);
@@ -16016,6 +16019,14 @@ test('terminal compose slash command autocomplete filters and fills without send
   assert.equal(sandbox.sendCalls[0].message, '/restart');
   assert.match(sandbox.sendCalls[0].idempotency_key, /^terminal-direct:agent-1:/);
 
+  sandbox.state.agents['agent-1'].agent_type = 'claude-code';
+  input.value = '/fast';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  context.terminalComposeInput(input);
+  assert.equal(slashDropdown.style.display, 'none');
+  assert.equal(input.focused, true);
+
   input.value = '/not-a-command';
   input.selectionStart = input.value.length;
   input.selectionEnd = input.value.length;
@@ -16031,6 +16042,19 @@ test('terminal compose slash command autocomplete filters and fills without send
   assert.equal(sandbox.sendCalls[1].cmd, 'user_agent_message');
   assert.equal(sandbox.sendCalls[1].agent_id, 'agent-1');
   assert.equal(sandbox.sendCalls[1].message, '/not-a-command');
+});
+
+test('terminal compose slash menu explicitly left-aligns every option text surface', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/styles/workspace-grid.css'), 'utf8');
+  for (const selector of [
+    'terminal-compose-slash-option',
+    'terminal-compose-slash-main',
+    'terminal-compose-slash-label',
+    'terminal-compose-slash-usage',
+    'terminal-compose-slash-help',
+  ]) {
+    assert.match(css, new RegExp('\\.' + selector + '\\s*\\{[^}]*text-align:\\s*left;', 's'));
+  }
 });
 
 test('terminal compose slash autocomplete safely hides when the backend catalog is missing', () => {

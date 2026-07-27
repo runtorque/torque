@@ -195,7 +195,10 @@ from .server_agent_common import (
     _resolve_agent_id,
     _should_show_guidance_hint,
 )
-from .commands.user_dm import parse_user_dm_command
+from .commands.user_dm import (
+    parse_user_dm_command,
+    user_dm_command_supports_provider,
+)
 from .server_communication import (
     GUIDANCE_HINT_USER_DIRECT_REPLY,
     USER_AGENT_LOOP_MIN_INTERVAL_SECONDS,
@@ -232,6 +235,7 @@ from .server_communication import (
     _user_agent_restart_response,
     _handle_user_agent_restart_command,
     _user_agent_read_only_command_response,
+    _user_agent_unsupported_command_response,
     _replay_buffered_cross_kind_messages,
     _make_agent_session_start_handler,
     _inherit_assigned_engineer_for_derived_task,
@@ -1992,6 +1996,10 @@ async def _handle_user_agent_message_command(data, state: MatrixState,
         }
     stripped_message = message_text.strip()
     command = parse_user_dm_command(stripped_message)
+    if bool(data.get("_loop_delivery")) and command and command.id == "fast":
+        # A scheduled natural-language message must not repeatedly toggle a
+        # provider mode merely because its body happens to equal this command.
+        command = None
     if command:
         # Registry-owned recognition keeps these trusted convenience actions
         # closed: unsupported slash-like prose still follows normal delivery.
@@ -2016,6 +2024,10 @@ async def _handle_user_agent_message_command(data, state: MatrixState,
             if inspect.isawaitable(result):
                 return await result
             return result
+        if not user_dm_command_supports_provider(
+                command, getattr(target, "agent_type", "")):
+            return _user_agent_unsupported_command_response(
+                data, state, target, command.id)
 
     idempotency_key = _user_agent_message_idempotency_key(data)
     message_id = _user_direct_message_id_from_idempotency_key(idempotency_key)
@@ -2028,10 +2040,12 @@ async def _handle_user_agent_message_command(data, state: MatrixState,
     recipient_name = str(getattr(target, "name", "") or "").strip()
     message_type = "message"
     context_snapshot = {}
-    if command and command.id == "compact":
-        message_text = "/compact"
+    if command and command.execution_mode == "provider_passthrough":
+        # Only closed-registry commands that passed the provider capability
+        # check above reach this literal provider-session delivery path.
+        message_text = command.insert
         message_type = "slash_command"
-        context_snapshot = {"slash_command": "compact"}
+        context_snapshot = {"slash_command": command.id}
     elif bool(data.get("_loop_delivery")):
         message_type = "loop"
         context_snapshot = {

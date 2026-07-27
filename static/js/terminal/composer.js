@@ -949,7 +949,7 @@ function _terminalComposeSlashTrigger(input) {
   };
 }
 
-function _terminalComposeSlashCandidates(query) {
+function _terminalComposeSlashCandidates(query, input) {
   var needle = String(query || '').trim().toLowerCase().replace(/\s+/g, ' ');
   var results = [];
   // The backend catalog is the only command contract.  Missing/invalid
@@ -958,8 +958,15 @@ function _terminalComposeSlashCandidates(query) {
   var catalog = state && Array.isArray(state.user_dm_commands)
     ? state.user_dm_commands
     : [];
+  var agentId = input && input.dataset ? String(input.dataset.agentId || '') : '';
+  var target = agentId && state && state.agents ? state.agents[agentId] : null;
+  var provider = String(target && target.agent_type || '').trim().toLowerCase();
   for (var i = 0; i < catalog.length; i++) {
     var item = catalog[i] || {};
+    var providers = Array.isArray(item.providers) ? item.providers : [];
+    if (providers.length && providers.map(function(value) {
+      return String(value || '').trim().toLowerCase();
+    }).indexOf(provider) < 0) continue;
     var search = String((item.search || '') + ' ' + (item.label || '') + ' ' + (item.usage || ''))
       .toLowerCase()
       .replace(/^\//, '')
@@ -1010,7 +1017,7 @@ function _terminalComposeUpdateSlashDropdown(input) {
     _terminalComposeSlashDropdownHide(cellId);
     return false;
   }
-  var results = _terminalComposeSlashCandidates(trigger.query);
+  var results = _terminalComposeSlashCandidates(trigger.query, input);
   if (!results.length) {
     _terminalComposeSlashDropdownHide(cellId);
     return false;
