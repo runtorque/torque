@@ -199,3 +199,46 @@ test('dispatch_state-only task delta patches the visible card badge without boar
   assert.deepEqual(renderCalls, []);
   assert.equal(rafCalls(), 0);
 });
+
+test('policy root with review children renders escaped bounded finalization badge', () => {
+  const context = createBadgeRenderContext();
+  vm.runInContext(`
+    state = { board_tasks: {}, agents: {}, groups: {}, group_settings: {} };
+    _boardLaneEntryText = () => '';
+    _boardMetadataBadgeClass = (name) => name;
+    _boardDependencyBlockedLabel = () => '';
+    _boardAssignedEngineerBadgeHtml = () => '';
+    _boardTaskDispatchStateBadgeHtml = () => '';
+    _boardTaskDispatchEligibility = () => null;
+    _boardTaskHealthState = () => 'healthy';
+    _boardTaskHealthLabel = () => '';
+    _boardExternalGithubChipHtml = () => '';
+    _boardTaskSync = () => ({});
+    _boardTaskHasGithubLink = () => false;
+    _artifactCountForTask = () => 0;
+    _renderBoardQuickEdit = () => '';
+    _boardAgentName = () => '';
+    _boardVerificationPreview = () => '';
+    behaviorOverlayApprovalCardHtml = () => '';
+    formatCode = (value) => esc(value);
+    _taskCreatedByBadgeHtml = () => '';
+    _branchBoundaryOverviewForContext = () => null;
+    boardFocusTask = () => {}; boardCardMouseEnter = () => {}; boardCardMouseLeave = () => {};
+    boardCardMenu = () => {}; openEditTask = () => {}; boardCopyTaskIdFromCard = () => {};
+    _boardCollapsedTasks = {}; _boardFocusedTask = ''; _boardSelectedTasks = {}; _boardHoveredTask = ''; _boardQuickEditTask = ''; _boardHasActiveFilters = () => false; _boardTasks = () => []; childrenOf = { 'ROOT': [{ id: 'REVIEW' }] };
+  `, context);
+  const html = vm.runInContext(`_renderBoardCard({
+    id: 'ROOT', task: 'Policy root', lane: 'In Progress', labels: [],
+    finalization_status: {
+      mode: 'review_only', label: 'Reviewing', eligible: false,
+      missing_gates: ['review_gate_<unsafe>', 'x'.repeat(400)]
+    }
+  }, childrenOf, 0, {})`, context);
+  assert.match(html, />Reviewing<\/span>/);
+  assert.match(html, /review_gate_&lt;unsafe&gt;/);
+  assert.doesNotMatch(html, /review_gate_<unsafe>/);
+  const tooltip = html.match(/board-card-status" title="([^"]*)"/)[1];
+  assert.match(tooltip, /^review_gate_&lt;unsafe&gt;, x/);
+  assert.ok(tooltip.length <= 320);
+  assert.doesNotMatch(tooltip, /x{400}/);
+});

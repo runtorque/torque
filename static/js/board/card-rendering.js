@@ -1192,9 +1192,11 @@ function _renderBoardCard(t, childrenOf, depth, renderState) {
       + '">' + esc(t.status) + '</span>';
   }
   var finalization = t.finalization_status || {};
-  if (showExecutionState && finalization.label) {
+  // Policy roots own the compact finalization projection even while their
+  // review descendants suppress ordinary parent execution badges.
+  if (finalization.label && (showExecutionState || finalization.mode !== 'legacy')) {
     var finalizationMissing = Array.isArray(finalization.missing_gates)
-      ? finalization.missing_gates.slice(0, 4).join(', ')
+      ? finalization.missing_gates.slice(0, 4).join(', ').slice(0, 280)
       : '';
     meta += '<span class="' + esc(_boardMetadataBadgeClass(
       'board-card-status', finalization.eligible ? 'success' : 'warning'
