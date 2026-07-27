@@ -590,6 +590,47 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         }, worker)
         self.assertEqual(telemetry.data["model"], "gpt-5.6-terra")
 
+    async def test_persisted_claude_model_reaches_new_and_resumed_worker_commands(self):
+        """Claude's built-in selector values use the existing model path."""
+        from torque.db import TorqueDB
+        from torque.adapters.claude_code import ClaudeCodeAdapter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db = TorqueDB(Path(tmp) / "torque.db")
+            db.init()
+            self.addCleanup(db.close)
+            state = self.state_mod.MatrixState(db=db)
+            state.add_group("backend")
+            state.update_group_settings(
+                "backend",
+                worker_provider="claude-code",
+                worker_model="claude-opus-5",
+            )
+
+            reloaded = self.state_mod.MatrixState(db=db)
+            reloaded.load()
+            bridge = _CapturingBridge(current_path=tmp)
+            service = self.server_agent_mod.AgentLaunchService(
+                state=reloaded,
+                connection=None,
+                bridge=bridge,
+                worktree_mgr=None,
+                template_mgr=_FakeTemplateManager(),
+            )
+            launch_cfg = service.resolve_worker_launch_config(
+                "backend", base_dir=tmp)
+            worker = await service.create_agent_with_config(
+                "backend", "Claude Worker", launch_cfg, kind="worker")
+
+        self.assertEqual(launch_cfg["command"], "claude --model claude-opus-5")
+        self.assertEqual(worker.command, launch_cfg["command"])
+        self.assertEqual(bridge.create_session_calls[0]["cell"].command,
+                         "claude --model claude-opus-5")
+        self.assertEqual(
+            ClaudeCodeAdapter().get_resume_command(worker.command, "session-123"),
+            "claude --model claude-opus-5 --resume session-123",
+        )
+
     def test_resolve_worker_launch_config_explicit_provider_command_win(self):
         service = self.server_agent_mod.AgentLaunchService(
             state=_FakeState(

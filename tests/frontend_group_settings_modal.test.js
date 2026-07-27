@@ -908,6 +908,85 @@ test('Codex model controls use detected choices with editable fallbacks last', (
   );
 });
 
+test('shared group model selectors preserve Claude built-ins, defaults, and future custom ids', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+  const claudeModels = [
+    'claude-haiku-4-5',
+    'claude-sonnet-4-6',
+    'claude-sonnet-5',
+    'claude-opus-4-8',
+    'claude-opus-5',
+    'claude-fable-5',
+  ];
+  seedProviders(context, [{
+    name: 'claude-code',
+    display_name: 'Claude Code',
+    command: 'claude',
+    models: claudeModels.map((id) => ({ id })),
+    reasoning_efforts: [],
+  }]);
+
+  const selectors = [
+    ['gs-agent-provider', 'gs-agent-model', 'onGsProviderChange'],
+    ['gs-worker-provider', 'gs-worker-model', 'onGsWorkerProviderChange'],
+    ['gs-engineer-provider', 'gs-engineer-model', 'onGsEngineerProviderChange'],
+    ['gs-architect-provider', 'gs-architect-model', 'onGsArchitectProviderChange'],
+  ];
+  selectors.forEach(([providerId, modelId, change], index) => {
+    ensure(providerId).value = 'claude-code';
+    ensure(modelId).value = claudeModels[index];
+    vm.runInContext(`${change}()`, context);
+    assert.deepEqual(
+      ensure(modelId + '-select').children.map((child) => child.value),
+      ['', ...claudeModels, '__custom__'],
+      modelId + ' should use the shared Claude catalog',
+    );
+    assert.equal(ensure(modelId + '-select').value, claudeModels[index]);
+    assert.equal(ensure(modelId).classList.contains('hidden'), true);
+  });
+
+  ensure('add-provider-select').value = 'claude-code';
+  ensure('add-model-input').value = 'claude-fable-5';
+  vm.runInContext('onAddProviderChange()', context);
+  assert.deepEqual(
+    ensure('add-model-input-select').children.map((child) => child.value),
+    ['', ...claudeModels, '__custom__'],
+    'the per-agent launch selector should use the shared Claude catalog',
+  );
+  assert.equal(ensure('add-model-input-select').value, 'claude-fable-5');
+
+  ensure('gs-agent-model').value = 'claude-future-6';
+  vm.runInContext('onGsProviderChange()', context);
+  assert.equal(ensure('gs-agent-model-select').value, '__custom__');
+  assert.equal(ensure('gs-agent-model').value, 'claude-future-6');
+  assert.equal(ensure('gs-agent-model').classList.contains('hidden'), false);
+  assert.equal(
+    vm.runInContext(`_getModelValue('gs-agent-model')`, context),
+    'claude-future-6',
+  );
+
+  ensure('gs-agent-provider').value = '';
+  ensure('gs-agent-model').value = '';
+  vm.runInContext('onGsProviderChange()', context);
+  assert.equal(ensure('gs-agent-model-select').value, '');
+
+  seedProviders(context, [{
+    name: 'claude-code',
+    display_name: 'Claude Code',
+    command: 'claude',
+    models: [{ id: '' }, { id: 'claude-haiku-4-5' }, { id: 'claude-haiku-4-5' }],
+  }]);
+  ensure('gs-agent-provider').value = 'claude-code';
+  vm.runInContext('onGsProviderChange()', context);
+  assert.deepEqual(
+    ensure('gs-agent-model-select').children.map((child) => child.value),
+    ['', 'claude-haiku-4-5', '__custom__'],
+    'malformed catalog entries must leave the custom fallback usable',
+  );
+});
+
 test('worker provider block inherits group default provider and previews model/command', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);

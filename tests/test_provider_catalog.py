@@ -10,6 +10,26 @@ from torque.provider_catalog import _resolve_codex_executable
 
 
 class CodexProviderCatalogTests(unittest.TestCase):
+    def test_claude_code_metadata_uses_the_static_builtin_catalog(self):
+        providers = adapters.get_providers()
+        claude = next(
+            provider for provider in providers
+            if provider["name"] == "claude-code"
+        )
+
+        self.assertEqual(claude["model_catalog_source"], "built-in")
+        self.assertEqual(
+            [model["id"] for model in claude["models"]],
+            [
+                "claude-haiku-4-5",
+                "claude-sonnet-4-6",
+                "claude-sonnet-5",
+                "claude-opus-4-8",
+                "claude-opus-5",
+                "claude-fable-5",
+            ],
+        )
+
     def test_executable_resolution_uses_common_install_when_path_is_stripped(self):
         with mock.patch(
             "torque.provider_catalog.shutil.which",

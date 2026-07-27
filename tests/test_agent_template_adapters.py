@@ -73,6 +73,12 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             )
             self.assertEqual(adapter.resolve_model_flags("sonnet"), " --model sonnet")
             self.assertEqual(
+                adapter.get_resume_command(
+                    "claude --model claude-fable-5", "session-123"
+                ),
+                "claude --model claude-fable-5 --resume session-123",
+            )
+            self.assertEqual(
                 adapter.resolve_reasoning_effort_flags("high"),
                 " --effort high",
             )

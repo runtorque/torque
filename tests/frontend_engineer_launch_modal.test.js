@@ -182,6 +182,54 @@ test('openEngineerLaunchDialog populates persisted engineer launch settings', ()
   assert.equal(ensure('modal-engineer-launch').classList.contains('visible'), true);
 });
 
+test('Engineer launch uses shared Claude model choices and preserves selection on save', () => {
+  const { sandbox, ensure } = createSandbox();
+  sandbox.state.engineer_settings.alpha.engineer_provider = 'claude-code';
+  sandbox.state.engineer_settings.alpha.engineer_boot_command = '';
+  sandbox.state.engineer_settings.alpha.engineer_model = 'claude-opus-5';
+  const claudeProvider = {
+    name: 'claude-code',
+    display_name: 'Claude Code',
+    command: 'claude',
+    models: [
+      { id: 'claude-haiku-4-5' },
+      { id: 'claude-sonnet-4-6' },
+      { id: 'claude-sonnet-5' },
+      { id: 'claude-opus-4-8' },
+      { id: 'claude-opus-5' },
+      { id: 'claude-fable-5' },
+    ],
+    reasoning_efforts: [],
+  };
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/modals.js');
+  loadScript(context, 'static/js/modals/engineer-launch.js');
+  vm.runInContext(`_cachedProviders = ${JSON.stringify([claudeProvider])};`, context);
+
+  vm.runInContext(`openEngineerLaunchDialog('alpha')`, context);
+  assert.deepEqual(
+    ensure('engineer-launch-model-select').children.map((child) => child.value),
+    [
+      '',
+      'claude-haiku-4-5',
+      'claude-sonnet-4-6',
+      'claude-sonnet-5',
+      'claude-opus-4-8',
+      'claude-opus-5',
+      'claude-fable-5',
+      '__custom__',
+    ],
+  );
+  assert.equal(ensure('engineer-launch-model-select').value, 'claude-opus-5');
+
+  ensure('engineer-launch-model-select').value = 'claude-fable-5';
+  vm.runInContext(`_onModelSelectChange('engineer-launch-model')`, context);
+  vm.runInContext('submitEngineerLaunchDialog()', context);
+  const update = sandbox.sendCalls.find((message) =>
+    message.cmd === 'engineer_update_settings');
+  assert.equal(update.engineer_model, 'claude-fable-5');
+});
+
 test('submitEngineerLaunchDialog persists settings then creates a Engineer', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
