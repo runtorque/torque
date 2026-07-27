@@ -15762,22 +15762,26 @@ test('terminal rich composer wraps around image tokens and leaves native repeat 
   input.classList.add('terminal-compose-input');
   input.dataset.cellId = 'agent-1';
   input.setAttribute('contenteditable', 'true');
-  input.value = 'before middle after';
+  const longUnbroken = 'x'.repeat(512);
+  const draft = 'before middle after ' + longUnbroken;
+  input.value = draft;
   document.activeElement = input;
   runInContext(context, `
     _terminalComposeRegisterAttachmentEntries('agent-1', [
       { path: '/tmp/before.png', filename: 'before.png' },
       { path: '/tmp/between.png', filename: 'between.png' }
-    ], 'before middle after', 0);
+    ], ${JSON.stringify('before middle after ' + 'x'.repeat(512))}, 0);
     _terminalComposeAttachments['agent-1'].entries[1].position = 7;
     _terminalComposeRenderRichInput(document.getElementById('terminal-compose-input-agent-1'));
   `);
   const firstToken = input.innerHTML.indexOf('[ Image #1 ]');
   const middle = input.innerHTML.indexOf('before ');
   const secondToken = input.innerHTML.indexOf('[ Image #2 ]');
-  const trailing = input.innerHTML.indexOf('middle after');
+  const trailing = input.innerHTML.indexOf('middle after ');
   assert.ok(firstToken >= 0 && firstToken < middle, 'token before prose stays inline');
   assert.ok(middle < secondToken && secondToken < trailing, 'token between prose stays inline');
+  assert.match(input.innerHTML, new RegExp(longUnbroken),
+    'long unbroken prose remains browser text and is covered by overflow-wrap');
   assert.equal((input.innerHTML.match(/data-attachment-caret-host/g) || []).length, 2,
     'each atomic token keeps exactly one stable caret boundary');
 
@@ -15810,6 +15814,19 @@ test('terminal rich composer wraps around image tokens and leaves native repeat 
     }
   }
   assert.equal(input.innerHTML, richHtml, 'keydown leaves browser-owned rich DOM untouched');
+  // Model the matching native input events: each repeated printable input
+  // updates the draft but no JavaScript loop generates extra characters.
+  delete input.childNodes;
+  const nativeRepeatText = 'aa77  ::,,';
+  for (const character of nativeRepeatText) {
+    input.value += character;
+    runInContext(context, `terminalComposeInput(document.getElementById('terminal-compose-input-agent-1'));`);
+  }
+  assert.equal(
+    jsonValue(context, `_terminalComposeDrafts['agent-1']`),
+    draft + nativeRepeatText,
+    'repeated native input is serialized after attachment-bearing prose',
+  );
 
   // Repeat handling deliberately delegates cadence and input insertion to the
   // browser; do not grow a JavaScript repeat loop or an event.repeat branch.
