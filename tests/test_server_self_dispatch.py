@@ -7661,12 +7661,20 @@ class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
         task = await service.send_agent_prompt(cell, "active", background=True,
             user_direct_message_id="msg-user")
         await entered.wait()
+        # A mismatched live session is reported safely before the turn is
+        # retired; it must never reach the provider interrupt primitive.
+        self.assertEqual((await service.cancel_user_direct_turn(cell,
+            message_id="msg-user", session_id="other"))["outcome"], "session_replaced")
+        self.assertEqual(interrupted, [])
         result = await service.cancel_user_direct_turn(cell, message_id="msg-user",
             session_id="session-1")
         self.assertEqual(result["outcome"], "interrupted")
         self.assertEqual(interrupted, ["session-1"])
+        # A successful interrupt retires the correlation, so retries cannot
+        # interrupt any later provider turn (even with the original session).
         self.assertEqual((await service.cancel_user_direct_turn(cell,
-            message_id="msg-user", session_id="other"))["outcome"], "session_replaced")
+            message_id="msg-user", session_id="session-1"))["outcome"], "no_active_turn")
+        self.assertEqual(interrupted, ["session-1"])
         release.set()
         await task
 
