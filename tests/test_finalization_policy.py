@@ -150,6 +150,46 @@ class FinalizationDoneBypassRegressionTests(unittest.TestCase):
         self.assertFalse(self.state.evaluate_task_finalization(root.id)["eligible"])
         self.assertEqual(root.finalization_audit[-1]["caller"], "board_add_task")
 
+    def test_state_update_cannot_combine_done_with_new_policy(self):
+        root = self.state.board_add_task("Legacy root", "g", id="TORQUE:913")
+        result = self.state.board_update_task(
+            root.id,
+            lane="Done",
+            finalization_mode="review_only",
+            required_review_gates=[{
+                "id": "security", "role": "security",
+                "review_task_id": "TORQUE:913:1",
+            }],
+            finalization_boundary={
+                "artifact_digest": "digest", "artifact_version": "v1",
+                "source_identity": "artifact", "immutable": True,
+            },
+        )
+        self.assertFalse(result["eligible"])
+        self.assertEqual(root.lane, "Backlog")
+        self.assertEqual(root.finalization_mode, "legacy")
+        self.assertEqual(root.finalization_audit[-1]["caller"], "board_update_task")
+        self.assertEqual(root.finalization_audit[-1]["mode"], "review_only")
+
+    def test_state_update_cannot_admit_policy_on_done_legacy_root(self):
+        root = self.state.board_add_task("Legacy root", "g", id="TORQUE:914")
+        self.state.board_move_task(root.id, "Done")
+        result = self.state.board_update_task(
+            root.id,
+            finalization_mode="review_only",
+            required_review_gates=[{
+                "id": "security", "role": "security",
+                "review_task_id": "TORQUE:914:1",
+            }],
+            finalization_boundary={
+                "artifact_digest": "digest", "artifact_version": "v1",
+                "source_identity": "artifact", "immutable": True,
+            },
+        )
+        self.assertFalse(result["eligible"])
+        self.assertEqual(root.lane, "Done")
+        self.assertEqual(root.finalization_mode, "legacy")
+
     def test_typed_review_record_refreshes_root_projection(self):
         root = self._ineligible_root("TORQUE:912")
         review = self.state.board_add_task(
@@ -274,6 +314,7 @@ class FinalizationProductionAdmissionTests(unittest.IsolatedAsyncioTestCase):
             "normalize_external_link": lambda *_args: {"provider": "", "external_id": "", "external_url": ""},
             "is_canonical_task_id": lambda _value: True,
             "is_draft_task_token": lambda _value: False,
+            "resolve_task_id": lambda _state, value: value,
             "engineer_tombstoned_error": lambda _value: {"type": "error"},
             "finalize_task_attachments": lambda attachments, artifacts, **_kwargs: (attachments, artifacts),
         })
@@ -300,3 +341,65 @@ class FinalizationProductionAdmissionTests(unittest.IsolatedAsyncioTestCase):
             has_blocking_issues=False, required_follow_up_resolved=True, boundary="d|v|e")
         state.board_move_task(review.id, "Done")
         self.assertEqual(root.lane, "Done")
+
+    async def test_board_operation_rejects_policy_updates_that_would_leave_done_ineligible(self):
+        _install_aiohttp_stub()
+        from dataclasses import fields
+        from torque.commands.board_operations import BoardOperationRuntime, handle_board_operation_command
+        from torque.state import MatrixState
+
+        state = MatrixState()
+        state.groups["g"] = []
+
+        async def base_dir(*_args, **_kwargs):
+            return ""
+
+        values = {field.name: None for field in fields(BoardOperationRuntime)}
+        values.update({
+            "state": state,
+            "resolve_base_dir": base_dir,
+            "resolve_deliverable_for_create": lambda *_args, **_kwargs: {"required": False, "type": "", "format": "", "artifact_title": ""},
+            "normalize_external_link": lambda *_args: {"provider": "", "external_id": "", "external_url": ""},
+            "is_canonical_task_id": lambda _value: True,
+            "is_draft_task_token": lambda _value: False,
+            "resolve_task_id": lambda _state, value: value,
+            "engineer_tombstoned_error": lambda _value: {"type": "error"},
+            "finalize_task_attachments": lambda attachments, artifacts, **_kwargs: (attachments, artifacts),
+            "capture_auto_resume_targets": lambda *_args, **_kwargs: [],
+        })
+        runtime = BoardOperationRuntime(**values)
+        policy = {
+            "finalization_mode": "review_only",
+            "required_review_gates": [{
+                "id": "security", "role": "security",
+                "review_task_id": "TORQUE:941:1",
+            }],
+            "finalization_boundary": {
+                "artifact_digest": "digest", "artifact_version": "v1",
+                "source_identity": "artifact", "immutable": True,
+            },
+        }
+
+        combined = state.board_add_task("Legacy", "g", id="TORQUE:941")
+        combined_result = await handle_board_operation_command({
+            "cmd": "board_update_task", "id": combined.id, "lane": "Done", **policy,
+        }, runtime)
+        self.assertEqual(combined_result["type"], "finalization_blocked")
+        self.assertEqual(combined.lane, "Backlog")
+        self.assertEqual(combined.finalization_mode, "legacy")
+
+        already_done = state.board_add_task("Legacy done", "g", id="TORQUE:942")
+        state.board_move_task(already_done.id, "Done")
+        already_done_result = await handle_board_operation_command({
+            "cmd": "board_update_task", "id": already_done.id,
+            **{
+                **policy,
+                "required_review_gates": [{
+                    "id": "security", "role": "security",
+                    "review_task_id": "TORQUE:942:1",
+                }],
+            },
+        }, runtime)
+        self.assertEqual(already_done_result["type"], "finalization_blocked")
+        self.assertEqual(already_done.lane, "Done")
+        self.assertEqual(already_done.finalization_mode, "legacy")

@@ -63,6 +63,10 @@ COMPACT_CARD_FIELDS = {
     "deliverable_type",
     "requires_review",
     "pre_approved_by",
+    # Compact policy-stage projection is intentionally eager so Board cards
+    # can render a truthful bounded finalization badge without task_detail.
+    "finalization_mode",
+    "finalization_status",
 }
 
 HEAVY_TASK_FIELDS = {

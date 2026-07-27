@@ -429,33 +429,42 @@ async def handle_board_operation_command(
                 "message": "Agent is tombstoned",
             }
         else:
-            state.board_update_task(tid, **fields)
-            if board_sync_manager:
-                board_sync_manager.enqueue_for_local_change(
-                    tid,
-                    reason="task_update",
-                    fields=fields.keys(),
+            update_result = state.board_update_task(tid, **fields)
+            if (isinstance(update_result, dict)
+                    and not update_result.get("eligible", True)):
+                result = {
+                    "type": "finalization_blocked",
+                    "task_id": tid,
+                    "finalization": update_result,
+                    "missing_gates": list(update_result.get("missing_gates", [])),
+                }
+            else:
+                if board_sync_manager:
+                    board_sync_manager.enqueue_for_local_change(
+                        tid,
+                        reason="task_update",
+                        fields=fields.keys(),
+                    )
+                # Auto-dispatch if agent_id was set and agent is idle
+                _new_aid = fields.get("agent_id", "")
+                if _new_aid:
+                    _tsk = state.board_tasks.get(tid)
+                    _cell = state.agents.get(_new_aid)
+                    if (_tsk and _cell
+                            and _tsk.lane == "To Do"
+                            and not state.agent_is_busy(_new_aid)
+                            and _cell.cell_type == "agent"
+                            and state.board_deps_met(_tsk)):
+                        await handle_command({
+                            "cmd": "dispatch_task",
+                            "id": tid, "agent_id": _new_aid})
+                await _maybe_auto_resume_targets(
+                    state,
+                    handle_command,
+                    _panel_event,
+                    targets=_update_resume_targets,
+                    group=_update_task.group if _update_task else "",
                 )
-            # Auto-dispatch if agent_id was set and agent is idle
-            _new_aid = fields.get("agent_id", "")
-            if _new_aid:
-                _tsk = state.board_tasks.get(tid)
-                _cell = state.agents.get(_new_aid)
-                if (_tsk and _cell
-                        and _tsk.lane == "To Do"
-                        and not state.agent_is_busy(_new_aid)
-                        and _cell.cell_type == "agent"
-                        and state.board_deps_met(_tsk)):
-                    await handle_command({
-                        "cmd": "dispatch_task",
-                        "id": tid, "agent_id": _new_aid})
-            await _maybe_auto_resume_targets(
-                state,
-                handle_command,
-                _panel_event,
-                targets=_update_resume_targets,
-                group=_update_task.group if _update_task else "",
-            )
 
     elif cmd == "board_mark_task_covered":
         tid = _resolve_task_id(state, data.get("id", ""))

@@ -662,6 +662,49 @@ class BoardMutationMixin:
         self._db_save_task(root)
         return bool(result.get("eligible")), result
 
+    def _candidate_finalization_done_allowed(
+            self, task: BoardTask, fields: dict, *, caller: str) -> tuple[bool, dict]:
+        """Evaluate an atomic policy/Done update before mutating the root.
+
+        Board updates can carry a lane and the explicit finalization contract in
+        one request.  Evaluating the persisted task first would see its legacy
+        mode and allow a subsequent policy write to leave an ineligible root in
+        Done.  Evaluate a detached candidate in the task index instead, then
+        only apply the request when that exact post-update root is eligible.
+        """
+        candidate = copy.deepcopy(task)
+        valid = set(BoardTask.__dataclass_fields__) - {"id", "slug", "created_at"}
+        for key, value in fields.items():
+            if key in valid:
+                setattr(candidate, key, value)
+
+        # ``evaluate_finalization`` resolves roots through ``board_tasks``.
+        # Temporarily substitute only the detached candidate; it is a pure
+        # evaluation and never emits or persists the candidate state.
+        self.board_tasks[task.id] = candidate
+        try:
+            result = evaluate_finalization(self, candidate)
+        finally:
+            self.board_tasks[task.id] = task
+
+        if result.get("eligible"):
+            return True, result
+
+        # A rejected candidate still records the attempted finalization with
+        # the candidate mode/boundary.  The legacy task itself remains legacy
+        # and is never transiently written with the requested policy.
+        entry = audit_entry(result, caller=caller, outcome="blocked")
+        audit = list(getattr(task, "finalization_audit", []) or [])
+        if not audit or any(
+                audit[-1].get(key) != entry.get(key)
+                for key in ("caller", "outcome", "boundary", "missing_gates")):
+            audit.append(entry)
+            task.finalization_audit = audit[-40:]
+        task.updated_at = datetime.now(timezone.utc).isoformat()
+        self._emit("task_upsert", **asdict(task))
+        self._db_save_task(task)
+        return False, result
+
     def board_update_task(self, tid: str, **fields):
         tid = self.resolve_task_alias(tid)
         task = self.board_tasks.get(tid)
@@ -718,7 +761,23 @@ class BoardMutationMixin:
         lane_changed = "lane" in fields and new_lane != old_lane
         if "lane" in fields and new_lane not in self.board_lanes:
             return
-        if lane_changed and new_lane == "Done" and self._is_finalization_root(task):
+        policy_fields = {
+            "finalization_mode", "required_review_gates", "finalization_boundary",
+        }
+        policy_update = bool(policy_fields & set(fields))
+        candidate_done_check = (
+            self._is_finalization_root(task)
+            and policy_update
+            and new_lane == "Done"
+        )
+        candidate_result = None
+        if candidate_done_check:
+            allowed, candidate_result = self._candidate_finalization_done_allowed(
+                task, fields, caller="board_update_task"
+            )
+            if not allowed:
+                return candidate_result
+        elif lane_changed and new_lane == "Done" and self._is_finalization_root(task):
             allowed, _result = self._finalization_done_allowed(
                 task, caller="board_update_task"
             )
@@ -739,6 +798,18 @@ class BoardMutationMixin:
         for key, value in fields.items():
             if key in valid:
                 setattr(task, key, value)
+        if candidate_result is not None:
+            # The candidate was accepted and is now the actual task.  Record
+            # the successful Done admission after applying it so its audit and
+            # projection persist with the non-legacy contract.
+            entry = audit_entry(candidate_result, caller="board_update_task",
+                                outcome="success")
+            audit = list(getattr(task, "finalization_audit", []) or [])
+            if not audit or any(
+                    audit[-1].get(key) != entry.get(key)
+                    for key in ("caller", "outcome", "boundary", "missing_gates")):
+                audit.append(entry)
+                task.finalization_audit = audit[-40:]
         if "task" in fields:
             task.slug = self._unique_task_slug(task.task, exclude_id=tid)
         # Status projection is derived, compact data rather than advisory prose.
