@@ -401,6 +401,9 @@ class StateLifecycleMixin:
     def remove_group(self, name: str) -> list[AgentCell]:
         removed: list[AgentCell] = []
         if name in self.groups:
+            # The group ceases to be an authorization boundary before its
+            # members/tasks are removed, so no watch outbox may deliver later.
+            self.invalidate_task_watch_group(name)
             for aid in self.groups[name]:
                 cell = self.agents.pop(aid, None)
                 if cell:
@@ -494,6 +497,9 @@ class StateLifecycleMixin:
     def rename_group(self, old: str, new: str):
         if old in self.groups and new and new not in self.groups \
                 and not self.group_prefix_conflict(new, exclude_name=old):
+            # Persisted watch scopes name their group; terminate them before
+            # changing that identity rather than risking a stale-scope send.
+            self.invalidate_task_watch_group(old)
             self.groups[new] = self.groups.pop(old)
             self.group_slugs.pop(old, None)
             self.group_slugs[new] = self._unique_group_slug(new)
@@ -940,6 +946,10 @@ class StateLifecycleMixin:
     def _hard_delete_agent(self, aid: str, *,
                            record_history: bool = True) -> list[AgentCell]:
         removed: list[AgentCell] = []
+        # Include cascaded terminals before removing the requester records.
+        self.invalidate_task_watch_requester(aid)
+        for child_id in list(self._children.get(aid, [])):
+            self.invalidate_task_watch_requester(child_id)
         cell = self.agents.pop(aid, None)
         if not cell:
             return removed
@@ -1003,6 +1013,8 @@ class StateLifecycleMixin:
         tombstoned = self._agent_cascade_cells(aid)
         tombstoned_ids = {c.id for c in tombstoned}
         for target in tombstoned:
+            self.invalidate_task_watch_requester(target.id, now=now)
+        for target in tombstoned:
             self._prepare_tombstoned_cell(target, now)
             self._emit_agent(target)
             self._db_save_agent(target)
@@ -1062,6 +1074,11 @@ class StateLifecycleMixin:
         if not cell or target_group not in self.groups:
             return
         old_group = cell.group
+        if old_group != target_group:
+            # Group movement invalidates the persisted requester/group scope.
+            self.invalidate_task_watch_requester(aid)
+            for child_id in self._children.get(aid, []):
+                self.invalidate_task_watch_requester(child_id)
         # Detach from parent if this is a child terminal being moved
         if cell.parent_id:
             old_parent = cell.parent_id

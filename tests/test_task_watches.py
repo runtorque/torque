@@ -79,7 +79,7 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
         self.other.group = 'g'
         two = self.state.create_task_watch(target=self.other, task_ids=['G:1'])
         response = await self._command('/unwatch all', 'all')
-        self.assertIn('Cancelled all', self.db.load_direct_message(response['message_id'])['message'])
+        self.assertIn('Cancelled 1 active', self.db.load_direct_message(response['message_id'])['message'])
         self.assertEqual(self.db.load_task_watch(one['id'])['status'], 'cancelled')
         self.assertEqual(self.db.load_task_watch(two['id'])['status'], 'active')
 
@@ -117,3 +117,48 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
         self.state.reconcile_task_watches()
         self.assertEqual(self.state.list_task_watches(self.agent), [])
         self.assertEqual(self.state.cancel_task_watch(self.agent, 'all'), 0)
+
+    async def test_soft_delete_cancels_active_watch_before_task_delivery(self):
+        watch = self.state.create_task_watch(target=self.agent, task_ids=['G:1'])
+        self.state.remove_agent(self.agent.id)
+        self.assertEqual(self.db.load_task_watch(watch['id'])['status'], 'cancelled')
+        self.state.board_move_task('G:1', 'Done')
+        self.assertEqual(self.db.list_operator_notices(), [])
+
+    async def test_hard_delete_move_and_rename_invalidate_requester_scope(self):
+        watch = self.state.create_task_watch(target=self.agent, task_ids=['G:1'])
+        self.state.move_agent(self.agent.id, 'other')
+        self.assertEqual(self.db.load_task_watch(watch['id'])['status'], 'cancelled')
+        self.agent.group = 'g'
+        self.state.groups['other'].remove(self.agent.id)
+        self.state.groups['g'].append(self.agent.id)
+        watch = self.state.create_task_watch(target=self.agent, task_ids=['G:1'])
+        self.state.rename_group('g', 'renamed')
+        self.assertEqual(self.db.load_task_watch(watch['id'])['status'], 'cancelled')
+        self.agent.group = 'renamed'
+        watch = self.state.create_task_watch(target=self.agent, task_ids=['G:1'])
+        self.state.purge_agent_now(self.agent.id)
+        self.assertEqual(self.db.load_task_watch(watch['id'])['status'], 'cancelled')
+
+    async def test_lifecycle_invalidation_stops_fired_pending_outbox_delivery(self):
+        self.state.board_move_task('G:1', 'Done')
+        original = self.state.publish_operator_notice
+        self.state.publish_operator_notice = lambda **kwargs: (_ for _ in ()).throw(RuntimeError('fail'))
+        watch = self.state.create_task_watch(target=self.agent, task_ids=['G:1'])
+        self.assertEqual(self.db.load_task_watch(watch['id'])['status'], 'fired')
+        self.state.remove_agent(self.agent.id)
+        self.state.publish_operator_notice = original
+        self.state.reconcile_task_watches()
+        self.assertEqual(self.db.load_task_watch(watch['id'])['status'], 'cancelled')
+        self.assertEqual(self.db.list_operator_notices(), [])
+
+    async def test_unwatch_only_reports_an_atomic_active_cancel_claim(self):
+        watch = self.state.create_task_watch(target=self.agent, task_ids=['G:1'])
+        original = self.db.claim_task_watch_cancelled
+        def fire_before_cancel(watch_id, *, cancelled_at):
+            self.db.claim_task_watch_fired(watch_id, fired_at=cancelled_at)
+            return original(watch_id, cancelled_at=cancelled_at)
+        self.db.claim_task_watch_cancelled = fire_before_cancel
+        response = await self._command('/unwatch ' + watch['id'], 'race')
+        self.assertIn('No matching active', self.db.load_direct_message(response['message_id'])['message'])
+        self.assertEqual(self.db.load_task_watch(watch['id'])['status'], 'fired')

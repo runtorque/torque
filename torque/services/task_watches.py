@@ -31,8 +31,31 @@ class TaskWatchService:
                     getattr(task, "group", "") == watch.get("group_name", ""))
 
     def _cancel(self, watch, *, now=None):
+        if not self._has_watch_api("claim_task_watch_cancelled"):
+            return None
         now = float(now or time.time())
-        return self._db.update_task_watch(watch["id"], {"status": "cancelled", "cancelled_at": now, "outbox_state": "cancelled", "updated_at": now}, only_status="active")
+        return self._db.claim_task_watch_cancelled(
+            watch["id"],
+            cancelled_at=now,
+        )
+
+    def invalidate_requester(self, requester_agent_id: str, *, now=None) -> int:
+        """Atomically stop active/fired watches before requester teardown."""
+        if not self._has_watch_api("terminate_task_watches_for_requester"):
+            return 0
+        return self._db.terminate_task_watches_for_requester(
+            requester_agent_id,
+            cancelled_at=float(now if now is not None else time.time()),
+        )
+
+    def invalidate_group(self, group_name: str, *, now=None) -> int:
+        """Atomically stop watches before a group identity/scope disappears."""
+        if not self._has_watch_api("terminate_task_watches_for_group"):
+            return 0
+        return self._db.terminate_task_watches_for_group(
+            group_name,
+            cancelled_at=float(now if now is not None else time.time()),
+        )
 
     def create(self, *, target, task_ids: list[str], now: float | None = None):
         if not self._has_watch_api(
@@ -65,18 +88,24 @@ class TaskWatchService:
         )
 
     def cancel(self, target, value: str, *, now=None) -> int:
-        if not self._has_watch_api("list_task_watches", "load_task_watch", "update_task_watch"):
+        if not self._has_watch_api(
+                "list_task_watches", "load_task_watch",
+                "claim_task_watch_cancelled"):
             return 0
         now = float(now if now is not None else time.time()); value = str(value or "").strip()
         if value == "all": candidates = self._db.list_task_watches(requester_agent_id=target.id, status="active", limit=WATCH_MAX_ACTIVE)
         else:
             item = self._db.load_task_watch(value)
             candidates = [item] if item and item.get("requester_agent_id") == target.id and item.get("status") == "active" else []
-        for watch in candidates: self._cancel(watch, now=now)
-        return len(candidates)
+        cancelled = 0
+        for watch in candidates:
+            if self._cancel(watch, now=now):
+                cancelled += 1
+        return cancelled
 
     def prune(self, *, now=None):
-        if not self._has_watch_api("list_task_watches", "update_task_watch"):
+        if not self._has_watch_api(
+                "list_task_watches", "claim_task_watch_cancelled"):
             return 0
         now = float(now if now is not None else time.time()); count=0
         for watch in self._db.list_task_watches(status="active", limit=10000):
@@ -97,7 +126,7 @@ class TaskWatchService:
 
     def evaluate_watch(self, watch, *, now=None):
         if (not self._has_watch_api(
-                    "claim_task_watch_fired", "update_task_watch")
+                    "claim_task_watch_fired", "claim_task_watch_cancelled")
                 or not watch or watch.get("status") != "active"):
             return
         now = float(now if now is not None else time.time())
@@ -133,6 +162,11 @@ class TaskWatchService:
                 or not watch or watch.get("status") != "fired"):
             return
         now = float(now if now is not None else time.time())
+        tasks = [self._state.board_tasks.get(task_id)
+                 for task_id in watch.get("task_ids", [])]
+        if not tasks or any(not self._visible(watch, task) for task in tasks):
+            self.invalidate_requester(watch.get("requester_agent_id", ""), now=now)
+            return
         if not self._db.claim_task_watch_outbox(watch["id"], attempted_at=now):
             return
         try:

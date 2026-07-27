@@ -92,3 +92,53 @@ class TaskWatchPersistenceMixin:
         )
         self._conn.commit()
         return int(cursor.rowcount or 0)
+
+    def claim_task_watch_cancelled(
+        self,
+        watch_id: str,
+        *,
+        cancelled_at: float,
+    ) -> dict | None:
+        """Atomically cancel one active watch and report only a real claim."""
+        cursor = self._conn.execute(
+            "UPDATE task_watches SET status='cancelled', cancelled_at=?, "
+            "outbox_state='cancelled', updated_at=? "
+            "WHERE id=? AND status='active'",
+            (cancelled_at, cancelled_at, str(watch_id or '').strip()),
+        )
+        self._conn.commit()
+        if not cursor.rowcount:
+            return None
+        return self.load_task_watch(watch_id)
+
+    def terminate_task_watches_for_requester(
+        self,
+        requester_agent_id: str,
+        *,
+        cancelled_at: float,
+    ) -> int:
+        """Prevent pending delivery after a requester loses its scope."""
+        cursor = self._conn.execute(
+            "UPDATE task_watches SET status='cancelled', cancelled_at=?, "
+            "outbox_state='cancelled', updated_at=? "
+            "WHERE requester_agent_id=? AND status IN ('active', 'fired')",
+            (cancelled_at, cancelled_at, str(requester_agent_id or '').strip()),
+        )
+        self._conn.commit()
+        return int(cursor.rowcount or 0)
+
+    def terminate_task_watches_for_group(
+        self,
+        group_name: str,
+        *,
+        cancelled_at: float,
+    ) -> int:
+        """Terminate watches when a group is removed or renamed."""
+        cursor = self._conn.execute(
+            "UPDATE task_watches SET status='cancelled', cancelled_at=?, "
+            "outbox_state='cancelled', updated_at=? "
+            "WHERE group_name=? AND status IN ('active', 'fired')",
+            (cancelled_at, cancelled_at, str(group_name or '').strip()),
+        )
+        self._conn.commit()
+        return int(cursor.rowcount or 0)

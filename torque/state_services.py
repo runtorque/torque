@@ -57,6 +57,15 @@ class StateServicesMixin:
     def reconcile_task_watches(self, **kwargs) -> None:
         return self._task_watch_service.reconcile(**kwargs)
 
+    def invalidate_task_watch_requester(self, requester_agent_id: str, **kwargs) -> int:
+        return self._task_watch_service.invalidate_requester(
+            requester_agent_id,
+            **kwargs,
+        )
+
+    def invalidate_task_watch_group(self, group_name: str, **kwargs) -> int:
+        return self._task_watch_service.invalidate_group(group_name, **kwargs)
+
     def evaluate_task_watches_for_task(self, task_id: str, **kwargs) -> None:
         return self._task_watch_service.evaluate_for_task(task_id, **kwargs)
 

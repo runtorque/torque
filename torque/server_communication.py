@@ -2225,7 +2225,16 @@ def _handle_task_watch_command(data: dict, state: MatrixState, target, message_t
         if not rest or len(rest.split()) != 1 or (rest != "all" and not re.fullmatch(r"watch-[a-f0-9]{12}", rest)):
             return _watch_local_response(data, state, target, command_id, "Usage: /unwatch <watch-id|all>")
         count = state.cancel_task_watch(target, rest)
-        detail = "Cancelled all active task watches." if rest == "all" else (f"Cancelled task watch `{rest}`." if count else "No matching active task watch.")
+        if rest == "all":
+            detail = (
+                f"Cancelled {count} active task watch(es)."
+                if count else "No active task watches."
+            )
+        else:
+            detail = (
+                f"Cancelled task watch `{rest}`."
+                if count else "No matching active task watch."
+            )
         return _watch_local_response(data, state, target, command_id, detail)
     refs = rest.split()
     if not refs or len(refs) > 20:
