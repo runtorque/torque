@@ -19,6 +19,11 @@ class TaskWatchService:
     @property
     def _db(self): return getattr(self._state, "db", None)
 
+    def _has_watch_api(self, *names: str) -> bool:
+        """Keep board mutation compatibility with minimal test/legacy DBs."""
+        db = self._db
+        return bool(db) and all(callable(getattr(db, name, None)) for name in names)
+
     def _visible(self, watch, task) -> bool:
         requester = self._state.get_active_agent(watch.get("requester_agent_id", ""))
         return bool(requester and getattr(requester, "cell_type", "") == "agent" and
@@ -30,7 +35,10 @@ class TaskWatchService:
         return self._db.update_task_watch(watch["id"], {"status": "cancelled", "cancelled_at": now, "outbox_state": "cancelled", "updated_at": now}, only_status="active")
 
     def create(self, *, target, task_ids: list[str], now: float | None = None):
-        if not self._db: raise ValueError("Task watch store is unavailable")
+        if not self._has_watch_api(
+                "list_task_watches", "save_task_watch", "load_task_watch",
+                "update_task_watch", "claim_task_watch_fired"):
+            raise ValueError("Task watch store is unavailable")
         now = float(now if now is not None else time.time())
         active = self._db.list_task_watches(requester_agent_id=target.id, status="active", limit=WATCH_MAX_ACTIVE + 1)
         if len(active) >= WATCH_MAX_ACTIVE: raise ValueError("At most 100 active watches are allowed for this agent")
@@ -47,10 +55,18 @@ class TaskWatchService:
         return self._db.load_task_watch(watch_id)
 
     def list_active(self, target, *, now=None):
+        if not self._has_watch_api("list_task_watches"):
+            return []
         self.prune(now=now)
-        return self._db.list_task_watches(requester_agent_id=target.id, status="active", limit=WATCH_MAX_ACTIVE)
+        return self._db.list_task_watches(
+            requester_agent_id=target.id,
+            status="active",
+            limit=WATCH_MAX_ACTIVE,
+        )
 
     def cancel(self, target, value: str, *, now=None) -> int:
+        if not self._has_watch_api("list_task_watches", "load_task_watch", "update_task_watch"):
+            return 0
         now = float(now if now is not None else time.time()); value = str(value or "").strip()
         if value == "all": candidates = self._db.list_task_watches(requester_agent_id=target.id, status="active", limit=WATCH_MAX_ACTIVE)
         else:
@@ -60,7 +76,8 @@ class TaskWatchService:
         return len(candidates)
 
     def prune(self, *, now=None):
-        if not self._db: return 0
+        if not self._has_watch_api("list_task_watches", "update_task_watch"):
+            return 0
         now = float(now if now is not None else time.time()); count=0
         for watch in self._db.list_task_watches(status="active", limit=10000):
             requester = self._state.get_active_agent(watch.get("requester_agent_id", ""))
@@ -72,13 +89,17 @@ class TaskWatchService:
         return count
 
     def evaluate_for_task(self, task_id: str, *, now=None):
-        if not self._db: return
+        if not self._has_watch_api("list_task_watches"):
+            return
         now = float(now if now is not None else time.time())
         for watch in self._db.list_task_watches(status="active", limit=10000):
             if task_id in watch.get("task_ids", []): self.evaluate_watch(watch, now=now)
 
     def evaluate_watch(self, watch, *, now=None):
-        if not self._db or not watch or watch.get("status") != "active": return
+        if (not self._has_watch_api(
+                    "claim_task_watch_fired", "update_task_watch")
+                or not watch or watch.get("status") != "active"):
+            return
         now = float(now if now is not None else time.time())
         if watch.get("expires_at", 0) <= now:
             self._cancel(watch, now=now); return
@@ -93,7 +114,9 @@ class TaskWatchService:
             self.deliver_outbox(fired, now=now)
 
     def reconcile(self, *, now=None):
-        if not self._db: return
+        if not self._has_watch_api(
+                "list_task_watches", "reset_sending_task_watch_outboxes"):
+            return
         self.prune(now=now)
         # A daemon crash can leave a claimed outbox mid-delivery.  The notice
         # and thread ids are stable, so returning it to pending is safe.
@@ -104,7 +127,11 @@ class TaskWatchService:
             if watch.get("outbox_state") != "sent": self.deliver_outbox(watch, now=now)
 
     def deliver_outbox(self, watch, *, now=None):
-        if not self._db or not watch or watch.get("status") != "fired": return
+        if (not self._has_watch_api(
+                    "claim_task_watch_outbox", "load_operator_notice_for_dedupe",
+                    "update_task_watch")
+                or not watch or watch.get("status") != "fired"):
+            return
         now = float(now if now is not None else time.time())
         if not self._db.claim_task_watch_outbox(watch["id"], attempted_at=now):
             return

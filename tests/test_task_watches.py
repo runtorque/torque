@@ -108,3 +108,12 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
                               if op.get('op') == 'operator_notice_upsert']), notice_events)
         self.assertEqual(len([row for row in self.db.load_direct_messages_for_thread(watch['thread_id'])
                               if row['id'] == watch['id'] + ':complete']), 1)
+
+    async def test_minimal_db_keeps_event_driven_evaluation_a_safe_noop(self):
+        class MinimalDB:
+            pass
+        self.state.db = MinimalDB()
+        self.state.evaluate_task_watches_for_task('G:1')
+        self.state.reconcile_task_watches()
+        self.assertEqual(self.state.list_task_watches(self.agent), [])
+        self.assertEqual(self.state.cancel_task_watch(self.agent, 'all'), 0)
