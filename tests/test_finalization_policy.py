@@ -217,3 +217,40 @@ class FinalizationReviewReportFlowTests(unittest.IsolatedAsyncioTestCase):
             review.completion_evidence["finalization_review"]["verdict"], "ship")
         # The legacy free-form review evidence is not used as finalization evidence.
         self.assertNotIn("review", review.completion_evidence)
+
+class FinalizationLaneRemovalRegressionTests(unittest.TestCase):
+    def setUp(self):
+        _install_aiohttp_stub()
+        from torque.state import MatrixState
+        self.state = MatrixState()
+        self.state.groups["g"] = []
+        self.state.board_add_lane("Reviewing")
+
+    def _policy_root(self, task_id, lane="Reviewing"):
+        return self.state.board_add_task(
+            "Policy root", "g", id=task_id, lane=lane,
+            finalization_mode="review_only",
+            required_review_gates=[{"id": "audit", "role": "audit", "review_task_id": task_id + ":1"}],
+            finalization_boundary={"artifact_digest": "d", "artifact_version": "v", "source_identity": "e", "immutable": True},
+        )
+
+    def test_remove_lane_to_done_refuses_ineligible_policy_root_atomically(self):
+        root = self._policy_root("TORQUE:930")
+        result = self.state.board_remove_lane("Reviewing", move_tasks_to="Done")
+        self.assertEqual(root.lane, "Reviewing")
+        self.assertIn("Reviewing", self.state.board_lanes)
+        self.assertEqual(result["type"], "finalization_blocked")
+        self.assertEqual(root.finalization_audit[-1]["caller"], "board_remove_lane")
+
+    def test_remove_lane_to_done_keeps_legacy_and_derived_review_compatibility(self):
+        legacy = self.state.board_add_task("Legacy", "g", id="TORQUE:931", lane="Reviewing")
+        root = self._policy_root("TORQUE:932", lane="Backlog")
+        review = self.state.board_add_task(
+            "Derived review", "g", id="TORQUE:932:1", lane="Reviewing",
+            parent_task_id=root.id, pipeline_root_id=root.id,
+        )
+        result = self.state.board_remove_lane("Reviewing", move_tasks_to="Done")
+        self.assertEqual(result["type"], "lane_removed")
+        self.assertEqual(legacy.lane, "Done")
+        self.assertEqual(review.lane, "Done")
+        self.assertNotEqual(root.lane, "Done")

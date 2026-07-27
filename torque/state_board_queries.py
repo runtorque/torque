@@ -156,6 +156,12 @@ class BoardQueryMixin:
                 continue
             if self.task_has_unresolved_descendants(review.id):
                 continue
+            if self._is_finalization_root(review):
+                allowed, _result = self._finalization_done_allowed(
+                    review, caller="cascade_review_handoff_completions"
+                )
+                if not allowed:
+                    continue
             review.status = ""
             self._board_apply_archive_state(
                 review,

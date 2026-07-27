@@ -867,6 +867,12 @@ class BoardMutationMixin:
             return False
         if "Done" not in self.board_lanes:
             return False
+        if self._is_finalization_root(task):
+            allowed, _result = self._finalization_done_allowed(
+                task, caller="expire_engineer_message_task"
+            )
+            if not allowed:
+                return False
 
         now = datetime.now(timezone.utc)
         changed = self._append_engineer_message_expiry_note(
@@ -1191,27 +1197,73 @@ class BoardMutationMixin:
         if (name in _RESERVED_LANES or name not in self.board_lanes
                 or len(self.board_lanes) <= 1):
             return
+        remaining_lanes = [lane for lane in self.board_lanes if lane != name]
+        target = move_tasks_to if move_tasks_to in remaining_lanes \
+            else remaining_lanes[0]
+        moving_tasks = [task for task in self.board_tasks.values()
+                        if task.lane == name]
+        # Preflight the complete batch before removing its source lane.  This
+        # keeps a denied policy root in its truthful lane and avoids a partial
+        # lane-removal mutation with stranded cards.
+        blocked: list[dict] = []
+        policy_roots = [task for task in moving_tasks
+                        if self._is_finalization_root(task)]
+        if target == "Done":
+            for task in policy_roots:
+                result = evaluate_finalization(self, task)
+                if not result.get("eligible"):
+                    # The canonical guard appends the bounded blocked audit and
+                    # refreshes the compact projection without moving anything.
+                    _allowed, audited = self._finalization_done_allowed(
+                        task, caller="board_remove_lane"
+                    )
+                    blocked.append({
+                        "task_id": task.id,
+                        "missing_gates": list(audited.get("missing_gates", [])),
+                    })
+        if blocked:
+            return {
+                "type": "finalization_blocked",
+                "lane": name,
+                "target_lane": target,
+                "blocked": blocked,
+            }
+
+        if target == "Done":
+            # Success audits occur only for the atomic batch that is actually
+            # about to enter Done, never for a lane-removal attempt later
+            # refused because another root was ineligible.
+            for task in policy_roots:
+                allowed, _result = self._finalization_done_allowed(
+                    task, caller="board_remove_lane"
+                )
+                if not allowed:  # defensive re-evaluation before mutation
+                    return {"type": "finalization_blocked", "lane": name,
+                            "target_lane": target, "blocked": [{
+                                "task_id": task.id,
+                                "missing_gates": list(_result.get("missing_gates", [])),
+                            }]}
+
         from datetime import datetime, timezone
         self.board_lanes.remove(name)
-        target = move_tasks_to if move_tasks_to in self.board_lanes \
-            else self.board_lanes[0]
         now_iso = datetime.now(timezone.utc).isoformat()
         max_pos = max(
             (t.position for t in self.board_tasks.values()
              if t.lane == target),
             default=-1,
         )
-        for t in self.board_tasks.values():
-            if t.lane == name:
-                max_pos += 1
-                t.lane = target
-                t.position = max_pos
-                t.updated_at = now_iso
-                t.lane_entered_at = now_iso
-                self._emit("task_upsert", **asdict(t))
-                self._db_save_task(t)
+        for task in moving_tasks:
+            max_pos += 1
+            task.lane = target
+            task.position = max_pos
+            task.updated_at = now_iso
+            task.lane_entered_at = now_iso
+            self._refresh_finalization_root_projection(task)
+            self._emit("task_upsert", **asdict(task))
+            self._db_save_task(task)
         self._emit("lanes_update", lanes=list(self.board_lanes))
         self._db_save_lanes()
+        return {"type": "lane_removed", "lane": name, "target_lane": target}
 
     def board_reorder_lanes(self, lanes: list[str]):
         if set(lanes) != set(self.board_lanes):
