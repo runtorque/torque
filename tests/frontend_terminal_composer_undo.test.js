@@ -73,3 +73,34 @@ test('Cmd/Ctrl Z is composer-scoped and composition does not steal native input'
   event.metaKey = false; event.ctrlKey = true; event.shiftKey = false; assert.equal(h.c.terminalComposeUndoRedoShortcut(event, input), true); assert.equal(input.value, '');
   const composing = Object.assign({}, event, { isComposing: true }); assert.equal(h.c.terminalComposeUndoRedoShortcut(composing, input), false);
 });
+
+test('caret movement starts a fresh transaction without discarding older undo history', () => {
+  const h = harness(), input = h.input('a', '');
+  h.c._terminalComposeHistoryState('a', input);
+  type(h, input, 'one');
+  type(h, input, 'one two');
+  input.selectionStart = input.selectionEnd = 1;
+  type(h, input, 'oXne two');
+  assert.equal(h.c.terminalComposeUndoRedo(input, false), true);
+  assert.equal(input.value, 'one two');
+  assert.equal(h.c.terminalComposeUndoRedo(input, false), true);
+  assert.equal(input.value, '');
+});
+
+test('initial IME composition remains native and commits one undoable transaction', () => {
+  const h = harness(), input = h.input('a', '');
+  h.c._terminalComposeHistoryState('a', input);
+  const event = {
+    currentTarget: input, isComposing: true, inputType: 'insertCompositionText',
+    preventDefault() { this.prevented = true; },
+  };
+  h.c.terminalComposeBeforeInput(event);
+  assert.equal(event.prevented, undefined, 'composition beforeinput stays browser-native');
+  input.value = 'あ';
+  h.c.terminalComposeInput(input, { isComposing: true });
+  assert.equal(h.c.terminalComposeUndoRedo(input, false), false,
+    'intermediate composition state does not create a history entry');
+  h.c.terminalComposeInput(input, { isComposing: false });
+  assert.equal(h.c.terminalComposeUndoRedo(input, false), true);
+  assert.equal(input.value, '');
+});
