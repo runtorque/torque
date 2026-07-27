@@ -208,7 +208,8 @@ does not guess a reply target from historical conversation rows.
 | `task_move` | Move a task between lanes. |
 | `task_dispatch` | Dispatch one task or an ordered batch. |
 | `task_mark_covered` | Record review/root-task coverage. |
-| `task_coverage_reconcile` | Reconcile uncovered proposal roots. |
+| `task_coverage_reconcile` | Recognized strict reconciliation route; unavailable without mutation until TORQUE:1228 activates it. |
+| `proposal_root_backlog_hygiene` | Inventory covered product-proposal roots and optionally finalize eligible roots. |
 | `task_artifact_upload` | Attach an artifact to a visible task. |
 | `task_verify` | Record tests, deploy, restart, and smoke evidence. |
 | `task_progress` | Report current Worker activity. |

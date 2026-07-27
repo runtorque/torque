@@ -66,6 +66,7 @@ _SCOPED_WRITE_SUFFIXES = {
     "task_edit",
     "task_upload_artifact",
     "task_mark_covered",
+    "task_coverage_reconcile",
     "task_verify",
     "task_move",
     "task_dispatch",

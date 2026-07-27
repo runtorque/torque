@@ -352,6 +352,26 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
             "to": engineer_id,
         }), False
 
+    if tool_name == "task_coverage_reconcile":
+        if caller_kind not in {"architect", "engineer"}:
+            return (
+                "Authorization denied: task_coverage_reconcile is not "
+                "available to this caller.",
+                True,
+            )
+        # This intentionally precedes all task resolution and command/state
+        # work. TORQUE:1228 replaces it with the semantic implementation.
+        return json.dumps({
+            "type": "tool_unavailable",
+            "tool": "task_coverage_reconcile",
+            "status": "recognized_but_not_yet_available",
+            "activation_task": "TORQUE:1228",
+            "message": (
+                "This tool exists but is not yet enabled. TORQUE:1228 will "
+                "activate strict task-coverage reconciliation."
+            ),
+        }, separators=(",", ":")), True
+
     if tool_name == "proposal_root_backlog_hygiene" and caller_kind == "architect":
         apply, apply_error = _optional_bool_arg(args, "apply", False)
         if apply_error:

@@ -78,7 +78,11 @@ _SUFFIX_TO_CANONICAL = {
     "task_dispatch": "task_dispatch",
     "batch_dispatch": "task_dispatch",
     "task_mark_covered": "task_mark_covered",
-    "proposal_root_backlog_hygiene": "task_coverage_reconcile",
+    # Product-root hygiene has distinct inventory and optional-finalization
+    # semantics. Keep its established public operation separate from the
+    # provisional strict reconciliation route.
+    "proposal_root_backlog_hygiene": "proposal_root_backlog_hygiene",
+    "task_coverage_reconcile": "task_coverage_reconcile",
     "task_upload_artifact": "task_artifact_upload",
     "task_verify": "task_verify",
     "verify": "task_verify",
@@ -285,6 +289,7 @@ _ARCHITECT_EAGER_BY_CATEGORY = {
     "tasks": {
         "task_list", "task_get", "task_chain", "task_claim", "task_create",
         "task_update", "task_reassign", "task_move", "task_mark_covered",
+        "task_coverage_reconcile",
         "task_verify",
     },
     # Recovery and durable operating context.
@@ -340,7 +345,8 @@ _ENGINEER_EAGER_BY_CATEGORY = {
     },
     # Common task coverage/routing and owned-agent lifecycle operations.
     "task_agent": {
-        "task_mark_covered", "task_reassign", "agent_launch_settings",
+        "task_mark_covered", "task_coverage_reconcile", "task_reassign",
+        "agent_launch_settings",
         "agent_close", "agent_relaunch",
     },
 }
@@ -991,6 +997,12 @@ def select_legacy_tool(
         suffix = "help_list" if not str(args.get("query", "") or "").strip() else "help_search"
     elif canonical_name == "task_dispatch":
         suffix = "batch_dispatch" if "entries" in args or "tasks" in args else "task_dispatch"
+    elif canonical_name == "task_coverage_reconcile":
+        # Do not let the historical hygiene inventory handler capture the
+        # strict public operation merely because both touch task coverage.
+        suffix = "task_coverage_reconcile"
+    elif canonical_name == "proposal_root_backlog_hygiene":
+        suffix = "proposal_root_backlog_hygiene"
     elif canonical_name == "area_link" and target_kind:
         suffix = f"area_{'unlink' if operation == 'remove' else 'link'}_{target_kind}"
     elif canonical_name == "initiative_link" and target_kind:

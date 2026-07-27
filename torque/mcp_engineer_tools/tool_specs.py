@@ -718,6 +718,26 @@ ENGINEER_TOOLS = [
         },
     },
     {
+        "name": "engineer_task_coverage_reconcile", "authority": {"requirements": [{"capability": "task.mark_covered", "minimum_scope": "self", "target_argument": "task_ids", "target_kind": "task", "handler_scoped": True}]},
+        "description": (
+            "Recognized strict task-coverage reconciliation operation. It is "
+            "not yet enabled: TORQUE:1228 will activate the bounded "
+            "reconciliation implementation. This provisional route performs "
+            "no board or state mutation."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task_ids": {"type": "array", "minItems": 1, "maxItems": 25,
+                             "items": {"type": "string"},
+                             "description": "Explicit bounded task IDs or aliases."},
+                "apply": {"type": "boolean", "description": "Reserved for TORQUE:1228; currently unavailable."},
+                "dry_run_token": {"type": "string", "description": "Reserved for TORQUE:1228; currently unavailable."},
+            },
+            "required": ["task_ids"],
+        },
+    },
+    {
         "name": "engineer_task_verify", "authority": {"requirements": [{"capability": "task.verify","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
         "description": (
             "Record a task verification checkpoint for deploy/restart "
