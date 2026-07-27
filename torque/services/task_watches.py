@@ -88,19 +88,26 @@ class TaskWatchService:
                 or any(getattr(task, "lane", "") == "Archived" and not task_counts_as_done(task) for task in tasks)):
             self._cancel(watch, now=now); return
         if not all(task_counts_as_done(task) for task in tasks): return
-        fired = self._db.update_task_watch(watch["id"], {"status": "fired", "fired_at": now, "outbox_state": "pending", "updated_at": now}, only_status="active")
-        if fired and fired.get("status") == "fired": self.deliver_outbox(fired, now=now)
+        fired = self._db.claim_task_watch_fired(watch["id"], fired_at=now)
+        if fired:
+            self.deliver_outbox(fired, now=now)
 
     def reconcile(self, *, now=None):
         if not self._db: return
         self.prune(now=now)
-        for watch in self._db.list_task_watches(status="active", limit=10000): self.evaluate_watch(watch, now=now)
+        # A daemon crash can leave a claimed outbox mid-delivery.  The notice
+        # and thread ids are stable, so returning it to pending is safe.
+        self._db.reset_sending_task_watch_outboxes()
+        for watch in self._db.list_task_watches(status="active", limit=10000):
+            self.evaluate_watch(watch, now=now)
         for watch in self._db.list_task_watches(status="fired", limit=10000):
             if watch.get("outbox_state") != "sent": self.deliver_outbox(watch, now=now)
 
     def deliver_outbox(self, watch, *, now=None):
         if not self._db or not watch or watch.get("status") != "fired": return
         now = float(now if now is not None else time.time())
+        if not self._db.claim_task_watch_outbox(watch["id"], attempted_at=now):
+            return
         try:
             task_ids = list(watch.get("task_ids") or [])
             title = "Watched tasks completed"

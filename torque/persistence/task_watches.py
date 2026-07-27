@@ -62,3 +62,33 @@ class TaskWatchPersistenceMixin:
             sql += " AND status=?"; params.append(only_status)
         self._conn.execute(sql, tuple(params)); self._conn.commit()
         return self.load_task_watch(watch_id)
+
+    def claim_task_watch_fired(self, watch_id: str, *, fired_at: float) -> dict | None:
+        """Atomically transition one active watch to its terminal fired state."""
+        cursor = self._conn.execute(
+            "UPDATE task_watches SET status='fired', fired_at=?, outbox_state='pending', updated_at=? "
+            "WHERE id=? AND status='active'",
+            (fired_at, fired_at, str(watch_id or '').strip()),
+        )
+        self._conn.commit()
+        if not cursor.rowcount:
+            return None
+        return self.load_task_watch(watch_id)
+
+    def claim_task_watch_outbox(self, watch_id: str, *, attempted_at: float) -> bool:
+        """Claim a pending outbox row so concurrent event paths cannot deliver twice."""
+        cursor = self._conn.execute(
+            "UPDATE task_watches SET outbox_state='sending', outbox_attempted_at=?, updated_at=? "
+            "WHERE id=? AND status='fired' AND outbox_state='pending'",
+            (attempted_at, attempted_at, str(watch_id or '').strip()),
+        )
+        self._conn.commit()
+        return bool(cursor.rowcount)
+
+    def reset_sending_task_watch_outboxes(self) -> int:
+        cursor = self._conn.execute(
+            "UPDATE task_watches SET outbox_state='pending', updated_at=? "
+            "WHERE status='fired' AND outbox_state='sending'", (time.time(),)
+        )
+        self._conn.commit()
+        return int(cursor.rowcount or 0)

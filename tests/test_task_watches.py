@@ -55,3 +55,30 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
         self.state.reconcile_task_watches(now=31*24*60*60+2); self.assertEqual(self.db.load_task_watch(watch['id'])['status'],'cancelled')
         watch=self.state.create_task_watch(target=self.agent,task_ids=['G:2'])
         self.state.board_remove_task('G:2'); self.assertEqual(self.db.load_task_watch(watch['id'])['status'],'cancelled')
+
+    async def test_outbox_failure_reconciles_once_without_rolling_back_fired(self):
+        self.state.board_move_task('G:1', 'Done')
+        original = self.state.publish_operator_notice
+        calls = []
+        def fail_once(**kwargs):
+            calls.append(kwargs)
+            raise RuntimeError('notice unavailable')
+        self.state.publish_operator_notice = fail_once
+        watch = self.state.create_task_watch(target=self.agent, task_ids=['G:1'])
+        self.assertEqual(watch['status'], 'fired')
+        self.assertEqual(self.db.load_task_watch(watch['id'])['outbox_state'], 'pending')
+        self.state.publish_operator_notice = original
+        self.state.reconcile_task_watches()
+        self.assertEqual(self.db.load_task_watch(watch['id'])['outbox_state'], 'sent')
+        self.assertEqual(len(self.db.list_operator_notices()), 1)
+        self.state.reconcile_task_watches()
+        self.assertEqual(len(self.db.list_operator_notices()), 1)
+
+    async def test_unwatch_all_and_requester_isolation(self):
+        one = self.state.create_task_watch(target=self.agent, task_ids=['G:1'])
+        self.other.group = 'g'
+        two = self.state.create_task_watch(target=self.other, task_ids=['G:1'])
+        response = await self._command('/unwatch all', 'all')
+        self.assertIn('Cancelled all', self.db.load_direct_message(response['message_id'])['message'])
+        self.assertEqual(self.db.load_task_watch(one['id'])['status'], 'cancelled')
+        self.assertEqual(self.db.load_task_watch(two['id'])['status'], 'active')
