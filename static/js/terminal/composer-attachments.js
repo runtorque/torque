@@ -336,6 +336,9 @@ function _terminalComposeInsertAttachments(input, entries) {
     start
   );
   var cursor = start;
+  // Commit the semantic model before canonicalizing innerHTML. This also keeps
+  // DOM shims that do not parse assigned markup from looking like a chip delete.
+  terminalComposeInput(input);
   _terminalComposeRenderRichInput(input, { preserveSelection: false });
   if (_terminalComposeIsRichInput(input)) {
     _terminalComposeSetRichSelection(input, cursor, cursor, 'none', { afterAttachments: true });
@@ -345,7 +348,6 @@ function _terminalComposeInsertAttachments(input, entries) {
     input.selectionStart = cursor;
     input.selectionEnd = cursor;
   }
-  terminalComposeInput(input);
   if (typeof input.focus === 'function') input.focus();
 }
 
@@ -368,6 +370,7 @@ function _terminalComposeRemoveAttachment(cellId, token) {
   if (_terminalComposeSelectedAttachmentByCell[id] === needle) {
     delete _terminalComposeSelectedAttachmentByCell[id];
   }
+  if (input) _terminalComposeHistoryCommit(input, 'attachment');
   _terminalComposeRefreshAttachmentChips(id);
   if (input) {
     _terminalComposeRenderRichInput(input, { preserveSelection: false });
@@ -377,7 +380,6 @@ function _terminalComposeRemoveAttachment(cellId, token) {
     _terminalComposeSetButtonState(input);
     if (typeof input.focus === 'function') input.focus();
   }
-  if (input) _terminalComposeHistoryCommit(input, 'attachment');
   return removed;
 }
 

@@ -417,7 +417,22 @@ function _terminalComposeHistoryPrune(cellId) {
   while (h.past.length > TERMINAL_COMPOSE_HISTORY_MAX_ENTRIES || bytes > TERMINAL_COMPOSE_HISTORY_MAX_BYTES) { var old = h.past.shift(); if (!old) break; removed.push.apply(removed, old.entries || []); bytes -= _terminalComposeHistorySize(old); }
   _terminalComposeHistoryRelease(cellId, removed);
 }
-function _terminalComposeHistoryPrepare(input, kind) { if (!input || !_terminalComposeIsRichInput(input)) return; var h = _terminalComposeHistoryState(input.dataset && input.dataset.cellId, input); if (h) h.pending = String(kind || 'edit'); }
+function _terminalComposeHistoryPrepare(input, kind) {
+  if (!input || !_terminalComposeIsRichInput(input)) return;
+  var id = String(input.dataset && input.dataset.cellId || '');
+  var h = _terminalComposeHistoryState(id, input);
+  // A target may be reconstructed while inactive (or tests/tooling may replace
+  // its attachment model). Treat that as a new baseline, never replay another
+  // composer's/stale DOM history into it.
+  var current = _terminalComposeHistorySnapshot(input, id);
+  if (h && !_terminalComposeHistoryEqual(h.present, current)) {
+    var discarded = []; (h.past || []).forEach(function(snapshot) { discarded.push.apply(discarded, snapshot.entries || []); });
+    (h.future || []).forEach(function(snapshot) { discarded.push.apply(discarded, snapshot.entries || []); });
+    h.past = []; h.future = []; h.present = current; h.lastKind = '';
+    _terminalComposeHistoryRelease(id, discarded);
+  }
+  if (h) h.pending = String(kind || 'edit');
+}
 function _terminalComposeHistoryCommit(input, kind) {
   if (!input || !_terminalComposeIsRichInput(input)) return; var id = String(input.dataset && input.dataset.cellId || ''), h = _terminalComposeHistoryState(id, input); if (!h) return;
   var next = _terminalComposeHistorySnapshot(input, id), action = String(kind || h.pending || 'edit'); h.pending = ''; if (_terminalComposeHistoryEqual(h.present, next)) return;
