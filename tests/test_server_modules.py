@@ -5238,7 +5238,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             recipient.mcp_messages[0]['delivery_reason'],
             'replay_failed',
         )
-        self.assertEqual(recipient.status, 'idle')
+        self.assertEqual(recipient.status, 'stopped')
 
     async def test_session_start_hook_replays_buffered_architect_peer_message(self):
         state = self._make_state()
