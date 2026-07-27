@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from .agent_classes import is_frozen_product_manager_class
 from .mcp_authority import SCOPE_RANK
 from .mcp_canonical import (
     canonical_tool_name,
@@ -247,14 +248,7 @@ def _task_target_scope(state, caller_cell, task) -> str:
     if not caller_cell or not task:
         return "global"
     caller_id = str(getattr(caller_cell, "id", "") or "").strip()
-    metadata = (
-        getattr(caller_cell, "effective_agent_class_snapshot", {}) or {}
-    ).get("metadata", {}) or {}
-    creator_proposal_mode = (
-        str(getattr(caller_cell, "kind", "") or "").strip() == "architect"
-        and str(metadata.get("task_authority_mode", "") or "").strip()
-        == "creator-proposal-only"
-    )
+    creator_proposal_mode = is_frozen_product_manager_class(caller_cell)
     # Creator-proposal authority is narrower than the normal Architect task
     # relationship: assignment is not ownership.  Do not let assignment or a
     # worker/Engineer relationship turn a peer-created task into ``self``.
@@ -489,13 +483,7 @@ def _handler_scoped_target_scope(
     caller_id = str(getattr(caller_cell, "id", "") or "").strip()
     if not caller_id:
         return scope
-    metadata = (
-        getattr(caller_cell, "effective_agent_class_snapshot", {}) or {}
-    ).get("metadata", {}) or {}
-    creator_proposal_mode = (
-        str(metadata.get("task_authority_mode", "") or "").strip()
-        == "creator-proposal-only"
-    )
+    creator_proposal_mode = is_frozen_product_manager_class(caller_cell)
     if (
             creator_proposal_mode
             and tool_name != "architect_task_pickup"
@@ -511,8 +499,7 @@ def _handler_scoped_target_scope(
     if (
             tool_name == "architect_task_reassign"
             and requirement.target_kind == "agent"
-            and str(metadata.get("task_authority_mode", "") or "").strip()
-            == "creator-proposal-only"
+            and creator_proposal_mode
             and str(getattr(target, "group", "") or "").strip()
             == str(getattr(caller_cell, "group", "") or "").strip()
     ):

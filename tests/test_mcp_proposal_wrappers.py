@@ -1,3 +1,4 @@
+import copy
 import importlib
 import json
 import tempfile
@@ -302,6 +303,103 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(-32003, denied.payload["error"]["code"])
         self.assertIn("creator/self", denied.payload["error"]["message"])
         self.assertEqual("Peer-owned record", peer_task.task)
+
+        # Assignment to the PM must not make a peer-created proposal self-owned.
+        # Each canonical task mutation must be refused at the transport boundary
+        # before a handler can mutate or disclose the assigned peer proposal.
+        assigned_peer_task = self.state.board_add_task(
+            "Peer-owned assigned proposal",
+            "g",
+            labels=["product-proposal", "proposal-only"],
+            created_by_architect_id=self.peer.id,
+            assigned_architect_id=self.architect.id,
+        )
+        baseline = {
+            "title": assigned_peer_task.task,
+            "lane": assigned_peer_task.lane,
+            "labels": list(assigned_peer_task.labels),
+            "assigned_engineer_id": assigned_peer_task.assigned_engineer_id,
+            "verification_state": assigned_peer_task.verification_state,
+            "messages": list(assigned_peer_task.messages),
+            "completion_evidence": copy.deepcopy(
+                assigned_peer_task.completion_evidence
+            ),
+        }
+        mutations = {
+            "task_reassign": {
+                "task": assigned_peer_task.id,
+                "new_engineer_id": self.engineer.id,
+            },
+            "task_dispatch": {"task": assigned_peer_task.id, "name": "nope"},
+            "task_move": {"task": assigned_peer_task.id, "new_lane": "Done"},
+            "task_verify": {"task": assigned_peer_task.id, "state": "passed"},
+            "task_artifact_upload": {
+                "task": assigned_peer_task.id,
+                "filename": "nope.txt",
+                "content_text": "nope",
+            },
+            "task_mark_covered": {
+                "task": assigned_peer_task.id,
+                "notes": "nope",
+            },
+        }
+        calls_before = len(self.calls)
+        for req_id, (tool_name, arguments) in enumerate(mutations.items(), start=8):
+            response = await self._call(tool_name, arguments, req_id=req_id)
+            self.assertIn("error", response.payload, tool_name)
+            self.assertEqual(-32003, response.payload["error"]["code"], tool_name)
+            self.assertIn(
+                "creator/self", response.payload["error"]["message"], tool_name
+            )
+        self.assertEqual(calls_before, len(self.calls))
+        self.assertEqual(baseline["title"], assigned_peer_task.task)
+        self.assertEqual(baseline["lane"], assigned_peer_task.lane)
+        self.assertEqual(baseline["labels"], assigned_peer_task.labels)
+        self.assertEqual(
+            baseline["assigned_engineer_id"],
+            assigned_peer_task.assigned_engineer_id,
+        )
+        self.assertEqual(
+            baseline["verification_state"], assigned_peer_task.verification_state
+        )
+        self.assertEqual(baseline["messages"], assigned_peer_task.messages)
+        self.assertEqual(
+            baseline["completion_evidence"], assigned_peer_task.completion_evidence
+        )
+
+    async def test_custom_metadata_cannot_activate_product_manager_exceptions(self):
+        # Custom classes may author metadata.  A custom Architect that copies
+        # the PM marker must not receive the PM-only same-group reassignment
+        # route or current-task reporter/derive projection.
+        custom_snapshot = copy.deepcopy(self.architect.effective_agent_class_snapshot)
+        custom_snapshot["id"] = "custom-productish"
+        custom_snapshot["builtin"] = False
+        custom_snapshot["metadata"]["task_authority_mode"] = "creator-proposal-only"
+        self.architect.effective_agent_class_id = "custom-productish"
+        self.architect.effective_agent_class_snapshot = custom_snapshot
+
+        tool_names = await self._list_tools()
+        self.assertNotIn("task_progress", tool_names)
+        self.assertNotIn("task_derive", tool_names)
+
+        peer_engineer = self._add_agent(
+            "engineer-peer",
+            "Peer Engineer",
+            kind="engineer",
+            hired_by_architect_id=self.peer.id,
+        )
+        own_task = self.state.board_add_task(
+            "Custom-class task", "g", created_by_architect_id=self.architect.id
+        )
+        denied = await self._call(
+            "task_reassign",
+            {"task": own_task.id, "new_engineer_id": peer_engineer.id},
+            req_id=2,
+        )
+        self.assertIn("error", denied.payload)
+        self.assertEqual(-32602, denied.payload["error"]["code"])
+        self.assertIn("Known tool is not authorized", denied.payload["error"]["message"])
+        self.assertEqual("", own_task.assigned_engineer_id)
 
     async def test_routed_product_proposal_task_can_be_picked_up_by_same_group_architect(self):
         # Exercise the public JSON-RPC route under a frozen default Architect

@@ -34,6 +34,36 @@ from .mcp_authority import (
 )
 
 BUILTIN_CLASS_DIR = Path(__file__).resolve().parent / "builtin_agent_classes"
+PRODUCT_MANAGER_CLASS_ID = "product-manager"
+
+
+def is_frozen_product_manager_class(cell: Any) -> bool:
+    """Whether *cell* carries the trusted frozen Product Manager identity.
+
+    Metadata is authorable by custom classes, so it cannot independently
+    activate Product Manager-only transport exceptions or tool projection.
+    The built-in class identity and its frozen snapshot must agree.
+    """
+
+    if str(getattr(cell, "kind", "") or "").strip() != "architect":
+        return False
+    if (
+        str(getattr(cell, "effective_agent_class_id", "") or "").strip()
+        != PRODUCT_MANAGER_CLASS_ID
+    ):
+        return False
+    snapshot = getattr(cell, "effective_agent_class_snapshot", {}) or {}
+    if not isinstance(snapshot, dict):
+        return False
+    return (
+        str(snapshot.get("id", "") or "").strip() == PRODUCT_MANAGER_CLASS_ID
+        and bool(snapshot.get("builtin", False))
+        and str(
+            (snapshot.get("metadata", {}) or {}).get(
+                "task_authority_mode", ""
+            ) or ""
+        ).strip() == "creator-proposal-only"
+    )
 
 
 @dataclass(frozen=True)
