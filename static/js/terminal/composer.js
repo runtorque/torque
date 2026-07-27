@@ -464,6 +464,16 @@ function _terminalComposeHistoryReset(cellId, input) {
   if (input && _terminalComposeIsRichInput(input)) _terminalComposeHistoryState(id, input);
 }
 function terminalComposeUndoRedoShortcut(evt, target) { if (!evt || evt.isComposing || evt.altKey || (!evt.metaKey && !evt.ctrlKey) || (evt.metaKey && evt.ctrlKey) || String(evt.key || '').toLowerCase() !== 'z') return false; var input = target || evt.target; if (!_terminalComposeIsRichInput(input) || !(input.classList && input.classList.contains('terminal-compose-input'))) return false; if (evt.preventDefault) evt.preventDefault(); if (evt.stopPropagation) evt.stopPropagation(); terminalComposeUndoRedo(input, !!evt.shiftKey); return true; }
+function _terminalComposeBindRichInput(input) {
+  if (!_terminalComposeIsRichInput(input)
+      || typeof input.addEventListener !== 'function'
+      || input._terminalComposeCompositionEndBound) return;
+  input.addEventListener('compositionend', function(evt) {
+    terminalComposeCompositionEnd(input, evt);
+  });
+  input._terminalComposeCompositionEndBound = true;
+}
+
 function terminalComposeCompositionEnd(input, evt) {
   if (!_terminalComposeIsRichInput(input)) return;
   var h = _terminalComposeHistoryState(input.dataset && input.dataset.cellId, input);
@@ -1694,6 +1704,7 @@ function _renderTerminalCompose(root, cell) {
       && existingDirectAgentId === directAgentId) {
     const input = _terminalComposeTextarea(root);
     if (input) {
+      _terminalComposeBindRichInput(input);
       if (input.placeholder !== placeholder) input.placeholder = placeholder;
       if (_terminalComposeIsRichInput(input)
           && typeof input.setAttribute === 'function'
@@ -1739,7 +1750,6 @@ function _renderTerminalCompose(root, cell) {
     + ' aria-label="' + esc(placeholder) + '"'
     + ' onbeforeinput="terminalComposeBeforeInput(event)"'
     + ' oninput="terminalComposeInput(this, event)"'
-    + ' oncompositionend="terminalComposeCompositionEnd(this, event)"'
     + ' onkeydown="terminalComposeKeydown(event, \'' + esc(cellId) + '\')"'
     + ' onpaste="return terminalComposePaste(event, \'' + esc(cellId) + '\')"'
     + ' ondragenter="terminalComposeDragenter(event, \'' + esc(cellId) + '\')"'
@@ -1769,6 +1779,7 @@ function _renderTerminalCompose(root, cell) {
     + '</form>';
   const input = _terminalComposeTextarea(root);
   if (input) {
+    _terminalComposeBindRichInput(input);
     _terminalComposeSetInputText(input, draft);
     _terminalComposeAutoResize(input);
     _terminalComposeSetButtonState(input);

@@ -14,7 +14,8 @@ function harness() {
   const c = vm.createContext(sandbox);
   load(c, 'static/js/terminal.js'); load(c, 'static/js/terminal/direct-messages.js'); load(c, 'static/js/terminal/composer.js'); load(c, 'static/js/terminal/composer-attachments.js');
   function input(id, value = '') {
-    const el = { value, innerHTML: '', childNodes: null, dataset: { cellId: id }, selectionStart: value.length, selectionEnd: value.length, selectionDirection: 'none', style: { removeProperty() {}, setProperty() {} }, classList: { contains(name) { return name === 'terminal-compose-input'; }, toggle() {} }, getAttribute(name) { return name === 'contenteditable' ? 'true' : ''; }, focus() {}, contains() { return false; }, closest() { return null; } };
+    const listeners = Object.create(null);
+    const el = { value, innerHTML: '', childNodes: null, dataset: { cellId: id }, selectionStart: value.length, selectionEnd: value.length, selectionDirection: 'none', style: { removeProperty() {}, setProperty() {} }, classList: { contains(name) { return name === 'terminal-compose-input'; }, toggle() {} }, getAttribute(name) { return name === 'contenteditable' ? 'true' : ''; }, focus() {}, contains() { return false; }, closest() { return null; }, addEventListener(type, listener) { (listeners[type] || (listeners[type] = [])).push(listener); }, dispatch(type, event) { (listeners[type] || []).forEach((listener) => listener(event || {})); } };
     ids.set(c._terminalComposeInputId(id), el); document.activeElement = el; return el;
   }
   return { c, input, revoked, get(expr) { return vm.runInContext(expr, c); } };
@@ -118,7 +119,9 @@ test('compositionend commits Chrome composition-only lifecycle as one undoable t
   h.c.terminalComposeBeforeInput(start);
   input.value = 'あ';
   h.c.terminalComposeInput(input, { isComposing: true });
-  h.c.terminalComposeCompositionEnd(input, {});
+  h.c._terminalComposeBindRichInput(input);
+  h.c._terminalComposeBindRichInput(input);
+  input.dispatch('compositionend', {});
   assert.equal(start.prevented, undefined, 'composition start remains native');
   assert.equal(h.c.terminalComposeUndoRedo(input, false), true);
   assert.equal(input.value, '');
