@@ -96,6 +96,42 @@ USER_DM_COMMANDS: tuple[UserDMCommand, ...] = (
         search="loop cancel stop recurring schedule /loop cancel",
     ),
     UserDMCommand(
+        id="remind",
+        label="/remind in <delay> <message>",
+        usage="/remind in 10m check the deploy",
+        insert="/remind in 10m ",
+        help="Create a one-shot reminder. Use 1m–30d with m/h/d units.",
+        aliases=("/remind",),
+        grammar="/remind in <integer m/h/d delay> <message>, or /remind cancel <id|all>",
+        execution_mode="local_reminder",
+        safety="requester_scoped_no_prompt",
+        search="remind in delay message one shot reminder /remind",
+    ),
+    UserDMCommand(
+        id="reminders",
+        label="/reminders",
+        usage="/reminders",
+        insert="/reminders",
+        help="List your active one-shot reminders for this direct-message thread.",
+        aliases=("/reminders",),
+        grammar="exact",
+        execution_mode="local_reminder",
+        safety="requester_scoped_no_prompt",
+        search="reminders active list one shot /reminders",
+    ),
+    UserDMCommand(
+        id="remind-cancel",
+        label="/remind cancel <reminder-id|all>",
+        usage="/remind cancel rem-abc123 or /remind cancel all",
+        insert="/remind cancel ",
+        help="Cancel one active one-shot reminder or all of your active reminders.",
+        aliases=("/remind cancel",),
+        grammar="/remind cancel <reminder-id|all>",
+        execution_mode="local_reminder",
+        safety="requester_scoped_no_prompt",
+        search="remind cancel reminder id all stop one shot /remind cancel",
+    ),
+    UserDMCommand(
         id="watch",
         label="/watch <task-id> [<task-id> ...]",
         usage="/watch TORQUE:123 TORQUE:124",
@@ -216,7 +252,7 @@ def parse_user_dm_command(message: str) -> UserDMCommand | None:
     # Watch verbs intentionally claim their own malformed/case-variant forms
     # so those never become provider prompts.  Unrelated slash prose such as
     # /watchdog remains an ordinary direct message.
-    for verb in ("watch", "watches", "unwatch"):
+    for verb in ("watch", "watches", "unwatch", "remind", "reminders"):
         lower = text.lower()
         token = "/" + verb
         if lower == token or (lower.startswith(token) and len(lower) > len(token) and lower[len(token)].isspace()):

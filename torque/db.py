@@ -169,6 +169,7 @@ from torque.persistence.reliability import (
 )
 from torque.persistence.operator_notices import OperatorNoticePersistenceMixin
 from torque.persistence.task_watches import TaskWatchPersistenceMixin
+from torque.persistence.reminders import ReminderPersistenceMixin
 from torque.persistence.initiatives import (
     INITIATIVE_COLUMNS,
     INITIATIVE_LINK_COLUMNS,
@@ -578,6 +579,7 @@ class TorqueDB(
         ReliabilityPersistenceMixin,
         OperatorNoticePersistenceMixin,
         TaskWatchPersistenceMixin,
+        ReminderPersistenceMixin,
         PlaybookPersistenceMixin,
         AgentHistoryPersistenceMixin,
         BehaviorOverlayPersistenceMixin,

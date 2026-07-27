@@ -28,6 +28,9 @@ GUIDANCE_HINT_USER_DIRECT_REPLY = "user_message.reply_hint"
 USER_AGENT_LOOP_MIN_INTERVAL_SECONDS = 60
 USER_AGENT_LOOP_MAX_INTERVAL_SECONDS = 24 * 60 * 60
 USER_AGENT_LOOP_MAX_MESSAGE_CHARS = 4000
+USER_REMINDER_MIN_DELAY_SECONDS = 60
+USER_REMINDER_MAX_DELAY_SECONDS = 30 * 24 * 60 * 60
+USER_REMINDER_MAX_MESSAGE_CHARS = USER_AGENT_LOOP_MAX_MESSAGE_CHARS
 
 
 def _append_mcp_message(cell, action: str, message: str = ""):
@@ -2266,3 +2269,112 @@ def _handle_task_watch_command(data: dict, state: MatrixState, target, message_t
         data, state, target, command_id,
         f"Watching {len(canonical)} task(s) until all are Done: `{watch['id']}`.",
     )
+
+
+def _parse_reminder_delay(token: str) -> tuple[int, str]:
+    """Parse the intentionally tiny one-shot reminder delay vocabulary."""
+    match = re.fullmatch(r"(\d+)([mhd])", str(token or ""))
+    if not match:
+        return 0, "Reminder delay must look like 10m, 2h, or 1d."
+    seconds = int(match.group(1)) * {"m": 60, "h": 3600, "d": 86400}[match.group(2)]
+    if seconds < USER_REMINDER_MIN_DELAY_SECONDS:
+        return 0, "Reminder delay must be at least 1m."
+    if seconds > USER_REMINDER_MAX_DELAY_SECONDS:
+        return 0, "Reminder delay must be 30d or less."
+    return seconds, ""
+
+
+def _reminder_local_response(data: dict, state: MatrixState, target, command_id: str, content: str) -> dict:
+    idempotency_key = _user_agent_message_idempotency_key(data)
+    message_id = _user_direct_message_id_from_idempotency_key(idempotency_key) or "msg-" + uuid.uuid4().hex[:12]
+    command_text = str(data.get("_reminder_command", "") or "")
+    existing = state.db.load_direct_message(message_id) if idempotency_key else None
+    if existing:
+        snapshot = existing.get("context_snapshot", {}) or {}
+        if (str(existing.get("recipient_id", "") or "") != target.id
+                or snapshot.get("slash_command") != command_id
+                or snapshot.get("reminder_command", "") != command_text):
+            return {"type": "error", "message": "idempotency key was reused for a different user_agent_message"}
+        append = getattr(state, "append_direct_message_to_caches", None)
+        if callable(append): append(existing)
+        return {"type": "ok", "message_id": message_id, "thread_id": existing.get("thread_id", ""), "agent_id": target.id, "delivered": True, "buffered": False, "deduped": True}
+    saved = _save_user_agent_system_audit_message(
+        state, target, content, message_id=message_id, idempotency_key=idempotency_key,
+        context_snapshot={"slash_command": command_id, "command_response": command_id, "reminder_command": command_text},
+    )
+    if not saved: return {"type": "error", "message": "Failed to save command response"}
+    return {"type": "ok", "message_id": saved["id"], "thread_id": saved["thread_id"], "agent_id": target.id, "delivered": True, "buffered": False, "deduped": False}
+
+
+def _handle_reminder_command(data: dict, state: MatrixState, target, message_text: str, command_id: str) -> dict:
+    """Execute local-only reminder grammar without ever queuing a provider prompt."""
+    raw = str(message_text or "").strip()
+    data = dict(data or {})
+    data["_reminder_command"] = raw
+    key = _user_agent_message_idempotency_key(data)
+    mid = _user_direct_message_id_from_idempotency_key(key)
+    if mid and state.db.load_direct_message(mid):
+        # Command-result persistence is the terminal idempotent outcome for
+        # list/cancel and for a successfully-audited create.  A create whose
+        # audit crashed has no row and therefore resumes through its durable
+        # request key below.
+        return _reminder_local_response(data, state, target, command_id, "")
+    expected = "/" + command_id
+    if command_id == "reminders":
+        if raw != "/reminders":
+            return _reminder_local_response(data, state, target, command_id, "Usage: /reminders")
+        reminders = state.list_reminders(target)
+        lines = ["**Active reminders**"]
+        now = time.time()
+        for reminder in reminders[:100]:
+            text = _user_dm_display_text(reminder.get("message", ""), limit=120)
+            due = datetime.fromtimestamp(reminder["due_at"], timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            remaining = max(0, int(reminder["due_at"] - now))
+            if remaining >= 86400: relative = f"in {remaining // 86400}d"
+            elif remaining >= 3600: relative = f"in {remaining // 3600}h"
+            else: relative = f"in {max(1, (remaining + 59) // 60)}m"
+            visible = state.get_active_agent(reminder.get("target_agent_id", ""))
+            origin = _user_dm_display_text(getattr(visible, "name", ""), limit=72) if visible else "original conversation unavailable"
+            lines.append(f"- `{reminder['id']}` · {due} ({relative}) · {origin} · pending · {text}")
+        if len(lines) == 1:
+            lines.append("- No active reminders.")
+        return _reminder_local_response(data, state, target, command_id, "\n".join(lines))
+    # Case variants and malformed /remind forms were intentionally claimed by
+    # the registry and are local guidance rather than provider instructions.
+    if not raw.startswith("/remind") or (len(raw) > 7 and not raw[7].isspace()):
+        return _reminder_local_response(data, state, target, command_id, "Usage: /remind in 10m <message>, /remind cancel <reminder-id>, or /remind cancel all")
+    if raw.startswith("/remind cancel"):
+        match = re.fullmatch(r"/remind cancel (rem-[a-f0-9]{12}|all)", raw)
+        if not match:
+            return _reminder_local_response(data, state, target, command_id, "Usage: /remind cancel <reminder-id|all>")
+        value = match.group(1)
+        count = state.cancel_reminder(target, value)
+        if value == "all":
+            text = f"Cancelled {count} active reminder(s)." if count else "No active reminders."
+        else:
+            text = f"Cancelled reminder `{value}`." if count else "No matching active reminder."
+        return _reminder_local_response(data, state, target, command_id, text)
+    match = re.fullmatch(r"/remind in (\d+[mhd]) ([\s\S]+)", raw)
+    if not match:
+        return _reminder_local_response(data, state, target, command_id, "Usage: /remind in 10m <message>")
+    if match.group(2)[0].isspace():
+        return _reminder_local_response(data, state, target, command_id, "Usage: /remind in 10m <message>")
+    delay, error = _parse_reminder_delay(match.group(1))
+    if error:
+        return _reminder_local_response(data, state, target, command_id, error)
+    text = str(match.group(2) or "").strip()
+    if not text:
+        return _reminder_local_response(data, state, target, command_id, "Reminder message is required.")
+    if len(text) > USER_REMINDER_MAX_MESSAGE_CHARS:
+        return _reminder_local_response(data, state, target, command_id, f"Reminder message is too long (max {USER_REMINDER_MAX_MESSAGE_CHARS} characters).")
+    try:
+        reminder = state.create_reminder(
+            target=target, delay_seconds=delay, message=text,
+            request_idempotency_key=_user_agent_message_idempotency_key(data),
+        )
+    except ValueError as exc:
+        if str(exc) == "idempotency key was reused for a different user_agent_message":
+            return {"type": "error", "message": str(exc)}
+        return _reminder_local_response(data, state, target, command_id, str(exc))
+    due = datetime.fromtimestamp(reminder["due_at"], timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    return _reminder_local_response(data, state, target, command_id, f"Reminder `{reminder['id']}` set for {due}.")

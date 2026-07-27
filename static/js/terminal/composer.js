@@ -1831,6 +1831,32 @@ function _terminalValidateLoopComposerInput(input, text, directAgent) {
   return true;
 }
 
+function _terminalValidateReminderComposerInput(input, text, directAgent) {
+  const raw = String(text || '').trim();
+  if (!(raw === '/remind' || raw.startsWith('/remind '))) return true;
+  if (!directAgent || !directAgent.id) {
+    _terminalComposeSetError(input, 'Select an agent to use /remind.');
+    return false;
+  }
+  if (/^\/remind cancel (rem-[a-f0-9]{12}|all)$/.test(raw)) return true;
+  const match = raw.match(/^\/remind in (\d+[mhd]) ([\s\S]+)$/);
+  if (!match) {
+    _terminalComposeSetError(input, 'Usage: /remind in 10m <message>, or /remind cancel <reminder-id|all>.');
+    return false;
+  }
+  const parts = match[1].match(/^(\d+)([mhd])$/);
+  const seconds = Number(parts[1] || 0) * (parts[2] === 'd' ? 86400 : (parts[2] === 'h' ? 3600 : 60));
+  if (seconds < 60 || seconds > 2592000) {
+    _terminalComposeSetError(input, 'Reminder delay must be between 1m and 30d.');
+    return false;
+  }
+  if (!String(match[2] || '').trim()) {
+    _terminalComposeSetError(input, 'Reminder message is required.');
+    return false;
+  }
+  return true;
+}
+
 function terminalCancelUserMessageLoop(evt, agentId) {
   if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
   if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
@@ -1867,6 +1893,10 @@ function terminalComposeSubmit(evt, cellId) {
   const text = _terminalComposePayloadText(id, displayText);
   const directAgent = _terminalComposeDirectAgentForCellId(id);
   if (!_terminalValidateLoopComposerInput(input, text, directAgent)) {
+    _terminalComposeSetButtonState(input);
+    return false;
+  }
+  if (!_terminalValidateReminderComposerInput(input, text, directAgent)) {
     _terminalComposeSetButtonState(input);
     return false;
   }

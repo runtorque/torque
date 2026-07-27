@@ -187,6 +187,23 @@ class NotificationManager:
             error_message="Failed to send direct user message notification",
         )
 
+    def on_reminder(self, reminder: dict) -> bool:
+        """Best-effort desktop fanout after a reminder's durable outcome."""
+        reminder = reminder or {}
+        target = self._state.agents.get(str(reminder.get("target_agent_id", "") or ""))
+        group = str(reminder.get("group_name", "") or "").strip()
+        if not target or not group:
+            return False
+        settings = self._state.get_group_settings(group)
+        if not settings.notifications:
+            return False
+        text = _first_line(reminder.get("message", "")) or "Reminder due"
+        return self._send_immediate_best_effort(
+            "Torque reminder",
+            text,
+            error_message="Failed to send reminder notification",
+        )
+
     def on_task_health_alert(self, task_id: str, health_state: str):
         """Queue a task-health notification when a task becomes risky."""
         task = self._state.board_tasks.get(task_id)

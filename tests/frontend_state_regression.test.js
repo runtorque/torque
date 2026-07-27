@@ -12874,6 +12874,16 @@ test('embedded terminal direct-message System rows render as right-aligned green
         created_at: 11,
       },
       {
+        message_id: 'dm-reminder',
+        message_type: 'reminder',
+        message: 'Review the deploy result',
+        sender_id: 'torque-server',
+        sender_kind: 'system',
+        recipient_id: 'agent-1',
+        recipient_kind: 'worker',
+        created_at: 11.5,
+      },
+      {
         message_id: 'dm-agent',
         message_type: 'message',
         message: 'Acknowledged',
@@ -12908,9 +12918,12 @@ test('embedded terminal direct-message System rows render as right-aligned green
   assert.match(html, /terminal-direct-message--agent-to-user/);
   assert.match(html, /terminal-direct-message--system/);
   assert.match(html, /terminal-direct-message--status-card/);
-  assert.equal((html.match(/terminal-direct-message--status-card/g) || []).length, 1);
+  assert.equal((html.match(/terminal-direct-message--status-card/g) || []).length, 2);
   assert.match(html, /<span class="terminal-direct-message-sender">System<\/span>/);
   assert.match(html, /<span class="terminal-direct-message-badge">System<\/span>/);
+  assert.match(html, /terminal-direct-message--reminder/);
+  assert.match(html, /<span class="terminal-direct-message-sender">Torque reminder<\/span>/);
+  assert.match(html, /<span class="terminal-direct-message-badge">Reminder<\/span>/);
   assert.match(html, /<div class="terminal-direct-message-body torque-markdown"><p>\/loop started: Every 5m — run checks<\/p><\/div>/);
 
   const css = appStylesheetSource();
@@ -16050,6 +16063,9 @@ test('terminal compose slash command autocomplete filters and fills without send
     { id: 'restart', label: '/restart', usage: '/restart', insert: '/restart', help: 'Restart only this DM agent with a fresh session.', search: 'restart /restart relaunch fresh session current dm agent' },
     { id: 'loop', label: '/loop every <interval> <message>', usage: '/loop every 10m check status', insert: '/loop every 10m ', help: 'Start a recurring user message. Use 1m–24h with s/m/h units, then add the message.', search: 'loop every interval message recurring schedule /loop every' },
     { id: 'loop-cancel', label: '/loop cancel', usage: '/loop cancel', insert: '/loop cancel', help: 'Cancel the active user-message loop for this agent.', search: 'loop cancel stop recurring schedule /loop cancel' },
+    { id: 'remind', label: '/remind in <delay> <message>', usage: '/remind in 10m check the deploy', insert: '/remind in 10m ', help: 'Create a one-shot reminder. Use 1m–30d with m/h/d units.', search: 'remind in delay message one shot reminder /remind' },
+    { id: 'reminders', label: '/reminders', usage: '/reminders', insert: '/reminders', help: 'List your active one-shot reminders.', search: 'reminders active list one shot /reminders' },
+    { id: 'remind-cancel', label: '/remind cancel <reminder-id|all>', usage: '/remind cancel rem-abc123 or /remind cancel all', insert: '/remind cancel ', help: 'Cancel one active one-shot reminder or all of your active reminders.', search: 'remind cancel reminder id all stop one shot /remind cancel' },
     { id: 'watch', label: '/watch <task-id> [<task-id> ...]', usage: '/watch TORQUE:123 TORQUE:124', insert: '/watch ', help: 'Notify once when all named tasks are Done.', search: 'watch task completion notify done /watch' },
     { id: 'watches', label: '/watches', usage: '/watches', insert: '/watches', help: "List this agent's active task-completion watches.", search: 'watches active task completion notify /watches' },
     { id: 'unwatch', label: '/unwatch <watch-id|all>', usage: '/unwatch watch-abc123 or /unwatch all', insert: '/unwatch ', help: 'Cancel one active task-completion watch.', search: 'unwatch cancel task completion notify /unwatch' },
@@ -16091,6 +16107,9 @@ test('terminal compose slash command autocomplete filters and fills without send
   assert.match(slashDropdown.innerHTML, /\/restart/);
   assert.match(slashDropdown.innerHTML, /\/loop every <interval> <message>/);
   assert.match(slashDropdown.innerHTML, /\/loop cancel/);
+  assert.match(slashDropdown.innerHTML, /\/remind in <delay> <message>/);
+  assert.match(slashDropdown.innerHTML, /\/reminders/);
+  assert.match(slashDropdown.innerHTML, /\/remind cancel <reminder-id\|all>/);
   assert.match(slashDropdown.innerHTML, /\/watch <task-id>/);
   assert.match(slashDropdown.innerHTML, /\/watches/);
   assert.match(slashDropdown.innerHTML, /\/unwatch <watch-id/);
@@ -16135,6 +16154,22 @@ test('terminal compose slash command autocomplete filters and fills without send
   assert.equal(input.focused, true);
   assert.equal(slashDropdown.style.display, 'none');
   assert.equal(jsonValue(context, `_terminalComposeDrafts['agent-1']`), '/loop cancel');
+  assert.equal(sandbox.sendCalls.length, 0);
+
+  input.value = '/remind c';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  context.terminalComposeInput(input);
+  assert.equal(slashDropdown.style.display, '');
+  assert.match(slashDropdown.innerHTML, /\/remind cancel <reminder-id\|all>/);
+  assert.doesNotMatch(slashDropdown.innerHTML, /\/remind in <delay> <message>/);
+  const enterReminderCancel = keyEvent('Enter');
+  context.__enterReminderCancel = enterReminderCancel;
+  runInContext(context, `terminalComposeKeydown(__enterReminderCancel, 'agent-1');`);
+  assert.equal(enterReminderCancel.preventDefaultCalled, true);
+  assert.equal(input.value, '/remind cancel ');
+  assert.equal(input.selectionStart, input.value.length);
+  assert.equal(input.focused, true);
   assert.equal(sandbox.sendCalls.length, 0);
 
   input.focused = false;
