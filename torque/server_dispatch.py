@@ -900,6 +900,13 @@ async def _scheduler_loop(state: MatrixState, handle_command, panel_event):
         except Exception:
             log.exception("User message loop scheduler cycle failed")
 
+        try:
+            # One-shot reminders have their own persisted UTC outbox and never
+            # enter the user→agent prompt path used by /loop.
+            state.reconcile_reminders(now=now.timestamp())
+        except Exception:
+            log.exception("One-shot reminder scheduler cycle failed")
+
         task_changed = False
         for task in list(state.board_tasks.values()):
             if not task.scheduled_at or task.scheduled_at > now_iso:

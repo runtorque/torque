@@ -15,7 +15,7 @@ import json
 import sqlite3
 from typing import Callable, Iterable
 
-SCHEMA_VERSION = "23"
+SCHEMA_VERSION = "24"
 
 
 @dataclass(frozen=True)
@@ -3152,8 +3152,19 @@ def _migration_0023_task_watch_request_keys(
         "ON task_watches(request_idempotency_key) "
         "WHERE request_idempotency_key != ''"
     )
-
-
+def _migration_0024_one_shot_reminders(conn: sqlite3.Connection, _backfill_agent_history) -> None:
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS reminders (
+            id TEXT PRIMARY KEY, requester_id TEXT NOT NULL DEFAULT 'user', requester_agent_id TEXT NOT NULL DEFAULT '', thread_id TEXT NOT NULL DEFAULT '',
+            target_agent_id TEXT NOT NULL DEFAULT '', group_name TEXT NOT NULL DEFAULT '', message TEXT NOT NULL DEFAULT '', created_at REAL NOT NULL DEFAULT 0,
+            due_at REAL NOT NULL DEFAULT 0, terminal_at REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'pending', cancelled_at REAL NOT NULL DEFAULT 0,
+            delivered_at REAL NOT NULL DEFAULT 0, request_idempotency_key TEXT NOT NULL DEFAULT '', dedupe_key TEXT NOT NULL DEFAULT '', outbox_state TEXT NOT NULL DEFAULT 'pending',
+            attempt_count INTEGER NOT NULL DEFAULT 0, last_attempt_at REAL NOT NULL DEFAULT 0,
+            last_error TEXT NOT NULL DEFAULT '', updated_at REAL NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminders(status, due_at, id); CREATE INDEX IF NOT EXISTS idx_reminders_requester ON reminders(requester_id, status, due_at, id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_reminders_request_key ON reminders(request_idempotency_key) WHERE request_idempotency_key != '';
+    """)
 SCHEMA_MIGRATIONS = (
     SchemaMigration(
         1,
@@ -3322,6 +3333,14 @@ SCHEMA_MIGRATIONS = (
         "task_watch_request_keys",
         "one-shot-task-watch-request-key-v1",
         _migration_0023_task_watch_request_keys,
+        phase="post_init",
+        repair_on_boot=True,
+    ),
+    SchemaMigration(
+        24,
+        "one_shot_reminders",
+        "durable-user-one-shot-reminders-v1",
+        _migration_0024_one_shot_reminders,
         phase="post_init",
         repair_on_boot=True,
     ),

@@ -3581,11 +3581,11 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         registry = importlib.import_module('torque.commands.user_dm')
         catalog = registry.user_dm_command_catalog()
         self.assertEqual([item['id'] for item in catalog], [
-            'compact', 'fast', 'restart', 'loop', 'loop-cancel', 'watch', 'watches', 'unwatch', 'status', 'commands',
+            'compact', 'fast', 'restart', 'loop', 'loop-cancel', 'remind', 'reminders', 'watch', 'watches', 'unwatch', 'status', 'commands',
         ])
         self.assertEqual(next(item for item in catalog if item['id'] == 'fast')['providers'], ['codex'])
         self.assertEqual([item['id'] for item in registry.user_dm_command_catalog(provider='codex')], [
-            'compact', 'fast', 'restart', 'loop', 'loop-cancel', 'watch', 'watches', 'unwatch', 'status', 'commands',
+            'compact', 'fast', 'restart', 'loop', 'loop-cancel', 'remind', 'reminders', 'watch', 'watches', 'unwatch', 'status', 'commands',
         ])
         self.assertNotIn('fast', [item['id'] for item in registry.user_dm_command_catalog(provider='claude-code')])
         self.assertEqual(registry.parse_user_dm_command(' /status ').id, 'status')

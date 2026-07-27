@@ -69,6 +69,18 @@ class StateServicesMixin:
     def evaluate_task_watches_for_task(self, task_id: str, **kwargs) -> None:
         return self._task_watch_service.evaluate_for_task(task_id, **kwargs)
 
+    def create_reminder(self, **kwargs):
+        return self._reminder_service.create(**kwargs)
+
+    def list_reminders(self, target, **kwargs):
+        return self._reminder_service.list_active(target, **kwargs)
+
+    def cancel_reminder(self, target, value: str, **kwargs) -> int:
+        return self._reminder_service.cancel(target, value, **kwargs)
+
+    def reconcile_reminders(self, **kwargs) -> None:
+        return self._reminder_service.reconcile(**kwargs)
+
     def _emit_initiative(self, initiative: dict | None) -> None:
         self._initiative_service._emit_initiative(initiative)
 

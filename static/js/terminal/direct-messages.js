@@ -214,7 +214,7 @@ function _terminalDirectMessageEnhanceCodeBlocks(html) {
 
 function _terminalDirectMessageDirection(row, agent) {
   const type = _terminalDirectMessageType(row);
-  if (type === 'system') return 'system';
+  if (type === 'system' || type === 'reminder') return 'system';
   const senderKind = String((row && row.sender_kind) || '').trim().toLowerCase();
   const recipientKind = String((row && row.recipient_kind) || '').trim().toLowerCase();
   const senderId = String((row && row.sender_id) || '').trim();
@@ -226,8 +226,9 @@ function _terminalDirectMessageDirection(row, agent) {
 }
 
 function _terminalDirectMessageSenderLabel(row, agent) {
+  const type = _terminalDirectMessageType(row);
   const direction = _terminalDirectMessageDirection(row, agent);
-  if (direction === 'system') return 'System';
+  if (direction === 'system') return type === 'reminder' ? 'Torque reminder' : 'System';
   if (direction === 'user-to-agent') {
     return (row && row.sender_name) || 'You';
   }
@@ -251,6 +252,7 @@ function _terminalDirectMessageTypeLabel(row) {
   }
   if (type === 'ask_reply') return 'Ask reply';
   if (type === 'system') return 'System';
+  if (type === 'reminder') return 'Reminder';
   if (type !== 'message') return type.replace(/_/g, ' ');
   return '';
 }
@@ -288,7 +290,7 @@ function _renderTerminalDirectMessageRow(row, agent) {
   return ''
     + '<div class="terminal-direct-message terminal-direct-message--' + esc(direction)
     + ' terminal-direct-message--' + esc(type.replace(/[^a-z0-9_-]+/g, '-'))
-    + (type === 'system' ? ' terminal-direct-message--status-card' : '')
+    + ((type === 'system' || type === 'reminder') ? ' terminal-direct-message--status-card' : '')
     + (selected ? ' selected' : '')
     + '" data-direct-message-id="' + esc(id) + '"'
     + ' data-direct-message-agent-id="' + esc((agent && agent.id) || '') + '"'

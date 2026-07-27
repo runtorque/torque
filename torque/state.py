@@ -104,6 +104,7 @@ from .services.metrics import (
 )
 from .services.operator_notices import OperatorNoticeService
 from .services.task_watches import TaskWatchService
+from .services.reminders import ReminderService
 from .services.thinking import ThinkingService
 from .perceived_empty import (
     coerce_perceived_empty_threshold,
@@ -2576,6 +2577,7 @@ class MatrixState(
         self._metrics_service = MetricsService(self)
         self._operator_notice_service = OperatorNoticeService(self)
         self._task_watch_service = TaskWatchService(self)
+        self._reminder_service = ReminderService(self)
         self.boot_timestamp: float = time.time()
         self.boot_repo_root: str = ""
         self.boot_head_commit: str = ""

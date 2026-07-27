@@ -232,6 +232,7 @@ from .server_communication import (
     _user_agent_loop_response,
     _handle_user_agent_loop_command,
     _handle_task_watch_command,
+    _handle_reminder_command,
     _restore_user_agent_restart_focus,
     _user_agent_restart_response,
     _handle_user_agent_restart_command,
@@ -2018,11 +2019,13 @@ async def _handle_user_agent_message_command(data, state: MatrixState,
             "watch": lambda: _handle_task_watch_command(data, state, target, stripped_message, "watch"),
             "watches": lambda: _handle_task_watch_command(data, state, target, stripped_message, "watches"),
             "unwatch": lambda: _handle_task_watch_command(data, state, target, stripped_message, "unwatch"),
+            "remind": lambda: _handle_reminder_command(data, state, target, stripped_message, "remind"),
+            "reminders": lambda: _handle_reminder_command(data, state, target, stripped_message, "reminders"),
         }
         handler = command_handlers.get(command.id)
         if handler and not (
             bool(data.get("_loop_delivery"))
-            and command.id in {"restart", "status", "commands", "watch", "watches", "unwatch"}
+                and command.id in {"restart", "status", "commands", "watch", "watches", "unwatch", "remind", "reminders"}
         ):
             result = handler()
             if inspect.isawaitable(result):
