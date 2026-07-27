@@ -78,6 +78,20 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
 
     async def _handle_command(self, payload):
         self.calls.append(dict(payload))
+        if payload.get("cmd") == "board_update_task":
+            task_id = payload.get("id", "")
+            self.state.board_update_task(
+                task_id,
+                **{
+                    key: value for key, value in payload.items()
+                    if key not in {"cmd", "id"}
+                },
+            )
+            return {"type": "ok", "task_id": task_id}
+        if payload.get("cmd") == "board_move_task":
+            task_id = payload.get("id", "")
+            self.state.board_move_task(task_id, payload.get("lane", ""))
+            return {"type": "ok", "task_id": task_id}
         if payload.get("cmd") == "inject_mcp_message":
             return {"type": "ok", "delivered": True}
         if payload.get("cmd") == "board_pickup_architect_task":
@@ -172,10 +186,17 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.architect.effective_agent_class_id, "product-manager")
         tool_names = await self._list_tools()
 
+        expected_task_surface = {
+            "task_list", "task_get", "task_chain", "task_create",
+            "task_claim", "task_update", "task_move", "task_mark_covered",
+            "task_coverage_reconcile", "task_artifact_upload", "task_verify",
+            "task_reassign", "task_dispatch", "task_derive", "task_progress",
+            "task_complete", "task_blocked", "task_error",
+        }
+        self.assertTrue(expected_task_surface <= tool_names)
         for name in {
-            "context", "tool_search", "task_create", "peer_list",
-            "peer_message", "peer_inbox", "peer_reply", "user_message",
-            "raise", "journal_write",
+            "context", "tool_search", "peer_list", "peer_message",
+            "peer_inbox", "peer_reply", "user_message", "raise", "journal_write",
         }:
             self.assertIn(name, tool_names)
 
@@ -183,10 +204,6 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             "engineer_hire",
             "engineer_lifecycle",
             "engineer_specializations_update",
-            "task_claim",
-            "task_update",
-            "task_move",
-            "task_reassign",
             "agent_message",
             "feedback_request",
             "behavior_overlay_admin",
@@ -200,10 +217,6 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             "architect_engineer_set_specializations",
             "architect_pending_hire_list",
             "architect_task_create",
-            "architect_task_pickup",
-            "architect_task_update",
-            "architect_task_move",
-            "architect_task_reassign",
             "architect_engineer_message",
             "architect_engineer_feedback_request",
             "architect_behavior_overlay_propose_for_engineer",
@@ -228,6 +241,59 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertIn("Unknown tool", self._error_text(response), tool_name)
         self.assertEqual([], self.calls)
+
+    async def test_pm_creator_scope_mutates_own_proposal_and_refuses_peer_task(self):
+        proposal = await self._call(
+            "task_create",
+            {"title": "PM authority record", "labels": ["intake"]},
+        )
+        task_id = self._result_payload(proposal)["id"]
+        task = self.state.board_tasks[task_id]
+        self.assertTrue({"product-proposal", "proposal-only"}.issubset(task.labels))
+
+        update = await self._call(
+            "task_update",
+            {
+                "task": task_id,
+                "title": "PM authority record corrected",
+                "labels": ["product-proposal", "proposal-only", "corrected"],
+            },
+            req_id=2,
+        )
+        self.assertEqual("ok", self._result_payload(update)["type"])
+        self.assertEqual("PM authority record corrected", task.task)
+
+        stripped = await self._call(
+            "task_update",
+            {"task": task_id, "labels": ["corrected"]},
+            req_id=3,
+        )
+        self.assertIn("must retain", self._error_text(stripped))
+        self.assertTrue({"product-proposal", "proposal-only"}.issubset(task.labels))
+
+        dispatched = await self._call(
+            "task_dispatch", {"task": task_id, "name": "pm-record-worker"},
+            req_id=4,
+        )
+        self.assertEqual("ok", self._result_payload(dispatched)["type"])
+        self.assertEqual("dispatch_task", self.calls[-1]["cmd"])
+
+        moved = await self._call(
+            "task_move", {"task": task_id, "new_lane": "Done"}, req_id=5
+        )
+        self.assertEqual("task_moved", self._result_payload(moved)["type"])
+        self.assertEqual("Done", task.lane)
+
+        peer_task = self.state.board_add_task(
+            "Peer-owned record", "g", created_by_architect_id=self.peer.id
+        )
+        denied = await self._call(
+            "task_update", {"task": peer_task.id, "title": "Nope"}, req_id=6
+        )
+        self.assertIn("error", denied.payload)
+        self.assertEqual(-32003, denied.payload["error"]["code"])
+        self.assertIn("creator/self", denied.payload["error"]["message"])
+        self.assertEqual("Peer-owned record", peer_task.task)
 
     async def test_routed_product_proposal_task_can_be_picked_up_by_same_group_architect(self):
         # Exercise the public JSON-RPC route under a frozen default Architect
@@ -359,8 +425,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             req_id=14,
             agent_id=self.torqly.id,
         )
-        self.assertIn("error", non_hired.payload)
-        self.assertEqual(-32602, non_hired.payload["error"]["code"])
+        self.assertIn("engineer not found in scope", self._error_text(non_hired))
         self.assertEqual(before, (owned.assigned_engineer_id, owned.updated_at))
 
         unclaimed_peer_root = self.state.board_add_task(
@@ -461,7 +526,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             agent_id=self.architect.id,
         )
         self.assertIn("error", wrong_class.payload)
-        self.assertEqual(-32602, wrong_class.payload["error"]["code"])
+        self.assertEqual(-32003, wrong_class.payload["error"]["code"])
         self.assertEqual(before, (owned.assigned_engineer_id, owned.updated_at))
 
     async def test_architect_task_pickup_denies_unrouted_non_pm_or_already_claimed_tasks(self):

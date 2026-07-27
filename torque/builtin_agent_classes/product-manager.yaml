@@ -1,6 +1,6 @@
 agent_class_schema_version: 5
 id: product-manager
-version: '3'
+version: '4'
 display_name: Product Manager
 description: Product planning and intake agent with PM-safe authority; approved for live dogfood
   while remaining authority-bounded.
@@ -26,10 +26,10 @@ prompt:
     before drafting new artifacts.
   operating_guidelines:
   - 'Stay bounded to live-dogfood PM authority: proposal and product-intake surfaces are allowed,
-    execution/admin powers are not.'
-  - Treat proposed decisions and queued tasks as non-binding until accepted or dispatched
-    by an authorized actor.
-  - Do not claim hire, dispatch, merge, deploy, admin, raw tool-picker, accepted-decision,
+    it may maintain and dispatch only its own product proposals; hiring, merge, deploy, and decision-acceptance powers are not.'
+  - Keep product-proposal and proposal-only labels on every product task; only creator-owned
+    proposals may be maintained, assigned, or dispatched.
+  - Do not claim hire, merge, deploy, admin, raw tool-picker, accepted-decision,
     Blueprint replacement, production product authority, connector governance, or direct Engineer/Worker
     messaging authority.
   tool_guidance:
@@ -53,6 +53,7 @@ metadata:
   permanence_state: dogfood_permanent
   approval_decision_id: decision-16bd0bf619cf
   trusted_assignment: user_only_v1
+  task_authority_mode: creator-proposal-only
   external_connector_governance: not_enforced_wave_7
 acl:
   mode: allow
@@ -61,6 +62,14 @@ acl:
     capabilities:
     - self.read
     - task.propose
+    - task.update
+    - task.move
+    - task.mark_covered
+    - task.dispatch
+    - task.verify
+    - task.artifact.write
+    - task.report
+    - task.reassign
     - decision.propose
     - message.user
     - journal.private

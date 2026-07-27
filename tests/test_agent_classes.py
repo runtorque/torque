@@ -717,7 +717,7 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         )
         self.assertEqual(class_status["assigned_class_version"], "2")
         self.assertEqual(class_status["effective_class_version"], "2")
-        self.assertEqual(class_status["next_launch_class_version"], "3")
+        self.assertEqual(class_status["next_launch_class_version"], "4")
         self.assertTrue(class_status["pending_next_launch"])
         self.assertTrue(class_status["apply_state"]["relaunch_required"])
 

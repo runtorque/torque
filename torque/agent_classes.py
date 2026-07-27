@@ -1451,7 +1451,7 @@ def agent_class_prompt_block_for_cell(cell: Any) -> str:
     status = str(snapshot.get("status", "") or "").strip()
     # Default/full classes intentionally add no prompt text so unassigned base
     # kinds preserve existing behavior by construction.
-    if not prompt_text and class_id.startswith("default-") and status == "full" and lifecycle == "stable":
+    if not prompt_text and class_id.startswith("default-") and lifecycle == "stable":
         return ""
     lines = [
         "## Agent Class",

@@ -16,6 +16,12 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
     _engineer_cell = ctx.caller_cell
     _engineer_group = ctx.caller_group
     tool_name = normalize_tool_name(name, tool_prefix)
+    is_creator_proposal_mode = (
+        caller_kind == "architect"
+        and str(
+            ((getattr(_engineer_cell, "effective_agent_class_snapshot", {}) or {}).get("metadata", {}) or {}).get("task_authority_mode", "") or ""
+        ).strip() == "creator-proposal-only"
+    )
 
     if tool_name == "task_create":
         if caller_kind == "architect":
@@ -220,9 +226,12 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
             return "Task not found", True
         caller_id_str = str(caller_id or "").strip()
         creator_class = _task_created_by_classifier(task)
-        if creator_class != "user" and not _architect_task_owned_by_caller(
-            task,
-            caller_id_str,
+        if is_creator_proposal_mode:
+            if str(getattr(task, "created_by_architect_id", "") or "").strip() != caller_id_str:
+                return "Authorization denied: task is outside Product Manager creator/self scope", True
+        elif creator_class != "user" and not _architect_task_owned_by_caller(
+                task,
+                caller_id_str,
         ):
             return "Task was not created by this architect", True
 
@@ -254,6 +263,18 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
                     continue
                 normalized_labels.append(label)
                 seen_labels.add(label)
+            if (
+                    is_creator_proposal_mode
+                    and {"product-proposal", "proposal-only"}.issubset(
+                        set(getattr(task, "labels", []) or [])
+                    )
+                    and not {"product-proposal", "proposal-only"}.issubset(
+                        set(normalized_labels)
+                    )):
+                return (
+                    "Product Manager updates must retain product-proposal and "
+                    "proposal-only labels"
+                ), True
             patch["labels"] = normalized_labels
             updated_fields.append("labels")
         if "action_name" in args:
@@ -312,9 +333,14 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         if caller_kind == "architect":
             if not _architect_task_owned_by_caller(task, caller_id_str):
                 return "Task was not created by this architect", True
-            engineer_id, engineer_error = _resolve_architect_hired_engineer(
-                real_state, caller_id, engineer_ident
-            )
+            if is_creator_proposal_mode:
+                engineer_id, engineer_error = _resolve_group_engineer(
+                    real_state, caller_id, engineer_ident
+                )
+            else:
+                engineer_id, engineer_error = _resolve_architect_hired_engineer(
+                    real_state, caller_id, engineer_ident
+                )
         else:
             caller_group = _caller_group(real_state, caller_id_str)
             if str(getattr(task, "group", "") or "").strip() != caller_group:
@@ -668,6 +694,13 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         tid = _resolve_task(state, args.get("task", ""))
         if not tid:
             return "Task not found", True
+        task = real_state.board_tasks.get(tid)
+        if caller_kind == "architect" and (
+                not task
+                or not _architect_task_owned_by_caller(
+                    task, str(caller_id or "").strip()
+                )):
+            return "Authorization denied: task is outside creator/self scope", True
         payload = {
             "cmd": "dispatch_task",
             "id": tid,
@@ -700,8 +733,9 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
             payload["agent_id"] = agent_id
         else:
             payload["create_agent"] = True
-            payload["_created_by_engineer_id"] = _engineer_cell.id
-            payload["owner_engineer_id"] = str(caller_id or "").strip()
+            if caller_kind == "engineer":
+                payload["_created_by_engineer_id"] = _engineer_cell.id
+                payload["owner_engineer_id"] = str(caller_id or "").strip()
             if _engineer_cell:
                 if _engineer_cell.session_id:
                     payload["target_session_id"] = _engineer_cell.session_id

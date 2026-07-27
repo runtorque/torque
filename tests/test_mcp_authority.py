@@ -99,7 +99,7 @@ class MCPAuthorityPrimitiveTests(unittest.TestCase):
             architect["message.subordinate"]["maximum_scope"],
             "children",
         )
-        self.assertNotIn("task.dispatch", architect)
+        self.assertEqual(architect["task.dispatch"]["maximum_scope"], "self")
 
     def test_coverage_audit_reports_every_drift_type(self):
         report = audit_tool_authority_coverage(
