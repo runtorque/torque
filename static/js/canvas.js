@@ -374,6 +374,14 @@ function _canvasStatusClass(cell) {
 
 function _canvasActivityDetail(cell) {
   if (!cell) return '';
+  // Keep the canvas auxiliary detail aligned with the shared card lifecycle
+  // rule.  A completed MCP call can outlive the running turn in activity_detail.
+  const lifecycle = typeof _agentCardExplicitLifecycleStatus === 'function'
+    ? _agentCardExplicitLifecycleStatus(cell) : '';
+  if (lifecycle && lifecycle !== 'running') {
+    return typeof _agentCardCurrentOrLastActionLabel === 'function'
+      ? _agentCardCurrentOrLastActionLabel(cell) : lifecycle;
+  }
   const detail = String(cell.activity_detail || '').trim();
   if (detail) return detail;
   if (typeof _agentCardCurrentOrLastActionLabel === 'function') {
