@@ -1099,6 +1099,90 @@ def _resolve_public_tool_call(
     return selected, translated
 
 
+_PUBLIC_TOOL_CALL_UNKNOWN = "unknown"
+_PUBLIC_TOOL_CALL_UNAUTHORIZED = "known_but_unauthorized"
+_PUBLIC_TOOL_CALL_AUTHORIZED = "authorized"
+
+
+def _classify_public_tool_call(
+    state,
+    cell_id: str,
+    requested_tool_name: str,
+    arguments: dict,
+) -> tuple[str, str, dict, object, str]:
+    """Classify a public call without broadening an MCP tool's authority.
+
+    Only an exact canonical name in this caller's ``tools/list`` projection is
+    entitled to a truthful authorization refusal.  Every other spelling stays
+    non-disclosing: unknown names, legacy handler aliases, and operations not
+    projected to this caller all retain the existing ``Unknown tool`` result.
+    The classifier deliberately stops at transport authorization; recognized
+    provisional routes still dispatch to their own inert handler response.
+    """
+
+    requested = str(requested_tool_name or "").strip()
+    tool_name, translated_arguments = _resolve_public_tool_call(
+        state,
+        cell_id,
+        requested,
+        arguments,
+    )
+    caller_cell = (
+        state.agents.get(str(cell_id or "").strip()) if cell_id else None
+    )
+    caller_kind = str(
+        getattr(caller_cell, "kind", "") or ""
+    ).strip() if caller_cell else ""
+    projected_canonical_name = (
+        requested == canonical_tool_name(requested)
+        and requested in {
+            str(tool.get("name", "") or "").strip()
+            for tool in _visible_tools(state, cell_id)
+        }
+    )
+
+    # An unresolved call or a missing handler is never a public operation.
+    if not tool_name or tool_name not in _ALL_TOOL_MAP:
+        return (
+            _PUBLIC_TOOL_CALL_UNKNOWN,
+            tool_name,
+            translated_arguments,
+            caller_cell,
+            caller_kind,
+        )
+
+    denied = (
+        _tool_hidden_for_caller(tool_name, caller_kind, caller_cell)
+        or _tool_denied_by_effective_authority(tool_name, caller_cell)
+        or _tool_argument_scope_denied(
+            state,
+            tool_name,
+            translated_arguments,
+            caller_cell,
+        )
+    )
+    if denied:
+        return (
+            (
+                _PUBLIC_TOOL_CALL_UNAUTHORIZED
+                if projected_canonical_name
+                else _PUBLIC_TOOL_CALL_UNKNOWN
+            ),
+            tool_name,
+            translated_arguments,
+            caller_cell,
+            caller_kind,
+        )
+
+    return (
+        _PUBLIC_TOOL_CALL_AUTHORIZED,
+        tool_name,
+        translated_arguments,
+        caller_cell,
+        caller_kind,
+    )
+
+
 def _tool_hidden_for_caller(tool_name: str, caller_kind: str, caller_cell) -> bool:
     """Return True when a known tool is intentionally scoped out."""
     name = str(tool_name or "").strip()
@@ -2042,16 +2126,18 @@ async def dispatch_mcp_rpc_body(
         )
         raw_arguments = params.get("arguments", {}) if isinstance(params, dict) else {}
         arguments = strip_mcp_idempotency_args(raw_arguments)
-        tool_name, arguments = _resolve_public_tool_call(
+        (
+            call_classification,
+            tool_name,
+            arguments,
+            caller_cell,
+            caller_kind,
+        ) = _classify_public_tool_call(
             state,
             cell_id,
             requested_tool_name,
             arguments,
         )
-        caller_cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
-        caller_kind = str(
-            getattr(caller_cell, "kind", "") or ""
-        ).strip() if caller_cell else ""
         if caller_cell and state.agent_is_tombstoned(caller_cell):
             return (
                 _jsonrpc_error(req_id, -32602, f"Agent {cell_id} is tombstoned"),
@@ -2061,18 +2147,7 @@ async def dispatch_mcp_rpc_body(
             caller_kind in {"architect", "engineer"}
             and _claim_session_wake(cell_id, mcp_session_id)
         )
-        if (
-            not tool_name
-            or
-            _tool_hidden_for_caller(tool_name, caller_kind, caller_cell)
-            or _tool_denied_by_effective_authority(tool_name, caller_cell)
-            or _tool_argument_scope_denied(
-                state,
-                tool_name,
-                arguments,
-                caller_cell,
-            )
-        ):
+        if call_classification != _PUBLIC_TOOL_CALL_AUTHORIZED:
             if session_wake_pending:
                 _queue_session_wake_entry(
                     state,
@@ -2080,14 +2155,11 @@ async def dispatch_mcp_rpc_body(
                     caller_kind=caller_kind,
                     first_tool_call_ts=first_tool_call_ts,
                 )
-            return (
-                _jsonrpc_error(
-                    req_id,
-                    -32602,
-                    f"Unknown tool: {requested_tool_name}",
-                ),
-                200,
-            )
+            if call_classification == _PUBLIC_TOOL_CALL_UNAUTHORIZED:
+                message = f"Known tool is not authorized: {requested_tool_name}"
+            else:
+                message = f"Unknown tool: {requested_tool_name}"
+            return _jsonrpc_error(req_id, -32602, message), 200
         write_tool = is_mcp_write_tool(tool_name)
         idempotency_key = ""
         request_hash = ""

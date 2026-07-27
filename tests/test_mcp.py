@@ -191,6 +191,140 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(observed["is_error"])
         self.assertIn("result", observed)
 
+    async def test_public_transport_distinguishes_projected_denial_from_unknown_and_unavailable(self):
+        """Canonical calls tell projected denial from unknown and provisional state."""
+        state = self.state_mod.MatrixState()
+        architect = self.state_mod.AgentCell(
+            id="architect-1",
+            name="Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        restricted_architect = self.state_mod.AgentCell(
+            id="architect-restricted",
+            name="Restricted Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+        )
+        peer = self.state_mod.AgentCell(
+            id="architect-peer",
+            name="Peer Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        restricted_architect.effective_agent_class_snapshot = {
+            "effective_authority": {
+                "schema_version": 1,
+                "base_kind": "architect",
+                "acl_mode": "allow",
+                "capabilities": {"task.read": "self"},
+            },
+        }
+        for cell in (architect, restricted_architect, worker, peer):
+            state.agents[cell.id] = cell
+        state.groups["g"] = [
+            architect.id,
+            restricted_architect.id,
+            worker.id,
+            peer.id,
+        ]
+        peer_task = self.state_mod.BoardTask(
+            id="TORQUE:peer",
+            task="Peer task",
+            group="g",
+            lane="Backlog",
+            created_by_architect_id=peer.id,
+        )
+        state.board_tasks[peer_task.id] = peer_task
+
+        async def unexpected_command(payload):
+            self.fail(f"Unexpected command: {payload}")
+
+        handler = self.mcp_mod.create_mcp_handler(unexpected_command, state)
+
+        async def call(cell_id, request_id, name, arguments):
+            return await handler(FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "method": "tools/call",
+                    "params": {"name": name, "arguments": arguments},
+                },
+                headers={"X-Torque-Cell-Id": cell_id},
+            ))
+
+        # The names under test are the actual public ``tools/list`` projection,
+        # rather than internal role-prefixed handlers.
+        listed = await handler(FakeRequest(
+            {"jsonrpc": "2.0", "id": "listed", "method": "tools/list"},
+            headers={"X-Torque-Cell-Id": restricted_architect.id},
+        ))
+        restricted_names = {
+            tool["name"] for tool in listed.payload["result"]["tools"]
+        }
+        self.assertIn("task_get", restricted_names)
+        self.assertNotIn("task_coverage_reconcile", restricted_names)
+
+        unknown = await call(architect.id, "unknown", "not_a_tool", {})
+        denied = await call(
+            restricted_architect.id,
+            "denied",
+            "task_get",
+            {"task": peer_task.id},
+        )
+        unavailable = await call(
+            architect.id,
+            "unavailable",
+            "task_coverage_reconcile",
+            {"task_ids": [peer_task.id]},
+        )
+        hidden = await call(
+            worker.id,
+            "hidden",
+            "task_coverage_reconcile",
+            {"task_ids": [peer_task.id]},
+        )
+
+        self.assertIn("error", unknown.payload)
+        self.assertIn("Unknown tool", unknown.payload["error"]["message"])
+        self.assertIn("error", denied.payload)
+        self.assertIn(
+            "Known tool is not authorized",
+            denied.payload["error"]["message"],
+        )
+        self.assertNotIn("Unknown tool", denied.payload["error"]["message"])
+        self.assertNotIn("error", unavailable.payload)
+        unavailable_payload = json.loads(
+            unavailable.payload["result"]["content"][0]["text"]
+        )
+        self.assertTrue(unavailable.payload["result"]["isError"])
+        self.assertEqual(
+            unavailable_payload["status"],
+            "recognized_but_not_yet_available",
+        )
+        self.assertIn("error", hidden.payload)
+        self.assertIn("Unknown tool", hidden.payload["error"]["message"])
+
+        self.assertEqual(
+            len({
+                unknown.payload["error"]["message"],
+                denied.payload["error"]["message"],
+                unavailable_payload["status"],
+            }),
+            3,
+        )
+
+
     async def test_dispatch_tool_forwards_task_artifact_uploads(self):
         state = self.state_mod.MatrixState()
         cell = self.state_mod.AgentCell(
