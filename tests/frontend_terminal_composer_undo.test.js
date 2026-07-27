@@ -100,6 +100,11 @@ test('initial IME composition remains native and commits one undoable transactio
   h.c.terminalComposeInput(input, { isComposing: true });
   assert.equal(h.c.terminalComposeUndoRedo(input, false), false,
     'intermediate composition state does not create a history entry');
+  const finalBeforeInput = { currentTarget: input, isComposing: false, inputType: 'insertText',
+    preventDefault() { this.prevented = true; } };
+  h.c.terminalComposeBeforeInput(finalBeforeInput);
+  assert.equal(finalBeforeInput.prevented, undefined,
+    'the final native beforeinput remains unprevented and preserves the baseline');
   h.c.terminalComposeInput(input, { isComposing: false });
   assert.equal(h.c.terminalComposeUndoRedo(input, false), true);
   assert.equal(input.value, '');

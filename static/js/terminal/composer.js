@@ -479,6 +479,11 @@ function terminalComposeBeforeInput(evt) {
     return;
   }
   var type = String(evt.inputType || '');
+  var h = _terminalComposeHistoryState(input.dataset && input.dataset.cellId, input);
+  // Browsers commonly follow composition input with a final ordinary
+  // beforeinput. Its DOM already contains the committed characters, so do not
+  // re-baseline history here; the matching final input commits composition.
+  if (h && h.composing && type !== 'historyUndo' && type !== 'historyRedo') return;
   if (type === 'historyUndo' || type === 'historyRedo') {
     if (evt.preventDefault) evt.preventDefault();
     terminalComposeUndoRedo(input, type === 'historyRedo');
