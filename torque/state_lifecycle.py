@@ -800,6 +800,7 @@ class StateLifecycleMixin:
             agent_class_definition_by_id,
             default_agent_class_id_for_kind,
             freeze_agent_class_snapshot,
+            launch_frozen_platform_authority_for_definition,
         )
 
         base_kind = str(getattr(cell, "kind", "") or "").strip()
@@ -836,6 +837,9 @@ class StateLifecycleMixin:
         cell.effective_agent_class_id = definition.id
         cell.effective_agent_class_version = definition.version
         cell.effective_agent_class_snapshot = class_snapshot
+        cell.effective_agent_class_platform_authority = (
+            launch_frozen_platform_authority_for_definition(definition)
+        )
         cell.effective_agent_class_applied_at = frozen_at
         if desired_id and cell.agent_class_version != definition.version:
             cell.agent_class_version = definition.version

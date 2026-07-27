@@ -52,7 +52,6 @@ def _scoped(
     scopes: Iterable[str] = SCOPE_ORDER,
     risk: str = "normal",
     agent_class_base_kinds: Iterable[str] | None = None,
-    agent_class_ceilings: dict[str, str] | None = None,
 ) -> CapabilityDefinition:
     return CapabilityDefinition(
         id=capability_id,
@@ -61,7 +60,6 @@ def _scoped(
         risk=risk,
         scopes=tuple(scopes),
         ceilings=dict(ceilings),
-        agent_class_ceilings=dict(agent_class_ceilings or {}),
         agent_class_base_kinds=(
             frozenset(agent_class_base_kinds)
             if agent_class_base_kinds is not None else None
@@ -148,9 +146,8 @@ CAPABILITY_CATALOG: dict[str, CapabilityDefinition] = {
             "task.report",
             "Report task status",
             "Report progress, blockers, errors, readiness, and completion.",
-            scopes=("self", "children", "group"),
-            ceilings={"worker": "self", "engineer": "group", "architect": "group"},
-            agent_class_ceilings={kind: "self" for kind in _ALL},
+            scopes=("self",),
+            ceilings={kind: "self" for kind in _ALL},
         ),
         _scoped(
             "task.create",
@@ -172,8 +169,7 @@ CAPABILITY_CATALOG: dict[str, CapabilityDefinition] = {
             "Update tasks",
             "Update task fields within the caller's task ownership ceiling.",
             scopes=("self", "children", "group"),
-            ceilings={"engineer": "children", "architect": "group"},
-            agent_class_ceilings={"engineer": "children", "architect": "self"},
+            ceilings={"engineer": "children", "architect": "self"},
             risk="high",
         ),
         _scoped(
@@ -181,8 +177,7 @@ CAPABILITY_CATALOG: dict[str, CapabilityDefinition] = {
             "Reassign tasks",
             "Change task ownership within the caller's routing ceiling.",
             scopes=("self", "children", "group"),
-            ceilings={"engineer": "group", "architect": "group"},
-            agent_class_ceilings={"engineer": "group", "architect": "children"},
+            ceilings={"engineer": "group", "architect": "children"},
             risk="high",
         ),
         _scoped(
@@ -190,8 +185,7 @@ CAPABILITY_CATALOG: dict[str, CapabilityDefinition] = {
             "Move tasks",
             "Move tasks across Board lanes within the caller's task ceiling.",
             scopes=("self", "children", "group"),
-            ceilings={"engineer": "children", "architect": "group"},
-            agent_class_ceilings={"engineer": "children", "architect": "self"},
+            ceilings={"engineer": "children", "architect": "self"},
             risk="high",
         ),
         _scoped(
@@ -199,8 +193,7 @@ CAPABILITY_CATALOG: dict[str, CapabilityDefinition] = {
             "Mark task coverage",
             "Record review or root-task coverage without dispatching work.",
             scopes=("self", "children", "group"),
-            ceilings={"engineer": "group", "architect": "group"},
-            agent_class_ceilings={"engineer": "group", "architect": "self"},
+            ceilings={"engineer": "group", "architect": "self"},
         ),
         _scoped(
             "task.dispatch",
@@ -219,9 +212,8 @@ CAPABILITY_CATALOG: dict[str, CapabilityDefinition] = {
             ceilings={
                 "worker": "self",
                 "engineer": "group",
-                "architect": "group",
+                "architect": "self",
             },
-            agent_class_ceilings={"worker": "self", "engineer": "group", "architect": "self"},
         ),
         _scoped(
             "task.artifact.write",

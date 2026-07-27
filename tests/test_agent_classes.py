@@ -223,15 +223,12 @@ class AgentClassRegistryTests(unittest.TestCase):
             preview["effective_authority"]["capabilities"]["task.propose"],
             "self",
         )
+        self.assertEqual(
+            preview["effective_authority"]["capabilities"]["task.dispatch"],
+            "self",
+        )
         for capability in (
-                "task.read", "task.update", "task.move", "task.mark_covered",
-                "task.verify", "task.reassign", "task.report"):
-            self.assertEqual(
-                preview["effective_authority"]["capabilities"][capability],
-                "group",
-                capability,
-            )
-        for capability in ("task.dispatch", "engineer.hire", "worktree.merge", "deploy.read"):
+                "engineer.hire", "worktree.merge", "deploy.read"):
             self.assertNotIn(
                 capability,
                 preview["effective_authority"]["capabilities"],

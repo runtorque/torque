@@ -21,7 +21,11 @@ from . import __version__
 from .capability_catalog import (
     CAPABILITY_CATALOG,
 )
-from .agent_classes import has_frozen_platform_task_authority_mode
+from .agent_classes import (
+    apply_frozen_platform_group_board_authority,
+    has_frozen_platform_group_board_authority,
+    has_frozen_platform_task_authority_mode,
+)
 from .mcp_authority import (
     EffectiveAuthority,
     AuthorityValidationError,
@@ -924,10 +928,11 @@ def _effective_class_authority_for_cell(cell) -> EffectiveAuthority | None:
     if not authority_snapshot:
         return None
     try:
-        return effective_authority_from_snapshot(
+        authority = effective_authority_from_snapshot(
             authority_snapshot,
             capabilities=CAPABILITY_CATALOG,
         )
+        return apply_frozen_platform_group_board_authority(cell, authority)
     except AuthorityValidationError:
         # Frozen authority corruption fails closed rather than broadening the
         # caller's projected authority.
@@ -988,9 +993,9 @@ def _raw_tools_for_caller(state, cell_id: str) -> tuple[list[dict], object, str]
     # includes the four current-task reporters and derive.  These retain their
     # normal current-task semantics (and can therefore be inert when no task is
     # assigned); they are deliberately not inherited by other Architects.
-    if caller_kind == "architect" and any(
-            has_frozen_platform_task_authority_mode(cell, mode)
-            for mode in ("creator-proposal-only", "group-board-authority")
+    if caller_kind == "architect" and (
+            has_frozen_platform_task_authority_mode(cell, "creator-proposal-only")
+            or has_frozen_platform_group_board_authority(cell)
     ):
         product_manager_current_task_tools = {
             "torque_done",
@@ -1781,11 +1786,11 @@ async def dispatch_mcp_rpc_body(
                 is_creator_proposal_mode = has_frozen_platform_task_authority_mode(
                     caller_cell, "creator-proposal-only")
                 is_group_board_authority_mode = (
-                    has_frozen_platform_task_authority_mode(
-                        caller_cell, "group-board-authority"))
+                    has_frozen_platform_group_board_authority(caller_cell))
                 if is_creator_proposal_mode or is_group_board_authority_mode:
                     scope = (
-                        "creator/self" if is_creator_proposal_mode else "group"
+                        "group" if is_group_board_authority_mode
+                        else "creator/self"
                     )
                     return (
                         _jsonrpc_error(

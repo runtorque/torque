@@ -43,9 +43,6 @@ class CapabilityDefinition:
     base_kinds: frozenset[str] = frozenset()
     scopes: tuple[str, ...] = ()
     ceilings: Mapping[str, str] = field(default_factory=dict)
-    # Authoring can be narrower than the runtime ceiling when a platform-owned,
-    # trusted built-in extension is the only supported way to reach a scope.
-    agent_class_ceilings: Mapping[str, str] = field(default_factory=dict)
     # ``None`` means every runtime-available base kind may author this ACL
     # capability.  A non-empty set reserves an otherwise runtime-valid
     # capability for platform-owned frozen authority extensions.
@@ -57,15 +54,6 @@ class CapabilityDefinition:
 
     def maximum_scope_for(self, base_kind: str) -> str:
         return str(self.ceilings.get(str(base_kind or "").strip(), "") or "")
-
-    def maximum_agent_class_scope_for(self, base_kind: str) -> str:
-        """Return the widest scope ordinary Agent Class ACLs may author."""
-
-        base_kind = str(base_kind or "").strip()
-        return str(
-            self.agent_class_ceilings.get(
-                base_kind, self.maximum_scope_for(base_kind)) or ""
-        )
 
     def available_to(self, base_kind: str) -> bool:
         base_kind = str(base_kind or "").strip()
@@ -681,7 +669,7 @@ def evaluate_capability_acl(
             if not definition.authorable_by_agent_class(base_kind):
                 continue
             effective[capability_id] = (
-                definition.maximum_agent_class_scope_for(base_kind)
+                definition.maximum_scope_for(base_kind)
                 if definition.scoped
                 else None
             )
@@ -752,7 +740,7 @@ def evaluate_capability_acl(
                 raise AuthorityValidationError(
                     f"scope {scope} is not supported by {capability_id}"
                 )
-            ceiling = definition.maximum_agent_class_scope_for(base_kind)
+            ceiling = definition.maximum_scope_for(base_kind)
             if scope and not scope_includes(ceiling, scope):
                 raise AuthorityValidationError(
                     f"scope {scope} exceeds the {base_kind} ceiling "

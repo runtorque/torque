@@ -6,7 +6,10 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from .agent_classes import has_frozen_platform_task_authority_mode
+from .agent_classes import (
+    has_frozen_platform_group_board_authority,
+    has_frozen_platform_task_authority_mode,
+)
 from .mcp_authority import SCOPE_RANK
 from .mcp_canonical import (
     canonical_tool_name,
@@ -611,24 +614,6 @@ def _tool_argument_scope_denied(
                 if target is not None
                 else ""
             )
-            # The catalog permits Product Manager's trusted frozen full-board
-            # extension to select group task mutation scope. Preserve the
-            # historical self/children transport ceiling for every other
-            # Architect class; their handler-level ownership rules are not a
-            # substitute for this non-disclosure gate.
-            if (
-                    str(getattr(caller_cell, "kind", "") or "").strip()
-                    == "architect"
-                    and requirement.target_kind in {"task", "agent"}
-                    and requirement.capability in {
-                        "task.update", "task.reassign", "task.move",
-                        "task.mark_covered", "task.verify", "task.report",
-                    }
-                    and target_scope == "group"
-                    and not has_frozen_platform_task_authority_mode(
-                        caller_cell, "group-board-authority")
-            ):
-                target_scope = "global"
             # Exact canonical calls that are actually projected must not leak
             # whether a declared target exists. A nonempty unresolved target
             # therefore receives the same pre-handler refusal as a resolved

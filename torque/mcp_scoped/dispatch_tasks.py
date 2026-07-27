@@ -1,6 +1,9 @@
 """Domain dispatcher extracted from :mod:`torque.mcp_tools_shared`."""
 
-from torque.agent_classes import has_frozen_platform_task_authority_mode
+from torque.agent_classes import (
+    has_frozen_platform_group_board_authority,
+    has_frozen_platform_task_authority_mode,
+)
 from torque.mcp_scoped.dispatch_context import ScopedDispatchContext, UNHANDLED
 from torque.mcp_scoped.dispatch_runtime import *  # noqa: F403
 
@@ -24,8 +27,7 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
     )
     is_group_board_authority_mode = (
         caller_kind == "architect"
-        and has_frozen_platform_task_authority_mode(
-            _engineer_cell, "group-board-authority")
+        and has_frozen_platform_group_board_authority(_engineer_cell)
     )
 
     def group_task_allowed(task) -> bool:
@@ -550,7 +552,11 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         caller_id_str = str(caller_id or "").strip()
         if is_group_board_authority_mode and not group_task_allowed(task):
             return "Authorization denied: task is outside Product Manager group scope", True
-        if is_creator_proposal_mode and not creator_task_allowed(task):
+        if (
+                is_creator_proposal_mode
+                and not is_group_board_authority_mode
+                and not creator_task_allowed(task)
+        ):
             return "Authorization denied: task is outside Product Manager creator/self scope", True
         if caller_kind == "engineer":
             if not real_state.engineer_can_access_task(
@@ -648,7 +654,11 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         task = real_state.board_tasks.get(tid)
         if is_group_board_authority_mode and not group_task_allowed(task):
             return "Authorization denied: task is outside Product Manager group scope", True
-        if is_creator_proposal_mode and not creator_task_allowed(task):
+        if (
+                is_creator_proposal_mode
+                and not is_group_board_authority_mode
+                and not creator_task_allowed(task)
+        ):
             return "Authorization denied: task is outside Product Manager creator/self scope", True
         actor_name = getattr(_engineer_cell, "name", "") or caller_kind
         payload = {
@@ -699,7 +709,11 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
             return "Task not found", True
         if is_group_board_authority_mode and not group_task_allowed(task):
             return "Authorization denied: task is outside Product Manager group scope", True
-        if is_creator_proposal_mode and not creator_task_allowed(task):
+        if (
+                is_creator_proposal_mode
+                and not is_group_board_authority_mode
+                and not creator_task_allowed(task)
+        ):
             return "Authorization denied: task is outside Product Manager creator/self scope", True
         requested_new_lane = str(args.get("new_lane", "") or "").strip()
         requested_lane = str(args.get("lane", "") or "").strip()

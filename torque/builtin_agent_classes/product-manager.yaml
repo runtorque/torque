@@ -52,7 +52,8 @@ metadata:
   permanence_state: dogfood_permanent
   approval_decision_id: decision-16bd0bf619cf
   trusted_assignment: user_only_v1
-  task_authority_mode: group-board-authority
+  task_authority_mode: creator-proposal-only
+  group_board_authority: true
   external_connector_governance: not_enforced_wave_7
 acl:
   mode: allow

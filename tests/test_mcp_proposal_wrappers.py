@@ -185,13 +185,108 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_pm_class_projects_every_tool_with_matching_capabilities(self):
         self.assertEqual(self.architect.effective_agent_class_id, "product-manager")
+        # The persisted snapshot stays at legacy catalog scopes and must
+        # rehydrate cleanly before the live trusted-registry extension adds
+        # Product Manager's group board authority for projection/enforcement.
+        persisted = self.architect.effective_agent_class_snapshot["effective_authority"]
+        restored = self.mcp_mod.effective_authority_from_snapshot(
+            persisted, capabilities=self.mcp_mod.CAPABILITY_CATALOG,
+        )
+        runtime = self.mcp_mod._effective_class_authority_for_cell(self.architect)
+        for capability in (
+                "task.update", "task.move", "task.mark_covered", "task.verify",
+                "task.reassign", "task.report"):
+            self.assertNotEqual("group", restored.capabilities[capability])
+            self.assertEqual("group", runtime.capabilities[capability])
+        self.assertEqual("self", runtime.capabilities["task.dispatch"])
+        invalid_snapshot = copy.deepcopy(persisted)
+        invalid_snapshot["capabilities"]["task.move"] = "group"
+        with self.assertRaises(self.mcp_mod.AuthorityValidationError):
+            self.mcp_mod.effective_authority_from_snapshot(
+                invalid_snapshot, capabilities=self.mcp_mod.CAPABILITY_CATALOG,
+            )
+        original_snapshot = self.architect.effective_agent_class_snapshot
+        self.architect.effective_agent_class_snapshot = dict(original_snapshot)
+        self.architect.effective_agent_class_snapshot["effective_authority"] = invalid_snapshot
+        self.assertEqual(
+            {}, self.mcp_mod._effective_class_authority_for_cell(
+                self.architect).capabilities,
+        )
+        self.architect.effective_agent_class_snapshot = original_snapshot
+        self.assertNotIn(
+            "effective_agent_class_platform_authority",
+            self.architect.effective_agent_class_snapshot,
+        )
+        self.assertNotIn(
+            "effective_agent_class_platform_authority",
+            self.db_mod._AGENT_PERSISTED_COLS,
+        )
+        # Daemon restart restoration recreates the ephemeral pin before a
+        # persisted stopped cell can serve its next MCP request.  The normal
+        # snapshot is intentionally still a frozen v5 authority here while
+        # the loaded built-in registry is v6: the six-scope platform union is
+        # version-independent and never changes the ordinary frozen snapshot.
+        frozen_version = self.architect.effective_agent_class_version
+        frozen_snapshot = self.architect.effective_agent_class_snapshot
+        legacy_snapshot = copy.deepcopy(frozen_snapshot)
+        legacy_snapshot["version"] = "5"
+        self.architect.effective_agent_class_version = "5"
+        self.architect.effective_agent_class_snapshot = legacy_snapshot
+        self.state._db_save_agent(self.architect)
+        restored_state = self.state_mod.MatrixState(db=self.db)
+        restored_state.load()
+        restored_cell = restored_state.agents[self.architect.id]
+        self.assertEqual("5", restored_cell.effective_agent_class_version)
+        self.assertEqual("5", restored_cell.effective_agent_class_snapshot["version"])
+        self.assertTrue(
+            restored_cell.effective_agent_class_platform_authority[
+                "group_board_authority"
+            ]
+        )
+        restored_runtime = self.mcp_mod._effective_class_authority_for_cell(
+            restored_cell,
+        )
+        self.assertEqual("group", restored_runtime.capabilities["task.move"])
+        self.assertEqual("self", restored_runtime.capabilities["task.dispatch"])
+        self.architect.effective_agent_class_version = frozen_version
+        self.architect.effective_agent_class_snapshot = frozen_snapshot
+        self.state._db_save_agent(self.architect)
+        class_path = Path(self.mcp_mod.__file__).resolve().parent / "builtin_agent_classes" / "product-manager.yaml"
+        original_class_text = class_path.read_text(encoding="utf-8")
+        agent_classes_mod = importlib.import_module("torque.agent_classes")
+        try:
+            class_path.write_text(
+                original_class_text.replace("group_board_authority: true", "group_board_authority: false"),
+                encoding="utf-8",
+            )
+            # Existing session remains frozen despite on-disk mutation.
+            unchanged_runtime = self.mcp_mod._effective_class_authority_for_cell(self.architect)
+            self.assertEqual("group", unchanged_runtime.capabilities["task.move"])
+            # Relaunch reruns registry resolution and observes the changed file.
+            agent_classes_mod._valid_class_lookup.cache_clear()
+            self.state.apply_effective_agent_class_for_launch(
+                self.architect, base_dir=self.tmp.name,
+            )
+            relaunched_runtime = self.mcp_mod._effective_class_authority_for_cell(self.architect)
+            self.assertEqual("self", relaunched_runtime.capabilities["task.move"])
+        finally:
+            class_path.write_text(original_class_text, encoding="utf-8")
+            agent_classes_mod._valid_class_lookup.cache_clear()
+            self.state.apply_effective_agent_class_for_launch(
+                self.architect, base_dir=self.tmp.name,
+            )
+        self.assertEqual(
+            "group",
+            self.mcp_mod._effective_class_authority_for_cell(
+                self.architect).capabilities["task.move"],
+        )
         tool_names = await self._list_tools()
 
         expected_task_surface = {
             "task_list", "task_get", "task_chain", "task_create",
             "task_claim", "task_update", "task_move", "task_mark_covered",
             "task_coverage_reconcile", "task_artifact_upload", "task_verify",
-            "task_reassign", "task_derive", "task_progress",
+            "task_reassign", "task_dispatch", "task_derive", "task_progress",
             "task_complete", "task_blocked", "task_error",
         }
         self.assertTrue(expected_task_surface <= tool_names)
@@ -231,7 +326,6 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             "architect_engineer_reply",
             "architect_decision_create",
             "architect_decision_update",
-            "task_dispatch",
         }
         self.assertFalse(denied & tool_names)
 
