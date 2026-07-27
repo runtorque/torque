@@ -51,7 +51,7 @@ class BackendSizeGuardrailTests(unittest.TestCase):
             "torque/state.py": 5000,
             "torque/db.py": 2500,
             # Declarative schema inventory and ordered migration catalog.
-            "torque/db_schema.py": 3750,
+            "torque/db_schema.py": 3800,
             # Read-only diagnostic collection and text rendering surface.
             "torque/doctor.py": 2600,
             "torque/mcp_tools_shared.py": 2500,

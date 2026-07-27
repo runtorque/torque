@@ -15,7 +15,7 @@ import json
 import sqlite3
 from typing import Callable, Iterable
 
-SCHEMA_VERSION = "24"
+SCHEMA_VERSION = "25"
 
 
 @dataclass(frozen=True)
