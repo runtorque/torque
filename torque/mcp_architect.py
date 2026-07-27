@@ -813,10 +813,11 @@ _ARCHITECT_TOOL_SPECS = [
     {
         "name": "architect_task_coverage_reconcile", "authority": {"requirements": [{"capability": "task.mark_covered", "minimum_scope": "self", "target_argument": "task_ids", "target_kind": "task", "handler_scoped": True}]},
         "description": (
-            "Recognized strict task-coverage reconciliation operation. It is "
-            "not yet enabled: TORQUE:1228 will activate the bounded "
-            "reconciliation implementation. This provisional route performs "
-            "no board or state mutation."
+            "NOT YET AVAILABLE: recognized strict task-coverage reconciliation "
+            "operation. It activates only after TORQUE:1228 is merged and "
+            "this caller session is relaunched, because tool projection and "
+            "authority are frozen for the session. This provisional route "
+            "performs no board or state mutation."
         ),
         "inputSchema": {
             "type": "object",

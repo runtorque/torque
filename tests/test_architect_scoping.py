@@ -4074,6 +4074,87 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.state.board_tasks[root.id].lane, "In Progress")
         self.assertEqual(self.state.board_tasks[root.id].completion_evidence, {})
 
+    async def test_task_coverage_reconcile_distinguishes_unknown_denied_and_unavailable(self):
+        """The provisional path is recognized, inert, and not an ACL denial."""
+        architect = self._add_architect("arch-reconcile", "Reconcile Architect")
+        engineer = self._add_engineer("eng-reconcile", "Reconcile Engineer")
+        baseline_task_ids = set(self.state.board_tasks)
+
+        unavailable_text, unavailable_error = await self._call(
+            "architect_task_coverage_reconcile",
+            {"task_ids": ["TORQUE:not-resolved"], "apply": True},
+            architect.id,
+        )
+        unavailable = json.loads(unavailable_text)
+        self.assertTrue(unavailable_error)
+        self.assertEqual(unavailable["type"], "tool_unavailable")
+        self.assertEqual(unavailable["status"], "recognized_but_not_yet_available")
+        self.assertEqual(unavailable["activation_task"], "TORQUE:1228")
+        self.assertEqual(
+            unavailable["activation_conditions"],
+            ["TORQUE:1228 is merged", "the caller session is relaunched"],
+        )
+        for fragment in (
+            "NOT YET AVAILABLE",
+            "TORQUE:1228 is merged",
+            "caller session is relaunched",
+        ):
+            self.assertIn(fragment, unavailable["message"])
+        # A merge-only promise would leave frozen existing sessions misled.
+        self.assertNotIn("TORQUE:1228 will activate", unavailable["message"])
+        self.assertEqual(self.handle_calls, [])
+        self.assertEqual(set(self.state.board_tasks), baseline_task_ids)
+
+        engineer_text, engineer_error = await self._call_engineer(
+            "engineer_task_coverage_reconcile",
+            {"task_ids": ["TORQUE:not-resolved"]},
+            engineer.id,
+        )
+        self.assertTrue(engineer_error)
+        self.assertEqual(json.loads(engineer_text), unavailable)
+        self.assertEqual(self.handle_calls, [])
+
+        # Keep all three outcomes in one matrix. The worker context is not
+        # entitled to this recognized operation, while an unregistered name
+        # remains genuinely unknown.
+        unknown_text, unknown_error = await self._call(
+            "architect_not_a_tool", {}, architect.id,
+        )
+        from torque.mcp_scoped.dispatch_context import ScopedDispatchContext
+        from torque.mcp_scoped.dispatch_tasks import dispatch_tasks
+
+        async def unexpected_command(_payload):
+            self.fail("recognized unavailable/denied route must not call commands")
+
+        denied_text, denied_error = await dispatch_tasks(ScopedDispatchContext(
+            name="worker_task_coverage_reconcile",
+            args={"task_ids": ["TORQUE:not-resolved"]},
+            handle_command=unexpected_command,
+            state=self.state,
+            real_state=self.state,
+            tool_prefix="worker_",
+            caller_kind="worker",
+            caller_id="worker-untrusted",
+            idempotency_key="",
+            caller_cell=None,
+            caller_group="torque",
+        ))
+        outcomes = {
+            "unknown": (unknown_text, unknown_error),
+            "known_but_unauthorized": (denied_text, denied_error),
+            "known_authorized_but_unavailable": (unavailable_text, unavailable_error),
+        }
+        self.assertTrue(all(is_error for _text, is_error in outcomes.values()))
+        self.assertIn("Unknown architect tool", outcomes["unknown"][0])
+        self.assertIn("Authorization denied", outcomes["known_but_unauthorized"][0])
+        self.assertEqual(
+            json.loads(outcomes["known_authorized_but_unavailable"][0])["status"],
+            "recognized_but_not_yet_available",
+        )
+        self.assertEqual(
+            len({text for text, _is_error in outcomes.values()}), 3,
+        )
+
     async def test_proposal_root_backlog_hygiene_dry_run_and_apply_preserves_evidence(self):
         pm = self._add_architect("pm-hygiene", "Blueprint")
         torqly = self._add_architect("arch-hygiene", "Torqly")
@@ -4158,6 +4239,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             apply=False,
         )
 
+        self.assertNotEqual(dry_run.get("status"), "recognized_but_not_yet_available")
         self.assertEqual(dry_run["inventory_count"], 2)
         self.assertEqual(dry_run["eligible_count"], 1)
         self.assertEqual(dry_run["ineligible_count"], 1)

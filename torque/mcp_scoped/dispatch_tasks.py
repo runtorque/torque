@@ -366,9 +366,15 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
             "tool": "task_coverage_reconcile",
             "status": "recognized_but_not_yet_available",
             "activation_task": "TORQUE:1228",
+            "activation_conditions": [
+                "TORQUE:1228 is merged",
+                "the caller session is relaunched",
+            ],
             "message": (
-                "This tool exists but is not yet enabled. TORQUE:1228 will "
-                "activate strict task-coverage reconciliation."
+                "This tool exists but is NOT YET AVAILABLE. It activates only "
+                "after TORQUE:1228 is merged and this caller session is "
+                "relaunched; tool projection and authority are frozen for the "
+                "session."
             ),
         }, separators=(",", ":")), True
 
