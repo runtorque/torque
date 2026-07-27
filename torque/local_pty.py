@@ -397,6 +397,19 @@ class LocalPtyAdapter:
         if cell:
             self._mark_codex_turn_submitted(cell, session, clear_screen=True)
 
+    async def interrupt_active_turn(self, session_id: str) -> bool:
+        """Ask the verified provider adapter to interrupt its active turn."""
+        session = self._sessions.get(session_id)
+        if not session or session.closed:
+            return False
+        cell = self.state.agents.get(session.cell_id)
+        adapter = get_adapter(cell.agent_type) if cell and cell.agent_type else None
+        interrupt_key = adapter.get_interrupt_key() if adapter else None
+        if not interrupt_key:
+            return False
+        await self.write_input(session_id, interrupt_key)
+        return True
+
     async def write_input(self, session_id: str, data: str) -> None:
         session = self._sessions.get(session_id)
         if not session or session.closed:

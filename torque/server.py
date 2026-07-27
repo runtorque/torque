@@ -2111,6 +2111,66 @@ async def _handle_user_agent_message_command(data, state: MatrixState,
     return _direct_message_delivery_response(delivered or saved)
 
 
+async def _handle_user_agent_turn_cancel_command(data, state: MatrixState,
+                                                  send_prompt) -> dict:
+    """Bounded operator cancellation for one durable, user-originated DM."""
+    target_id = _resolve_agent_id(state, str(data.get("agent_id") or "").strip())
+    target = state.get_active_agent(target_id) if target_id else None
+    if not target or getattr(target, "cell_type", "") != "agent":
+        return {"type": "error", "message": "Agent is no longer available"}
+    session_id = str(data.get("session_id") or "").strip()
+    source_key = str(data.get("turn_idempotency_key") or "").strip()
+    cancel_key = _user_agent_message_idempotency_key(data)
+    message_id = _user_direct_message_id_from_idempotency_key(source_key)
+    if not session_id or not message_id or not cancel_key:
+        return {"type": "error", "message": "A current submitted message is required"}
+    source = state.db.load_direct_message(message_id) if getattr(state, "db", None) else None
+    if not source or (
+            str(source.get("sender_kind", "")) != "user"
+            or str(source.get("recipient_id", "")) != target.id
+            or str(source.get("idempotency_key", "")) != source_key
+            or str(source.get("message_type", "")) not in {"message", "slash_command"}):
+        return {"type": "error", "message": "That submitted message is not cancellable"}
+    audit_id = _user_direct_message_id_from_idempotency_key(cancel_key)
+    existing = state.db.load_direct_message(audit_id)
+    if existing:
+        snapshot = existing.get("context_snapshot", {}) or {}
+        if (str(existing.get("sender_kind", "")) != "system"
+                or str(snapshot.get("cancelled_message_id", "")) != message_id
+                or str(snapshot.get("cancel_session_id", "")) != session_id):
+            return {"type": "error", "message": "Cancellation retry key conflicts"}
+        return {"type": "ok", "outcome": snapshot.get("cancel_outcome", "no_active_turn"),
+                "message_id": audit_id, "deduped": True}
+    cancel = getattr(send_prompt, "cancel_user_direct_turn", None)
+    if not callable(cancel):
+        outcome = "unsupported_provider"
+    else:
+        result = await cancel(target, message_id=message_id, session_id=session_id)
+        outcome = str((result or {}).get("outcome", "interrupt_failed"))
+    labels = {
+        "cancelled_queued": "Cancelled the queued user message before provider delivery.",
+        "interrupted": "Interrupted the active user message turn.",
+        "unsupported_provider": "This provider cannot safely interrupt the active turn.",
+        "session_replaced": "The target session changed; no turn was interrupted.",
+        "no_active_turn": "No active turn remains for that submitted message.",
+        "interrupt_failed": "Could not interrupt the active turn; it was left unchanged.",
+    }
+    if outcome == "cancelled_queued":
+        state.update_direct_message_delivery(message_id, "cancelled",
+                                             reason="cancelled_by_user", emit=True)
+    audit = _save_user_agent_system_audit_message(
+        state, target, labels.get(outcome, labels["interrupt_failed"]),
+        message_id=audit_id, idempotency_key=cancel_key,
+        context_snapshot={"cancelled_message_id": message_id,
+                          "cancel_session_id": session_id,
+                          "cancel_outcome": outcome},
+    )
+    if not audit:
+        return {"type": "error", "message": "Failed to record cancellation outcome"}
+    return {"type": "ok", "outcome": outcome, "message_id": audit_id,
+            "deduped": False}
+
+
 async def _deliver_engineer_reply_and_resume(state: MatrixState, engineer, *,
                                            group: str,
                                            answer: str,
@@ -2853,6 +2913,7 @@ def _build_agent_operation_runtime(
             _handle_set_engineer_specializations_command
         ),
         handle_user_agent_message_command=_handle_user_agent_message_command,
+        handle_user_agent_turn_cancel_command=_handle_user_agent_turn_cancel_command,
         is_designated_engineer=is_designated_engineer,
         new_agent_prompt_sequence=_new_agent_prompt_sequence,
         normalize_engineer_specialization_selection=(
@@ -4312,7 +4373,8 @@ async def main(connection=None):
                                  persist: bool = False,
                                  background: bool = False,
                                  prime_input_ready: bool = False,
-                                 settled_submit: bool = False):
+                                 settled_submit: bool = False,
+                                 user_direct_message_id: str = ""):
         return await agent_launch.send_agent_prompt(
             cell,
             prompt,
@@ -4321,7 +4383,10 @@ async def main(connection=None):
             background=background,
             prime_input_ready=prime_input_ready,
             settled_submit=settled_submit,
+            user_direct_message_id=user_direct_message_id,
         )
+
+    _send_agent_prompt.cancel_user_direct_turn = agent_launch.cancel_user_direct_turn
 
     async def _restart_agent_session(command: dict) -> dict | None:
         return await _handle_restart_agent_command(

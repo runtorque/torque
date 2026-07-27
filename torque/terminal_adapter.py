@@ -92,6 +92,10 @@ class TerminalAdapter(Protocol):
         """Send text/keystrokes to a terminal session."""
         ...
 
+    async def interrupt_active_turn(self, session_id: str) -> bool:
+        """Interrupt the active provider turn when the adapter supports it."""
+        ...
+
     async def write_input(self, session_id: str, data: str) -> None:
         """Write raw terminal input bytes without submit handling."""
         ...
