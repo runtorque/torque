@@ -298,6 +298,8 @@ from .server_agent_operations import (
     _handle_pending_hire_list_command,
 )
 
+from .server_ai_runtime import initialize_ai_runtime
+from .server_event_ingest_runtime import initialize_event_ingest_runtime
 from .server_ai_settings import (
     _REDACTED_SECRET_VALUE,
     _redact_command_log_value,
@@ -3231,62 +3233,15 @@ async def main(connection=None):
     state = MatrixState(db=db)
     state.load()
     db.enable_async_writes(True)
-    embedding_service = LocalEmbeddingService(data_dir=DATA_DIR)
-    ai_index_service = AIIndexService(
+    ai_runtime = initialize_ai_runtime(
         db=db,
         state=state,
-        embedding_service=embedding_service,
         data_dir=DATA_DIR,
         broadcast_callback=state.broadcast,
     )
-    ai_summary_service = AISummaryService(
-        db=db,
-        state=state,
-    )
-    state.ai_embedding_service = embedding_service
-    state.ai_index_service = ai_index_service
-    state.ai_summary_service = ai_summary_service
-    if bool(getattr(state.global_settings, "ai_enabled", False)):
-        try:
-            asyncio.get_running_loop().call_later(
-                3.0,
-                ai_index_service.schedule_incremental,
-                "startup",
-            )
-            if bool(getattr(state.global_settings, "ai_boot_summary_enabled", True)):
-                asyncio.get_running_loop().call_later(
-                    3.0,
-                    ai_summary_service.schedule_all_boot_summaries,
-                    "startup",
-                )
-        except Exception:
-            log.exception("Failed to schedule startup AI jobs")
-    ai_index_delta_ops = {
-        "architect_journal_append",
-        "journal_append",
-        "decision_upsert",
-        "decision_remove",
-        "task_upsert",
-        "task_remove",
-        "agent_peer_thread_upsert",
-        "agent_peer_thread_remove",
-    }
-
-    def _schedule_ai_index_from_delta(delta: dict) -> None:
-        op = str((delta or {}).get("op", "") or "")
-        ai_index_service.schedule_incremental(op)
-        if op in {
-            "architect_journal_append",
-            "journal_append",
-            "decision_upsert",
-            "decision_remove",
-        }:
-            ai_summary_service.schedule_for_delta(delta)
-
-    state.register_delta_observer(
-        _schedule_ai_index_from_delta,
-        ops=ai_index_delta_ops,
-    )
+    embedding_service = ai_runtime.embedding_service
+    ai_index_service = ai_runtime.index_service
+    ai_summary_service = ai_runtime.summary_service
     capture_deploy_boot_state(state, torque_config.SCRIPT_DIR)
     log.info("State loaded: %d agents, %d groups",
              len(state.agents), len(state.groups))
@@ -3331,42 +3286,20 @@ async def main(connection=None):
     except Exception:
         log.exception("Orphaned-sidecar reap at startup failed (non-fatal)")
 
-    from .event_ingest_client import EventIngestClient
-
-    event_ingest_client = EventIngestClient(data_dir=DATA_DIR)
-    event_ingest_configured = [False]
-    try:
-        await event_ingest_client.connect()
-        await _configure_event_ingest_client(event_ingest_client, state)
-        event_ingest_configured[0] = True
-        log.info("Event ingest daemon connected at %s",
-                 event_ingest_client.socket_path)
-    except Exception:
-        # Keep startup alive; endpoint appends and the drainer both retry via
-        # ensure_running on demand. If append still cannot persist an event,
-        # /events returns 503 instead of pretending the event is safe.
-        log.exception("Event ingest daemon unavailable at startup")
-    event_ingest_drainer = EventIngestDrainer(
-        event_ingest_client,
-        event_bus,
-        state,
+    event_ingest_runtime = await initialize_event_ingest_runtime(
+        data_dir=DATA_DIR,
+        event_bus=event_bus,
+        state=state,
         daemon_identity=owner.label,
+        configure_client=_configure_event_ingest_client,
     )
+    event_ingest_client = event_ingest_runtime.client
+    event_ingest_configured = event_ingest_runtime.configured
+    event_ingest_drainer = event_ingest_runtime.drainer
+    _ensure_event_ingest_configured = event_ingest_runtime.ensure_configured
     perceived_empty_detector = PerceivedEmptyDetector()
     log.info("Event bus, event-ingest client, health monitor, "
              "and notifications initialized")
-
-    async def _ensure_event_ingest_configured():
-        if event_ingest_configured[0]:
-            return
-        await _configure_event_ingest_client(event_ingest_client, state)
-        event_ingest_configured[0] = True
-
-    async def _on_event_ingest_reconnect(_info):
-        event_ingest_configured[0] = False
-        await _ensure_event_ingest_configured()
-
-    event_ingest_client.on_reconnect = _on_event_ingest_reconnect
 
     supervisor_banner: dict | None = None
     from .local_pty import LocalPtyAdapter, SupervisedPtyAdapter
