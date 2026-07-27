@@ -390,20 +390,54 @@ class AgentClassRegistryTests(unittest.TestCase):
             acl={"mode": "deny", "rules": []},
             capabilities=CAPABILITY_CATALOG,
         )
-        self.assertEqual("self", bare_deny.capabilities["task.update"])
-        self.assertEqual("children", bare_deny.capabilities["task.reassign"])
-        with self.assertRaisesRegex(ValueError, "exceeds the architect ceiling"):
+        probes = (*capabilities, "task.dispatch")
+        baseline = {capability: bare_deny.capabilities.get(capability)
+                    for capability in probes}
+        self.assertEqual({
+            "task.update": "self", "task.move": "self",
+            "task.mark_covered": "self", "task.verify": "self",
+            "task.reassign": "children", "task.report": "self",
+            "task.dispatch": None,
+        }, baseline)
+        # Keep each reason explicit: these prove the catalog remains the
+        # custom-class authoring ceiling, while the PM union is platform-only.
+        expected_group_refusals = {
+            "task.update": "scope group exceeds the architect ceiling self for task.update",
+            "task.move": "scope group exceeds the architect ceiling self for task.move",
+            "task.mark_covered": "scope group exceeds the architect ceiling self for task.mark_covered",
+            "task.verify": "scope group exceeds the architect ceiling self for task.verify",
+            "task.reassign": "scope group exceeds the architect ceiling children for task.reassign",
+            "task.report": "scope group is not supported by task.report",
+        }
+        for capability, expected_refusal in expected_group_refusals.items():
+            with self.assertRaisesRegex(ValueError, expected_refusal):
+                compile_agent_class_acl(
+                    base_kind="architect",
+                    acl={"mode": "allow", "rules": [
+                        {"capability": capability, "scope": "group"},
+                    ]},
+                    capabilities=CAPABILITY_CATALOG,
+                )
+            self.assertEqual(
+                baseline,
+                {candidate: bare_deny.capabilities.get(candidate)
+                 for candidate in probes},
+            )
+        with self.assertRaisesRegex(
+                ValueError,
+                "capability task.dispatch is outside the architect Agent Class ceiling",
+        ):
             compile_agent_class_acl(
                 base_kind="architect",
-                acl={
-                    "mode": "allow",
-                    "rules": [
-                        {"capability": capability, "scope": "group"}
-                        for capability in capabilities
-                    ],
-                },
+                acl={"mode": "allow", "rules": [
+                    {"capability": "task.dispatch", "scope": "self"},
+                ]},
                 capabilities=CAPABILITY_CATALOG,
             )
+        self.assertEqual(
+            baseline,
+            {candidate: bare_deny.capabilities.get(candidate) for candidate in probes},
+        )
 
     def test_invalid_config_rejects_raw_tools_terminal_profile_confusion_and_bad_draft(self):
         _definition, issues = validate_class_data(
