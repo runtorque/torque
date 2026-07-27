@@ -3581,16 +3581,17 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         registry = importlib.import_module('torque.commands.user_dm')
         catalog = registry.user_dm_command_catalog()
         self.assertEqual([item['id'] for item in catalog], [
-            'compact', 'fast', 'restart', 'loop', 'loop-cancel', 'remind', 'reminders', 'watch', 'watches', 'unwatch', 'status', 'commands',
+            'compact', 'fast', 'restart', 'loop', 'loop-cancel', 'remind', 'reminders', 'remind-cancel', 'watch', 'watches', 'unwatch', 'status', 'commands',
         ])
         self.assertEqual(next(item for item in catalog if item['id'] == 'fast')['providers'], ['codex'])
         self.assertEqual([item['id'] for item in registry.user_dm_command_catalog(provider='codex')], [
-            'compact', 'fast', 'restart', 'loop', 'loop-cancel', 'remind', 'reminders', 'watch', 'watches', 'unwatch', 'status', 'commands',
+            'compact', 'fast', 'restart', 'loop', 'loop-cancel', 'remind', 'reminders', 'remind-cancel', 'watch', 'watches', 'unwatch', 'status', 'commands',
         ])
         self.assertNotIn('fast', [item['id'] for item in registry.user_dm_command_catalog(provider='claude-code')])
         self.assertEqual(registry.parse_user_dm_command(' /status ').id, 'status')
         self.assertEqual(registry.parse_user_dm_command('/loop every 1m hi').id, 'loop')
         self.assertEqual(registry.parse_user_dm_command('/loop cancel').id, 'loop-cancel')
+        self.assertEqual(registry.parse_user_dm_command('/remind cancel').id, 'remind-cancel')
         self.assertEqual(registry.parse_user_dm_command(' /fast ').id, 'fast')
         self.assertIsNone(registry.parse_user_dm_command('/fast please'))
         self.assertIsNone(registry.parse_user_dm_command('/FAST'))

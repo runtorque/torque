@@ -120,6 +120,18 @@ USER_DM_COMMANDS: tuple[UserDMCommand, ...] = (
         search="reminders active list one shot /reminders",
     ),
     UserDMCommand(
+        id="remind-cancel",
+        label="/remind cancel <reminder-id|all>",
+        usage="/remind cancel rem-abc123 or /remind cancel all",
+        insert="/remind cancel ",
+        help="Cancel one active one-shot reminder or all of your active reminders.",
+        aliases=("/remind cancel",),
+        grammar="/remind cancel <reminder-id|all>",
+        execution_mode="local_reminder",
+        safety="requester_scoped_no_prompt",
+        search="remind cancel reminder id all stop one shot /remind cancel",
+    ),
+    UserDMCommand(
         id="watch",
         label="/watch <task-id> [<task-id> ...]",
         usage="/watch TORQUE:123 TORQUE:124",
