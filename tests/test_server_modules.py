@@ -3547,7 +3547,167 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         commands_row = self.db.load_direct_message(commands['message_id'])
         self.assertIn('/compact', commands_row['message'])
         self.assertIn('/status', commands_row['message'])
+        self.assertIn('/usage', commands_row['message'])
         self.assertIn('/commands', commands_row['message'])
+
+    async def test_user_dm_usage_is_exact_targeted_and_read_only(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id='agent-1', name='Worker', group='g', cell_type='agent',
+            kind='worker', session_id='session-1', status='idle',
+            context_window={
+                'source': 'codex_transcript', 'model': 'gpt-5.4',
+                'session_id': 'session-secret', 'reasoning_output_tokens': 999,
+                'used_tokens': 147732, 'limit_tokens': 258400,
+            },
+            provider_usage={
+                'five_hour': {
+                    'available': True, 'used_percentage': 0,
+                    'resets_at': '2030-01-02T03:04:05Z',
+                },
+                'seven_day': {
+                    'available': True, 'used_percentage': 42,
+                    'resets_at': '2030-01-08T03:04:05Z',
+                },
+            },
+        )
+        other = self.state_mod.AgentCell(
+            id='agent-2', name='Other', group='g', cell_type='agent',
+            kind='worker', session_id='session-2', status='running',
+            context_window={'used_tokens': 1, 'limit_tokens': 2},
+            provider_usage={'five_hour': {'available': True, 'used_percentage': 99,
+                                           'resets_at': '2030-01-02T03:04:05Z'}},
+        )
+        state.agents[worker.id] = worker
+        state.agents[other.id] = other
+        state.groups['g'] = [worker.id, other.id]
+        sent = []
+
+        async def fake_send_prompt(*args, **kwargs):
+            sent.append((args, kwargs))
+
+        before = (
+            worker.status, worker.activity, worker.last_progress_at,
+            dict(worker.context_window), dict(worker.provider_usage),
+            other.status, dict(other.context_window), dict(other.provider_usage),
+        )
+        result = await self.server_mod._handle_user_agent_message_command(
+            {'agent_id': worker.id, 'message': '  /usage  ',
+             'idempotency_key': 'usage-idempotency'}, state, fake_send_prompt,
+        )
+        repeated = await self.server_mod._handle_user_agent_message_command(
+            {'agent_id': worker.id, 'message': '/usage',
+             'idempotency_key': 'usage-idempotency'}, state, fake_send_prompt,
+        )
+
+        self.assertEqual(result['type'], 'ok')
+        self.assertFalse(result['deduped'])
+        self.assertTrue(repeated['deduped'])
+        self.assertEqual(result['message_id'], repeated['message_id'])
+        self.assertEqual(sent, [])
+        self.assertEqual(before, (
+            worker.status, worker.activity, worker.last_progress_at,
+            dict(worker.context_window), dict(worker.provider_usage),
+            other.status, dict(other.context_window), dict(other.provider_usage),
+        ))
+        row = self.db.load_direct_message(result['message_id'])
+        self.assertEqual(row['sender_kind'], 'system')
+        self.assertEqual(row['recipient_id'], worker.id)
+        self.assertEqual(row['context_snapshot'], {
+            'slash_command': 'usage', 'command_response': 'usage',
+        })
+        self.assertIn('Agent usage', row['message'])
+        self.assertIn('147,732', row['message'])
+        self.assertIn('258,400', row['message'])
+        self.assertIn('57.17% used', row['message'])
+        self.assertIn('codex_transcript · gpt-5.4', row['message'])
+        self.assertIn('Provider 5-hour: `0%` used', row['message'])
+        self.assertIn('Provider 7-day: `42%` used', row['message'])
+        self.assertNotIn('session-secret', row['message'])
+        self.assertNotIn('999', row['message'])
+        self.assertNotIn('99%', row['message'])
+        self.assertEqual(len(state.direct_messages_by_agent[worker.id]), 1)
+        self.assertNotIn(other.id, state.direct_messages_by_agent)
+
+    def test_user_dm_usage_formatting_is_bounded_and_truthful(self):
+        communication = importlib.import_module('torque.server_communication')
+        now = 1_700_000_000.0
+        future = '2023-11-14T23:13:20Z'
+
+        complete = types.SimpleNamespace(
+            context_window={
+                'source': 'claude_statusline', 'model': 'claude-sonnet-4-6',
+                'used_tokens': 50, 'limit_tokens': 200,
+            },
+            provider_usage={
+                'five_hour': {'available': True, 'used_percentage': 12,
+                              'resets_at': future},
+                'seven_day': {'available': True, 'used_percentage': 100,
+                              'resets_at': future},
+            },
+        )
+        output = communication._user_dm_usage_message(complete, now=now)
+        self.assertIn('50` / `200', output)
+        self.assertIn('25.00% used', output)
+        self.assertIn('claude_statusline · claude-sonnet-4-6', output)
+        self.assertIn('2023-11-14 23:13 UTC (in 1h)', output)
+
+        context_only = types.SimpleNamespace(
+            context_window={'used_tokens': 0, 'limit_tokens': 100,
+                            'source': 'unsafe source', 'model': 'model`secret'},
+            provider_usage=None,
+        )
+        output = communication._user_dm_usage_message(context_only, now=now)
+        self.assertIn('0` / `100', output)
+        self.assertIn('0.00% used', output)
+        self.assertIn('Provider 5-hour: Not reported', output)
+        self.assertNotIn('unsafe source', output)
+        self.assertNotIn('secret', output)
+
+        five_hour_only = types.SimpleNamespace(
+            context_window={},
+            provider_usage={'five_hour': {'available': True, 'used_percentage': 0,
+                                          'resets_at': future}},
+        )
+        output = communication._user_dm_usage_message(five_hour_only, now=now)
+        self.assertIn('Context window: Not reported', output)
+        self.assertIn('Provider 5-hour: `0%` used', output)
+        self.assertIn('Provider 7-day: Not reported', output)
+
+        seven_day_only = types.SimpleNamespace(
+            context_window={},
+            provider_usage={'seven_day': {'available': True, 'used_percentage': 1,
+                                          'resets_at': future}},
+        )
+        output = communication._user_dm_usage_message(seven_day_only, now=now)
+        self.assertIn('Provider 5-hour: Not reported', output)
+        self.assertIn('Provider 7-day: `1%` used', output)
+
+        unavailable = types.SimpleNamespace(
+            context_window={'used_tokens': float('nan'), 'limit_tokens': 100},
+            provider_usage={
+                'five_hour': {'available': True, 'used_percentage': float('inf'),
+                              'resets_at': future},
+                'seven_day': {'available': True, 'used_percentage': -1,
+                              'resets_at': '2020-01-01T00:00:00Z' + ('x' * 100)},
+            },
+        )
+        output = communication._user_dm_usage_message(unavailable, now=now)
+        self.assertIn('Context window: Unavailable', output)
+        self.assertIn('Provider 5-hour: Unavailable', output)
+        self.assertIn('Provider 7-day: Unavailable', output)
+        self.assertIn('No current usage is reported for this agent.', output)
+        self.assertNotIn('nan', output.lower())
+        self.assertNotIn('inf', output.lower())
+
+        over_range = types.SimpleNamespace(
+            context_window={'used_tokens': 300, 'limit_tokens': 200},
+            provider_usage={'five_hour': {'available': True, 'used_percentage': 101,
+                                          'resets_at': future}},
+        )
+        output = communication._user_dm_usage_message(over_range, now=now)
+        self.assertIn('150.00% used', output)
+        self.assertIn('Provider 5-hour: `100%` used', output)
 
     async def test_user_dm_registry_exact_negative_cases_remain_normal_messages(self):
         state = self._make_state()
@@ -3567,28 +3727,33 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
 
         for index, message in enumerate((
             '/status extra', '/commands please', '/STATUS', '/loopy',
-            '`/status`', '/compact please', '/restart now',
+            '`/status`', '/compact please', '/restart now', '/usage now',
+            '/USAGE', '/usages',
         )):
             result = await self.server_mod._handle_user_agent_message_command(
                 {'agent_id': worker.id, 'message': message,
                  'idempotency_key': f'normal-{index}'}, state, fake_send_prompt,
             )
             self.assertEqual(result['type'], 'ok')
-        self.assertEqual(len(sent), 7)
+        self.assertEqual(len(sent), 10)
         self.assertTrue(all('## Message from the User' in prompt for prompt in sent))
+        self.assertTrue(any('/usage now' in prompt for prompt in sent))
+        self.assertTrue(any('/USAGE' in prompt for prompt in sent))
+        self.assertTrue(any('/usages' in prompt for prompt in sent))
 
     def test_user_dm_command_catalog_and_parser_are_closed_and_snapshot_backed(self):
         registry = importlib.import_module('torque.commands.user_dm')
         catalog = registry.user_dm_command_catalog()
         self.assertEqual([item['id'] for item in catalog], [
-            'compact', 'fast', 'restart', 'loop', 'loop-cancel', 'remind', 'reminders', 'remind-cancel', 'watch', 'watches', 'unwatch', 'status', 'commands',
+            'compact', 'fast', 'restart', 'loop', 'loop-cancel', 'remind', 'reminders', 'remind-cancel', 'watch', 'watches', 'unwatch', 'usage', 'status', 'commands',
         ])
         self.assertEqual(next(item for item in catalog if item['id'] == 'fast')['providers'], ['codex'])
         self.assertEqual([item['id'] for item in registry.user_dm_command_catalog(provider='codex')], [
-            'compact', 'fast', 'restart', 'loop', 'loop-cancel', 'remind', 'reminders', 'remind-cancel', 'watch', 'watches', 'unwatch', 'status', 'commands',
+            'compact', 'fast', 'restart', 'loop', 'loop-cancel', 'remind', 'reminders', 'remind-cancel', 'watch', 'watches', 'unwatch', 'usage', 'status', 'commands',
         ])
         self.assertNotIn('fast', [item['id'] for item in registry.user_dm_command_catalog(provider='claude-code')])
         self.assertEqual(registry.parse_user_dm_command(' /status ').id, 'status')
+        self.assertEqual(registry.parse_user_dm_command(' /usage ').id, 'usage')
         self.assertEqual(registry.parse_user_dm_command('/loop every 1m hi').id, 'loop')
         self.assertEqual(registry.parse_user_dm_command('/loop cancel').id, 'loop-cancel')
         self.assertEqual(registry.parse_user_dm_command('/remind cancel').id, 'remind-cancel')
@@ -3596,6 +3761,9 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(registry.parse_user_dm_command('/fast please'))
         self.assertIsNone(registry.parse_user_dm_command('/FAST'))
         self.assertIsNone(registry.parse_user_dm_command('/status now'))
+        self.assertIsNone(registry.parse_user_dm_command('/usage now'))
+        self.assertIsNone(registry.parse_user_dm_command('/USAGE'))
+        self.assertIsNone(registry.parse_user_dm_command('/usages'))
         self.assertIsNone(registry.parse_user_dm_command('/STATUS'))
         state = self._make_state()
         self.assertEqual(state.to_dict()['user_dm_commands'], catalog)

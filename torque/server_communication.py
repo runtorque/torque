@@ -21,7 +21,11 @@ from .server_agent_common import _resolve_agent_id
 from .server_agent_operations import _agent_dismissed_at
 from .server_artifacts import describe_task_artifact_for_digest
 from .state import BoardTask, MatrixState, task_counts_as_done, task_is_closed
-from .commands.user_dm import user_dm_command_by_id, user_dm_command_catalog
+from .commands.user_dm import (
+    _user_dm_usage_message,
+    user_dm_command_by_id,
+    user_dm_command_catalog,
+)
 
 
 GUIDANCE_HINT_USER_DIRECT_REPLY = "user_message.reply_hint"
@@ -863,6 +867,8 @@ def _user_agent_read_only_command_response(
     content = (
         _user_dm_status_message(state, target)
         if command.id == "status"
+        else _user_dm_usage_message(target)
+        if command.id == "usage"
         else _user_dm_commands_message(target)
     )
     saved = _save_user_agent_system_audit_message(
