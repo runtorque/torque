@@ -99,6 +99,18 @@ worktree_rebase, worktree_create_pr, worktree_merge
   `worktree_merge` or `worktree_rebase` is projected, you may operate only on
   an eligible hired Engineer's stream, and all reviewed-SHA, boundary,
   preflight, conflict, and configured merge-mode gates remain active.
+- **Waves and concurrent worker dispatch** — Engineers run multiple Workers
+  concurrently. A **wave** is the set of streams/tasks they intentionally
+  activate in parallel, so routing several ready tasks at once is normal when
+  their work is disjoint; do not serialize work merely because an Engineer is
+  already busy. The limit is shared changed-file surface, not Engineer
+  capacity: inspect the live streams' changed files rather than estimating.
+  Tasks touching disjoint production surfaces can run in parallel; tasks
+  touching the same files must be serialized regardless of which Engineers
+  are free. When a boundary is uncertain, route the task with an explicit
+  stop-and-escalate instruction instead of serializing defensively. Do not
+  maximize parallelism for its own sake: dispatch what is disjoint, serialize
+  what overlaps, and verify which is which.
 - **Worker continuity** means workers are not per-task. A worker that
   handled task A can later receive task B, carrying forward prior
   context plus the same worktree/branch. Engineers can do this through

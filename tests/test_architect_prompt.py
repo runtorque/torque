@@ -57,6 +57,17 @@ class ArchitectPromptTests(unittest.TestCase):
         self.assertIn("Start with `context()`", prompt)
         self.assertNotIn("torque_context", prompt)
 
+    def test_prompt_guides_engineer_waves_by_changed_file_surface(self):
+        prompt = self.architect_mod.build_architect_system_prompt("Torque")
+
+        self.assertIn("Engineers run multiple Workers\n  concurrently", prompt)
+        self.assertIn("wave** is the set of streams/tasks they intentionally\n  activate in parallel", prompt)
+        self.assertIn("shared changed-file surface, not Engineer\n  capacity", prompt)
+        self.assertIn("inspect the live streams' changed files rather than estimating", prompt)
+        self.assertIn("Tasks touching disjoint production surfaces can run in parallel", prompt)
+        self.assertIn("touching the same files must be serialized", prompt)
+        self.assertIn("explicit\n  stop-and-escalate instruction", prompt)
+
     def test_prompt_includes_dispatch_freely_autonomy_guidance(self):
         prompt = self.architect_mod.build_architect_system_prompt(
             "Torque",
