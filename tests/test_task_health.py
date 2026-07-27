@@ -57,6 +57,7 @@ class TaskHealthTests(unittest.TestCase):
             group="g",
             lane="In Progress",
             agent_id="agent-1",
+            dispatch_state="live",
             updated_at=_iso(10_000),
         )
         agents = {
@@ -65,6 +66,7 @@ class TaskHealthTests(unittest.TestCase):
                 name="Worker",
                 group="g",
                 cell_type="agent",
+                status="running",
             )
         }
 
@@ -82,6 +84,170 @@ class TaskHealthTests(unittest.TestCase):
         self.assertEqual(idle_snapshots["task-1"].state, "idle-risk")
         self.assertEqual(stalled_snapshots["task-1"].state, "stalled")
 
+    def test_only_dispatched_running_work_is_timed_for_silence(self):
+        base = 15_000
+        tasks = {
+            "unassigned": self.state_mod.BoardTask(
+                id="unassigned",
+                task="Awaiting assignment",
+                group="g",
+                lane="In Progress",
+                dispatch_state="live",
+                updated_at=_iso(base),
+            ),
+            "assigned": self.state_mod.BoardTask(
+                id="assigned",
+                task="Assigned but not sent",
+                group="g",
+                lane="In Progress",
+                agent_id="assigned-agent",
+                dispatch_state="queued",
+                updated_at=_iso(base),
+            ),
+            "closed": self.state_mod.BoardTask(
+                id="closed",
+                task="Completed work round",
+                group="g",
+                lane="In Progress",
+                agent_id="closed-agent",
+                dispatch_state="live",
+                updated_at=_iso(base),
+            ),
+            "silent": self.state_mod.BoardTask(
+                id="silent",
+                task="Dispatched and silent",
+                group="g",
+                lane="In Progress",
+                agent_id="silent-agent",
+                dispatch_state="live",
+                updated_at=_iso(base),
+            ),
+        }
+        agents = {
+            "assigned-agent": self.state_mod.AgentCell(
+                id="assigned-agent",
+                name="Assigned",
+                group="g",
+                status="running",
+            ),
+            "closed-agent": self.state_mod.AgentCell(
+                id="closed-agent",
+                name="Closed",
+                group="g",
+                status="idle",
+            ),
+            "silent-agent": self.state_mod.AgentCell(
+                id="silent-agent",
+                name="Silent",
+                group="g",
+                status="running",
+            ),
+        }
+
+        after_idle = self.task_health_mod.compute_task_health(
+            tasks,
+            agents,
+            now_ts=base + (11 * 60),
+        )
+        after_stalled = self.task_health_mod.compute_task_health(
+            tasks,
+            agents,
+            now_ts=base + (21 * 60),
+        )
+
+        for task_id in ("unassigned", "assigned", "closed"):
+            self.assertEqual(after_idle[task_id].state, "healthy")
+            self.assertEqual(after_stalled[task_id].state, "healthy")
+            self.assertEqual(
+                after_stalled[task_id].details["reasons"],
+                ["not_active"],
+            )
+        self.assertEqual(after_idle["silent"].state, "idle-risk")
+        self.assertEqual(after_stalled["silent"].state, "stalled")
+
+    def test_backlog_queued_task_remains_healthy_and_not_active(self):
+        base = 16_000
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Queued backlog work",
+            group="g",
+            lane="Backlog",
+            updated_at=_iso(base),
+        )
+
+        snapshot = self.task_health_mod.compute_task_health(
+            {"task-1": task},
+            {},
+            now_ts=base + (21 * 60),
+        )["task-1"]
+
+        self.assertEqual(snapshot.state, "healthy")
+        self.assertEqual(snapshot.details["reasons"], ["not_active"])
+
+    def test_deadlines_only_schedule_dispatched_running_work(self):
+        base = 17_000
+        tasks = {
+            "unassigned": self.state_mod.BoardTask(
+                id="unassigned",
+                task="Unassigned",
+                group="g",
+                lane="In Progress",
+                dispatch_state="live",
+                updated_at=_iso(base),
+            ),
+            "assigned": self.state_mod.BoardTask(
+                id="assigned",
+                task="Assigned",
+                group="g",
+                lane="In Progress",
+                agent_id="assigned-agent",
+                dispatch_state="queued",
+                updated_at=_iso(base),
+            ),
+            "silent": self.state_mod.BoardTask(
+                id="silent",
+                task="Silent",
+                group="g",
+                lane="In Progress",
+                agent_id="silent-agent",
+                dispatch_state="live",
+                updated_at=_iso(base),
+            ),
+        }
+        agents = {
+            "assigned-agent": self.state_mod.AgentCell(
+                id="assigned-agent",
+                name="Assigned",
+                group="g",
+                status="running",
+                last_progress_at=base,
+            ),
+            "silent-agent": self.state_mod.AgentCell(
+                id="silent-agent",
+                name="Silent",
+                group="g",
+                status="running",
+                last_progress_at=base,
+            ),
+        }
+
+        self.assertIsNone(
+            self.task_health_mod.next_task_health_deadline(
+                tasks["unassigned"], tasks, agents, base
+            )
+        )
+        self.assertIsNone(
+            self.task_health_mod.next_task_health_deadline(
+                tasks["assigned"], tasks, agents, base
+            )
+        )
+        self.assertEqual(
+            self.task_health_mod.next_task_health_deadline(
+                tasks["silent"], tasks, agents, base
+            ),
+            base + self.task_health_mod.IDLE_RISK_AFTER_SECS,
+        )
+
     def test_heartbeats_do_not_mask_progress_silence(self):
         base = 50_000
         task = self.state_mod.BoardTask(
@@ -90,6 +256,7 @@ class TaskHealthTests(unittest.TestCase):
             group="g",
             lane="In Progress",
             agent_id="agent-1",
+            dispatch_state="live",
             updated_at=_iso(base),
         )
         agents = {
@@ -98,6 +265,7 @@ class TaskHealthTests(unittest.TestCase):
                 name="Worker",
                 group="g",
                 cell_type="agent",
+                status="running",
                 last_progress_at=base,
                 last_heartbeat_at=base + (10 * 60),
             )
@@ -124,6 +292,7 @@ class TaskHealthTests(unittest.TestCase):
             group="g",
             lane="In Progress",
             agent_id="agent-1",
+            dispatch_state="live",
             updated_at=_iso(base),
         )
         agents = {
@@ -132,6 +301,7 @@ class TaskHealthTests(unittest.TestCase):
                 name="Worker",
                 group="g",
                 cell_type="agent",
+                status="running",
                 last_progress_at=0,
                 last_heartbeat_at=base + (10 * 60),
             )
@@ -158,6 +328,7 @@ class TaskHealthTests(unittest.TestCase):
             group="g",
             lane="In Progress",
             agent_id="agent-1",
+            dispatch_state="live",
             updated_at=_iso(base),
         )
         agents = {
@@ -695,6 +866,7 @@ class TaskHealthTests(unittest.TestCase):
                     group="g",
                     lane="In Progress",
                     agent_id="agent-1",
+                    dispatch_state="live",
                     updated_at=_iso(base),
                 )
                 agent = self.state_mod.AgentCell(
@@ -733,6 +905,7 @@ class TaskHealthTests(unittest.TestCase):
             group="g",
             lane="In Progress",
             agent_id="agent-1",
+            dispatch_state="live",
             updated_at=_iso(base),
         )
         agents = {
@@ -769,6 +942,7 @@ class TaskHealthTests(unittest.TestCase):
             group="g",
             lane="In Progress",
             agent_id="agent-1",
+            dispatch_state="live",
             updated_at=_iso(base),
         )
         agents = {
@@ -777,6 +951,7 @@ class TaskHealthTests(unittest.TestCase):
                 name="Worker",
                 group="g",
                 cell_type="agent",
+                status="running",
                 command="codex",
                 current_process="codex",
                 last_progress_at=base,
@@ -803,6 +978,7 @@ class TaskHealthTests(unittest.TestCase):
             group="g",
             lane="In Progress",
             agent_id="agent-1",
+            dispatch_state="live",
             updated_at=_iso(base),
         )
         agents = {
@@ -811,6 +987,7 @@ class TaskHealthTests(unittest.TestCase):
                 name="Reviewer",
                 group="g",
                 cell_type="agent",
+                status="running",
                 session_id="",
                 last_progress_at=0,
                 last_heartbeat_at=base + (10 * 60),
@@ -943,6 +1120,7 @@ class TaskHealthTests(unittest.TestCase):
             parent_task_id="parent",
             updated_at=_iso(30_000),
             agent_id="agent-1",
+            dispatch_state="live",
         )
         agents = {
             "agent-1": self.state_mod.AgentCell(
@@ -950,6 +1128,7 @@ class TaskHealthTests(unittest.TestCase):
                 name="Worker",
                 group="g",
                 cell_type="agent",
+                status="running",
             )
         }
 
@@ -998,6 +1177,7 @@ class TaskHealthTests(unittest.TestCase):
             pipeline_root_id=parent.id,
             pipeline_depth=2,
             agent_id="agent-fix",
+            dispatch_state="live",
             labels=["review-fix"],
             updated_at=_iso(base + (20 * 60)),
         )
@@ -1066,6 +1246,7 @@ class TaskHealthTests(unittest.TestCase):
             pipeline_root_id=parent.id,
             pipeline_depth=2,
             agent_id="agent-fix",
+            dispatch_state="live",
             labels=["review-fix"],
             updated_at=_iso(base + (2 * 60)),
         )
@@ -1118,6 +1299,7 @@ class MatrixStateTaskHealthTests(unittest.TestCase):
             name="Worker",
             group="g",
             cell_type="agent",
+            status="running",
         )
 
         state.recompute_task_health(now_ts=40_000 + (11 * 60), persist=False)
@@ -1153,6 +1335,7 @@ class MatrixStateTaskHealthTests(unittest.TestCase):
             group="g",
             lane="In Progress",
             agent_id="agent-1",
+            dispatch_state="live",
             created_at=_iso(base),
             updated_at=_iso(base),
         )
@@ -1161,6 +1344,7 @@ class MatrixStateTaskHealthTests(unittest.TestCase):
             name="Worker",
             group="g",
             cell_type="agent",
+            status="running",
         )
 
         state.recompute_task_health(now_ts=base, persist=False)
