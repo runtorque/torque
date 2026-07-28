@@ -7,6 +7,7 @@ verify/name/reply reports. The server supplies runtime integrations explicitly.
 from __future__ import annotations
 
 import time
+import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -283,6 +284,32 @@ async def handle_ai_report_command(
                     else (task.id if task else "")
                 ))
 
+        def _acknowledge_block_replies(t, c, report_action):
+            """Receipt is the worker's next report after a delivered ruling."""
+            if not t or not c:
+                return False
+            changed = False
+            now = time.time()
+            for entry in list(getattr(t, "messages", []) or []):
+                if (not isinstance(entry, dict)
+                        or entry.get("action") != "block_reply"
+                        or str(entry.get("worker_id", "") or "") != c.id
+                        or entry.get("delivery_state") != "delivered"
+                        or entry.get("acknowledged_at")):
+                    continue
+                entry["acknowledged_at"] = now
+                entry["acknowledged_by_action"] = report_action
+                entry["delivery_reason"] = "worker_acknowledged"
+                entry["delivery_updated_at"] = now
+                message_id = str(entry.get("reply_message_id", "") or "")
+                if message_id:
+                    state.mark_direct_message_read(
+                        message_id, read_at=now, reader_id=c.id, emit=True)
+                changed = True
+            if changed:
+                _save_task(t)
+            return changed
+
         async def _drain_auto_dispatch_queue(group_name: str):
             if not group_name:
                 return
@@ -298,6 +325,9 @@ async def handle_ai_report_command(
             "ask", "derive", "ready", "verify",
         }:
             state.mark_agent_progress(cell)
+
+        if action != "blocked":
+            _acknowledge_block_replies(task, cell, action)
 
         if result and result.get("type") == "error":
             pass  # auto-resolve failed; skip action
@@ -580,6 +610,16 @@ async def handle_ai_report_command(
             _append_mcp(cell, "blocked", message)
             _append_task_msg(task, "blocked",
                              message, cell.name)
+            if task and task.messages:
+                # The durable correlation survives a daemon restart and is
+                # intentionally kept in the task's persisted activity log.
+                task.messages[-1].update({
+                    "block_id": "block-" + uuid.uuid4().hex[:12],
+                    "agent_id": cell.id,
+                    "agent_session_id": str(getattr(cell, "agent_session_id", "") or ""),
+                    "session_id": str(getattr(cell, "session_id", "") or ""),
+                    "reply_message_id": "",
+                })
             _record_history_msg(cell, "blocked", message)
             state._emit_agent(cell)
             if task:

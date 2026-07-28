@@ -5706,6 +5706,56 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('Can I use the fallback API?', sent[0][1])
         self.assertIn('Use the minimal fallback.', sent[0][1])
 
+    async def test_blocked_worker_reply_delivers_to_same_live_worker_and_is_idempotent(self):
+        state = self._make_state()
+        architect = self.state_mod.AgentCell(id='arch-1', name='Architect', group='g', cell_type='agent', kind='architect')
+        worker = self.state_mod.AgentCell(id='worker-1', name='Worker', group='g', cell_type='agent', kind='worker', session_id='pty-1', agent_session_id='provider-1', session_resume=True, status='idle')
+        state.agents = {architect.id: architect, worker.id: worker}
+        state.groups['g'] = [architect.id, worker.id]
+        task = state.board_add_task('Implement', 'g', lane='In Progress', id='task-1', agent_id=worker.id)
+        task.messages.append({'timestamp': 1, 'action': 'blocked', 'message': 'Which contract?', 'agent_name': worker.name, 'agent_id': worker.id, 'block_id': 'block-1', 'reply_message_id': ''})
+        state.board_update_task(task.id, messages=list(task.messages))
+        sent = []
+
+        async def send_prompt(cell, prompt, **kwargs):
+            sent.append((cell.id, prompt, kwargs))
+            async def delivered():
+                return None
+            return asyncio.create_task(delivered())
+
+        async def relaunch(_payload):
+            self.fail('live same-session reply must not relaunch')
+
+        first = await self.server_mod.resolve_blocked_task_reply(state, task, architect, 'Contract A wins.', send_prompt=send_prompt, relaunch_agent=relaunch, reply_id='msg-block-test')
+        second = await self.server_mod.resolve_blocked_task_reply(state, task, architect, 'Contract A wins.', send_prompt=send_prompt, relaunch_agent=relaunch, reply_id='msg-block-test')
+        self.assertEqual(first['type'], 'ok')
+        self.assertEqual(first['agent_id'], worker.id)
+        self.assertEqual(first['delivery_state'], 'delivered')
+        self.assertTrue(second['deduped'])
+        self.assertEqual(len(sent), 1)
+        self.assertIn('Block reference: block-1', sent[0][1])
+        self.assertEqual(self.db.load_direct_message('msg-block-test')['delivery_state'], 'delivered')
+
+    async def test_blocked_worker_reply_reports_unrecoverable_without_provider_resume(self):
+        state = self._make_state()
+        architect = self.state_mod.AgentCell(id='arch-1', name='Architect', group='g', cell_type='agent', kind='architect')
+        worker = self.state_mod.AgentCell(id='worker-1', name='Worker', group='g', cell_type='agent', kind='worker', session_id='', agent_session_id='', session_resume=False, status='stopped')
+        state.agents = {architect.id: architect, worker.id: worker}
+        state.groups['g'] = [architect.id, worker.id]
+        task = state.board_add_task('Implement', 'g', lane='In Progress', id='task-1', agent_id=worker.id)
+        task.messages.append({'timestamp': 1, 'action': 'blocked', 'message': 'Which contract?', 'agent_name': worker.name, 'agent_id': worker.id, 'block_id': 'block-1', 'reply_message_id': ''})
+        state.board_update_task(task.id, messages=list(task.messages))
+
+        async def impossible(*_args, **_kwargs):
+            self.fail('unrecoverable target must not be prompted or relaunched')
+
+        result = await self.server_mod.resolve_blocked_task_reply(state, task, architect, 'Contract A wins.', send_prompt=impossible, relaunch_agent=impossible, reply_id='msg-block-gone')
+        self.assertEqual(result['type'], 'unrecoverable')
+        self.assertEqual(result['delivery_state'], 'unrecoverable')
+        self.assertEqual(result['delivery_reason'], 'provider_session_unavailable')
+        reply = [m for m in task.messages if m.get('action') == 'block_reply'][0]
+        self.assertEqual(reply['delivery_state'], 'unrecoverable')
+
     async def test_resolve_architect_ask_delivers_user_reply_to_architect_inbox(self):
         state = self._make_state()
         architect = self.state_mod.AgentCell(

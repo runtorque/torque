@@ -335,6 +335,35 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
             "updated_fields": updated_fields,
         }), False
 
+    if tool_name == "task_block_reply" and caller_kind == "architect":
+        tid = _resolve_task(state, args.get("task", ""))
+        task = state.board_tasks.get(tid) if tid else None
+        if not task or not group_task_allowed(task):
+            return "Task not found", True
+        caller_id_str = str(caller_id or "").strip()
+        creator_class = _task_created_by_classifier(task)
+        if is_group_board_authority_mode:
+            pass
+        elif is_creator_proposal_mode:
+            if not creator_task_allowed(task):
+                return "Authorization denied: task is outside Product Manager creator/self scope", True
+        elif creator_class != "user" and not _architect_task_owned_by_caller(task, caller_id_str):
+            return "Task was not created by this architect", True
+        answer = str(args.get("answer", "") or "").strip()
+        if not answer:
+            return "answer is required", True
+        # Stable across transport retries: duplicate invokes return the first
+        # persisted delivery result and never send a second provider turn.
+        material = "|".join((caller_id_str, tid, answer, str(idempotency_key or "")))
+        reply_id = "msg-block-" + hashlib.sha256(material.encode()).hexdigest()[:12]
+        result = await handle_command({
+            "cmd": "blocked_task_reply", "task_id": tid,
+            "actor_id": caller_id_str, "answer": answer, "reply_id": reply_id,
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result or {"type": "error", "message": "Reply failed"}), False
+
     if tool_name == "task_reassign":
         task_state = state
         if caller_kind == "engineer":
