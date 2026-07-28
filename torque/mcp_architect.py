@@ -2019,7 +2019,7 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
     },
     {
         "name": "architect_proposal_peer_message", "authority": {"requirements": [{"capability": "message.architect_peer","minimum_scope": "group","target_argument": "architect_id","target_kind": "agent"}]},
-        "description": "Send a product-peer marked message to an eligible same-group Architect/product-profile peer. ack_required requires a product-scope anchor.",
+        "description": "Send a product-peer marked message to an eligible same-group Architect/product-profile peer. Product-scope anchors are optional; use them when the message genuinely concerns a record.",
         "inputSchema": {"type": "object", "properties": {"architect_id": {"type": "string"}, "message": {"type": "string"}, "ack_required": {"type": "boolean"}, "context_task_ids": {"type": "array", "items": {"type": "string"}}, "context_decision_ids": {"type": "array", "items": {"type": "string"}}, "context_area_ids": {"type": "array", "items": {"type": "string"}}, "context_initiative_ids": {"type": "array", "items": {"type": "string"}}, "context_idea_brief_ids": {"type": "array", "items": {"type": "string"}}, "context_summary": {"type": "string"}}, "required": ["architect_id", "message"]},
     },
     {
@@ -2029,7 +2029,7 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
     },
     {
         "name": "architect_proposal_peer_reply", "authority": {"requirements": [{"capability": "message.architect_peer","minimum_scope": "group","target_argument": "message_id","target_kind": "message_peer"}]},
-        "description": "Reply inside a product-peer marked thread only. ack_required requires a product-scope anchor.",
+        "description": "Reply inside a product-peer marked thread only. Product-scope anchors are optional; use them when the reply genuinely concerns a record.",
         "inputSchema": {"type": "object", "properties": {"message_id": {"type": "string"}, "message": {"type": "string"}, "ack_required": {"type": "boolean"}, "context_task_ids": {"type": "array", "items": {"type": "string"}}, "context_decision_ids": {"type": "array", "items": {"type": "string"}}, "context_area_ids": {"type": "array", "items": {"type": "string"}}, "context_initiative_ids": {"type": "array", "items": {"type": "string"}}, "context_idea_brief_ids": {"type": "array", "items": {"type": "string"}}, "context_summary": {"type": "string"}}, "required": ["message_id", "message"]},
     },
     {

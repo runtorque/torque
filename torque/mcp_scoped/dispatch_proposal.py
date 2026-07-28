@@ -310,15 +310,9 @@ async def dispatch_proposal(ctx: ScopedDispatchContext):
         context, context_error = _normalize_proposal_context(real_state, caller_id, _engineer_group, args)
         if context_error:
             return context_error, True
-        anchor_error = _require_proposal_peer_anchor(
-            context,
-            tool_name="architect_proposal_peer_message",
-        )
-        if anchor_error:
-            return anchor_error, True
-        ack_anchor_error = _require_product_ack_anchor(ack_required, context)
-        if ack_anchor_error:
-            return ack_anchor_error, True
+        # Product-peer marking scopes inbox/route behavior; an attachment is
+        # optional so acknowledgements and short coordination relays remain
+        # deliverable without an arbitrary record id.
         context = _add_proposal_peer_marker(context, source="architect_proposal_peer_message", caller_id=caller_id)
         length_error = _validate_architect_peer_message_length(message, context.get("context_summary", ""))
         if length_error:
@@ -375,15 +369,8 @@ async def dispatch_proposal(ctx: ScopedDispatchContext):
                 return context_error, True
         else:
             context = _row_proposal_context(row)
-        anchor_error = _require_proposal_peer_anchor(
-            context,
-            tool_name="architect_proposal_peer_reply",
-        )
-        if anchor_error:
-            return anchor_error, True
-        ack_anchor_error = _require_product_ack_anchor(ack_required, context)
-        if ack_anchor_error:
-            return ack_anchor_error, True
+        # Replies retain their product-peer marker even when neither the
+        # original message nor this reply has a record attachment.
         context = _add_proposal_peer_marker(context, source="architect_proposal_peer_reply", caller_id=caller_id)
         length_error = _validate_architect_peer_message_length(message, context.get("context_summary", ""))
         if length_error:

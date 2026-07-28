@@ -754,8 +754,14 @@ def _normalize_proposal_context(
     for task_ident in _dedupe_strings(args.get("context_task_ids", [])):
         task_id = _resolve_task(state, task_ident)
         task = state.board_tasks.get(task_id or "")
-        if not task_id or not _product_task_visible_for_architect(state, caller_id, task):
+        if not task_id:
             return {}, f"Task not found: {task_ident}"
+        if not _product_task_visible_for_architect(state, caller_id, task):
+            # The caller supplied this identifier, so name the scope failure
+            # rather than disguising it as a missing record.  Product-peer
+            # delivery no longer needs an attachment, so callers can omit it
+            # for a lightweight acknowledgement or relay.
+            return {}, f"Task is not readable in product-proposal scope: {task_ident}"
         task_ids.append(task_id)
         task_snapshots.append(_peer_context_task_snapshot(task))
 
@@ -847,37 +853,6 @@ def _normalize_proposal_context(
         },
     }, ""
 
-
-def _proposal_context_anchor_count(context: dict) -> int:
-    snapshot = dict((context or {}).get("context_snapshot", {}) or {})
-    proposal = dict(snapshot.get("proposal_context", {}) or {})
-    return (
-        len(list((context or {}).get("context_task_ids", []) or []))
-        + len(list((context or {}).get("context_decision_ids", []) or []))
-        + len(list(proposal.get("area_ids", []) or []))
-        + len(list(proposal.get("initiative_ids", []) or []))
-        + len(list(proposal.get("idea_brief_ids", []) or []))
-    )
-
-
-def _require_proposal_peer_anchor(context: dict, *, tool_name: str) -> str:
-    if _proposal_context_anchor_count(context) > 0:
-        return ""
-    return (
-        f"{tool_name} requires at least one product-scope anchor "
-        "(Idea Brief, decision, task proposal, Area, or Initiative)"
-    )
-
-
-def _require_product_ack_anchor(ack_required: bool, context: dict) -> str:
-    if not ack_required:
-        return ""
-    if _proposal_context_anchor_count(context) <= 0:
-        return (
-            "ack_required=true requires message.ack_request plus at least "
-            "one product-scope anchor (Idea Brief, decision, task proposal, Area, or Initiative)"
-        )
-    return ""
 
 
 def _caller_authority_allows_capability(state, caller_id: str,
