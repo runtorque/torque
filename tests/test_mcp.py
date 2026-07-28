@@ -2214,8 +2214,8 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(calls[-1]["actor_agent_id"], architect.id)
 
-    async def test_architect_can_merge_task_linked_user_worker_worktree(self):
-        """A user-owned worker inherits only its creating Architect's stream scope."""
+    async def test_same_group_architect_can_merge_task_linked_user_worker_worktree(self):
+        """A merge-authorized peer may drain a user stream another Architect created."""
         state = self.state_mod.MatrixState()
         merge_authority = {
             "effective_authority": {
@@ -2338,7 +2338,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[-1]["actor_agent_id"], architect.id)
 
         calls.clear()
-        denied, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+        peer_result, status = await self.mcp_mod.dispatch_mcp_rpc_body(
             {
                 "jsonrpc": "2.0",
                 "id": 2,
@@ -2353,12 +2353,18 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             state=state,
         )
         self.assertEqual(status, 200)
-        self.assertEqual(calls, [])
-        self.assertIn(
-            "Known tool is not authorized",
-            denied["error"]["message"],
+        self.assertFalse(peer_result["result"]["isError"])
+        self.assertEqual(
+            json.loads(peer_result["result"]["content"][0]["text"])["sha"],
+            "user-worker-reviewed-sha",
         )
+        self.assertEqual(
+            [call["cmd"] for call in calls],
+            ["worktree_check_merge", "worktree_merge"],
+        )
+        self.assertEqual(calls[-1]["actor_agent_id"], peer_architect.id)
 
+        calls.clear()
         cross_group_denied, status = await self.mcp_mod.dispatch_mcp_rpc_body(
             {
                 "jsonrpc": "2.0",
