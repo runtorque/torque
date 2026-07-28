@@ -18,6 +18,7 @@ import uuid
 from aiohttp import web
 
 from . import __version__
+from .deploy_state import agent_session_runtime_provenance_payload
 from .capability_catalog import (
     CAPABILITY_CATALOG,
 )
@@ -122,7 +123,8 @@ TOOLS = [
         "description": (
             "Get current agent identity, status, and linked tasks. "
             "Returns the agent's name, group, directory, worktree info, "
-            "and any board tasks currently assigned to this agent. Use "
+            "its session/daemon code-revision provenance, and any board tasks "
+            "currently assigned to this agent. Use "
             "this to understand your current assignment before starting work."
         ),
         "inputSchema": {"type": "object", "properties": {}},
@@ -1299,7 +1301,13 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
         tasks = {tid: serialize_task_for_mcp(t, tasks_by_id=state.board_tasks)
                  for tid, t in state.board_tasks.items()
                  if t.agent_id == cell_id}
-        return json.dumps({"agent": asdict(cell), "tasks": tasks},
+        return json.dumps({
+            "agent": asdict(cell),
+            "runtime_provenance": agent_session_runtime_provenance_payload(
+                state, cell
+            ),
+            "tasks": tasks,
+        },
                           indent=2), False
 
     if name in {"torque_area_list", "torque_area_show"}:

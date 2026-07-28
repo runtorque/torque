@@ -1547,6 +1547,8 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_relaunch_stopped_engineer_preserves_binding_and_engineer_mcp_entrypoint(self):
         state = self._make_state()
+        state.boot_timestamp = 123.0
+        state.boot_head_commit = "daemon-revision"
         engineer = self._add_engineer_cell(state, "eng-alice", "Alice")
         engineer.status = "stopped"
         engineer.template = "default"
@@ -1604,6 +1606,9 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             call["mcp_entrypoint"],
             self.server_agent_mod.ENGINEER_MCP_ENTRYPOINT,
         )
+        self.assertEqual(engineer.session_code_revision, "daemon-revision")
+        self.assertEqual(engineer.session_daemon_started_at, 123.0)
+        self.assertGreater(engineer.session_started_at, 0)
 
     async def test_relaunch_stopped_architect_uses_engineer_launch_and_architect_mcp_entrypoint(self):
         state = self._make_state()

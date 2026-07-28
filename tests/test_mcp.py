@@ -3456,6 +3456,53 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(payload["tasks"]["task-1"]["task_artifacts"]), 2)
         self.assertEqual(payload["tasks"]["task-1"]["task_artifacts"][0]["url"], "/attachments/task-1/image.png")
 
+    async def test_torque_context_reports_stale_session_runtime_provenance(self):
+        state = self.state_mod.MatrixState()
+        state.boot_timestamp = 200.0
+        state.boot_repo_root = "/repo"
+        state.boot_head_commit = "daemon-new"
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            session_code_revision="session-old",
+            session_started_at=100.0,
+            session_daemon_started_at=50.0,
+        )
+        state.agents[cell.id] = cell
+        state.groups["g"] = [cell.id]
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        def fake_git(repo_root, *args):
+            self.assertEqual(repo_root, "/repo")
+            if args == ("rev-list", "--count", "session-old..daemon-new"):
+                return "3"
+            if args == ("rev-list", "--count", "daemon-new..session-old"):
+                return "0"
+            self.fail(f"Unexpected git call: {args}")
+
+        with mock.patch("torque.deploy_state._run_git", side_effect=fake_git):
+            text, is_error = await self.mcp_mod._dispatch_tool(
+                "torque_context", {}, cell.id, fake_handle_command, state,
+            )
+
+        self.assertFalse(is_error)
+        provenance = json.loads(text)["runtime_provenance"]
+        self.assertEqual(provenance["session"], {
+            "code_revision": "session-old",
+            "started_at": 100.0,
+            "daemon_started_at": 50.0,
+        })
+        self.assertEqual(provenance["daemon"], {
+            "code_revision": "daemon-new",
+            "started_at": 200.0,
+        })
+        self.assertEqual(provenance["comparison"]["status"], "behind")
+        self.assertEqual(provenance["comparison"]["commits_behind"], 3)
+
     async def test_torque_context_includes_upstream_artifacts_for_derived_tasks(self):
         state = self.state_mod.MatrixState()
         cell = self.state_mod.AgentCell(

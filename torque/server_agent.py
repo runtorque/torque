@@ -22,6 +22,7 @@ from .artifacts import (
 from .agent_classes import append_agent_class_prompt_block
 from .behavior_overlay import behavior_overlay_block_marker, split_behavior_overlay_blocks
 from .config import log
+from .deploy_state import record_session_runtime_provenance
 from .state import normalize_codex_fast_mode
 from .terminal_adapter import (
     TerminalInputDeliveryError,
@@ -885,6 +886,9 @@ class AgentLaunchService:
                     getattr(cell, "id", "<unknown>"),
                 )
             raise
+        record_session_runtime_provenance(self.state, cell)
+        self.state._emit_agent(cell)
+        self.state._db_save_agent(cell)
         return cell
 
     async def send_agent_prompt(self, cell, prompt: str, *,

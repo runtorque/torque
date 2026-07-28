@@ -112,6 +112,104 @@ def capture_deploy_boot_state(state, repo_hint: str | Path) -> None:
     state.boot_head_error = f"failed to capture boot git state{suffix}"
 
 
+def record_session_runtime_provenance(state, cell, *, now: float | None = None) -> None:
+    """Snapshot the daemon code that supplied a successfully launched session.
+
+    The daemon's checkout can advance without replacing its Python process.
+    Recording at launch is therefore the only honest way to describe the
+    tool/prompt surface an agent session was started with.
+    """
+    cell.session_code_revision = str(
+        getattr(state, "boot_head_commit", "") or ""
+    ).strip()
+    cell.session_started_at = float(time.time() if now is None else now)
+    cell.session_daemon_started_at = float(
+        getattr(state, "boot_timestamp", 0) or 0
+    )
+
+
+def agent_session_runtime_provenance_payload(state, cell) -> dict:
+    """Return bounded agent/daemon revision evidence for ``torque_context``.
+
+    This is deliberately best-effort: provenance remains readable when the
+    checkout is unavailable, and unknown values are never guessed from the
+    current mutable repository state.
+    """
+    session_revision = str(
+        getattr(cell, "session_code_revision", "") or ""
+    ).strip()
+    daemon_revision = str(
+        getattr(state, "boot_head_commit", "") or ""
+    ).strip()
+    repo_root = str(getattr(state, "boot_repo_root", "") or "").strip()
+    payload = {
+        "session": {
+            "code_revision": session_revision,
+            "started_at": float(getattr(cell, "session_started_at", 0) or 0),
+            "daemon_started_at": float(
+                getattr(cell, "session_daemon_started_at", 0) or 0
+            ),
+        },
+        "daemon": {
+            "code_revision": daemon_revision,
+            "started_at": float(getattr(state, "boot_timestamp", 0) or 0),
+        },
+        "comparison": {
+            "status": "unknown",
+            "commits_behind": None,
+        },
+    }
+    comparison = payload["comparison"]
+    if not session_revision:
+        comparison["detail"] = (
+            "session revision was not recorded; relaunch to capture provenance"
+        )
+        return payload
+    if not daemon_revision:
+        comparison["detail"] = "daemon boot revision is unavailable"
+        return payload
+    if session_revision == daemon_revision:
+        comparison.update(status="current", commits_behind=0)
+        return payload
+    if not repo_root:
+        comparison["detail"] = "daemon repository is unavailable for comparison"
+        return payload
+    try:
+        behind = int(_run_git(
+            repo_root, "rev-list", "--count", f"{session_revision}..{daemon_revision}"
+        ) or "0")
+        ahead = int(_run_git(
+            repo_root, "rev-list", "--count", f"{daemon_revision}..{session_revision}"
+        ) or "0")
+    except Exception as exc:
+        comparison["detail"] = (
+            f"unable to compare revisions: {_error_text(exc)}"
+        )
+        return payload
+    if behind and not ahead:
+        comparison.update(
+            status="behind",
+            commits_behind=behind,
+            detail=f"session is {behind} commit(s) behind the daemon",
+        )
+    elif ahead and not behind:
+        comparison.update(
+            status="ahead",
+            commits_behind=0,
+            detail=f"session is {ahead} commit(s) ahead of the daemon",
+        )
+    elif ahead and behind:
+        comparison.update(
+            status="diverged",
+            commits_behind=behind,
+            commits_ahead=ahead,
+            detail="session and daemon revisions have diverged",
+        )
+    else:
+        comparison["detail"] = "revisions could not be ordered"
+    return payload
+
+
 def _group_mainline_branch(state, group: str, current_branch: str) -> str:
     group_settings = getattr(state, "group_settings", {}).get(str(group or ""))
     configured = str(
