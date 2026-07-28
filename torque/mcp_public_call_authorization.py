@@ -517,9 +517,9 @@ def _handler_scoped_target_scope(
                 state, caller_cell, target
             )
     ):
-        # A user-owned worker has no Engineer parent.  Its only Architect
-        # relationship is the task chain that initiated its stream, checked
-        # by this side-effect-free predicate before the handler is reached.
+        # A user-owned worker has no Engineer parent.  Its bounded Architect
+        # relationship is its same-group task stream, checked by this
+        # side-effect-free predicate before the handler is reached.
         return "children"
     # Keep this exception tied to the exact legacy handlers whose documented
     # contract permits a routed product proposal owned by another architect.

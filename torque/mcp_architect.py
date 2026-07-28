@@ -46,7 +46,7 @@ _ARCHITECT_TASK_EXECUTION_SOURCE_NAMES = {
 
 _ARCHITECT_WORKTREE_DESCRIPTIONS = {
     "architect_merge": (
-        "Merge a hired Engineer's, or this Architect's task-linked "
+        "Merge a hired Engineer's, or a same-group task-linked "
         "user-owned Worker's, reviewed worktree stream through Torque's "
         "configured PR or direct-merge workflow. Safety gates remain active; "
         "use worktree_rebase if Torque reports conflicts or a stale base."
@@ -71,8 +71,8 @@ def _architect_worktree_tool_specs() -> list[dict]:
     Architect worktree operations intentionally require an agent target.
     Driverless path/branch targeting is an Engineer-only escape hatch because
     it cannot express either the Architect-to-hired-Engineer relationship or
-    the task-provenance relationship for a user-owned Worker, both of which
-    are enforced by the frozen Agent Class authority gate.
+    the same-group task-stream relationship for a user-owned Worker, both of
+    which are enforced by the frozen Agent Class authority gate.
     """
 
     tools = []
@@ -97,7 +97,7 @@ def _architect_worktree_tool_specs() -> list[dict]:
         authority = copied.get("authority", {})
         for requirement in authority.get("requirements", []):
             if requirement.get("capability") == "worktree.merge":
-                # The public call gate derives the narrowly task-provenanced
+                # The public call gate derives the narrowly task-linked
                 # Architect -> user-worker relationship before dispatch.
                 requirement["handler_scoped"] = True
         boundary_override = properties.get("force_boundary_mismatch", {})
