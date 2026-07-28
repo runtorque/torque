@@ -5706,6 +5706,278 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('Can I use the fallback API?', sent[0][1])
         self.assertIn('Use the minimal fallback.', sent[0][1])
 
+    async def test_blocked_worker_reply_delivers_to_same_live_worker_and_is_idempotent(self):
+        state = self._make_state()
+        architect = self.state_mod.AgentCell(id='arch-1', name='Architect', group='g', cell_type='agent', kind='architect')
+        worker = self.state_mod.AgentCell(id='worker-1', name='Worker', group='g', cell_type='agent', kind='worker', session_id='pty-1', agent_session_id='provider-1', session_resume=True, status='idle')
+        state.agents = {architect.id: architect, worker.id: worker}
+        state.groups['g'] = [architect.id, worker.id]
+        task = state.board_add_task('Implement', 'g', lane='In Progress', id='task-1', agent_id=worker.id)
+        task.messages.append({'timestamp': 1, 'action': 'blocked', 'message': 'Which contract?', 'agent_name': worker.name, 'agent_id': worker.id, 'block_id': 'block-1', 'reply_message_id': ''})
+        state.board_update_task(task.id, messages=list(task.messages))
+        sent = []
+
+        async def send_prompt(cell, prompt, **kwargs):
+            sent.append((cell.id, prompt, kwargs))
+            async def delivered():
+                return None
+            return asyncio.create_task(delivered())
+
+        async def relaunch(_payload):
+            self.fail('live same-session reply must not relaunch')
+
+        first = await self.server_mod.resolve_blocked_task_reply(state, task, architect, 'Contract A wins.', send_prompt=send_prompt, relaunch_agent=relaunch, reply_id='msg-block-test')
+        second = await self.server_mod.resolve_blocked_task_reply(state, task, architect, 'Contract A wins.', send_prompt=send_prompt, relaunch_agent=relaunch, reply_id='msg-block-test')
+        self.assertEqual(first['type'], 'ok')
+        self.assertEqual(first['agent_id'], worker.id)
+        self.assertEqual(first['delivery_state'], 'delivered')
+        self.assertTrue(second['deduped'])
+        self.assertEqual(len(sent), 1)
+        self.assertIn('Block reference: block-1', sent[0][1])
+        self.assertEqual(self.db.load_direct_message('msg-block-test')['delivery_state'], 'delivered')
+
+    async def test_blocked_worker_reply_targets_newest_unanswered_block_after_old_delivery(self):
+        """A prior delivered block reply must not fence a newer unanswered block."""
+        state = self._make_state()
+        architect = self.state_mod.AgentCell(id='arch-1', name='Architect', group='g', cell_type='agent', kind='architect')
+        worker = self.state_mod.AgentCell(id='worker-1', name='Worker', group='g', cell_type='agent', kind='worker', session_id='pty-1', agent_session_id='provider-1', session_resume=True, status='idle')
+        state.agents = {architect.id: architect, worker.id: worker}
+        state.groups['g'] = [architect.id, worker.id]
+        task = state.board_add_task('Implement', 'g', lane='In Progress', id='task-multi-block', agent_id=worker.id)
+        task.messages.extend([
+            {'timestamp': 1, 'action': 'blocked', 'message': 'Old question?', 'agent_id': worker.id, 'block_id': 'block-old', 'reply_message_id': 'old-reply'},
+            {'timestamp': 2, 'action': 'block_reply', 'message': 'Old answer', 'worker_id': worker.id, 'block_id': 'block-old', 'reply_message_id': 'old-reply', 'delivery_state': 'delivered'},
+            {'timestamp': 3, 'action': 'blocked', 'message': 'New question?', 'agent_id': worker.id, 'block_id': 'block-new', 'reply_message_id': ''},
+        ])
+        state.board_update_task(task.id, messages=list(task.messages))
+        state.save_direct_message({
+            'id': 'old-reply', 'thread_id': 'block-reply:task-multi-block',
+            'group_name': 'g', 'sender_id': architect.id, 'sender_kind': 'architect',
+            'recipient_id': worker.id, 'recipient_kind': 'worker', 'message': 'Old answer',
+            'message_type': 'block_reply', 'source_task_id': task.id,
+            'context_snapshot': {'block_id': 'block-old'}, 'delivery_state': 'delivered',
+        })
+        sent = []
+        async def send_prompt(cell, prompt, **kwargs):
+            sent.append((cell.id, prompt, kwargs))
+            async def delivered(): return None
+            return asyncio.create_task(delivered())
+
+        result = await self.server_mod.resolve_blocked_task_reply(
+            state, task, architect, 'candidate-multi-block-new-reply', send_prompt=send_prompt,
+            relaunch_agent=None, reply_id='new-reply')
+
+        self.assertEqual(result['type'], 'ok')
+        self.assertEqual(result['block_id'], 'block-new')
+        self.assertEqual(result['reply_message_id'], 'new-reply')
+        self.assertEqual(len(sent), 1)
+        self.assertIn('Block reference: block-new', sent[0][1])
+        self.assertIn('candidate-multi-block-new-reply', sent[0][1])
+        blocks = {entry['block_id']: entry for entry in task.messages if entry.get('action') == 'blocked'}
+        self.assertEqual(blocks['block-old']['reply_message_id'], 'old-reply')
+        self.assertEqual(blocks['block-new']['reply_message_id'], 'new-reply')
+
+    async def test_blocked_worker_reply_reports_unrecoverable_without_provider_resume(self):
+        state = self._make_state()
+        architect = self.state_mod.AgentCell(id='arch-1', name='Architect', group='g', cell_type='agent', kind='architect')
+        worker = self.state_mod.AgentCell(id='worker-1', name='Worker', group='g', cell_type='agent', kind='worker', session_id='', agent_session_id='', session_resume=False, status='stopped')
+        state.agents = {architect.id: architect, worker.id: worker}
+        state.groups['g'] = [architect.id, worker.id]
+        task = state.board_add_task('Implement', 'g', lane='In Progress', id='task-1', agent_id=worker.id)
+        task.messages.append({'timestamp': 1, 'action': 'blocked', 'message': 'Which contract?', 'agent_name': worker.name, 'agent_id': worker.id, 'block_id': 'block-1', 'reply_message_id': ''})
+        state.board_update_task(task.id, messages=list(task.messages))
+
+        async def impossible(*_args, **_kwargs):
+            self.fail('unrecoverable target must not be prompted or relaunched')
+
+        result = await self.server_mod.resolve_blocked_task_reply(state, task, architect, 'Contract A wins.', send_prompt=impossible, relaunch_agent=impossible, reply_id='msg-block-gone')
+        self.assertEqual(result['type'], 'unrecoverable')
+        self.assertEqual(result['delivery_state'], 'unrecoverable')
+        self.assertEqual(result['delivery_reason'], 'provider_session_unavailable')
+        reply = [m for m in task.messages if m.get('action') == 'block_reply'][0]
+        self.assertEqual(reply['delivery_state'], 'unrecoverable')
+
+    async def test_blocked_worker_reply_marks_missing_receipt_indeterminate_and_never_replays(self):
+        state = self._make_state()
+        architect = self.state_mod.AgentCell(id='arch-1', name='Architect', group='g', cell_type='agent', kind='architect')
+        worker = self.state_mod.AgentCell(id='worker-1', name='Worker', group='g', cell_type='agent', kind='worker', session_id='pty-1', status='idle')
+        state.agents = {architect.id: architect, worker.id: worker}
+        state.groups['g'] = [architect.id, worker.id]
+        task = state.board_add_task('Implement', 'g', lane='In Progress', id='task-1', agent_id=worker.id)
+        task.messages.extend([
+            {'timestamp': 1, 'action': 'blocked', 'message': 'Question?', 'agent_name': worker.name, 'agent_id': worker.id, 'block_id': 'block-buffered', 'reply_message_id': 'msg-block-buffered'},
+            {'timestamp': 2, 'action': 'block_reply', 'message': 'Answer', 'worker_id': worker.id, 'block_id': 'block-buffered', 'reply_message_id': 'msg-block-buffered', 'delivery_state': 'unrecoverable'},
+        ])
+        state.board_update_task(task.id, messages=list(task.messages))
+        state.save_direct_message({'id': 'msg-block-buffered', 'thread_id': 'block-reply:task-1', 'group_name': 'g', 'sender_id': architect.id, 'sender_kind': 'architect', 'recipient_id': worker.id, 'recipient_kind': 'worker', 'message': 'Answer', 'message_type': 'block_reply', 'source_task_id': task.id, 'delivery_state': 'buffered'})
+        sent = []
+        async def send_prompt(cell, prompt, **kwargs):
+            sent.append((cell.id, prompt))
+            async def delivered(): return None
+            return asyncio.create_task(delivered())
+        # Models a crash after the provider accepted a send but before the
+        # sender persisted `delivered`: buffered alone is not proof that no
+        # prompt reached the worker, so retry must not duplicate it.
+        result = await self.server_mod.resolve_blocked_task_reply(state, task, architect, 'Answer', send_prompt=send_prompt, relaunch_agent=None, reply_id='msg-block-buffered')
+        self.assertEqual(result['type'], 'indeterminate')
+        self.assertEqual(result['delivery_state'], 'indeterminate')
+        self.assertEqual(result['delivery_reason'], 'delivery_receipt_missing')
+        self.assertEqual(sent, [])
+
+    async def test_blocked_worker_reply_crash_after_direct_row_persistence_retry_is_indeterminate(self):
+        """A retry must not replay when process death follows durable row save."""
+        state = self._make_state()
+        architect = self.state_mod.AgentCell(id='arch-1', name='Architect', group='g', cell_type='agent', kind='architect')
+        worker = self.state_mod.AgentCell(id='worker-1', name='Worker', group='g', cell_type='agent', kind='worker', session_id='', agent_session_id='provider-1', session_resume=True, status='stopped')
+        state.agents = {architect.id: architect, worker.id: worker}
+        state.groups['g'] = [architect.id, worker.id]
+        task = state.board_add_task('Implement', 'g', lane='In Progress', id='task-crash-persist', agent_id=worker.id)
+        task.messages.append({'timestamp': 1, 'action': 'blocked', 'message': 'Question?', 'agent_id': worker.id, 'block_id': 'block-crash-persist', 'reply_message_id': ''})
+        state.board_update_task(task.id, messages=list(task.messages))
+
+        class SimulatedProcessDeath(BaseException):
+            pass
+
+        async def crash_after_persistence(_payload):
+            raise SimulatedProcessDeath()
+
+        with self.assertRaises(SimulatedProcessDeath):
+            await self.server_mod.resolve_blocked_task_reply(
+                state, task, architect, 'Answer', send_prompt=None,
+                relaunch_agent=crash_after_persistence,
+                reply_id='transport-a')
+
+        self.assertEqual(
+            self.db.load_direct_message('transport-a')['delivery_state'],
+            'buffered')
+        persisted_block = next(m for m in task.messages if m.get('action') == 'blocked')
+        self.assertEqual(persisted_block['reply_message_id'], 'transport-a')
+        persisted_messages = json.loads(self.db._conn.execute(
+            'SELECT messages FROM board_tasks WHERE id=?',
+            (task.id,),
+        ).fetchone()[0])
+        persisted_projection = next(
+            m for m in persisted_messages if m.get('action') == 'block_reply')
+        self.assertEqual(persisted_projection['reply_message_id'], 'transport-a')
+        replayed = []
+
+        async def must_not_relaunch(_payload):
+            replayed.append('relaunch')
+
+        retry = await self.server_mod.resolve_blocked_task_reply(
+            state, task, architect, 'Answer', send_prompt=None,
+            relaunch_agent=must_not_relaunch, reply_id='transport-b')
+        self.assertEqual(retry['type'], 'indeterminate')
+        self.assertEqual(retry['reply_message_id'], 'transport-a')
+        self.assertEqual(replayed, [])
+
+    async def test_blocked_worker_reply_crash_after_send_acceptance_retry_is_indeterminate(self):
+        """A post-send/pre-receipt crash is never replayed under another id."""
+        state = self._make_state()
+        architect = self.state_mod.AgentCell(id='arch-1', name='Architect', group='g', cell_type='agent', kind='architect')
+        worker = self.state_mod.AgentCell(id='worker-1', name='Worker', group='g', cell_type='agent', kind='worker', session_id='pty-1', agent_session_id='provider-1', session_resume=True, status='idle')
+        state.agents = {architect.id: architect, worker.id: worker}
+        state.groups['g'] = [architect.id, worker.id]
+        task = state.board_add_task('Implement', 'g', lane='In Progress', id='task-crash-send', agent_id=worker.id)
+        task.messages.append({'timestamp': 1, 'action': 'blocked', 'message': 'Question?', 'agent_id': worker.id, 'block_id': 'block-crash-send', 'reply_message_id': ''})
+        state.board_update_task(task.id, messages=list(task.messages))
+
+        class SimulatedProcessDeath(BaseException):
+            pass
+
+        accepted = []
+        async def accepted_then_crash(cell, prompt, **kwargs):
+            accepted.append((cell.id, prompt, kwargs))
+            async def _crash_after_provider_acceptance():
+                raise SimulatedProcessDeath()
+            return asyncio.create_task(_crash_after_provider_acceptance())
+
+        with self.assertRaises(SimulatedProcessDeath):
+            await self.server_mod.resolve_blocked_task_reply(
+                state, task, architect, 'Answer', send_prompt=accepted_then_crash,
+                relaunch_agent=None, reply_id='transport-a')
+
+        self.assertEqual(len(accepted), 1)
+        retry = await self.server_mod.resolve_blocked_task_reply(
+            state, task, architect, 'Answer',
+            send_prompt=lambda *_args, **_kwargs: self.fail('must not replay'),
+            relaunch_agent=None, reply_id='transport-b')
+        self.assertEqual(retry['type'], 'indeterminate')
+        self.assertEqual(retry['reply_message_id'], 'transport-a')
+        self.assertEqual(len(accepted), 1)
+
+    async def test_blocked_worker_reply_unlinked_buffered_row_is_indeterminate(self):
+        """A durable row without a task receipt still fences a new transport id."""
+        state = self._make_state()
+        architect = self.state_mod.AgentCell(id='arch-1', name='Architect', group='g', cell_type='agent', kind='architect')
+        worker = self.state_mod.AgentCell(id='worker-1', name='Worker', group='g', cell_type='agent', kind='worker', session_id='pty-1', status='idle')
+        state.agents = {architect.id: architect, worker.id: worker}
+        state.groups['g'] = [architect.id, worker.id]
+        task = state.board_add_task('Implement', 'g', lane='In Progress', id='task-unlinked', agent_id=worker.id)
+        task.messages.append({'timestamp': 1, 'action': 'blocked', 'message': 'Question?', 'agent_id': worker.id, 'block_id': 'block-unlinked', 'reply_message_id': ''})
+        state.board_update_task(task.id, messages=list(task.messages))
+        state.save_direct_message({
+            'id': 'persisted-before-projection', 'thread_id': 'block-reply:task-unlinked',
+            'group_name': 'g', 'sender_id': architect.id, 'sender_kind': 'architect',
+            'recipient_id': worker.id, 'recipient_kind': 'worker', 'message': 'Answer',
+            'message_type': 'block_reply', 'source_task_id': task.id,
+            'context_snapshot': {'block_id': 'block-unlinked'},
+            'delivery_state': 'buffered',
+        })
+        sent = []
+        async def must_not_send(*_args, **_kwargs):
+            sent.append(True)
+        result = await self.server_mod.resolve_blocked_task_reply(
+            state, task, architect, 'candidate-hazard-unlinked-no-replay', send_prompt=must_not_send,
+            relaunch_agent=None, reply_id='new-transport-id')
+        self.assertEqual(result['type'], 'indeterminate')
+        self.assertEqual(result['reply_message_id'], 'persisted-before-projection')
+        self.assertEqual(sent, [])
+
+    async def test_blocked_worker_reply_rejects_closed_or_stale_worker_target(self):
+        """Closed or reassigned tasks must not wake the worker that raised it."""
+        state = self._make_state()
+        architect = self.state_mod.AgentCell(id='arch-1', name='Architect', group='g', cell_type='agent', kind='architect')
+        original = self.state_mod.AgentCell(id='worker-1', name='Original', group='g', cell_type='agent', kind='worker', session_id='pty-1', status='idle')
+        replacement = self.state_mod.AgentCell(id='worker-2', name='Replacement', group='g', cell_type='agent', kind='worker', session_id='pty-2', status='idle')
+        state.agents = {architect.id: architect, original.id: original, replacement.id: replacement}
+        state.groups['g'] = [architect.id, original.id, replacement.id]
+        task = state.board_add_task('Implement', 'g', lane='In Progress', id='task-stale', agent_id=replacement.id)
+        task.messages.append({'timestamp': 1, 'action': 'blocked', 'message': 'Question?', 'agent_id': original.id, 'block_id': 'block-stale', 'reply_message_id': ''})
+        state.board_update_task(task.id, messages=list(task.messages))
+        sent = []
+        async def must_not_send(*_args, **_kwargs):
+            sent.append(True)
+        stale = await self.server_mod.resolve_blocked_task_reply(
+            state, task, architect, 'Answer', send_prompt=must_not_send,
+            relaunch_agent=None, reply_id='stale-reply')
+        self.assertEqual(stale['type'], 'error')
+        self.assertEqual(sent, [])
+        state.board_move_task(task.id, 'Done')
+        closed = await self.server_mod.resolve_blocked_task_reply(
+            state, task, architect, 'Answer', send_prompt=must_not_send,
+            relaunch_agent=None, reply_id='closed-reply')
+        self.assertEqual(closed['type'], 'error')
+        self.assertEqual(closed['message'], 'Task is already closed')
+        self.assertEqual(sent, [])
+    async def test_blocked_worker_reply_failed_retry_never_reports_success(self):
+        state = self._make_state()
+        architect = self.state_mod.AgentCell(id='arch-1', name='Architect', group='g', cell_type='agent', kind='architect')
+        worker = self.state_mod.AgentCell(id='worker-1', name='Worker', group='g', cell_type='agent', kind='worker', session_id='pty-1', status='idle')
+        state.agents = {architect.id: architect, worker.id: worker}
+        state.groups['g'] = [architect.id, worker.id]
+        task = state.board_add_task('Implement', 'g', lane='In Progress', id='task-failed', agent_id=worker.id)
+        task.messages.append({'timestamp': 1, 'action': 'blocked', 'message': 'Question?', 'agent_id': worker.id, 'block_id': 'block-failed', 'reply_message_id': 'msg-block-failed'})
+        state.board_update_task(task.id, messages=list(task.messages))
+        state.save_direct_message({'id': 'msg-block-failed', 'thread_id': 'block-reply:task-failed', 'group_name': 'g', 'sender_id': architect.id, 'sender_kind': 'architect', 'recipient_id': worker.id, 'recipient_kind': 'worker', 'message': 'Answer', 'message_type': 'block_reply', 'source_task_id': task.id, 'delivery_state': 'failed', 'delivery_reason': 'resume_delivery_failed'})
+        sent = []
+        async def send_prompt(*_args, **_kwargs):
+            sent.append(True)
+        failed = await self.server_mod.resolve_blocked_task_reply(state, task, architect, 'Answer', send_prompt=send_prompt, relaunch_agent=None, reply_id='msg-block-failed')
+        self.assertEqual(failed['type'], 'unrecoverable')
+        self.assertEqual(failed['delivery_reason'], 'resume_delivery_failed')
+        self.assertEqual(sent, [])
+
     async def test_resolve_architect_ask_delivers_user_reply_to_architect_inbox(self):
         state = self._make_state()
         architect = self.state_mod.AgentCell(

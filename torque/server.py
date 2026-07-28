@@ -251,6 +251,7 @@ from .server_communication import (
     _handle_engineer_reply,
     _ask_reply_target_for_task,
     _resolve_human_ask_task,
+    resolve_blocked_task_reply,
     _is_architect_ask_task,
     _architect_ask_reply_prompt,
     _resolve_architect_ask_task,
@@ -2415,6 +2416,7 @@ async def _handle_doctor_command(db: TorqueDB, bridge=None) -> dict:
 _INTERNAL_FAILED_WRITE_PREFIX = "internal:"
 _NO_COMMAND_RECEIPT = object()
 _CRITICAL_BOARD_COMMANDS = {
+    "blocked_task_reply",
     "architect_task_update",
     "board_add_task",
     "board_update_task",
@@ -5536,6 +5538,34 @@ async def main(connection=None):
                     panel_event=_panel_event,
                 )
                 result = schedule_result.value
+
+            elif cmd == "blocked_task_reply":
+                task = state.board_tasks.get(_resolve_task_id(
+                    state, data.get("task_id", "")))
+                actor = state.agents.get(str(data.get("actor_id", "") or ""))
+                if not task or not actor:
+                    result = {"type": "error", "message": "Task or architect not found"}
+                else:
+                    result = await resolve_blocked_task_reply(
+                        state, task, actor, data.get("answer", ""),
+                        send_prompt=_send_agent_prompt,
+                        relaunch_agent=(
+                            lambda payload: _handle_relaunch_agent_command(
+                                payload, state, bridge=bridge,
+                                worktree_mgr=worktree_mgr,
+                                resolve_base_dir=_resolve_base_dir,
+                                resolve_agent_launch_config=_resolve_agent_launch_config,
+                                resolve_engineer_launch_config=_resolve_engineer_launch_config,
+                                resolve_architect_launch_config=_resolve_architect_launch_config,
+                                resolve_worker_launch_config=_resolve_worker_launch_config,
+                                apply_persistent_prompt=_apply_persistent_prompt,
+                                build_cell_persistent_prompt=_build_cell_persistent_prompt,
+                                persistent_prompt_filename=_persistent_prompt_filename,
+                                is_designated_engineer=_is_designated_engineer,
+                                send_agent_prompt=_send_agent_prompt)),
+                        panel_event=_panel_event,
+                        reply_id=str(data.get("reply_id", "") or ""),
+                    )
 
             elif cmd == "ai_report":
                 result = await handle_ai_report_command(

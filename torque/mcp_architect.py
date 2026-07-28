@@ -692,6 +692,22 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_task_block_reply", "authority": {"requirements": [{"capability": "task.update","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
+        "description": (
+            "Answer the latest blocked worker question for this task. Torque persists "
+            "the correlated reply before waking the same worker/session and returns "
+            "an explicit unrecoverable status if that context cannot be resumed."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string", "description": "Blocked task ID or alias."},
+                "answer": {"type": "string", "description": "Ruling for the worker to continue with."},
+            },
+            "required": ["task", "answer"],
+        },
+    },
+    {
         "name": "architect_task_reassign", "authority": {"requirements": [{"capability": "task.reassign","minimum_scope": "self","target_argument": "task","target_kind": "task"},{"capability": "task.reassign","minimum_scope": "self","target_argument": "new_engineer_id","target_kind": "agent","handler_scoped": True}]},
         "description": (
             "Reassign a task created by this architect to another visible engineer."

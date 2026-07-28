@@ -1941,6 +1941,245 @@ async def _resolve_human_ask_task(
         "delivery_reason": str(current.get("delivery_reason", "") or ""),
     }
 
+
+def _format_block_reply_prompt(task, answer: str, block_id: str) -> str:
+    """Return the explicit continuation turn for a blocked worker."""
+    return (
+        "\n## Blocker resolved\n\n"
+        f"Task: {getattr(task, 'id', '')}\n"
+        f"Block reference: {block_id}\n\n"
+        f"Answer:\n{str(answer or '').strip()}\n\n"
+        "Continue the same task from your existing context. Report progress or "
+        "completion through the normal Torque tools.\n---\n"
+    )
+
+
+def _latest_open_block(task) -> dict | None:
+    """Find the newest block without a worker acknowledgement.
+
+    A persisted reply is still open until the worker's next report
+    acknowledges it.  This lets retries safely inspect that same block while
+    ensuring an older reply never takes precedence over a newer blocker.
+    """
+    messages = list(getattr(task, "messages", []) or [])
+    replies = {
+        str(entry.get("block_id", "") or ""): entry
+        for entry in messages
+        if isinstance(entry, dict) and entry.get("action") == "block_reply"
+        and entry.get("block_id")
+    }
+    for entry in reversed(messages):
+        if (isinstance(entry, dict) and entry.get("action") == "blocked"
+                and entry.get("block_id")):
+            reply = replies.get(str(entry["block_id"]))
+            if not reply or not reply.get("acknowledged_at"):
+                return entry
+    return None
+
+
+def _existing_block_reply(state: MatrixState, task, block: dict, reply_id: str = "") -> tuple[dict | None, dict | None]:
+    """Return the durable row/projection for one block, regardless of link state.
+
+    A process can stop between either persistence operation.  In particular,
+    the direct row may be present before a task snapshot contains its id, so a
+    transport retry must inspect the durable block-reply thread rather than
+    relying on the request's newly-derived id or the task projection alone.
+    """
+    block_id = str(block.get("block_id", "") or "")
+    projection = next((entry for entry in reversed(list(task.messages or []))
+                       if isinstance(entry, dict)
+                       and entry.get("action") == "block_reply"
+                       and str(entry.get("block_id", "") or "") == block_id), None)
+    db = getattr(state, "db", None)
+    if not db:
+        return None, projection
+    correlated_id = str((projection or {}).get("reply_message_id", "")
+                        or block.get("reply_message_id", "") or "")
+    requested_id = str(reply_id or "").strip()
+    for message_id in (correlated_id, requested_id):
+        row = db.load_direct_message(message_id) if message_id else None
+        if row and str(row.get("message_type", "") or "") == "block_reply":
+            snapshot = row.get("context_snapshot", {}) or {}
+            if (str(row.get("source_task_id", "") or "") == task.id
+                    and (str(snapshot.get("block_id", "") or "") == block_id
+                         or message_id == correlated_id)):
+                return row, projection
+    loader = getattr(db, "load_block_reply_direct_messages", None)
+    if not callable(loader):
+        return None, projection
+    rows = loader(task.id, block_id, limit=5000)
+    if rows:
+        return rows[-1], projection
+    return None, projection
+
+
+def _existing_block_reply_result(task, block: dict, row: dict | None,
+                                 projection: dict | None) -> dict:
+    """Return truthful retry semantics without replaying a possible ruling."""
+    reply_id = str((row or {}).get("id", "") or (projection or {}).get("reply_message_id", "") or "")
+    state = str((row or {}).get("delivery_state", "") or "").strip()
+    if state == "delivered":
+        return {"type": "ok", "task_id": task.id,
+                "agent_id": str((row or {}).get("recipient_id", "") or ""),
+                "block_id": block["block_id"], "reply_message_id": reply_id,
+                "delivery_state": "delivered", "acknowledgement": "pending", "deduped": True,
+                "message": "Existing delivered blocked-worker reply retained; no duplicate prompt was sent."}
+    if state == "failed" or (not row and str((projection or {}).get("delivery_state", "") or "") == "unrecoverable"):
+        reason = str((row or {}).get("delivery_reason", "") or (projection or {}).get("delivery_reason", "") or "resume_delivery_failed")
+        return {"type": "unrecoverable", "task_id": task.id,
+                "block_id": block["block_id"], "reply_message_id": reply_id,
+                "delivery_state": "unrecoverable", "delivery_reason": reason,
+                "message": "Prior reply delivery failed; it was not delivered and re-dispatch is required."}
+    # A buffered row, or a projection whose direct row is missing, is an
+    # ambiguous crash boundary.  The provider may already have accepted it.
+    return {"type": "indeterminate", "task_id": task.id,
+            "block_id": block["block_id"], "reply_message_id": reply_id,
+            "delivery_state": "indeterminate",
+            "delivery_reason": "delivery_receipt_missing",
+            "message": "Reply persistence exists but delivery receipt is missing; inspect the worker or re-dispatch rather than sending a duplicate ruling."}
+
+
+async def resolve_blocked_task_reply(
+        state: MatrixState, task, actor, answer: str, *,
+        send_prompt, relaunch_agent, panel_event=None, reply_id: str = "") -> dict:
+    """Durably answer a worker block and resume its *same* provider session.
+
+    The direct-message row is the durable reply record.  The task activity
+    entry holds the correlation and acknowledgement projection so snapshots
+    make an unread/unrecoverable answer visible without a separate lookup.
+    """
+    answer = str(answer or "").strip()
+    if not task or not answer:
+        return {"type": "error", "message": "Task and answer are required"}
+    if task_is_closed(task):
+        return {"type": "error", "message": "Task is already closed"}
+
+    block = _latest_open_block(task)
+    if not block:
+        return {"type": "error", "message": "No unanswered worker block on this task"}
+    # Replay suppression is scoped to the newest unanswered block.  A durable
+    # reply for an older block must never divert or suppress this new ruling.
+    existing, existing_reply = _existing_block_reply(state, task, block, reply_id)
+    if existing or existing_reply:
+        return _existing_block_reply_result(task, block, existing, existing_reply)
+
+    target = state.agents.get(str(block.get("agent_id", "") or task.agent_id))
+    now = time.time()
+    reply_id = str(reply_id or "").strip() or "msg-block-" + uuid.uuid4().hex[:12]
+    if (not target or getattr(target, "cell_type", "") != "agent"
+            or getattr(target, "kind", "") != "worker"
+            or state.agent_is_tombstoned(target) or _agent_dismissed_at(target)
+            or str(getattr(task, "agent_id", "") or "") != str(getattr(target, "id", "") or "")
+            or getattr(state.agent_current_task(target.id), "id", "") != task.id):
+        return {"type": "error", "task_id": task.id,
+                "block_id": block["block_id"],
+                "message": "Blocked worker no longer owns the active task"}
+
+    reply = {
+        "timestamp": now, "action": "block_reply", "message": answer,
+        "agent_name": str(getattr(actor, "name", "") or "Architect"),
+        "agent_id": str(getattr(actor, "id", "") or ""),
+        "worker_id": str(block.get("agent_id", "") or ""),
+        "block_id": block["block_id"], "reply_message_id": reply_id,
+        "delivery_state": "buffered", "delivery_reason": "awaiting_delivery",
+        "delivery_updated_at": now, "terminal_at": 0.0,
+        "acknowledged_at": 0.0,
+    }
+    # Persist the correlation/projection before attempting any wake/resume.
+    # This write and the direct row below are both before relaunch/send.
+    task.messages.append(reply)
+    block["reply_message_id"] = reply_id
+    block["reply_at"] = now
+
+    def save():
+        state.board_update_task(task.id, messages=list(task.messages))
+
+    save()
+
+    row = state.save_direct_message({
+        "id": reply_id, "thread_id": "block-reply:" + task.id,
+        "group_name": task.group, "sender_id": getattr(actor, "id", ""),
+        "sender_kind": getattr(actor, "kind", "architect") or "architect",
+        "sender_name": getattr(actor, "name", "Architect"),
+        "recipient_id": target.id, "recipient_kind": getattr(target, "kind", "worker"),
+        "recipient_name": target.name, "message": answer, "message_type": "block_reply",
+        "source_task_id": task.id, "context_task_ids": [task.id],
+        "context_snapshot": {"block_id": block["block_id"], "requires_ack": True},
+        "ack_required": True, "delivery_state": "buffered", "created_at": now,
+    })
+    if not row:
+        reply["delivery_state"] = "unrecoverable"
+        reply["delivery_reason"] = "persistence_unavailable"
+        reply["delivery_updated_at"] = time.time()
+        reply["terminal_at"] = reply["delivery_updated_at"]
+        save()
+        return {"type": "unrecoverable", "task_id": task.id,
+                "block_id": block["block_id"], "reply_message_id": reply_id,
+                "delivery_state": "unrecoverable", "delivery_reason": reply["delivery_reason"],
+                "message": "Reply could not be persisted or delivered; re-dispatch is required."}
+
+    # A stopped terminal can be re-opened only when the provider conversation
+    # is resumable.  Starting fresh would silently discard the asker/context.
+    if not getattr(target, "session_id", ""):
+        if not (getattr(target, "agent_session_id", "") and getattr(target, "session_resume", False)):
+            reply["delivery_reason"] = "provider_session_unavailable"
+            reply["delivery_updated_at"] = time.time()
+            reply["delivery_state"] = "unrecoverable"
+            reply["terminal_at"] = reply["delivery_updated_at"]
+            state.update_direct_message_delivery(reply_id, "failed", reason=reply["delivery_reason"])
+            save()
+            return {"type": "unrecoverable", "task_id": task.id,
+                    "block_id": block["block_id"], "reply_message_id": reply_id,
+                    "delivery_state": "unrecoverable", "delivery_reason": reply["delivery_reason"],
+                    "message": "Reply recorded but the worker has no resumable provider session; re-dispatch is required."}
+        try:
+            relaunch = await relaunch_agent({"id": target.id})
+        except Exception as exc:
+            relaunch = {"type": "error", "message": str(exc)}
+        if (isinstance(relaunch, dict) and relaunch.get("type") == "error") or not getattr(target, "session_id", ""):
+            reply["delivery_reason"] = "resume_failed"
+            reply["delivery_updated_at"] = time.time()
+            reply["delivery_state"] = "unrecoverable"
+            reply["terminal_at"] = reply["delivery_updated_at"]
+            state.update_direct_message_delivery(reply_id, "failed", reason=reply["delivery_reason"])
+            save()
+            return {"type": "unrecoverable", "task_id": task.id,
+                    "block_id": block["block_id"], "reply_message_id": reply_id,
+                    "delivery_state": "unrecoverable", "delivery_reason": reply["delivery_reason"],
+                    "message": "Reply recorded but provider-session resume failed; re-dispatch is required."}
+
+    try:
+        queued = await _queue_cell_prompt_send(
+            target, _format_block_reply_prompt(task, answer, block["block_id"]),
+            send_prompt, prime_input_ready=True, settled_submit=True,
+            wait_for_delivery=True, user_direct_message_id=reply_id)
+    except Exception:
+        queued = False
+    if not queued:
+        state.update_direct_message_delivery(reply_id, "failed", reason="resume_delivery_failed")
+        reply["delivery_state"] = "unrecoverable"
+        reply["delivery_reason"] = "resume_delivery_failed"
+        reply["delivery_updated_at"] = time.time()
+        reply["terminal_at"] = reply["delivery_updated_at"]
+        save()
+        return {"type": "unrecoverable", "task_id": task.id,
+                "block_id": block["block_id"], "reply_message_id": reply_id,
+                "delivery_state": "unrecoverable", "delivery_reason": reply["delivery_reason"],
+                "message": "Reply was persisted but could not reach the resumed worker; re-dispatch is required."}
+    state.update_direct_message_delivery(reply_id, "delivered")
+    reply["delivery_state"] = "delivered"
+    reply["delivery_reason"] = "awaiting_worker_ack"
+    reply["delivery_updated_at"] = time.time()
+    reply["terminal_at"] = 0.0
+    save()
+    if panel_event:
+        panel_event("worker_block_reply_delivered", target.id, target.name, target.group,
+                    "Blocked worker resumed; awaiting acknowledgement", task_id=task.id)
+    return {"type": "ok", "task_id": task.id, "agent_id": target.id,
+            "block_id": block["block_id"], "reply_message_id": reply_id,
+            "delivery_state": "delivered", "acknowledgement": "pending",
+            "message": "Reply delivered to the same worker session; awaiting its next report acknowledgement."}
+
 def _is_architect_ask_task(task) -> bool:
     labels = set(getattr(task, "labels", []) or [])
     return "architect-ask" in labels and "torque:human" in labels
