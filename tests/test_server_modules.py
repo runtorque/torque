@@ -5756,6 +5756,33 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         reply = [m for m in task.messages if m.get('action') == 'block_reply'][0]
         self.assertEqual(reply['delivery_state'], 'unrecoverable')
 
+    async def test_blocked_worker_reply_retries_buffered_but_not_failed_delivery(self):
+        state = self._make_state()
+        architect = self.state_mod.AgentCell(id='arch-1', name='Architect', group='g', cell_type='agent', kind='architect')
+        worker = self.state_mod.AgentCell(id='worker-1', name='Worker', group='g', cell_type='agent', kind='worker', session_id='pty-1', status='idle')
+        state.agents = {architect.id: architect, worker.id: worker}
+        state.groups['g'] = [architect.id, worker.id]
+        task = state.board_add_task('Implement', 'g', lane='In Progress', id='task-1', agent_id=worker.id)
+        task.messages.extend([
+            {'timestamp': 1, 'action': 'blocked', 'message': 'Question?', 'agent_name': worker.name, 'agent_id': worker.id, 'block_id': 'block-buffered', 'reply_message_id': 'msg-block-buffered'},
+            {'timestamp': 2, 'action': 'block_reply', 'message': 'Answer', 'worker_id': worker.id, 'block_id': 'block-buffered', 'reply_message_id': 'msg-block-buffered', 'delivery_state': 'unrecoverable'},
+        ])
+        state.board_update_task(task.id, messages=list(task.messages))
+        state.save_direct_message({'id': 'msg-block-buffered', 'thread_id': 'block-reply:task-1', 'group_name': 'g', 'sender_id': architect.id, 'sender_kind': 'architect', 'recipient_id': worker.id, 'recipient_kind': 'worker', 'message': 'Answer', 'message_type': 'block_reply', 'source_task_id': task.id, 'delivery_state': 'buffered'})
+        sent = []
+        async def send_prompt(cell, prompt, **kwargs):
+            sent.append((cell.id, prompt))
+            async def delivered(): return None
+            return asyncio.create_task(delivered())
+        result = await self.server_mod.resolve_blocked_task_reply(state, task, architect, 'Answer', send_prompt=send_prompt, relaunch_agent=None, reply_id='msg-block-buffered')
+        self.assertEqual(result['type'], 'ok')
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(self.db.load_direct_message('msg-block-buffered')['delivery_state'], 'delivered')
+        state.update_direct_message_delivery('msg-block-buffered', 'failed', reason='resume_delivery_failed')
+        failed = await self.server_mod.resolve_blocked_task_reply(state, task, architect, 'Answer', send_prompt=send_prompt, relaunch_agent=None, reply_id='msg-block-buffered')
+        self.assertEqual(failed['type'], 'unrecoverable')
+        self.assertEqual(len(sent), 1)
+
     async def test_resolve_architect_ask_delivers_user_reply_to_architect_inbox(self):
         state = self._make_state()
         architect = self.state_mod.AgentCell(

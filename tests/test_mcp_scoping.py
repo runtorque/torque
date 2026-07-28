@@ -608,6 +608,52 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Agent not found", text)
         self.assertEqual(calls, [])
 
+    async def test_architect_block_reply_scopes_to_owned_same_group_task(self):
+        state = self._make_state()
+        owner = self._add_architect(state, "arch-owner", "Owner")
+        other = self._add_architect(state, "arch-other", "Other")
+        worker = self._add_worker(state, "worker-1", "Worker", "")
+        task = self._add_task(
+            state, "TORQUE:block", "Blocked work", lane="In Progress",
+            agent_id=worker.id, created_by_architect_id=owner.id,
+        )
+        calls = []
+
+        async def handle_command(payload):
+            calls.append(dict(payload))
+            return {"type": "ok", "task_id": task.id, "delivery_state": "delivered"}
+
+        text, is_error = await self.mcp_architect_mod._dispatch_architect_tool(
+            "architect_task_block_reply", {"task": task.id, "answer": "Use A."},
+            handle_command, state, caller_id=owner.id, idempotency_key="reply-1",
+        )
+        self.assertFalse(is_error, text)
+        self.assertEqual(json.loads(text)["delivery_state"], "delivered")
+        self.assertEqual(calls[0]["cmd"], "blocked_task_reply")
+        self.assertEqual(calls[0]["actor_id"], owner.id)
+
+        calls.clear()
+        denied, denied_error = await self.mcp_architect_mod._dispatch_architect_tool(
+            "architect_task_block_reply", {"task": task.id, "answer": "Use B."},
+            handle_command, state, caller_id=other.id,
+        )
+        self.assertTrue(denied_error)
+        self.assertIn("Task was not created by this architect", denied)
+        self.assertEqual(calls, [])
+
+        foreign = self._add_task(
+            state, "TORQUE:foreign", "Foreign", group="other", lane="In Progress",
+            agent_id=worker.id, created_by_architect_id=owner.id,
+        )
+        del foreign
+        cross_group, cross_group_error = await self.mcp_architect_mod._dispatch_architect_tool(
+            "architect_task_block_reply", {"task": "TORQUE:foreign", "answer": "Use A."},
+            handle_command, state, caller_id=owner.id,
+        )
+        self.assertTrue(cross_group_error)
+        self.assertIn("Task not found", cross_group)
+        self.assertEqual(calls, [])
+
     async def test_engineer_merge_driverless_boundary_error_not_phantom_conflict(self):
         state = self._make_state()
         alice = self._add_engineer(state, "eng-alice", "Alice")

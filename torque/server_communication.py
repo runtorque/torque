@@ -1990,13 +1990,33 @@ async def resolve_blocked_task_reply(
     now = time.time()
     reply_id = str(reply_id or "").strip() or "msg-block-" + uuid.uuid4().hex[:12]
     existing = state.db.load_direct_message(reply_id) if getattr(state, "db", None) else None
+    existing_reply = next((entry for entry in reversed(list(task.messages or []))
+                           if isinstance(entry, dict)
+                           and entry.get("action") == "block_reply"
+                           and entry.get("reply_message_id") == reply_id), None)
     if existing:
-        return {"type": "ok", "task_id": task.id, "agent_id": str(existing.get("recipient_id", "") or ""),
+        existing_state = str(existing.get("delivery_state", "") or "buffered")
+        if existing_state == "delivered":
+            return {"type": "ok", "task_id": task.id, "agent_id": str(existing.get("recipient_id", "") or ""),
+                    "block_id": block["block_id"], "reply_message_id": reply_id,
+                    "delivery_state": "delivered", "acknowledgement": "pending", "deduped": True,
+                    "message": "Existing delivered blocked-worker reply retained; no duplicate prompt was sent."}
+        if existing_state == "failed":
+            return {"type": "unrecoverable", "task_id": task.id,
+                    "block_id": block["block_id"], "reply_message_id": reply_id,
+                    "delivery_state": "unrecoverable",
+                    "delivery_reason": str(existing.get("delivery_reason", "") or "resume_delivery_failed"),
+                    "message": "Prior reply delivery failed; it was not delivered and re-dispatch is required."}
+        # A buffered row is the only retryable state. The row was persisted
+        # before transport; replaying it is safe because no delivery receipt
+        # exists yet. Continue below without appending a second task record.
+    elif existing_reply and existing_reply.get("delivery_state") == "unrecoverable":
+        return {"type": "unrecoverable", "task_id": task.id,
                 "block_id": block["block_id"], "reply_message_id": reply_id,
-                "delivery_state": str(existing.get("delivery_state", "") or "buffered"),
-                "acknowledgement": "pending", "deduped": True,
-                "message": "Existing blocked-worker reply retained; no duplicate resume prompt was sent."}
-    reply = {
+                "delivery_state": "unrecoverable",
+                "delivery_reason": str(existing_reply.get("delivery_reason", "") or "unrecoverable"),
+                "message": "Prior reply was not deliverable; re-dispatch is required."}
+    reply = existing_reply or {
         "timestamp": now, "action": "block_reply", "message": answer,
         "agent_name": str(getattr(actor, "name", "") or "Architect"),
         "agent_id": str(getattr(actor, "id", "") or ""),
@@ -2008,9 +2028,10 @@ async def resolve_blocked_task_reply(
     }
     # Persist the reply projection before attempting any wake/resume.  This is
     # deliberately failure-first: an operator never gets a false success.
-    task.messages.append(reply)
-    block["reply_message_id"] = reply_id
-    block["reply_at"] = now
+    if not existing_reply:
+        task.messages.append(reply)
+        block["reply_message_id"] = reply_id
+        block["reply_at"] = now
 
     def save():
         state.board_update_task(task.id, messages=list(task.messages))
