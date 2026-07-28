@@ -5811,6 +5811,13 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             'buffered')
         persisted_block = next(m for m in task.messages if m.get('action') == 'blocked')
         self.assertEqual(persisted_block['reply_message_id'], 'transport-a')
+        persisted_messages = json.loads(self.db._conn.execute(
+            'SELECT messages FROM board_tasks WHERE id=?',
+            (task.id,),
+        ).fetchone()[0])
+        persisted_projection = next(
+            m for m in persisted_messages if m.get('action') == 'block_reply')
+        self.assertEqual(persisted_projection['reply_message_id'], 'transport-a')
         replayed = []
 
         async def must_not_relaunch(_payload):
