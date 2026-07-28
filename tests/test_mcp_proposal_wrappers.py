@@ -1517,7 +1517,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(before_calls, self.calls)
 
-    async def test_proposal_peer_threads_are_marker_filtered_and_ack_requires_anchor(self):
+    async def test_proposal_peer_threads_include_eligible_unmarked_rows_and_keep_marker_for_routes(self):
         task_resp = await self._call("architect_task_propose", {"title": "Anchor task"})
         task_id = self._result_payload(task_resp)["id"]
 
@@ -1559,18 +1559,24 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("torque.proposal_peer.v1", saved["context_snapshot"]["proposal_peer"]["marker"])
         self.assertTrue(saved["ack_required"])
 
-        # Raw Architect↔Architect row without marker and Architect↔Engineer row stay hidden.
-        self.db.save_agent_peer_message({
-            "id": "msg-raw-peer",
-            "thread_id": "thread-raw-peer",
-            "group_name": "g",
-            "sender_id": self.peer.id,
-            "sender_kind": "architect",
-            "recipient_id": self.architect.id,
-            "recipient_kind": "architect",
-            "message": "raw hidden",
-            "created_at": 2,
-        })
+        # A full Architect sends over the ordinary peer path, which deliberately
+        # has no product marker.  It remains an eligible same-group peer row.
+        ordinary = await self._call(
+            "architect_peer_message",
+            {
+                "architect_id": self.architect.id,
+                "message": "Normal peer-path message; please reply in this thread.",
+            },
+            req_id=4,
+            agent_id=self.full_peer.id,
+        )
+        ordinary_payload = self._result_payload(ordinary)
+        ordinary_row = self.db.load_agent_peer_message(ordinary_payload["message_id"])
+        self.assertFalse(
+            ordinary_row.get("context_snapshot", {}).get("proposal_peer"),
+        )
+
+        # Non-Architect rows remain hidden even if they carry the marker.
         self.db.save_agent_peer_message({
             "id": "msg-engineer",
             "thread_id": "thread-engineer",
@@ -1583,11 +1589,100 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             "created_at": 3,
             "context_snapshot": {"proposal_peer": {"marker": "torque.proposal_peer.v1"}},
         })
+        # A same-group Architect thread that does not include the caller also
+        # remains unaddressable, whether or not it is marked.
+        self.db.save_agent_peer_message({
+            "id": "msg-not-a-party",
+            "thread_id": "thread-not-a-party",
+            "group_name": "g",
+            "sender_id": self.full_peer.id,
+            "sender_kind": "architect",
+            "recipient_id": self.peer.id,
+            "recipient_kind": "architect",
+            "message": "not for the caller",
+            "created_at": 4,
+        })
 
-        inbox = await self._call("architect_proposal_peer_inbox", {}, req_id=4)
+        inbox = await self._call("architect_proposal_peer_inbox", {}, req_id=5)
         threads = self._result_payload(inbox)["threads"]
-        self.assertEqual([sent_payload["thread_id"]], [thread["thread_id"] for thread in threads])
-        self.assertEqual([product_message_id], [threads[0]["messages"][0]["id"]])
+        thread_by_id = {thread["thread_id"]: thread for thread in threads}
+        self.assertEqual(
+            {sent_payload["thread_id"], ordinary_payload["thread_id"]},
+            set(thread_by_id),
+        )
+        self.assertEqual(
+            [ordinary_payload["message_id"]],
+            [entry["id"] for entry in thread_by_id[ordinary_payload["thread_id"]]["messages"]],
+        )
+
+        # The marker remains a hard discriminator for product-route evidence;
+        # visibility uses relationship eligibility, not this provenance marker.
+        proposals_mod = importlib.import_module("torque.mcp_scoped.proposals")
+        self.assertTrue(proposals_mod._row_has_proposal_peer_marker(saved))
+        self.assertFalse(proposals_mod._row_has_proposal_peer_marker(ordinary_row))
+        self.db.save_agent_peer_message({
+            "id": "msg-unmarked-route",
+            "thread_id": "thread-unmarked-route",
+            "group_name": "g",
+            "sender_id": self.architect.id,
+            "sender_kind": "architect",
+            "recipient_id": self.full_peer.id,
+            "recipient_kind": "architect",
+            "message": "Unmarked route evidence must not authorize coverage.",
+            "created_at": 5,
+            "context_task_ids": [task_id],
+        })
+        self.assertEqual(
+            {},
+            proposals_mod._proposal_peer_route_message_for_task(
+                self.state,
+                self.full_peer.id,
+                self.state.board_tasks[task_id],
+            ),
+        )
+
+        # Explicit product context keeps the proposal-only anchor validation,
+        # while the unmarked row is now addressable and replyable in place.
+        ordinary_reply = await self._call(
+            "architect_proposal_peer_reply",
+            {
+                "message_id": ordinary_payload["message_id"],
+                "message": "Replying in the original full-Architect thread.",
+                "context_task_ids": [task_id],
+            },
+            req_id=6,
+        )
+        ordinary_reply_payload = self._result_payload(ordinary_reply)
+        ordinary_reply_row = self.db.load_agent_peer_message(
+            ordinary_reply_payload["message_id"]
+        )
+        self.assertEqual(ordinary_payload["thread_id"], ordinary_reply_payload["thread_id"])
+        self.assertEqual(
+            "torque.proposal_peer.v1",
+            ordinary_reply_row["context_snapshot"]["proposal_peer"]["marker"],
+        )
+
+        # Inbox and reply use the same eligibility predicate: it now returns
+        # the two-way conversation and never leaks the non-party thread.
+        inbox_after_reply = await self._call(
+            "architect_proposal_peer_inbox", {}, req_id=7
+        )
+        threads_after_reply = {
+            thread["thread_id"]: thread
+            for thread in self._result_payload(inbox_after_reply)["threads"]
+        }
+        self.assertEqual(
+            [ordinary_payload["message_id"], ordinary_reply_payload["message_id"]],
+            [entry["id"] for entry in threads_after_reply[ordinary_payload["thread_id"]]["messages"]],
+        )
+        self.assertNotIn("thread-not-a-party", threads_after_reply)
+
+        denied_non_party = await self._call(
+            "architect_proposal_peer_reply",
+            {"message_id": "msg-not-a-party", "message": "must not send"},
+            req_id=8,
+        )
+        self.assertIn("product-peer scope", self._error_text(denied_non_party))
 
         before_rows = self.db.load_agent_peer_messages_for_agent(self.architect.id, limit=20)
         before_calls = list(self.calls)
@@ -1607,22 +1702,10 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(before_calls, self.calls)
 
-        before_rows = self.db.load_agent_peer_messages_for_agent(self.architect.id, limit=20)
-        raw_reply = await self._call(
-            "architect_proposal_peer_reply",
-            {"message_id": "msg-raw-peer", "message": "no"},
-            req_id=5,
-        )
-        self.assertIn("product-peer scope", self._error_text(raw_reply))
-        self.assertEqual(
-            [row["id"] for row in before_rows],
-            [row["id"] for row in self.db.load_agent_peer_messages_for_agent(self.architect.id, limit=20)],
-        )
-
         reply = await self._call(
             "architect_proposal_peer_reply",
             {"message_id": product_message_id, "message": "Acknowledged.", "ack_required": True},
-            req_id=6,
+            req_id=9,
         )
         reply_payload = self._result_payload(reply)
         reply_row = self.db.load_agent_peer_message(reply_payload["message_id"])
