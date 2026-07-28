@@ -1012,6 +1012,14 @@ def _row_proposal_context(row: dict | None) -> dict:
 
 def _proposal_peer_row_visible(state, caller_id: str, row: dict,
                               peer_id: str = "") -> bool:
+    """Return whether a peer-message row is addressable in product scope.
+
+    Product-peer markers classify rows emitted by the proposal send paths.
+    They are retained for product-route evidence, but must not turn an
+    otherwise eligible same-group Architect conversation into an invisible,
+    unreplyable one: normal Architect peer messages predate the marker and
+    share the same participant/eligibility boundary.
+    """
     caller_id = str(caller_id or "").strip()
     participants = {
         str((row or {}).get("sender_id", "") or "").strip(),
@@ -1025,8 +1033,6 @@ def _proposal_peer_row_visible(state, caller_id: str, row: dict,
         str((row or {}).get("sender_kind", "") or "").strip(),
         str((row or {}).get("recipient_kind", "") or "").strip(),
     } != {"architect"}:
-        return False
-    if not _row_has_proposal_peer_marker(row):
         return False
     peer_architect_id = next((pid for pid in participants if pid != caller_id), "")
     peer = state.agents.get(peer_architect_id)
