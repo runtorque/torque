@@ -269,6 +269,170 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(observed["is_error"])
         self.assertIn("result", observed)
 
+    async def test_public_transport_reports_undeclared_arguments(self):
+        """A successful call must still disclose keys outside its schema."""
+        state = self.state_mod.MatrixState()
+        architect = self.state_mod.AgentCell(
+            id="architect-1",
+            name="Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        state.agents[architect.id] = architect
+        state.groups["g"] = [architect.id]
+
+        async def fake_handle_command(_payload):
+            self.fail("journal_list should not need command dispatch")
+
+        result, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+            {
+                "jsonrpc": "2.0",
+                "id": "undeclared-argument",
+                "method": "tools/call",
+                "params": {
+                    "name": "journal_list",
+                    "arguments": {
+                        "limit": 1,
+                        "nonexistent_parameter_probe": "probe",
+                    },
+                },
+            },
+            cell_id=architect.id,
+            handle_command=fake_handle_command,
+            state=state,
+        )
+
+        self.assertEqual(status, 200)
+        self.assertFalse(result["result"]["isError"])
+        self.assertIn(
+            "Undeclared parameter received: nonexistent_parameter_probe. "
+            "They are not part of this public tool schema.",
+            [block["text"] for block in result["result"]["content"]],
+        )
+
+    async def test_tombstoned_public_call_reports_undeclared_argument(self):
+        state = self.state_mod.MatrixState()
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            deleted_at=1.0,
+        )
+        state.agents[worker.id] = worker
+        state.groups["g"] = [worker.id]
+
+        async def fake_handle_command(_payload):
+            self.fail("tombstoned call must not dispatch")
+
+        result, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+            {
+                "jsonrpc": "2.0",
+                "id": "tombstoned-undeclared-argument",
+                "method": "tools/call",
+                "params": {
+                    "name": "task_progress",
+                    "arguments": {
+                        "message": "still running",
+                        "nonexistent_parameter_probe": "probe",
+                    },
+                },
+            },
+            cell_id=worker.id,
+            handle_command=fake_handle_command,
+            state=state,
+        )
+
+        self.assertEqual(status, 200)
+        self.assertIn("tombstoned", result["error"]["message"])
+        self.assertIn(
+            "Undeclared parameter received: nonexistent_parameter_probe. "
+            "They are not part of this public tool schema.",
+            result["error"]["message"],
+        )
+
+    async def test_agent_message_missing_target_uses_public_name_and_recovers(self):
+        """The public ``agent`` instruction must be actionable for Architects."""
+        state = self.state_mod.MatrixState()
+        architect = self.state_mod.AgentCell(
+            id="architect-1",
+            name="Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+            hired_by_architect_id=architect.id,
+        )
+        state.agents[architect.id] = architect
+        state.agents[engineer.id] = engineer
+        state.groups["g"] = [architect.id, engineer.id]
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            return {"type": "ok", "delivered": True}
+
+        missing, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+            {
+                "jsonrpc": "2.0",
+                "id": "missing-agent",
+                "method": "tools/call",
+                "params": {
+                    "name": "agent_message",
+                    "arguments": {
+                        "agent_id": engineer.id,
+                        "message": "Please inspect this.",
+                    },
+                },
+            },
+            cell_id=architect.id,
+            handle_command=fake_handle_command,
+            state=state,
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(missing["result"]["isError"])
+        self.assertEqual(
+            missing["result"]["content"][0]["text"],
+            "agent is required",
+        )
+        self.assertIn(
+            "Undeclared parameter received: agent_id. "
+            "They are not part of this public tool schema.",
+            [block["text"] for block in missing["result"]["content"]],
+        )
+
+        sent, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+            {
+                "jsonrpc": "2.0",
+                "id": "public-agent",
+                "method": "tools/call",
+                "params": {
+                    "name": "agent_message",
+                    "arguments": {
+                        "agent": engineer.id,
+                        "message": "Please inspect this.",
+                    },
+                },
+            },
+            cell_id=architect.id,
+            handle_command=fake_handle_command,
+            state=state,
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(sent["result"]["isError"])
+        self.assertEqual(
+            json.loads(sent["result"]["content"][0]["text"])["engineer_id"],
+            engineer.id,
+        )
+        self.assertEqual(calls[0]["cmd"], "inject_mcp_message")
+
     async def test_public_transport_hides_target_existence_for_projected_tools(self):
         """Projected canonical calls deny missing and out-of-scope targets alike."""
         state = self.state_mod.MatrixState()
@@ -396,6 +560,14 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("task_coverage_reconcile", restricted_names)
 
         peer_target = await call("peer", "task_get", {"task": peer_task.id})
+        peer_target_with_probe = await call(
+            "peer-with-probe",
+            "task_get",
+            {
+                "task": peer_task.id,
+                "nonexistent_parameter_probe": "probe",
+            },
+        )
         missing_task = await call("missing-task", "task_get", {"task": "TORQUE:missing"})
         unfrozen_missing_task = await call(
             "unfrozen-missing-task",
@@ -459,6 +631,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             "task_reassign": "Known tool is not authorized: task_reassign",
         }
         peer_text = error_text(peer_target)
+        peer_with_probe_text = error_text(peer_target_with_probe)
         missing_task_text = error_text(missing_task)
         unfrozen_missing_task_text = error_text(unfrozen_missing_task)
         missing_covering_text = error_text(missing_covering)
@@ -471,6 +644,12 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         missing_first_text = error_text(missing_first_target)
         missing_second_text = error_text(missing_second_target)
         self.assertEqual(expected["task_get"], peer_text)
+        self.assertIn(expected["task_get"], peer_with_probe_text)
+        self.assertIn(
+            "Undeclared parameter received: nonexistent_parameter_probe. "
+            "They are not part of this public tool schema.",
+            peer_with_probe_text,
+        )
         self.assertEqual(peer_text, missing_task_text)
         self.assertEqual(peer_text, unfrozen_missing_task_text)
         self.assertEqual(expected["task_mark_covered"], missing_covering_text)

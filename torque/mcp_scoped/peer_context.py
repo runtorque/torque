@@ -61,7 +61,7 @@ def _resolve_architect_peer(state, caller_id: str,
     """Resolve a same-group Architect peer for a send/reply mutation."""
     architect_ident = str(architect_ident or "").strip()
     if not architect_ident:
-        return None, "architect_id is required"
+        return None, "peer is required"
     caller = state.agents.get(str(caller_id or "").strip())
     caller_group = str(getattr(caller, "group", "") or "").strip()
     architect_id = _resolve_agent_including_tombstoned(state, architect_ident)
@@ -233,7 +233,7 @@ def _resolve_engineer_peer(
         include_dismissed: bool = False) -> tuple[object | None, str]:
     engineer_ident = str(engineer_ident or "").strip()
     if not engineer_ident:
-        return None, "engineer_id is required"
+        return None, "peer is required"
     engineer_id = _resolve_agent_including_tombstoned(state, engineer_ident)
     if not engineer_id:
         return None, f"Engineer not found: {engineer_ident}"

@@ -148,7 +148,7 @@ async def dispatch_communications(ctx: ScopedDispatchContext):
     if tool_name == "message_architect" and caller_kind == "engineer":
         architect_ident = str(args.get("architect_id", "") or "").strip()
         if not architect_ident:
-            return "architect_id is required", True
+            return "supervisor is required", True
         architect, architect_error = _resolve_architect_for_engineer(
             real_state, caller_id, architect_ident
         )

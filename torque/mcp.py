@@ -1013,11 +1013,16 @@ def _authority_project_tools(
     ]
 
 
-def _raw_tools_for_caller(state, cell_id: str) -> tuple[list[dict], object, str]:
+def _raw_tools_for_caller(
+    state,
+    cell_id: str,
+    *,
+    include_tombstoned: bool = False,
+) -> tuple[list[dict], object, str]:
     """Return authority-projected internal operations for one caller."""
 
     cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
-    if cell and state.agent_is_tombstoned(cell):
+    if cell and state.agent_is_tombstoned(cell) and not include_tombstoned:
         return [], cell, ""
     authority = _effective_class_authority_for_cell(cell)
     caller_kind = str(getattr(cell, "kind", "") or "").strip() if cell else ""
@@ -1080,8 +1085,17 @@ def _raw_tools_for_caller(state, cell_id: str) -> tuple[list[dict], object, str]
     return tools, cell, caller_kind
 
 
-def _canonical_tools_for_caller(state, cell_id: str) -> list[dict]:
-    tools, _cell, caller_kind = _raw_tools_for_caller(state, cell_id)
+def _canonical_tools_for_caller(
+    state,
+    cell_id: str,
+    *,
+    include_tombstoned: bool = False,
+) -> list[dict]:
+    tools, _cell, caller_kind = _raw_tools_for_caller(
+        state,
+        cell_id,
+        include_tombstoned=include_tombstoned,
+    )
     if not tools:
         return []
     canonical = canonicalize_tool_specs(
@@ -1118,6 +1132,80 @@ def _visible_tools(state, cell_id: str):
         public_tool_spec(tool)
         for tool in _canonical_tools_for_caller(state, cell_id)
     ]
+
+
+def _undeclared_public_argument_names(
+    state,
+    cell_id: str,
+    requested_tool_name: str,
+    arguments: dict,
+) -> list[str]:
+    """Return public-schema keys supplied to an exact public tool name.
+
+    MCP clients are not uniformly strict about a tool's input schema.  Torque
+    therefore accepts extra keys for forward compatibility, but must not let
+    that tolerance masquerade as proof that a key is part of the contract.
+    Hidden legacy aliases intentionally retain their old argument shapes, so
+    this check applies only to the exact canonical name advertised to the
+    caller.
+    """
+
+    if not isinstance(arguments, dict):
+        return []
+    requested = str(requested_tool_name or "").strip()
+    if not requested:
+        return []
+    for tool in _canonical_tools_for_caller(
+        state,
+        cell_id,
+        include_tombstoned=True,
+    ):
+        if requested != str(tool.get("name", "") or "").strip():
+            continue
+        properties = (
+            tool.get("inputSchema", {})
+            .get("properties", {})
+        )
+        if not isinstance(properties, dict):
+            return []
+        return sorted(
+            str(key)
+            for key in arguments
+            if str(key) not in properties
+        )
+    return []
+
+
+def _undeclared_public_argument_notice(names: list[str]) -> str:
+    """Format a caller-facing receipt for tolerated non-schema arguments."""
+
+    label = "parameter" if len(names) == 1 else "parameters"
+    return (
+        f"Undeclared {label} received: {', '.join(names)}. "
+        "They are not part of this public tool schema."
+    )
+
+
+def _append_undeclared_public_argument_notice(result: dict, names: list[str]) -> dict:
+    """Expose tolerated non-schema arguments without rejecting the call."""
+
+    if not names or not isinstance(result, dict):
+        return result
+    content = result.get("content")
+    if not isinstance(content, list):
+        return result
+    notice = _undeclared_public_argument_notice(names)
+    if any(
+        isinstance(block, dict) and block.get("text") == notice
+        for block in content
+    ):
+        return result
+    result = dict(result)
+    result["content"] = [
+        *content,
+        {"type": "text", "text": notice},
+    ]
+    return result
 
 
 def _deferred_tools_for_caller(state, cell_id: str):
@@ -1808,18 +1896,36 @@ def _jsonrpc_error(id, code, message):
     return {"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}}
 
 
+def _jsonrpc_error_with_undeclared_public_argument_notice(
+    id,
+    code,
+    message: str,
+    names: list[str],
+):
+    """Keep JSON-RPC early errors truthful about tolerated public keys."""
+
+    if names:
+        message = f"{message} — {_undeclared_public_argument_notice(names)}"
+    return _jsonrpc_error(id, code, message)
+
+
 # ---------------------------------------------------------------------------
 # aiohttp handler / replayable dispatch
 # ---------------------------------------------------------------------------
 
-def _idempotency_conflict_result(req_id, tool_name: str):
-    return _jsonrpc_error(
+def _idempotency_conflict_result(
+    req_id,
+    tool_name: str,
+    undeclared_public_arguments: list[str] | None = None,
+):
+    return _jsonrpc_error_with_undeclared_public_argument_notice(
         req_id,
         -32602,
         (
             "Idempotency key was reused for a different MCP write"
             f" ({tool_name})"
         ),
+        undeclared_public_arguments or [],
     )
 
 
@@ -1903,6 +2009,16 @@ async def dispatch_mcp_rpc_body(
         )
         raw_arguments = params.get("arguments", {}) if isinstance(params, dict) else {}
         arguments = strip_mcp_idempotency_args(raw_arguments)
+        public_arguments = dict(arguments)
+        # Compute from the advertised schema before classification so an
+        # authorization/tombstone/idempotency early return cannot silently
+        # erase evidence that a public argument name was undeclared.
+        undeclared_public_arguments = _undeclared_public_argument_names(
+            state,
+            cell_id,
+            requested_tool_name,
+            public_arguments,
+        )
         (
             call_classification,
             tool_name,
@@ -1913,11 +2029,16 @@ async def dispatch_mcp_rpc_body(
             state,
             cell_id,
             requested_tool_name,
-            arguments,
+            public_arguments,
         )
         if caller_cell and state.agent_is_tombstoned(caller_cell):
             return (
-                _jsonrpc_error(req_id, -32602, f"Agent {cell_id} is tombstoned"),
+                _jsonrpc_error_with_undeclared_public_argument_notice(
+                    req_id,
+                    -32602,
+                    f"Agent {cell_id} is tombstoned",
+                    undeclared_public_arguments,
+                ),
                 200,
             )
         session_wake_pending = (
@@ -1943,18 +2064,24 @@ async def dispatch_mcp_rpc_body(
                         else "creator/self"
                     )
                     return (
-                        _jsonrpc_error(
+                        _jsonrpc_error_with_undeclared_public_argument_notice(
                             req_id,
                             -32003,
                             "Authorization denied: target is outside Product "
                             f"Manager {scope} scope",
+                            undeclared_public_arguments,
                         ),
                         200,
                     )
                 message = f"Known tool is not authorized: {requested_tool_name}"
             else:
                 message = f"Unknown tool: {requested_tool_name}"
-            return _jsonrpc_error(req_id, -32602, message), 200
+            return _jsonrpc_error_with_undeclared_public_argument_notice(
+                req_id,
+                -32602,
+                message,
+                undeclared_public_arguments,
+            ), 200
         write_tool = is_mcp_write_tool(tool_name)
         idempotency_key = ""
         request_hash = ""
@@ -1985,11 +2112,22 @@ async def dispatch_mcp_rpc_body(
                                 caller_kind=caller_kind,
                                 first_tool_call_ts=first_tool_call_ts,
                             )
-                        return _idempotency_conflict_result(req_id, tool_name), 200
+                        return _idempotency_conflict_result(
+                            req_id,
+                            tool_name,
+                            undeclared_public_arguments,
+                        ), 200
                     try:
                         cached = json.loads(existing.get("response_json", "{}"))
                     except (json.JSONDecodeError, TypeError):
                         cached = {}
+                    # Older persisted idempotency rows may predate the
+                    # receipt feature. A replay remains acceptance-identical
+                    # but must not recreate the silent-parameter trap.
+                    cached = _append_undeclared_public_argument_notice(
+                        cached,
+                        undeclared_public_arguments,
+                    )
                     record_mcp_health_event_safe(
                         db,
                         surface=mcp_tool_surface(tool_name),
@@ -2014,7 +2152,12 @@ async def dispatch_mcp_rpc_body(
                     first_tool_call_ts=first_tool_call_ts,
                 )
             return (
-                _jsonrpc_error(req_id, -32602, f"Unknown tool: {tool_name}"),
+                _jsonrpc_error_with_undeclared_public_argument_notice(
+                    req_id,
+                    -32602,
+                    f"Unknown tool: {tool_name}",
+                    undeclared_public_arguments,
+                ),
                 200,
             )
 
@@ -2163,6 +2306,10 @@ async def dispatch_mcp_rpc_body(
             caller_cell,
         )
         result = _apply_inline_field_authority(result, caller_cell)
+        result = _append_undeclared_public_argument_notice(
+            result,
+            undeclared_public_arguments,
+        )
 
         if write_tool and idempotency_key and db and cacheable:
             try:

@@ -26,6 +26,45 @@ names returned by MCP `tools/list`.
 - Internal authority metadata and compatibility aliases are never returned in
   public tool schemas.
 
+### Argument receipts and canonical translation audit
+
+Torque tolerates undeclared arguments rather than rejecting them. This is a
+deliberate compatibility decision: MCP clients may send forward-compatible
+extra fields, and rejecting those fields would turn a diagnostic improvement
+into a client-breaking change. Every successful or failed exact public-tool
+call that includes one now gets a caller-visible receipt such as
+`Undeclared parameter received: agent_id. They are not part of this public
+tool schema.` Tool-result responses carry it as a second text block;
+pre-dispatch JSON-RPC errors (including authorization, tombstone, and
+idempotency exits) append it to the error message. The operation's acceptance
+and handler semantics are otherwise unchanged; callers must not treat a
+successful call as evidence that an extra field is declared.
+
+The public argument for an Architect's single-agent reference is `agent`.
+This includes `agent_message`, `behavior_overlay_get`,
+`behavior_overlay_versions`, `behavior_overlay_diff`,
+`behavior_overlay_proposal_list`, and `telemetry_query`. Their handler fields
+remain `engineer_id` or `agent_id` internally. `behavior_overlay_propose` and
+`behavior_overlay_rollback` instead use the deliberate polymorphic
+`target`/`target_kind` pair because they can address either an agent or a
+role; they are not alternate single-agent spellings.
+
+Audit of `translate_canonical_arguments`:
+
+- **Leaks fixed:** `peer` → `architect_id`/`engineer_id` now reports `peer`;
+  `agent` → `engineer_id` reports `agent`; `supervisor` → `architect_id`
+  reports `supervisor`; and batch `entries` → `tasks` reports `entries`.
+- **Checked clean:** `peer` → optional
+  `peer_architect_id`/`peer_engineer_id`; `help_search` mode-only key removal;
+  `area_link`, `initiative_link`, and behavior-overlay target routing;
+  `memory_set_pin`, event delivery, lifecycle, and hire-list mode selection;
+  thinking/scratchpad/mind-map aliases; and behavior-review compatibility
+  fields. These paths either use their public name in validation or have no
+  required-target error after translation.
+
+This audit concerns caller-facing diagnostics only. It does not alter
+authorization, scope, persistence, or audit-record field names.
+
 ## Discovery
 
 `tool_search(query, max_results)` searches only operations Torque classifies
