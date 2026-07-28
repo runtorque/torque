@@ -627,7 +627,10 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("error", denied.payload)
         self.assertEqual(-32602, denied.payload["error"]["code"])
-        self.assertIn("Known tool is not authorized", denied.payload["error"]["message"])
+        self.assertEqual(
+            "Authorization denied: target is outside this caller's authorized scope for task_reassign.",
+            denied.payload["error"]["message"],
+        )
         self.assertEqual("", own_task.assigned_engineer_id)
 
     async def test_routed_product_proposal_task_can_be_picked_up_by_same_group_architect(self):
@@ -848,7 +851,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             agent_id=self.torqly.id,
         )
         self.assertEqual(
-            "Known tool is not authorized: task_reassign",
+            "Authorization denied: target is outside this caller's authorized scope for task_reassign.",
             self._error_text(malformed),
         )
         self.assertEqual(before, (owned.assigned_engineer_id, owned.updated_at))
@@ -883,7 +886,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         )
         no_route_text = self._error_text(no_route)
         self.assertEqual(
-            "Known tool is not authorized: task_claim",
+            "Authorization denied: target is outside this caller's authorized scope for task_claim.",
             no_route_text,
         )
         self.assertEqual("", unrouted.assigned_architect_id)
@@ -904,7 +907,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         )
         wrong_group_text = self._error_text(wrong_group_denied)
         self.assertEqual(
-            "Known tool is not authorized: task_claim",
+            "Authorization denied: target is outside this caller's authorized scope for task_claim.",
             wrong_group_text,
         )
         self.assertEqual("", wrong_group.assigned_architect_id)
@@ -923,7 +926,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         )
         ineligible_text = self._error_text(ineligible_denied)
         self.assertEqual(
-            "Known tool is not authorized: task_claim",
+            "Authorization denied: target is outside this caller's authorized scope for task_claim.",
             ineligible_text,
         )
         self.assertEqual("", ineligible.assigned_architect_id)
@@ -966,7 +969,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             agent_id=self.torqly.id,
         )
         self.assertEqual(
-            "Known tool is not authorized: task_claim",
+            "Authorization denied: target is outside this caller's authorized scope for task_claim.",
             self._error_text(claimed),
         )
         self.assertEqual(self.peer.id, self.state.board_tasks[claimed_id].assigned_architect_id)
@@ -1009,7 +1012,10 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         )
 
         text = self._error_text(denied)
-        self.assertEqual("Known tool is not authorized: task_claim", text)
+        self.assertEqual(
+            "Authorization denied: target is outside this caller's authorized scope for task_claim.",
+            text,
+        )
         self.assertEqual(before_assignment, task.assigned_architect_id)
         self.assertEqual(before_evidence, task.completion_evidence)
         self.assertEqual(before_messages, task.messages)
@@ -1070,7 +1076,10 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         # The public canonical name is projected to this caller, so its
         # target-scope refusal must be truthful rather than non-disclosing.
         denied_text = self._error_text(denied_peer_covering)
-        self.assertIn("Known tool is not authorized", denied_text)
+        self.assertEqual(
+            "Authorization denied: target is outside this caller's authorized scope for task_mark_covered.",
+            denied_text,
+        )
         self.assertNotIn("Unknown tool", denied_text)
         self.assertEqual(before_lane, user_root.lane)
         self.assertEqual(before_evidence, user_root.completion_evidence)
@@ -1108,7 +1117,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             agent_id=self.torqly.id,
         )
         self.assertEqual(
-            "Known tool is not authorized: task_mark_covered",
+            "Authorization denied: target is outside this caller's authorized scope for task_mark_covered.",
             self._error_text(denied),
         )
         self.assertEqual(before_evidence, other_owned.completion_evidence)

@@ -48,11 +48,13 @@ from .mcp_engineer import (
 from .mcp_public_call_authorization import (
     PublicCallAuthorizationDependencies,
     _PUBLIC_TOOL_CALL_AUTHORIZED,
-    _PUBLIC_TOOL_CALL_UNAUTHORIZED,
+    _PUBLIC_TOOL_CALL_TARGET_SCOPE_DENIED,
+    _PUBLIC_TOOL_CALL_UNKNOWN,
     _classify_public_tool_call as _classify_public_tool_call_with_dependencies,
     _resolve_public_tool_call as _resolve_public_tool_call_with_dependencies,
     _resolve_scoped_resource,
     _scoped_resource_relationship,
+    public_call_refusal_message,
 )
 from .mcp_tool_search import deferred_tool_specs, public_tool_spec
 from .mcp_tool_search import tool_search_response
@@ -2053,12 +2055,17 @@ async def dispatch_mcp_rpc_body(
                     caller_kind=caller_kind,
                     first_tool_call_ts=first_tool_call_ts,
                 )
-            if call_classification == _PUBLIC_TOOL_CALL_UNAUTHORIZED:
+            if call_classification != _PUBLIC_TOOL_CALL_UNKNOWN:
                 is_creator_proposal_mode = has_frozen_platform_task_authority_mode(
                     caller_cell, "creator-proposal-only")
                 is_group_board_authority_mode = (
                     has_frozen_platform_group_board_authority(caller_cell))
-                if is_creator_proposal_mode or is_group_board_authority_mode:
+                if (
+                        call_classification
+                        == _PUBLIC_TOOL_CALL_TARGET_SCOPE_DENIED
+                        and (is_creator_proposal_mode
+                             or is_group_board_authority_mode)
+                ):
                     scope = (
                         "group" if is_group_board_authority_mode
                         else "creator/self"
@@ -2073,7 +2080,10 @@ async def dispatch_mcp_rpc_body(
                         ),
                         200,
                     )
-                message = f"Known tool is not authorized: {requested_tool_name}"
+                message = public_call_refusal_message(
+                    call_classification,
+                    requested_tool_name,
+                )
             else:
                 message = f"Unknown tool: {requested_tool_name}"
             return _jsonrpc_error_with_undeclared_public_argument_notice(

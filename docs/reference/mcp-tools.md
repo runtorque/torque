@@ -65,6 +65,34 @@ Audit of `translate_canonical_arguments`:
 This audit concerns caller-facing diagnostics only. It does not alter
 authorization, scope, persistence, or audit-record field names.
 
+### Authorization refusals and positive controls
+
+For an **exact canonical name already present in the caller's `tools/list`**,
+Torque identifies the authorization layer that refused the call: the operation
+is not projected for the caller, the session's frozen Agent Class authority
+snapshot denies it (relaunch after an approved class change), or the requested
+target is outside the caller's authorized scope. The final form intentionally
+does not distinguish an absent target from an out-of-scope target. Unknown
+names, legacy aliases, and canonical names absent from `tools/list` still
+return only `Unknown tool`; a refusal must never become a discovery oracle.
+
+When diagnosing a remaining ambiguous handler-level response, use a
+same-session positive control only when it resolves to the **same internal
+handler**: call the same public tool against a target that should be allowed.
+A handler-level response (including a non-authorization error) proves that
+tool projection and frozen authority passed for that handler in that session;
+a refusal on the original target is then target-specific. This control is not
+available for argument-dependent public-name resolution, because different
+arguments select a different handler and identical arguments are the original
+call. Read source instead for: `event_delivery_update`,
+`engineer_lifecycle`, `hire_list`, `idea_brief_transition`,
+`idea_brief_update`, `thinking_list`, and `thinking_get`.
+
+| Public-name resolution | Diagnostic route |
+| --- | --- |
+| Argument-independent / same handler | Same-session positive control can eliminate projection and frozen-authority causes. |
+| Argument-dependent | No external positive control exists; inspect the selected handler and authorization path. |
+
 ## Discovery
 
 `tool_search(query, max_results)` searches only operations Torque classifies
