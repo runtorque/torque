@@ -8,6 +8,7 @@ import time
 
 from .adapters import get_adapter
 from .config import log
+from .deploy_state import record_session_runtime_provenance
 from .server_agent import (
     _new_agent_prompt_sequence,
     _startup_prompt_for_new_agent,
@@ -857,6 +858,9 @@ async def _handle_relaunch_agent_command(
         sdk_system_prompt=launch_cfg.get("sdk_system_prompt", ""),
         mcp_entrypoint=mcp_entrypoint_for_cell(cell),
     )
+    record_session_runtime_provenance(state, cell)
+    state._emit_agent(cell)
+    state._db_save_agent(cell)
 
     # Fresh-session kickoff: when the new session has no prior provider
     # conversation to resume into (no agent_session_id, or session_resume
@@ -1037,6 +1041,9 @@ async def _handle_restart_agent_command(
         sdk_system_prompt=launch_cfg.get("sdk_system_prompt", ""),
         mcp_entrypoint=mcp_entrypoint_for_cell(cell),
     )
+    record_session_runtime_provenance(state, cell)
+    state._emit_agent(cell)
+    state._db_save_agent(cell)
 
     if cell.session_id:
         for prompt_text, send_kwargs in _new_agent_prompt_sequence(

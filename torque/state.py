@@ -1075,6 +1075,12 @@ class AgentCell:
     window_id: str = ""  # terminal/UI window this session lives in
     parent_id: str = ""  # for child terminals: the owning agent's ID
     status: str = "stopped"  # idle | running | error | stopped
+    # Runtime provenance is intentionally ephemeral. It identifies the
+    # Torque daemon revision that supplied this live agent session, rather
+    # than inferring it later from a mutable checkout.
+    session_code_revision: str = ""
+    session_started_at: float = 0.0
+    session_daemon_started_at: float = 0.0
     current_process: str = ""  # foreground job name (tracked for terminals)
     current_path: str = ""  # working directory (tracked for terminals)
     current_branch: str = ""  # git branch (empty if not in a repo)
