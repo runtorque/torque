@@ -888,7 +888,7 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
     if tool_name == "batch_dispatch":
         raw_tasks = args.get("tasks", [])
         if not isinstance(raw_tasks, list) or not raw_tasks:
-            return "tasks must be a non-empty array", True
+            return "entries must be a non-empty array", True
         raw_max_concurrent = args.get("max_concurrent", None)
         if raw_max_concurrent is None:
             max_concurrent = normalize_default_worker_concurrency(

@@ -1120,6 +1120,70 @@ def _visible_tools(state, cell_id: str):
     ]
 
 
+def _undeclared_public_argument_names(
+    state,
+    cell_id: str,
+    requested_tool_name: str,
+    arguments: dict,
+) -> list[str]:
+    """Return public-schema keys supplied to an exact public tool name.
+
+    MCP clients are not uniformly strict about a tool's input schema.  Torque
+    therefore accepts extra keys for forward compatibility, but must not let
+    that tolerance masquerade as proof that a key is part of the contract.
+    Hidden legacy aliases intentionally retain their old argument shapes, so
+    this check applies only to the exact canonical name advertised to the
+    caller.
+    """
+
+    if not isinstance(arguments, dict):
+        return []
+    requested = str(requested_tool_name or "").strip()
+    if not requested:
+        return []
+    for tool in _canonical_tools_for_caller(state, cell_id):
+        if requested != str(tool.get("name", "") or "").strip():
+            continue
+        properties = (
+            tool.get("inputSchema", {})
+            .get("properties", {})
+        )
+        if not isinstance(properties, dict):
+            return []
+        return sorted(
+            str(key)
+            for key in arguments
+            if str(key) not in properties
+        )
+    return []
+
+
+def _undeclared_public_argument_notice(names: list[str]) -> str:
+    """Format a caller-facing receipt for tolerated non-schema arguments."""
+
+    label = "parameter" if len(names) == 1 else "parameters"
+    return (
+        f"Undeclared {label} received: {', '.join(names)}. "
+        "They are not part of this public tool schema."
+    )
+
+
+def _append_undeclared_public_argument_notice(result: dict, names: list[str]) -> dict:
+    """Expose tolerated non-schema arguments without rejecting the call."""
+
+    if not names or not isinstance(result, dict):
+        return result
+    content = result.get("content")
+    if not isinstance(content, list):
+        return result
+    result = dict(result)
+    result["content"] = [
+        *content,
+        {"type": "text", "text": _undeclared_public_argument_notice(names)},
+    ]
+    return result
+
+
 def _deferred_tools_for_caller(state, cell_id: str):
     """Return deferred MCP tool schemas available to the caller."""
     return deferred_tool_specs(_canonical_tools_for_caller(state, cell_id))
@@ -1903,6 +1967,7 @@ async def dispatch_mcp_rpc_body(
         )
         raw_arguments = params.get("arguments", {}) if isinstance(params, dict) else {}
         arguments = strip_mcp_idempotency_args(raw_arguments)
+        public_arguments = dict(arguments)
         (
             call_classification,
             tool_name,
@@ -1913,7 +1978,7 @@ async def dispatch_mcp_rpc_body(
             state,
             cell_id,
             requested_tool_name,
-            arguments,
+            public_arguments,
         )
         if caller_cell and state.agent_is_tombstoned(caller_cell):
             return (
@@ -1955,6 +2020,12 @@ async def dispatch_mcp_rpc_body(
             else:
                 message = f"Unknown tool: {requested_tool_name}"
             return _jsonrpc_error(req_id, -32602, message), 200
+        undeclared_public_arguments = _undeclared_public_argument_names(
+            state,
+            cell_id,
+            requested_tool_name,
+            public_arguments,
+        )
         write_tool = is_mcp_write_tool(tool_name)
         idempotency_key = ""
         request_hash = ""
@@ -2163,6 +2234,10 @@ async def dispatch_mcp_rpc_body(
             caller_cell,
         )
         result = _apply_inline_field_authority(result, caller_cell)
+        result = _append_undeclared_public_argument_notice(
+            result,
+            undeclared_public_arguments,
+        )
 
         if write_tool and idempotency_key and db and cacheable:
             try:

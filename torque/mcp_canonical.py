@@ -492,6 +492,21 @@ def _canonical_schema(name: str, schema: dict, *, caller_kind: str) -> dict:
         props.pop("engineer_id", None)
         add("agent", {"type": "string", "description": "Eligible subordinate agent id, slug, or name."})
         required = ["agent", "message"]
+    elif (
+        caller_kind == "architect"
+        and name in {
+            "behavior_overlay_get",
+            "behavior_overlay_versions",
+            "behavior_overlay_diff",
+            "behavior_overlay_proposal_list",
+            "telemetry_query",
+        }
+    ):
+        # Keep a single public reference name across the Architect surface.
+        # ``agent_id`` and ``cell_id`` are historical handler aliases only.
+        props.pop("agent_id", None)
+        props.pop("cell_id", None)
+        add("agent", {"type": "string", "description": "Optional agent id, slug, or name."})
     elif name == "supervisor_message":
         props.pop("architect_id", None)
         add("supervisor", {"type": "string", "description": "Optional supervising agent reference; defaults to the caller's supervisor."})
@@ -1173,6 +1188,19 @@ def translate_canonical_arguments(
             ] = peer
     elif canonical_name == "agent_message" and caller_kind == "architect":
         translated["engineer_id"] = translated.pop("agent", "")
+    elif (
+        caller_kind == "architect"
+        and canonical_name in {
+            "behavior_overlay_get",
+            "behavior_overlay_versions",
+            "behavior_overlay_diff",
+            "behavior_overlay_proposal_list",
+            "telemetry_query",
+        }
+    ):
+        agent = translated.pop("agent", "")
+        if agent:
+            translated["agent_id"] = agent
     elif canonical_name == "supervisor_message":
         supervisor = translated.pop("supervisor", "")
         if supervisor:

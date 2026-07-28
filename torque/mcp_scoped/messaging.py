@@ -429,7 +429,10 @@ async def _send_architect_engineer_message(real_state, handle_command,
                                            dispatch_task_id: str = ""):
     engineer_ident = str(args.get("engineer_id", "") or "").strip()
     if not engineer_ident:
-        return None, "engineer_id is required"
+        # ``agent`` is the canonical public argument.  ``engineer_id`` is
+        # only the translated handler/persistence field and must not leak
+        # into caller guidance.
+        return None, "agent is required"
     engineer_id, engineer_error = _resolve_architect_hired_engineer(
         real_state, caller_id, engineer_ident
     )

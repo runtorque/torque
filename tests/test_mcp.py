@@ -269,6 +269,129 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(observed["is_error"])
         self.assertIn("result", observed)
 
+    async def test_public_transport_reports_undeclared_arguments(self):
+        """A successful call must still disclose keys outside its schema."""
+        state = self.state_mod.MatrixState()
+        architect = self.state_mod.AgentCell(
+            id="architect-1",
+            name="Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        state.agents[architect.id] = architect
+        state.groups["g"] = [architect.id]
+
+        async def fake_handle_command(_payload):
+            self.fail("journal_list should not need command dispatch")
+
+        result, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+            {
+                "jsonrpc": "2.0",
+                "id": "undeclared-argument",
+                "method": "tools/call",
+                "params": {
+                    "name": "journal_list",
+                    "arguments": {
+                        "limit": 1,
+                        "nonexistent_parameter_probe": "probe",
+                    },
+                },
+            },
+            cell_id=architect.id,
+            handle_command=fake_handle_command,
+            state=state,
+        )
+
+        self.assertEqual(status, 200)
+        self.assertFalse(result["result"]["isError"])
+        self.assertIn(
+            "Undeclared parameter received: nonexistent_parameter_probe. "
+            "They are not part of this public tool schema.",
+            [block["text"] for block in result["result"]["content"]],
+        )
+
+    async def test_agent_message_missing_target_uses_public_name_and_recovers(self):
+        """The public ``agent`` instruction must be actionable for Architects."""
+        state = self.state_mod.MatrixState()
+        architect = self.state_mod.AgentCell(
+            id="architect-1",
+            name="Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+            hired_by_architect_id=architect.id,
+        )
+        state.agents[architect.id] = architect
+        state.agents[engineer.id] = engineer
+        state.groups["g"] = [architect.id, engineer.id]
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            return {"type": "ok", "delivered": True}
+
+        missing, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+            {
+                "jsonrpc": "2.0",
+                "id": "missing-agent",
+                "method": "tools/call",
+                "params": {
+                    "name": "agent_message",
+                    "arguments": {
+                        "agent_id": engineer.id,
+                        "message": "Please inspect this.",
+                    },
+                },
+            },
+            cell_id=architect.id,
+            handle_command=fake_handle_command,
+            state=state,
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(missing["result"]["isError"])
+        self.assertEqual(
+            missing["result"]["content"][0]["text"],
+            "agent is required",
+        )
+        self.assertIn(
+            "Undeclared parameter received: agent_id. "
+            "They are not part of this public tool schema.",
+            [block["text"] for block in missing["result"]["content"]],
+        )
+
+        sent, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+            {
+                "jsonrpc": "2.0",
+                "id": "public-agent",
+                "method": "tools/call",
+                "params": {
+                    "name": "agent_message",
+                    "arguments": {
+                        "agent": engineer.id,
+                        "message": "Please inspect this.",
+                    },
+                },
+            },
+            cell_id=architect.id,
+            handle_command=fake_handle_command,
+            state=state,
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(sent["result"]["isError"])
+        self.assertEqual(
+            json.loads(sent["result"]["content"][0]["text"])["engineer_id"],
+            engineer.id,
+        )
+        self.assertEqual(calls[0]["cmd"], "inject_mcp_message")
+
     async def test_public_transport_hides_target_existence_for_projected_tools(self):
         """Projected canonical calls deny missing and out-of-scope targets alike."""
         state = self.state_mod.MatrixState()

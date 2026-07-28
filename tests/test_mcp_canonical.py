@@ -686,6 +686,37 @@ class CanonicalMCPContractTests(unittest.TestCase):
         self.assertEqual(architect_args["architect_id"], "architect-2")
         self.assertNotIn("peer", architect_args)
 
+    def test_architect_agent_references_use_one_public_spelling(self):
+        """Read/telemetry neighbors must not make ``agent_id`` the guess."""
+        tools = {
+            tool["name"]: tool
+            for tool in _canonical_tools_for_caller(_State("architect"), "caller")
+        }
+        cases = {
+            "behavior_overlay_get": "architect_behavior_overlay_read",
+            "behavior_overlay_versions": "architect_behavior_overlay_versions",
+            "behavior_overlay_diff": "architect_behavior_overlay_diff",
+            "behavior_overlay_proposal_list": (
+                "architect_behavior_overlay_proposal_list"
+            ),
+            "telemetry_query": "architect_mcp_calls",
+        }
+        for public_name, legacy_name in cases.items():
+            with self.subTest(public_name=public_name):
+                properties = tools[public_name]["inputSchema"]["properties"]
+                self.assertIn("agent", properties)
+                self.assertNotIn("agent_id", properties)
+                self.assertNotIn("cell_id", properties)
+                resolved, translated = _resolve_public_tool_call(
+                    _State("architect"),
+                    "caller",
+                    public_name,
+                    {"agent": "engineer-1"},
+                )
+                self.assertEqual(resolved, legacy_name)
+                self.assertEqual(translated["agent_id"], "engineer-1")
+                self.assertNotIn("agent", translated)
+
     def test_consolidated_dispatch_selects_single_or_batch_handler(self):
         state = _State("engineer")
         single_name, single_args = _resolve_public_tool_call(
