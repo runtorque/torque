@@ -32,11 +32,13 @@ Torque tolerates undeclared arguments rather than rejecting them. This is a
 deliberate compatibility decision: MCP clients may send forward-compatible
 extra fields, and rejecting those fields would turn a diagnostic improvement
 into a client-breaking change. Every successful or failed exact public-tool
-call that includes one now gets a second text receipt such as
+call that includes one now gets a caller-visible receipt such as
 `Undeclared parameter received: agent_id. They are not part of this public
-tool schema.` The operation's acceptance and handler semantics are otherwise
-unchanged; callers must not treat a successful call as evidence that an extra
-field is declared.
+tool schema.` Tool-result responses carry it as a second text block;
+pre-dispatch JSON-RPC errors (including authorization, tombstone, and
+idempotency exits) append it to the error message. The operation's acceptance
+and handler semantics are otherwise unchanged; callers must not treat a
+successful call as evidence that an extra field is declared.
 
 The public argument for an Architect's single-agent reference is `agent`.
 This includes `agent_message`, `behavior_overlay_get`,

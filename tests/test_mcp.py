@@ -311,6 +311,47 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             [block["text"] for block in result["result"]["content"]],
         )
 
+    async def test_tombstoned_public_call_reports_undeclared_argument(self):
+        state = self.state_mod.MatrixState()
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            deleted_at=1.0,
+        )
+        state.agents[worker.id] = worker
+        state.groups["g"] = [worker.id]
+
+        async def fake_handle_command(_payload):
+            self.fail("tombstoned call must not dispatch")
+
+        result, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+            {
+                "jsonrpc": "2.0",
+                "id": "tombstoned-undeclared-argument",
+                "method": "tools/call",
+                "params": {
+                    "name": "task_progress",
+                    "arguments": {
+                        "message": "still running",
+                        "nonexistent_parameter_probe": "probe",
+                    },
+                },
+            },
+            cell_id=worker.id,
+            handle_command=fake_handle_command,
+            state=state,
+        )
+
+        self.assertEqual(status, 200)
+        self.assertIn("tombstoned", result["error"]["message"])
+        self.assertIn(
+            "Undeclared parameter received: nonexistent_parameter_probe. "
+            "They are not part of this public tool schema.",
+            result["error"]["message"],
+        )
+
     async def test_agent_message_missing_target_uses_public_name_and_recovers(self):
         """The public ``agent`` instruction must be actionable for Architects."""
         state = self.state_mod.MatrixState()
@@ -519,6 +560,14 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("task_coverage_reconcile", restricted_names)
 
         peer_target = await call("peer", "task_get", {"task": peer_task.id})
+        peer_target_with_probe = await call(
+            "peer-with-probe",
+            "task_get",
+            {
+                "task": peer_task.id,
+                "nonexistent_parameter_probe": "probe",
+            },
+        )
         missing_task = await call("missing-task", "task_get", {"task": "TORQUE:missing"})
         unfrozen_missing_task = await call(
             "unfrozen-missing-task",
@@ -582,6 +631,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             "task_reassign": "Known tool is not authorized: task_reassign",
         }
         peer_text = error_text(peer_target)
+        peer_with_probe_text = error_text(peer_target_with_probe)
         missing_task_text = error_text(missing_task)
         unfrozen_missing_task_text = error_text(unfrozen_missing_task)
         missing_covering_text = error_text(missing_covering)
@@ -594,6 +644,12 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         missing_first_text = error_text(missing_first_target)
         missing_second_text = error_text(missing_second_target)
         self.assertEqual(expected["task_get"], peer_text)
+        self.assertIn(expected["task_get"], peer_with_probe_text)
+        self.assertIn(
+            "Undeclared parameter received: nonexistent_parameter_probe. "
+            "They are not part of this public tool schema.",
+            peer_with_probe_text,
+        )
         self.assertEqual(peer_text, missing_task_text)
         self.assertEqual(peer_text, unfrozen_missing_task_text)
         self.assertEqual(expected["task_mark_covered"], missing_covering_text)

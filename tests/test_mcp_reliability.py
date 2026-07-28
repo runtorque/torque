@@ -329,6 +329,99 @@ class MCPIdempotencyTests(unittest.IsolatedAsyncioTestCase):
         health = self.db.load_mcp_health_summary(since=0)
         self.assertEqual(health["totals"].get("dedupe"), 1)
 
+    async def test_idempotency_conflict_reports_undeclared_public_argument(self):
+        async def handle_command(_payload):
+            return {"type": "ok"}
+
+        body = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "task_progress",
+                "arguments": {
+                    "message": "still running",
+                    IDEMPOTENCY_ARG: "idem-undeclared-receipt",
+                },
+            },
+        }
+        first, status = await self.mcp.dispatch_mcp_rpc_body(
+            body,
+            cell_id="agent-1",
+            handle_command=handle_command,
+            state=self.state,
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(first["result"]["isError"])
+
+        conflict = {
+            **body,
+            "id": 2,
+            "params": {
+                **body["params"],
+                "arguments": {
+                    **body["params"]["arguments"],
+                    "nonexistent_parameter_probe": "probe",
+                },
+            },
+        }
+        result, status = await self.mcp.dispatch_mcp_rpc_body(
+            conflict,
+            cell_id="agent-1",
+            handle_command=handle_command,
+            state=self.state,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(result["error"]["code"], -32602)
+        self.assertIn("Idempotency key was reused", result["error"]["message"])
+        self.assertIn(
+            "Undeclared parameter received: nonexistent_parameter_probe. "
+            "They are not part of this public tool schema.",
+            result["error"]["message"],
+        )
+
+    async def test_legacy_cached_idempotency_response_gets_receipt(self):
+        body = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "task_progress",
+                "arguments": {
+                    "message": "still running",
+                    "nonexistent_parameter_probe": "probe",
+                    IDEMPOTENCY_ARG: "idem-legacy-undeclared-receipt",
+                },
+            },
+        }
+        self.db.save_mcp_idempotency(
+            idempotency_key="idem-legacy-undeclared-receipt",
+            surface=self.mcp.mcp_tool_surface("torque_progress"),
+            tool_name="torque_progress",
+            request_hash=self.mcp.mcp_request_hash(body),
+            response={
+                "content": [{"type": "text", "text": '{"type":"ok"}'}],
+                "isError": False,
+            },
+        )
+
+        async def handle_command(_payload):
+            self.fail("cached response must not run the write again")
+
+        result, status = await self.mcp.dispatch_mcp_rpc_body(
+            body,
+            cell_id="agent-1",
+            handle_command=handle_command,
+            state=self.state,
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(result["result"]["isError"])
+        self.assertIn(
+            "Undeclared parameter received: nonexistent_parameter_probe. "
+            "They are not part of this public tool schema.",
+            [block["text"] for block in result["result"]["content"]],
+        )
+
     async def test_torque_message_user_retry_does_not_duplicate_row(self):
         async def handle_command(_payload):
             return {"type": "ok"}
