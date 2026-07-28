@@ -261,8 +261,8 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual("group", restored_runtime.capabilities[capability])
         self.assertEqual("self", restored_runtime.capabilities["task.dispatch"])
 
-        # A stale v5 snapshot predates the current v6 true grant.  Restore
-        # must not use the v6 registry to grant it to the stopped v5 session;
+        # A stale v5 snapshot predates the current v7 grants.  Restore
+        # must not use the v7 registry to grant it to the stopped v5 session;
         # the status still explicitly tells the operator that relaunch is
         # pending.
         legacy_snapshot = copy.deepcopy(frozen_snapshot)
@@ -288,7 +288,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(status_response["status"]["pending_next_launch"])
         self.assertTrue(status_response["status"]["apply_state"]["relaunch_required"])
         self.assertEqual("5", status_response["status"]["effective_class_version"])
-        self.assertEqual("6", status_response["status"]["next_launch_class_version"])
+        self.assertEqual("7", status_response["status"]["next_launch_class_version"])
         self.architect.effective_agent_class_version = frozen_version
         self.architect.effective_agent_class_snapshot = frozen_snapshot
         self.state._db_save_agent(self.architect)
@@ -297,13 +297,13 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         agent_classes_mod = importlib.import_module("torque.agent_classes")
         try:
             class_path.write_text(
-                original_class_text.replace("version: '6'", "version: '7'").replace(
+                original_class_text.replace("version: '7'", "version: '8'").replace(
                     "group_board_authority: true", "group_board_authority: false",
                 ),
                 encoding="utf-8",
             )
             agent_classes_mod._valid_class_lookup.cache_clear()
-            # A v6 true grant likewise cannot survive into a v7 false
+            # A v7 true grant likewise cannot survive into a v8 false
             # definition through restore.  It is pending next launch rather
             # than silently retaining or dropping authority by current YAML.
             restored_state = self.state_mod.MatrixState(db=self.db)
@@ -321,8 +321,8 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual("agent_class_status", status_response["type"])
             self.assertTrue(status_response["status"]["pending_next_launch"])
             self.assertTrue(status_response["status"]["apply_state"]["relaunch_required"])
-            self.assertEqual("6", status_response["status"]["effective_class_version"])
-            self.assertEqual("7", status_response["status"]["next_launch_class_version"])
+            self.assertEqual("7", status_response["status"]["effective_class_version"])
+            self.assertEqual("8", status_response["status"]["next_launch_class_version"])
             # Existing session remains frozen despite on-disk mutation.
             unchanged_runtime = self.mcp_mod._effective_class_authority_for_cell(self.architect)
             self.assertEqual("group", unchanged_runtime.capabilities["task.move"])
@@ -401,6 +401,44 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertIn("Unknown tool", self._error_text(response), tool_name)
         self.assertEqual([], self.calls)
+
+    async def test_pm_can_read_peer_idea_brief_within_group_only(self):
+        peer_brief = self.db.create_idea_brief({
+            "group": "g",
+            "title": "Peer-authored brief",
+            "problem_opportunity": "A same-group PM must be able to review this.",
+            "created_by_kind": "architect",
+            "created_by_id": self.peer.id,
+        })
+        other_group_brief = self.db.create_idea_brief({
+            "group": "other",
+            "title": "Other-group brief",
+            "problem_opportunity": "This must stay outside the PM's reach.",
+            "created_by_kind": "architect",
+            "created_by_id": self.cross_group_architect.id,
+        })
+
+        tool_names = await self._list_tools()
+        self.assertTrue({"idea_brief_list", "idea_brief_get"} <= tool_names)
+        self.assertFalse({
+            "idea_brief_create", "idea_brief_update", "idea_brief_transition",
+        } & tool_names)
+
+        listed = self._result_payload(await self._call("idea_brief_list", {}))
+        listed_ids = {brief["id"] for brief in listed["idea_briefs"]}
+        self.assertIn(peer_brief["id"], listed_ids)
+        self.assertNotIn(other_group_brief["id"], listed_ids)
+
+        peer_payload = self._result_payload(await self._call(
+            "idea_brief_get", {"idea_brief": peer_brief["id"]},
+        ))
+        self.assertEqual(peer_brief["id"], peer_payload["id"])
+        self.assertFalse(peer_payload["caller_owned"])
+
+        outside_group = await self._call(
+            "idea_brief_get", {"idea_brief": other_group_brief["id"]},
+        )
+        self.assertIn("outside Product Manager group scope", self._error_text(outside_group))
 
     async def test_pm_has_full_same_group_board_authority(self):
         product_task = self.state.board_add_task(

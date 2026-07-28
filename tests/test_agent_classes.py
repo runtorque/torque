@@ -238,6 +238,18 @@ class AgentClassRegistryTests(unittest.TestCase):
             preview["effective_authority"]["capabilities"]["message.peer"],
             "group",
         )
+        self.assertEqual(
+            preview["effective_authority"]["capabilities"]["idea_brief.read"],
+            "group",
+        )
+        self.assertNotIn(
+            "idea_brief.write",
+            preview["effective_authority"]["capabilities"],
+        )
+        self.assertNotIn(
+            "idea_brief.propose",
+            preview["effective_authority"]["capabilities"],
+        )
         self.assertIn("capability_catalog", preview["authoring_contract"])
         self.assertEqual(preview["draft"], {})
         self.assertTrue(preview["metadata"]["approved_for_live_dogfood"])
@@ -787,7 +799,7 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         )
         self.assertEqual(class_status["assigned_class_version"], "2")
         self.assertEqual(class_status["effective_class_version"], "2")
-        self.assertEqual(class_status["next_launch_class_version"], "6")
+        self.assertEqual(class_status["next_launch_class_version"], "7")
         self.assertTrue(class_status["pending_next_launch"])
         self.assertTrue(class_status["apply_state"]["relaunch_required"])
 
