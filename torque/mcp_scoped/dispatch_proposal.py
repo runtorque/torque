@@ -3,6 +3,27 @@
 from torque.mcp_scoped.dispatch_context import ScopedDispatchContext, UNHANDLED
 from torque.mcp_scoped.dispatch_runtime import *  # noqa: F403
 
+
+_PROPOSAL_READ_DEFAULT_LIMIT = 6
+_PROPOSAL_READ_PREVIEW_LIMIT = 1_200
+
+
+def _proposal_read_limit(args: dict) -> int:
+    try:
+        return max(1, int((args or {}).get("limit", _PROPOSAL_READ_DEFAULT_LIMIT) or _PROPOSAL_READ_DEFAULT_LIMIT))
+    except (TypeError, ValueError):
+        return _PROPOSAL_READ_DEFAULT_LIMIT
+
+
+def _proposal_preview(value) -> tuple[str, int, bool]:
+    text = str(value or "")
+    return (
+        text if len(text) <= _PROPOSAL_READ_PREVIEW_LIMIT
+        else text[:_PROPOSAL_READ_PREVIEW_LIMIT - 1].rstrip() + "…",
+        len(text),
+        len(text) > _PROPOSAL_READ_PREVIEW_LIMIT,
+    )
+
 _ARCHITECT_PROPOSAL_TOOL_REGISTRY = AsyncHandlerRegistry()
 _ARCHITECT_PROPOSAL_TOOL_REGISTRY.register_prefix(
     "thinking_",
@@ -73,7 +94,33 @@ async def dispatch_proposal(ctx: ScopedDispatchContext):
             caller_id,
             include_archived=bool(args.get("include_archived", False)),
         )
-        return _compact_json({"type": "decision_proposal_list", "decisions": decisions}), False
+        limit = _proposal_read_limit(args)
+        selected = decisions[:limit]
+        detail = bool(args.get("detail", False))
+        if not detail:
+            summaries = []
+            for decision in selected:
+                rationale, rationale_length, rationale_truncated = _proposal_preview(
+                    (decision or {}).get("rationale", "")
+                )
+                summaries.append({
+                    "id": str((decision or {}).get("id", "") or ""),
+                    "title": str((decision or {}).get("title", "") or ""),
+                    "status": str((decision or {}).get("status", "") or ""),
+                    "rationale_preview": rationale,
+                    "rationale_length": rationale_length,
+                    "rationale_truncated": rationale_truncated,
+                })
+            selected = summaries
+        return _compact_json({
+            "type": "decision_proposal_list",
+            "detail": "full" if detail else "summary",
+            "detail_available": not detail,
+            "decisions": selected,
+            "decisions_total": len(decisions),
+            "decisions_returned": len(selected),
+            "decisions_capped": len(selected) < len(decisions),
+        }), False
 
     if caller_kind == "architect" and tool_name == "proposal_peer_list":
         include_dismissed, bool_error = _optional_bool_arg(args, "include_dismissed", False)
@@ -462,8 +509,36 @@ async def dispatch_proposal(ctx: ScopedDispatchContext):
         return json.dumps(result), False
 
     if caller_kind == "architect" and tool_name == "proposal_journal_read":
-        entries = real_state.architect_journal_read(caller_id, since=args.get("since", 0), limit=args.get("limit", 20))
-        entries = [entry for entry in entries if str((entry or {}).get("type", "") or "").strip() in _PROPOSAL_JOURNAL_ENTRY_TYPES]
-        return json.dumps({"type": "proposal_journal", "entries": entries}), False
+        # Read enough to filter product-visible types before paging.
+        entries, _total = real_state.architect_journal_read_page(
+            caller_id, since=args.get("since", 0), limit=1_000_000,
+        )
+        entries = [
+            entry for entry in entries
+            if str((entry or {}).get("type", "") or "").strip()
+            in _PROPOSAL_JOURNAL_ENTRY_TYPES
+        ]
+        limit = _proposal_read_limit(args)
+        selected = entries[:limit]
+        detail = bool(args.get("detail", False))
+        if not detail:
+            selected = [
+                {
+                    **dict(entry or {}),
+                    "entry": _proposal_preview((entry or {}).get("entry", ""))[0],
+                    "entry_length": _proposal_preview((entry or {}).get("entry", ""))[1],
+                    "entry_truncated": _proposal_preview((entry or {}).get("entry", ""))[2],
+                }
+                for entry in selected
+            ]
+        return json.dumps({
+            "type": "proposal_journal",
+            "detail": "full" if detail else "summary",
+            "detail_available": not detail,
+            "entries": selected,
+            "entries_total": len(entries),
+            "entries_returned": len(selected),
+            "entries_capped": len(selected) < len(entries),
+        }), False
 
     return UNHANDLED

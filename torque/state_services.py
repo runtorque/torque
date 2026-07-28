@@ -525,6 +525,14 @@ class StateServicesMixin:
     def architect_journal_read(self, architect_id: str, *, since: float=0, limit: int=20) -> list[dict]:
         return self._journal_service.architect_journal_read(architect_id, since=since, limit=limit)
 
+    def architect_journal_read_page(self, architect_id: str, *, since: float=0,
+                                    limit: int=20) -> tuple[list[dict], int]:
+        return self._journal_service.architect_journal_read_page(
+            architect_id,
+            since=since,
+            limit=limit,
+        )
+
     def _append_engineer_worklog_entry(self, group: str, entry: dict):
         return self._journal_service._append_engineer_worklog_entry(group, entry)
 

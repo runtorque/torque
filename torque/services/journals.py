@@ -135,9 +135,20 @@ class JournalService:
                                since: float = 0,
                                limit: int = 20) -> list[dict]:
         """Read recent architect journal entries, newest first."""
+        entries, _total = self.architect_journal_read_page(
+            architect_id,
+            since=since,
+            limit=limit,
+        )
+        return entries
+
+    def architect_journal_read_page(self, architect_id: str, *,
+                                    since: float = 0,
+                                    limit: int = 20) -> tuple[list[dict], int]:
+        """Read a recent journal page and its matching-entry total in one pass."""
         architect_id = str(architect_id or "").strip()
         if not architect_id:
-            return []
+            return [], 0
         try:
             since_value = float(since or 0)
         except (TypeError, ValueError):
@@ -147,11 +158,11 @@ class JournalService:
         except (TypeError, ValueError):
             limit_value = 20
         if limit_value <= 0:
-            return []
+            return [], 0
 
         path = self._architect_journal_path(architect_id)
         if not path.exists():
-            return []
+            return [], 0
 
         entries = []
         with path.open("r", encoding="utf-8") as handle:
@@ -179,10 +190,11 @@ class JournalService:
                 item["architect_id"] = architect_id
                 item["timestamp"] = timestamp
                 entries.append(item)
-        if len(entries) > limit_value:
+        total = len(entries)
+        if total > limit_value:
             entries = entries[-limit_value:]
         entries.reverse()
-        return entries
+        return entries, total
 
     def _append_engineer_worklog_entry(self, group: str, entry: dict):
         """Append a Engineer worklog entry to in-memory state and emit it."""

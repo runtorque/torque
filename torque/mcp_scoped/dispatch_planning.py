@@ -3,6 +3,67 @@
 from torque.mcp_scoped.dispatch_context import ScopedDispatchContext, UNHANDLED
 from torque.mcp_scoped.dispatch_runtime import *  # noqa: F403
 
+
+_ARCHITECT_READ_DEFAULT_LIMIT = 6
+_ARCHITECT_READ_PREVIEW_LIMIT = 1_200
+
+
+def _architect_read_limit(args: dict) -> int:
+    """Return a safe default without limiting an explicit retrieval request."""
+    value = (args or {}).get("limit", _ARCHITECT_READ_DEFAULT_LIMIT)
+    try:
+        limit = int(value or _ARCHITECT_READ_DEFAULT_LIMIT)
+    except (TypeError, ValueError):
+        return _ARCHITECT_READ_DEFAULT_LIMIT
+    return max(1, limit)
+
+
+def _architect_read_preview(value, *, limit: int = _ARCHITECT_READ_PREVIEW_LIMIT):
+    text = str(value or "")
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
+
+
+def _architect_journal_summary(entry: dict) -> dict:
+    item = dict(entry or {})
+    full_entry = str(item.get("entry", "") or "")
+    item["entry"] = _architect_read_preview(full_entry)
+    item["entry_length"] = len(full_entry)
+    item["entry_truncated"] = len(full_entry) > _ARCHITECT_READ_PREVIEW_LIMIT
+    return item
+
+
+def _architect_decision_summary(decision: dict) -> dict:
+    """Expose enough decision state to orient without returning unbounded prose."""
+    source = dict(decision or {})
+    title = str(source.get("title", "") or "")
+    rationale = str(source.get("rationale", "") or "")
+    task_ids = list(source.get("linked_task_ids", []) or [])
+    engineer_ids = list(source.get("linked_engineer_ids", []) or [])
+    metadata_keys = sorted(str(key) for key in dict(source.get("metadata", {}) or {}))
+    return {
+        "id": str(source.get("id", "") or ""),
+        "title": _architect_read_preview(title),
+        "title_length": len(title),
+        "title_truncated": len(title) > _ARCHITECT_READ_PREVIEW_LIMIT,
+        "rationale_preview": _architect_read_preview(rationale),
+        "rationale_length": len(rationale),
+        "rationale_truncated": len(rationale) > _ARCHITECT_READ_PREVIEW_LIMIT,
+        "status": str(source.get("status", "") or ""),
+        "supersedes": source.get("supersedes"),
+        "linked_task_ids": task_ids[:20],
+        "linked_task_ids_total": len(task_ids),
+        "linked_task_ids_capped": len(task_ids) > 20,
+        "linked_engineer_ids": engineer_ids[:20],
+        "linked_engineer_ids_total": len(engineer_ids),
+        "linked_engineer_ids_capped": len(engineer_ids) > 20,
+        "archived": bool(source.get("archived", False)),
+        "created_at": source.get("created_at", 0),
+        "updated_at": source.get("updated_at", 0),
+        "metadata_keys": metadata_keys[:20],
+        "metadata_keys_total": len(metadata_keys),
+        "metadata_keys_capped": len(metadata_keys) > 20,
+    }
+
 async def dispatch_planning(ctx: ScopedDispatchContext):
     name = ctx.name
     args = ctx.args
@@ -519,7 +580,21 @@ async def dispatch_planning(ctx: ScopedDispatchContext):
                 decision for decision in decisions
                 if str(decision.get("status", "") or "").strip() == status_filter
             ]
-        return json.dumps({"decisions": decisions}), False
+        total = len(decisions)
+        limit = _architect_read_limit(args)
+        selected = decisions[:limit]
+        detail = bool(args.get("detail", False))
+        return json.dumps({
+            "type": "decision_list",
+            "detail": "full" if detail else "summary",
+            "detail_available": not detail,
+            "decisions": selected if detail else [
+                _architect_decision_summary(decision) for decision in selected
+            ],
+            "decisions_total": total,
+            "decisions_returned": len(selected),
+            "decisions_capped": len(selected) < total,
+        }), False
 
     if tool_name == "journal":
         if caller_kind == "architect":
@@ -561,13 +636,23 @@ async def dispatch_planning(ctx: ScopedDispatchContext):
 
     if tool_name == "journal_read":
         if caller_kind == "architect":
+            limit = _architect_read_limit(args)
+            entries, total = real_state.architect_journal_read_page(
+                caller_id,
+                since=args.get("since", 0),
+                limit=limit,
+            )
+            detail = bool(args.get("detail", False))
             return json.dumps({
                 "type": "journal",
-                "entries": real_state.architect_journal_read(
-                    caller_id,
-                    since=args.get("since", 0),
-                    limit=args.get("limit", 20),
-                ),
+                "detail": "full" if detail else "summary",
+                "detail_available": not detail,
+                "entries": entries if detail else [
+                    _architect_journal_summary(entry) for entry in entries
+                ],
+                "entries_total": total,
+                "entries_returned": len(entries),
+                "entries_capped": len(entries) < total,
             }), False
         scope = str(args.get("scope", "") or "").strip().lower()
         include_cross_author = bool(args.get("include_cross_author", False))

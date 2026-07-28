@@ -29,6 +29,36 @@ from torque.mcp_scoped.proposals import (
 from torque.server_artifacts import serialize_task_for_mcp
 
 _ARCHITECT_PEER_MESSAGE_LENGTH_LIMIT = 16 * 1024
+_ARCHITECT_PEER_PREVIEW_LIMIT = 1_200
+
+
+def _architect_peer_thread_summary(thread: dict) -> dict:
+    """Return a bounded orientation view while retaining thread identifiers."""
+    messages = list((thread or {}).get("messages", []) or [])
+    last = dict(messages[-1] if messages else {})
+    message = str(last.get("message", "") or "")
+    preview = (
+        message if len(message) <= _ARCHITECT_PEER_PREVIEW_LIMIT
+        else message[:_ARCHITECT_PEER_PREVIEW_LIMIT - 1].rstrip() + "…"
+    )
+    return {
+        key: (thread or {}).get(key)
+        for key in (
+            "thread_id", "peer_architect_id", "peer_name",
+            "last_message_at", "requires_reply",
+        )
+    } | {
+        "message_count": len(messages),
+        "last_message": {
+            "id": str(last.get("id", "") or ""),
+            "direction": str(last.get("direction", "") or ""),
+            "created_at": last.get("created_at", 0),
+            "ack_required": bool(last.get("ack_required", False)),
+            "message": preview,
+            "message_length": len(message),
+            "message_truncated": len(message) > _ARCHITECT_PEER_PREVIEW_LIMIT,
+        },
+    }
 
 def _validate_architect_peer_message_length(
         message: str,
@@ -85,26 +115,46 @@ def _architect_peer_inbox_json(
     thread_id = str(args.get("thread_id", "") or "").strip()
     if not getattr(state, "db", None):
         return _compact_json({"type": "architect_peer_inbox", "threads": []}), False
-    row_limit = min(max(limit * 20, limit), 1000)
-    rows = state.db.load_agent_peer_messages_for_agent(
+    # Page threads before loading their messages. This keeps the reported
+    # total exact even when one old thread has many messages.
+    thread_rows = state.db.load_agent_peer_threads_for_agent(
         caller_id,
-        limit=row_limit,
+        limit=limit,
         since=since_value,
         peer_id=peer_id,
         thread_id=thread_id,
+        sender_kind="architect",
+        recipient_kind="architect",
+        requires_reply=requires_reply,
     )
-    rows = [
-        row for row in rows
-        if {
-            str(row.get("sender_kind", "") or "").strip(),
-            str(row.get("recipient_kind", "") or "").strip(),
-        } == {"architect"}
-    ]
-    grouped: dict[str, list[dict]] = {}
-    for row in rows:
-        grouped.setdefault(str(row.get("thread_id", "") or ""), []).append(row)
+    total = state.db.count_agent_peer_threads_for_agent(
+        caller_id,
+        since=since_value,
+        peer_id=peer_id,
+        thread_id=thread_id,
+        sender_kind="architect",
+        recipient_kind="architect",
+        requires_reply=requires_reply,
+    )
     threads = []
-    for group_thread_id, messages in grouped.items():
+    for thread_row in thread_rows:
+        group_thread_id = str(thread_row.get("thread_id", "") or "")
+        messages = state.db.load_agent_peer_messages_for_agent(
+            caller_id,
+            limit=1000,
+            since=since_value,
+            peer_id=peer_id,
+            thread_id=group_thread_id,
+        )
+        messages = [
+            row for row in messages
+            if {
+                str(row.get("sender_kind", "") or "").strip(),
+                str(row.get("recipient_kind", "") or "").strip(),
+            } == {"architect"}
+        ]
+        if not messages:
+            continue
         messages.sort(
             key=lambda row: (
                 float(row.get("created_at", 0) or 0),
@@ -137,9 +187,18 @@ def _architect_peer_inbox_json(
         ),
         reverse=True,
     )
+    selected = threads[:limit]
+    detail = bool(args.get("detail", False))
     return _compact_json({
         "type": "architect_peer_inbox",
-        "threads": threads[:limit],
+        "detail": "full" if detail else "summary",
+        "detail_available": not detail,
+        "threads": selected if detail else [
+            _architect_peer_thread_summary(thread) for thread in selected
+        ],
+        "threads_total": total,
+        "threads_returned": len(selected),
+        "threads_capped": len(selected) < total,
     }), False
 
 

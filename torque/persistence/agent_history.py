@@ -532,6 +532,102 @@ class AgentHistoryPersistenceMixin:
         ).fetchall()
         return [_decode_agent_peer_message_row(row) for row in rows]
 
+    def _agent_peer_thread_scope_query(
+        self,
+        agent_id: str,
+        *,
+        since: float = 0,
+        peer_id: str = "",
+        thread_id: str = "",
+        sender_kind: str = "",
+        recipient_kind: str = "",
+        requires_reply: bool = False,
+    ) -> tuple[str, list]:
+        """Build the aggregate query used for bounded peer-inbox pages."""
+        where = [
+            "(sender_id=? OR recipient_id=?)",
+            _AGENT_PEER_MESSAGE_NON_USER_WHERE,
+            "archived_at=0",
+        ]
+        params: list = [agent_id, agent_id]
+        if sender_kind:
+            where.append("sender_kind=?")
+            params.append(sender_kind)
+        if recipient_kind:
+            where.append("recipient_kind=?")
+            params.append(recipient_kind)
+        if peer_id:
+            where.append(
+                "((sender_id=? AND recipient_id=?) OR "
+                "(sender_id=? AND recipient_id=?))"
+            )
+            params.extend([agent_id, peer_id, peer_id, agent_id])
+        if thread_id:
+            where.append("thread_id=?")
+            params.append(thread_id)
+        since_value = _peer_float(since, 0)
+        if since_value > 0:
+            where.append("created_at>?")
+            params.append(since_value)
+        query = (
+            "SELECT thread_id, MAX(created_at) AS last_message_at, "
+            "MAX(CASE WHEN sender_id=? THEN created_at ELSE 0 END) AS latest_outgoing, "
+            "MAX(CASE WHEN sender_id<>? AND ack_required=1 THEN created_at ELSE 0 END) AS latest_incoming_ack "
+            "FROM agent_peer_messages WHERE " + " AND ".join(where) + " GROUP BY thread_id"
+        )
+        # The expression is deliberately identical to
+        # _thread_requires_architect_reply in the scoped layer.
+        aggregate_params = [agent_id, agent_id, *params]
+        if requires_reply:
+            query += " HAVING latest_incoming_ack > latest_outgoing"
+        return query, aggregate_params
+
+    def load_agent_peer_threads_for_agent(
+        self,
+        agent_id: str,
+        *,
+        limit: int = 100,
+        since: float = 0,
+        peer_id: str = "",
+        thread_id: str = "",
+        sender_kind: str = "",
+        recipient_kind: str = "",
+        requires_reply: bool = False,
+    ) -> list[dict]:
+        """Return recent matching thread ids without materialising their messages."""
+        agent_id = str(agent_id or "").strip()
+        if not agent_id:
+            return []
+        limit = max(1, min(int(limit or 100), 1000))
+        query, params = self._agent_peer_thread_scope_query(
+            agent_id, since=since, peer_id=str(peer_id or "").strip(),
+            thread_id=str(thread_id or "").strip(), sender_kind=sender_kind,
+            recipient_kind=recipient_kind, requires_reply=requires_reply,
+        )
+        rows = self._conn.execute(
+            query + " ORDER BY last_message_at DESC, thread_id DESC LIMIT ?",
+            (*params, limit),
+        ).fetchall()
+        return [
+            {"thread_id": str(row[0] or ""), "last_message_at": float(row[1] or 0)}
+            for row in rows
+        ]
+
+    def count_agent_peer_threads_for_agent(
+        self,
+        agent_id: str,
+        **kwargs,
+    ) -> int:
+        """Count all matching peer threads, including pages not returned."""
+        agent_id = str(agent_id or "").strip()
+        if not agent_id:
+            return 0
+        query, params = self._agent_peer_thread_scope_query(agent_id, **kwargs)
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM (" + query + ")", params,
+        ).fetchone()
+        return int(row[0] or 0) if row else 0
+
     def load_peer_messages_for_architect(
         self,
         architect_id: str,
