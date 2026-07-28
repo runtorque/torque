@@ -196,6 +196,31 @@ class IdeaBriefStateAndServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(brief["id"], "TORQUE-IB:1")
         self.assertEqual(brief["thinking_links"][1]["type"], "mind_map_node")
         self.assertEqual(emitted[-1]["op"], "idea_brief_upsert")
+        for title in ("Second brief", "Third brief"):
+            self.db.create_idea_brief({
+                "group": "Torque",
+                "title": title,
+                "problem_opportunity": "List rows must be body-free.",
+                "created_by_kind": "architect",
+                "created_by_id": "arch-1",
+            })
+        listed = await handle_command({
+            "cmd": "idea_brief_list",
+            "group": "Torque",
+            "limit": 2,
+            "actor_kind": "architect",
+            "actor_id": "arch-1",
+        })
+        self.assertEqual(3, listed["idea_briefs_total"])
+        self.assertEqual(2, listed["idea_briefs_returned"])
+        self.assertTrue(listed["idea_briefs_capped"])
+        self.assertEqual(
+            {
+                "id", "slug", "title", "status", "group", "created_by_id",
+                "created_by_kind", "updated_at", "archived", "caller_owned",
+            },
+            set(listed["idea_briefs"][0]),
+        )
 
         implicit_propose = await handle_command({
             "cmd": "idea_brief_update",
@@ -215,6 +240,11 @@ class IdeaBriefStateAndServerTests(unittest.IsolatedAsyncioTestCase):
         })
         self.assertEqual(shown["type"], "idea_brief")
         self.assertEqual(shown["id"], brief["id"])
+        self.assertEqual({"decision": "decision-12acf9ee0894"}, shown["source_context"])
+        for raw_field in (
+                "thinking_links_json", "source_context_json", "proposal_json",
+                "refinement_log_json"):
+            self.assertNotIn(raw_field, shown)
         scoped = await handle_command({
             "cmd": "idea_brief_show",
             "group": "Other",

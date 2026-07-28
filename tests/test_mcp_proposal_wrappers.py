@@ -410,6 +410,26 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             "created_by_kind": "architect",
             "created_by_id": self.peer.id,
         })
+        second_peer_brief = self.db.create_idea_brief({
+            "group": "g",
+            "title": "Second peer brief",
+            "problem_opportunity": "A second visible brief proves the limit is real.",
+            "created_by_kind": "architect",
+            "created_by_id": self.peer.id,
+        })
+        own_brief = self.db.create_idea_brief({
+            "group": "g",
+            "title": "Caller-authored brief",
+            "problem_opportunity": "The full get response keeps every body field.",
+            "why_it_matters": "List probes must not pay for this content.",
+            "proposed_shape": "Use a summary row and named full retrieval.",
+            "smallest_useful_version": "Bounded list serialization.",
+            "risks_tradeoffs": "Avoid changing read authority.",
+            "open_questions": "None.",
+            "source_context": {"task": "TORQUE:1289"},
+            "created_by_kind": "architect",
+            "created_by_id": self.architect.id,
+        })
         other_group_brief = self.db.create_idea_brief({
             "group": "other",
             "title": "Other-group brief",
@@ -424,16 +444,40 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             "idea_brief_create", "idea_brief_update", "idea_brief_transition",
         } & tool_names)
 
-        listed = self._result_payload(await self._call("idea_brief_list", {}))
+        listed = self._result_payload(await self._call(
+            "idea_brief_list", {"limit": 2},
+        ))
+        self.assertEqual(3, listed["idea_briefs_total"])
+        self.assertEqual(2, listed["idea_briefs_returned"])
+        self.assertTrue(listed["idea_briefs_capped"])
+        self.assertEqual(2, len(listed["idea_briefs"]))
+        self.assertEqual(
+            {
+                "id", "slug", "title", "status", "group", "created_by_id",
+                "created_by_kind", "updated_at", "archived", "caller_owned",
+            },
+            set(listed["idea_briefs"][0]),
+        )
         listed_ids = {brief["id"] for brief in listed["idea_briefs"]}
-        self.assertIn(peer_brief["id"], listed_ids)
         self.assertNotIn(other_group_brief["id"], listed_ids)
+        self.assertTrue({peer_brief["id"], second_peer_brief["id"], own_brief["id"]} - listed_ids)
 
         peer_payload = self._result_payload(await self._call(
             "idea_brief_get", {"idea_brief": peer_brief["id"]},
         ))
         self.assertEqual(peer_brief["id"], peer_payload["id"])
         self.assertFalse(peer_payload["caller_owned"])
+
+        own_payload = self._result_payload(await self._call(
+            "idea_brief_get", {"idea_brief": own_brief["id"]},
+        ))
+        self.assertEqual(own_brief["proposed_shape"], own_payload["proposed_shape"])
+        self.assertEqual({"task": "TORQUE:1289"}, own_payload["source_context"])
+        self.assertTrue(own_payload["caller_owned"])
+        for raw_field in (
+                "thinking_links_json", "source_context_json", "proposal_json",
+                "refinement_log_json"):
+            self.assertNotIn(raw_field, own_payload)
 
         outside_group = await self._call(
             "idea_brief_get", {"idea_brief": other_group_brief["id"]},

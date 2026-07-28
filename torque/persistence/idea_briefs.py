@@ -175,6 +175,36 @@ class IdeaBriefPersistenceMixin:
         cols = [d[0] for d in cursor.description]
         return [_decode_idea_brief_row(row, cols) for row in cursor.fetchall()]
 
+    def count_idea_briefs(self, *, group: str = "",
+                          status: str = "",
+                          include_archived: bool = False,
+                          created_by_id: str = "") -> int:
+        """Return the exact count for the same scope used by list_idea_briefs."""
+
+        query = "SELECT COUNT(*) FROM idea_briefs"
+        filters = []
+        params = []
+        group = str(group or "").strip()
+        if group:
+            filters.append("group_name=?")
+            params.append(group)
+        status = str(status or "").strip().lower()
+        if status:
+            normalize_idea_brief_status(status)
+            filters.append("status=?")
+            params.append(status)
+        if not include_archived:
+            filters.append("archived_at=''")
+            filters.append("status!='archived'")
+        created_by_id = str(created_by_id or "").strip()
+        if created_by_id:
+            filters.append("created_by_id=?")
+            params.append(created_by_id)
+        if filters:
+            query += " WHERE " + " AND ".join(filters)
+        row = self._conn.execute(query, tuple(params)).fetchone()
+        return int(row[0] if row else 0)
+
     def create_idea_brief(self, row_dict: dict) -> dict:
         row = dict(row_dict or {})
         group = str(row.get("group", row.get("group_name", "")) or "").strip()

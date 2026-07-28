@@ -14,6 +14,8 @@ from ..idea_briefs import (
     IDEA_BRIEF_TEXT_FIELDS,
     idea_brief_contract_metadata,
     idea_brief_is_archived,
+    idea_brief_response_payload,
+    idea_brief_summary_row,
 )
 from ..state import MatrixState
 
@@ -939,20 +941,41 @@ async def _handle_idea_brief_command(data: dict, state: MatrixState) -> dict:
             limit = min(max(int(data.get("limit", 200)), 1), 1000)
         except (TypeError, ValueError):
             limit = 200
+        status = str(data.get("status", "") or "")
+        created_by_id = str(data.get("created_by_id", "") or "")
+        actor = _thinking_actor_from_data(data)
         try:
-            briefs = state.list_idea_briefs(
+            total = state.count_idea_briefs(
                 group=group,
-                status=str(data.get("status", "") or ""),
+                status=status,
                 include_archived=include_archived,
-                created_by_id=str(data.get("created_by_id", "") or ""),
-                limit=limit,
+                created_by_id=created_by_id,
             )
+            briefs = [
+                idea_brief_summary_row(
+                    brief,
+                    caller_owned=(
+                        str(brief.get("created_by_kind", "") or "") == actor["kind"]
+                        and str(brief.get("created_by_id", "") or "") == actor["id"]
+                    ),
+                )
+                for brief in state.list_idea_briefs(
+                    group=group,
+                    status=status,
+                    include_archived=include_archived,
+                    created_by_id=created_by_id,
+                    limit=limit,
+                )
+            ]
         except ValueError as exc:
             return _idea_brief_error(str(exc), "validation_error")
         return {
             "type": "idea_brief_list",
             "group": group,
             "idea_briefs": briefs,
+            "idea_briefs_total": total,
+            "idea_briefs_returned": len(briefs),
+            "idea_briefs_capped": total > len(briefs),
             **idea_brief_contract_metadata(),
         }
 
@@ -989,7 +1012,7 @@ async def _handle_idea_brief_command(data: dict, state: MatrixState) -> dict:
         return error
 
     if cmd == "idea_brief_show":
-        payload = dict(brief)
+        payload = idea_brief_response_payload(brief)
         payload["type"] = "idea_brief"
         payload.update(idea_brief_contract_metadata())
         return payload

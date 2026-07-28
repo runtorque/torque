@@ -11,6 +11,8 @@ from torque.idea_briefs import (
     IDEA_BRIEF_PROPOSAL_SCOPE,
     idea_brief_contract_metadata,
     idea_brief_is_archived,
+    idea_brief_response_payload,
+    idea_brief_summary_row,
 )
 from torque.mcp_engineer_tools.shared import resolve_task as _resolve_task
 from torque.mcp_scoped.architect_reports import (
@@ -1778,12 +1780,21 @@ async def _architect_idea_brief_tool(
     include_archived = _thinking_bool_arg(args, "include_archived", False)
 
     if tool_name == "idea_brief_list":
+        status = str(args.get("status", "") or "")
         try:
+            total = state.count_idea_briefs(
+                group=group,
+                status=status,
+                include_archived=include_archived,
+            )
             briefs = [
-                _with_idea_brief_owner_flag(brief, caller_id)
+                idea_brief_summary_row(
+                    brief,
+                    caller_owned=_idea_brief_owned_by_caller(brief, caller_id),
+                )
                 for brief in state.list_idea_briefs(
                     group=group,
-                    status=str(args.get("status", "") or ""),
+                    status=status,
                     include_archived=include_archived,
                     limit=_thinking_limit(args),
                 )
@@ -1794,6 +1805,9 @@ async def _architect_idea_brief_tool(
             "type": "idea_brief_list",
             "group": group,
             "idea_briefs": briefs,
+            "idea_briefs_total": total,
+            "idea_briefs_returned": len(briefs),
+            "idea_briefs_capped": total > len(briefs),
             **idea_brief_contract_metadata(),
         }), False
 
@@ -1806,7 +1820,9 @@ async def _architect_idea_brief_tool(
         )
         if error:
             return error, True
-        payload = _with_idea_brief_owner_flag(brief, caller_id)
+        payload = idea_brief_response_payload(
+            _with_idea_brief_owner_flag(brief, caller_id)
+        )
         payload["type"] = "idea_brief"
         payload.update(idea_brief_contract_metadata())
         return _compact_json(payload), False
