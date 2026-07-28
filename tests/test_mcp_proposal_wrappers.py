@@ -146,6 +146,20 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("default-architect", cell.effective_agent_class_id)
         self.assertTrue(cell.effective_agent_class_snapshot)
 
+    async def _operator_agent_class_status(self, state, agent_id):
+        """Exercise the browser/server class-status command, not its helper."""
+        commands_mod = importlib.import_module("torque.commands.agent_classes")
+
+        async def resolve_base_dir(_group):
+            return self.tmp.name
+
+        return await commands_mod._handle_agent_class_command(
+            {"cmd": "agent_class_status", "agent_id": agent_id},
+            state,
+            self.db,
+            resolve_base_dir,
+        )
+
     async def _call(self, tool_name, arguments=None, *, req_id=1, agent_id=None):
         handler = self._handler()
         return await handler(
@@ -222,12 +236,35 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             self.db_mod._AGENT_PERSISTED_COLS,
         )
         # Daemon restart restoration recreates the ephemeral pin before a
-        # persisted stopped cell can serve its next MCP request.  The normal
-        # snapshot is intentionally still a frozen v5 authority here while
-        # the loaded built-in registry is v6: the six-scope platform union is
-        # version-independent and never changes the ordinary frozen snapshot.
+        # persisted stopped cell can serve its next MCP request, but only for
+        # the exact launch-frozen definition version.  The extension itself
+        # remains ephemeral and the normal frozen authority still owns the
+        # task.dispatch=self reservation.
         frozen_version = self.architect.effective_agent_class_version
-        frozen_snapshot = self.architect.effective_agent_class_snapshot
+        frozen_snapshot = copy.deepcopy(self.architect.effective_agent_class_snapshot)
+        self.state._db_save_agent(self.architect)
+        restored_state = self.state_mod.MatrixState(db=self.db)
+        restored_state.load()
+        restored_cell = restored_state.agents[self.architect.id]
+        self.assertEqual(frozen_version, restored_cell.effective_agent_class_version)
+        self.assertTrue(
+            restored_cell.effective_agent_class_platform_authority[
+                "group_board_authority"
+            ]
+        )
+        restored_runtime = self.mcp_mod._effective_class_authority_for_cell(
+            restored_cell,
+        )
+        for capability in (
+                "task.update", "task.move", "task.mark_covered", "task.verify",
+                "task.reassign", "task.report"):
+            self.assertEqual("group", restored_runtime.capabilities[capability])
+        self.assertEqual("self", restored_runtime.capabilities["task.dispatch"])
+
+        # A stale v5 snapshot predates the current v6 true grant.  Restore
+        # must not use the v6 registry to grant it to the stopped v5 session;
+        # the status still explicitly tells the operator that relaunch is
+        # pending.
         legacy_snapshot = copy.deepcopy(frozen_snapshot)
         legacy_snapshot["version"] = "5"
         self.architect.effective_agent_class_version = "5"
@@ -238,16 +275,20 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         restored_cell = restored_state.agents[self.architect.id]
         self.assertEqual("5", restored_cell.effective_agent_class_version)
         self.assertEqual("5", restored_cell.effective_agent_class_snapshot["version"])
-        self.assertTrue(
-            restored_cell.effective_agent_class_platform_authority[
-                "group_board_authority"
-            ]
-        )
+        self.assertEqual({}, restored_cell.effective_agent_class_platform_authority)
         restored_runtime = self.mcp_mod._effective_class_authority_for_cell(
             restored_cell,
         )
-        self.assertEqual("group", restored_runtime.capabilities["task.move"])
+        self.assertEqual("self", restored_runtime.capabilities["task.move"])
         self.assertEqual("self", restored_runtime.capabilities["task.dispatch"])
+        status_response = await self._operator_agent_class_status(
+            restored_state, restored_cell.id,
+        )
+        self.assertEqual("agent_class_status", status_response["type"])
+        self.assertTrue(status_response["status"]["pending_next_launch"])
+        self.assertTrue(status_response["status"]["apply_state"]["relaunch_required"])
+        self.assertEqual("5", status_response["status"]["effective_class_version"])
+        self.assertEqual("6", status_response["status"]["next_launch_class_version"])
         self.architect.effective_agent_class_version = frozen_version
         self.architect.effective_agent_class_snapshot = frozen_snapshot
         self.state._db_save_agent(self.architect)
@@ -256,9 +297,32 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         agent_classes_mod = importlib.import_module("torque.agent_classes")
         try:
             class_path.write_text(
-                original_class_text.replace("group_board_authority: true", "group_board_authority: false"),
+                original_class_text.replace("version: '6'", "version: '7'").replace(
+                    "group_board_authority: true", "group_board_authority: false",
+                ),
                 encoding="utf-8",
             )
+            agent_classes_mod._valid_class_lookup.cache_clear()
+            # A v6 true grant likewise cannot survive into a v7 false
+            # definition through restore.  It is pending next launch rather
+            # than silently retaining or dropping authority by current YAML.
+            restored_state = self.state_mod.MatrixState(db=self.db)
+            restored_state.load()
+            restored_cell = restored_state.agents[self.architect.id]
+            self.assertEqual({}, restored_cell.effective_agent_class_platform_authority)
+            restored_runtime = self.mcp_mod._effective_class_authority_for_cell(
+                restored_cell,
+            )
+            self.assertEqual("self", restored_runtime.capabilities["task.move"])
+            self.assertEqual("self", restored_runtime.capabilities["task.dispatch"])
+            status_response = await self._operator_agent_class_status(
+                restored_state, restored_cell.id,
+            )
+            self.assertEqual("agent_class_status", status_response["type"])
+            self.assertTrue(status_response["status"]["pending_next_launch"])
+            self.assertTrue(status_response["status"]["apply_state"]["relaunch_required"])
+            self.assertEqual("6", status_response["status"]["effective_class_version"])
+            self.assertEqual("7", status_response["status"]["next_launch_class_version"])
             # Existing session remains frozen despite on-disk mutation.
             unchanged_runtime = self.mcp_mod._effective_class_authority_for_cell(self.architect)
             self.assertEqual("group", unchanged_runtime.capabilities["task.move"])
