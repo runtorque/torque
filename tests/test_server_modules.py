@@ -5782,9 +5782,22 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['delivery_state'], 'indeterminate')
         self.assertEqual(result['delivery_reason'], 'delivery_receipt_missing')
         self.assertEqual(sent, [])
-        state.update_direct_message_delivery('msg-block-buffered', 'failed', reason='resume_delivery_failed')
-        failed = await self.server_mod.resolve_blocked_task_reply(state, task, architect, 'Answer', send_prompt=send_prompt, relaunch_agent=None, reply_id='msg-block-buffered')
+    async def test_blocked_worker_reply_failed_retry_never_reports_success(self):
+        state = self._make_state()
+        architect = self.state_mod.AgentCell(id='arch-1', name='Architect', group='g', cell_type='agent', kind='architect')
+        worker = self.state_mod.AgentCell(id='worker-1', name='Worker', group='g', cell_type='agent', kind='worker', session_id='pty-1', status='idle')
+        state.agents = {architect.id: architect, worker.id: worker}
+        state.groups['g'] = [architect.id, worker.id]
+        task = state.board_add_task('Implement', 'g', lane='In Progress', id='task-failed', agent_id=worker.id)
+        task.messages.append({'timestamp': 1, 'action': 'blocked', 'message': 'Question?', 'agent_id': worker.id, 'block_id': 'block-failed', 'reply_message_id': 'msg-block-failed'})
+        state.board_update_task(task.id, messages=list(task.messages))
+        state.save_direct_message({'id': 'msg-block-failed', 'thread_id': 'block-reply:task-failed', 'group_name': 'g', 'sender_id': architect.id, 'sender_kind': 'architect', 'recipient_id': worker.id, 'recipient_kind': 'worker', 'message': 'Answer', 'message_type': 'block_reply', 'source_task_id': task.id, 'delivery_state': 'failed', 'delivery_reason': 'resume_delivery_failed'})
+        sent = []
+        async def send_prompt(*_args, **_kwargs):
+            sent.append(True)
+        failed = await self.server_mod.resolve_blocked_task_reply(state, task, architect, 'Answer', send_prompt=send_prompt, relaunch_agent=None, reply_id='msg-block-failed')
         self.assertEqual(failed['type'], 'unrecoverable')
+        self.assertEqual(failed['delivery_reason'], 'resume_delivery_failed')
         self.assertEqual(sent, [])
 
     async def test_resolve_architect_ask_delivers_user_reply_to_architect_inbox(self):
