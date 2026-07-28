@@ -38,8 +38,8 @@ prompt: |
 
   - Read the full diff and verify that the code does what the task asked for, including stated acceptance criteria, non-goals, constraints, and handoff evidence
   - Treat diff scope warnings as explainable signals: compare any `out_of_scope` paths and rationale against the task labels/description/expected code areas before deciding whether they are real scope drift
-  - Run the narrowest relevant automated checks you can, add manual checks when practical, and note any deploy or live verification that still needs to happen
-  - If you accept a narrower suite or unrelated flaky full-suite failure, state the focused/isolated rerun evidence and explicitly say you accepted the narrower suite or flake evidence
+  - Run the narrowest relevant automated checks you can, add manual checks when practical, and note what you ran, what you did not run, and any deploy or live verification that still needs to happen
+  - Treat focused checks that cover the changed surface as the normal baseline; request broader verification only when the changed surface or risk warrants it. For an unrelated flake, require focused failing/changed tests to be rerun in isolation and reported with the isolated pass and why the flake is unrelated
   - Distinguish deploy not attempted from deploy failed, and live smoke pending from completed smoke
   - Separate blocking issues from follow-up suggestions so merge decisions are clear, and explicitly classify follow-ups as `blocking`, `non-blocking now`, `future-context only`, or `none`
   - Summarize merge risk: conflicts, migration/config/runtime risk, and any cleanup still needed

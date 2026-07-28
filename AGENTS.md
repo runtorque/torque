@@ -129,7 +129,7 @@ Rules of thumb:
 
 ## Testing
 
-Run `make test`; it self-sanitizes inherited `TORQUE_*` runtime variables. Use targeted tests first when practical, but keep the full suite green before finishing. Manual runtime/deploy recipes live in [docs/operate/manual-testing.md](docs/operate/manual-testing.md) and must be run only from a non-worker shell.
+Run the narrowest relevant tests or checks for the changed surface first — only broaden to a larger suite if the changed surface or risk warrants it. Before finishing, state exactly what you ran and did not run. `make test` self-sanitizes inherited `TORQUE_*` runtime variables when a broader suite is warranted. Manual runtime/deploy recipes live in [docs/operate/manual-testing.md](docs/operate/manual-testing.md) and must be run only from a non-worker shell.
 
 ## Reference docs
 

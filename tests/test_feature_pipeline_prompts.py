@@ -1,3 +1,4 @@
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -92,6 +93,81 @@ class FeaturePipelinePromptTests(unittest.TestCase):
         self.assertIn("unresolved fix handoff is the valid blocking-review closeout path", rendered_prompt)
         self.assertIn("No blocking issues: your FINAL action MUST be `torque ai done`", closeout)
         self.assertIn("NOT a substitute for either closeout path", closeout)
+
+    def test_feature_prompts_require_targeted_verification_and_reporting(self):
+        implement_source = (
+            REPO_ROOT / ".torque" / "actions" / "feature" / "implement.yaml"
+        ).read_text()
+        review_source = (
+            REPO_ROOT / ".torque" / "actions" / "feature" / "review.yaml"
+        ).read_text()
+        claude = (REPO_ROOT / "CLAUDE.md").read_text()
+        agents = (REPO_ROOT / "AGENTS.md").read_text()
+        targeted_guidance = (
+            "Run the narrowest relevant tests or checks for the changed surface first "
+            "— only broaden to a larger suite if the changed surface or risk warrants it"
+        )
+
+        self.assertIn(targeted_guidance, claude)
+        self.assertIn(targeted_guidance, agents)
+        self.assertIn(targeted_guidance, implement_source)
+        self.assertIn("state exactly what you ran and did not run", claude)
+        self.assertIn("state exactly what you ran and did not run", agents)
+        self.assertIn("tests/checks run and not run", implement_source)
+        self.assertIn("attempted-test evidence", implement_source)
+        self.assertNotIn("keep the full suite green before finishing", claude)
+        self.assertNotIn("Run the test suite to make sure nothing is broken", implement_source)
+        self.assertNotIn("full-suite-attempted evidence", implement_source)
+
+        self.assertIn(
+            "focused checks that cover the changed surface as the normal baseline",
+            review_source,
+        )
+        self.assertIn("what you ran, what you did not run", review_source)
+        self.assertIn("request broader verification only when the changed surface or risk warrants it", review_source)
+        self.assertNotIn("If you accept a narrower suite", review_source)
+
+        rendered = ActionManager().render_prompt(
+            "feature/implement",
+            {},
+            base_dir=str(REPO_ROOT),
+            torque_context={"task": {"title": "Targeted verification"}},
+        )
+        self.assertIsNotNone(rendered)
+        self.assertIn(targeted_guidance, rendered)
+        self.assertIn("tests/checks run and not run", rendered)
+        self.assertNotIn("Run the test suite to make sure nothing is broken", rendered)
+
+    def test_action_prompt_loading_observes_on_disk_changes_per_render(self):
+        source = (
+            REPO_ROOT / ".torque" / "actions" / "feature" / "implement.yaml"
+        ).read_text()
+        marker = "Dynamic targeted-verification guidance"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            action_path = Path(tmp) / ".torque" / "actions" / "feature" / "implement.yaml"
+            action_path.parent.mkdir(parents=True)
+            action_path.write_text(source)
+            manager = ActionManager()
+
+            before = manager.render_prompt(
+                "feature/implement", {}, base_dir=tmp,
+                torque_context={"task": {"title": "Before change"}},
+            )
+            self.assertIsNotNone(before)
+            self.assertNotIn(marker, before)
+
+            action_path.write_text(source.replace(
+                "## Handoff evidence",
+                f"## {marker}\n\n## Handoff evidence",
+            ))
+            after = manager.render_prompt(
+                "feature/implement", {}, base_dir=tmp,
+                torque_context={"task": {"title": "After change"}},
+            )
+
+        self.assertIsNotNone(after)
+        self.assertIn(marker, after)
 
     def test_feature_implement_prompt_requires_review_derivation_when_requested(self):
         project_prompt = (REPO_ROOT / ".torque" / "actions" / "feature" / "implement.yaml").read_text()
