@@ -38,8 +38,8 @@ prompt: |
   - Follow the plan from the previous steps — do not redesign or re-scope
   - Write clean, minimal code that follows the existing patterns in the codebase
   - Add or update tests to cover the new behavior
-  - Run the test suite to make sure nothing is broken
-  - If a broad suite hits an unrelated flake, preserve the full-suite-attempted evidence, rerun the focused failing/changed tests in isolation, and report the isolated pass plus why the flake is unrelated instead of flattening it into a generic pass/fail
+  - Run the narrowest relevant tests or checks for the changed surface first — only broaden to a larger suite if the changed surface or risk warrants it
+  - If a test run hits an unrelated flake, preserve the attempted-test evidence, rerun the focused failing/changed tests in isolation, and report the isolated pass plus why the flake is unrelated instead of flattening it into a generic pass/fail
   - When live deploy/smoke cannot be run from the worker context, say deploy was not attempted and live smoke remains pending rather than implying deploy-mode verification ran
   - Keep the diff focused — no unrelated changes
 
@@ -49,7 +49,7 @@ prompt: |
 
   ## Handoff evidence
 
-  Before deriving review or reporting completion, summarize: files changed and why; acceptance criteria satisfied; tests/checks run; any manual smoke coverage; deviations from the plan; remaining risks or live verification still needed. Put this evidence in the `feature/review` derive context so the reviewer can evaluate the work without rediscovering basic context.
+  Before deriving review or reporting completion, summarize: files changed and why; acceptance criteria satisfied; tests/checks run and not run; any manual smoke coverage; deviations from the plan; remaining risks or live verification still needed. Put this evidence in the `feature/review` derive context so the reviewer can evaluate the work without rediscovering basic context.
 
   If Torque blocks review derivation because the worktree has a stale base, run the suggested rebase command and include the standard post-rebase evidence in the next `feature/review` derive context: `post_rebase_head_sha`, `base_head_sha`, exact `rerun_tests` command(s), and `review_boundary_updated`.
 
