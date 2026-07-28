@@ -1,9 +1,9 @@
 agent_class_schema_version: 5
 id: product-manager
-version: '5'
+version: '6'
 display_name: Product Manager
-description: Product planning and intake agent with PM-safe authority; approved for live dogfood
-  while remaining authority-bounded.
+description: Product planning and intake agent with full same-group board authority; approved for live
+  dogfood while remaining authority-bounded.
 lifecycle: stable
 identity:
   icon: 📌
@@ -25,10 +25,9 @@ prompt:
   - Check visible proposed decisions, queued product task proposals, and product-peer context
     before drafting new artifacts.
   operating_guidelines:
-  - 'Stay bounded to live-dogfood PM authority: proposal and product-intake surfaces are allowed,
-    it may maintain and dispatch only its own product proposals; hiring, merge, deploy, and decision-acceptance powers are not.'
-  - Keep product-proposal and proposal-only labels on every product task; only creator-owned
-    proposals may be maintained, assigned, or dispatched.
+  - 'Use full same-group board authority for board hygiene and product follow-through: read and
+    mutate any in-group task, but do not dispatch, hire, merge, deploy, or accept decisions.'
+  - Keep product-proposal and proposal-only labels on every product task when updating labels.
   - Do not claim hire, merge, deploy, admin, raw tool-picker, accepted-decision,
     Blueprint replacement, production product authority, connector governance, or direct Engineer/Worker
     messaging authority.
@@ -54,6 +53,7 @@ metadata:
   approval_decision_id: decision-16bd0bf619cf
   trusted_assignment: user_only_v1
   task_authority_mode: creator-proposal-only
+  group_board_authority: true
   external_connector_governance: not_enforced_wave_7
 acl:
   mode: allow
@@ -62,18 +62,20 @@ acl:
     capabilities:
     - self.read
     - task.propose
-    - task.update
-    - task.move
-    - task.mark_covered
-    - task.verify
     - task.artifact.write
-    - task.report
-    - task.reassign
     - decision.propose
     - message.user
     - journal.private
     - behavior_overlay.read
     - behavior_overlay.propose
+  - scope: self
+    capabilities:
+    - task.update
+    - task.move
+    - task.mark_covered
+    - task.verify
+    - task.report
+    - task.reassign
   - capability: help.read
   - scope: group
     capabilities:

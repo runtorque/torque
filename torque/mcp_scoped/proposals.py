@@ -2,6 +2,10 @@
 
 from datetime import datetime
 
+from torque.agent_classes import (
+    has_frozen_platform_group_board_authority,
+    has_frozen_platform_task_authority_mode,
+)
 from torque.behavior_overlay import BehaviorOverlayScope
 from torque.config import log
 from torque.idea_briefs import (
@@ -463,12 +467,22 @@ def _architect_task_owned_by_caller(task, caller_id: str) -> bool:
 
 
 def _product_task_visible_for_architect(state, caller_id: str, task) -> bool:
+    """Return Product Manager-visible tasks without crossing the group boundary.
+
+    The trusted, frozen full-board Product Manager mode deliberately expands
+    only task visibility. Product labels continue to be available as an
+    optional caller filter; they are no longer a mandatory visibility ceiling.
+    Other Architect classes retain the product-wrapper visibility contract.
+    """
+
     if not task:
         return False
     caller = state.agents.get(str(caller_id or "").strip())
     group = str(getattr(caller, "group", "") or "").strip()
     if not group or str(getattr(task, "group", "") or "").strip() != group:
         return False
+    if has_frozen_platform_group_board_authority(caller):
+        return True
     task_id = str(getattr(task, "id", "") or "").strip()
     if _task_has_product_label(task):
         return True

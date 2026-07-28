@@ -35,6 +35,54 @@ from .mcp_authority import (
 )
 
 BUILTIN_CLASS_DIR = Path(__file__).resolve().parent / "builtin_agent_classes"
+_GROUP_BOARD_TASK_CAPABILITIES = frozenset({
+    "task.update", "task.move", "task.mark_covered", "task.verify",
+    "task.reassign", "task.report",
+})
+
+
+def launch_frozen_platform_authority_for_definition(
+        definition: "AgentClassDefinition | None") -> dict[str, Any]:
+    """Create ephemeral platform-extension state from a resolved definition."""
+
+    return {
+        "class_id": str(getattr(definition, "id", "") or "").strip(),
+        "group_board_authority": bool(
+            definition
+            and definition.builtin
+            and definition.base_kind == "architect"
+            and (definition.metadata or {}).get("group_board_authority") is True
+        ),
+    }
+
+
+def has_frozen_platform_group_board_authority(cell: Any) -> bool:
+    """Return the launch-frozen trusted Product Manager board outcome."""
+
+    outcome = getattr(cell, "effective_agent_class_platform_authority", {}) or {}
+    return bool(
+        str(getattr(cell, "kind", "") or "").strip() == "architect"
+        and isinstance(outcome, dict)
+        and outcome.get("class_id")
+        == str(getattr(cell, "effective_agent_class_id", "") or "").strip()
+        and outcome.get("group_board_authority") is True
+    )
+
+
+def apply_frozen_platform_group_board_authority(cell: Any, authority):
+    """Reapply the launch-pinned PM group scope after rehydration."""
+
+    if not authority or not has_frozen_platform_group_board_authority(cell):
+        return authority
+    capabilities = dict(authority.capabilities)
+    capabilities.update({capability: "group" for capability in _GROUP_BOARD_TASK_CAPABILITIES})
+    return EffectiveAuthority(
+        base_kind=authority.base_kind,
+        mode=authority.mode,
+        capabilities=dict(sorted(capabilities.items())),
+    )
+
+
 def has_frozen_platform_task_authority_mode(cell: Any, mode: str) -> bool:
     """Return whether a trusted built-in snapshot enables a task mode.
 

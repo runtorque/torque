@@ -42,6 +42,30 @@ class StateLoadingMixin:
                 cell.status = "stopped"
                 for f in _EPHEMERAL_FIELDS:
                     setattr(cell, f, type(getattr(cell, f))())
+                # Platform extension outcomes are intentionally not persisted
+                # with the frozen snapshot. Re-resolve one only when the
+                # trusted current definition still exactly matches the
+                # launch-frozen version.  A registry version change makes the
+                # stopped session pending-next-launch; it must not silently
+                # acquire or lose an extension during restore.
+                from .agent_classes import (
+                    agent_class_definition_by_id,
+                    launch_frozen_platform_authority_for_definition,
+                )
+                class_id = str(getattr(cell, "effective_agent_class_id", "") or "")
+                base_dir = self._agent_class_base_dir_for_cell(cell)
+                definition = agent_class_definition_by_id(
+                    class_id, base_dir=base_dir,
+                ) if class_id else None
+                frozen_version = str(
+                    getattr(cell, "effective_agent_class_version", "") or ""
+                ).strip()
+                if definition and frozen_version == str(definition.version or "").strip():
+                    cell.effective_agent_class_platform_authority = (
+                        launch_frozen_platform_authority_for_definition(definition)
+                    )
+                else:
+                    cell.effective_agent_class_platform_authority = {}
                 self.agents[aid] = cell
             self.groups = data.get("groups", {})
             for gname in list(self.groups):

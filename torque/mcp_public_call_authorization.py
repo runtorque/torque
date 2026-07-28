@@ -6,7 +6,10 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from .agent_classes import has_frozen_platform_task_authority_mode
+from .agent_classes import (
+    has_frozen_platform_group_board_authority,
+    has_frozen_platform_task_authority_mode,
+)
 from .mcp_authority import SCOPE_RANK
 from .mcp_canonical import (
     canonical_tool_name,

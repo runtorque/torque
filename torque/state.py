@@ -1127,6 +1127,9 @@ class AgentCell:
     effective_agent_class_id: str = ""
     effective_agent_class_version: str = ""
     effective_agent_class_snapshot: dict = field(default_factory=dict)
+    # Launch-frozen platform extensions derived from the trusted live registry;
+    # intentionally ephemeral and never inferred from snapshot metadata.
+    effective_agent_class_platform_authority: dict = field(default_factory=dict)
     effective_agent_class_applied_at: float = 0.0
     dismissed_at: int = 0  # unix timestamp when an architect/engineer is paused/dismissed
     deleted_at: float = 0.0  # unix timestamp when the cell entered the restore window

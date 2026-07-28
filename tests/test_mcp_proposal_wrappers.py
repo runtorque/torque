@@ -146,6 +146,20 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("default-architect", cell.effective_agent_class_id)
         self.assertTrue(cell.effective_agent_class_snapshot)
 
+    async def _operator_agent_class_status(self, state, agent_id):
+        """Exercise the browser/server class-status command, not its helper."""
+        commands_mod = importlib.import_module("torque.commands.agent_classes")
+
+        async def resolve_base_dir(_group):
+            return self.tmp.name
+
+        return await commands_mod._handle_agent_class_command(
+            {"cmd": "agent_class_status", "agent_id": agent_id},
+            state,
+            self.db,
+            resolve_base_dir,
+        )
+
     async def _call(self, tool_name, arguments=None, *, req_id=1, agent_id=None):
         handler = self._handler()
         return await handler(
@@ -185,6 +199,151 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_pm_class_projects_every_tool_with_matching_capabilities(self):
         self.assertEqual(self.architect.effective_agent_class_id, "product-manager")
+        # The persisted snapshot stays at legacy catalog scopes and must
+        # rehydrate cleanly before the live trusted-registry extension adds
+        # Product Manager's group board authority for projection/enforcement.
+        persisted = self.architect.effective_agent_class_snapshot["effective_authority"]
+        restored = self.mcp_mod.effective_authority_from_snapshot(
+            persisted, capabilities=self.mcp_mod.CAPABILITY_CATALOG,
+        )
+        runtime = self.mcp_mod._effective_class_authority_for_cell(self.architect)
+        for capability in (
+                "task.update", "task.move", "task.mark_covered", "task.verify",
+                "task.reassign", "task.report"):
+            self.assertNotEqual("group", restored.capabilities[capability])
+            self.assertEqual("group", runtime.capabilities[capability])
+        self.assertEqual("self", runtime.capabilities["task.dispatch"])
+        invalid_snapshot = copy.deepcopy(persisted)
+        invalid_snapshot["capabilities"]["task.move"] = "group"
+        with self.assertRaises(self.mcp_mod.AuthorityValidationError):
+            self.mcp_mod.effective_authority_from_snapshot(
+                invalid_snapshot, capabilities=self.mcp_mod.CAPABILITY_CATALOG,
+            )
+        original_snapshot = self.architect.effective_agent_class_snapshot
+        self.architect.effective_agent_class_snapshot = dict(original_snapshot)
+        self.architect.effective_agent_class_snapshot["effective_authority"] = invalid_snapshot
+        self.assertEqual(
+            {}, self.mcp_mod._effective_class_authority_for_cell(
+                self.architect).capabilities,
+        )
+        self.architect.effective_agent_class_snapshot = original_snapshot
+        self.assertNotIn(
+            "effective_agent_class_platform_authority",
+            self.architect.effective_agent_class_snapshot,
+        )
+        self.assertNotIn(
+            "effective_agent_class_platform_authority",
+            self.db_mod._AGENT_PERSISTED_COLS,
+        )
+        # Daemon restart restoration recreates the ephemeral pin before a
+        # persisted stopped cell can serve its next MCP request, but only for
+        # the exact launch-frozen definition version.  The extension itself
+        # remains ephemeral and the normal frozen authority still owns the
+        # task.dispatch=self reservation.
+        frozen_version = self.architect.effective_agent_class_version
+        frozen_snapshot = copy.deepcopy(self.architect.effective_agent_class_snapshot)
+        self.state._db_save_agent(self.architect)
+        restored_state = self.state_mod.MatrixState(db=self.db)
+        restored_state.load()
+        restored_cell = restored_state.agents[self.architect.id]
+        self.assertEqual(frozen_version, restored_cell.effective_agent_class_version)
+        self.assertTrue(
+            restored_cell.effective_agent_class_platform_authority[
+                "group_board_authority"
+            ]
+        )
+        restored_runtime = self.mcp_mod._effective_class_authority_for_cell(
+            restored_cell,
+        )
+        for capability in (
+                "task.update", "task.move", "task.mark_covered", "task.verify",
+                "task.reassign", "task.report"):
+            self.assertEqual("group", restored_runtime.capabilities[capability])
+        self.assertEqual("self", restored_runtime.capabilities["task.dispatch"])
+
+        # A stale v5 snapshot predates the current v6 true grant.  Restore
+        # must not use the v6 registry to grant it to the stopped v5 session;
+        # the status still explicitly tells the operator that relaunch is
+        # pending.
+        legacy_snapshot = copy.deepcopy(frozen_snapshot)
+        legacy_snapshot["version"] = "5"
+        self.architect.effective_agent_class_version = "5"
+        self.architect.effective_agent_class_snapshot = legacy_snapshot
+        self.state._db_save_agent(self.architect)
+        restored_state = self.state_mod.MatrixState(db=self.db)
+        restored_state.load()
+        restored_cell = restored_state.agents[self.architect.id]
+        self.assertEqual("5", restored_cell.effective_agent_class_version)
+        self.assertEqual("5", restored_cell.effective_agent_class_snapshot["version"])
+        self.assertEqual({}, restored_cell.effective_agent_class_platform_authority)
+        restored_runtime = self.mcp_mod._effective_class_authority_for_cell(
+            restored_cell,
+        )
+        self.assertEqual("self", restored_runtime.capabilities["task.move"])
+        self.assertEqual("self", restored_runtime.capabilities["task.dispatch"])
+        status_response = await self._operator_agent_class_status(
+            restored_state, restored_cell.id,
+        )
+        self.assertEqual("agent_class_status", status_response["type"])
+        self.assertTrue(status_response["status"]["pending_next_launch"])
+        self.assertTrue(status_response["status"]["apply_state"]["relaunch_required"])
+        self.assertEqual("5", status_response["status"]["effective_class_version"])
+        self.assertEqual("6", status_response["status"]["next_launch_class_version"])
+        self.architect.effective_agent_class_version = frozen_version
+        self.architect.effective_agent_class_snapshot = frozen_snapshot
+        self.state._db_save_agent(self.architect)
+        class_path = Path(self.mcp_mod.__file__).resolve().parent / "builtin_agent_classes" / "product-manager.yaml"
+        original_class_text = class_path.read_text(encoding="utf-8")
+        agent_classes_mod = importlib.import_module("torque.agent_classes")
+        try:
+            class_path.write_text(
+                original_class_text.replace("version: '6'", "version: '7'").replace(
+                    "group_board_authority: true", "group_board_authority: false",
+                ),
+                encoding="utf-8",
+            )
+            agent_classes_mod._valid_class_lookup.cache_clear()
+            # A v6 true grant likewise cannot survive into a v7 false
+            # definition through restore.  It is pending next launch rather
+            # than silently retaining or dropping authority by current YAML.
+            restored_state = self.state_mod.MatrixState(db=self.db)
+            restored_state.load()
+            restored_cell = restored_state.agents[self.architect.id]
+            self.assertEqual({}, restored_cell.effective_agent_class_platform_authority)
+            restored_runtime = self.mcp_mod._effective_class_authority_for_cell(
+                restored_cell,
+            )
+            self.assertEqual("self", restored_runtime.capabilities["task.move"])
+            self.assertEqual("self", restored_runtime.capabilities["task.dispatch"])
+            status_response = await self._operator_agent_class_status(
+                restored_state, restored_cell.id,
+            )
+            self.assertEqual("agent_class_status", status_response["type"])
+            self.assertTrue(status_response["status"]["pending_next_launch"])
+            self.assertTrue(status_response["status"]["apply_state"]["relaunch_required"])
+            self.assertEqual("6", status_response["status"]["effective_class_version"])
+            self.assertEqual("7", status_response["status"]["next_launch_class_version"])
+            # Existing session remains frozen despite on-disk mutation.
+            unchanged_runtime = self.mcp_mod._effective_class_authority_for_cell(self.architect)
+            self.assertEqual("group", unchanged_runtime.capabilities["task.move"])
+            # Relaunch reruns registry resolution and observes the changed file.
+            agent_classes_mod._valid_class_lookup.cache_clear()
+            self.state.apply_effective_agent_class_for_launch(
+                self.architect, base_dir=self.tmp.name,
+            )
+            relaunched_runtime = self.mcp_mod._effective_class_authority_for_cell(self.architect)
+            self.assertEqual("self", relaunched_runtime.capabilities["task.move"])
+        finally:
+            class_path.write_text(original_class_text, encoding="utf-8")
+            agent_classes_mod._valid_class_lookup.cache_clear()
+            self.state.apply_effective_agent_class_for_launch(
+                self.architect, base_dir=self.tmp.name,
+            )
+        self.assertEqual(
+            "group",
+            self.mcp_mod._effective_class_authority_for_cell(
+                self.architect).capabilities["task.move"],
+        )
         tool_names = await self._list_tools()
 
         expected_task_surface = {
@@ -243,129 +402,104 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Unknown tool", self._error_text(response), tool_name)
         self.assertEqual([], self.calls)
 
-    async def test_pm_creator_scope_mutates_own_proposal_and_refuses_peer_task(self):
-        proposal = await self._call(
-            "task_create",
-            {"title": "PM authority record", "labels": ["intake"]},
+    async def test_pm_has_full_same_group_board_authority(self):
+        product_task = self.state.board_add_task(
+            "Product-label retention", "g", lane="Backlog",
+            labels=["product-proposal", "proposal-only"],
+            created_by_architect_id=self.architect.id,
         )
-        task_id = self._result_payload(proposal)["id"]
-        task = self.state.board_tasks[task_id]
-        self.assertTrue({"product-proposal", "proposal-only"}.issubset(task.labels))
+        engineer_task = self.state.board_add_task(
+            "Engineer-created execution", "g", lane="To Do",
+            labels=["execution"], created_by_engineer_id=self.engineer.id,
+        )
+        system_task = self.state.board_add_task(
+            "System-derived execution", "g", lane="In Progress",
+            labels=["pipeline"],
+        )
+        done_task = self.state.board_add_task(
+            "Completed non-product task", "g", lane="Done", labels=["ops"],
+        )
+        archived_task = self.state.board_add_task(
+            "Archived task", "g", lane="Archived", labels=["ops"],
+        )
+        other_task = self.state.board_add_task(
+            "Other-group task", "other", lane="To Do", labels=["ops"],
+        )
 
-        update = await self._call(
-            "task_update",
-            {
-                "task": task_id,
-                "title": "PM authority record corrected",
-                "labels": ["product-proposal", "proposal-only", "corrected"],
-            },
+        pm_list = self._result_payload(await self._call("task_list", {"limit": 100}))
+        full_architect_list = self._result_payload(await self._call(
+            "task_list", {"limit": 100}, agent_id=self.full_peer.id,
+        ))
+        pm_ids = {item["id"] for item in pm_list["tasks"]}
+        full_ids = {item["id"] for item in full_architect_list["tasks"]}
+        expected_ids = {
+            task.id for task in self.state.board_tasks.values()
+            if task.group == "g" and task.lane != "Archived"
+        }
+        self.assertEqual(expected_ids, pm_ids)
+        full_non_archived_ids = {
+            item["id"] for item in full_architect_list["tasks"]
+            if item["lane"] != "Archived"
+        }
+        self.assertEqual(full_non_archived_ids, pm_ids)
+        self.assertNotIn(archived_task.id, pm_ids)
+        self.assertNotIn(other_task.id, pm_ids)
+        self.assertTrue({"Backlog", "To Do", "In Progress", "Done"} <= {
+            item["lane"] for item in pm_list["tasks"]
+        })
+        self.assertEqual(len(expected_ids), pm_list["count"])
+
+        retained = await self._call(
+            "task_update", {"task": product_task.id, "labels": ["retained"]},
             req_id=2,
         )
-        self.assertEqual("ok", self._result_payload(update)["type"])
-        self.assertEqual("PM authority record corrected", task.task)
+        self.assertIn("must retain", self._error_text(retained))
+        self.assertTrue({"product-proposal", "proposal-only"} <= set(product_task.labels))
 
-        stripped = await self._call(
-            "task_update",
-            {"task": task_id, "labels": ["corrected"]},
+        updated = await self._call(
+            "task_update", {"task": engineer_task.id, "title": "PM-updated engineer task"},
             req_id=3,
         )
-        self.assertIn("must retain", self._error_text(stripped))
-        self.assertTrue({"product-proposal", "proposal-only"}.issubset(task.labels))
-
+        self.assertEqual("ok", self._result_payload(updated)["type"])
+        self.assertEqual("PM-updated engineer task", engineer_task.task)
         reassigned = await self._call(
-            "task_reassign",
-            {"task": task_id, "new_engineer_id": self.engineer.id},
+            "task_reassign", {"task": engineer_task.id, "new_engineer_id": self.engineer.id},
             req_id=4,
         )
         self.assertEqual(self.engineer.id, self._result_payload(reassigned)["assigned_engineer_id"])
-        self.assertEqual(self.engineer.id, task.assigned_engineer_id)
-
-        dispatched = await self._call(
-            "task_dispatch", {"task": task_id, "name": "pm-record-worker"},
+        moved = await self._call(
+            "task_move", {"task": engineer_task.id, "new_lane": "Done"},
             req_id=5,
         )
-        self.assertEqual("ok", self._result_payload(dispatched)["type"])
-        self.assertEqual("dispatch_task", self.calls[-1]["cmd"])
-
-        moved = await self._call(
-            "task_move", {"task": task_id, "new_lane": "Done"}, req_id=6
-        )
         self.assertEqual("task_moved", self._result_payload(moved)["type"])
-        self.assertEqual("Done", task.lane)
-
-        peer_task = self.state.board_add_task(
-            "Peer-owned record", "g", created_by_architect_id=self.peer.id
+        self.assertEqual("Done", engineer_task.lane)
+        covered = await self._call(
+            "task_mark_covered", {"task": system_task.id, "notes": "PM board hygiene"},
+            req_id=6,
         )
+        self.assertEqual("task_marked_covered", self._result_payload(covered)["type"])
+        verified = await self._call(
+            "task_verify", {"task": system_task.id, "state": "passed"}, req_id=7,
+        )
+        self.assertEqual("ok", self._result_payload(verified)["type"])
+        self.assertEqual("board_verify_task", self.calls[-1]["cmd"])
+
+        user_message = await self._call(
+            "user_message",
+            {"message": "Execution task is now visible.", "context_task_ids": [system_task.id]},
+            req_id=8,
+        )
+        self.assertEqual("ok", self._result_payload(user_message)["type"])
+
+        before = (other_task.task, other_task.lane, list(other_task.messages))
         denied = await self._call(
-            "task_update", {"task": peer_task.id, "title": "Nope"}, req_id=7
+            "task_move", {"task": other_task.id, "new_lane": "Done"}, req_id=9,
         )
         self.assertIn("error", denied.payload)
         self.assertEqual(-32003, denied.payload["error"]["code"])
-        self.assertIn("creator/self", denied.payload["error"]["message"])
-        self.assertEqual("Peer-owned record", peer_task.task)
-
-        # Assignment to the PM must not make a peer-created proposal self-owned.
-        # Each canonical task mutation must be refused at the transport boundary
-        # before a handler can mutate or disclose the assigned peer proposal.
-        assigned_peer_task = self.state.board_add_task(
-            "Peer-owned assigned proposal",
-            "g",
-            labels=["product-proposal", "proposal-only"],
-            created_by_architect_id=self.peer.id,
-            assigned_architect_id=self.architect.id,
-        )
-        baseline = {
-            "title": assigned_peer_task.task,
-            "lane": assigned_peer_task.lane,
-            "labels": list(assigned_peer_task.labels),
-            "assigned_engineer_id": assigned_peer_task.assigned_engineer_id,
-            "verification_state": assigned_peer_task.verification_state,
-            "messages": list(assigned_peer_task.messages),
-            "completion_evidence": copy.deepcopy(
-                assigned_peer_task.completion_evidence
-            ),
-        }
-        mutations = {
-            "task_reassign": {
-                "task": assigned_peer_task.id,
-                "new_engineer_id": self.engineer.id,
-            },
-            "task_dispatch": {"task": assigned_peer_task.id, "name": "nope"},
-            "task_move": {"task": assigned_peer_task.id, "new_lane": "Done"},
-            "task_verify": {"task": assigned_peer_task.id, "state": "passed"},
-            "task_artifact_upload": {
-                "task": assigned_peer_task.id,
-                "filename": "nope.txt",
-                "content_text": "nope",
-            },
-            "task_mark_covered": {
-                "task": assigned_peer_task.id,
-                "notes": "nope",
-            },
-        }
-        calls_before = len(self.calls)
-        for req_id, (tool_name, arguments) in enumerate(mutations.items(), start=8):
-            response = await self._call(tool_name, arguments, req_id=req_id)
-            self.assertIn("error", response.payload, tool_name)
-            self.assertEqual(-32003, response.payload["error"]["code"], tool_name)
-            self.assertIn(
-                "creator/self", response.payload["error"]["message"], tool_name
-            )
-        self.assertEqual(calls_before, len(self.calls))
-        self.assertEqual(baseline["title"], assigned_peer_task.task)
-        self.assertEqual(baseline["lane"], assigned_peer_task.lane)
-        self.assertEqual(baseline["labels"], assigned_peer_task.labels)
-        self.assertEqual(
-            baseline["assigned_engineer_id"],
-            assigned_peer_task.assigned_engineer_id,
-        )
-        self.assertEqual(
-            baseline["verification_state"], assigned_peer_task.verification_state
-        )
-        self.assertEqual(baseline["messages"], assigned_peer_task.messages)
-        self.assertEqual(
-            baseline["completion_evidence"], assigned_peer_task.completion_evidence
-        )
+        self.assertIn("Product Manager group scope", denied.payload["error"]["message"])
+        self.assertNotIn("Unknown tool", denied.payload["error"]["message"])
+        self.assertEqual(before, (other_task.task, other_task.lane, list(other_task.messages)))
 
     async def test_custom_metadata_cannot_activate_product_manager_exceptions(self):
         # Custom classes may author metadata.  A custom Architect that copies
@@ -628,17 +762,19 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(before, (owned.assigned_engineer_id, owned.updated_at))
 
-        # The Product Manager's frozen class still lacks task.reassign; it
-        # must remain denied before a handler can mutate this task.
-        wrong_class = await self._call(
+        # The Product Manager may now reassign any in-group task to a
+        # same-group Engineer; this is distinct from the default Architect
+        # denials exercised above.
+        pm_reassign = await self._call(
             "task_reassign",
             {"task": owned.id, "new_engineer_id": self.torqly_engineer.id},
             req_id=17,
             agent_id=self.architect.id,
         )
-        self.assertIn("error", wrong_class.payload)
-        self.assertEqual(-32003, wrong_class.payload["error"]["code"])
-        self.assertEqual(before, (owned.assigned_engineer_id, owned.updated_at))
+        self.assertEqual(
+            self.torqly_engineer.id,
+            self._result_payload(pm_reassign)["assigned_engineer_id"],
+        )
 
     async def test_architect_task_pickup_denies_unrouted_non_pm_or_already_claimed_tasks(self):
         self._freeze_default_architect(self.torqly)
@@ -1111,18 +1247,14 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         response_text = response.payload["result"]["content"][0]["text"]
         payload = self._result_payload(response)
 
-        self.assertNotIn(hidden_task.id, response_text)
-        self.assertNotIn("Hidden task", response_text)
+        self.assertIn(hidden_task.id, response_text)
+        self.assertIn("Hidden task", response_text)
         self.assertNotIn("decision-raw", response_text)
         self.assertNotIn("Accepted secret", response_text)
-        self.assertEqual(payload["links"]["tasks"], [product_task.id])
-        self.assertEqual(payload["hidden_link_counts"]["tasks"], 1)
-        self.assertEqual(payload["linked_tasks"]["count"], 1)
-        self.assertEqual(payload["linked_tasks"]["hidden_count"], 1)
-        self.assertEqual(
-            [item["title"] for item in payload["linked_tasks"]["items"]],
-            ["Product task"],
-        )
+        self.assertEqual(payload["links"]["tasks"], [hidden_task.id, product_task.id])
+        self.assertEqual(payload["hidden_link_counts"]["tasks"], 0)
+        self.assertEqual(payload["linked_tasks"]["count"], 2)
+        self.assertEqual(payload["linked_tasks"]["hidden_count"], 0)
         self.assertEqual(payload["links"]["decisions"], [product_decision["id"]])
         self.assertEqual(payload["hidden_link_counts"]["decisions"], 1)
         self.assertEqual(payload["linked_decisions"]["count"], 1)
@@ -1141,12 +1273,12 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         list_text = list_response.payload["result"]["content"][0]["text"]
         list_payload = self._result_payload(list_response)
         listed_area = next(item for item in list_payload["areas"] if item["id"] == area["id"])
-        self.assertNotIn(hidden_task.id, list_text)
-        self.assertNotIn("Hidden task", list_text)
+        self.assertIn(hidden_task.id, list_text)
+        self.assertIn("Hidden task", list_text)
         self.assertNotIn("decision-raw", list_text)
         self.assertNotIn("Accepted secret", list_text)
-        self.assertEqual(listed_area["links"]["tasks"], [product_task.id])
-        self.assertEqual(listed_area["hidden_link_counts"]["tasks"], 1)
+        self.assertEqual(listed_area["links"]["tasks"], [hidden_task.id, product_task.id])
+        self.assertEqual(listed_area["hidden_link_counts"]["tasks"], 0)
         self.assertEqual(listed_area["links"]["decisions"], [product_decision["id"]])
         self.assertEqual(listed_area["hidden_link_counts"]["decisions"], 1)
 
@@ -1200,17 +1332,13 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         response_text = response.payload["result"]["content"][0]["text"]
         payload = self._result_payload(response)
 
-        self.assertNotIn(hidden_task.id, response_text)
-        self.assertNotIn("Hidden initiative task", response_text)
+        self.assertIn(hidden_task.id, response_text)
+        self.assertIn("Hidden initiative task", response_text)
         self.assertNotIn("decision-raw-initiative", response_text)
         self.assertNotIn("Accepted initiative secret", response_text)
-        self.assertEqual(payload["links"]["tasks"], [product_task.id])
-        self.assertEqual(payload["linked_tasks"]["count"], 1)
-        self.assertEqual(payload["linked_tasks"]["hidden_count"], 1)
-        self.assertEqual(
-            [item["title"] for item in payload["linked_tasks"]["items"]],
-            ["Product initiative task"],
-        )
+        self.assertEqual(payload["links"]["tasks"], [hidden_task.id, product_task.id])
+        self.assertEqual(payload["linked_tasks"]["count"], 2)
+        self.assertEqual(payload["linked_tasks"]["hidden_count"], 0)
         self.assertEqual(payload["links"]["decisions"], [product_decision["id"]])
         self.assertEqual(payload["linked_decisions"]["count"], 1)
         self.assertEqual(payload["linked_decisions"]["hidden_count"], 1)
@@ -1227,12 +1355,15 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             item for item in list_payload["initiatives"]
             if item["id"] == initiative["id"]
         )
-        self.assertNotIn(hidden_task.id, list_text)
-        self.assertNotIn("Hidden initiative task", list_text)
+        self.assertIn(hidden_task.id, list_text)
+        self.assertIn("Hidden initiative task", list_text)
         self.assertNotIn("decision-raw-initiative", list_text)
         self.assertNotIn("Accepted initiative secret", list_text)
-        self.assertEqual(listed_initiative["links"]["tasks"], [product_task.id])
-        self.assertEqual(listed_initiative["linked_tasks"]["hidden_count"], 1)
+        self.assertEqual(
+            listed_initiative["links"]["tasks"],
+            [hidden_task.id, product_task.id],
+        )
+        self.assertEqual(listed_initiative["linked_tasks"]["hidden_count"], 0)
         self.assertEqual(listed_initiative["links"]["decisions"], [product_decision["id"]])
         self.assertEqual(listed_initiative["linked_decisions"]["hidden_count"], 1)
 

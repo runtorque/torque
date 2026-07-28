@@ -639,10 +639,10 @@ _ARCHITECT_TOOL_SPECS = [
         "name": "architect_task_update", "authority": {"requirements": [{"capability": "task.update","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
         "description": (
             "Update title, description, labels, and/or action binding for a "
-            "task in this architect's group, provided the task was created "
-            "by this architect or by the user. Tasks created by other architects, "
-            "engineers, or system-derived (parent/pipeline) tasks remain "
-            "off-limits. Omitted fields are left unchanged; labels use "
+            "task in this architect's group within its frozen authority. "
+            "The Product Manager's trusted full-board authority may update any "
+            "same-group task; other Architect classes retain their ownership "
+            "limits. Omitted fields are left unchanged; labels use "
             "replace semantics; action_vars also use replace semantics. "
             "Non-empty action_name values are validated against "
             "ActionManager.list_actions() for the architect's group."
@@ -1905,17 +1905,17 @@ _ARCHITECT_TOOL_SPECS = [
 _ARCHITECT_PRODUCT_TOOL_SPECS = [
     {
         "name": "architect_proposal_board_summary", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group","handler_scoped": True}]},
-        "description": "Product-safe board summary over linked/product-labeled tasks only; never dispatches or exposes all same-group task detail.",
+        "description": "Board summary over tasks visible to the caller's frozen Product Manager authority; never dispatches.",
         "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}},
     },
     {
         "name": "architect_task_proposal_list", "authority": {"requirements": [{"capability": "task.read","minimum_scope": "self","result_kind": "task","result_paths": ["tasks"]}]},
-        "description": "List linked/product-labeled task summaries visible to this product wrapper.",
+        "description": "List task summaries visible to this product wrapper; labels are an optional filter.",
         "inputSchema": {"type": "object", "properties": {"label_filter": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]}, "lane_filter": {"type": "string"}, "include_archived": {"type": "boolean"}, "limit": {"type": "integer"}}},
     },
     {
         "name": "architect_task_proposal_show", "authority": {"requirements": [{"capability": "task.read","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
-        "description": "Show one proposal-linked/product-labeled task; hidden/non-product tasks return the normal not-found style error.",
+        "description": "Show one task visible to this product wrapper; out-of-scope tasks return the normal not-found style error.",
         "inputSchema": {"type": "object", "properties": {"task": {"type": "string"}}, "required": ["task"]},
     },
     {
