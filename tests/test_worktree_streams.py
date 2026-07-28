@@ -237,6 +237,60 @@ class WorktreeStreamTests(unittest.TestCase):
         )
         self.assertIn("- PR: <pr_url>", packet["merge_report_snippet"])
 
+    def test_merge_readiness_exposes_worker_attested_completion_deviation(self):
+        state = self._make_state()
+        worker = self._add_agent(state, status="idle")
+        product = self._task(
+            "TORQUE:2",
+            "Implement stream evidence",
+            agent_id=worker.id,
+            completion_evidence={
+                "completion": {
+                    "action": "done",
+                    "acceptance_deviation": {
+                        "statement": "Delivered an API contract only.",
+                        "reason": "The UI integration needs product review first.",
+                        "agent_id": worker.id,
+                        "agent_name": worker.name,
+                        "recorded_at": "2026-04-07T10:30:00+00:00",
+                    },
+                },
+            },
+        )
+        review = self._task(
+            "TORQUE:2:1",
+            "Review stream evidence",
+            lane="Done",
+            action_name="feature/review",
+            parent_task_id=product.id,
+            pipeline_root_id=product.id,
+            pipeline_depth=1,
+            agent_id=worker.id,
+            boundary={
+                "version": "1", "repo_root": "/repo",
+                "branch": "torque/worker", "base_branch": "main",
+                "status": "open", "recorded_at": "2026-04-07T11:30:00+00:00",
+                "commit_sha": "abc123", "recorded_by_agent_id": worker.id,
+            },
+            completion_evidence={"review": {"verdict": "ship"}},
+        )
+        state.board_tasks[product.id] = product
+        state.board_tasks[review.id] = review
+
+        packet = self.streams_mod.compute_worktree_stream(
+            state, repo_root="/repo", branch="torque/worker",
+        )["merge_readiness"]
+
+        self.assertEqual(packet["completion_deviations"], [{
+            "task_id": product.id,
+            "task_title": product.task,
+            "statement": "Delivered an API contract only.",
+            "reason": "The UI integration needs product review first.",
+            "agent_id": worker.id,
+            "agent_name": worker.name,
+            "recorded_at": "2026-04-07T10:30:00+00:00",
+        }])
+
     def test_pending_pr_stream_exposes_pr_metadata_without_looking_merged(self):
         state = self._make_state()
         worker = self._add_agent(state, status="idle")

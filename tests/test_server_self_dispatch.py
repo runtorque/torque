@@ -709,6 +709,7 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertIn("continues in the same agent", prompt)
         self.assertIn("raise(question=\"title\", description=\"details\")", prompt)
         self.assertIn("task_complete(message=\"brief summary\")", prompt)
+        self.assertIn("deviation_statement", prompt)
         self.assertIn("Other reporting tools when relevant:", prompt)
         self.assertIn("task_blocked(reason=", prompt)
         self.assertIn("task_error(message=", prompt)
@@ -1917,6 +1918,59 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             "pytest tests/test_done.py",
         )
         self.assertEqual(evidence["artifacts"]["count"], 1)
+
+    def test_completion_evidence_snapshot_records_worker_attested_deviation(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        cell = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+        )
+        state.agents[cell.id] = cell
+        task = state.board_add_task("Implement the mechanism", "g", id="TORQUE:163")
+
+        changed = self.server_mod._record_task_completion_evidence_snapshot(
+            state,
+            task,
+            cell=cell,
+            action="done",
+            message="Design analysis completed.",
+            deviation_statement=(
+                "Delivered a design analysis instead of the requested implementation."
+            ),
+            deviation_reason=(
+                "The implementation mechanism needs a separate design decision first."
+            ),
+        )
+
+        self.assertTrue(changed)
+        deviation = task.completion_evidence["completion"]["acceptance_deviation"]
+        self.assertEqual(
+            deviation["statement"],
+            "Delivered a design analysis instead of the requested implementation.",
+        )
+        self.assertEqual(
+            deviation["reason"],
+            "The implementation mechanism needs a separate design decision first.",
+        )
+        self.assertEqual(deviation["agent_id"], cell.id)
+
+    def test_completion_evidence_snapshot_keeps_ordinary_completion_unchanged(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        task = state.board_add_task("Implement the mechanism", "g", id="TORQUE:164")
+
+        changed = self.server_mod._record_task_completion_evidence_snapshot(
+            state,
+            task,
+            action="done",
+            message="Implemented the mechanism.",
+        )
+
+        self.assertFalse(changed)
+        self.assertEqual(task.completion_evidence, {})
 
     async def test_board_move_task_handler_can_clear_status(self):
         state = self.state_mod.MatrixState()

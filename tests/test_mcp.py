@@ -58,6 +58,33 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(text), {"type": "ok"})
 
         text, is_error = await self.mcp_mod._dispatch_tool(
+            "torque_ready",
+            {
+                "deviation_statement": "Implemented the backend only.",
+                "deviation_reason": "The frontend follow-up is separately assigned.",
+            },
+            cell.id,
+            fake_handle_command,
+            state,
+        )
+        self.assertFalse(is_error)
+        self.assertEqual(json.loads(text), {"type": "ok"})
+
+        text, is_error = await self.mcp_mod._dispatch_tool(
+            "torque_done",
+            {
+                "message": "Delivered the design analysis.",
+                "deviation_statement": "Implementation was deliberately deferred.",
+                "deviation_reason": "The mechanism needs an approved design first.",
+            },
+            cell.id,
+            fake_handle_command,
+            state,
+        )
+        self.assertFalse(is_error)
+        self.assertEqual(json.loads(text), {"type": "ok"})
+
+        text, is_error = await self.mcp_mod._dispatch_tool(
             "torque_verify",
             {
                 "state": "pending",
@@ -109,6 +136,21 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                     "cell_id": "agent-1",
                     "action": "progress",
                     "message": "Running tests",
+                },
+                {
+                    "cmd": "ai_report",
+                    "cell_id": "agent-1",
+                    "action": "ready",
+                    "deviation_statement": "Implemented the backend only.",
+                    "deviation_reason": "The frontend follow-up is separately assigned.",
+                },
+                {
+                    "cmd": "ai_report",
+                    "cell_id": "agent-1",
+                    "action": "done",
+                    "message": "Delivered the design analysis.",
+                    "deviation_statement": "Implementation was deliberately deferred.",
+                    "deviation_reason": "The mechanism needs an approved design first.",
                 },
                 {
                     "cmd": "ai_report",

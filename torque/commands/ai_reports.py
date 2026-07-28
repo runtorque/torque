@@ -153,6 +153,8 @@ async def handle_ai_report_command(
     action = data.get("action", "")
     message = data.get("message", "")
     task_id = data.get("task_id", "")
+    deviation_statement = data.get("deviation_statement", "")
+    deviation_reason = data.get("deviation_reason", "")
 
     cell = state.agents.get(cell_id)
     if not cell:
@@ -438,6 +440,8 @@ async def handle_ai_report_command(
                     cell=cell,
                     action="done",
                     message=message or "Done",
+                    deviation_statement=deviation_statement,
+                    deviation_reason=deviation_reason,
                     board_sync_manager=board_sync_manager,
                 )
                 review_verdict = _record_review_verdict_evidence(
@@ -775,6 +779,8 @@ async def handle_ai_report_command(
                         cell=cell,
                         action="ready",
                         message=message or "Ready",
+                        deviation_statement=deviation_statement,
+                        deviation_reason=deviation_reason,
                         board_sync_manager=board_sync_manager,
                     )
                 state._emit_agent(cell)

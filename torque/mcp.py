@@ -243,6 +243,21 @@ TOOLS = [
                     "type": "string",
                     "description": "Optional completion summary.",
                 },
+                "deviation_statement": {
+                    "type": "string",
+                    "description": (
+                        "Optional worker attestation of a deliberate deviation "
+                        "from the task's acceptance criteria. Provide together "
+                        "with deviation_reason."
+                    ),
+                },
+                "deviation_reason": {
+                    "type": "string",
+                    "description": (
+                        "Why the stated acceptance-criteria deviation was "
+                        "deliberate. Provide together with deviation_statement."
+                    ),
+                },
             },
         },
     },
@@ -397,7 +412,25 @@ TOOLS = [
             "Moves the task to Done, unlinks the agent, and cascades "
             "completion up the parent chain if all siblings are done."
         ),
-        "inputSchema": {"type": "object", "properties": {}},
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "deviation_statement": {
+                    "type": "string",
+                    "description": (
+                        "Optional worker attestation of a deliberate deviation "
+                        "from acceptance criteria. Provide with deviation_reason."
+                    ),
+                },
+                "deviation_reason": {
+                    "type": "string",
+                    "description": (
+                        "Why the stated acceptance-criteria deviation was "
+                        "deliberate. Provide with deviation_statement."
+                    ),
+                },
+            },
+        },
     },
     {
         "name": "torque_name", "authority": {"requirements": [{"capability": "task.report","minimum_scope": "self","handler_scoped": True}]},
@@ -1662,6 +1695,9 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
     if action == "done":
         if args.get("message"):
             payload["message"] = args["message"]
+        for key in ("deviation_statement", "deviation_reason"):
+            if args.get(key):
+                payload[key] = args[key]
     elif action == "blocked":
         payload["message"] = args.get("reason", "")
     elif action == "error":
@@ -1693,7 +1729,9 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
             if key in args:
                 payload[key] = args[key]
     elif action == "ready":
-        pass
+        for key in ("deviation_statement", "deviation_reason"):
+            if args.get(key):
+                payload[key] = args[key]
     elif action == "name":
         payload["message"] = args.get("name", "")
     elif action == "derive":
