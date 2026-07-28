@@ -65,7 +65,10 @@ async def dispatch_proposal(ctx: ScopedDispatchContext):
         return _product_initiative_read_json(real_state, caller_id, args, show=True)
 
     if caller_kind == "architect" and tool_name == "decision_proposal_list":
-        decisions = _product_decisions_for_architect(
+        # This is the proposal-only class's implementation of canonical
+        # decision_list.  Read scope is group-wide; ownership remains enforced
+        # by the separate proposal update/link handlers.
+        decisions = _load_same_group_architect_decisions(
             real_state,
             caller_id,
             include_archived=bool(args.get("include_archived", False)),

@@ -487,6 +487,15 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         })
         self.assertEqual(len(expected_ids), pm_list["count"])
 
+        shown_non_product = self._result_payload(await self._call(
+            "task_get", {"task": engineer_task.id}, req_id=20,
+        ))
+        self.assertEqual(shown_non_product["id"], engineer_task.id)
+        cross_group_show = await self._call(
+            "task_get", {"task": other_task.id}, req_id=21,
+        )
+        self.assertIn("outside Product Manager group scope", self._error_text(cross_group_show))
+
         retained = await self._call(
             "task_update", {"task": product_task.id, "labels": ["retained"]},
             req_id=2,
@@ -1235,7 +1244,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("Unknown tool", self._error_text(update_other))
 
-    async def test_proposal_area_show_hides_non_product_task_and_raw_decision_links(self):
+    async def test_proposal_area_show_reads_all_same_group_task_and_decision_links(self):
         hidden_task = self.state.board_add_task(
             "Hidden task",
             "g",
@@ -1287,20 +1296,20 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn(hidden_task.id, response_text)
         self.assertIn("Hidden task", response_text)
-        self.assertNotIn("decision-raw", response_text)
-        self.assertNotIn("Accepted secret", response_text)
+        self.assertIn("decision-raw", response_text)
+        self.assertIn("Accepted secret", response_text)
         self.assertEqual(payload["links"]["tasks"], [hidden_task.id, product_task.id])
         self.assertEqual(payload["hidden_link_counts"]["tasks"], 0)
         self.assertEqual(payload["linked_tasks"]["count"], 2)
         self.assertEqual(payload["linked_tasks"]["hidden_count"], 0)
-        self.assertEqual(payload["links"]["decisions"], [product_decision["id"]])
-        self.assertEqual(payload["hidden_link_counts"]["decisions"], 1)
-        self.assertEqual(payload["linked_decisions"]["count"], 1)
-        self.assertEqual(payload["linked_decisions"]["hidden_count"], 1)
-        self.assertEqual(payload["linked_decisions"]["ids"], [product_decision["id"]])
+        self.assertEqual(payload["links"]["decisions"], ["decision-raw", product_decision["id"]])
+        self.assertEqual(payload["hidden_link_counts"]["decisions"], 0)
+        self.assertEqual(payload["linked_decisions"]["count"], 2)
+        self.assertEqual(payload["linked_decisions"]["hidden_count"], 0)
+        self.assertEqual(payload["linked_decisions"]["ids"], ["decision-raw", product_decision["id"]])
         self.assertEqual(
             [item["title"] for item in payload["linked_decisions"]["items"]],
-            ["Visible product decision"],
+            ["Accepted secret", "Visible product decision"],
         )
 
         list_response = await self._call(
@@ -1313,14 +1322,14 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         listed_area = next(item for item in list_payload["areas"] if item["id"] == area["id"])
         self.assertIn(hidden_task.id, list_text)
         self.assertIn("Hidden task", list_text)
-        self.assertNotIn("decision-raw", list_text)
-        self.assertNotIn("Accepted secret", list_text)
+        self.assertIn("decision-raw", list_text)
+        self.assertIn("Accepted secret", list_text)
         self.assertEqual(listed_area["links"]["tasks"], [hidden_task.id, product_task.id])
         self.assertEqual(listed_area["hidden_link_counts"]["tasks"], 0)
-        self.assertEqual(listed_area["links"]["decisions"], [product_decision["id"]])
-        self.assertEqual(listed_area["hidden_link_counts"]["decisions"], 1)
+        self.assertEqual(listed_area["links"]["decisions"], ["decision-raw", product_decision["id"]])
+        self.assertEqual(listed_area["hidden_link_counts"]["decisions"], 0)
 
-    async def test_proposal_initiative_show_hides_non_product_task_and_raw_decision_links(self):
+    async def test_proposal_initiative_show_reads_all_same_group_task_and_decision_links(self):
         hidden_task = self.state.board_add_task(
             "Hidden initiative task",
             "g",
@@ -1372,15 +1381,14 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn(hidden_task.id, response_text)
         self.assertIn("Hidden initiative task", response_text)
-        self.assertNotIn("decision-raw-initiative", response_text)
-        self.assertNotIn("Accepted initiative secret", response_text)
+        self.assertIn("decision-raw-initiative", response_text)
         self.assertEqual(payload["links"]["tasks"], [hidden_task.id, product_task.id])
         self.assertEqual(payload["linked_tasks"]["count"], 2)
         self.assertEqual(payload["linked_tasks"]["hidden_count"], 0)
-        self.assertEqual(payload["links"]["decisions"], [product_decision["id"]])
-        self.assertEqual(payload["linked_decisions"]["count"], 1)
-        self.assertEqual(payload["linked_decisions"]["hidden_count"], 1)
-        self.assertEqual(payload["linked_decisions"]["items"], [product_decision["id"]])
+        self.assertEqual(payload["links"]["decisions"], ["decision-raw-initiative", product_decision["id"]])
+        self.assertEqual(payload["linked_decisions"]["count"], 2)
+        self.assertEqual(payload["linked_decisions"]["hidden_count"], 0)
+        self.assertEqual(payload["linked_decisions"]["items"], ["decision-raw-initiative", product_decision["id"]])
 
         list_response = await self._call(
             "architect_proposal_initiative_list",
@@ -1395,15 +1403,14 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn(hidden_task.id, list_text)
         self.assertIn("Hidden initiative task", list_text)
-        self.assertNotIn("decision-raw-initiative", list_text)
-        self.assertNotIn("Accepted initiative secret", list_text)
+        self.assertIn("decision-raw-initiative", list_text)
         self.assertEqual(
             listed_initiative["links"]["tasks"],
             [hidden_task.id, product_task.id],
         )
         self.assertEqual(listed_initiative["linked_tasks"]["hidden_count"], 0)
-        self.assertEqual(listed_initiative["links"]["decisions"], [product_decision["id"]])
-        self.assertEqual(listed_initiative["linked_decisions"]["hidden_count"], 1)
+        self.assertEqual(listed_initiative["links"]["decisions"], ["decision-raw-initiative", product_decision["id"]])
+        self.assertEqual(listed_initiative["linked_decisions"]["hidden_count"], 0)
 
     async def test_proposal_peer_list_and_message_include_same_group_full_architect_with_anchors(self):
         product_task = self.state.board_add_task(

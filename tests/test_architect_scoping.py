@@ -5172,7 +5172,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(other_inspect_error)
         self.assertEqual(other_inspect_text, "thread not found in scope")
 
-    async def test_architect_decisions_are_scoped_to_owner(self):
+    async def test_architect_decisions_are_same_group_read_and_owner_write(self):
         architect = self._add_architect("arch-1", "Architect")
         other_architect = self._add_architect("arch-2", "Other Architect")
         alice = self._add_engineer(
@@ -5238,7 +5238,45 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             other_architect.id,
         )
         self.assertFalse(other_error, other_text)
-        self.assertEqual(json.loads(other_text)["decisions"], [])
+        self.assertEqual(
+            [item["id"] for item in json.loads(other_text)["decisions"]],
+            [decision["id"]],
+        )
+        get_text, get_error = await self._call(
+            "architect_decision_get",
+            {"id": decision["id"]},
+            other_architect.id,
+        )
+        self.assertFalse(get_error, get_text)
+        self.assertEqual(json.loads(get_text)["id"], decision["id"])
+
+        peer_update_text, peer_update_error = await self._call(
+            "architect_decision_update",
+            {"id": decision["id"], "title": "Peer must not edit"},
+            other_architect.id,
+        )
+        self.assertTrue(peer_update_error)
+        self.assertEqual(peer_update_text, "Decision not found")
+        self.assertEqual(self.state.load_decision(decision["id"])["title"], "Ship safer path")
+
+        cross_group_architect = self._add_architect(
+            "arch-other-group", "Other Group", group="other"
+        )
+        cross_group_decision = self.state.save_decision({
+            "id": "decision-cross-group",
+            "architect_id": cross_group_architect.id,
+            "title": "Do not disclose",
+            "rationale": "Cross-group boundary",
+            "status": "proposed",
+        })
+        self.assertIsNotNone(cross_group_decision)
+        cross_get_text, cross_get_error = await self._call(
+            "architect_decision_get",
+            {"id": cross_group_decision["id"]},
+            other_architect.id,
+        )
+        self.assertTrue(cross_get_error)
+        self.assertEqual(cross_get_text, "Decision not found")
 
         relink_text, relink_error = await self._call(
             "architect_decision_link",
@@ -5412,8 +5450,11 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             {"decision_id": decision["id"]},
             other_architect.id,
         )
-        self.assertTrue(other_error)
-        self.assertEqual(other_text, "Decision not found")
+        self.assertFalse(other_error, other_text)
+        self.assertEqual(
+            json.loads(other_text)["source"]["decision"]["id"],
+            decision["id"],
+        )
 
     async def test_architect_wave_summary_from_explicit_tasks_marks_missing_evidence_unknown(self):
         architect = self._add_architect("arch-1", "Architect")

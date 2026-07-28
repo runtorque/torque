@@ -371,22 +371,9 @@ async def dispatch_planning(ctx: ScopedDispatchContext):
         }), False
 
     if tool_name == "decision_get" and caller_kind == "architect":
-        proposal_only = (
-            _caller_authority_allows_capability(
-                real_state, caller_id, "decision.propose"
-            )
-            and not _caller_authority_allows_capability(
-                real_state, caller_id, "decision.create"
-            )
+        decision, decision_error = _load_same_group_architect_decision(
+            real_state, caller_id, args.get("id", "")
         )
-        if proposal_only:
-            decision, decision_error = _load_product_decision(
-                real_state, caller_id, args.get("id", "")
-            )
-        else:
-            decision, decision_error = _load_architect_decision(
-                real_state, caller_id, args.get("id", "")
-            )
         if not decision:
             return decision_error, True
         return json.dumps(decision), False
@@ -522,7 +509,8 @@ async def dispatch_planning(ctx: ScopedDispatchContext):
                 "status_filter must be one of: proposed, accepted, revised, rejected",
                 True,
             )
-        decisions = real_state.load_decisions_for_architect(
+        decisions = _load_same_group_architect_decisions(
+            real_state,
             caller_id,
             include_archived=bool(args.get("include_archived", False)),
         )

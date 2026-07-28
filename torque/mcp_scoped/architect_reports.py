@@ -13,7 +13,7 @@ from torque.mcp_scoped.common import (
     _dedupe_strings,
     _effective_assigned_engineer_id,
     _filter_tasks_for_caller,
-    _load_architect_decision,
+    _load_same_group_architect_decision,
     _peer_row_context,
     _summary_task_title,
     _task_board_sync_inline_state,
@@ -1068,7 +1068,7 @@ def _architect_wave_scope_from_args(state, architect_id: str, architect_group: s
     seed_task_ids: list[str] = []
     decision_payload = {}
     if decision_id:
-        decision, decision_error = _load_architect_decision(
+        decision, decision_error = _load_same_group_architect_decision(
             state,
             architect_id,
             decision_id,
@@ -1434,7 +1434,7 @@ def _architect_wave_summary_json(state, architect_id: str,
     seed_task_ids: list[str] = []
     decision_payload = {}
     if decision_id:
-        decision, decision_error = _load_architect_decision(
+        decision, decision_error = _load_same_group_architect_decision(
             state,
             architect_id,
             decision_id,
