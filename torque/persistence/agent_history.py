@@ -485,6 +485,36 @@ class AgentHistoryPersistenceMixin:
         """Load one direct/conversation message by ID."""
         return self.load_agent_peer_message(message_id)
 
+    def load_block_reply_direct_messages(
+        self,
+        task_id: str,
+        block_id: str,
+        *,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Load every durable block reply for one task/block correlation.
+
+        Block replies are routing records rather than ordinary peer-chat
+        messages, so the peer-thread loaders intentionally exclude them.
+        Retry safety needs this direct lookup even when the task projection
+        was not persisted before a process crash.
+        """
+        task_id = str(task_id or "").strip()
+        block_id = str(block_id or "").strip()
+        if not task_id or not block_id:
+            return []
+        limit = max(1, min(int(limit or 100), 5000))
+        rows = self._conn.execute(
+            "SELECT " + ", ".join(_AGENT_PEER_MESSAGE_COLUMNS) + " "
+            "FROM agent_peer_messages "
+            "WHERE source_task_id=? AND message_type='block_reply' "
+            "ORDER BY created_at ASC, id ASC LIMIT ?",
+            (task_id, limit),
+        ).fetchall()
+        return [decoded for row in rows
+                if str((decoded := _decode_agent_peer_message_row(row)).get(
+                    "context_snapshot", {}).get("block_id", "") or "") == block_id]
+
     def load_agent_peer_messages_for_agent(
         self,
         agent_id: str,
