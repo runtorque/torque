@@ -1,6 +1,6 @@
 agent_class_schema_version: 5
 id: product-manager
-version: '6'
+version: '7'
 display_name: Product Manager
 description: Product planning and intake agent with full same-group board authority; approved for live
   dogfood while remaining authority-bounded.
@@ -86,6 +86,7 @@ acl:
     - planning.initiative.read
     - decision.read
     - decision.link
+    - idea_brief.read
     - message.peer
     - message.ack_request
 operator_summary:
