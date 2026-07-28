@@ -2,6 +2,7 @@
 
 from torque.mcp_scoped.dispatch_context import ScopedDispatchContext, UNHANDLED
 from torque.mcp_scoped.dispatch_runtime import *  # noqa: F403
+from torque.worktree_scope import architect_can_access_user_owned_worker_worktree
 
 async def dispatch_worktrees(ctx: ScopedDispatchContext):
     name = ctx.name
@@ -107,6 +108,14 @@ async def dispatch_worktrees(ctx: ScopedDispatchContext):
             agent_id, agent_error = _resolve_visible_agent(
                 real_state, caller_kind, caller_id, agent_ident
             )
+            if not agent_id and caller_kind == "architect":
+                candidate_id = _resolve_agent(real_state, agent_ident)
+                candidate = real_state.agents.get(candidate_id) if candidate_id else None
+                if architect_can_access_user_owned_worker_worktree(
+                    real_state, _engineer_cell, candidate
+                ):
+                    agent_id = candidate_id
+                    agent_error = ""
             if not agent_id:
                 recovered = await _try_post_success_agent_recovery(agent_ident)
                 if recovered:

@@ -20,6 +20,7 @@ from .mcp_engineer_tools.shared import (
     resolve_agent as resolve_mcp_agent,
     resolve_task as resolve_mcp_task,
 )
+from .worktree_scope import architect_can_access_user_owned_worker_worktree
 
 
 @dataclass(frozen=True)
@@ -507,6 +508,19 @@ def _handler_scoped_target_scope(
             == str(getattr(caller_cell, "group", "") or "").strip()
     ):
         return "self"
+    if (
+            tool_name in {
+                "architect_merge", "architect_rebase", "architect_create_pr",
+            }
+            and requirement.target_kind == "agent"
+            and architect_can_access_user_owned_worker_worktree(
+                state, caller_cell, target
+            )
+    ):
+        # A user-owned worker has no Engineer parent.  Its only Architect
+        # relationship is the task chain that initiated its stream, checked
+        # by this side-effect-free predicate before the handler is reached.
+        return "children"
     # Keep this exception tied to the exact legacy handlers whose documented
     # contract permits a routed product proposal owned by another architect.
     # The predicates inspect persisted route evidence only; they do not

@@ -2214,6 +2214,245 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(calls[-1]["actor_agent_id"], architect.id)
 
+    async def test_architect_can_merge_task_linked_user_worker_worktree(self):
+        """A user-owned worker inherits only its creating Architect's stream scope."""
+        state = self.state_mod.MatrixState()
+        merge_authority = {
+            "effective_authority": {
+                "schema_version": 1,
+                "base_kind": "architect",
+                "acl_mode": "allow",
+                "capabilities": {
+                    "self.read": "self",
+                    "worktree.merge": "children",
+                },
+            },
+        }
+        architect = self.state_mod.AgentCell(
+            id="architect-1",
+            name="Torqly",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+            effective_agent_class_snapshot=merge_authority,
+        )
+        peer_architect = self.state_mod.AgentCell(
+            id="architect-2",
+            name="Peer",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+            effective_agent_class_snapshot=merge_authority,
+        )
+        user_worker = self.state_mod.AgentCell(
+            id="worker-user",
+            name="User Worker",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+            worktree_path="/tmp/user-worker",
+            worktree_branch="torque/user/user-worker",
+            worktree_base_branch="main",
+        )
+        task = self.state_mod.BoardTask(
+            id="TORQUE:worker-stream",
+            task="Reviewed user-worker stream",
+            group="g",
+            lane="In Progress",
+            agent_id=user_worker.id,
+            created_by_architect_id=architect.id,
+        )
+        state.agents = {
+            architect.id: architect,
+            peer_architect.id: peer_architect,
+            user_worker.id: user_worker,
+        }
+        state.groups["g"] = list(state.agents)
+        state.board_tasks[task.id] = task
+        foreign_worker = self.state_mod.AgentCell(
+            id="worker-foreign",
+            name="Foreign User Worker",
+            group="other-group",
+            cell_type="agent",
+            kind="worker",
+            worktree_path="/tmp/foreign-worker",
+            worktree_branch="torque/user/foreign-worker",
+            worktree_base_branch="main",
+        )
+        foreign_task = self.state_mod.BoardTask(
+            id="TORQUE:foreign-stream",
+            task="Foreign user-worker stream",
+            group="other-group",
+            lane="In Progress",
+            agent_id=foreign_worker.id,
+            created_by_architect_id=architect.id,
+        )
+        state.agents[foreign_worker.id] = foreign_worker
+        state.groups["other-group"] = [foreign_worker.id]
+        state.board_tasks[foreign_task.id] = foreign_task
+        calls = []
+
+        async def green_handle_command(payload):
+            calls.append(dict(payload))
+            if payload["cmd"] == "worktree_check_merge":
+                return {
+                    "type": "worktree_check_merge",
+                    "id": user_worker.id,
+                    "clean": True,
+                    "conflicts": [],
+                }
+            if payload["cmd"] == "worktree_merge":
+                return {
+                    "type": "worktree_merge",
+                    "id": user_worker.id,
+                    "ok": True,
+                    "sha": "user-worker-reviewed-sha",
+                    "cleanup": {"errors": []},
+                }
+            self.fail(f"Unexpected command: {payload}")
+
+        result, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "worktree_merge",
+                    "arguments": {"agent": user_worker.id},
+                },
+            },
+            cell_id=architect.id,
+            handle_command=green_handle_command,
+            state=state,
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(result["result"]["isError"])
+        self.assertEqual(
+            json.loads(result["result"]["content"][0]["text"])["sha"],
+            "user-worker-reviewed-sha",
+        )
+        self.assertEqual(
+            [call["cmd"] for call in calls],
+            ["worktree_check_merge", "worktree_merge"],
+        )
+        self.assertEqual(calls[-1]["actor_agent_id"], architect.id)
+
+        calls.clear()
+        denied, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "worktree_merge",
+                    "arguments": {"agent": user_worker.id},
+                },
+            },
+            cell_id=peer_architect.id,
+            handle_command=green_handle_command,
+            state=state,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(calls, [])
+        self.assertIn(
+            "Known tool is not authorized",
+            denied["error"]["message"],
+        )
+
+        cross_group_denied, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "worktree_merge",
+                    "arguments": {"agent": foreign_worker.id},
+                },
+            },
+            cell_id=architect.id,
+            handle_command=green_handle_command,
+            state=state,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(calls, [])
+        self.assertIn(
+            "Known tool is not authorized",
+            cross_group_denied["error"]["message"],
+        )
+
+    async def test_architect_user_worker_merge_keeps_preflight_gate(self):
+        state = self.state_mod.MatrixState()
+        architect = self.state_mod.AgentCell(
+            id="architect-1",
+            name="Torqly",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+            effective_agent_class_snapshot={
+                "effective_authority": {
+                    "schema_version": 1,
+                    "base_kind": "architect",
+                    "acl_mode": "allow",
+                    "capabilities": {"worktree.merge": "children"},
+                },
+            },
+        )
+        user_worker = self.state_mod.AgentCell(
+            id="worker-user",
+            name="User Worker",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+            worktree_path="/tmp/user-worker",
+            worktree_branch="torque/user/user-worker",
+            worktree_base_branch="main",
+        )
+        task = self.state_mod.BoardTask(
+            id="TORQUE:worker-stream",
+            task="Unreviewed user-worker stream",
+            group="g",
+            lane="In Progress",
+            agent_id=user_worker.id,
+            created_by_architect_id=architect.id,
+        )
+        state.agents = {architect.id: architect, user_worker.id: user_worker}
+        state.groups["g"] = list(state.agents)
+        state.board_tasks[task.id] = task
+        calls = []
+
+        async def blocked_handle_command(payload):
+            calls.append(dict(payload))
+            self.assertEqual(payload["cmd"], "worktree_check_merge")
+            return {
+                "type": "worktree_check_merge",
+                "id": user_worker.id,
+                "clean": False,
+                "conflicts": [],
+                "error": "Review is required before merge.",
+            }
+
+        result, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "worktree_merge",
+                    "arguments": {"agent": user_worker.id},
+                },
+            },
+            cell_id=architect.id,
+            handle_command=blocked_handle_command,
+            state=state,
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(result["result"]["isError"])
+        self.assertIn(
+            "Review is required before merge.",
+            result["result"]["content"][0]["text"],
+        )
+        self.assertEqual([call["cmd"] for call in calls], ["worktree_check_merge"])
+
     async def test_architect_listed_worktree_rebase_is_callable(self):
         state = self.state_mod.MatrixState()
         architect = self.state_mod.AgentCell(
