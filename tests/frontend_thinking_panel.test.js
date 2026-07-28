@@ -403,6 +403,40 @@ test('Idea Brief tab renders list/detail and creates briefs with linked Thinking
   assert.equal(createCall.thinking_links[0].context, 'Source note for the problem framing.');
 });
 
+test('Idea Brief summary-list auto-selection loads its named full detail exactly once', () => {
+  const { sandbox, document, sendCalls } = createHarness();
+  run(sandbox, `thinkingSetTab('idea-briefs'); ideaBriefReceiveList({
+    type: 'idea_brief_list',
+    group: 'Torque',
+    idea_briefs: [{
+      id: 'TORQUE-IB:1', group: 'Torque', title: 'Summary only', status: 'draft',
+      updated_at: '2026-07-28T00:00:00+00:00', archived: false, caller_owned: true
+    }]
+  });`);
+
+  const showCalls = sendCalls.filter((call) => call.cmd === 'idea_brief_show');
+  assert.equal(showCalls.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(showCalls[0])), {
+    cmd: 'idea_brief_show', group: 'Torque', idea_brief: 'TORQUE-IB:1', include_archived: false
+  });
+  assert.match(document.getElementById('panel-thinking').innerHTML, /Loading the full Idea Brief before it can be edited/);
+  assert.equal(document.getElementById('idea-brief-problem-opportunity'), null);
+
+  run(sandbox, `ideaBriefReceiveMutation({ type: 'idea_brief', idea_brief: {
+    id: 'TORQUE-IB:1', group: 'Torque', group_name: 'Torque', title: 'Summary only', status: 'draft',
+    problem_opportunity: 'The complete problem body remains available for editing.',
+    why_it_matters: 'It prevents destructive blank saves.', proposed_shape: 'Load detail by id.',
+    smallest_useful_version: 'One named show request.', risks_tradeoffs: 'No list/show loop.',
+    open_questions: 'None.', thinking_links: []
+  }});`);
+
+  assert.equal(sendCalls.filter((call) => call.cmd === 'idea_brief_show').length, 1);
+  assert.equal(
+    document.getElementById('idea-brief-problem-opportunity').value,
+    'The complete problem body remains available for editing.',
+  );
+});
+
 test('Idea Brief add link preserves non-default selected source without link context', () => {
   const { sandbox, document, sendCalls } = createHarness();
   sandbox.state.thinking.scratchpad_notes['TORQUE-S:1'] = {

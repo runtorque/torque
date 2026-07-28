@@ -74,6 +74,23 @@ class IdeaBriefService:
             log.exception("Failed to list idea briefs")
             return []
 
+    def count_idea_briefs(self, *, group: str = "",
+                          status: str = "",
+                          include_archived: bool = False,
+                          created_by_id: str = "") -> int:
+        if not self._state.db:
+            return 0
+        try:
+            return self._state.db.count_idea_briefs(
+                group=group,
+                status=status,
+                include_archived=include_archived,
+                created_by_id=created_by_id,
+            )
+        except Exception:
+            log.exception("Failed to count idea briefs")
+            return 0
+
     def load_idea_brief(self, brief_id: str) -> dict | None:
         if not self._state.db:
             return None

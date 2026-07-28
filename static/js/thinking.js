@@ -45,6 +45,11 @@ var _ideaBriefLoadingGroup = null;
 var _ideaBriefIncludeArchived = false;
 var _ideaBriefSelectedId = '';
 var _ideaBriefShowLoadingId = '';
+// List responses deliberately contain only summary metadata. Keep that
+// transport distinction outside of the persisted row so a selected summary
+// cannot be rendered or saved as though it were a complete brief.
+var _ideaBriefSummaryIdsById = {};
+var _ideaBriefPendingDetailSurfaceState = null;
 var _ideaBriefDraftsById = {};
 var _ideaBriefDirtyDraftsById = {};
 var _ideaBriefRenderedDraftsById = {};
@@ -103,6 +108,8 @@ function _thinkingSyncStateReference() {
   _ideaBriefLoadedGroup = null;
   _ideaBriefLoadingGroup = null;
   _ideaBriefShowLoadingId = '';
+  _ideaBriefSummaryIdsById = {};
+  _ideaBriefPendingDetailSurfaceState = null;
 }
 
 function _thinkingEnsureState() {
@@ -1712,6 +1719,42 @@ function _ideaBriefFirstVisibleId(group) {
   return items.length ? String(items[0].id || '') : '';
 }
 
+function _ideaBriefNeedsDetail(briefId) {
+  return !!_ideaBriefSummaryIdsById[String(briefId || '')];
+}
+
+function _ideaBriefSurfaceStateOptions() {
+  return {
+    scrollSelectors: [
+      ':root',
+      '#thinking-workspace',
+      '#thinking-scratch-list',
+      '#thinking-scratch-editor',
+      '#thinking-map-list-scroll',
+      '#thinking-map-detail',
+      '#thinking-map-canvas-wrap',
+      '#thinking-idea-list',
+      '#thinking-idea-detail',
+    ],
+    captureFocusKey: function(active) {
+      if (active && active.dataset && active.dataset.thinkingField) {
+        return '[data-thinking-field="' + active.dataset.thinkingField + '"]';
+      }
+      return '';
+    },
+  };
+}
+
+function _ideaBriefCapturePendingDetailSurfaceState(briefId) {
+  if (!_thinkingPanelVisible() || !briefId || typeof _captureSurfaceState !== 'function') return null;
+  var panel = document.getElementById('panel-thinking');
+  if (!panel) return null;
+  return {
+    briefId: String(briefId),
+    snapshot: _captureSurfaceState(panel, _ideaBriefSurfaceStateOptions()),
+  };
+}
+
 function ideaBriefEnsureLoaded(opts) {
   opts = opts || {};
   var group = _thinkingGroup();
@@ -1736,21 +1779,44 @@ function ideaBriefReceiveList(msg) {
   var includeArchived = !!_ideaBriefIncludeArchived;
   var loadKey = group + '|' + (includeArchived ? '1' : '0');
   var incoming = Array.isArray(msg && msg.idea_briefs) ? msg.idea_briefs : [];
+  var selectedBeforeList = String(_ideaBriefSelectedId || '');
+  var pendingSurfaceState = _ideaBriefCapturePendingDetailSurfaceState(selectedBeforeList);
+  _ideaBriefCaptureDraft();
   for (var id in state.idea_briefs) {
     var existing = state.idea_briefs[id];
-    if (existing && _ideaBriefItemGroup(existing) === group) delete state.idea_briefs[id];
+    if (existing && _ideaBriefItemGroup(existing) === group) {
+      delete state.idea_briefs[id];
+      delete _ideaBriefSummaryIdsById[id];
+    }
   }
   incoming.forEach(function(brief) {
-    if (brief && brief.id) state.idea_briefs[brief.id] = Object.assign({}, brief);
+    if (brief && brief.id) {
+      state.idea_briefs[brief.id] = Object.assign({}, brief);
+      _ideaBriefSummaryIdsById[brief.id] = true;
+    }
   });
   if (_ideaBriefLoadingGroup === loadKey) _ideaBriefLoadingGroup = null;
   _ideaBriefLoadedGroup = loadKey;
-  if (_ideaBriefSelectedId && _ideaBriefSelectedId !== THINKING_NEW_IDEA_BRIEF_ID) {
+  if (!_ideaBriefSelectedId) {
+    _ideaBriefSelectedId = _ideaBriefFirstVisibleId(group);
+  } else if (_ideaBriefSelectedId !== THINKING_NEW_IDEA_BRIEF_ID) {
     var selected = state.idea_briefs[_ideaBriefSelectedId];
     if (!selected || _ideaBriefItemGroup(selected) !== group || !_ideaBriefIsVisible(selected, includeArchived)) {
       _ideaBriefSelectedId = _ideaBriefFirstVisibleId(group);
       _ideaBriefSelectedLinkKey = '';
     }
+  }
+  if (selectedBeforeList !== _ideaBriefSelectedId) _ideaBriefPendingDetailSurfaceState = null;
+  else if (_ideaBriefSelectedId && _ideaBriefSelectedId !== THINKING_NEW_IDEA_BRIEF_ID) {
+    // A clean server value should be replaced by the named detail response.
+    // Only carry a snapshot through the loading shell when it protects an
+    // actual local draft (including its focus, caret, and scroll position).
+    _ideaBriefPendingDetailSurfaceState = _ideaBriefDirtyDraftsById[_ideaBriefSelectedId]
+      ? pendingSurfaceState
+      : null;
+  }
+  if (_ideaBriefSelectedId && _ideaBriefSelectedId !== THINKING_NEW_IDEA_BRIEF_ID) {
+    ideaBriefLoad(_ideaBriefSelectedId);
   }
   if (_thinkingPanelVisible()) renderThinkingPanel();
 }
@@ -1771,6 +1837,7 @@ function ideaBriefReceiveMutation(msg) {
   if (!brief || !brief.id) return;
   _ideaBriefEnsureState();
   state.idea_briefs[brief.id] = Object.assign({}, state.idea_briefs[brief.id] || {}, brief);
+  delete _ideaBriefSummaryIdsById[brief.id];
   if (_ideaBriefShowLoadingId === brief.id) _ideaBriefShowLoadingId = '';
   _ideaBriefSaving = false;
   _ideaBriefLastError = '';
@@ -1806,7 +1873,10 @@ function ideaBriefReceiveMutation(msg) {
   if (msg.type === 'idea_brief_archived' && !_ideaBriefIncludeArchived) {
     _ideaBriefSelectedId = _ideaBriefFirstVisibleId(_thinkingGroup());
   }
-  ideaBriefEnsureLoaded({ force: true });
+  // A named show response is already the complete selected detail. Refreshing
+  // its list here would replace it with another summary row and trigger an
+  // avoidable list/show loop.
+  if (msg.type !== 'idea_brief') ideaBriefEnsureLoaded({ force: true });
   if (_thinkingPanelVisible()) renderThinkingPanel();
 }
 
@@ -1858,6 +1928,7 @@ function ideaBriefToggleArchived() {
 function ideaBriefNew() {
   _thinkingCaptureDrafts();
   _ideaBriefLastStatus = '';
+  _ideaBriefPendingDetailSurfaceState = null;
   _ideaBriefSelectedId = THINKING_NEW_IDEA_BRIEF_ID;
   _ideaBriefSelectedLinkKey = '';
   if (!_ideaBriefDraftsById[THINKING_NEW_IDEA_BRIEF_ID]) {
@@ -1870,6 +1941,7 @@ function ideaBriefSelect(briefId) {
   _thinkingCaptureDrafts();
   _ideaBriefLastStatus = '';
   _ideaBriefSelectedId = String(briefId || '');
+  _ideaBriefPendingDetailSurfaceState = null;
   _ideaBriefSelectedLinkKey = '';
   if (_ideaBriefSelectedId && _ideaBriefSelectedId !== THINKING_NEW_IDEA_BRIEF_ID) {
     ideaBriefLoad(_ideaBriefSelectedId);
@@ -2099,6 +2171,10 @@ function ideaBriefSave() {
   _ideaBriefCaptureDraft();
   var briefId = String(_ideaBriefSelectedId || '');
   if (!briefId) return;
+  if (briefId !== THINKING_NEW_IDEA_BRIEF_ID && _ideaBriefNeedsDetail(briefId)) {
+    ideaBriefLoad(briefId);
+    return;
+  }
   var draft = _ideaBriefDraft(briefId);
   if (!String(draft.problem_opportunity || '').trim()) {
     _ideaBriefLastError = 'validation_error: Problem or opportunity is required.';
@@ -2121,6 +2197,10 @@ function ideaBriefRefine() {
   _ideaBriefCaptureDraft();
   var briefId = String(_ideaBriefSelectedId || '');
   if (!briefId || briefId === THINKING_NEW_IDEA_BRIEF_ID) return;
+  if (_ideaBriefNeedsDetail(briefId)) {
+    ideaBriefLoad(briefId);
+    return;
+  }
   var draft = _ideaBriefDraft(briefId);
   var payload = _ideaBriefPayloadFromDraft(draft);
   payload.cmd = 'idea_brief_refine';
@@ -2140,6 +2220,10 @@ function ideaBriefPark() {
   _ideaBriefCaptureDraft();
   var briefId = String(_ideaBriefSelectedId || '');
   if (!briefId || briefId === THINKING_NEW_IDEA_BRIEF_ID) return;
+  if (_ideaBriefNeedsDetail(briefId)) {
+    ideaBriefLoad(briefId);
+    return;
+  }
   var draft = _ideaBriefDraft(briefId);
   _ideaBriefConfirm('Park this Idea Brief? It stays available for later review.', {
     label: 'Park', variant: 'btn-secondary', title: 'Park Idea Brief'
@@ -2154,6 +2238,10 @@ function ideaBriefArchive() {
   _ideaBriefCaptureDraft();
   var briefId = String(_ideaBriefSelectedId || '');
   if (!briefId || briefId === THINKING_NEW_IDEA_BRIEF_ID) return;
+  if (_ideaBriefNeedsDetail(briefId)) {
+    ideaBriefLoad(briefId);
+    return;
+  }
   var draft = _ideaBriefDraft(briefId);
   _ideaBriefConfirm('Archive this Idea Brief? Archived briefs are hidden by default.', {
     label: 'Archive', variant: 'btn-danger', title: 'Archive Idea Brief'
@@ -2168,6 +2256,10 @@ function ideaBriefPropose() {
   _ideaBriefCaptureDraft();
   var briefId = String(_ideaBriefSelectedId || '');
   if (!briefId || briefId === THINKING_NEW_IDEA_BRIEF_ID) return;
+  if (_ideaBriefNeedsDetail(briefId)) {
+    ideaBriefLoad(briefId);
+    return;
+  }
   var draft = _ideaBriefDraft(briefId);
   _ideaBriefConfirm('Propose this Idea Brief for product-safe review? This will not create tasks, assign work, dispatch agents, or accept a decision.', {
     label: 'Propose for review', variant: 'btn-primary', title: 'Propose Idea Brief'
@@ -2527,6 +2619,9 @@ function _renderIdeaBriefDetail() {
   if (!isNew && (!brief || !_ideaBriefIsVisible(brief, _ideaBriefIncludeArchived))) {
     return '<section class="thinking-editor idea-brief-detail thinking-editor-empty"><div class="thinking-empty-detail ui-state ui-state--note ui-state--fill">This Idea Brief is not visible in the current list.</div></section>';
   }
+  if (!isNew && _ideaBriefNeedsDetail(briefId)) {
+    return '<section class="thinking-editor idea-brief-detail thinking-editor-empty" id="thinking-idea-detail"><div class="thinking-loading ui-state ui-state--loading ui-state--fill" role="status" aria-live="polite">Loading the full Idea Brief before it can be edited…</div></section>';
+  }
   var draft = _ideaBriefDraft(briefId);
   var dirty = _ideaBriefDraftIsDirty(briefId, draft);
   var status = isNew ? 'draft' : _ideaBriefStatus(brief);
@@ -2583,25 +2678,7 @@ function renderThinkingPanel() {
   _thinkingCaptureDrafts();
   var snapshot = null;
   if (typeof _captureSurfaceState === 'function') {
-    snapshot = _captureSurfaceState(panel, {
-      scrollSelectors: [
-        ':root',
-        '#thinking-workspace',
-        '#thinking-scratch-list',
-        '#thinking-scratch-editor',
-        '#thinking-map-list-scroll',
-        '#thinking-map-detail',
-        '#thinking-map-canvas-wrap',
-        '#thinking-idea-list',
-        '#thinking-idea-detail',
-      ],
-      captureFocusKey: function(active) {
-        if (active && active.dataset && active.dataset.thinkingField) {
-          return '[data-thinking-field="' + active.dataset.thinkingField + '"]';
-        }
-        return '';
-      },
-    });
+    snapshot = _captureSurfaceState(panel, _ideaBriefSurfaceStateOptions());
   }
   var group = _thinkingGroup();
   var notes = _thinkingNotesForGroup(group);
@@ -2622,7 +2699,13 @@ function renderThinkingPanel() {
   html += '</div>';
   panel.innerHTML = html;
   if (typeof _restoreSurfaceState === 'function') {
-    _restoreSurfaceState(panel, snapshot, {
+    var pending = _ideaBriefPendingDetailSurfaceState;
+    var restoreSnapshot = snapshot;
+    if (pending && pending.briefId === _ideaBriefSelectedId && !_ideaBriefNeedsDetail(pending.briefId)) {
+      restoreSnapshot = pending.snapshot;
+      _ideaBriefPendingDetailSurfaceState = null;
+    }
+    _restoreSurfaceState(panel, restoreSnapshot, {
       resolveFocus: function(root, focus) {
         if (focus && focus.key && root && root.querySelector) return root.querySelector(focus.key);
         return null;

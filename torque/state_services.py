@@ -351,6 +351,9 @@ class StateServicesMixin:
     def list_idea_briefs(self, *, group: str='', status: str='', include_archived: bool=False, created_by_id: str='', limit: int=200) -> list[dict]:
         return self._idea_brief_service.list_idea_briefs(group=group, status=status, include_archived=include_archived, created_by_id=created_by_id, limit=limit)
 
+    def count_idea_briefs(self, *, group: str='', status: str='', include_archived: bool=False, created_by_id: str='') -> int:
+        return self._idea_brief_service.count_idea_briefs(group=group, status=status, include_archived=include_archived, created_by_id=created_by_id)
+
     def load_idea_brief(self, brief_id: str) -> dict | None:
         return self._idea_brief_service.load_idea_brief(brief_id)
 
