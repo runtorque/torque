@@ -9,6 +9,7 @@ _STREAM_STATES = (
     "implementing",
     "reviewing",
     "fixing_blockers",
+    "merge_readiness_unknown",
     "awaiting_human_validation",
     "ready_to_merge",
     "merged",

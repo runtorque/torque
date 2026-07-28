@@ -122,6 +122,7 @@ ENGINEER_TOOLS = [
                     "description": (
                         "Optional stream state filter such as "
                         "'implementing', 'reviewing', 'fixing_blockers', "
+                        "'merge_readiness_unknown', "
                         "'awaiting_human_validation', or 'ready_to_merge'."
                     ),
                 },

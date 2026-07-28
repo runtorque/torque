@@ -3,6 +3,7 @@ import importlib
 import sys
 import types
 import tempfile
+import subprocess
 import unittest
 from unittest import mock
 from datetime import datetime, timezone
@@ -163,10 +164,17 @@ class WorktreeStreamTests(unittest.TestCase):
                 "version": "1",
                 "repo_root": "/repo",
                 "branch": "torque/worker",
+                "base_branch": "main",
                 "status": "open",
                 "recorded_at": "2026-04-07T11:30:00+00:00",
                 "commit_sha": "abc123",
                 "recorded_by_agent_id": worker.id,
+                "stale_base": {
+                    "stale": False,
+                    "source": "merge_readiness_check",
+                    "base_branch": "main",
+                    "merge_clean": True,
+                },
             },
             completion_evidence={
                 "review": {
@@ -179,6 +187,12 @@ class WorktreeStreamTests(unittest.TestCase):
         )
         state.board_tasks[product.id] = product
         state.board_tasks[review.id] = review
+        self.streams_mod._merge_readiness_cache_put(
+            "/repo", "torque/worker", "main", {
+                "state": "fresh", "stale": False,
+                "source": "merge_readiness_check", "merge_clean": True,
+            },
+        )
 
         stream = self.streams_mod.compute_worktree_stream(
             state,
@@ -252,6 +266,12 @@ class WorktreeStreamTests(unittest.TestCase):
                 "recorded_at": "2026-04-07T11:30:00+00:00",
                 "commit_sha": "reviewed-head",
                 "recorded_by_agent_id": worker.id,
+                "stale_base": {
+                    "stale": False,
+                    "source": "merge_readiness_check",
+                    "base_branch": "main",
+                    "merge_clean": True,
+                },
                 "pr": {
                     "provider": "github",
                     "remote": "origin",
@@ -267,6 +287,12 @@ class WorktreeStreamTests(unittest.TestCase):
         )
         state.board_tasks[product.id] = product
         state.board_tasks[review.id] = review
+        self.streams_mod._merge_readiness_cache_put(
+            "/repo", "torque/worker", "main", {
+                "state": "fresh", "stale": False,
+                "source": "merge_readiness_check", "merge_clean": True,
+            },
+        )
 
         stream = self.streams_mod.compute_worktree_stream(
             state,
@@ -365,6 +391,113 @@ class WorktreeStreamTests(unittest.TestCase):
             packet["head"]["current_branch_head_sha"],
             "reviewed-head",
         )
+
+    def test_merge_readiness_conflict_is_not_reported_ready(self):
+        state = self._make_state()
+        worker = self._add_agent(state, status="idle")
+        product = self._task("TORQUE:1", "Add guard", agent_id=worker.id)
+        review = self._task(
+            "TORQUE:1:1", "Review guard", lane="Done",
+            action_name="feature/review", parent_task_id=product.id,
+            pipeline_root_id=product.id, pipeline_depth=1, agent_id=worker.id,
+            boundary={
+                "version": "1", "repo_root": "/repo",
+                "branch": "torque/worker", "base_branch": "main",
+                "commit_sha": "reviewed-head", "recorded_by_agent_id": worker.id,
+            },
+            completion_evidence={"review": {"verdict": "ship"}},
+        )
+        state.board_tasks[product.id] = product
+        state.board_tasks[review.id] = review
+        self.streams_mod._merge_readiness_cache_put(
+            "/repo", "torque/worker", "main", {
+                "state": "stale", "stale": True,
+                "source": "merge_readiness_check", "base_advanced": True,
+                "merge_clean": False, "merge_conflict": True,
+            },
+        )
+
+        stream = self.streams_mod.compute_worktree_stream(
+            state, repo_root="/repo", branch="torque/worker",
+        )
+
+        self.assertEqual(stream["state"], "fixing_blockers")
+        self.assertEqual(stream["merge_state"], "not_ready")
+        self.assertEqual(stream["recommended_next_action"], "rebase")
+        self.assertEqual(stream["recommended_tool"], "worktree_rebase")
+        self.assertTrue(stream["merge_readiness"]["stale_base"]["merge_conflict"])
+
+    def test_unknown_merge_readiness_never_asserts_ready(self):
+        state = self._make_state()
+        worker = self._add_agent(state, status="idle")
+        product = self._task("TORQUE:1", "Add guard", agent_id=worker.id)
+        review = self._task(
+            "TORQUE:1:1", "Review guard", lane="Done",
+            action_name="feature/review", parent_task_id=product.id,
+            pipeline_root_id=product.id, pipeline_depth=1, agent_id=worker.id,
+            boundary={
+                "version": "1", "repo_root": "/repo",
+                "branch": "torque/worker", "base_branch": "main",
+                "commit_sha": "reviewed-head", "recorded_by_agent_id": worker.id,
+            },
+            completion_evidence={"review": {"verdict": "ship"}},
+        )
+        state.board_tasks[product.id] = product
+        state.board_tasks[review.id] = review
+
+        stream = self.streams_mod.compute_worktree_stream(
+            state, repo_root="/repo", branch="torque/worker",
+        )
+
+        self.assertEqual(stream["state"], "merge_readiness_unknown")
+        self.assertEqual(stream["merge_state"], "not_ready")
+        self.assertEqual(
+            stream["recommended_next_action"], "check_merge_readiness",
+        )
+        self.assertEqual(
+            stream["merge_readiness"]["stale_base"]["source"], "not_checked",
+        )
+
+    def test_merge_tree_readiness_probe_distinguishes_clean_and_conflict(self):
+        def probe(*, conflict: bool):
+            with tempfile.TemporaryDirectory() as repo:
+                def git(*args):
+                    subprocess.run(
+                        ["git", "-C", repo, *args], check=True,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+
+                git("init", "-q", "-b", "main")
+                git("config", "user.email", "test@example.com")
+                git("config", "user.name", "Test")
+                with open(f"{repo}/shared.txt", "w") as handle:
+                    handle.write("base\n")
+                git("add", "shared.txt")
+                git("commit", "-qm", "initial")
+                git("switch", "-qc", "worker")
+                target = "shared.txt" if conflict else "worker.txt"
+                with open(f"{repo}/{target}", "w") as handle:
+                    handle.write("worker\n")
+                git("add", target)
+                git("commit", "-qm", "worker")
+                git("switch", "-q", "main")
+                target = "shared.txt" if conflict else "base.txt"
+                with open(f"{repo}/{target}", "w") as handle:
+                    handle.write("main\n")
+                git("add", target)
+                git("commit", "-qm", "main")
+                return asyncio.run(self.streams_mod._probe_merge_readiness(
+                    repo, "worker", "main",
+                ))
+
+        clean = probe(conflict=False)
+        conflict = probe(conflict=True)
+        self.assertTrue(clean["base_advanced"])
+        self.assertTrue(clean["merge_clean"])
+        self.assertFalse(clean["merge_conflict"])
+        self.assertTrue(conflict["base_advanced"])
+        self.assertFalse(conflict["merge_clean"])
+        self.assertTrue(conflict["merge_conflict"])
 
     def test_merged_pr_stream_keeps_reviewed_sha_and_surfaces_merge_sha(self):
         state = self._make_state()

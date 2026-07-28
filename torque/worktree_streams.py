@@ -190,12 +190,34 @@ def _follow_up_note_packets(latest_review: dict) -> dict:
 
 
 def _stale_base_packet(boundary: dict, pr: dict) -> dict:
+    base_branch = str(
+        (boundary or {}).get("base_branch", "")
+        or (pr or {}).get("base_branch", "")
+        or ""
+    ).strip()
+    repo_root = str((boundary or {}).get("repo_root", "") or "").strip()
+    branch = str(
+        (boundary or {}).get("branch", "")
+        or (pr or {}).get("head_branch", "")
+        or ""
+    ).strip()
+    # A fresh probe always outranks historical boundary/PR metadata.  The
+    # latter describes what was true when review ran; it cannot prove the
+    # base is still current now.
+    cached = _merge_readiness_cache_get(repo_root, branch, base_branch)
+    if cached:
+        return cached
+
     stale = boundary.get("stale_base") if isinstance(boundary, dict) else {}
     if isinstance(stale, dict) and stale:
         packet = dict(stale)
-        packet["state"] = "stale" if packet.get("stale") else "fresh"
-        packet["source"] = packet.get("source") or "boundary"
-        return packet
+        # A historical stale finding remains a safe reason to block or
+        # rebase.  A historical *fresh* finding is not proof that the base is
+        # still current, so only a live cache probe may make a stream ready.
+        if packet.get("stale"):
+            packet["state"] = "stale"
+            packet["source"] = packet.get("source") or "boundary"
+            return packet
 
     pr_merge_state = str((pr or {}).get("merge_state", "") or "").strip()
     if pr_merge_state.upper() in _STALE_PR_MERGE_STATES:
@@ -450,6 +472,19 @@ _repo_branches_cache: dict[str, tuple[float, frozenset[str]]] = {}
 _repo_branches_inflight: dict[str, asyncio.Future] = {}
 _repo_branches_semaphore = asyncio.Semaphore(_BRANCH_EXISTS_MAX_CONCURRENT_REFRESHES)
 
+# Merge readiness is a read model, but it must not guess that a branch can be
+# merged.  Keep the expensive merge-tree probe off the synchronous snapshot
+# path and warm this small, short-lived cache from its async callers.
+_MERGE_READINESS_TTL_SECONDS = 2.0
+_MERGE_READINESS_GIT_TIMEOUT_SECONDS = 8.0
+_MERGE_READINESS_MAX_CONCURRENT_REFRESHES = 4
+_merge_readiness_ttl_cache: dict[
+    tuple[str, str, str], tuple[float, dict]
+] = {}
+_merge_readiness_semaphore = asyncio.Semaphore(
+    _MERGE_READINESS_MAX_CONCURRENT_REFRESHES
+)
+
 
 def _normalize_repo_root(repo_root: str) -> str:
     value = str(repo_root or "").strip()
@@ -471,6 +506,7 @@ def invalidate_branch_exists_cache(repo_root: str = "", branch: str = "") -> Non
     if not repo_root:
         _branch_exists_ttl_cache.clear()
         _repo_branches_cache.clear()
+        _merge_readiness_ttl_cache.clear()
         return
     if branch:
         _branch_exists_ttl_cache.pop((repo_root, branch), None)
@@ -478,6 +514,42 @@ def invalidate_branch_exists_cache(repo_root: str = "", branch: str = "") -> Non
         for key in [k for k in _branch_exists_ttl_cache if k[0] == repo_root]:
             _branch_exists_ttl_cache.pop(key, None)
     _repo_branches_cache.pop(repo_root, None)
+    for key in [
+            key for key in _merge_readiness_ttl_cache
+            if key[0] == repo_root and (not branch or key[1] == branch)
+    ]:
+        _merge_readiness_ttl_cache.pop(key, None)
+
+
+def _merge_readiness_cache_key(repo_root: str, branch: str,
+                               base_branch: str) -> tuple[str, str, str]:
+    return (
+        _normalize_repo_root(repo_root),
+        str(branch or "").strip(),
+        str(base_branch or "").strip(),
+    )
+
+
+def _merge_readiness_cache_get(repo_root: str, branch: str,
+                               base_branch: str) -> dict:
+    key = _merge_readiness_cache_key(repo_root, branch, base_branch)
+    if not all(key):
+        return {}
+    cached = _merge_readiness_ttl_cache.get(key)
+    if not cached or cached[0] <= time.monotonic():
+        return {}
+    return dict(cached[1])
+
+
+def _merge_readiness_cache_put(repo_root: str, branch: str,
+                               base_branch: str, info: dict) -> None:
+    key = _merge_readiness_cache_key(repo_root, branch, base_branch)
+    if not all(key):
+        return
+    _merge_readiness_ttl_cache[key] = (
+        time.monotonic() + _MERGE_READINESS_TTL_SECONDS,
+        dict(info or {}),
+    )
 
 
 async def _list_repo_branches_async(repo_root: str) -> frozenset[str]:
@@ -599,12 +671,149 @@ def _collect_state_repo_roots(state, *, group: str = "") -> set[str]:
     return repo_roots
 
 
-async def prefill_branch_exists_for_state(state, *, group: str = "") -> None:
-    """Prefill branch-exists cache for every repo referenced by ``state``."""
+async def prefill_branch_exists_for_state(state, *, group: str = "",
+                                          include_merge_readiness: bool = True
+                                          ) -> None:
+    """Warm branch and (by default) current-base merge-readiness caches."""
     repo_roots = _collect_state_repo_roots(state, group=group)
-    if not repo_roots:
-        return
-    await prefill_branch_exists_async(repo_roots)
+    if repo_roots:
+        await prefill_branch_exists_async(repo_roots)
+    if include_merge_readiness:
+        await prefill_merge_readiness_for_state(state, group=group)
+
+
+async def _run_merge_readiness_git(repo_root: str, *args: str) -> tuple[int, str]:
+    """Run a bounded git probe used solely to populate merge readiness."""
+    proc = None
+    try:
+        async with _merge_readiness_semaphore:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", repo_root, *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=_MERGE_READINESS_GIT_TIMEOUT_SECONDS
+            )
+        return proc.returncode, stdout.decode("utf-8", errors="replace").strip()
+    except asyncio.TimeoutError:
+        if proc is not None:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=1.0)
+            except (OSError, asyncio.TimeoutError):
+                pass
+        return 1, ""
+    except OSError:
+        return 1, ""
+
+
+async def _probe_merge_readiness(repo_root: str, branch: str,
+                                 base_branch: str) -> dict:
+    """Check current-base mergeability using ``merge-tree --write-tree``.
+
+    A moved base is recorded separately from a conflict.  The latter is the
+    condition that makes a ready stream impossible to merge now.
+    """
+    repo_root, branch, base_branch = _merge_readiness_cache_key(
+        repo_root, branch, base_branch
+    )
+    unknown = {
+        "state": "unknown",
+        "stale": None,
+        "source": "merge_readiness_check_failed",
+        "base_branch": base_branch,
+    }
+    if not all((repo_root, branch, base_branch)) or not os.path.isdir(repo_root):
+        return unknown
+    base_code, base_head = await _run_merge_readiness_git(
+        repo_root, "rev-parse", base_branch
+    )
+    branch_code, branch_head = await _run_merge_readiness_git(
+        repo_root, "rev-parse", branch
+    )
+    fork_code, fork_point = await _run_merge_readiness_git(
+        repo_root, "merge-base", base_branch, branch
+    )
+    if base_code or branch_code or fork_code or not all(
+            (base_head, branch_head, fork_point)):
+        return unknown
+
+    # Do not use the old three-argument merge-tree form: it can exit with a
+    # confident-looking result that does not expose conflicts to the caller.
+    merge_code, merge_output = await _run_merge_readiness_git(
+        repo_root, "merge-tree", "--write-tree", "--name-only",
+        base_branch, branch,
+    )
+    base_advanced = fork_point != base_head
+    conflict = merge_code != 0
+    return {
+        "state": "stale" if base_advanced else "fresh",
+        "stale": base_advanced,
+        "source": "merge_readiness_check",
+        "base_branch": base_branch,
+        "base_head": base_head,
+        "branch_head": branch_head,
+        "fork_point": fork_point,
+        "base_advanced": base_advanced,
+        "merge_clean": not conflict,
+        "merge_conflict": conflict,
+        # This is deliberately only a diagnostic; conflict truth is the
+        # merge-tree exit status, not a grep over its human output.
+        "merge_tree_output": merge_output[:1000] if conflict else "",
+    }
+
+
+def _stream_base_branch(state, stream: dict) -> str:
+    readiness = (stream or {}).get("merge_readiness", {}) or {}
+    stale = readiness.get("stale_base", {}) if isinstance(readiness, dict) else {}
+    base_branch = str((stale or {}).get("base_branch", "") or "").strip()
+    if base_branch:
+        return base_branch
+    pr = (stream or {}).get("pr", {}) or {}
+    base_branch = str(pr.get("base_branch", "") or "").strip()
+    if base_branch:
+        return base_branch
+    owner = state.agents.get(str((stream or {}).get("agent_id", "") or ""))
+    return str(getattr(owner, "worktree_base_branch", "") or "").strip()
+
+
+async def prefill_merge_readiness_for_state(state, *, group: str = "") -> None:
+    """Warm current-base merge probes before synchronous stream synthesis.
+
+    Failure is intentionally cached as ``unknown`` and downstream synthesis
+    treats it as not-ready rather than falsely recommending a merge.
+    """
+    await prefill_branch_exists_for_state(
+        state, group=group, include_merge_readiness=False,
+    )
+    streams = compute_worktree_streams(
+        state, group=group, include_orphaned=False,
+    )
+    probes = []
+    for stream in streams:
+        if str(stream.get("state", "") or "") == "merged":
+            continue
+        repo_root = str(stream.get("repo_root", "") or "").strip()
+        branch = str(stream.get("branch", "") or "").strip()
+        base_branch = _stream_base_branch(state, stream)
+        if not all((repo_root, branch, base_branch)):
+            continue
+        if _merge_readiness_cache_get(repo_root, branch, base_branch):
+            continue
+        probes.append((repo_root, branch, base_branch))
+
+    async def populate(repo_root: str, branch: str, base_branch: str) -> None:
+        info = await _probe_merge_readiness(repo_root, branch, base_branch)
+        _merge_readiness_cache_put(repo_root, branch, base_branch, info)
+
+    if probes:
+        await asyncio.gather(
+            *(populate(*probe) for probe in probes), return_exceptions=True,
+        )
 
 
 def stream_id(repo_root: str, branch: str) -> str:
@@ -993,6 +1202,38 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
     )
 
     merged = _is_merged_stream(boundary_tasks, state, repo_root=repo_root, branch=branch)
+    latest_boundary_info = task_boundary(latest_boundary) if latest_boundary else {}
+    latest_review_boundary_info = (
+        task_boundary(latest_review_boundary) if latest_review_boundary else {}
+    )
+    readiness_boundary_info = latest_review_boundary_info or latest_boundary_info
+    # Older boundaries sometimes lack the repo/branch even though the stream
+    # identity is authoritative.  Supply it so the async readiness cache is
+    # usable without mutating historical task evidence.
+    readiness_boundary_info = {
+        **readiness_boundary_info,
+        "repo_root": readiness_boundary_info.get("repo_root") or repo_root,
+        "branch": readiness_boundary_info.get("branch") or branch,
+    }
+    if not readiness_boundary_info.get("base_branch"):
+        for cell in state.iter_active_agents():
+            if stream_identity_for_agent(cell) != (repo_root, branch):
+                continue
+            base_branch = str(
+                getattr(cell, "worktree_base_branch", "") or ""
+            ).strip()
+            if base_branch:
+                readiness_boundary_info["base_branch"] = base_branch
+                break
+    latest_boundary_pr = boundary_pr_metadata(readiness_boundary_info)
+    readiness_stale_base = _stale_base_packet(
+        readiness_boundary_info, latest_boundary_pr
+    )
+    readiness_conflict = bool(readiness_stale_base.get("merge_conflict"))
+    readiness_unknown = (
+        readiness_stale_base.get("state") == "unknown"
+        or readiness_stale_base.get("stale") is None
+    )
     validation_state, validation_record = _compute_validation_state(stream_tasks)
     pending_validation = validation_state == "pending_human_validation"
     branch_has_advanced = bool(latest_review_boundary and started_followers)
@@ -1001,7 +1242,7 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
 
     if merged:
         code_state = "merged"
-    elif merge_conflict:
+    elif merge_conflict or readiness_conflict:
         code_state = "merge_conflict"
     elif blocker_tasks:
         code_state = "review_blocked"
@@ -1022,7 +1263,7 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
 
     if merged:
         stream_state = "merged"
-    elif merge_conflict or blocker_tasks:
+    elif merge_conflict or readiness_conflict or blocker_tasks:
         stream_state = "fixing_blockers"
     elif review_tasks:
         stream_state = "reviewing"
@@ -1036,6 +1277,12 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
         stream_state = "ready_to_merge"
     else:
         stream_state = "implementing"
+
+    # A clean review alone is not a merge-readiness proof.  We must have a
+    # current-base probe before asserting ready; a failed probe is surfaced as
+    # an actionable unknown rather than a confident false merge suggestion.
+    if stream_state == "ready_to_merge" and readiness_unknown:
+        stream_state = "merge_readiness_unknown"
 
     if merged:
         merge_state = "merged"
@@ -1090,6 +1337,16 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
         branch_advanced=branch_has_advanced,
         latest_review_boundary=latest_review_boundary,
     )
+    if readiness_conflict:
+        gate_reason = (
+            "The base branch advanced and now conflicts with this stream; "
+            "rebase before merge."
+        )
+    elif stream_state == "merge_readiness_unknown":
+        gate_reason = (
+            "Current-base merge readiness could not be determined; "
+            "do not merge until the check succeeds."
+        )
     queue_gate = _compute_queue_gate(
         queue_tasks=[
             task for task in queued_tasks
@@ -1129,7 +1386,7 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
         stream_state=stream_state,
         validation_state=validation_state,
         validation_tasks=validation_tasks,
-        merge_conflict=merge_conflict,
+        merge_conflict=merge_conflict or readiness_conflict,
         has_open_product_tasks=bool(open_product_tasks or queued_tasks),
     )
 
@@ -1160,11 +1417,6 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
 
     group_value = _stream_group(stream_tasks, owner_agent)
     stream_id_value = stream_id(repo_root, branch)
-    latest_boundary_info = task_boundary(latest_boundary) if latest_boundary else {}
-    latest_review_boundary_info = (
-        task_boundary(latest_review_boundary) if latest_review_boundary else {}
-    )
-    latest_boundary_pr = boundary_pr_metadata(latest_boundary_info)
     latest_merged_commit_sha = (
         str(latest_boundary_info.get("merge_commit_sha", "") or "").strip()
         or str(latest_boundary_pr.get("merge_commit_sha", "") or "").strip()
@@ -1182,7 +1434,7 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
         queued_followers=queued_followers,
         started_followers=started_followers,
         latest_review_boundary=latest_review_boundary,
-        latest_boundary_info=latest_review_boundary_info or latest_boundary_info,
+        latest_boundary_info=readiness_boundary_info,
         latest_review=latest_review,
         latest_reviewed_commit_sha=latest_reviewed_commit_sha,
         latest_merged_commit_sha=latest_merged_commit_sha,
@@ -2009,6 +2261,8 @@ def _recommended_next_action(*, stream_state: str, validation_state: str,
                              has_open_product_tasks: bool) -> str:
     if stream_state == "merged":
         return "none"
+    if stream_state == "merge_readiness_unknown":
+        return "check_merge_readiness"
     if merge_conflict:
         return "resolve_merge_conflict"
     if stream_state == "fixing_blockers":
