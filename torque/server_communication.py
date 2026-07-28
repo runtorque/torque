@@ -2007,9 +2007,15 @@ async def resolve_blocked_task_reply(
                     "delivery_state": "unrecoverable",
                     "delivery_reason": str(existing.get("delivery_reason", "") or "resume_delivery_failed"),
                     "message": "Prior reply delivery failed; it was not delivered and re-dispatch is required."}
-        # A buffered row is the only retryable state. The row was persisted
-        # before transport; replaying it is safe because no delivery receipt
-        # exists yet. Continue below without appending a second task record.
+        # Buffered is deliberately ambiguous: a process can die after the
+        # terminal accepted the prompt but before we persist its receipt.
+        # Replaying would duplicate a ruling in the same worker context.
+        # Never turn missing evidence into an exactly-once claim.
+        return {"type": "indeterminate", "task_id": task.id,
+                "block_id": block["block_id"], "reply_message_id": reply_id,
+                "delivery_state": "indeterminate",
+                "delivery_reason": "delivery_receipt_missing",
+                "message": "Reply persistence exists but delivery receipt is missing; inspect the worker or re-dispatch rather than sending a duplicate ruling."}
     elif existing_reply and existing_reply.get("delivery_state") == "unrecoverable":
         return {"type": "unrecoverable", "task_id": task.id,
                 "block_id": block["block_id"], "reply_message_id": reply_id,

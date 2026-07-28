@@ -5756,7 +5756,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         reply = [m for m in task.messages if m.get('action') == 'block_reply'][0]
         self.assertEqual(reply['delivery_state'], 'unrecoverable')
 
-    async def test_blocked_worker_reply_retries_buffered_but_not_failed_delivery(self):
+    async def test_blocked_worker_reply_marks_missing_receipt_indeterminate_and_never_replays(self):
         state = self._make_state()
         architect = self.state_mod.AgentCell(id='arch-1', name='Architect', group='g', cell_type='agent', kind='architect')
         worker = self.state_mod.AgentCell(id='worker-1', name='Worker', group='g', cell_type='agent', kind='worker', session_id='pty-1', status='idle')
@@ -5774,14 +5774,18 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             sent.append((cell.id, prompt))
             async def delivered(): return None
             return asyncio.create_task(delivered())
+        # Models a crash after the provider accepted a send but before the
+        # sender persisted `delivered`: buffered alone is not proof that no
+        # prompt reached the worker, so retry must not duplicate it.
         result = await self.server_mod.resolve_blocked_task_reply(state, task, architect, 'Answer', send_prompt=send_prompt, relaunch_agent=None, reply_id='msg-block-buffered')
-        self.assertEqual(result['type'], 'ok')
-        self.assertEqual(len(sent), 1)
-        self.assertEqual(self.db.load_direct_message('msg-block-buffered')['delivery_state'], 'delivered')
+        self.assertEqual(result['type'], 'indeterminate')
+        self.assertEqual(result['delivery_state'], 'indeterminate')
+        self.assertEqual(result['delivery_reason'], 'delivery_receipt_missing')
+        self.assertEqual(sent, [])
         state.update_direct_message_delivery('msg-block-buffered', 'failed', reason='resume_delivery_failed')
         failed = await self.server_mod.resolve_blocked_task_reply(state, task, architect, 'Answer', send_prompt=send_prompt, relaunch_agent=None, reply_id='msg-block-buffered')
         self.assertEqual(failed['type'], 'unrecoverable')
-        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent, [])
 
     async def test_resolve_architect_ask_delivers_user_reply_to_architect_inbox(self):
         state = self._make_state()
