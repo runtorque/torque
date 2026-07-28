@@ -150,7 +150,7 @@ function loadScript(context, relPath) {
   vm.runInContext(fs.readFileSync(filename, 'utf8'), context, { filename });
 }
 
-function createHarness() {
+function createHarness(options = {}) {
   const document = new FakeDocument();
   const sendCalls = [];
   const sandbox = {
@@ -166,6 +166,7 @@ function createHarness() {
       idea_briefs: {},
     },
     _activePanelApp: 'thinking',
+    location: { protocol: 'http:', host: 'localhost' },
     _currentGroup() { return sandbox.state.active_group; },
     _panelAppVisible(app) { return app === 'thinking'; },
     send(message) { sendCalls.push(message); },
@@ -174,8 +175,27 @@ function createHarness() {
   sandbox.global = sandbox;
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
+  if (options.wsDelta) {
+    loadScript(sandbox, 'static/js/ws.js');
+    loadScript(sandbox, 'static/js/ws/interaction-guard.js');
+    loadScript(sandbox, 'static/js/ws/invalidation.js');
+    loadScript(sandbox, 'static/js/ws/delta-registry.js');
+    loadScript(sandbox, 'static/js/ws/delta-apply.js');
+    run(sandbox, `
+      state = {
+        agents: {}, groups: {}, children: {}, active_group: 'Torque',
+        thinking: { scratchpad_notes: {}, mind_maps: {} }, idea_briefs: {}
+      };
+    `);
+  }
   loadScript(sandbox, 'static/js/render.js');
   loadScript(sandbox, 'static/js/thinking.js');
+  if (options.wsDelta) {
+    sandbox.renderInvalidatedSurfaces = function(flags) {
+      sandbox._lastInvalidatedSurfaces = Object.assign({}, flags);
+      if (flags.thinking) sandbox.renderThinkingPanel();
+    };
+  }
   return { sandbox, document, sendCalls };
 }
 
@@ -690,22 +710,14 @@ test('Idea Brief clean resync with default link source does not mask later selec
   assert.equal(document.getElementById('idea-brief-why-it-matters').value, 'Updated why from server');
 });
 
-test('Idea Brief preserves local draft, caret, selected link, and scroll across deltas', () => {
-  const { sandbox, document } = createHarness();
-  sandbox.state.idea_briefs['TORQUE-IB:1'] = {
-    id: 'TORQUE-IB:1',
-    group: 'Torque',
-    group_name: 'Torque',
-    title: 'Drafted brief',
-    status: 'draft',
-    problem_opportunity: 'Server problem',
-    why_it_matters: 'Server why',
-    proposed_shape: '',
-    smallest_useful_version: '',
-    risks_tradeoffs: '',
-    open_questions: '',
-    thinking_links: [{ type: 'scratchpad_note', id: 'TORQUE-S:1', title: 'Note' }],
-  };
+test('Idea Brief WS deltas rerender server changes without losing dirty draft focus, caret, or viewport', () => {
+  const { sandbox, document } = createHarness({ wsDelta: true });
+  run(sandbox, `state.idea_briefs['TORQUE-IB:1'] = {
+    id: 'TORQUE-IB:1', group: 'Torque', group_name: 'Torque', title: 'Drafted brief',
+    status: 'draft', problem_opportunity: 'Server problem', why_it_matters: 'Server why',
+    proposed_shape: '', smallest_useful_version: '', risks_tradeoffs: '', open_questions: '',
+    thinking_links: [{ type: 'scratchpad_note', id: 'TORQUE-S:1', title: 'Note' }]
+  };`);
   run(sandbox, `thinkingSetTab('idea-briefs'); ideaBriefSelect('TORQUE-IB:1'); ideaBriefSelectLink('scratchpad_note|TORQUE-S:1||0');`);
   const problem = document.getElementById('idea-brief-problem-opportunity');
   problem.value = 'Local problem draft';
@@ -713,8 +725,16 @@ test('Idea Brief preserves local draft, caret, selected link, and scroll across 
   problem.selectionEnd = 13;
   problem.scrollTop = 33;
   problem.focus();
+  const detail = document.getElementById('thinking-idea-detail');
+  detail.scrollTop = 117;
 
-  run(sandbox, `ideaBriefReceiveDelta({ id: 'TORQUE-IB:1', group: 'Torque', group_name: 'Torque', problem_opportunity: 'Server pushed problem' }); renderThinkingPanel();`);
+  run(sandbox, `_expectedSeq = 0; _handleDelta({
+    seq: 0,
+    ops: [{
+      op: 'idea_brief_upsert', id: 'TORQUE-IB:1', group: 'Torque', group_name: 'Torque',
+      title: 'Server-updated brief title', problem_opportunity: 'Server pushed problem'
+    }]
+  });`);
 
   const restored = document.getElementById('idea-brief-problem-opportunity');
   assert.equal(restored.value, 'Local problem draft');
@@ -722,6 +742,9 @@ test('Idea Brief preserves local draft, caret, selected link, and scroll across 
   assert.equal(restored.selectionStart, 6);
   assert.equal(restored.selectionEnd, 13);
   assert.equal(restored.scrollTop, 33);
+  assert.equal(document.getElementById('thinking-idea-detail').scrollTop, 117);
+  assert.equal(sandbox._lastInvalidatedSurfaces.thinking, true);
+  assert.match(document.getElementById('panel-thinking').innerHTML, /Server-updated brief title/);
   assert.match(document.getElementById('panel-thinking').innerHTML, /idea-brief-link-card selected/);
 });
 
