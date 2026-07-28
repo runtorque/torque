@@ -47,12 +47,35 @@ from torque.mcp_scoped.planning import (
 from torque.server_artifacts import serialize_task_for_mcp
 from torque.state import ARCHIVED_LANE, board_task_is_closed
 
-_ARCHITECT_PEER_INBOX_DEFAULT_LIMIT = 20
+_ARCHITECT_PEER_INBOX_DEFAULT_LIMIT = 6
 _ARCHITECT_PEER_INBOX_MAX_LIMIT = 100
 _PROPOSAL_PEER_MARKER = "torque.proposal_peer.v1"
 _PROPOSAL_DECISION_MARKER = "torque.decision_proposal.v1"
 _PROPOSAL_CONTEXT_MARKER = "torque.proposal_context.v1"
 _PRODUCT_TASK_LABELS = frozenset({"product-proposal", "proposal-only"})
+
+
+def _proposal_peer_thread_summary(thread: dict) -> dict:
+    messages = list((thread or {}).get("messages", []) or [])
+    last = dict(messages[-1] if messages else {})
+    message = str(last.get("message", "") or "")
+    preview_limit = 1_200
+    preview = message if len(message) <= preview_limit else message[:preview_limit - 1].rstrip() + "…"
+    return {
+        "thread_id": str((thread or {}).get("thread_id", "") or ""),
+        "peer_architect_id": str((thread or {}).get("peer_architect_id", "") or ""),
+        "peer_name": str((thread or {}).get("peer_name", "") or ""),
+        "last_message_at": (thread or {}).get("last_message_at", 0),
+        "requires_reply": bool((thread or {}).get("requires_reply", False)),
+        "message_count": len(messages),
+        "last_message": {
+            "id": str(last.get("id", "") or ""),
+            "direction": str(last.get("direction", "") or ""),
+            "message": preview,
+            "message_length": len(message),
+            "message_truncated": len(message) > preview_limit,
+        },
+    }
 
 def _cell_has_proposal_peer_authority(state, cell) -> bool:
     if not cell:
@@ -1115,9 +1138,19 @@ def _proposal_peer_inbox_json(state, caller_id: str,
         ),
         reverse=True,
     )
+    total = len(threads)
+    selected = threads[:limit]
+    detail = bool(args.get("detail", False))
     return _compact_json({
         "type": "proposal_peer_inbox",
-        "threads": threads[:limit],
+        "detail": "full" if detail else "summary",
+        "detail_available": not detail,
+        "threads": selected if detail else [
+            _proposal_peer_thread_summary(thread) for thread in selected
+        ],
+        "threads_total": total,
+        "threads_returned": len(selected),
+        "threads_capped": len(selected) < total,
     }), False
 
 

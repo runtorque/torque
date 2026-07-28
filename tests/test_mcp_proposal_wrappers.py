@@ -1648,7 +1648,9 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             "created_at": 4,
         })
 
-        inbox = await self._call("architect_proposal_peer_inbox", {}, req_id=5)
+        inbox = await self._call(
+            "architect_proposal_peer_inbox", {"detail": True}, req_id=5,
+        )
         threads = self._result_payload(inbox)["threads"]
         thread_by_id = {thread["thread_id"]: thread for thread in threads}
         self.assertEqual(
@@ -1710,7 +1712,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         # Inbox and reply use the same eligibility predicate: it now returns
         # the two-way conversation and never leaks the non-party thread.
         inbox_after_reply = await self._call(
-            "architect_proposal_peer_inbox", {}, req_id=7
+            "architect_proposal_peer_inbox", {"detail": True}, req_id=7
         )
         threads_after_reply = {
             thread["thread_id"]: thread

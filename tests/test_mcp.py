@@ -3801,6 +3801,43 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(upstream[0]["source_task_label"], "Research auth patch")
         self.assertEqual(upstream[0]["url"], "/attachments/task-parent/plan.md")
 
+    async def test_torque_context_defaults_to_bounded_summary_with_full_opt_in(self):
+        state = self.state_mod.MatrixState()
+        cell = self.state_mod.AgentCell(
+            id="agent-1", name="Worker", group="g", cell_type="agent",
+        )
+        state.agents[cell.id] = cell
+        state.groups["g"] = [cell.id]
+        for index in range(4):
+            state.board_add_task(
+                f"Task {index}", "g", lane="In Progress", id=f"task-{index}",
+                agent_id=cell.id, description="x" * 4_000,
+            )
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        text, is_error = await self.mcp_mod._dispatch_tool(
+            "torque_context", {}, cell.id, fake_handle_command, state,
+        )
+        self.assertFalse(is_error)
+        summary = json.loads(text)
+        self.assertEqual(summary["detail"], "summary")
+        self.assertTrue(summary["detail_available"])
+        self.assertEqual(summary["tasks_total"], 4)
+        self.assertEqual(summary["tasks_returned"], 3)
+        self.assertTrue(summary["tasks_capped"])
+        self.assertTrue(summary["tasks"]["task-0"]["description_truncated"])
+        self.assertLess(len(text), 10_000)
+
+        full_text, full_error = await self.mcp_mod._dispatch_tool(
+            "torque_context", {"detail": True}, cell.id,
+            fake_handle_command, state,
+        )
+        self.assertFalse(full_error)
+        self.assertEqual(len(json.loads(full_text)["tasks"]), 4)
+        self.assertIn("x" * 4_000, full_text)
+
     async def test_architect_session_wake_emits_once_per_mcp_session_in_background(self):
         state = self.state_mod.MatrixState()
         architect = self.state_mod.AgentCell(

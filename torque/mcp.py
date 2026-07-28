@@ -91,6 +91,8 @@ INSTRUCTIONS = (
     "subtasks, and coordinate with other agents in the pipeline."
 )
 MCP_SESSION_HEADER = "X-Torque-MCP-Session-Id"
+_CONTEXT_DEFAULT_TASK_LIMIT = 3
+_CONTEXT_DESCRIPTION_PREVIEW_LIMIT = 600
 from .mcp_session_wake import (
     _SESSION_WAKE_DEDUPE_SECS,
     _SESSION_WAKE_SEEN,
@@ -123,11 +125,23 @@ TOOLS = [
         "description": (
             "Get current agent identity, status, and linked tasks. "
             "Returns the agent's name, group, directory, worktree info, "
-            "its session/daemon code-revision provenance, and any board tasks "
-            "currently assigned to this agent. Use "
+            "its session/daemon code-revision provenance, and bounded summaries "
+            "of board tasks currently assigned to this agent (with the total "
+            "available reported). Set detail=true for complete legacy records. Use "
             "this to understand your current assignment before starting work."
         ),
-        "inputSchema": {"type": "object", "properties": {}},
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "detail": {
+                    "type": "boolean",
+                    "description": (
+                        "Return the complete legacy agent and task records. "
+                        "The default is a bounded orientation summary."
+                    ),
+                },
+            },
+        },
     },
     {
         "name": "torque_area_list", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "self","result_kind": "area","result_paths": ["areas"]}]},
@@ -1298,17 +1312,101 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
         if state.agent_is_tombstoned(cell):
             return f"Agent {cell_id} is tombstoned", True
         from dataclasses import asdict
-        tasks = {tid: serialize_task_for_mcp(t, tasks_by_id=state.board_tasks)
-                 for tid, t in state.board_tasks.items()
-                 if t.agent_id == cell_id}
+        tasks = [
+            (tid, task) for tid, task in state.board_tasks.items()
+            if task.agent_id == cell_id
+        ]
+        runtime_provenance = agent_session_runtime_provenance_payload(state, cell)
+        if bool(args.get("detail", False)):
+            return json.dumps({
+                "detail": "full",
+                "agent": asdict(cell),
+                "runtime_provenance": runtime_provenance,
+                "tasks": {
+                    tid: serialize_task_for_mcp(task, tasks_by_id=state.board_tasks)
+                    for tid, task in tasks
+                },
+            }, indent=2), False
+
+        def preview(value, limit=_CONTEXT_DESCRIPTION_PREVIEW_LIMIT):
+            text = str(value or "")
+            return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
+
+        def artifact_refs(items):
+            refs = []
+            for artifact in list(items or [])[:5]:
+                if not isinstance(artifact, dict):
+                    continue
+                refs.append({
+                    key: preview(artifact.get(key, ""), limit=160)
+                    for key in (
+                        "type", "title", "filename", "url", "path",
+                        "source_task_id", "source_task_label",
+                    )
+                    if artifact.get(key, "") not in (None, "")
+                })
+            return refs
+
+        def task_summary(task):
+            description = str(getattr(task, "description", "") or "")
+            title = str(getattr(task, "task", "") or "")
+            labels = list(getattr(task, "labels", []) or [])
+            serialized = serialize_task_for_mcp(
+                task,
+                tasks_by_id=state.board_tasks,
+            )
+            task_artifacts = list(serialized.get("task_artifacts", []) or [])
+            upstream_artifacts = list(serialized.get("upstream_artifacts", []) or [])
+            return {
+                "id": str(getattr(task, "id", "") or ""),
+                "slug": str(getattr(task, "slug", "") or ""),
+                "title": preview(title),
+                "title_length": len(title),
+                "title_truncated": len(title) > _CONTEXT_DESCRIPTION_PREVIEW_LIMIT,
+                "lane": str(getattr(task, "lane", "") or ""),
+                "status": str(getattr(task, "status", "") or ""),
+                "dispatch_state": str(getattr(task, "dispatch_state", "") or ""),
+                "health_state": str(getattr(task, "health_state", "") or ""),
+                "labels": [preview(label, limit=120) for label in labels[:20]],
+                "labels_total": len(labels),
+                "labels_capped": len(labels) > 20,
+                "parent_task_id": str(getattr(task, "parent_task_id", "") or ""),
+                "pipeline_depth": int(getattr(task, "pipeline_depth", 0) or 0),
+                "description_preview": preview(description),
+                "description_length": len(description),
+                "description_truncated": len(description) > _CONTEXT_DESCRIPTION_PREVIEW_LIMIT,
+                "artifact_count": len(getattr(task, "attachments", []) or [])
+                    + len(getattr(task, "artifacts", []) or []),
+                # These are references rather than task prose, and retaining
+                # them keeps the orientation call useful for artifact handoff.
+                "task_artifacts": artifact_refs(task_artifacts),
+                "task_artifacts_total": len(task_artifacts),
+                "task_artifacts_capped": len(task_artifacts) > 5,
+                "upstream_artifacts": artifact_refs(upstream_artifacts),
+                "upstream_artifacts_total": len(upstream_artifacts),
+                "upstream_artifacts_capped": len(upstream_artifacts) > 5,
+            }
+
+        selected = tasks[:_CONTEXT_DEFAULT_TASK_LIMIT]
+        agent = {}
+        for key in (
+                "id", "name", "slug", "group", "kind", "cell_type", "status",
+                "directory", "current_task_id", "worktree_path", "worktree_branch",
+                "worktree_base_branch", "worktree_dirty", "worktree_diff",
+        ):
+            value = getattr(cell, key, "")
+            agent[key] = preview(value) if isinstance(value, str) else value
         return json.dumps({
-            "agent": asdict(cell),
-            "runtime_provenance": agent_session_runtime_provenance_payload(
-                state, cell
-            ),
-            "tasks": tasks,
-        },
-                          indent=2), False
+            "type": "torque_context",
+            "detail": "summary",
+            "detail_available": True,
+            "agent": agent,
+            "runtime_provenance": runtime_provenance,
+            "tasks": {tid: task_summary(task) for tid, task in selected},
+            "tasks_total": len(tasks),
+            "tasks_returned": len(selected),
+            "tasks_capped": len(selected) < len(tasks),
+        }, indent=2), False
 
     if name in {"torque_area_list", "torque_area_show"}:
         cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None

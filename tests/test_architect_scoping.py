@@ -645,7 +645,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
 
         inbox_text, inbox_error = await self._call(
             "architect_peer_inbox",
-            {},
+            {"detail": True},
             architect.id,
         )
         self.assertFalse(inbox_error, inbox_text)
@@ -4726,7 +4726,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         })
         inbox_text, inbox_error = await self._call(
             "architect_peer_inbox",
-            {"requires_reply": True},
+            {"requires_reply": True, "detail": True},
             peer.id,
         )
         self.assertFalse(inbox_error, inbox_text)
@@ -5298,6 +5298,62 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(archive_error, archive_text)
         self.assertEqual(self.state._delta_ops[-1]["op"], "decision_upsert")
         self.assertTrue(self.state._delta_ops[-1]["archived"])
+
+    async def test_architect_read_defaults_are_bounded_and_report_totals(self):
+        architect = self._add_architect("arch-1", "Architect")
+        peer = self._add_architect("arch-2", "Peer")
+        long_text = "x" * 4_000
+        for index in range(7):
+            self.state.save_decision({
+                "id": f"decision-{index}", "architect_id": architect.id,
+                "title": f"Decision {index}", "rationale": long_text,
+                "status": "accepted",
+            })
+            self.db.save_agent_peer_message({
+                "id": f"message-{index}", "thread_id": f"thread-{index}",
+                "group_name": architect.group, "sender_id": peer.id,
+                "sender_kind": "architect", "recipient_id": architect.id,
+                "recipient_kind": "architect", "message": long_text,
+                "created_at": float(index + 1),
+            })
+
+        decision_text, decision_error = await self._call(
+            "architect_decision_list", {}, architect.id,
+        )
+        self.assertFalse(decision_error, decision_text)
+        decisions = json.loads(decision_text)
+        self.assertEqual((decisions["decisions_total"], decisions["decisions_returned"]), (7, 6))
+        self.assertTrue(decisions["decisions_capped"])
+        self.assertTrue(decisions["decisions"][0]["rationale_truncated"])
+
+        inbox_text, inbox_error = await self._call(
+            "architect_peer_inbox", {}, architect.id,
+        )
+        self.assertFalse(inbox_error, inbox_text)
+        inbox = json.loads(inbox_text)
+        self.assertEqual((inbox["threads_total"], inbox["threads_returned"]), (7, 6))
+        self.assertTrue(inbox["threads_capped"])
+        self.assertTrue(inbox["threads"][0]["last_message"]["message_truncated"])
+
+        with mock.patch.object(self.state_mod, "DATA_DIR", Path(self.tmp.name)):
+            for index in range(7):
+                self.state.architect_journal_append(
+                    architect.id, "observation", long_text,
+                )
+            journal_text, journal_error = await self._call(
+                "architect_journal_read", {}, architect.id,
+            )
+        self.assertFalse(journal_error, journal_text)
+        journal = json.loads(journal_text)
+        self.assertEqual((journal["entries_total"], journal["entries_returned"]), (7, 6))
+        self.assertTrue(journal["entries_capped"])
+        self.assertTrue(journal["entries"][0]["entry_truncated"])
+
+        full_text, full_error = await self._call(
+            "architect_peer_inbox", {"detail": True, "limit": 1}, architect.id,
+        )
+        self.assertFalse(full_error, full_text)
+        self.assertEqual(json.loads(full_text)["threads"][0]["messages"][0]["message"], long_text)
 
     async def test_architect_wave_summary_from_decision_groups_evidence_and_exclusions(self):
         architect = self._add_architect("arch-1", "Architect")

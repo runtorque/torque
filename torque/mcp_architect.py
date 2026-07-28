@@ -1458,7 +1458,11 @@ _ARCHITECT_TOOL_SPECS = [
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum threads to return (default 20, max 100).",
+                    "description": "Maximum threads to return (default 6, max 100).",
+                },
+                "detail": {
+                    "type": "boolean",
+                    "description": "Include complete message bodies and context snapshots; default is a bounded thread summary.",
                 },
             },
         },
@@ -1854,7 +1858,7 @@ _ARCHITECT_TOOL_SPECS = [
     },
     {
         "name": "architect_decision_list", "authority": {"requirements":[{"capability":"decision.read","minimum_scope":"self","result_kind":"decision","result_paths":["decisions"]}]},
-        "description": "List persisted decisions authored by any Architect in this group.",
+        "description": "List persisted decisions authored by any Architect in this group. Defaults to six bounded summaries and reports the total available.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -1866,6 +1870,14 @@ _ARCHITECT_TOOL_SPECS = [
                 "include_archived": {
                     "type": "boolean",
                     "description": "Include archived decisions.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum decisions to return (default: 6).",
+                },
+                "detail": {
+                    "type": "boolean",
+                    "description": "Include full rationale and metadata for each returned decision.",
                 },
             },
         },
@@ -1903,7 +1915,11 @@ _ARCHITECT_TOOL_SPECS = [
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum entries to return (default: 20).",
+                    "description": "Maximum entries to return (default: 6).",
+                },
+                "detail": {
+                    "type": "boolean",
+                    "description": "Include complete journal entries; default previews are bounded.",
                 },
             },
         },
@@ -1954,8 +1970,8 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
     },
     {
         "name": "architect_decision_proposal_list", "authority": {"requirements":[{"capability":"decision.read","minimum_scope":"self","result_kind":"decision","result_paths":["decisions"]}]},
-        "description": "List same-group decisions; proposal-only mutation tools remain caller-owned.",
-        "inputSchema": {"type": "object", "properties": {"include_archived": {"type": "boolean"}}},
+        "description": "List same-group decisions; proposal-only mutation tools remain caller-owned. Defaults to six bounded summaries and reports the total available.",
+        "inputSchema": {"type": "object", "properties": {"include_archived": {"type": "boolean"}, "limit": {"type": "integer", "description": "Maximum decisions to return (default: 6)."}, "detail": {"type": "boolean", "description": "Include complete decision records for returned entries."}}},
     },
     {
         "name": "architect_decision_propose", "authority": {"requirements": [{"capability": "decision.propose","minimum_scope": "self","handler_scoped": True}]},
@@ -2025,7 +2041,7 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
     {
         "name": "architect_proposal_peer_inbox", "authority": {"requirements": [{"capability": "message.architect_peer","minimum_scope": "group","target_argument": "peer_architect_id","target_kind": "agent"}]},
         "description": "Read only product-peer marked Architect↔Architect threads involving this caller; raw peer and Architect↔Engineer rows are hidden.",
-        "inputSchema": {"type": "object", "properties": {"peer_architect_id": {"type": "string"}, "thread_id": {"type": "string"}, "requires_reply": {"type": "boolean"}, "since": {"type": "number"}, "limit": {"type": "integer"}}},
+        "inputSchema": {"type": "object", "properties": {"peer_architect_id": {"type": "string"}, "thread_id": {"type": "string"}, "requires_reply": {"type": "boolean"}, "since": {"type": "number"}, "limit": {"type": "integer", "description": "Maximum threads to return (default: 6)."}, "detail": {"type": "boolean", "description": "Include complete thread messages and context."}}},
     },
     {
         "name": "architect_proposal_peer_reply", "authority": {"requirements": [{"capability": "message.architect_peer","minimum_scope": "group","target_argument": "message_id","target_kind": "message_peer"}]},
@@ -2050,7 +2066,7 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
     {
         "name": "architect_proposal_journal_read", "authority": {"requirements": [{"capability": "journal.private","minimum_scope": "self","handler_scoped": True}]},
         "description": "Read recent private product-planning recovery journal entries, excluding decision-type journal rows.",
-        "inputSchema": {"type": "object", "properties": {"since": {"type": "number"}, "limit": {"type": "integer"}}},
+        "inputSchema": {"type": "object", "properties": {"since": {"type": "number"}, "limit": {"type": "integer", "description": "Maximum entries to return (default: 6)."}, "detail": {"type": "boolean", "description": "Include complete journal entry bodies."}}},
     },
 ]
 
