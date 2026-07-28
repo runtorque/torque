@@ -7,6 +7,7 @@ from torque.mcp_scoped.common import (
     _dedupe_strings,
     _filter_tasks_for_caller,
     _load_architect_decision,
+    _load_same_group_architect_decisions,
     _resolve_architect_engineer,
 )
 
@@ -44,7 +45,8 @@ def _initiative_visible_decision_ids_for_caller(state, caller_kind: str,
         return set()
     return {
         str(decision.get("id", "") or "")
-        for decision in state.load_decisions_for_architect(
+        for decision in _load_same_group_architect_decisions(
+            state,
             caller_id,
             include_archived=False,
         )

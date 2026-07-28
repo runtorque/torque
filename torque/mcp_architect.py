@@ -203,7 +203,7 @@ _ARCHITECT_TOOL_SPECS = [
         "name": "architect_wave_summary", "authority": {"requirements": [{"capability": "decision.read","minimum_scope": "self","handler_scoped": True},{"capability": "task.read","minimum_scope": "group","target_argument": "task_ids","target_kind": "task"}]},
         "description": (
             "Generate a compact bounded wave-summary drafting aid from either "
-            "one caller-owned decision id or an explicit task-id list. The "
+            "one same-group decision id or an explicit task-id list. The "
             "summary expands visible linked task chains, groups completed work "
             "by category/labels, reports recorded PR/squash/review/origin/test "
             "evidence with unknown markers for missing data, separates active "
@@ -216,7 +216,7 @@ _ARCHITECT_TOOL_SPECS = [
                 "decision_id": {
                     "type": "string",
                     "description": (
-                        "Caller-owned decision id whose linked tasks define "
+                        "Same-group decision id whose linked tasks define "
                         "the wave. Provide exactly one of decision_id or "
                         "task_ids."
                     ),
@@ -240,7 +240,7 @@ _ARCHITECT_TOOL_SPECS = [
         "name": "architect_completion_audit", "authority": {"requirements": [{"capability": "decision.read","minimum_scope": "self","handler_scoped": True},{"capability": "task.read","minimum_scope": "group","target_argument": "task_ids","target_kind": "task"}]},
         "description": (
             "Run a compact conservative completion audit before marking a "
-            "decision/task wave complete. Given one caller-owned decision id "
+            "decision/task wave complete. Given one same-group decision id "
             "or an explicit task-id list, it expands visible task chains, "
             "separates active gates from parked/deferred exclusions, reports "
             "open branch boundaries, blocking asks, pending engineer/peer "
@@ -254,7 +254,7 @@ _ARCHITECT_TOOL_SPECS = [
                 "decision_id": {
                     "type": "string",
                     "description": (
-                        "Caller-owned decision id whose linked tasks define "
+                        "Same-group decision id whose linked tasks define "
                         "the audit scope. Provide exactly one of decision_id "
                         "or task_ids."
                     ),
@@ -1845,7 +1845,7 @@ _ARCHITECT_TOOL_SPECS = [
     },
     {
         "name": "architect_decision_list", "authority": {"requirements":[{"capability":"decision.read","minimum_scope":"self","result_kind":"decision","result_paths":["decisions"]}]},
-        "description": "List this architect's persisted decisions.",
+        "description": "List persisted decisions authored by any Architect in this group.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -1910,12 +1910,12 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
     },
     {
         "name": "architect_task_proposal_list", "authority": {"requirements": [{"capability": "task.read","minimum_scope": "self","result_kind": "task","result_paths": ["tasks"]}]},
-        "description": "List task summaries visible to this product wrapper; labels are an optional filter.",
+        "description": "List same-group task summaries; labels are an optional filter.",
         "inputSchema": {"type": "object", "properties": {"label_filter": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]}, "lane_filter": {"type": "string"}, "include_archived": {"type": "boolean"}, "limit": {"type": "integer"}}},
     },
     {
         "name": "architect_task_proposal_show", "authority": {"requirements": [{"capability": "task.read","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
-        "description": "Show one task visible to this product wrapper; out-of-scope tasks return the normal not-found style error.",
+        "description": "Show one same-group task; cross-group tasks remain unavailable.",
         "inputSchema": {"type": "object", "properties": {"task": {"type": "string"}}, "required": ["task"]},
     },
     {
@@ -1945,7 +1945,7 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
     },
     {
         "name": "architect_decision_proposal_list", "authority": {"requirements":[{"capability":"decision.read","minimum_scope":"self","result_kind":"decision","result_paths":["decisions"]}]},
-        "description": "List caller-owned proposed product decisions only.",
+        "description": "List same-group decisions; proposal-only mutation tools remain caller-owned.",
         "inputSchema": {"type": "object", "properties": {"include_archived": {"type": "boolean"}}},
     },
     {
@@ -2125,7 +2125,7 @@ _ARCHITECT_TOOL_SPECS.extend([
                 "target_kind": "decision",
             }],
         },
-        "description": "Read one decision owned by this Architect.",
+        "description": "Read one decision authored by an Architect in this group.",
         "inputSchema": {
             "type": "object",
             "properties": {"id": {"type": "string"}},

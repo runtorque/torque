@@ -865,6 +865,12 @@ def _peer_row_context(row: dict) -> dict:
 
 def _load_architect_decision(state, caller_id: str,
                              decision_id: str) -> tuple[dict | None, str]:
+    """Load a decision owned by the caller for a mutation path.
+
+    Keep ownership separate from the group-read helper below.  Decision
+    updates, links, reviews, and supersession remain caller-owned even though
+    every Architect may now inspect a peer's same-group decision.
+    """
     decision_id = str(decision_id or "").strip()
     if not decision_id:
         return None, "decision id is required"
@@ -874,6 +880,52 @@ def _load_architect_decision(state, caller_id: str,
     ).strip():
         return None, "Decision not found"
     return decision, ""
+
+
+def _load_same_group_architect_decision(
+        state, caller_id: str, decision_id: str,
+) -> tuple[dict | None, str]:
+    """Load a decision when its author is an Architect in the caller's group.
+
+    Decisions do not persist a group themselves; their author is the group
+    anchor.  Preserve cross-group non-disclosure by returning the historical
+    not-found response outside the caller's group, while allowing all
+    same-group Architect readers through.
+    """
+    decision_id = str(decision_id or "").strip()
+    if not decision_id:
+        return None, "decision id is required"
+    decision = state.load_decision(decision_id)
+    caller_group = _caller_group(state, caller_id)
+    author_id = str((decision or {}).get("architect_id", "") or "").strip()
+    author = state.agents.get(author_id) if author_id else None
+    if (
+            not decision
+            or not caller_group
+            or not _is_architect_cell(author, state)
+            or str(getattr(author, "group", "") or "").strip() != caller_group):
+        return None, "Decision not found"
+    return decision, ""
+
+
+def _load_same_group_architect_decisions(
+        state, caller_id: str, *, include_archived: bool = False,
+) -> list[dict]:
+    """Return all decisions authored by Architects in the caller's group."""
+    caller_group = _caller_group(state, caller_id)
+    if not caller_group:
+        return []
+    decisions = []
+    for decision in state.load_all_decisions(include_archived=include_archived):
+        author = state.agents.get(
+            str(decision.get("architect_id", "") or "").strip()
+        )
+        if (
+                _is_architect_cell(author, state)
+                and str(getattr(author, "group", "") or "").strip()
+                == caller_group):
+            decisions.append(decision)
+    return decisions
 
 
 def _agent_peer_message_row_to_entry(row: dict, agent_id: str) -> dict:

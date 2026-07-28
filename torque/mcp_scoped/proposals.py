@@ -3,7 +3,6 @@
 from datetime import datetime
 
 from torque.agent_classes import (
-    has_frozen_platform_group_board_authority,
     has_frozen_platform_task_authority_mode,
 )
 from torque.behavior_overlay import BehaviorOverlayScope
@@ -28,6 +27,7 @@ from torque.mcp_scoped.common import (
     _caller_group,
     _dedupe_strings,
     _load_architect_decision,
+    _load_same_group_architect_decisions,
     _optional_bool_arg,
     _task_created_by_classifier,
     _thread_requires_architect_reply,
@@ -467,12 +467,11 @@ def _architect_task_owned_by_caller(task, caller_id: str) -> bool:
 
 
 def _product_task_visible_for_architect(state, caller_id: str, task) -> bool:
-    """Return Product Manager-visible tasks without crossing the group boundary.
+    """Return same-group task read visibility for every Architect.
 
-    The trusted, frozen full-board Product Manager mode deliberately expands
-    only task visibility. Product labels continue to be available as an
-    optional caller filter; they are no longer a mandatory visibility ceiling.
-    Other Architect classes retain the product-wrapper visibility contract.
+    Product labels are an optional query filter, never a visibility ceiling.
+    The product wrapper remains responsible for proposal-only *writes*, but
+    must not make same-group coordination depend on manually pasted task text.
     """
 
     if not task:
@@ -481,14 +480,7 @@ def _product_task_visible_for_architect(state, caller_id: str, task) -> bool:
     group = str(getattr(caller, "group", "") or "").strip()
     if not group or str(getattr(task, "group", "") or "").strip() != group:
         return False
-    if has_frozen_platform_group_board_authority(caller):
-        return True
-    task_id = str(getattr(task, "id", "") or "").strip()
-    if _task_has_product_label(task):
-        return True
-    if str(getattr(task, "created_by_architect_id", "") or "").strip() == str(caller_id or "").strip() and _task_has_product_label(task):
-        return True
-    return task_id in _decision_proposal_linked_task_ids(state, caller_id)
+    return True
 
 
 def _product_visible_task_ids_for_architect(state, caller_id: str) -> set[str]:
@@ -500,9 +492,10 @@ def _product_visible_task_ids_for_architect(state, caller_id: str) -> set[str]:
 
 
 def _product_visible_decision_ids_for_architect(state, caller_id: str) -> set[str]:
+    """Return all same-group decision IDs for read-only product projections."""
     return {
         str(decision.get("id", "") or "").strip()
-        for decision in _product_decisions_for_architect(state, caller_id)
+        for decision in _load_same_group_architect_decisions(state, caller_id)
         if str(decision.get("id", "") or "").strip()
     }
 
@@ -514,7 +507,7 @@ def _product_task_summary(state, caller_id: str, task) -> dict:
     )
     linked_decisions = [
         decision.get("id")
-        for decision in _product_decisions_for_architect(state, caller_id)
+        for decision in _load_same_group_architect_decisions(state, caller_id)
         if str(getattr(task, "id", "") or "").strip()
         in {str(tid or "").strip() for tid in decision.get("linked_task_ids", []) or []}
     ]
@@ -589,7 +582,7 @@ def _proposal_board_summary_json(state, caller_id: str, args: dict) -> tuple[str
         "lanes": lane_counts,
         "tasks": items[:limit],
         "truncated": len(items) > limit,
-        "scope": "pm-linked/product-labeled task summaries only",
+        "scope": "same-group task summaries; product labels are optional filters",
     }), False
 
 
