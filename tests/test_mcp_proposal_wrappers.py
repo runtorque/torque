@@ -1566,27 +1566,64 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         task_resp = await self._call("architect_task_propose", {"title": "Anchor task"})
         task_id = self._result_payload(task_resp)["id"]
 
-        before_rows = self.db.load_agent_peer_messages_for_agent(self.architect.id, limit=20)
-        before_calls = list(self.calls)
+        # Bare same-group Architect sends remain valid without an explicit
+        # product-scope anchor, including acknowledgement requests.
         unanchored = await self._call(
             "architect_proposal_peer_message",
             {"architect_id": self.torqly.id, "message": "unanchored product peer"},
             req_id=20,
         )
-        self.assertIn("product-scope anchor", self._error_text(unanchored))
-        self.assertEqual(
-            [row["id"] for row in before_rows],
-            [row["id"] for row in self.db.load_agent_peer_messages_for_agent(self.architect.id, limit=20)],
+        unanchored_payload = self._result_payload(unanchored)
+        unanchored_row = self.db.load_agent_peer_message(
+            unanchored_payload["message_id"]
         )
-        self.assertEqual(before_calls, self.calls)
+        self.assertEqual([], unanchored_row["context_task_ids"])
+        self.assertEqual("delivered", unanchored_row["delivery_state"])
+        self.assertEqual(
+            "torque.proposal_peer.v1",
+            unanchored_row["context_snapshot"]["proposal_peer"]["marker"],
+        )
 
         no_anchor = await self._call(
             "architect_proposal_peer_message",
             {"architect_id": self.peer.id, "message": "ack?", "ack_required": True},
             req_id=2,
         )
-        self.assertIn("product-scope anchor", self._error_text(no_anchor))
-        self.assertEqual([], self.db.load_agent_peer_messages_for_agent(self.architect.id, limit=20))
+        no_anchor_payload = self._result_payload(no_anchor)
+        no_anchor_row = self.db.load_agent_peer_message(
+            no_anchor_payload["message_id"]
+        )
+        self.assertTrue(no_anchor_row["ack_required"])
+        self.assertEqual([], no_anchor_row["context_task_ids"])
+        self.assertEqual("delivered", no_anchor_row["delivery_state"])
+
+        unreadable_task = self.state.board_add_task(
+            "Other-group product task", "other", lane="Backlog", id="TORQUE:unreadable"
+        )
+        before_rows = self.db.load_agent_peer_messages_for_agent(
+            self.architect.id, limit=20
+        )
+        before_calls = list(self.calls)
+        unreadable = await self._call(
+            "architect_proposal_peer_message",
+            {
+                "architect_id": self.peer.id,
+                "message": "This attachment is outside my proposal scope.",
+                "context_task_ids": [unreadable_task.id],
+            },
+            req_id=21,
+        )
+        self.assertIn(
+            "not readable in product-proposal scope",
+            self._error_text(unreadable),
+        )
+        self.assertEqual(
+            [row["id"] for row in before_rows],
+            [row["id"] for row in self.db.load_agent_peer_messages_for_agent(
+                self.architect.id, limit=20
+            )],
+        )
+        self.assertEqual(before_calls, self.calls)
 
         sent = await self._call(
             "architect_proposal_peer_message",
@@ -1654,7 +1691,12 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         threads = self._result_payload(inbox)["threads"]
         thread_by_id = {thread["thread_id"]: thread for thread in threads}
         self.assertEqual(
-            {sent_payload["thread_id"], ordinary_payload["thread_id"]},
+            {
+                unanchored_payload["thread_id"],
+                no_anchor_payload["thread_id"],
+                sent_payload["thread_id"],
+                ordinary_payload["thread_id"],
+            },
             set(thread_by_id),
         )
         self.assertEqual(
