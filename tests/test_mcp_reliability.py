@@ -295,9 +295,10 @@ class MCPIdempotencyTests(unittest.IsolatedAsyncioTestCase):
             "id": 1,
             "method": "tools/call",
             "params": {
-                "name": "torque_progress",
+                "name": "task_progress",
                 "arguments": {
                     "message": "still running",
+                    "nonexistent_parameter_probe": "probe",
                     IDEMPOTENCY_ARG: "idem-1",
                 },
             },
@@ -325,6 +326,14 @@ class MCPIdempotencyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 200)
         self.assertEqual(second["id"], 2)
         self.assertEqual(json.loads(second["result"]["content"][0]["text"])["count"], 1)
+        notice = (
+            "Undeclared parameter received: nonexistent_parameter_probe. "
+            "They are not part of this public tool schema."
+        )
+        self.assertEqual(
+            [block["text"] for block in second["result"]["content"]].count(notice),
+            1,
+        )
         self.assertEqual(len(calls), 1)
         health = self.db.load_mcp_health_summary(since=0)
         self.assertEqual(health["totals"].get("dedupe"), 1)

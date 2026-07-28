@@ -1194,10 +1194,16 @@ def _append_undeclared_public_argument_notice(result: dict, names: list[str]) ->
     content = result.get("content")
     if not isinstance(content, list):
         return result
+    notice = _undeclared_public_argument_notice(names)
+    if any(
+        isinstance(block, dict) and block.get("text") == notice
+        for block in content
+    ):
+        return result
     result = dict(result)
     result["content"] = [
         *content,
-        {"type": "text", "text": _undeclared_public_argument_notice(names)},
+        {"type": "text", "text": notice},
     ]
     return result
 
