@@ -1955,11 +1955,25 @@ def _format_block_reply_prompt(task, answer: str, block_id: str) -> str:
 
 
 def _latest_open_block(task) -> dict | None:
-    """Find the latest unanswered block record on a task's durable log."""
-    for entry in reversed(list(getattr(task, "messages", []) or [])):
+    """Find the newest block without a worker acknowledgement.
+
+    A persisted reply is still open until the worker's next report
+    acknowledges it.  This lets retries safely inspect that same block while
+    ensuring an older reply never takes precedence over a newer blocker.
+    """
+    messages = list(getattr(task, "messages", []) or [])
+    replies = {
+        str(entry.get("block_id", "") or ""): entry
+        for entry in messages
+        if isinstance(entry, dict) and entry.get("action") == "block_reply"
+        and entry.get("block_id")
+    }
+    for entry in reversed(messages):
         if (isinstance(entry, dict) and entry.get("action") == "blocked"
-                and entry.get("block_id") and not entry.get("reply_message_id")):
-            return entry
+                and entry.get("block_id")):
+            reply = replies.get(str(entry["block_id"]))
+            if not reply or not reply.get("acknowledged_at"):
+                return entry
     return None
 
 
@@ -2040,22 +2054,12 @@ async def resolve_blocked_task_reply(
     if task_is_closed(task):
         return {"type": "error", "message": "Task is already closed"}
 
-    blocks = [entry for entry in reversed(list(getattr(task, "messages", []) or []))
-              if isinstance(entry, dict) and entry.get("action") == "blocked"
-              and entry.get("block_id")]
     block = _latest_open_block(task)
-    existing = existing_reply = None
-    # Check every recent block.  A previous process may have persisted a row
-    # but not the block's reply_message_id before it died.
-    for candidate in blocks:
-        candidate_row, candidate_projection = _existing_block_reply(
-            state, task, candidate, reply_id)
-        if candidate_row or candidate_projection:
-            block, existing, existing_reply = (
-                candidate, candidate_row, candidate_projection)
-            break
     if not block:
         return {"type": "error", "message": "No unanswered worker block on this task"}
+    # Replay suppression is scoped to the newest unanswered block.  A durable
+    # reply for an older block must never divert or suppress this new ruling.
+    existing, existing_reply = _existing_block_reply(state, task, block, reply_id)
     if existing or existing_reply:
         return _existing_block_reply_result(task, block, existing, existing_reply)
 

@@ -5736,6 +5736,47 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('Block reference: block-1', sent[0][1])
         self.assertEqual(self.db.load_direct_message('msg-block-test')['delivery_state'], 'delivered')
 
+    async def test_blocked_worker_reply_targets_newest_unanswered_block_after_old_delivery(self):
+        """A prior delivered block reply must not fence a newer unanswered block."""
+        state = self._make_state()
+        architect = self.state_mod.AgentCell(id='arch-1', name='Architect', group='g', cell_type='agent', kind='architect')
+        worker = self.state_mod.AgentCell(id='worker-1', name='Worker', group='g', cell_type='agent', kind='worker', session_id='pty-1', agent_session_id='provider-1', session_resume=True, status='idle')
+        state.agents = {architect.id: architect, worker.id: worker}
+        state.groups['g'] = [architect.id, worker.id]
+        task = state.board_add_task('Implement', 'g', lane='In Progress', id='task-multi-block', agent_id=worker.id)
+        task.messages.extend([
+            {'timestamp': 1, 'action': 'blocked', 'message': 'Old question?', 'agent_id': worker.id, 'block_id': 'block-old', 'reply_message_id': 'old-reply'},
+            {'timestamp': 2, 'action': 'block_reply', 'message': 'Old answer', 'worker_id': worker.id, 'block_id': 'block-old', 'reply_message_id': 'old-reply', 'delivery_state': 'delivered'},
+            {'timestamp': 3, 'action': 'blocked', 'message': 'New question?', 'agent_id': worker.id, 'block_id': 'block-new', 'reply_message_id': ''},
+        ])
+        state.board_update_task(task.id, messages=list(task.messages))
+        state.save_direct_message({
+            'id': 'old-reply', 'thread_id': 'block-reply:task-multi-block',
+            'group_name': 'g', 'sender_id': architect.id, 'sender_kind': 'architect',
+            'recipient_id': worker.id, 'recipient_kind': 'worker', 'message': 'Old answer',
+            'message_type': 'block_reply', 'source_task_id': task.id,
+            'context_snapshot': {'block_id': 'block-old'}, 'delivery_state': 'delivered',
+        })
+        sent = []
+        async def send_prompt(cell, prompt, **kwargs):
+            sent.append((cell.id, prompt, kwargs))
+            async def delivered(): return None
+            return asyncio.create_task(delivered())
+
+        result = await self.server_mod.resolve_blocked_task_reply(
+            state, task, architect, 'candidate-multi-block-new-reply', send_prompt=send_prompt,
+            relaunch_agent=None, reply_id='new-reply')
+
+        self.assertEqual(result['type'], 'ok')
+        self.assertEqual(result['block_id'], 'block-new')
+        self.assertEqual(result['reply_message_id'], 'new-reply')
+        self.assertEqual(len(sent), 1)
+        self.assertIn('Block reference: block-new', sent[0][1])
+        self.assertIn('candidate-multi-block-new-reply', sent[0][1])
+        blocks = {entry['block_id']: entry for entry in task.messages if entry.get('action') == 'blocked'}
+        self.assertEqual(blocks['block-old']['reply_message_id'], 'old-reply')
+        self.assertEqual(blocks['block-new']['reply_message_id'], 'new-reply')
+
     async def test_blocked_worker_reply_reports_unrecoverable_without_provider_resume(self):
         state = self._make_state()
         architect = self.state_mod.AgentCell(id='arch-1', name='Architect', group='g', cell_type='agent', kind='architect')
@@ -5887,7 +5928,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         async def must_not_send(*_args, **_kwargs):
             sent.append(True)
         result = await self.server_mod.resolve_blocked_task_reply(
-            state, task, architect, 'Answer', send_prompt=must_not_send,
+            state, task, architect, 'candidate-hazard-unlinked-no-replay', send_prompt=must_not_send,
             relaunch_agent=None, reply_id='new-transport-id')
         self.assertEqual(result['type'], 'indeterminate')
         self.assertEqual(result['reply_message_id'], 'persisted-before-projection')
