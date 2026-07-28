@@ -17,6 +17,15 @@ _DONE_LINE = (
     '- `torque_done(message="brief summary")` — task complete, no follow-up needed'
 )
 
+_DEVIATION_DISCLOSURE_LINE = (
+    "If you deliberately complete without meeting stated acceptance criteria, "
+    "include both `deviation_statement` and `deviation_reason` in "
+    "`torque_done(...)` or `torque_ready(...)`. This records the judgment "
+    "for merge/acceptance review and does not block closure. A lone field is "
+    "recorded as an incomplete disclosure attempt, not a deviation attestation. "
+    "Do not infer or claim a deviation when criteria are met."
+)
+
 _ASK_LINE = (
     '- `raise(question="title", description="details")` '
     '— blocking decision/approval only; routes to the immediate decision owner '
@@ -145,6 +154,13 @@ def build_torque_system_prompt(*, include_shared_memory: bool = True,
         ## Important
 
         Always signal completion via one of the tools above.
+        If you deliberately complete without meeting stated acceptance criteria,
+        call `torque_done(...)` or `torque_ready(...)` with both
+        `deviation_statement` and `deviation_reason`; this records the
+        judgment for merge/acceptance review and does not block closure. A
+        lone field is recorded as an incomplete disclosure attempt, not a
+        deviation attestation. Do not infer or claim a deviation when criteria
+        are met.
         Your dispatch prompt specifies which transitions are available —
         use those to determine valid `derive` targets.
         Use `raise` only when a blocking decision owner answer or approval is
@@ -444,6 +460,7 @@ def build_dispatch_postscript(*,
     if has_ask:
         lines.append(_ASK_LINE)
     lines.append(_DONE_LINE)
+    lines.append(_DEVIATION_DISCLOSURE_LINE)
     lines.extend([
         "",
         "Other reporting tools when relevant:",

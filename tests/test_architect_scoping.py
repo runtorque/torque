@@ -1549,6 +1549,25 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             assigned_engineer_id=hired.id,
             created_by_architect_id=architect.id,
             verification_state="passed",
+            completion_evidence={
+                "completion": {
+                    "acceptance_deviation": {
+                        "statement": "Delivered the API contract only.",
+                        "reason": "UI integration needs product review.",
+                        "agent_id": worker.id,
+                        "agent_name": worker.name,
+                        "recorded_at": "2026-04-07T11:00:00+00:00",
+                    },
+                    "acceptance_deviation_attempt": {
+                        "statement": "",
+                        "reason": "The final deployment check is deferred.",
+                        "missing_fields": ["statement"],
+                        "agent_id": worker.id,
+                        "agent_name": worker.name,
+                        "recorded_at": "2026-04-07T11:01:00+00:00",
+                    },
+                },
+            },
         )
         self._add_task(
             "task-ready-review",
@@ -1741,6 +1760,31 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         }
         self.assertIn(ready_product.id, ready_ids)
         self.assertNotIn(other_product.id, ready_ids)
+        ready_stream = next(
+            item for item in sections["ready_to_merge_streams"]["items"]
+            if ready_product.id in item["product_task_ids"]
+        )
+        self.assertEqual(ready_stream["completion_deviations"], [{
+            "task_id": ready_product.id,
+            "task_title": ready_product.task,
+            "statement": "Delivered the API contract only.",
+            "reason": "UI integration needs product review.",
+            "agent_id": worker.id,
+            "agent_name": worker.name,
+            "recorded_at": "2026-04-07T11:00:00+00:00",
+        }])
+        self.assertEqual(
+            ready_stream["completion_deviation_disclosure_attempts"], [{
+                "task_id": ready_product.id,
+                "task_title": ready_product.task,
+                "statement": "",
+                "reason": "The final deployment check is deferred.",
+                "missing_fields": ["statement"],
+                "agent_id": worker.id,
+                "agent_name": worker.name,
+                "recorded_at": "2026-04-07T11:01:00+00:00",
+            }],
+        )
         blocker_ids = {
             item.get("active_blocker_task_id", "")
             for item in sections["blocker_or_stale_streams"]["items"]
@@ -5610,6 +5654,25 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             assigned_engineer_id=alice.id,
             created_by_architect_id=architect.id,
             labels=["torque:human"],
+            completion_evidence={
+                "completion": {
+                    "acceptance_deviation": {
+                        "statement": "Delivered the service contract only.",
+                        "reason": "The UI follow-up is separately assigned.",
+                        "agent_id": worker.id,
+                        "agent_name": worker.name,
+                        "recorded_at": "2026-06-17T11:00:00+00:00",
+                    },
+                    "acceptance_deviation_attempt": {
+                        "statement": "The UI acceptance item is deferred.",
+                        "reason": "",
+                        "missing_fields": ["reason"],
+                        "agent_id": worker.id,
+                        "agent_name": worker.name,
+                        "recorded_at": "2026-06-17T11:01:00+00:00",
+                    },
+                },
+            },
         )
         review = self._add_task(
             "TORQUE:310:1",
@@ -5715,6 +5778,32 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             for task_id in item.get("workflow_task_ids", []) + item.get("product_task_ids", [])
         }
         self.assertIn(review.id, branch_task_ids)
+        audit_branch = next(
+            item
+            for item in payload["sections"]["branch_boundaries"]["open_or_unmerged"]["items"]
+            if review.id in item.get("workflow_task_ids", [])
+        )
+        self.assertEqual(audit_branch["completion_deviations"], [{
+            "task_id": active.id,
+            "task_title": active.task,
+            "statement": "Delivered the service contract only.",
+            "reason": "The UI follow-up is separately assigned.",
+            "agent_id": worker.id,
+            "agent_name": worker.name,
+            "recorded_at": "2026-06-17T11:00:00+00:00",
+        }])
+        self.assertEqual(
+            audit_branch["completion_deviation_disclosure_attempts"], [{
+                "task_id": active.id,
+                "task_title": active.task,
+                "statement": "The UI acceptance item is deferred.",
+                "reason": "",
+                "missing_fields": ["reason"],
+                "agent_id": worker.id,
+                "agent_name": worker.name,
+                "recorded_at": "2026-06-17T11:01:00+00:00",
+            }],
+        )
         parked_ids = [
             item["id"] for item in payload["sections"]["parked_deferred"]["items"]
         ]

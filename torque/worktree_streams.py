@@ -108,6 +108,91 @@ def _task_refs(tasks: Iterable) -> list[dict]:
     return [_task_packet_ref(task) for task in tasks if task]
 
 
+def _completion_deviation_packets(tasks: Iterable) -> list[dict]:
+    """Return worker-attested completion deviations for merge decisioning.
+
+    This intentionally reads the typed completion record only. Acceptance
+    criteria are prose, so trying to derive deviations from task text or a
+    free-form completion summary would fabricate a decision signal.
+    """
+    packets = []
+    seen_task_ids = set()
+    for task in tasks:
+        task_id = str(getattr(task, "id", "") or "").strip()
+        if not task or task_id in seen_task_ids:
+            continue
+        seen_task_ids.add(task_id)
+        evidence = getattr(task, "completion_evidence", {}) or {}
+        if not isinstance(evidence, dict):
+            continue
+        completion = evidence.get("completion", {}) or {}
+        if not isinstance(completion, dict):
+            continue
+        deviation = completion.get("acceptance_deviation", {}) or {}
+        if not isinstance(deviation, dict):
+            continue
+        statement = str(deviation.get("statement", "") or "").strip()
+        reason = str(deviation.get("reason", "") or "").strip()
+        if not statement or not reason:
+            continue
+        packets.append({
+            "task_id": task_id,
+            "task_title": str(getattr(task, "task", "") or "").strip(),
+            "statement": statement,
+            "reason": reason,
+            "agent_id": str(deviation.get("agent_id", "") or "").strip(),
+            "agent_name": str(deviation.get("agent_name", "") or "").strip(),
+            "recorded_at": str(deviation.get("recorded_at", "") or "").strip(),
+        })
+    return packets
+
+
+def _completion_deviation_disclosure_attempt_packets(
+        tasks: Iterable) -> list[dict]:
+    """Return incomplete worker disclosure attempts without attesting one.
+
+    This is deliberately separate from ``_completion_deviation_packets``:
+    only a complete statement/reason pair is a worker-attested acceptance
+    deviation.  The partial signal exists so Architect merge/acceptance
+    surfaces can distinguish an attempted disclosure from an ordinary close.
+    """
+    packets = []
+    seen_task_ids = set()
+    for task in tasks:
+        task_id = str(getattr(task, "id", "") or "").strip()
+        if not task or task_id in seen_task_ids:
+            continue
+        seen_task_ids.add(task_id)
+        evidence = getattr(task, "completion_evidence", {}) or {}
+        if not isinstance(evidence, dict):
+            continue
+        completion = evidence.get("completion", {}) or {}
+        if not isinstance(completion, dict):
+            continue
+        attempt = completion.get("acceptance_deviation_attempt", {}) or {}
+        if not isinstance(attempt, dict):
+            continue
+        statement = str(attempt.get("statement", "") or "").strip()
+        reason = str(attempt.get("reason", "") or "").strip()
+        missing_fields = [
+            field for field in (attempt.get("missing_fields", []) or [])
+            if field in {"statement", "reason"}
+        ]
+        if not (statement or reason) or not missing_fields:
+            continue
+        packets.append({
+            "task_id": task_id,
+            "task_title": str(getattr(task, "task", "") or "").strip(),
+            "statement": statement,
+            "reason": reason,
+            "missing_fields": missing_fields,
+            "agent_id": str(attempt.get("agent_id", "") or "").strip(),
+            "agent_name": str(attempt.get("agent_name", "") or "").strip(),
+            "recorded_at": str(attempt.get("recorded_at", "") or "").strip(),
+        })
+    return packets
+
+
 def _verification_packet(validation_state: str,
                          validation_record: dict | None) -> dict:
     record = validation_record or {}
@@ -393,6 +478,11 @@ def _merge_readiness_packet(*, stream_id_value: str, repo_root: str,
     active_workflow_tasks = [
         task for task in workflow_tasks if not board_task_is_closed(task)
     ]
+    completion_deviation_attempts = (
+        _completion_deviation_disclosure_attempt_packets(
+            [*product_tasks, *workflow_tasks]
+        )
+    )
     boundary_status = str(
         (latest_boundary_info or {}).get("status", "") or ""
     ).strip()
@@ -406,6 +496,9 @@ def _merge_readiness_packet(*, stream_id_value: str, repo_root: str,
         "merge_state": merge_state,
         "product_task_ids": [task.id for task in product_tasks],
         "workflow_task_ids": [task.id for task in workflow_tasks],
+        "completion_deviations": _completion_deviation_packets(
+            [*product_tasks, *workflow_tasks]
+        ),
         "active_workflow_task_ids": [
             task.id for task in active_workflow_tasks
         ],
@@ -450,6 +543,10 @@ def _merge_readiness_packet(*, stream_id_value: str, repo_root: str,
         "recommended_next_action": next_action,
         "recommended_tool": _recommended_worktree_tool(next_action),
     }
+    if completion_deviation_attempts:
+        packet["completion_deviation_disclosure_attempts"] = (
+            completion_deviation_attempts
+        )
     packet["merge_report_snippet"] = merge_report_snippet_template(packet)
     return packet
 

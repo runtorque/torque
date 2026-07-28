@@ -894,6 +894,8 @@ def _record_task_completion_evidence_snapshot(
         cell=None,
         action: str = "",
         message: str = "",
+        deviation_statement: str = "",
+        deviation_reason: str = "",
         actor_name: str = "",
         timestamp: str = "",
         board_sync_manager=None,
@@ -917,7 +919,7 @@ def _record_task_completion_evidence_snapshot(
         or "torque",
     }
     if action:
-        update["completion"] = {
+        completion = {
             "action": _completion_evidence_text(action, limit=80),
             "message": _completion_evidence_text(message, limit=2000),
             "agent_id": _completion_evidence_text(
@@ -926,6 +928,39 @@ def _record_task_completion_evidence_snapshot(
                 getattr(cell, "name", ""), limit=160),
             "recorded_at": update["updated_at"],
         }
+        statement = _completion_evidence_text(deviation_statement, limit=2000)
+        reason = _completion_evidence_text(deviation_reason, limit=2000)
+        # Acceptance criteria are prose: only the worker can attest to a
+        # deliberate deviation. Do not infer one from the completion message.
+        if statement and reason:
+            completion["acceptance_deviation"] = {
+                "statement": statement,
+                "reason": reason,
+                "agent_id": completion["agent_id"],
+                "agent_name": completion["agent_name"],
+                "recorded_at": update["updated_at"],
+            }
+            sources.append("acceptance_deviation")
+        elif statement or reason:
+            # A partial pair is not an attested deviation: criteria remain
+            # prose and Torque must not fill in the omitted half.  Preserve
+            # the worker's explicit attempt, though, so a closure cannot look
+            # indistinguishable from an ordinary no-deviation completion.
+            missing_fields = []
+            if not statement:
+                missing_fields.append("statement")
+            if not reason:
+                missing_fields.append("reason")
+            completion["acceptance_deviation_attempt"] = {
+                "statement": statement,
+                "reason": reason,
+                "missing_fields": missing_fields,
+                "agent_id": completion["agent_id"],
+                "agent_name": completion["agent_name"],
+                "recorded_at": update["updated_at"],
+            }
+            sources.append("acceptance_deviation_incomplete")
+        update["completion"] = completion
     if verification:
         update["verification"] = verification
         sources.append("verification")
