@@ -184,6 +184,42 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_dispatch_tool_forwards_partial_deviation_for_ready_and_done(self):
+        state = self.state_mod.MatrixState()
+        cell = self.state_mod.AgentCell(
+            id="agent-partial",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+        )
+        state.agents[cell.id] = cell
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            return {"type": "ok"}
+
+        for tool_name, args in (
+            ("torque_ready", {"deviation_statement": "Backend only."}),
+            ("torque_done", {"deviation_reason": "UI work is deferred."}),
+        ):
+            text, is_error = await self.mcp_mod._dispatch_tool(
+                tool_name, args, cell.id, fake_handle_command, state,
+            )
+            self.assertFalse(is_error)
+            self.assertEqual(json.loads(text), {"type": "ok"})
+
+        self.assertEqual(calls, [
+            {
+                "cmd": "ai_report", "cell_id": cell.id,
+                "action": "ready", "deviation_statement": "Backend only.",
+            },
+            {
+                "cmd": "ai_report", "cell_id": cell.id,
+                "action": "done", "deviation_reason": "UI work is deferred.",
+            },
+        ])
+
     async def test_direct_mcp_call_notifies_observer_for_agent_mcp_panel(self):
         state = self.state_mod.MatrixState()
         cell = self.state_mod.AgentCell(

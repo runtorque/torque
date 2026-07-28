@@ -96,6 +96,13 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertIn("Proceed with the derived task you just created.", prompt)
         self.assertIn("Relevant shared context", prompt)
 
+    def test_dispatch_prompt_explains_incomplete_deviation_disclosures(self):
+        prompt = self.server_prompts_mod.build_dispatch_postscript()
+        self.assertIn(
+            "A lone field is recorded as an incomplete disclosure attempt",
+            prompt,
+        )
+
     def test_append_task_artifacts_can_include_upstream_handoff_block(self):
         prompt = self.server_mod._append_task_artifacts(
             "Implement the plan.",
@@ -1956,6 +1963,47 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             "The implementation mechanism needs a separate design decision first.",
         )
         self.assertEqual(deviation["agent_id"], cell.id)
+
+    def test_completion_evidence_snapshot_records_incomplete_deviation_attempt_for_done_and_ready(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        cell = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+        )
+        state.agents[cell.id] = cell
+        for action, kwargs, expected in (
+            ("done", {"deviation_statement": "Delivered the backend only."}, {
+                "statement": "Delivered the backend only.",
+                "reason": "", "missing_fields": ["reason"],
+            }),
+            ("ready", {"deviation_reason": "UI work is separately assigned."}, {
+                "statement": "", "reason": "UI work is separately assigned.",
+                "missing_fields": ["statement"],
+            }),
+        ):
+            task = state.board_add_task(
+                "Implement the mechanism", "g", id=f"TORQUE:163a-{action}"
+            )
+            changed = self.server_mod._record_task_completion_evidence_snapshot(
+                state, task, cell=cell, action=action, **kwargs,
+            )
+
+            self.assertTrue(changed)
+            completion = task.completion_evidence["completion"]
+            self.assertNotIn("acceptance_deviation", completion)
+            self.assertEqual(completion["acceptance_deviation_attempt"], {
+                **expected,
+                "agent_id": cell.id,
+                "agent_name": cell.name,
+                "recorded_at": completion["recorded_at"],
+            })
+            self.assertIn(
+                "acceptance_deviation_incomplete",
+                task.completion_evidence["sources"],
+            )
 
     def test_completion_evidence_snapshot_keeps_ordinary_completion_unchanged(self):
         state = self.state_mod.MatrixState()

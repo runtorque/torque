@@ -248,14 +248,17 @@ TOOLS = [
                     "description": (
                         "Optional worker attestation of a deliberate deviation "
                         "from the task's acceptance criteria. Provide together "
-                        "with deviation_reason."
+                        "with deviation_reason; a lone field is recorded as an "
+                        "incomplete disclosure attempt."
                     ),
                 },
                 "deviation_reason": {
                     "type": "string",
                     "description": (
                         "Why the stated acceptance-criteria deviation was "
-                        "deliberate. Provide together with deviation_statement."
+                        "deliberate. Provide together with deviation_statement; "
+                        "a lone field is recorded as an incomplete disclosure "
+                        "attempt."
                     ),
                 },
             },
@@ -419,14 +422,17 @@ TOOLS = [
                     "type": "string",
                     "description": (
                         "Optional worker attestation of a deliberate deviation "
-                        "from acceptance criteria. Provide with deviation_reason."
+                        "from acceptance criteria. Provide with deviation_reason; "
+                        "a lone field is recorded as an incomplete disclosure "
+                        "attempt."
                     ),
                 },
                 "deviation_reason": {
                     "type": "string",
                     "description": (
                         "Why the stated acceptance-criteria deviation was "
-                        "deliberate. Provide with deviation_statement."
+                        "deliberate. Provide with deviation_statement; a lone "
+                        "field is recorded as an incomplete disclosure attempt."
                     ),
                 },
             },

@@ -239,6 +239,9 @@ def _stream_recommended_next_action(stream: dict) -> str:
 
 
 def _architect_attention_stream_item(stream: dict) -> dict:
+    readiness = (stream or {}).get("merge_readiness", {}) or {}
+    if not isinstance(readiness, dict):
+        readiness = {}
     item = {
         "stream_id": str((stream or {}).get("stream_id", "") or ""),
         "state": str((stream or {}).get("state", "") or ""),
@@ -264,6 +267,16 @@ def _architect_attention_stream_item(stream: dict) -> dict:
         "branch_advanced": bool((stream or {}).get("branch_advanced", False)),
         "recommended_next_action": _stream_recommended_next_action(stream),
         "last_activity_at": str((stream or {}).get("last_activity_at", "") or ""),
+        # These records are intentionally typed worker-supplied evidence, not
+        # an inference from task prose.  Include them in the Architect's
+        # decision projections rather than leaving them only in the lower
+        # level readiness packet.
+        "completion_deviations": list(
+            readiness.get("completion_deviations", []) or []
+        ),
+        "completion_deviation_disclosure_attempts": list(
+            readiness.get("completion_deviation_disclosure_attempts", []) or []
+        ),
     }
     stale = _stream_stale_base(stream)
     if stale:

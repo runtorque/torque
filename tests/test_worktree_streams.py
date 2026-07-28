@@ -291,6 +291,45 @@ class WorktreeStreamTests(unittest.TestCase):
             "recorded_at": "2026-04-07T10:30:00+00:00",
         }])
 
+    def test_merge_readiness_exposes_incomplete_deviation_attempt_without_attesting_it(self):
+        state = self._make_state()
+        worker = self._add_agent(state, status="idle")
+        product = self._task(
+            "TORQUE:2a",
+            "Implement stream evidence",
+            agent_id=worker.id,
+            completion_evidence={
+                "completion": {
+                    "action": "ready",
+                    "acceptance_deviation_attempt": {
+                        "statement": "Delivered the API only.",
+                        "reason": "",
+                        "missing_fields": ["reason"],
+                        "agent_id": worker.id,
+                        "agent_name": worker.name,
+                        "recorded_at": "2026-04-07T10:30:00+00:00",
+                    },
+                },
+            },
+        )
+        state.board_tasks[product.id] = product
+
+        packet = self.streams_mod.compute_worktree_stream(
+            state, repo_root="/repo", branch="torque/worker",
+        )["merge_readiness"]
+
+        self.assertEqual(packet["completion_deviations"], [])
+        self.assertEqual(packet["completion_deviation_disclosure_attempts"], [{
+            "task_id": product.id,
+            "task_title": product.task,
+            "statement": "Delivered the API only.",
+            "reason": "",
+            "missing_fields": ["reason"],
+            "agent_id": worker.id,
+            "agent_name": worker.name,
+            "recorded_at": "2026-04-07T10:30:00+00:00",
+        }])
+
     def test_pending_pr_stream_exposes_pr_metadata_without_looking_merged(self):
         state = self._make_state()
         worker = self._add_agent(state, status="idle")
