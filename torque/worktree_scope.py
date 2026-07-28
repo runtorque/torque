@@ -2,8 +2,11 @@
 
 An Architect's ``worktree.merge: children`` authority normally follows the
 Architect -> hired Engineer relationship.  User-owned workers deliberately
-have no Engineer owner, so their ``torque/user/...`` worktrees need task
-provenance to establish the equivalent bounded relationship.
+have no Engineer owner, so their ``torque/user/...`` worktrees use their
+same-group task stream as the equivalent bounded relationship.  Task
+provenance remains sufficient, but is not required: one Architect may
+dispatch a stream while another same-group Architect with existing merge
+authority drains it.
 """
 
 from __future__ import annotations
@@ -14,13 +17,15 @@ def architect_can_access_user_owned_worker_worktree(
     caller_cell,
     worker,
 ) -> bool:
-    """Whether ``caller_cell`` owns a user-worker stream through task provenance.
+    """Whether ``caller_cell`` may access a same-group user-worker stream.
 
     This does *not* make user-owned workers generally visible to Architects.
     It is limited to a worker with no Engineer ownership, a ``torque/user/``
-    branch, and a task linked to that worker whose task chain was created by
-    the calling Architect.  The merge/review/validation gates remain in the
-    normal worktree command path.
+    branch, and a same-group task linked to that worker.  A task chain created
+    by the calling Architect remains an explicitly accepted path; a
+    same-group Architect who already has the projected ``worktree.merge``
+    capability may also drain a stream created by an Architect peer.  The
+    merge/review/validation gates remain in the normal worktree command path.
     """
 
     caller_id = str(getattr(caller_cell, "id", "") or "").strip()
@@ -46,6 +51,7 @@ def architect_can_access_user_owned_worker_worktree(
     if not worker_id:
         return False
     tasks = getattr(state, "board_tasks", {}) or {}
+    linked_same_group_task = False
     for task in tasks.values():
         if worker_id not in {
             str(getattr(task, "agent_id", "") or "").strip(),
@@ -56,9 +62,15 @@ def architect_can_access_user_owned_worker_worktree(
             getattr(caller_cell, "group", "") or ""
         ).strip():
             continue
+        linked_same_group_task = True
         if _task_chain_created_by_architect(tasks, task, caller_id):
             return True
-    return False
+    # Dispatch provenance and merge authority commonly land on different
+    # same-group Architect seats.  The transport still requires the caller's
+    # frozen ``worktree.merge: children`` capability before this predicate can
+    # project the user-worker relationship, so this fallback adds no tool
+    # projection and does not bypass merge gates.
+    return linked_same_group_task
 
 
 def _task_chain_created_by_architect(tasks, task, architect_id: str) -> bool:
