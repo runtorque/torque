@@ -626,9 +626,9 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             return response.payload["error"]["message"]
 
         expected = {
-            "task_get": "Known tool is not authorized: task_get",
-            "task_mark_covered": "Known tool is not authorized: task_mark_covered",
-            "task_reassign": "Known tool is not authorized: task_reassign",
+            "task_get": "Authorization denied: target is outside this caller's authorized scope for task_get.",
+            "task_mark_covered": "Authorization denied: target is outside this caller's authorized scope for task_mark_covered.",
+            "task_reassign": "Authorization denied: target is outside this caller's authorized scope for task_reassign.",
         }
         peer_text = error_text(peer_target)
         peer_with_probe_text = error_text(peer_target_with_probe)
@@ -656,12 +656,12 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(missing_covering_text, peer_primary_covered_text)
         self.assertEqual(peer_primary_covered_text, missing_primary_covered_text)
         self.assertEqual(
-            "Known tool is not authorized: task_claim",
+            "Authorization denied: target is outside this caller's authorized scope for task_claim.",
             peer_claim_text,
         )
         self.assertEqual(peer_claim_text, missing_claim_text)
         self.assertEqual(
-            "Known tool is not authorized: task_coverage_reconcile",
+            "Authorization denied: target is outside this caller's authorized scope for task_coverage_reconcile.",
             coverage_peer_second_text,
         )
         self.assertEqual(coverage_peer_second_text, coverage_missing_first_text)
@@ -2639,7 +2639,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 200)
         self.assertEqual(calls, [])
         self.assertIn(
-            "Known tool is not authorized",
+            "Authorization denied: target is outside this caller's authorized scope for worktree_merge.",
             cross_group_denied["error"]["message"],
         )
 

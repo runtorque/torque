@@ -102,7 +102,41 @@ def _resolve_public_tool_call(
 
 _PUBLIC_TOOL_CALL_UNKNOWN = "unknown"
 _PUBLIC_TOOL_CALL_UNAUTHORIZED = "known_but_unauthorized"
+_PUBLIC_TOOL_CALL_NOT_PROJECTED = "known_but_not_projected"
+_PUBLIC_TOOL_CALL_FROZEN_AUTHORITY_DENIED = (
+    "known_but_frozen_authority_denied"
+)
+_PUBLIC_TOOL_CALL_TARGET_SCOPE_DENIED = "known_but_target_scope_denied"
 _PUBLIC_TOOL_CALL_AUTHORIZED = "authorized"
+
+
+def public_call_refusal_message(classification: str,
+                                requested_tool_name: str) -> str:
+    """Describe an entitled public-call refusal without exposing a target.
+
+    The caller is entitled to this diagnostic only after the exact canonical
+    name has passed the tools/list projection gate.  In particular, the
+    target-scope wording deliberately covers both missing and out-of-scope
+    targets, preserving the no-target-oracle boundary.
+    """
+    tool_name = str(requested_tool_name or "").strip()
+    if classification == _PUBLIC_TOOL_CALL_NOT_PROJECTED:
+        return (
+            f"Authorization denied: {tool_name} is not projected for this "
+            "caller."
+        )
+    if classification == _PUBLIC_TOOL_CALL_FROZEN_AUTHORITY_DENIED:
+        return (
+            f"Authorization denied: {tool_name} is denied by this session's "
+            "frozen authority snapshot; relaunch after an Agent Class change "
+            "to refresh it."
+        )
+    if classification == _PUBLIC_TOOL_CALL_TARGET_SCOPE_DENIED:
+        return (
+            "Authorization denied: target is outside this caller's "
+            f"authorized scope for {tool_name}."
+        )
+    return f"Known tool is not authorized: {tool_name}"
 
 
 def _classify_public_tool_call(
@@ -154,25 +188,28 @@ def _classify_public_tool_call(
             caller_kind,
         )
 
-    denied = (
-        _tool_hidden_for_caller(
+    if _tool_hidden_for_caller(
             tool_name, caller_kind, caller_cell, dependencies
-        )
-        or _tool_denied_by_effective_authority(
+    ):
+        refusal = _PUBLIC_TOOL_CALL_NOT_PROJECTED
+    elif _tool_denied_by_effective_authority(
             tool_name, caller_cell, dependencies
-        )
-        or _tool_argument_scope_denied(
+    ):
+        refusal = _PUBLIC_TOOL_CALL_FROZEN_AUTHORITY_DENIED
+    elif _tool_argument_scope_denied(
             state,
             tool_name,
             translated_arguments,
             caller_cell,
             dependencies,
-        )
-    )
-    if denied:
+    ):
+        refusal = _PUBLIC_TOOL_CALL_TARGET_SCOPE_DENIED
+    else:
+        refusal = ""
+    if refusal:
         return (
             (
-                _PUBLIC_TOOL_CALL_UNAUTHORIZED
+                refusal
                 if projected_canonical_name
                 else _PUBLIC_TOOL_CALL_UNKNOWN
             ),
