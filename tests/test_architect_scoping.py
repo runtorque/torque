@@ -25,6 +25,8 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.state_mod = importlib.reload(self.state_mod)
         self.shared_mod = importlib.import_module("torque.mcp_tools_shared")
         self.shared_mod = importlib.reload(self.shared_mod)
+        self.streams_mod = importlib.import_module("torque.worktree_streams")
+        self.streams_mod = importlib.reload(self.streams_mod)
         self.mcp_architect_mod = importlib.import_module("torque.mcp_architect")
         self.mcp_architect_mod = importlib.reload(self.mcp_architect_mod)
         self.mcp_engineer_mod = importlib.import_module("torque.mcp_engineer")
@@ -1562,6 +1564,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                 "version": "1",
                 "repo_root": "/repo",
                 "branch": "torque/hired-ready",
+                "base_branch": "main",
                 "status": "open",
                 "recorded_at": "2026-04-07T11:30:00+00:00",
                 "commit_sha": "abc123",
@@ -1701,6 +1704,12 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "context_task_ids": [ask.id],
             "context_summary": "handoff",
         })
+        self.streams_mod._merge_readiness_cache_put(
+            "/repo", "torque/hired-ready", "main", {
+                "state": "fresh", "stale": False,
+                "source": "merge_readiness_check", "merge_clean": True,
+            },
+        )
 
         text, is_error = await self._call(
             "architect_attention_digest",

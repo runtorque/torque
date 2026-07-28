@@ -639,6 +639,18 @@ def build_mission_control_summary(
                 severity="high",
                 priority=92,
             ))
+        elif state_name == "merge_readiness_unknown":
+            at_risk_watchlist.append(_stream_card(
+                stream,
+                gate="merge_readiness_unknown",
+                reason=gate_reason or (
+                    "Current-base merge readiness could not be determined."
+                ),
+                recommended_next_action="check_merge_readiness",
+                evidence_chips=["stream:merge_readiness_unknown"],
+                severity="high",
+                priority=90,
+            ))
         elif state_name == "awaiting_human_validation":
             needs_operator_now.append(_stream_card(
                 stream,
@@ -661,6 +673,22 @@ def build_mission_control_summary(
                 priority=82,
             ))
         elif state_name == "fixing_blockers":
+            stale = ((stream or {}).get("merge_readiness", {}) or {}).get(
+                "stale_base", {}
+            )
+            if isinstance(stale, dict) and stale.get("merge_conflict"):
+                at_risk_watchlist.append(_stream_card(
+                    stream,
+                    gate="stale_base_conflict",
+                    reason=gate_reason or (
+                        "The base branch conflicts with this stream."
+                    ),
+                    recommended_next_action="rebase_stale_base",
+                    evidence_chips=["stream:stale_base_conflict"],
+                    severity="high",
+                    priority=84,
+                ))
+                continue
             at_risk_watchlist.append(_stream_card(
                 stream,
                 gate="review_blockers",

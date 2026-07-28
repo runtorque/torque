@@ -81,6 +81,7 @@ from .worktree_streams import (
     compute_worktree_streams,
     member_task_ids_for_stream,
     merge_report_snippet_from_merge_result,
+    prefill_merge_readiness_for_state,
 )
 from .worktree_boundaries import latest_boundary_task, task_boundary
 from .mcp_scoped.common import (
@@ -1335,6 +1336,18 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
     real_state = state
     state = view_state
     tool_name = normalize_tool_name(name, tool_prefix)
+    if tool_name in {
+            "attention_digest", "completion_audit", "group_health_brief",
+            "session_map", "stream_show", "streams_list", "wave_summary",
+    }:
+        try:
+            await prefill_merge_readiness_for_state(
+                real_state, group=_engineer_group,
+            )
+        except Exception:
+            # A read may still proceed, but unknown readiness must never
+            # masquerade as a merge recommendation.
+            log.exception("Failed to prefill merge readiness for %s", tool_name)
     _raw_handle_command = handle_command
     if (
             caller_kind == "architect"
