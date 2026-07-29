@@ -43,16 +43,28 @@ class BranchCleanupDryRunTests(unittest.TestCase):
         conn.executescript(
             """
             CREATE TABLE agents (id TEXT, status TEXT, worktree_branch TEXT, deleted_at REAL);
-            CREATE TABLE board_tasks (id TEXT, lane TEXT, worktree_boundary TEXT);
+            CREATE TABLE board_tasks (id TEXT, lane TEXT, worktree_boundary TEXT, agent_id TEXT);
             """
         )
         conn.execute(
             "INSERT INTO agents VALUES (?, ?, ?, 0)",
-            ("live1234", "running", "agent-branch"),
+            ("live1234", "running", "torque/engineer/agent-branch"),
         )
         conn.execute(
-            "INSERT INTO board_tasks VALUES (?, ?, ?)",
-            ("TASK:1", "In Progress", json.dumps({"branch": "task-boundary"})),
+            "INSERT INTO agents VALUES (?, ?, ?, 0)",
+            ("idle5678", "idle", "torque/engineer/idle-assigned-agent"),
+        )
+        conn.execute(
+            "INSERT INTO board_tasks VALUES (?, ?, ?, ?)",
+            ("TASK:1", "In Progress", json.dumps({"branch": "torque/engineer/task-boundary"}), ""),
+        )
+        conn.execute(
+            "INSERT INTO board_tasks VALUES (?, ?, ?, ?)",
+            ("TASK:2", "Done", json.dumps({"branch": "torque/engineer/terminal-boundary"}), ""),
+        )
+        conn.execute(
+            "INSERT INTO board_tasks VALUES (?, ?, ?, ?)",
+            ("TASK:3", "In Progress", "{}", "idle5678"),
         )
         conn.commit()
         conn.close()
@@ -70,40 +82,58 @@ class BranchCleanupDryRunTests(unittest.TestCase):
 
     def test_enumerator_excludes_live_gates_before_tree_identity(self):
         for branch in (
-            "eligible",
-            "task-boundary",
-            "agent-branch",
-            "torque/worker-live1234",
+            "torque/engineer/eligible",
+            "torque/engineer/task-boundary",
+            "torque/engineer/terminal-boundary",
+            "torque/engineer/agent-branch",
+            "torque/engineer/idle-assigned-agent",
+            "torque/engineer/worker-live1234",
             "torque/submodules/lib/topic",
             cleanup.ATTESTED_PROTECTED[0],
-            "content",
+            "torque/engineer/content",
+            "feature/outside",
         ):
             self.branch_at_main(branch)
         # Give content a tree that differs from main, so it proves the
         # tree-identity half still rejects actual added content.
-        git(self.repo, "checkout", "content")
+        git(self.repo, "checkout", "torque/engineer/content")
         (self.repo / "content").write_text("new\n")
         git(self.repo, "add", "content")
         git(self.repo, "commit", "-m", "content")
         git(self.repo, "checkout", "main")
-        git(self.repo, "update-ref", "refs/remotes/origin/eligible", self.main)
+        git(self.repo, "update-ref", "refs/remotes/origin/torque/engineer/eligible", self.main)
 
         live_path = Path(self.tmp.name) / "live-worktree"
-        git(self.repo, "worktree", "add", str(live_path), "task-boundary")
+        git(self.repo, "worktree", "add", str(live_path), "torque/engineer/task-boundary")
 
         report = cleanup.enumerate_cleanup(self.repo, self.db)
         excluded = {item["branch"]: set(item["reasons"]) for item in report["excluded_for_live_work"]}
         eligible = {(item["location"], item["branch"]) for item in report["eligible"]}
 
-        self.assertIn("live_worktree", excluded["task-boundary"])
-        self.assertIn("non_terminal_task:TASK:1", excluded["task-boundary"])
-        self.assertIn("task_boundary:TASK:1", excluded["task-boundary"])
-        self.assertIn("non_idle_agent_branch:live1234", excluded["agent-branch"])
-        self.assertIn("non_idle_agent_id:live1234", excluded["torque/worker-live1234"])
-        self.assertIn("explicit_protected", excluded[cleanup.ATTESTED_PROTECTED[0]])
-        self.assertIn("submodule_branch_not_in_scope", excluded["torque/submodules/lib/topic"])
-        self.assertEqual(eligible, {("local", "eligible"), ("origin", "eligible")})
+        self.assertIn("live_worktree", excluded["torque/engineer/task-boundary"])
+        self.assertIn("non_terminal_task_boundary:TASK:1", excluded["torque/engineer/task-boundary"])
+        self.assertIn("non_idle_agent_branch:live1234", excluded["torque/engineer/agent-branch"])
+        self.assertIn("non_idle_agent_id:live1234", excluded["torque/engineer/worker-live1234"])
+        self.assertIn("non_terminal_task_agent:TASK:3", excluded["torque/engineer/idle-assigned-agent"])
+        self.assertNotIn("torque/engineer/terminal-boundary", excluded)
+        protected = {item["branch"]: item for item in report["protected_status"]}
+        self.assertTrue(protected[cleanup.ATTESTED_PROTECTED[0]]["present"])
+        self.assertEqual(
+            eligible,
+            {
+                ("local", "torque/engineer/eligible"),
+                ("origin", "torque/engineer/eligible"),
+                ("local", "torque/engineer/terminal-boundary"),
+            },
+        )
+        self.assertEqual(
+            {(item["location"], item["branch"]) for item in report["outside_namespace"]},
+            {
+                ("local", "feature/outside"),
+                ("local", "torque/submodules/lib/topic"),
+            },
+        )
         self.assertTrue(report["refs_unchanged"])
-        self.assertEqual(report["counts"]["eligible_local_refs"], 1)
+        self.assertEqual(report["counts"]["eligible_local_refs"], 2)
         self.assertEqual(report["counts"]["eligible_origin_refs"], 1)
-        self.assertTrue(any(item["branch"] == "content" for item in report["ineligible"]))
+        self.assertTrue(any(item["branch"] == "torque/engineer/content" for item in report["ineligible"]))

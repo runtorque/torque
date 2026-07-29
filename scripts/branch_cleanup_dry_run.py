@@ -19,6 +19,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,6 +40,7 @@ COURIER_DOA_PROTECTED = (
     "torque/courier/fix-review-verdict-recording-cc39425",
 )
 DEFAULT_PROTECTED = ATTESTED_PROTECTED + COURIER_DOA_PROTECTED
+_VALID_AGENT_BRANCH = re.compile(r"^torque/(?!submodules/)[^/]+/[^/]+$")
 
 
 @dataclass(frozen=True)
@@ -110,13 +112,17 @@ def _json_object(value: object) -> dict:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def is_valid_agent_branch(branch: str) -> bool:
+    """Allow only worker streams and the user stream; never submodules."""
+    return bool(_VALID_AGENT_BRANCH.fullmatch(branch))
+
+
 def task_and_agent_exclusions(db_path: Path) -> dict[str, set[str]]:
     """Collect task-boundary and non-idle-agent exclusions from SQLite read-only.
 
-    A boundary branch is protected even if its task later reached a terminal
-    lane: a non-empty boundary is an independent requested safety gate.  For
-    non-terminal tasks the reason is recorded separately.  A task's assigned
-    agent contributes its current worktree branch through the agent query.
+    Boundaries belong to the live gate only while their task is non-terminal.
+    A non-terminal task can have an empty boundary, however, so its assigned
+    agent's worktree branch is joined in even when that agent is idle.
     """
     reasons: dict[str, set[str]] = defaultdict(set)
     if not db_path.exists():
@@ -124,16 +130,20 @@ def task_and_agent_exclusions(db_path: Path) -> dict[str, set[str]]:
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
-        for row in conn.execute("SELECT id, lane, worktree_boundary FROM board_tasks"):
+        task_rows = conn.execute(
+            "SELECT t.id, t.worktree_boundary, a.worktree_branch "
+            "FROM board_tasks AS t "
+            "LEFT JOIN agents AS a ON a.id = t.agent_id "
+            "WHERE t.lane NOT IN ('Done', 'Archived')"
+        )
+        for row in task_rows:
             boundary = _json_object(row["worktree_boundary"])
-            if not boundary:
-                continue
             branch = normalize_ref(str(boundary.get("branch", "")).strip())
-            if not branch:
-                continue
-            reasons[branch].add(f"task_boundary:{row['id']}")
-            if str(row["lane"] or "") not in TERMINAL_LANES:
-                reasons[branch].add(f"non_terminal_task:{row['id']}")
+            if branch:
+                reasons[branch].add(f"non_terminal_task_boundary:{row['id']}")
+            assigned_branch = normalize_ref(str(row["worktree_branch"] or "").strip())
+            if assigned_branch:
+                reasons[assigned_branch].add(f"non_terminal_task_agent:{row['id']}")
 
         # Status is the live daemon's persisted activity state.  Do not limit
         # this to workers: a non-idle engineer/architect ID in a branch is
@@ -188,30 +198,49 @@ def enumerate_cleanup(
     main_sha = _run(repo, "rev-parse", "main").stdout.strip()
     main_tree = _run(repo, "rev-parse", "main^{tree}").stdout.strip()
 
-    reasons = defaultdict(set)
+    live_reasons = defaultdict(set)
     for branch in live_worktree_branches(repo):
-        reasons[branch].add("live_worktree")
+        live_reasons[branch].add("live_worktree")
     for branch, items in task_and_agent_exclusions(db_path).items():
-        reasons[branch].update(items)
-    apply_non_idle_id_exclusions(reasons, refs)
+        live_reasons[branch].update(items)
+    apply_non_idle_id_exclusions(live_reasons, refs)
+    protected_reasons = defaultdict(set)
     protected = tuple(protected)
     for branch in protected:
-        reasons[normalize_ref(branch)].add("explicit_protected")
+        protected_reasons[normalize_ref(branch)].add("explicit_protected")
+    outside_namespace = [
+        {"ref": ref.ref, "branch": ref.branch, "location": ref.location}
+        for ref in refs
+        if ref.branch != "main" and not is_valid_agent_branch(ref.branch)
+    ]
+    outside_names = {item["branch"] for item in outside_namespace}
     for ref in refs:
         if ref.branch.startswith("torque/submodules/"):
-            reasons[ref.branch].add("submodule_branch_not_in_scope")
+            outside_names.add(ref.branch)
 
-    exclusions = [
+    live_exclusions = [
         {"branch": branch, "reasons": sorted(items)}
-        for branch, items in sorted(reasons.items())
+        for branch, items in sorted(live_reasons.items())
         if not branch.startswith("__agent_id__:")
+    ]
+    protected_status = [
+        {
+            "branch": branch,
+            "present": any(ref.branch == branch for ref in refs),
+            "live_reasons": sorted(live_reasons.get(branch, set())),
+        }
+        for branch in protected
     ]
     eligible: list[dict] = []
     ineligible: list[dict] = []
     for ref in refs:
         if ref.branch == "main":
             continue
-        if ref.branch in reasons:
+        if (
+            ref.branch in live_reasons
+            or ref.branch in protected_reasons
+            or ref.branch in outside_names
+        ):
             continue
         identical, reason = merge_tree_is_main(repo, ref, main_tree)
         item = {"ref": ref.ref, "branch": ref.branch, "location": ref.location}
@@ -233,13 +262,16 @@ def enumerate_cleanup(
             "live_worktrees": "git worktree list --porcelain",
             "tree_identity": "git merge-tree --write-tree <ref> main; compare output to main^{tree}",
         },
-        "excluded_for_live_work": exclusions,
+        "excluded_for_live_work": live_exclusions,
+        "outside_namespace": outside_namespace,
+        "protected_status": protected_status,
         "eligible": eligible,
         "ineligible": ineligible,
         "counts": {
             "scanned_local_refs": sum(ref.location == "local" for ref in refs),
             "scanned_origin_refs": sum(ref.location == "origin" for ref in refs),
-            "excluded_branches": len(exclusions),
+            "live_excluded_branches": len(live_exclusions),
+            "outside_namespace_refs": len(outside_namespace),
             "eligible_local_refs": sum(item["location"] == "local" for item in eligible),
             "eligible_origin_refs": sum(item["location"] == "origin" for item in eligible),
             "ineligible_refs": len(ineligible),
@@ -253,15 +285,17 @@ def enumerate_cleanup(
     }
 
 
-def write_report(report: dict, output_dir: Path) -> tuple[Path, Path, Path]:
+def write_report(report: dict, output_dir: Path) -> tuple[Path, Path, Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     exclusions = output_dir / "branch-cleanup-live-work-exclusions.json"
     eligible = output_dir / "branch-cleanup-eligible.json"
+    outside_namespace = output_dir / "branch-cleanup-outside-namespace.json"
     summary = output_dir / "branch-cleanup-dry-run.json"
     exclusions.write_text(json.dumps(report["excluded_for_live_work"], indent=2) + "\n")
     eligible.write_text(json.dumps(report["eligible"], indent=2) + "\n")
+    outside_namespace.write_text(json.dumps(report["outside_namespace"], indent=2) + "\n")
     summary.write_text(json.dumps(report, indent=2) + "\n")
-    return exclusions, eligible, summary
+    return exclusions, eligible, outside_namespace, summary
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -275,7 +309,7 @@ def main(argv: list[str] | None = None) -> int:
     except (FileNotFoundError, subprocess.CalledProcessError, sqlite3.Error) as exc:
         print(f"branch cleanup dry run failed: {exc}", file=sys.stderr)
         return 2
-    exclusions, eligible, summary = write_report(report, args.output_dir)
+    exclusions, eligible, outside_namespace, summary = write_report(report, args.output_dir)
     print(f"main: {report['main_sha']}")
     print(f"excluded for live work: {len(report['excluded_for_live_work'])} -> {exclusions}")
     print(
@@ -283,6 +317,7 @@ def main(argv: list[str] | None = None) -> int:
         f"local={report['counts']['eligible_local_refs']} "
         f"origin={report['counts']['eligible_origin_refs']} -> {eligible}"
     )
+    print(f"outside valid agent namespace: {len(report['outside_namespace'])} -> {outside_namespace}")
     print(f"full report: {summary}")
     print(f"refs unchanged: {report['refs_unchanged']}")
     return 0 if report["refs_unchanged"] else 3
