@@ -184,6 +184,17 @@ class BranchCleanupDryRunTests(unittest.TestCase):
             ])
         self.assertEqual(raised.exception.code, 2)
 
+    def test_apply_command_preserves_full_large_stdout_and_stderr(self):
+        stdout = "out-prefix-" + "x" * 2_001
+        stderr = "err-prefix-" + "y" * 2_001
+        completed = subprocess.CompletedProcess(["git"], 1, stdout=stdout, stderr=stderr)
+        with mock.patch.object(cleanup, "_run", return_value=completed):
+            evidence = cleanup._apply_command(self.repo, "branch", "-D", "torque/e/worker")
+        self.assertEqual(evidence["stdout"], stdout)
+        self.assertEqual(evidence["stderr"], stderr)
+        self.assertGreater(len(evidence["stdout"]), 2_000)
+        self.assertGreater(len(evidence["stderr"]), 2_000)
+
     def test_apply_runs_gated_force_local_before_one_at_a_time_remote_and_remeasures(self):
         candidates = [
             self.eligible("torque/e/local", "local"),
@@ -233,3 +244,25 @@ class BranchCleanupDryRunTests(unittest.TestCase):
         self.assertEqual([x["branch"] for x in result["remote"]["succeeded"]], ["torque/e/remote-one"])
         self.assertEqual([x["branch"] for x in result["remote"]["failed"]], ["torque/e/remote-two"])
         self.assertEqual([x["branch"] for x in result["remote"]["never_attempted"]], ["torque/e/remote-three"])
+
+    def test_local_failure_stops_before_any_remote_command(self):
+        candidates = [
+            self.eligible("torque/e/local-one", "local"),
+            self.eligible("torque/e/local-two", "local"),
+            self.eligible("torque/e/remote", "origin"),
+        ]
+        commands = []
+
+        def command(_repo, *args):
+            commands.append(args)
+            return {"command": list(args), "returncode": 1, "stdout": "", "stderr": "local denied"}
+
+        with mock.patch.object(cleanup, "_apply_command", side_effect=command):
+            result = cleanup.apply_cleanup(
+                self.repo, self.db, expected_eligible_count=3, max_count_drift=0,
+                measure=lambda *_: self.report(candidates),
+            )
+        self.assertEqual(commands, [("branch", "-D", "torque/e/local-one")])
+        self.assertEqual(result["stop_reason"], "local_delete_failed")
+        self.assertEqual([x["branch"] for x in result["local"]["never_attempted"]], ["torque/e/local-two"])
+        self.assertEqual([x["branch"] for x in result["remote"]["never_attempted"]], ["torque/e/remote"])

@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Safely enumerate stranded, squash-merged branches without deleting them.
+"""Enumerate stranded branches by default; explicitly gated apply can delete refs.
 
-This is deliberately a *dry-run-only* instrument.  It never calls a Git
-ref-mutating command.  ``git merge-tree --write-tree`` is its sole write-like
-operation: Git may create unreachable loose objects while calculating the
-merged tree, but no local or remote ref is changed.
+Without ``--apply`` this is a dry-run-only instrument and never calls a
+Git ref-mutating command.  ``--apply`` is destructive: it requires an explicit
+baseline acknowledgement, recomputes eligibility in-process, and then deletes
+only the freshly gated local refs before remote refs.  ``git merge-tree
+--write-tree`` may create unreachable loose objects while calculating merged
+trees in either mode.
 
 The safety order is intentional: live-stream exclusions are collected before
 tree identity is tested.  A newly dispatched worker can have an unchanged
@@ -322,8 +324,10 @@ def _apply_command(repo: Path, *args: str) -> dict:
     return {
         "command": ["git", "-C", str(repo), *args],
         "returncode": result.returncode,
-        "stdout": result.stdout[-2000:],
-        "stderr": result.stderr[-2000:],
+        # This is destructive-operation evidence, not console presentation:
+        # preserve both streams losslessly for recovery/audit.
+        "stdout": result.stdout,
+        "stderr": result.stderr,
     }
 
 
