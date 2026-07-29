@@ -6708,6 +6708,44 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(text, "No pending blocking question for that engineer")
         self.assertEqual(self.handle_calls, [])
 
+    async def test_worker_ask_is_discoverable_but_refuses_architect_answer_at_the_wrong_level(self):
+        architect = self._add_architect("arch-1", "Architect")
+        engineer = self._add_engineer(
+            "eng-hired", "Hired Engineer", hired_by_architect_id=architect.id,
+        )
+        worker = self._add_worker("worker-1", "Worker", engineer.id)
+        parent = self._add_task(
+            "task-parent", "Implement release", lane="In Progress",
+            agent_id=worker.id, assigned_engineer_id=engineer.id,
+        )
+        ask = self._add_task(
+            "task-ask", "Which release gate applies?", labels=["torque:human"],
+            parent_task_id=parent.id, reply_agent_id=worker.id,
+            assigned_engineer_id=engineer.id,
+        )
+
+        read_text, read_error = await self._call(
+            "architect_engineer_pending_question",
+            {"engineer_id": engineer.id},
+            architect.id,
+        )
+        self.assertFalse(read_error, read_text)
+        read_payload = json.loads(read_text)
+        self.assertEqual(read_payload["ask_level"], "worker")
+        self.assertEqual(read_payload["ask_task_id"], ask.id)
+        self.assertEqual(read_payload["question"], ask.task)
+        self.assertIn("owning Engineer", read_payload["note"])
+
+        answer_text, answer_error = await self._call(
+            "architect_engineer_answer",
+            {"engineer_id": engineer.id, "answer": "Use the review gate."},
+            architect.id,
+        )
+        self.assertTrue(answer_error)
+        self.assertIn("worker-level ask", answer_text)
+        self.assertIn("agent_ask_answer(task=task-ask)", answer_text)
+        self.assertEqual(self.handle_calls, [])
+
 
 
 class ArchitectBindingValidationTests(unittest.TestCase):

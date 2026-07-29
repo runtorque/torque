@@ -301,6 +301,7 @@ class ServerAiReportMandatoryReviewGateTests(unittest.IsolatedAsyncioTestCase):
         ask = state.board_tasks[result["task_id"]]
         self.assertIn("torque:human", ask.labels)
         self.assertIn(NON_USER_ASK_LABEL, ask.labels)
+        self.assertEqual(ask.assigned_engineer_id, engineer.id)
         self.assertFalse(worker.needs_attention)
         self.assertEqual(task.status, "Awaiting Input")
 
