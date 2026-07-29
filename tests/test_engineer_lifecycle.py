@@ -1667,7 +1667,9 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result)
         self.assertEqual(architect.kind, "architect")
         self.assertEqual(architect.effective_agent_class_id, "product-manager")
-        self.assertEqual(architect.effective_agent_class_version, "6")
+        # TORQUE:1325 bumped Product Manager v7→v8 to replace launch-frozen
+        # dispatch snapshots; this relaunch must freeze that current authority.
+        self.assertEqual(architect.effective_agent_class_version, "8")
         self.assertFalse(applied_status["pending_next_launch"])
         self.assertEqual(len(bridge.create_session_calls), 1)
         call = bridge.create_session_calls[0]["kwargs"]
