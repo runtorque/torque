@@ -71,6 +71,11 @@ from .mcp_tools_shared import (
     _direct_user_message_response,
     save_agent_user_direct_message_from_mcp,
 )
+from .mcp_scoped.action_catalog import (
+    ACTION_CATALOG_TOOL,
+    SHARED_ACTION_CATALOG_TOOL_NAMES,
+    dispatch_action_catalog_tool,
+)
 from .mcp_retry import (
     IDEMPOTENCY_HEADER,
     derive_idempotency_key,
@@ -172,29 +177,7 @@ TOOLS = [
         },
     },
     *help_tool_specs("torque_"),
-    {
-        "name": "torque_actions_list", "authority": {"requirements": [{"capability": "self.read","minimum_scope": "self","handler_scoped": True}]},
-        "description": (
-            "List the live dispatch-effective action catalog for this group. "
-            "Each action includes its description, declared transitions "
-            "(always an explicit list), worktree directive (null means "
-            "inherited), labels, normalized dispatch target, and winning "
-            "project/user scope. "
-            "Use this before selecting a task action or deriving follow-up work."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "group": {
-                    "type": "string",
-                    "description": (
-                        "Optional group whose project action scope to resolve; "
-                        "defaults to the caller's group."
-                    ),
-                },
-            },
-        },
-    },
+    ACTION_CATALOG_TOOL,
     {
         "name": "torque_task_upload_artifact", "authority": {"requirements": [{"capability": "task.artifact.write","minimum_scope": "self","handler_scoped": True}]},
         "description": (
@@ -1095,7 +1078,7 @@ def _raw_tools_for_caller(
             "torque_help_show",
             "torque_help_search",
             "torque_help_query",
-            "torque_actions_list",
+            *SHARED_ACTION_CATALOG_TOOL_NAMES,
             "torque_memory_publish",
             "torque_memory_list",
             "torque_memory_read",
@@ -1599,23 +1582,11 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
             "tasks_capped": len(selected) < len(tasks),
         }, indent=2), False
 
-    if name == "torque_actions_list":
-        cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
-        if not cell:
-            return f"Agent {cell_id} not found", True
-        if state.agent_is_tombstoned(cell):
-            return f"Agent {cell_id} is tombstoned", True
-        caller_group = str(getattr(cell, "group", "") or "").strip()
-        requested_group = str(args.get("group", "") or "").strip()
-        if requested_group and requested_group != caller_group:
-            return "Action catalog is limited to the caller's group", True
-        result = await handle_command({
-            "cmd": "list_action_catalog",
-            "group": caller_group,
-        })
-        if result and result.get("type") == "error":
-            return result.get("message", "Unknown error"), True
-        return json.dumps(result or {"type": "action_catalog", "group": caller_group, "actions": []}), False
+    action_catalog_result = await dispatch_action_catalog_tool(
+        name, args, cell_id, handle_command, state,
+    )
+    if action_catalog_result is not None:
+        return action_catalog_result
 
     if name in {"torque_area_list", "torque_area_show"}:
         cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
