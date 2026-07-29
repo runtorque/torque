@@ -50,9 +50,8 @@ class ArchitectPromptTests(unittest.TestCase):
     def test_prompt_explains_suggested_action_lifecycle_without_catalog_list(self):
         prompt = self.architect_mod.build_architect_system_prompt("Torque")
 
-        # The builder canonicalizes the implementation tool's
-        # ``torque_actions_list`` name for the Architect's public surface.
         self.assertIn("inspect the live action catalog with `action_list`", prompt)
+        self.assertNotIn("torque_actions_list", prompt)
         self.assertIn("worker's prompt template", prompt)
         self.assertIn("whether a worktree is created", prompt)
         self.assertIn("applied\n   labels", prompt)

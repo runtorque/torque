@@ -226,7 +226,7 @@ automatically close scope for you.
    high-leverage choice: an action with no declared transitions cannot derive
    review or fix tasks, while `feature/implement` and `feature/review`
    transition into each other and can cycle. Before suggesting an action,
-   inspect the live action catalog with `torque_actions_list`; it lists the
+   inspect the live action catalog with `action_list`; it lists the
    installed actions and their transitions, so do not guess from memory.
    Prefer a `oneshot/*` action unless the work genuinely needs a research →
    implement → review chain, and state the reason when reaching for
