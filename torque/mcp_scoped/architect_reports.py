@@ -180,12 +180,36 @@ def _normalize_architect_attention_limit(value) -> tuple[int, str]:
     return min(limit, _ARCHITECT_ATTENTION_MAX_LIMIT), ""
 
 
-def _bounded_items(items: list[dict], limit: int) -> dict:
-    return {
+def _bounded_items(items: list[dict], limit: int, *,
+                   source_truncated: bool,
+                   source_limit: int | None) -> dict:
+    """Bound an output list without concealing a bounded input source.
+
+    ``truncated`` describes only the benign response/display bound.  A source
+    window is a separate, potentially lossy condition and callers must state
+    both whether it may have truncated and what its ceiling was.  This makes
+    the complete-set case an explicit choice at every report builder.
+    """
+    source_limit = int(source_limit) if source_limit is not None else None
+    if source_limit is not None and source_limit < 1:
+        raise ValueError("source_limit must be positive when provided")
+    # A full source window cannot honestly be reported as complete even when
+    # its loader supplied a stale/incorrect false flag.
+    source_truncated = bool(source_truncated) or bool(
+        source_limit is not None and len(items) >= source_limit
+    )
+    payload = {
         "count": len(items),
         "items": items[:limit],
         "truncated": len(items) > limit,
+        "source_truncated": source_truncated,
+        "count_scope": (
+            "loaded_source_window" if source_truncated else "complete_set"
+        ),
     }
+    if source_limit is not None:
+        payload["load_limit"] = source_limit
+    return payload
 
 
 def _architect_attention_task_item(task, *, created_by: str = "") -> dict:
@@ -447,13 +471,15 @@ def _architect_attention_peer_ack_items(state, caller_id: str,
                                         limit: int) -> dict:
     section = _architect_peer_ack_candidates(state, caller_id)
     items = list(section.get("items", []) or [])
-    payload = {
-        "count": len(items),
-        "items": items[:limit],
-        "truncated": (
-            len(items) > limit or bool(section.get("source_truncated"))
+    payload = _bounded_items(
+        items,
+        limit,
+        source_truncated=bool(section.get("source_truncated")),
+        source_limit=int(
+            section.get("load_limit", _ARCHITECT_PEER_SUMMARY_LOAD_LIMIT)
+            or _ARCHITECT_PEER_SUMMARY_LOAD_LIMIT
         ),
-    }
+    )
     if section.get("error"):
         payload["error"] = section.get("error")
     return payload
@@ -627,21 +653,22 @@ def _architect_attention_digest_json(state, architect_id: str,
     ]
 
     sections = {
-        "blocking_asks": _bounded_items(blocking_asks, limit),
-        "engineer_pending_questions": _bounded_items(engineer_questions, limit),
+        "blocking_asks": _bounded_items(blocking_asks, limit, source_truncated=False, source_limit=None),
+        "engineer_pending_questions": _bounded_items(engineer_questions, limit, source_truncated=False, source_limit=None),
         "peer_ack_required": _architect_attention_peer_ack_items(
             state,
             architect_id,
             limit,
         ),
-        "ready_to_merge_streams": _bounded_items(ready_to_merge, limit),
+        "ready_to_merge_streams": _bounded_items(ready_to_merge, limit, source_truncated=False, source_limit=None),
         "blocker_or_stale_streams": _bounded_items(
             blocker_or_stale_streams,
             limit,
+            source_truncated=False, source_limit=None,
         ),
-        "unhealthy_tasks": _bounded_items(unhealthy_tasks, limit),
-        "unhealthy_streams": _bounded_items(unhealthy_streams, limit),
-        "pending_hires": _bounded_items(pending_hires, limit),
+        "unhealthy_tasks": _bounded_items(unhealthy_tasks, limit, source_truncated=False, source_limit=None),
+        "unhealthy_streams": _bounded_items(unhealthy_streams, limit, source_truncated=False, source_limit=None),
+        "pending_hires": _bounded_items(pending_hires, limit, source_truncated=False, source_limit=None),
     }
     attention_total = sum(
         int(section.get("count", 0) or 0)
@@ -652,6 +679,10 @@ def _architect_attention_digest_json(state, architect_id: str,
         "group": architect_group,
         "limit_per_section": limit,
         "attention_count": attention_total,
+        "attention_count_is_bounded": any(
+            section.get("count_scope") == "loaded_source_window"
+            for section in sections.values()
+        ),
         "sections": sections,
         "parked_deferred": {
             "count": len(parked_deferred),
@@ -1337,12 +1368,14 @@ def _completion_audit_peer_ack_items(state, architect_id: str, *,
         scoped_item["scope_match"] = "matched" if matches_scope else "unknown_context"
         items.append(scoped_item)
     payload = {
-        **_bounded_items(items, limit),
-        "truncated": bool(section.get("source_truncated")) or len(items) > limit,
-        "source_truncated": bool(section.get("source_truncated")),
-        "load_limit": int(
+        **_bounded_items(
+            items,
+            limit,
+            source_truncated=bool(section.get("source_truncated")),
+            source_limit=int(
             section.get("load_limit", _ARCHITECT_PEER_SUMMARY_LOAD_LIMIT)
             or _ARCHITECT_PEER_SUMMARY_LOAD_LIMIT
+            ),
         ),
         "scan": "all_loaded_peer_ack_threads_filtered_before_output_bound",
     }
@@ -1381,8 +1414,8 @@ def _completion_audit_branch_sections(state, architect_group: str,
         if str(item.get("state", "") or "") == "ready_to_merge"
     ]
     return {
-        "ready_to_merge": _bounded_items(ready, limit),
-        "open_or_unmerged": _bounded_items(streams, limit),
+        "ready_to_merge": _bounded_items(ready, limit, source_truncated=False, source_limit=None),
+        "open_or_unmerged": _bounded_items(streams, limit, source_truncated=False, source_limit=None),
         "note": (
             "Any in-scope stream that is not merged is treated as an open "
             "branch-boundary gate; ready_to_merge means it may be ready for "
@@ -1490,8 +1523,8 @@ def _architect_wave_summary_json(state, architect_id: str,
                 "completed_by_category": {
                     "count": 0, "categories": [], "truncated": False,
                 },
-                "remaining_active": _bounded_items([], limit),
-                "parked_deferred": _bounded_items([], limit),
+                "remaining_active": _bounded_items([], limit, source_truncated=False, source_limit=None),
+                "parked_deferred": _bounded_items([], limit, source_truncated=False, source_limit=None),
             },
             "scoping": {
                 "tasks": "same_group_visible_to_calling_architect",
@@ -1562,11 +1595,14 @@ def _architect_wave_summary_json(state, architect_id: str,
             "remaining_active": _bounded_items(
                 [_wave_summary_task_item(task) for task in remaining],
                 limit,
+                source_truncated=False, source_limit=None,
             ),
             "parked_deferred": {
                 **_bounded_items(
                     [_wave_summary_task_item(task) for task in parked_deferred],
                     limit,
+                    source_truncated=False,
+                    source_limit=None,
                 ),
                 "note": (
                     "Parked/deferred items are excluded from shipped/actionable "
@@ -1613,11 +1649,13 @@ def _architect_wave_summary_json(state, architect_id: str,
         payload["sections"]["remaining_active"] = _bounded_items(
             [_wave_summary_task_item(task) for task in remaining],
             limit,
+            source_truncated=False, source_limit=None,
         )
         payload["sections"]["parked_deferred"] = {
             **_bounded_items(
                 [_wave_summary_task_item(task) for task in parked_deferred],
                 limit,
+                source_truncated=False, source_limit=None,
             ),
             "note": payload["sections"]["parked_deferred"]["note"],
         }
@@ -1662,7 +1700,7 @@ def _architect_completion_audit_json(state, architect_id: str,
                 "No visible linked tasks were found for the requested scope."
             ],
             "sections": {
-                "active_tasks": _bounded_items([], limit),
+                "active_tasks": _bounded_items([], limit, source_truncated=False, source_limit=None),
                 "remaining_gates": _bounded_items([
                     {
                         "kind": "empty_scope",
@@ -1672,8 +1710,8 @@ def _architect_completion_audit_json(state, architect_id: str,
                             "or explicit task scope."
                         ),
                     }
-                ], limit),
-                "parked_deferred": _bounded_items([], limit),
+                ], limit, source_truncated=False, source_limit=None),
+                "parked_deferred": _bounded_items([], limit, source_truncated=False, source_limit=None),
             },
             "scoping": {
                 "tasks": "same_group_visible_to_calling_architect",
@@ -1906,17 +1944,18 @@ def _architect_completion_audit_json(state, architect_id: str,
             "remaining_gates": gate_count,
         },
         "sections": {
-            "active_tasks": _bounded_items(active_task_items, limit),
-            "remaining_gates": _bounded_items(remaining_gates, limit),
+            "active_tasks": _bounded_items(active_task_items, limit, source_truncated=False, source_limit=None),
+            "remaining_gates": _bounded_items(remaining_gates, limit, source_truncated=False, source_limit=None),
             "branch_boundaries": branch_boundaries,
-            "blocking_asks": _bounded_items(blocking_asks, limit),
+            "blocking_asks": _bounded_items(blocking_asks, limit, source_truncated=False, source_limit=None),
             "engineer_pending_questions": _bounded_items(
                 engineer_questions,
                 limit,
+                source_truncated=False, source_limit=None,
             ),
             "peer_ack_required": peer_ack,
             "pending_hires": {
-                **_bounded_items(pending_hires, limit),
+                **_bounded_items(pending_hires, limit, source_truncated=False, source_limit=None),
                 "note": (
                     "Pending hires are caller-architect scoped; hire records "
                     "are not task-scoped, so unresolved caller hires are "
@@ -1932,6 +1971,7 @@ def _architect_completion_audit_json(state, architect_id: str,
                     for task in accepted_scope_not_done
                 ],
                 limit,
+                source_truncated=False, source_limit=None,
             ),
             "parked_deferred": {
                 **_bounded_items(
@@ -1940,6 +1980,8 @@ def _architect_completion_audit_json(state, architect_id: str,
                         for task in parked_deferred
                     ],
                     limit,
+                    source_truncated=False,
+                    source_limit=None,
                 ),
                 "note": (
                     "Parked/deferred items are separated from active blockers "
@@ -1949,6 +1991,7 @@ def _architect_completion_audit_json(state, architect_id: str,
             "verification_caveats": _bounded_items(
                 verification_items,
                 limit,
+                source_truncated=False, source_limit=None,
             ),
         },
         "recommendation_rules": {
@@ -2021,10 +2064,12 @@ def _architect_completion_audit_json(state, architect_id: str,
         payload["sections"]["active_tasks"] = _bounded_items(
             active_task_items,
             limit,
+            source_truncated=False, source_limit=None,
         )
         payload["sections"]["remaining_gates"] = _bounded_items(
             remaining_gates,
             limit,
+            source_truncated=False, source_limit=None,
         )
         payload["sections"]["branch_boundaries"] = _completion_audit_branch_sections(
             state,
@@ -2035,10 +2080,12 @@ def _architect_completion_audit_json(state, architect_id: str,
         payload["sections"]["blocking_asks"] = _bounded_items(
             blocking_asks,
             limit,
+            source_truncated=False, source_limit=None,
         )
         payload["sections"]["engineer_pending_questions"] = _bounded_items(
             engineer_questions,
             limit,
+            source_truncated=False, source_limit=None,
         )
         payload["sections"]["peer_ack_required"] = _completion_audit_peer_ack_items(
             state,
@@ -2049,7 +2096,7 @@ def _architect_completion_audit_json(state, architect_id: str,
             limit=limit,
         )
         payload["sections"]["pending_hires"] = {
-            **_bounded_items(pending_hires, limit),
+            **_bounded_items(pending_hires, limit, source_truncated=False, source_limit=None),
             "note": payload["sections"]["pending_hires"]["note"],
         }
         payload["sections"]["accepted_scope_not_done"] = _bounded_items(
@@ -2061,15 +2108,18 @@ def _architect_completion_audit_json(state, architect_id: str,
                 for task in accepted_scope_not_done
             ],
             limit,
+            source_truncated=False, source_limit=None,
         )
         payload["sections"]["parked_deferred"] = {
             **_bounded_items(
                 [_completion_audit_task_item(task) for task in parked_deferred],
                 limit,
+                source_truncated=False, source_limit=None,
             ),
             "note": payload["sections"]["parked_deferred"]["note"],
         }
         payload["sections"]["verification_caveats"] = _bounded_items(
             verification_items,
             limit,
+            source_truncated=False, source_limit=None,
         )

@@ -1857,6 +1857,163 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(peer_section["truncated"])
         self.assertEqual(payload["attention_count"], 3)
 
+    async def test_architect_attention_digest_discloses_real_peer_load_window(self):
+        """The digest must not present a full 1,000-row source window as complete."""
+        architect = self._add_architect("arch-1", "Architect")
+        peer = self._add_architect("arch-peer", "Peer Architect")
+        load_limit = self.shared_mod._ARCHITECT_PEER_SUMMARY_LOAD_LIMIT
+
+        # This is intentionally the real production window, not a lowered
+        # test constant. Every row satisfies the peer-loader's production
+        # non-user, non-blocking, non-archived message predicate.
+        for idx in range(load_limit):
+            self.db.save_agent_peer_message({
+                "id": f"synthetic-peer-noise-{idx:04d}",
+                "thread_id": f"synthetic-noise-thread-{idx:04d}",
+                "group_name": "torque",
+                "sender_id": peer.id,
+                "sender_kind": "architect",
+                "recipient_id": architect.id,
+                "recipient_kind": "architect",
+                "message": "Synthetic non-pending peer traffic.",
+                "message_type": "message",
+                "blocking": False,
+                "archived_at": 0,
+                "created_at": 10_000.0 + idx,
+                "ack_required": False,
+            })
+        self.db.save_agent_peer_message({
+            "id": "synthetic-pending-beyond-real-window",
+            "thread_id": "synthetic-pending-beyond-real-window",
+            "group_name": "torque",
+            "sender_id": peer.id,
+            "sender_kind": "architect",
+            "recipient_id": architect.id,
+            "recipient_kind": "architect",
+            "message": "Synthetic pending ack beyond the real load window.",
+            "message_type": "message",
+            "blocking": False,
+            "archived_at": 0,
+            "created_at": 1.0,
+            "ack_required": True,
+        })
+        matching_count = self.db._conn.execute(
+            "SELECT COUNT(*) FROM agent_peer_messages WHERE "
+            "(sender_id=? OR recipient_id=?) "
+            "AND sender_kind!='user' AND recipient_kind!='user' "
+            "AND message_type='message' AND blocking=0 AND archived_at=0",
+            (architect.id, architect.id),
+        ).fetchone()[0]
+        self.assertEqual(matching_count, load_limit + 1)
+        loaded_rows = self.db.load_agent_peer_messages_for_agent(
+            architect.id,
+            limit=load_limit,
+        )
+        self.assertEqual(len(loaded_rows), load_limit)
+        self.assertNotIn(
+            "synthetic-pending-beyond-real-window",
+            {row["id"] for row in loaded_rows},
+        )
+
+        text, is_error = await self._call(
+            "architect_attention_digest",
+            {"limit_per_section": 20},
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        payload = json.loads(text)
+        self.assertTrue(payload["attention_count_is_bounded"])
+        peer_section = payload["sections"]["peer_ack_required"]
+        self.assertFalse(peer_section["truncated"])
+        self.assertTrue(peer_section["source_truncated"])
+        self.assertEqual(peer_section["load_limit"], load_limit)
+        self.assertEqual(peer_section["count_scope"], "loaded_source_window")
+
+    def test_bounded_items_separates_display_and_source_truncation(self):
+        source_only = self.shared_mod._bounded_items(
+            [],
+            1,
+            source_truncated=True,
+            source_limit=1000,
+        )
+        display_only = self.shared_mod._bounded_items(
+            [{"id": "one"}, {"id": "two"}],
+            1,
+            source_truncated=False,
+            source_limit=None,
+        )
+        full_window = self.shared_mod._bounded_items(
+            [{"id": str(index)} for index in range(1000)],
+            1,
+            source_truncated=False,
+            source_limit=1000,
+        )
+
+        self.assertFalse(source_only["truncated"])
+        self.assertTrue(source_only["source_truncated"])
+        self.assertEqual(source_only["load_limit"], 1000)
+        self.assertEqual(source_only["count_scope"], "loaded_source_window")
+        self.assertTrue(display_only["truncated"])
+        self.assertFalse(display_only["source_truncated"])
+        self.assertEqual(display_only["count_scope"], "complete_set")
+        self.assertTrue(full_window["source_truncated"])
+        self.assertEqual(full_window["count_scope"], "loaded_source_window")
+
+    def test_peer_pending_reply_predicate_matches_thread_aggregate(self):
+        """Keep the in-memory digest predicate aligned with the SQL aggregate."""
+        architect = self._add_architect("arch-1", "Architect")
+        peer = self._add_architect("arch-peer", "Peer Architect")
+        cases = {
+            "pending": [(peer.id, 10.0, True), (architect.id, 9.0, False)],
+            "answered": [(peer.id, 20.0, True), (architect.id, 21.0, False)],
+            "not-an-ack": [(peer.id, 30.0, False)],
+            "same-time": [(peer.id, 40.0, True), (architect.id, 40.0, False)],
+        }
+        for thread_id, messages in cases.items():
+            for index, (sender_id, created_at, ack_required) in enumerate(messages):
+                self.db.save_agent_peer_message({
+                    "id": f"predicate-{thread_id}-{index}",
+                    "thread_id": thread_id,
+                    "group_name": "torque",
+                    "sender_id": sender_id,
+                    "sender_kind": "architect",
+                    "recipient_id": (
+                        peer.id if sender_id == architect.id else architect.id
+                    ),
+                    "recipient_kind": "architect",
+                    "message": "Synthetic predicate case.",
+                    "message_type": "message",
+                    "blocking": False,
+                    "archived_at": 0,
+                    "created_at": created_at,
+                    "ack_required": ack_required,
+                })
+
+        aggregate_pending = {
+            row["thread_id"]
+            for row in self.db.load_agent_peer_threads_for_agent(
+                architect.id,
+                limit=100,
+                sender_kind="architect",
+                recipient_kind="architect",
+                requires_reply=True,
+            )
+        }
+        digest_pending = set()
+        for thread_id in cases:
+            messages = self.db.load_agent_peer_messages_for_agent(
+                architect.id,
+                limit=100,
+                thread_id=thread_id,
+            )
+            if self.shared_mod._thread_requires_architect_reply(
+                    messages, architect.id):
+                digest_pending.add(thread_id)
+
+        self.assertEqual(digest_pending, {"pending"})
+        self.assertEqual(aggregate_pending, digest_pending)
+
     async def test_architect_board_summary_bounds_large_task_excerpt(self):
         architect = self._add_architect("arch-1", "Architect")
         alice = self._add_engineer(
