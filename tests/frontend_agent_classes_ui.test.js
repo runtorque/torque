@@ -519,7 +519,7 @@ test('Agent Class manager presents approved Product Manager dogfood state with c
     warnings: [
       'External connectors are not governed by Agent Classes in Wave 7; manage connector access separately.',
       'External connector exposure is not governed or enforced by Agent Classes in Wave 7; manage connector access separately.',
-      'Product Manager may dispatch only creator-owned product proposals; it cannot hire, merge, deploy, administer, use raw tool picker authority, or message engineers/workers directly.',
+      'Product Manager may use same-group board authority for product follow-through, but cannot dispatch, hire, merge, deploy, administer, use raw tool picker authority, or message engineers/workers directly.',
     ],
     external_connector_caveat: 'External connector exposure is not governed or enforced by Agent Classes in Wave 7; manage connector access separately.',
     restrictions: [

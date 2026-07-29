@@ -212,7 +212,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
                 "task.reassign", "task.report"):
             self.assertNotEqual("group", restored.capabilities[capability])
             self.assertEqual("group", runtime.capabilities[capability])
-        self.assertEqual("self", runtime.capabilities["task.dispatch"])
+        self.assertNotIn("task.dispatch", runtime.capabilities)
         invalid_snapshot = copy.deepcopy(persisted)
         invalid_snapshot["capabilities"]["task.move"] = "group"
         with self.assertRaises(self.mcp_mod.AuthorityValidationError):
@@ -259,10 +259,10 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
                 "task.update", "task.move", "task.mark_covered", "task.verify",
                 "task.reassign", "task.report"):
             self.assertEqual("group", restored_runtime.capabilities[capability])
-        self.assertEqual("self", restored_runtime.capabilities["task.dispatch"])
+        self.assertNotIn("task.dispatch", restored_runtime.capabilities)
 
-        # A stale v5 snapshot predates the current v7 grants.  Restore
-        # must not use the v7 registry to grant it to the stopped v5 session;
+        # A stale v5 snapshot predates the current v8 grants.  Restore
+        # must not use the v8 registry to grant it to the stopped v5 session;
         # the status still explicitly tells the operator that relaunch is
         # pending.
         legacy_snapshot = copy.deepcopy(frozen_snapshot)
@@ -280,7 +280,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             restored_cell,
         )
         self.assertEqual("self", restored_runtime.capabilities["task.move"])
-        self.assertEqual("self", restored_runtime.capabilities["task.dispatch"])
+        self.assertNotIn("task.dispatch", restored_runtime.capabilities)
         status_response = await self._operator_agent_class_status(
             restored_state, restored_cell.id,
         )
@@ -288,7 +288,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(status_response["status"]["pending_next_launch"])
         self.assertTrue(status_response["status"]["apply_state"]["relaunch_required"])
         self.assertEqual("5", status_response["status"]["effective_class_version"])
-        self.assertEqual("7", status_response["status"]["next_launch_class_version"])
+        self.assertEqual("8", status_response["status"]["next_launch_class_version"])
         self.architect.effective_agent_class_version = frozen_version
         self.architect.effective_agent_class_snapshot = frozen_snapshot
         self.state._db_save_agent(self.architect)
@@ -297,13 +297,13 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         agent_classes_mod = importlib.import_module("torque.agent_classes")
         try:
             class_path.write_text(
-                original_class_text.replace("version: '7'", "version: '8'").replace(
+                original_class_text.replace("version: '8'", "version: '9'").replace(
                     "group_board_authority: true", "group_board_authority: false",
                 ),
                 encoding="utf-8",
             )
             agent_classes_mod._valid_class_lookup.cache_clear()
-            # A v7 true grant likewise cannot survive into a v8 false
+            # A v8 true grant likewise cannot survive into a v9 false
             # definition through restore.  It is pending next launch rather
             # than silently retaining or dropping authority by current YAML.
             restored_state = self.state_mod.MatrixState(db=self.db)
@@ -314,15 +314,15 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
                 restored_cell,
             )
             self.assertEqual("self", restored_runtime.capabilities["task.move"])
-            self.assertEqual("self", restored_runtime.capabilities["task.dispatch"])
+            self.assertNotIn("task.dispatch", restored_runtime.capabilities)
             status_response = await self._operator_agent_class_status(
                 restored_state, restored_cell.id,
             )
             self.assertEqual("agent_class_status", status_response["type"])
             self.assertTrue(status_response["status"]["pending_next_launch"])
             self.assertTrue(status_response["status"]["apply_state"]["relaunch_required"])
-            self.assertEqual("7", status_response["status"]["effective_class_version"])
-            self.assertEqual("8", status_response["status"]["next_launch_class_version"])
+            self.assertEqual("8", status_response["status"]["effective_class_version"])
+            self.assertEqual("9", status_response["status"]["next_launch_class_version"])
             # Existing session remains frozen despite on-disk mutation.
             unchanged_runtime = self.mcp_mod._effective_class_authority_for_cell(self.architect)
             self.assertEqual("group", unchanged_runtime.capabilities["task.move"])
@@ -350,10 +350,26 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             "task_list", "task_get", "task_chain", "task_create",
             "task_claim", "task_update", "task_move", "task_mark_covered",
             "task_coverage_reconcile", "task_artifact_upload", "task_verify",
-            "task_reassign", "task_dispatch", "task_derive", "task_progress",
+            "task_reassign", "task_derive", "task_progress",
             "task_complete", "task_blocked", "task_error",
         }
         self.assertTrue(expected_task_surface <= tool_names)
+        # The PM prohibition is enforced in its frozen projection; a default
+        # Engineer retains dispatch so this cannot fail open by removing it
+        # everywhere.
+        self.assertNotIn("task_dispatch", tool_names)
+        self.state.assign_agent_class(
+            self.engineer.id,
+            "default-engineer",
+            actor_kind="user",
+            base_dir=self.tmp.name,
+        )
+        self.state.apply_effective_agent_class_for_launch(
+            self.engineer,
+            base_dir=self.tmp.name,
+        )
+        engineer_tool_names = await self._list_tools(agent_id=self.engineer.id)
+        self.assertIn("task_dispatch", engineer_tool_names)
         for name in {
             "context", "tool_search", "peer_list", "peer_message",
             "peer_inbox", "peer_reply", "user_message", "raise", "journal_write",

@@ -223,9 +223,9 @@ class AgentClassRegistryTests(unittest.TestCase):
             preview["effective_authority"]["capabilities"]["task.propose"],
             "self",
         )
-        self.assertEqual(
-            preview["effective_authority"]["capabilities"]["task.dispatch"],
-            "self",
+        self.assertNotIn(
+            "task.dispatch",
+            preview["effective_authority"]["capabilities"],
         )
         for capability in (
                 "engineer.hire", "worktree.merge", "deploy.read"):
@@ -799,7 +799,7 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         )
         self.assertEqual(class_status["assigned_class_version"], "2")
         self.assertEqual(class_status["effective_class_version"], "2")
-        self.assertEqual(class_status["next_launch_class_version"], "7")
+        self.assertEqual(class_status["next_launch_class_version"], "8")
         self.assertTrue(class_status["pending_next_launch"])
         self.assertTrue(class_status["apply_state"]["relaunch_required"])
 

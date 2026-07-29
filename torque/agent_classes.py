@@ -360,32 +360,6 @@ def _acl_mapping(data: dict[str, Any]) -> dict[str, Any]:
     return dict(value or {}) if isinstance(value, dict) else {}
 
 
-def _trusted_platform_creator_proposal_mode(
-    data: "AgentClassDefinition | dict[str, Any]",
-) -> bool:
-    """Whether trusted built-in class data enables the dispatch extension.
-
-    The marker lives in generally authorable metadata, so it is only authority
-    bearing when class loading has identified the definition as built-in.  This
-    deliberately keys on mode, not a named class identity.
-    """
-
-    if isinstance(data, AgentClassDefinition):
-        builtin = data.builtin
-        base_kind = data.base_kind
-        metadata = data.metadata or {}
-    else:
-        builtin = bool(data.get("builtin", False))
-        base_kind = str(data.get("base_kind", "") or "").strip()
-        metadata = data.get("metadata", {}) if isinstance(data.get("metadata"), dict) else {}
-    return (
-        bool(builtin)
-        and base_kind == "architect"
-        and str(metadata.get("task_authority_mode", "") or "").strip()
-        == "creator-proposal-only"
-    )
-
-
 def _compiled_authority_for_data(
     data: "AgentClassDefinition | dict[str, Any]",
 ) -> dict[str, Any]:
@@ -402,17 +376,6 @@ def _compiled_authority_for_data(
             acl=acl,
             capabilities=CAPABILITY_CATALOG,
         )
-        if _trusted_platform_creator_proposal_mode(data):
-            # Dispatch is a platform-owned, launch-frozen extension for the
-            # trusted creator-proposal mode.  It is intentionally unavailable
-            # to ordinary Architect ACL authoring, including custom classes.
-            capabilities = dict(authority.capabilities)
-            capabilities["task.dispatch"] = "self"
-            authority = EffectiveAuthority(
-                base_kind=authority.base_kind,
-                mode=authority.mode,
-                capabilities=dict(sorted(capabilities.items())),
-            )
     except AuthorityValidationError:
         return {
             "mode": str(acl.get("mode", "") or ""),
@@ -1383,8 +1346,6 @@ def _class_status_from_preview(class_preview: dict[str, Any]) -> str:
             for capability_id, definition in CAPABILITY_CATALOG.items()
             if definition.authorable_by_agent_class(base_kind)
         }
-        if _trusted_platform_creator_proposal_mode(class_preview):
-            expected["task.dispatch"] = "self"
         actual = dict(effective.get("capabilities") or {})
         return "full" if actual == expected else "restricted"
     return "full"
