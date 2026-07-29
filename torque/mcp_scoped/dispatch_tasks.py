@@ -111,6 +111,14 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
                 action_vars = {}
             if not isinstance(action_vars, dict):
                 return "action_vars must be an object", True
+            suggested_action = str(args.get("suggested_action", "") or "").strip()
+            suggested_action_error = await _validate_suggested_action(
+                suggested_action,
+                _engineer_group,
+                handle_command,
+            )
+            if suggested_action_error:
+                return suggested_action_error, True
 
             dispatch_requested, dispatch_error = _optional_bool_arg(
                 args, "dispatch", False
@@ -156,9 +164,7 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
                     "id": task_id,
                     "assigned_engineer_id": assigned_engineer_id,
                     "created_by_architect_id": str(caller_id or "").strip(),
-                    "suggested_action": str(
-                        args.get("suggested_action", "") or ""
-                    ).strip(),
+                    "suggested_action": suggested_action,
                     "suggested_specialization": suggested_specialization,
                     "action_name": "",
                     "action_vars": action_vars,
@@ -379,6 +385,17 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
                 return "action_vars must be an object", True
             patch["action_vars"] = copy.deepcopy(action_vars)
             updated_fields.append("action_vars")
+        if "suggested_action" in args:
+            suggested_action = str(args.get("suggested_action", "") or "").strip()
+            suggested_action_error = await _validate_suggested_action(
+                suggested_action,
+                _engineer_group,
+                handle_command,
+            )
+            if suggested_action_error:
+                return suggested_action_error, True
+            patch["suggested_action"] = suggested_action
+            updated_fields.append("suggested_action")
         if not updated_fields:
             return "At least one editable field is required", True
 

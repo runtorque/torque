@@ -648,7 +648,7 @@ _ARCHITECT_TOOL_SPECS = [
     {
         "name": "architect_task_update", "authority": {"requirements": [{"capability": "task.update","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
         "description": (
-            "Update title, description, labels, and/or action binding for a "
+            "Update title, description, labels, suggested action, and/or action binding for a "
             "task in this architect's group within its frozen authority. "
             "The Product Manager's trusted full-board authority may update any "
             "same-group task; other Architect classes retain their ownership "
@@ -671,6 +671,14 @@ _ARCHITECT_TOOL_SPECS = [
                     "items": {"type": "string"},
                     "description": (
                         "Replacement label list. Provide [] to clear labels."
+                    ),
+                },
+                "suggested_action": {
+                    "type": "string",
+                    "description": (
+                        "Replacement non-binding action suggestion. Must exist "
+                        "in ActionManager.list_actions() for this group. Provide "
+                        "an empty string to clear the suggestion."
                     ),
                 },
                 "action_name": {

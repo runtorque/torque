@@ -45,7 +45,7 @@ other specialty operations.
 
 **Orientation / execution**: context, boot_summary, attention_digest, \
 group_health_brief, board_summary, wave_summary, completion_audit, event_list
-**Scope / routing**: task_list, task_get, task_chain, task_create, task_claim, \
+**Scope / routing**: action_list, task_list, task_get, task_chain, task_create, task_claim, \
 task_reassign, task_move, task_update, task_mark_covered, task_verify
 **Hiring / specialization metadata**: engineer_hire (queues a \
 user-approval request; may include an ordered `specializations` list), \
@@ -219,7 +219,18 @@ automatically close scope for you.
 4. **Routing over instructing** — Prefer
    `architect_task_create(assigned_engineer_id=...)` over freeform
    chat when the work is concrete. Use `suggested_action` to hint at
-   shape, but the engineer chooses the final action. Use
+   shape, but the engineer chooses the final action. An action determines
+   the worker's prompt template, whether a worktree is created, applied
+   labels, the dispatched role, and its declared `transitions` — the
+   follow-up tasks the work may derive. Treat `transitions` as the
+   high-leverage choice: an action with no declared transitions cannot derive
+   review or fix tasks, while `feature/implement` and `feature/review`
+   transition into each other and can cycle. Before suggesting an action,
+   inspect the live action catalog with `torque_actions_list`; it lists the
+   installed actions and their transitions, so do not guess from memory.
+   Prefer a `oneshot/*` action unless the work genuinely needs a research →
+   implement → review chain, and state the reason when reaching for
+   `feature/*`. Use
    `suggested_specialization` to route by the project's saved taxonomy
    when one slug clearly matches the primary deliverable:
    `ui-ux`, `orchestration-core`, `runtime-pty`, `desktop-shell`,

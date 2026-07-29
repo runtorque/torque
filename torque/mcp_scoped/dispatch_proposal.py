@@ -168,6 +168,14 @@ async def dispatch_proposal(ctx: ScopedDispatchContext):
         requested_group = str(args.get("group", "") or "").strip()
         if requested_group and requested_group != _engineer_group:
             return "group must match the architect's group", True
+        suggested_action = str(args.get("suggested_action", "") or "").strip()
+        suggested_action_error = await _validate_suggested_action(
+            suggested_action,
+            _engineer_group,
+            handle_command,
+        )
+        if suggested_action_error:
+            return suggested_action_error, True
         lane = str(args.get("lane", "") or "").strip()
         if lane:
             if lane not in real_state.board_lanes:
@@ -203,7 +211,7 @@ async def dispatch_proposal(ctx: ScopedDispatchContext):
             action_name="",
             action_vars={},
             created_by_architect_id=str(caller_id or "").strip(),
-            suggested_action=str(args.get("suggested_action", "") or "").strip(),
+            suggested_action=suggested_action,
             suggested_specialization=str(args.get("suggested_specialization", "") or "").strip(),
         )
         if not task:

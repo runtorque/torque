@@ -79,6 +79,15 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
 
     async def _handle_command(self, payload):
         self.calls.append(dict(payload))
+        if payload.get("cmd") == "list_actions":
+            return {
+                "type": "actions",
+                "group": payload.get("group", ""),
+                "actions": [
+                    {"name": "feature/implement"},
+                    {"name": "oneshot/fix"},
+                ],
+            }
         if payload.get("cmd") == "board_update_task":
             task_id = payload.get("id", "")
             self.state.board_update_task(
@@ -1319,7 +1328,10 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("product-proposal", task.labels)
         self.assertIn("proposal-only", task.labels)
         self.assertIn("normal queued Board task", payload["caveat"])
-        self.assertEqual([], self.calls)
+        self.assertEqual(
+            [{"cmd": "list_actions", "group": "g"}],
+            self.calls,
+        )
 
         before = set(self.state.board_tasks)
         rejected = await self._call(
