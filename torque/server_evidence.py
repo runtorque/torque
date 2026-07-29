@@ -1125,6 +1125,25 @@ def _record_merge_completion_evidence(
         for key in ("number", "url", "state", "merge_commit_sha"):
             if pr.get(key) not in (None, ""):
                 merge.setdefault("pr", {})[key] = pr[key]
+    remote_cleanup = result.get("remote_branch_cleanup")
+    if isinstance(remote_cleanup, dict):
+        cleanup_evidence = {
+            "attempted": bool(remote_cleanup.get("attempted")),
+            "status": _completion_evidence_text(
+                remote_cleanup.get("status", ""), limit=80),
+            "branch_deleted": bool(remote_cleanup.get("branch_deleted")),
+            "branch_delete_failed": bool(
+                remote_cleanup.get("branch_delete_failed")),
+            "branch_delete_returncode": remote_cleanup.get(
+                "branch_delete_returncode"),
+            "branch_delete_stderr": _completion_evidence_text(
+                remote_cleanup.get("branch_delete_stderr", ""), limit=500),
+        }
+        for key in ("remote", "branch", "reason"):
+            value = _completion_evidence_text(remote_cleanup.get(key, ""), limit=240)
+            if value:
+                cleanup_evidence[key] = value
+        merge["remote_branch_cleanup"] = cleanup_evidence
 
     timestamp = datetime.now(timezone.utc).isoformat()
     actor_name = _completion_evidence_text(getattr(cell, "name", "")) \

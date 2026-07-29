@@ -96,6 +96,112 @@ from .targets import (
     _worktree_merge_error,
 )
 
+
+async def _cleanup_verified_merged_pr_head_branch(
+    *,
+    worktree_mgr: WorktreeManager,
+    worktree_path: str,
+    remote: str,
+    branch: str,
+    base_branch: str,
+    pr_metadata: dict | None,
+    origin_verification: dict | None,
+) -> dict:
+    """Best-effort remote cleanup, gated by authoritative merge evidence.
+
+    This deliberately runs only after the PR state and origin/base SHA have
+    both been independently verified. Cleanup failures are evidence, not
+    merge failures: the merge already landed and must remain successful.
+    """
+    cleanup = {
+        "attempted": False,
+        "remote": str(remote or "").strip(),
+        "branch": str(branch or "").strip(),
+        # Keep the established branch-cleanup evidence names so local and
+        # remote cleanup results can be read with the same vocabulary.
+        "branch_deleted": False,
+        "branch_delete_failed": False,
+        "branch_delete_returncode": None,
+        "branch_delete_stderr": "",
+    }
+    pr_state = str((pr_metadata or {}).get("state") or "").upper()
+    origin_verified = bool((origin_verification or {}).get("verified"))
+    if not origin_verified:
+        cleanup.update(
+            status="not_attempted",
+            reason="origin_merge_not_verified",
+        )
+        return cleanup
+    if pr_state != "MERGED":
+        cleanup.update(status="not_attempted", reason="pr_not_verified_merged")
+        return cleanup
+    if not cleanup["remote"] or not cleanup["branch"]:
+        cleanup.update(status="not_attempted", reason="remote_or_head_branch_missing")
+        return cleanup
+    # A PR head must never be allowed to name its own base branch.
+    if cleanup["branch"] == str(base_branch or "").strip():
+        cleanup.update(status="not_attempted", reason="head_branch_is_base_branch")
+        return cleanup
+
+    delete_helper = getattr(worktree_mgr, "github_delete_remote_branch", None)
+    if not callable(delete_helper):
+        cleanup.update(status="not_attempted", reason="remote_cleanup_unavailable")
+        return cleanup
+
+    cleanup["attempted"] = True
+    try:
+        delete_result = await delete_helper(
+            worktree_path,
+            cleanup["remote"],
+            cleanup["branch"],
+        )
+    except Exception as exc:  # pragma: no cover - defensive integration path
+        log.warning(
+            "Remote PR head cleanup failed for %s/%s: %s",
+            cleanup["remote"], cleanup["branch"], exc,
+        )
+        cleanup.update(
+            status="refused",
+            branch_delete_failed=True,
+            branch_delete_stderr=str(exc),
+            branch_delete_returncode=-1,
+        )
+        return cleanup
+
+    if not isinstance(delete_result, dict):
+        cleanup.update(
+            status="refused",
+            branch_delete_failed=True,
+            branch_delete_stderr="remote branch delete returned invalid result",
+            branch_delete_returncode=-1,
+        )
+        return cleanup
+
+    cleanup["branch_delete_returncode"] = delete_result.get(
+        "branch_delete_returncode"
+    )
+    cleanup["branch_delete_stderr"] = str(
+        delete_result.get("branch_delete_stderr") or ""
+    )
+    if delete_result.get("ok"):
+        cleanup["branch_deleted"] = bool(delete_result.get("deleted"))
+        cleanup["branch_delete_failed"] = False
+        cleanup["status"] = (
+            "deleted" if cleanup["branch_deleted"] else "already_absent"
+        )
+        return cleanup
+
+    cleanup.update(
+        status="refused",
+        branch_delete_failed=True,
+        branch_delete_stderr=(
+            cleanup["branch_delete_stderr"]
+            or str(delete_result.get("error") or "remote branch delete failed")
+        ),
+    )
+    return cleanup
+
+
 async def _run_pr_worktree_merge(
     *,
     state: MatrixState,
@@ -972,6 +1078,22 @@ async def _run_pr_worktree_merge(
     )
     if origin_verification:
         result["origin_verification"] = origin_verification
+    # The merged PR head is the exact branch captured for this worktree
+    # boundary; do not infer a target from a naming convention. This runs
+    # before local/worktree cleanup so the remote operation retains its Git
+    # context, but only after origin verification has made merge success
+    # authoritative.
+    result["remote_branch_cleanup"] = (
+        await _cleanup_verified_merged_pr_head_branch(
+            worktree_mgr=worktree_mgr,
+            worktree_path=wt,
+            remote=remote,
+            branch=branch,
+            base_branch=base_branch,
+            pr_metadata=pr_metadata,
+            origin_verification=origin_verification,
+        )
+    )
     _attach_auto_force_push_metadata(result, push_metadata_result)
     if gates.get("workflow_breach"):
         result["workflow_breach"] = gates["workflow_breach"]

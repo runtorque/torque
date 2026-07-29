@@ -1120,6 +1120,64 @@ class WorktreeGithubPrimitiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["phase"], "remote_base_sync")
         self.assertEqual(remaining, [])
 
+    async def test_delete_remote_branch_surfaces_refusal_evidence(self):
+        fake, _calls, remaining = self._fake_exec([
+            (
+                [
+                    "git", "-C", "/wt", "push", "origin", "--delete",
+                    "torque/test/remote-cleanup",
+                ],
+                FakeProcess(returncode=1, stderr="protected branch"),
+            ),
+        ])
+
+        with patch("torque.worktree.asyncio.create_subprocess_exec", side_effect=fake):
+            result = await self.mgr.github_delete_remote_branch(
+                "/wt", "origin", "torque/test/remote-cleanup",
+            )
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["branch_delete_failed"])
+        self.assertEqual(result["branch_delete_returncode"], 1)
+        self.assertEqual(result["branch_delete_stderr"], "protected branch")
+        self.assertIn("Failed to delete remote branch", result["error"])
+        self.assertEqual(remaining, [])
+
+    async def test_delete_remote_branch_removes_scratch_remote_head(self):
+        """The helper's success result is confirmed against the remote."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            remote = root / "remote.git"
+            repo = root / "repo"
+            self._git("init", "--bare", str(remote))
+            self._git("clone", str(remote), str(repo))
+            self._git("config", "user.email", "tester@example.com", cwd=repo)
+            self._git("config", "user.name", "Tester", cwd=repo)
+            (repo / "base.txt").write_text("base\n")
+            self._git("add", "base.txt", cwd=repo)
+            self._git("commit", "-m", "base", cwd=repo)
+            self._git("branch", "-M", "main", cwd=repo)
+            self._git("push", "-u", "origin", "main", cwd=repo)
+            self._git("switch", "-c", "torque/test/remote-cleanup", cwd=repo)
+            (repo / "feature.txt").write_text("feature\n")
+            self._git("add", "feature.txt", cwd=repo)
+            self._git("commit", "-m", "feature", cwd=repo)
+            self._git("push", "-u", "origin", "torque/test/remote-cleanup", cwd=repo)
+
+            result = await self.mgr.github_delete_remote_branch(
+                str(repo), "origin", "torque/test/remote-cleanup",
+            )
+            remaining = self._git(
+                "ls-remote", "--heads", "origin", "torque/test/remote-cleanup",
+                cwd=repo,
+            )
+
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(result["deleted"])
+        self.assertFalse(result["branch_delete_failed"])
+        self.assertEqual(result["branch_delete_returncode"], 0)
+        self.assertEqual(remaining.stdout.strip(), "")
+
     async def test_remote_branch_sha_uses_ls_remote_without_updating_refs(self):
         fake, _calls, remaining = self._fake_exec([
             (
