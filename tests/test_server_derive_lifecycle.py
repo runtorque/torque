@@ -629,6 +629,9 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
             "cell_id": review.agent_id,
             "action": "done",
             "message": "Ship",
+            "terminal_declaration": (
+                "No further work is needed; I will not derive after this."
+            ),
         })
 
         self.assertTrue(done is None or done.get("type") == "ok", done)
