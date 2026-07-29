@@ -933,37 +933,6 @@ class TorqueDB(
                 surface="board_tasks",
             )
 
-    def save_task_and_agents(self, task, agents) -> None:
-        """Persist one task reassignment and its worker owners atomically."""
-        agent_rows = list(agents or [])
-
-        def _operation():
-            try:
-                self._conn.execute("BEGIN")
-                for cell in agent_rows:
-                    self._insert_agent_row(self._conn, cell)
-                self._insert_board_task_row(self._conn, task)
-                self._conn.commit()
-            except Exception:
-                self._conn.rollback()
-                raise
-
-        with profiling.timer("sqlite_write_ms"), \
-                profiling.timer("sqlite_write_save_task_and_agents_ms"):
-            self._run_sqlite_write_with_lock_retry(
-                _operation,
-                surface="task_and_agents",
-            )
-
-    async def save_task_and_agents_async(self, task, agents) -> None:
-        """Queue and await an atomic task/worker ownership transfer."""
-        return await self._enqueue_async_write(
-            "task_and_agents",
-            "save_task_and_agents",
-            _snapshot_db_payload(task),
-            _snapshot_db_payload(list(agents or [])),
-        )
-
     def save_board_task_deferred(self, task) -> None:
         """Persist a board task off-loop when called from asyncio code."""
         self.defer_write(

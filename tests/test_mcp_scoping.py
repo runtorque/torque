@@ -1428,6 +1428,16 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
                 "task_id": task.id,
                 "from": alice.id,
                 "to": bob.id,
+                "worker_transfer": {
+                    "status": "not_applicable",
+                    "transferred_count": 0,
+                    "worker_ids": [],
+                    "warning": (
+                        "No live workers are linked to this task; no worker "
+                        "ownership changed."
+                    ),
+                },
+                "orphaned_task_worker_count": 0,
             },
         )
         self.assertEqual(state.board_tasks[task.id].assigned_engineer_id, bob.id)
@@ -1486,6 +1496,16 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
                 "task_id": task.id,
                 "from": "",
                 "to": bob.id,
+                "worker_transfer": {
+                    "status": "not_applicable",
+                    "transferred_count": 0,
+                    "worker_ids": [],
+                    "warning": (
+                        "No live workers are linked to this task; no worker "
+                        "ownership changed."
+                    ),
+                },
+                "orphaned_task_worker_count": 0,
             },
         )
         self.assertEqual(state.board_tasks[task.id].assigned_engineer_id, bob.id)

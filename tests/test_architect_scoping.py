@@ -3342,6 +3342,53 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         })
         self.assertEqual(payload["orphaned_task_worker_count"], 0)
 
+    async def test_task_reassign_persistence_failure_leaves_memory_unchanged(self):
+        architect = self._add_architect("arch-1", "Architect")
+        previous_owner = self._add_engineer(
+            "eng-previous", "Previous", hired_by_architect_id=architect.id
+        )
+        receiving_owner = self._add_engineer(
+            "eng-receiving", "Receiving", hired_by_architect_id=architect.id
+        )
+        worker = self._add_worker("worker-1", "Worker", previous_owner.id)
+        task = self._add_task(
+            "task-transfer-failure",
+            "Do not project a failed transfer",
+            lane="In Progress",
+            assigned_engineer_id=previous_owner.id,
+            created_by_architect_id=architect.id,
+            agent_id=worker.id,
+        )
+
+        # The task and worker snapshots are persisted before their in-memory
+        # fields are changed.  A database failure must therefore be a clean
+        # refusal rather than a half-reassigned live projection.
+        with mock.patch.object(
+                self.db,
+                "save_task_and_agents_async",
+                side_effect=RuntimeError("injected write failure"),
+        ):
+            text, error = await self._call(
+                "architect_task_reassign",
+                {"task": task.id, "new_engineer_id": receiving_owner.id},
+                architect.id,
+            )
+
+        self.assertTrue(error)
+        self.assertEqual(
+            text,
+            "Failed to persist task and worker ownership transfer",
+        )
+        self.assertEqual(task.assigned_engineer_id, previous_owner.id)
+        self.assertEqual(worker.owner_engineer_id, previous_owner.id)
+        persisted = self.db._conn.execute(
+            "SELECT t.assigned_engineer_id, a.owner_engineer_id "
+            "FROM board_tasks t JOIN agents a ON a.id=t.agent_id "
+            "WHERE t.id=?",
+            (task.id,),
+        ).fetchone()
+        self.assertEqual(persisted, (previous_owner.id, previous_owner.id))
+
     async def test_architect_task_create_and_reassign_reject_non_engineer_targets(self):
         architect = self._add_architect("arch-1", "Architect")
         other_architect = self._add_architect("arch-2", "Other Architect")
