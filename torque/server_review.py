@@ -448,11 +448,18 @@ def _review_verdict_from_message(message: str) -> str:
             return "ship_with_fixes"
         if lower.startswith(("needs rework", "needs changes", "blocker")):
             return "needs_rework"
+        if lower == "revert" or (
+                lower.startswith("revert")
+                and len(lower) > len("revert")
+                and lower[len("revert")] in {
+                    " ", ":", "-", "—", "–", ",", ";",
+                }):
+            return "needs_rework"
         if lower == "ship" or lower == "ship it":
             return "ship"
         if lower.startswith("ship") and len(lower) > 4:
             next_char = lower[4]
-            if next_char in {" ", ":", "-", "—", "–", ",", ";"}:
+            if next_char in {" ", ".", ":", "-", "—", "–", ",", ";"}:
                 return "ship"
     return ""
 
@@ -554,11 +561,15 @@ def _build_review_verdict_payload(*, task, cell=None, source_action: str,
         return {}
 
     source_action = _completion_evidence_text(source_action, limit=80)
-    message = _completion_evidence_text(message, limit=2000)
+    full_message = str(message or "").strip()
+    # The summary is bounded so completion evidence, board snapshots, and
+    # websocket payloads cannot grow without limit. Parse the complete report
+    # first: a final verdict commonly follows a detailed review body.
+    message = _completion_evidence_text(full_message, limit=2000)
     derived_action = _completion_evidence_text(derived_action, limit=120)
     verdict = ""
-    followup = _review_followup_classification_from_message(message)
-    parsed = _review_verdict_from_message(message)
+    followup = _review_followup_classification_from_message(full_message)
+    parsed = _review_verdict_from_message(full_message)
 
     if source_action == "derive":
         if pre_approved or derived_action.endswith("preapproved"):
@@ -595,6 +606,8 @@ def _build_review_verdict_payload(*, task, cell=None, source_action: str,
         "summary": message,
         "recorded_at": recorded_at,
     }
+    if len(full_message) > len(message):
+        payload["summary_truncated"] = True
     if parsed:
         payload["parsed_verdict"] = parsed
     if cell:
@@ -668,7 +681,7 @@ def _review_task_has_ship_verdict(task) -> bool:
         return False
     review = _task_review_evidence(task)
     verdict = str(review.get("verdict", "") or "").strip()
-    if verdict and verdict != "unknown":
+    if verdict:
         return verdict == "ship"
     for entry in reversed(getattr(task, "messages", []) or []):
         if str(entry.get("action", "") or "").lower() != "done":
