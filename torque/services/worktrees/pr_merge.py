@@ -202,6 +202,26 @@ async def _cleanup_verified_merged_pr_head_branch(
     return cleanup
 
 
+def _remote_branch_cleanup_error(cleanup: dict | None) -> str:
+    """Return caller-visible cleanup text for a failed remote delete.
+
+    A landed merge must remain successful when this best-effort operation
+    fails, but leaving that failure only in ``remote_branch_cleanup`` makes
+    the main post-merge cleanup summary misleadingly report ``errors=[]``.
+    """
+    cleanup = cleanup or {}
+    if not cleanup.get("branch_delete_failed"):
+        return ""
+    remote = str(cleanup.get("remote") or "remote").strip()
+    branch = str(cleanup.get("branch") or "branch").strip()
+    detail = str(
+        cleanup.get("branch_delete_stderr")
+        or cleanup.get("error")
+        or "remote branch delete failed"
+    ).strip()
+    return f"Remote branch cleanup failed for '{remote}/{branch}': {detail}"
+
+
 async def _run_pr_worktree_merge(
     *,
     state: MatrixState,
@@ -959,6 +979,27 @@ async def _run_pr_worktree_merge(
         )
         log.warning(post_merge_sync_warning)
 
+    origin_verification = _origin_verification_evidence(
+        merge_sha=merge_sha,
+        remote=remote,
+        base_branch=base_branch,
+        post_merge_sync=post_merge_sync,
+        authoritative_guard=authoritative_guard,
+    )
+    # A successful remote delete needs the worktree as its Git cwd. Run it
+    # after authoritative merge verification but before finalization, which
+    # may remove that worktree. This is independent of a later shared-context
+    # removal skip.
+    remote_branch_cleanup = await _cleanup_verified_merged_pr_head_branch(
+        worktree_mgr=worktree_mgr,
+        worktree_path=wt,
+        remote=remote,
+        branch=branch,
+        base_branch=base_branch,
+        pr_metadata=pr_metadata,
+        origin_verification=origin_verification,
+    )
+
     await _progress("finalize", "Finalizing merge\u2026")
     try:
         if getattr(cell, "driverless", False):
@@ -1069,31 +1110,28 @@ async def _run_pr_worktree_merge(
             phase=post_merge_sync.get("phase", "remote_base_sync"),
             detail=post_merge_sync,
         )
-    origin_verification = _origin_verification_evidence(
-        merge_sha=merge_sha,
-        remote=remote,
-        base_branch=base_branch,
-        post_merge_sync=post_merge_sync,
-        authoritative_guard=authoritative_guard,
-    )
     if origin_verification:
         result["origin_verification"] = origin_verification
-    # The merged PR head is the exact branch captured for this worktree
-    # boundary; do not infer a target from a naming convention. This runs
-    # before local/worktree cleanup so the remote operation retains its Git
-    # context, but only after origin verification has made merge success
-    # authoritative.
-    result["remote_branch_cleanup"] = (
-        await _cleanup_verified_merged_pr_head_branch(
-            worktree_mgr=worktree_mgr,
-            worktree_path=wt,
-            remote=remote,
-            branch=branch,
-            base_branch=base_branch,
-            pr_metadata=pr_metadata,
-            origin_verification=origin_verification,
+    result["remote_branch_cleanup"] = remote_branch_cleanup
+    remote_cleanup_error = _remote_branch_cleanup_error(remote_branch_cleanup)
+    if remote_cleanup_error:
+        # Preserve merge success while surfacing this failure through the
+        # cleanup result and normal post-success warning channel.
+        cleanup = result.setdefault("cleanup", {})
+        errors = cleanup.setdefault("errors", [])
+        if remote_cleanup_error not in errors:
+            errors.append(remote_cleanup_error)
+        warning = (
+            "Merge landed, but post-merge cleanup reported warnings: "
+            + remote_cleanup_error
         )
-    )
+        log.warning(warning)
+        _append_post_success_warning(
+            result,
+            warning,
+            phase="remote_branch_delete",
+            detail=remote_branch_cleanup,
+        )
     _attach_auto_force_push_metadata(result, push_metadata_result)
     if gates.get("workflow_breach"):
         result["workflow_breach"] = gates["workflow_breach"]
