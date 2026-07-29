@@ -172,7 +172,8 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
                     getattr(assigned_engineer, "engineer_specializations", [])
                     or []
                 )
-                if suggested_specialization not in engineer_specs:
+                # Empty means a routable generalist, not a missing binding.
+                if engineer_specs and suggested_specialization not in engineer_specs:
                     response["suggested_specialization_warning"] = (
                         f"assigned engineer does not carry specialization "
                         f"'{suggested_specialization}'"

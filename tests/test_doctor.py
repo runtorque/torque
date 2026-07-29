@@ -600,6 +600,21 @@ class TorqueDoctorTests(unittest.TestCase):
         self.assertIn("legacy (pre-stage-5):  0", rendered)
         self.assertIn("nonconforming:         0", rendered)
 
+    def test_doctor_advises_that_empty_specialization_engineers_are_generalists(self):
+        self._save_engineer("eng-forge", "Forge")
+
+        report = build_doctor_report_for_db(self.db_path)
+        warnings = {
+            warning["name"]: warning for warning in report["warnings"]
+        }
+
+        self.assertEqual(report["result"], "pass")
+        self.assertNotIn("engineer_generalist_specialization", report["failed_checks"])
+        warning = warnings["engineer_generalist_specialization"]
+        self.assertEqual(warning["status"], "warn")
+        self.assertEqual(warning["details"]["engineers"][0]["id"], "eng-forge")
+        self.assertIn("lowest-preference", warning["details"]["hint"])
+
     def test_build_doctor_report_accepts_custom_worker_branch_names(self):
         home = self._home_dir()
         self._save_engineer("eng-alice", "Alice")

@@ -569,16 +569,32 @@ def _collect_engineers_section(conn: sqlite3.Connection) -> dict:
             task_counts = {}
 
     engineers = []
+    specialization_column_exists = _column_exists(
+        conn, "agents", "engineer_specializations"
+    )
     try:
+        specialization_column = (
+            "engineer_specializations" if specialization_column_exists
+            else "'[]' AS engineer_specializations"
+        )
         rows = conn.execute(
-            "SELECT rowid, id, name, slug, persistent FROM agents "
+            f"SELECT rowid, id, name, slug, persistent, {specialization_column} FROM agents "
             "WHERE cell_type='agent' AND kind='engineer' "
             "ORDER BY rowid"
         ).fetchall()
     except sqlite3.OperationalError:
         rows = []
-    for rowid, agent_id, name, slug, persistent in rows:
+    for rowid, agent_id, name, slug, persistent, raw_specializations in rows:
         agent_id = str(agent_id or "")
+        try:
+            specializations = json.loads(raw_specializations or "[]")
+        except (TypeError, ValueError):
+            specializations = []
+        if not isinstance(specializations, list):
+            specializations = []
+        specializations = [
+            str(item).strip() for item in specializations if str(item).strip()
+        ]
         engineers.append(
             {
                 "id": agent_id,
@@ -587,6 +603,11 @@ def _collect_engineers_section(conn: sqlite3.Connection) -> dict:
                 "persistent": int(persistent or 0),
                 "worker_count": int(worker_counts.get(agent_id, 0) or 0),
                 "task_count": int(task_counts.get(agent_id, 0) or 0),
+                "specializations": specializations,
+                "specialization_display": (
+                    ", ".join(specializations) if specializations
+                    else "generalist"
+                ),
                 "_rowid": int(rowid or 0),
                 "_created_at": history_created_at.get(agent_id),
             }
@@ -609,9 +630,19 @@ def _collect_engineers_section(conn: sqlite3.Connection) -> dict:
         engineer.pop("_rowid", None)
         engineer.pop("_created_at", None)
 
+    generalists = [
+        {
+            "id": engineer["id"],
+            "name": engineer["name"],
+            "slug": engineer["slug"],
+        }
+        for engineer in engineers
+        if not engineer["specializations"]
+    ]
     return {
         "total": len(engineers),
         "engineers": engineers,
+        "generalists": generalists,
         "binding_env_mismatches": binding_env_mismatches,
     }
 
@@ -1318,6 +1349,26 @@ def _warn_no_engineers(report: dict) -> dict | None:
     }
 
 
+def _warn_engineer_generalist_specialization(report: dict) -> dict | None:
+    engineers = report.get("engineers", {}) or {}
+    generalists = list(engineers.get("generalists", []) or [])
+    if not generalists:
+        return None
+    return {
+        "name": "engineer_generalist_specialization",
+        "status": "warn",
+        "details": {
+            "count": len(generalists),
+            "engineers": generalists,
+            "hint": (
+                "empty specialization bindings are routable generalists: "
+                "explicit assignment works and hint-based routing uses them "
+                "as a lowest-preference fallback after matching specialists"
+            ),
+        },
+    }
+
+
 def _warn_engineer_binding_env_mismatch(report: dict) -> dict | None:
     engineers = report.get("engineers", {}) or {}
     mismatches = list(engineers.get("binding_env_mismatches", []) or [])
@@ -1811,6 +1862,7 @@ _DOCTOR_WARNINGS = [
     _warn_task_aliases_missing_canonical,
     _warn_ignored_legacy_template_files,
     _warn_no_engineers,
+    _warn_engineer_generalist_specialization,
     _warn_engineer_binding_env_mismatch,
     _warn_stale_pending_hires,
     _warn_dangling_decision_architects,
@@ -2054,7 +2106,8 @@ def format_doctor_report(report: dict) -> str:
             f"kind=engineer  "
             f"persistent={int(engineer.get('persistent', 0) or 0)}  "
             f"workers={int(engineer.get('worker_count', 0) or 0)}  "
-            f"tasks={int(engineer.get('task_count', 0) or 0)}"
+            f"tasks={int(engineer.get('task_count', 0) or 0)}  "
+            f"specializations={engineer.get('specialization_display', '')}"
         )
     lines.extend([
         "",

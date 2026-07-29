@@ -2389,6 +2389,11 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             ["ui-ux", "security-focus"],
         )
         self.assertEqual(engineers[bob.id]["specializations"], [])
+        self.assertEqual(engineers[bob.id]["specialization_display"], "generalist")
+        self.assertEqual(
+            engineers[alice.id]["specialization_display"],
+            "ui-ux, security-focus",
+        )
 
     async def test_architect_engineer_feedback_request_fans_out_to_hired_only(self):
         architect = self._add_architect("arch-1", "Architect")
@@ -2828,6 +2833,54 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             {item["id"] for item in filtered["tasks"]["items"]},
             {ui_task.id},
+        )
+
+    async def test_architect_board_summary_generalist_filter_includes_all_specializations(self):
+        architect = self._add_architect("arch-1", "Architect")
+        generalist = self._add_engineer(
+            "eng-generalist", "Generalist", hired_by_architect_id=architect.id
+        )
+        ui_task = self._add_task(
+            "task-ui", "Polish header", assigned_engineer_id=generalist.id,
+            created_by_architect_id=architect.id, suggested_specialization="ui-ux",
+        )
+        events_task = self._add_task(
+            "task-events", "Add event digest", assigned_engineer_id=generalist.id,
+            created_by_architect_id=architect.id, suggested_specialization="events",
+        )
+
+        text, is_error = await self._call(
+            "architect_board_summary",
+            {"specialization_engineer_id": generalist.id},
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        self.assertEqual(
+            {item["id"] for item in json.loads(text)["tasks"]["items"]},
+            {ui_task.id, events_task.id},
+        )
+
+    async def test_architect_task_create_generalist_has_no_specialization_mismatch_warning(self):
+        architect = self._add_architect("arch-1", "Architect")
+        generalist = self._add_engineer(
+            "eng-generalist", "Generalist", hired_by_architect_id=architect.id
+        )
+
+        text, is_error = await self._call(
+            "architect_task_create",
+            {
+                "title": "Generalist fallback",
+                "group": "torque",
+                "assigned_engineer_id": generalist.id,
+                "suggested_specialization": "ui-ux",
+            },
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        self.assertNotIn(
+            "suggested_specialization_warning", json.loads(text)
         )
 
     async def test_architect_task_list_filters_and_scopes_to_architect_group(self):
