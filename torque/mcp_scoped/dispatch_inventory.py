@@ -313,6 +313,9 @@ async def dispatch_inventory(ctx: ScopedDispatchContext):
             current_task = real_state.agent_current_task(cell.id)
             if current_task and current_task.id not in visible_task_ids:
                 current_task = None
+            specializations = list(
+                getattr(cell, "engineer_specializations", []) or []
+            )
             engineers.append({
                 "id": cell.id,
                 "name": cell.name,
@@ -329,8 +332,13 @@ async def dispatch_inventory(ctx: ScopedDispatchContext):
                 "current_task": current_task.task if current_task else "",
                 "activity": cell.activity,
                 "activity_detail": cell.activity_detail,
-                "specializations": list(
-                    getattr(cell, "engineer_specializations", []) or []
+                "specializations": specializations,
+                # Keep the underlying empty list intact: it is not a slug.
+                # The display field prevents an intentional generalist from
+                # being mistaken for an unconfigured or unusable engineer.
+                "specialization_display": (
+                    ", ".join(specializations) if specializations
+                    else "generalist"
                 ),
             })
         engineers.sort(

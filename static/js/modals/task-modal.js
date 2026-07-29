@@ -1054,11 +1054,17 @@ function _taskSpecializationBestMatch(labels) {
   if (!Object.keys(labelSet).length) return null;
   var best = null;
   var bestScore = 0;
+  var generalist = null;
   for (var id in state.agents) {
     var c = state.agents[id];
     if (!c || c.kind !== 'engineer') continue;
     var specs = c.engineer_specializations || [];
-    if (!specs.length) continue;
+    // Empty bindings deliberately mean a generalist. Keep one as a fallback
+    // so a matching specialist always wins over it.
+    if (!specs.length) {
+      if (!generalist) generalist = c;
+      continue;
+    }
     var score = 0;
     for (var i = 0; i < specs.length; i++) {
       if (labelSet[(specs[i] || '').toLowerCase()]) score++;
@@ -1068,7 +1074,7 @@ function _taskSpecializationBestMatch(labels) {
       best = c;
     }
   }
-  return best;
+  return best || generalist;
 }
 
 function _renderTaskSpecializationHint() {
@@ -1082,7 +1088,9 @@ function _renderTaskSpecializationHint() {
     return;
   }
   hintEl.style.display = '';
-  hintEl.textContent = 'best-match: ' + (match.name || match.slug || match.id);
+  var specs = match.engineer_specializations || [];
+  var role = specs.length ? '' : ' (generalist fallback)';
+  hintEl.textContent = 'best-match: ' + (match.name || match.slug || match.id) + role;
 }
 
 function _setTaskLabels(labels) {

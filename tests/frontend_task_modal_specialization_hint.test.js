@@ -54,6 +54,58 @@ test('best-match picks the engineer with the most overlapping specializations', 
   assert.equal(none, null);
 });
 
+test('best-match prefers a matching specialist over a generalist', () => {
+  const agents = {
+    'eng-generalist': {
+      id: 'eng-generalist', name: 'Generalist', kind: 'engineer',
+      engineer_specializations: [],
+    },
+    'eng-specialist': {
+      id: 'eng-specialist', name: 'Specialist', kind: 'engineer',
+      engineer_specializations: ['ui-ux'],
+    },
+  };
+  const { ctx } = buildContext(agents);
+  const match = ctx._taskSpecializationBestMatch(['ui-ux']);
+  assert.equal(match && match.name, 'Specialist');
+});
+
+test('best-match falls back to a generalist when no specialist matches', () => {
+  const agents = {
+    'eng-generalist': {
+      id: 'eng-generalist', name: 'Generalist', kind: 'engineer',
+      engineer_specializations: [],
+    },
+    'eng-specialist': {
+      id: 'eng-specialist', name: 'Specialist', kind: 'engineer',
+      engineer_specializations: ['events'],
+    },
+  };
+  const { ctx } = buildContext(agents);
+  const match = ctx._taskSpecializationBestMatch(['ui-ux']);
+  assert.equal(match && match.name, 'Generalist');
+});
+
+test('best-match treats legacy absent specializations like deliberate empty bindings', () => {
+  const legacy = {
+    'eng-legacy': { id: 'eng-legacy', name: 'Legacy', kind: 'engineer' },
+  };
+  const deliberate = {
+    'eng-generalist': {
+      id: 'eng-generalist', name: 'Generalist', kind: 'engineer',
+      engineer_specializations: [],
+    },
+  };
+  assert.equal(
+    buildContext(legacy).ctx._taskSpecializationBestMatch(['ui-ux']).name,
+    'Legacy',
+  );
+  assert.equal(
+    buildContext(deliberate).ctx._taskSpecializationBestMatch(['ui-ux']).name,
+    'Generalist',
+  );
+});
+
 test('best-match skips non-engineer agents', () => {
   const agents = {
     'worker-a': {
@@ -104,6 +156,19 @@ test('render shows hint naming the best-match engineer', () => {
   vm.runInContext('_renderTaskSpecializationHint();', ctx);
   assert.notEqual(hintEl.style.display, 'none');
   assert.match(hintEl.textContent, /best-match: Alice/);
+});
+
+test('render identifies an empty-binding fallback as a generalist', () => {
+  const agents = {
+    'eng-generalist': {
+      id: 'eng-generalist', name: 'Generalist', kind: 'engineer',
+      engineer_specializations: [],
+    },
+  };
+  const { ctx, hintEl } = buildContext(agents);
+  vm.runInContext('_taskLabels = ["ui-ux"]; _taskSystemLabels = [];', ctx);
+  vm.runInContext('_renderTaskSpecializationHint();', ctx);
+  assert.match(hintEl.textContent, /generalist fallback/);
 });
 
 test('initiative create helper opens Board task modal with source-scoped create context', () => {

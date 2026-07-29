@@ -202,7 +202,8 @@ _ARCHITECT_TOOL_SPECS = [
                         "Optional engineer id/slug/name. When set, the task "
                         "excerpt is filtered to tasks whose "
                         "suggested_specialization matches one of that "
-                        "engineer's specializations."
+                        "engineer's specializations; an Engineer with no "
+                        "specializations is a generalist and matches every slug."
                     ),
                 },
             },

@@ -459,6 +459,8 @@ class TorqueDoctorTests(unittest.TestCase):
                     "persistent": 1,
                     "worker_count": 1,
                     "task_count": 1,
+                    "specializations": [],
+                    "specialization_display": "generalist",
                 }
             ],
         )
@@ -478,7 +480,10 @@ class TorqueDoctorTests(unittest.TestCase):
             report["drift"]["agents_created_by_engineer_owner_engineer"],
             0,
         )
-        self.assertEqual(report["warnings"], [])
+        self.assertEqual(
+            [warning["name"] for warning in report["warnings"]],
+            ["engineer_generalist_specialization"],
+        )
         self.assertEqual(report["runtime_locations"]["data_dir_kind"], "custom")
         self.assertEqual(
             report["runtime_locations"]["primary_runtime_python"],
@@ -489,7 +494,7 @@ class TorqueDoctorTests(unittest.TestCase):
         self.assertFalse(report["stage_6_cleanup"]["legacy_columns_present"])
         self.assertFalse(report["stage_6_cleanup"]["engineer_tool_aliases_present"])
         self.assertIn("Torque doctor — kinds refactor", rendered)
-        self.assertIn("Result: PASS", rendered)
+        self.assertIn("Result: PASS (with warnings)", rendered)
         self.assertIn("[engineers]", rendered)
         self.assertIn("[architects]", rendered)
         self.assertIn("[pending_hires]", rendered)
@@ -599,6 +604,21 @@ class TorqueDoctorTests(unittest.TestCase):
         self.assertIn("namespaced (stage 5):  0", rendered)
         self.assertIn("legacy (pre-stage-5):  0", rendered)
         self.assertIn("nonconforming:         0", rendered)
+
+    def test_doctor_advises_that_empty_specialization_engineers_are_generalists(self):
+        self._save_engineer("eng-forge", "Forge")
+
+        report = build_doctor_report_for_db(self.db_path)
+        warnings = {
+            warning["name"]: warning for warning in report["warnings"]
+        }
+
+        self.assertEqual(report["result"], "pass")
+        self.assertNotIn("engineer_generalist_specialization", report["failed_checks"])
+        warning = warnings["engineer_generalist_specialization"]
+        self.assertEqual(warning["status"], "warn")
+        self.assertEqual(warning["details"]["engineers"][0]["id"], "eng-forge")
+        self.assertIn("lowest-preference", warning["details"]["hint"])
 
     def test_build_doctor_report_accepts_custom_worker_branch_names(self):
         home = self._home_dir()
@@ -960,20 +980,17 @@ class TorqueDoctorTests(unittest.TestCase):
 
         self.assertEqual(report["result"], "pass")
         self.assertEqual(
-            report["warnings"],
+            [warning["name"] for warning in report["warnings"]],
             [
-                {
-                    "name": "unassigned_tasks_when_engineer_present",
-                    "status": "warn",
-                    "details": {"count": 1, "engineer_count": 1},
-                }
+                "unassigned_tasks_when_engineer_present",
+                "engineer_generalist_specialization",
             ],
         )
         self.assertEqual(report["tasks"]["unassigned_when_engineer_present"], 1)
         self.assertIn("Result: PASS (with warnings)", rendered)
         self.assertIn("engineer present but unassigned tasks remain: 1", rendered)
 
-    def test_build_doctor_report_does_not_warn_about_default_engineer_routing(self):
+    def test_build_doctor_report_advises_about_default_generalist_engineers(self):
         home = self._home_dir()
         self.db.save_agent(
             AgentCell(
@@ -1004,8 +1021,11 @@ class TorqueDoctorTests(unittest.TestCase):
 
         self.assertEqual(report["result"], "pass")
         self.assertEqual(report["engineers"]["total"], 2)
-        self.assertEqual(report["warnings"], [])
-        self.assertIn("Result: PASS", rendered)
+        self.assertEqual(
+            [warning["name"] for warning in report["warnings"]],
+            ["engineer_generalist_specialization"],
+        )
+        self.assertIn("Result: PASS (with warnings)", rendered)
         self.assertNotIn("default (engineer_* routing)", rendered)
 
     def test_build_doctor_report_passes_for_multiple_engineers_when_engineer_exists(self):
@@ -1038,7 +1058,10 @@ class TorqueDoctorTests(unittest.TestCase):
             rendered = format_doctor_report(report)
 
         self.assertEqual(report["result"], "pass")
-        self.assertEqual(report["warnings"], [])
+        self.assertEqual(
+            [warning["name"] for warning in report["warnings"]],
+            ["engineer_generalist_specialization"],
+        )
         self.assertEqual(report["engineers"]["total"], 2)
         self.assertNotIn("default (engineer_* routing)", rendered)
 
