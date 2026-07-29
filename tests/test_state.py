@@ -5441,6 +5441,11 @@ class MatrixStateEngineerStreamTests(unittest.IsolatedAsyncioTestCase):
         _install_aiohttp_stub()
         self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
+        self.streams_mod = importlib.import_module("torque.worktree_streams")
+        # This fixture uses a synthetic, non-repository path.  Reset the
+        # process-global readiness cache so the snapshot test neither leaks
+        # nor depends on a probe installed by another test.
+        self.streams_mod.invalidate_branch_exists_cache("/repo")
 
     def _make_state_with_open_stream(self):
         state = self.state_mod.MatrixState()
@@ -5457,6 +5462,7 @@ class MatrixStateEngineerStreamTests(unittest.IsolatedAsyncioTestCase):
             worktree_path="/repo/.torque/worktrees/agent-1",
             worktree_repo_root="/repo",
             worktree_branch="torque/worker",
+            worktree_base_branch="main",
             git_root="/repo",
         )
         state.agents[worker.id] = worker
@@ -5490,6 +5496,7 @@ class MatrixStateEngineerStreamTests(unittest.IsolatedAsyncioTestCase):
                 "version": "1",
                 "repo_root": "/repo",
                 "branch": "torque/worker",
+                "base_branch": "main",
                 "status": "open",
                 "recorded_at": "2026-04-07T11:30:00+00:00",
                 "commit_sha": "abc123",
@@ -5498,6 +5505,17 @@ class MatrixStateEngineerStreamTests(unittest.IsolatedAsyncioTestCase):
         )
         state.board_tasks[product.id] = product
         state.board_tasks[review.id] = review
+        # `ready_to_merge` deliberately requires a fresh current-base probe;
+        # a historical clean review is not enough.  Model that probe directly
+        # rather than making this snapshot fixture consult the host checkout.
+        self.streams_mod._merge_readiness_cache_put(
+            "/repo", "torque/worker", "main", {
+                "state": "fresh",
+                "stale": False,
+                "source": "merge_readiness_check",
+                "merge_clean": True,
+            },
+        )
         return state, product
 
     def test_to_dict_includes_engineer_streams_snapshot(self):
@@ -5511,6 +5529,10 @@ class MatrixStateEngineerStreamTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary["count"], 1)
         self.assertEqual(summary["items"][0]["branch"], "torque/worker")
         self.assertEqual(summary["items"][0]["state"], "ready_to_merge")
+        self.assertEqual(
+            summary["items"][0]["merge_readiness"]["stale_base"]["source"],
+            "merge_readiness_check",
+        )
 
     async def test_snapshot_msg_async_round_trips_state_payload(self):
         state, _product = self._make_state_with_open_stream()
