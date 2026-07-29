@@ -393,22 +393,23 @@ async def dispatch_architect_reads(ctx: ScopedDispatchContext):
                 args.get("specialization_engineer_id", "") or ""
             ).strip()
             if spec_ident:
-                resolved_engineer_id, _engineer_error = _resolve_visible_agent(
-                    real_state, caller_kind, caller_id, spec_ident
+                resolved_engineer_id, engineer_error = _resolve_architect_hired_engineer(
+                    real_state, caller_id, spec_ident
                 )
-                if resolved_engineer_id:
-                    specialization_filter_engineer_id = resolved_engineer_id
-                    spec_cell = real_state.agents.get(resolved_engineer_id)
-                    specialization_filter = {
-                        str(s or "").strip()
-                        for s in (
-                            getattr(
-                                spec_cell, "engineer_specializations", []
-                            ) or []
-                        )
-                        if str(s or "").strip()
-                    }
-                    specialization_filter_is_generalist = not specialization_filter
+                if not resolved_engineer_id:
+                    return engineer_error, True
+                specialization_filter_engineer_id = resolved_engineer_id
+                spec_cell = real_state.agents.get(resolved_engineer_id)
+                specialization_filter = {
+                    str(s or "").strip()
+                    for s in (
+                        getattr(
+                            spec_cell, "engineer_specializations", []
+                        ) or []
+                    )
+                    if str(s or "").strip()
+                }
+                specialization_filter_is_generalist = not specialization_filter
         for task in actionable_visible_tasks:
             created_by = _task_created_by_classifier(task) if include_created_by else ""
             if include_created_by:

@@ -2861,6 +2861,27 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             {ui_task.id, events_task.id},
         )
 
+    async def test_architect_board_summary_rejects_architect_as_specialization_engineer(self):
+        architect = self._add_architect("arch-1", "Architect")
+        specialist = self._add_engineer(
+            "eng-specialist", "Specialist", hired_by_architect_id=architect.id
+        )
+        specialist.engineer_specializations = ["ui-ux"]
+        self.state._db_save_agent(specialist)
+        self._add_task(
+            "task-ui", "Polish header", assigned_engineer_id=specialist.id,
+            created_by_architect_id=architect.id, suggested_specialization="ui-ux",
+        )
+
+        text, is_error = await self._call(
+            "architect_board_summary",
+            {"specialization_engineer_id": architect.id},
+            architect.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertEqual(text, "engineer not found in scope")
+
     async def test_architect_task_create_generalist_has_no_specialization_mismatch_warning(self):
         architect = self._add_architect("arch-1", "Architect")
         generalist = self._add_engineer(
