@@ -78,6 +78,19 @@ class WorktreeStreamTests(unittest.TestCase):
         state.groups["g"] = []
         return state
 
+    def test_exported_prefill_path_handles_empty_state(self):
+        class EmptyState:
+            agents = {}
+            board_tasks = {}
+
+            @staticmethod
+            def iter_active_agents():
+                return iter(())
+
+        asyncio.run(
+            self.streams_mod.prefill_branch_exists_for_state(EmptyState())
+        )
+
     def _add_agent(self, state, *, agent_id="agent-1", branch="torque/worker",
                    current_task_id="", status="running",
                    last_event_at="2026-04-07T12:00:00+00:00"):

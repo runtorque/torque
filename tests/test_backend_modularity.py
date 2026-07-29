@@ -2,11 +2,16 @@
 
 import ast
 import builtins
+import dis
+import importlib
 from pathlib import Path
 import subprocess
 import tempfile
+import types
+import typing
 import unittest
 
+from tests.helpers import install_aiohttp_stub
 from torque.backend_invariants import (
     BACKEND_LINE_LIMITS,
     DEFAULT_BACKEND_LINE_LIMIT,
@@ -319,6 +324,87 @@ class BackendSizeGuardrailTests(unittest.TestCase):
             {},
             violations,
             "runtime builders must receive main-local callbacks explicitly",
+        )
+
+
+class ResponsibilitySplitNameClosureTests(unittest.TestCase):
+    MOVED_FUNCTIONS = {
+        "torque.server_user_commands": (
+            "_watch_local_response",
+            "_handle_task_watch_command",
+            "_parse_reminder_delay",
+            "_reminder_local_response",
+            "_handle_reminder_command",
+        ),
+        "torque.server_engineer_commands": (
+            "_handle_engineer_flush_now_command",
+            "_engineer_journal_source_key",
+            "_append_engineer_journal_entry",
+            "_handle_engineer_dismiss_note_command",
+            "_handle_digest_pause_resume_command",
+        ),
+        "torque.worktree_stream_readiness": (
+            "_normalize_repo_root",
+            "invalidate_branch_exists_cache",
+            "_merge_readiness_cache_key",
+            "_merge_readiness_cache_get",
+            "_merge_readiness_cache_put",
+            "_list_repo_branches_async",
+            "_refresh_repo_branches",
+            "prefill_branch_exists_async",
+            "_collect_state_repo_roots",
+            "prefill_branch_exists_for_state",
+            "_run_merge_readiness_git",
+            "_probe_merge_readiness",
+            "_stream_base_branch",
+            "prefill_merge_readiness_for_state",
+            "_branch_exists_locally",
+        ),
+    }
+
+    @classmethod
+    def _loaded_global_names(cls, code: types.CodeType) -> set[str]:
+        names = {
+            instruction.argval
+            for instruction in dis.get_instructions(code)
+            if instruction.opname in {"LOAD_GLOBAL", "LOAD_NAME"}
+        }
+        for constant in code.co_consts:
+            if isinstance(constant, types.CodeType):
+                names.update(cls._loaded_global_names(constant))
+        return names
+
+    def test_moved_functions_have_closed_body_and_annotation_names(self):
+        install_aiohttp_stub()
+        self.assertEqual(
+            sum(len(names) for names in self.MOVED_FUNCTIONS.values()),
+            25,
+        )
+        body_failures = {}
+        annotation_failures = {}
+        for module_name, function_names in self.MOVED_FUNCTIONS.items():
+            module = importlib.import_module(module_name)
+            for function_name in function_names:
+                function = getattr(module, function_name)
+                key = f"{module_name}.{function_name}"
+                missing = sorted(
+                    name
+                    for name in self._loaded_global_names(function.__code__)
+                    if name not in function.__globals__
+                    and not hasattr(builtins, name)
+                )
+                if missing:
+                    body_failures[key] = missing
+                try:
+                    typing.get_type_hints(function)
+                except (NameError, TypeError) as exc:
+                    annotation_failures[key] = f"{type(exc).__name__}: {exc}"
+        self.assertEqual(
+            {"body": {}, "annotations": {}},
+            {
+                "body": body_failures,
+                "annotations": annotation_failures,
+            },
         )
 
 

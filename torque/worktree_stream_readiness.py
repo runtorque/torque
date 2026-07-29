@@ -6,6 +6,7 @@ import asyncio
 import os
 import subprocess
 import time
+from typing import Iterable
 
 from .worktree_boundaries import task_boundary
 
@@ -343,6 +344,10 @@ async def prefill_merge_readiness_for_state(state, *, group: str = "") -> None:
     Failure is intentionally cached as ``unknown`` and downstream synthesis
     treats it as not-ready rather than falsely recommending a merge.
     """
+    # Deferred to avoid the import cycle: worktree_streams re-exports this
+    # module's readiness helpers.
+    from .worktree_streams import compute_worktree_streams
+
     await prefill_branch_exists_for_state(
         state, group=group, include_merge_readiness=False,
     )
