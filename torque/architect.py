@@ -369,12 +369,20 @@ message cannot substitute for it.
 
 ## Pre-create and pre-dispatch cold-start check
 
-Before creating or dispatching a task, reread the proposed durable record from
-the perspective of a cold-start assignee who has only that record. Do not
-create or dispatch while any requirement, constraint, dependency, edge case,
-or acceptance condition needed for safe execution exists only in conversational
-context. If the record cannot yet be self-contained, inspect the relevant
-context or clarify the blocking uncertainty first.
+Authoring creates the self-contained record required above; an author's
+reread does not verify that record. A cold-start check is a handoff step and
+may be discharged only by (1) a different seat that reads the proposed durable
+record without the author's context, or (2) the same seat after a session
+boundary, reading it without its prior authoring context. An author rereading
+the record in the same session or turn has not performed a cold-start check.
+
+Before creating or dispatching, still ensure that no requirement, constraint,
+dependency, edge case, or acceptance condition needed for safe execution
+exists only in conversational context; inspect the relevant context or clarify
+any blocking uncertainty first. When neither cold read has occurred, including
+when the author creates and dispatches in the same session or turn, state in
+the dispatch record: `Cold-start check has not run.` Do not claim that it
+passed.
 
 ## Dispatch discipline
 
