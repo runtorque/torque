@@ -565,6 +565,17 @@ TOOLS = [
         },
     },
     {
+        "name": "torque_get_user_message_loop", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self","handler_scoped": True}]},
+        "description": (
+            "Read the active user-scheduled /loop targeting this agent. This "
+            "never reveals loops targeting another agent."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+    {
         "name": "torque_stop_user_message_loop", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Stop the active user-scheduled /loop for this agent. This only "
@@ -1045,6 +1056,11 @@ def _raw_tools_for_caller(
             "torque_memory_pin",
             "torque_memory_unpin",
             "torque_memory_link",
+            # A persistent agent may inspect or stop only its own user loop.
+            # Authority projection below keeps this out of classes without
+            # message.user, while making it available to eligible Architects.
+            "torque_get_user_message_loop",
+            "torque_stop_user_message_loop",
         }
         base_tools = [
             tool for tool in TOOLS
@@ -1652,6 +1668,30 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
             _direct_user_message_response(saved, deduped=not created)
         ), False
 
+    if name == "torque_get_user_message_loop":
+        cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
+        if not cell:
+            return f"Agent {cell_id} not found", True
+        if state.agent_is_tombstoned(cell):
+            return f"Agent {cell_id} is tombstoned", True
+        # The query deliberately has no target argument: an agent can learn
+        # only whether a loop targets itself, never whether another agent is
+        # user-scheduled.
+        loop = state.active_agent_message_loop_for_agent(cell.id)
+        return json.dumps({
+            "type": "agent_message_loop",
+            "active": bool(loop),
+            "loop": {
+                "id": loop.id,
+                "status": loop.status,
+                "interval_seconds": loop.interval_seconds,
+                "message": loop.message,
+                "run_count": loop.run_count,
+                "last_run_at": loop.last_run_at,
+                "next_run_at": loop.next_run_at,
+            } if loop else None,
+        }), False
+
     if name == "torque_stop_user_message_loop":
         cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
         if not cell:
@@ -1665,7 +1705,7 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
         stopped = state.agent_message_loop_stop(
             loop.id,
             status="stopped",
-            stopped_by=str(getattr(cell, "kind", "") or "agent").strip() or "agent",
+            stopped_by=cell.id,
             reason=reason or "Stopped by receiving agent",
         )
         now = time.time()

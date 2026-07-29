@@ -35,6 +35,7 @@ _SUFFIX_TO_CANONICAL = {
     "proposal_message_user": "user_message",
     "proposal_ask_user": "raise",
     "note": "user_note",
+    "get_user_message_loop": "user_message_loop_get",
     "stop_user_message_loop": "user_message_loop_stop",
     "peer_list": "peer_list",
     "proposal_peer_list": "peer_list",
@@ -241,6 +242,11 @@ CANONICAL_DESCRIPTIONS = {
     "help_query": "Answer a question from maintained Torque help with source excerpts.",
     "help_get": "Read one maintained Torque help topic.",
     "user_message": "Send a durable, non-blocking message to the owning user conversation.",
+    "user_message_loop_get": (
+        "Read the active user-scheduled /loop targeting this agent. The "
+        "response is scoped to the caller and includes its cadence, delivery "
+        "state, and standing message."
+    ),
     "raise": "Raise a blocking decision to the immediate decision owner and pause until answered. Ownership routes Worker to owning Engineer, hired Engineer to hiring Architect, and Architect or an orphaned agent to the user.",
     "user_note": "Post a persistent non-blocking note or soft question for the user.",
     "peer_list": "List same-level peers eligible for direct coordination.",
@@ -282,7 +288,8 @@ _ARCHITECT_EAGER_BY_CATEGORY = {
     "communication": {
         "raise", "user_message", "peer_list", "peer_message",
         "peer_inbox", "peer_reply", "agent_message", "agent_reply",
-        "agent_ask_get", "agent_ask_answer",
+        "agent_ask_get", "agent_ask_answer", "user_message_loop_get",
+        "user_message_loop_stop",
     },
     # Architect task routing. task_create carries the authorized
     # dispatch-to-hired-Engineer flow; Architects do not dispatch Workers.
@@ -322,6 +329,7 @@ _ENGINEER_EAGER_BY_CATEGORY = {
         "task_update", "task_move", "task_dispatch", "task_verify",
         "task_artifact_upload", "agent_list", "agent_get", "agent_message",
         "agent_ask_answer", "raise", "user_message", "user_note",
+        "user_message_loop_get", "user_message_loop_stop",
         "peer_list", "peer_message", "peer_inbox", "peer_reply",
         "supervisor_message", "agent_reply", "event_list",
     },
@@ -361,7 +369,8 @@ _EAGER_BY_KIND = {
         "context", "area_list", "area_get", "help_search", "help_query", "help_get",
         "task_artifact_upload", "task_complete", "task_blocked", "task_error",
         "task_progress", "task_verify", "agent_ready", "agent_rename",
-        "task_derive", "raise", "user_message", "user_message_loop_stop",
+        "task_derive", "raise", "user_message", "user_message_loop_get",
+        "user_message_loop_stop",
         "agent_reply", "memory_publish", "memory_list", "memory_get",
         "memory_set_pin", "memory_link",
     },
