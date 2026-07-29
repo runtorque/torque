@@ -773,6 +773,10 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
         implementer, reviewer, _root, _fix = (
             self._add_second_review_cycle_chain(state)
         )
+        implementer.worktree_path = "/repo/fix-worktree"
+        implementer.worktree_branch = "torque/implementer/fix"
+        reviewer.worktree_path = "/repo/predecessor-worktree"
+        reviewer.worktree_branch = "torque/reviewer/predecessor"
         calls, dispatch = self._recording_dispatch(state)
         handle_command = self._extract_handle_command(state, dispatch)
 
@@ -787,7 +791,140 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["type"], "ok")
         self.assertEqual(result["agent_id"], reviewer.id)
         self.assertEqual(calls[0]["agent_id"], reviewer.id)
+        self.assertEqual(calls[0]["inherit_worktree_from"], implementer.id)
         self.assertNotIn("create_agent", calls[0])
+
+    async def test_reused_reviewer_records_boundary_at_fix_worktree_head(self):
+        """A re-review boundary must name the SHA the reviewer was handed."""
+        state = self._make_state()
+        implementer, reviewer, _root, _fix = (
+            self._add_second_review_cycle_chain(state)
+        )
+        implementer.worktree_path = "/repo/fix-worktree"
+        implementer.worktree_branch = "torque/implementer/fix"
+        implementer.worktree_repo_root = "/repo"
+        implementer.worktree_base_branch = "main"
+        reviewer.worktree_path = "/repo/predecessor-worktree"
+        reviewer.worktree_branch = "torque/reviewer/predecessor"
+        reviewer.worktree_repo_root = "/repo"
+        reviewer.worktree_base_branch = "main"
+        heads = {
+            implementer.worktree_path: "reviewed-fix-sha",
+            reviewer.worktree_path: "predecessor-sha",
+        }
+
+        async def dispatch(payload):
+            task = state.board_tasks[payload["id"]]
+            target = state.agents[payload["agent_id"]]
+            source = state.agents[payload["inherit_worktree_from"]]
+            self.server_mod._copy_worktree_context(target, source)
+            task.agent_id = target.id
+            task.lane = "In Progress"
+            target.current_task_id = task.id
+            return {"type": "ok", "task_id": task.id, "agent_id": target.id}
+
+        async def record_task_boundary(task, cell, message=""):
+            task.worktree_boundary = {
+                "repo_root": cell.worktree_repo_root,
+                "branch": cell.worktree_branch,
+                "commit_sha": heads[cell.worktree_path],
+                "message": message,
+                "status": "open",
+            }
+            return dict(task.worktree_boundary)
+
+        handle_command = self._extract_handle_command(
+            state,
+            dispatch,
+            closure_overrides={"_record_task_boundary": record_task_boundary},
+        )
+        derived = await handle_command({
+            "cmd": "ai_report",
+            "cell_id": implementer.id,
+            "action": "derive",
+            "action_name": "feature/review",
+            "message": "Review the fixes at reviewed-fix-sha",
+        })
+        self.assertEqual(derived["type"], "ok")
+
+        review = state.board_tasks[derived["task_id"]]
+        completed = await handle_command({
+            "cmd": "ai_report",
+            "cell_id": reviewer.id,
+            "action": "done",
+            "message": "Ship; reviewed reviewed-fix-sha",
+            "terminal_declaration": (
+                "No further work is needed; I will not derive after this."
+            ),
+        })
+
+        self.assertTrue(completed is None or completed.get("type") == "ok")
+        self.assertEqual(review.worktree_boundary["branch"],
+                         implementer.worktree_branch)
+        self.assertEqual(review.worktree_boundary["commit_sha"],
+                         "reviewed-fix-sha")
+
+    async def test_dispatch_reused_reviewer_adopts_explicit_fix_worktree(self):
+        """Existing-agent dispatch applies the review handoff before prompting."""
+        state = self._make_state()
+        implementer, reviewer, _root, fix = (
+            self._add_second_review_cycle_chain(state)
+        )
+        implementer.worktree_path = "/repo/fix-worktree"
+        implementer.worktree_branch = "torque/implementer/fix"
+        implementer.worktree_repo_root = "/repo"
+        implementer.worktree_base_branch = "main"
+        reviewer.worktree_path = "/repo/predecessor-worktree"
+        reviewer.worktree_branch = "torque/reviewer/predecessor"
+        reviewer.worktree_repo_root = "/repo"
+        reviewer.worktree_base_branch = "main"
+        review = state.board_add_task(
+            "Review fixed implementation",
+            "g",
+            lane="Backlog",
+            id="task-rereview",
+            action_name="feature/review",
+            parent_task_id=fix.id,
+            pipeline_root_id="task-root",
+        )
+        sent_prompts = []
+
+        def record_task_dispatch(cell, task, lane):
+            state.board_update_task(task.id, agent_id=cell.id, lane=lane)
+            cell.current_task_id = task.id
+
+        async def send_agent_prompt(cell, prompt, **_kwargs):
+            sent_prompts.append((cell.id, prompt))
+
+        holder = {}
+
+        async def recursive_dispatch(payload):
+            return await holder["handle_command"](payload)
+
+        handle_command = self._extract_handle_command(
+            state,
+            recursive_dispatch,
+            action_mgr=self._AutoCloseActionManager(),
+            closure_overrides={
+                "_build_postscript": lambda *args, **kwargs: "",
+                "_record_task_dispatch": record_task_dispatch,
+                "_send_agent_prompt": send_agent_prompt,
+            },
+        )
+        holder["handle_command"] = handle_command
+
+        result = await handle_command({
+            "cmd": "dispatch_task",
+            "id": review.id,
+            "agent_id": reviewer.id,
+            "inherit_worktree_from": implementer.id,
+            "handoff_worktree_from": implementer.id,
+        })
+
+        self.assertEqual(result["type"], "ok")
+        self.assertEqual(reviewer.worktree_path, implementer.worktree_path)
+        self.assertEqual(reviewer.worktree_branch, implementer.worktree_branch)
+        self.assertEqual(sent_prompts[0][0], reviewer.id)
 
     async def test_feature_review_derive_refuses_stale_base_before_dispatch(self):
         state = self._make_state()

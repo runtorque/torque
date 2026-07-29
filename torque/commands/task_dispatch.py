@@ -107,6 +107,9 @@ async def handle_dispatch_task_command(
     template_mgr = runtime.template_mgr
     worktree_mgr = runtime.worktree_mgr
     result = None
+    inherit_worktree_from = str(
+        data.get("inherit_worktree_from", "") or ""
+    ).strip()
 
     tid = _resolve_task_id(state, data.get("id", ""))
     task = state.board_tasks.get(tid)
@@ -500,6 +503,30 @@ async def handle_dispatch_task_command(
                     "agent_id": cell.id,
                 }
                 cell = None
+
+            # Reused reviewers are existing agents and therefore do not pass
+            # through the new-agent inheritance branch.  Apply an explicit
+            # worktree handoff before prompting them, so their eventual task
+            # boundary is recorded from the worktree they reviewed rather
+            # than a predecessor worktree they happened to retain.
+            if cell and not result and inherit_worktree_from:
+                inherited_worktree_source = (
+                    _resolve_inherited_worktree_source(
+                        state,
+                        task,
+                        inherit_worktree_from,
+                    )
+                )
+                if (
+                        inherited_worktree_source
+                        and inherited_worktree_source is not cell
+                        and _copy_worktree_context(
+                            cell,
+                            inherited_worktree_source,
+                        )
+                ):
+                    state._emit_agent(cell)
+                    state._db_save_agent(cell)
 
             if cell:
                 final_prompt = ""
