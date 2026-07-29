@@ -37,6 +37,36 @@ USER_REMINDER_MAX_DELAY_SECONDS = 30 * 24 * 60 * 60
 USER_REMINDER_MAX_MESSAGE_CHARS = USER_AGENT_LOOP_MAX_MESSAGE_CHARS
 
 
+def _recipient_can_stop_user_message_loop(
+        state: MatrixState | None,
+        row: dict) -> bool:
+    """Return whether loop-stop guidance is projected for this recipient.
+
+    Legacy/unclassified sessions retain the historical full worker surface.
+    A frozen Agent Class snapshot is authoritative, however: do not inject a
+    tool hint into a loop delivery when that class lacks self-scoped
+    ``message.user``.
+    """
+    if state is None:
+        return True
+    recipient_id = str((row or {}).get("recipient_id", "") or "").strip()
+    recipient = state.agents.get(recipient_id) if recipient_id else None
+    if not recipient:
+        return False
+    snapshot = getattr(recipient, "effective_agent_class_snapshot", {})
+    if not isinstance(snapshot, dict) or not snapshot:
+        return True
+    authority = snapshot.get("effective_authority")
+    if not isinstance(authority, dict):
+        return False
+    capabilities = authority.get("capabilities")
+    if not isinstance(capabilities, dict):
+        return False
+    return str(capabilities.get("message.user", "") or "").strip() in {
+        "self", "children", "group", "global",
+    }
+
+
 def _append_mcp_message(cell, action: str, message: str = ""):
     """Append an MCP message to the cell log."""
     if not cell:
@@ -413,7 +443,8 @@ def _format_user_direct_message_prompt(
         "## Message from the User",
         "",
     ]
-    if message_type == "loop":
+    if message_type == "loop" and _recipient_can_stop_user_message_loop(
+            state, row):
         parts.extend([
             "This message was sent by a user-scheduled /loop.",
             "If the loop is no longer actionable, stop it with:",

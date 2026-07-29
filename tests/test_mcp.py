@@ -1118,9 +1118,17 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                 cell_type="agent",
                 kind="worker",
             )
+            unrelated = self.state_mod.AgentCell(
+                id="worker-3",
+                name="Unrelated",
+                group="g",
+                cell_type="agent",
+                kind="worker",
+            )
             state.agents[worker.id] = worker
             state.agents[other.id] = other
-            state.groups["g"] = [worker.id, other.id]
+            state.agents[unrelated.id] = unrelated
+            state.groups["g"] = [worker.id, other.id, unrelated.id]
             loop = state.agent_message_loop_add(
                 agent_id=worker.id,
                 group_name="g",
@@ -1135,7 +1143,36 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             )
 
             async def fake_handle_command(_payload):
-                raise AssertionError("self-stop must not dispatch commands")
+                raise AssertionError("loop reads and self-stop must not dispatch commands")
+
+            text, is_error = await self.mcp_mod._dispatch_tool(
+                "torque_get_user_message_loop", {}, worker.id,
+                fake_handle_command, state,
+            )
+            self.assertFalse(is_error, text)
+            own_loop = json.loads(text)
+            self.assertTrue(own_loop["active"])
+            self.assertEqual(own_loop["loop"]["id"], loop.id)
+            self.assertEqual(own_loop["loop"]["message"], "check in")
+
+            text, is_error = await self.mcp_mod._dispatch_tool(
+                "torque_get_user_message_loop", {}, other.id,
+                fake_handle_command, state,
+            )
+            self.assertFalse(is_error, text)
+            other_loop = json.loads(text)
+            self.assertTrue(other_loop["active"])
+            self.assertNotEqual(other_loop["loop"]["id"], loop.id)
+
+            text, is_error = await self.mcp_mod._dispatch_tool(
+                "torque_get_user_message_loop", {}, unrelated.id,
+                fake_handle_command, state,
+            )
+            self.assertFalse(is_error, text)
+            self.assertEqual(
+                json.loads(text),
+                {"type": "agent_message_loop", "active": False, "loop": None},
+            )
 
             text, is_error = await self.mcp_mod._dispatch_tool(
                 "torque_stop_user_message_loop",
@@ -1149,6 +1186,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             payload = json.loads(text)
             self.assertEqual(payload["loop"]["id"], loop.id)
             self.assertEqual(payload["loop"]["status"], "stopped")
+            self.assertEqual(payload["loop"]["stopped_by"], worker.id)
             self.assertEqual(state.agent_message_loops[loop.id].status, "stopped")
             self.assertIsNotNone(state.active_agent_message_loop_for_agent(other.id))
             audit = db.load_direct_message(payload["audit_message_id"])
@@ -1157,6 +1195,26 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Receiving agent stopped /loop", audit["message"])
             self.assertIn("done now", audit["message"])
             db.close()
+
+    async def test_torque_get_user_message_loop_reports_no_active_loop(self):
+        state = self.state_mod.MatrixState()
+        worker = self.state_mod.AgentCell(
+            id="worker-1", name="Worker", group="g", cell_type="agent",
+        )
+        state.agents[worker.id] = worker
+
+        async def fake_handle_command(_payload):
+            raise AssertionError("loop read must not dispatch commands")
+
+        text, is_error = await self.mcp_mod._dispatch_tool(
+            "torque_get_user_message_loop", {}, worker.id,
+            fake_handle_command, state,
+        )
+        self.assertFalse(is_error, text)
+        self.assertEqual(
+            json.loads(text),
+            {"type": "agent_message_loop", "active": False, "loop": None},
+        )
 
     async def test_architect_and_engineer_message_user_persist_direct_rows(self):
         db_mod = importlib.import_module("torque.db")

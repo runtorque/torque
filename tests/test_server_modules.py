@@ -145,6 +145,41 @@ class ServerModuleExtractionTests(unittest.TestCase):
                     prompt,
                 )
 
+    def test_loop_stop_guidance_respects_recipient_frozen_authority(self):
+        state = self._rewrite_state()
+        architect = self.state_mod.AgentCell(
+            id="arch-1", name="Architect", group="g", cell_type="agent",
+            kind="architect",
+        )
+        row = {
+            "id": "loop-message-1",
+            "recipient_id": architect.id,
+            "message_type": "loop",
+            "message": "Review the milestone.",
+        }
+        state.agents[architect.id] = architect
+
+        architect.effective_agent_class_snapshot = {
+            "effective_authority": {
+                "schema_version": 1,
+                "base_kind": "architect",
+                "acl_mode": "allow",
+                "capabilities": {"self.read": "self"},
+            },
+        }
+        denied_prompt = self.server_mod._format_user_direct_message_prompt(
+            row, "architect", state=state,
+        )
+        self.assertNotIn("user_message_loop_stop", denied_prompt)
+
+        architect.effective_agent_class_snapshot["effective_authority"][
+            "capabilities"
+        ]["message.user"] = "self"
+        allowed_prompt = self.server_mod._format_user_direct_message_prompt(
+            row, "architect", state=state,
+        )
+        self.assertIn("user_message_loop_stop", allowed_prompt)
+
     def test_normalize_engineer_specialization_selection_validates_and_dedupes(self):
         normalize = self.server_mod._normalize_engineer_specialization_selection
 

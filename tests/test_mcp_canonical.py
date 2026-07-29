@@ -143,9 +143,9 @@ class CanonicalMCPContractTests(unittest.TestCase):
 
     def test_default_surfaces_are_unique_canonical_and_bounded(self):
         limits = {
-            "worker": (24, 24),
-            "engineer": (57, 75),
-            "architect": (55, 100),
+            "worker": (25, 25),
+            "engineer": (59, 77),
+            "architect": (57, 103),
         }
         legacy_names = {tool["name"] for tool in ALL_TOOLS}
         for kind, (eager_limit, total_limit) in limits.items():
@@ -361,6 +361,54 @@ class CanonicalMCPContractTests(unittest.TestCase):
         self.assertIn("worktree_diff", read_tools)
         self.assertNotIn("worktree_merge", read_tools)
 
+    def test_architect_loop_tools_require_message_user_authority(self):
+        allowed_authority = {
+            "schema_version": 1,
+            "base_kind": "architect",
+            "acl_mode": "allow",
+            "capabilities": {
+                "self.read": "self",
+                "message.user": "self",
+            },
+        }
+        allowed_state = _State("architect", authority=allowed_authority)
+        allowed_tools = {
+            tool["name"]: tool
+            for tool in _canonical_tools_for_caller(allowed_state, "caller")
+        }
+        self.assertIn("user_message_loop_get", allowed_tools)
+        self.assertIn("user_message_loop_stop", allowed_tools)
+        self.assertFalse(allowed_tools["user_message_loop_get"].get("deferred"))
+        self.assertFalse(allowed_tools["user_message_loop_stop"].get("deferred"))
+        self.assertEqual(
+            _resolve_public_tool_call(
+                allowed_state, "caller", "user_message_loop_get", {},
+            )[0],
+            "torque_get_user_message_loop",
+        )
+        self.assertEqual(
+            _resolve_public_tool_call(
+                allowed_state, "caller", "user_message_loop_stop",
+                {"reason": "complete"},
+            )[0],
+            "torque_stop_user_message_loop",
+        )
+
+        denied_authority = {
+            "schema_version": 1,
+            "base_kind": "architect",
+            "acl_mode": "allow",
+            "capabilities": {"self.read": "self"},
+        }
+        denied_tools = {
+            tool["name"]
+            for tool in _canonical_tools_for_caller(
+                _State("architect", authority=denied_authority), "caller",
+            )
+        }
+        self.assertNotIn("user_message_loop_get", denied_tools)
+        self.assertNotIn("user_message_loop_stop", denied_tools)
+
     def test_restricted_architect_denies_core_tools_without_capabilities(self):
         restricted_authority = {
             "schema_version": 1,
@@ -430,11 +478,11 @@ class CanonicalMCPContractTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(len(eager), 57)
+        self.assertEqual(len(eager), 59)
         self.assertEqual(eager, ENGINEER_EAGER_TOOL_NAMES)
         initial_projection = _visible_tools(_State("engineer"), "caller")
         self.assertEqual(
-            {tool["name"] for tool in initial_projection[:57]},
+            {tool["name"] for tool in initial_projection[:59]},
             ENGINEER_EAGER_TOOL_NAMES,
         )
         for category in categories:
