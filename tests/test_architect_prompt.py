@@ -367,6 +367,10 @@ class ArchitectPromptTests(unittest.TestCase):
         self.assertIn("## Dispatch discipline", prompt)
         self.assertIn("Assignment or staging is not dispatch", prompt)
         self.assertIn("required explicit\nassignee-message step", prompt)
+        self.assertIn(
+            "only an explicit `task` argument dispatches",
+            prompt,
+        )
 
     def test_self_contained_task_contract_is_shared_with_restricted_architect_classes(self):
         for class_id in ("default-architect", "product-manager", "creative-architect", "torque-steward"):

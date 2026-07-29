@@ -2175,6 +2175,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["dispatch"]["task_id"], task.id)
         self.assertEqual(payload["dispatch"]["dispatch_state"], "live")
         self.assertEqual(payload["dispatch"]["engineer_id"], alice.id)
+        self.assertNotIn("dispatch_advisory", payload["dispatch"])
         creates = [
             call for call in self.handle_calls
             if call.get("cmd") == "board_add_task"
@@ -2260,6 +2261,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(unrelated_error, unrelated_text)
         unrelated_payload = json.loads(unrelated_text)
         self.assertNotIn("task_id", unrelated_payload)
+        self.assertNotIn("dispatch_advisory", unrelated_payload)
         self.assertEqual(referenced.dispatch_state, "queued")
         self.assertEqual(other_staged.dispatch_state, "queued")
 
@@ -2278,6 +2280,27 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(context_error, context_text)
         context_payload = json.loads(context_text)
         self.assertNotIn("task_id", context_payload)
+        self.assertEqual(
+            context_payload["dispatch_advisory"],
+            "This message referenced one eligible staged task but did not "
+            "dispatch it. Pass task=<task id or slug> explicitly to dispatch.",
+        )
+        self.assertEqual(referenced.dispatch_state, "queued")
+        self.assertEqual(other_staged.dispatch_state, "queued")
+
+        ambiguous_text, ambiguous_error = await self._call(
+            "architect_engineer_message",
+            {
+                "engineer_id": alice.id,
+                "message": f"Compare {referenced.id} with {other_staged.id}.",
+            },
+            architect.id,
+        )
+
+        self.assertFalse(ambiguous_error, ambiguous_text)
+        ambiguous_payload = json.loads(ambiguous_text)
+        self.assertNotIn("task_id", ambiguous_payload)
+        self.assertNotIn("dispatch_advisory", ambiguous_payload)
         self.assertEqual(referenced.dispatch_state, "queued")
         self.assertEqual(other_staged.dispatch_state, "queued")
 
@@ -2294,6 +2317,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(dispatch_error, dispatch_text)
         dispatch_payload = json.loads(dispatch_text)
         self.assertEqual(dispatch_payload["task_id"], referenced.id)
+        self.assertNotIn("dispatch_advisory", dispatch_payload)
         self.assertEqual(
             self.state.board_tasks[referenced.id].dispatch_state,
             "live",
@@ -2325,6 +2349,11 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(context_error, context_text)
         context_payload = json.loads(context_text)
         self.assertNotIn("task_id", context_payload)
+        self.assertEqual(
+            context_payload["dispatch_advisory"],
+            "This message referenced one eligible staged task but did not "
+            "dispatch it. Pass task=<task id or slug> explicitly to dispatch.",
+        )
         self.assertEqual(queued.dispatch_state, "queued")
 
     async def test_architect_tools_exclude_and_reject_tombstoned_engineer(self):
