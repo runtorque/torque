@@ -38,6 +38,8 @@ def _open_worker_ask_for_engineer(state, engineer_id: str):
     engineer_id = str(engineer_id or "").strip()
     if not engineer_id:
         return None
+    engineer = getattr(state, "agents", {}).get(engineer_id)
+    engineer_group = str(getattr(engineer, "group", "") or "").strip()
     for task in sorted(
             getattr(state, "board_tasks", {}).values(),
             key=lambda item: (str(getattr(item, "created_at", "") or ""),
@@ -51,7 +53,15 @@ def _open_worker_ask_for_engineer(state, engineer_id: str):
         worker = getattr(state, "agents", {}).get(
             str(getattr(task, "reply_agent_id", "") or "").strip()
         )
-        if str(getattr(worker, "owner_engineer_id", "") or "").strip() == engineer_id:
+        if (
+            str(getattr(worker, "cell_type", "") or "").strip() == "agent"
+            and str(getattr(worker, "kind", "") or "").strip() == "worker"
+            and engineer_group
+            and str(getattr(task, "group", "") or "").strip() == engineer_group
+            and str(getattr(worker, "group", "") or "").strip() == engineer_group
+            and str(getattr(worker, "owner_engineer_id", "") or "").strip()
+            == engineer_id
+        ):
             return task
     return None
 

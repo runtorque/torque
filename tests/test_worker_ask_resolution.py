@@ -41,14 +41,14 @@ class WorkerAskResolutionTests(unittest.IsolatedAsyncioTestCase):
             "Implement release", "g", lane="In Progress", id="parent",
             agent_id=self.worker.id, assigned_engineer_id=self.engineer.id,
         )
-        # This is the same durable shape produced by a Worker raise, including
-        # the Engineer ownership stamp that makes the typed resolver usable.
+        # This is the legacy durable shape produced before Worker asks gained
+        # an Engineer ownership stamp.  The reply Worker remains its sole
+        # ownership anchor.
         self.ask = self.state.board_add_task(
             "Which release gate applies?", "g", lane="Backlog", id="ask",
             labels=["torque:human", "torque:derived", "torque:non-user-ask"],
             parent_task_id=self.parent.id, pipeline_depth=1,
             pipeline_root_id=self.parent.id, reply_agent_id=self.worker.id,
-            assigned_engineer_id=self.engineer.id,
         )
 
     def _add_agent(self, agent_id, name, kind, **kwargs):
@@ -91,6 +91,17 @@ class WorkerAskResolutionTests(unittest.IsolatedAsyncioTestCase):
         result = response.payload["result"]
         return result, result["content"][0]["text"]
 
+    @staticmethod
+    def _freeze_self_task_update(engineer):
+        engineer.effective_agent_class_snapshot = {
+            "effective_authority": {
+                "schema_version": 1,
+                "base_kind": "engineer",
+                "acl_mode": "allow",
+                "capabilities": {"task.update": "self"},
+            },
+        }
+
     async def test_owned_engineer_resolves_worker_ask_and_releases_parent_cascade(self):
         # Before resolution, both the read surface and cascade see the same
         # open Worker ask.
@@ -117,8 +128,11 @@ class WorkerAskResolutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("agent_ask_answer(task=ask)", wrong_text)
 
         # The owning Engineer has the typed resolution route.  This exercises
-        # public MCP selection, authorization, reply delivery, state change,
-        # and the normal Done cascade without a manual board move or force.
+        # public MCP selection, the legacy reply-Worker authorization
+        # fallback under a frozen self-only authority, reply delivery, state
+        # change, and the normal Done cascade without a manual board move or
+        # force.
+        self._freeze_self_task_update(self.engineer)
         resolved = await self._call(
             self.engineer.id, "agent_ask_answer",
             {"task": self.ask.id, "answer": "Use the review gate."}, 3,
@@ -143,3 +157,41 @@ class WorkerAskResolutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("ask_task_id", after_payload)
         self.assertEqual(after_payload["note"], "No pending question for engineer.")
 
+    async def test_legacy_worker_ask_refuses_other_engineer(self):
+        other_engineer = self._add_agent("eng-2", "Other Engineer", "engineer")
+        self._freeze_self_task_update(self.engineer)
+        self._freeze_self_task_update(other_engineer)
+
+        denied = await self._call(
+            other_engineer.id, "agent_ask_answer",
+            {"task": self.ask.id, "answer": "Use the review gate."}, 5,
+        )
+        denied_text = denied.payload["error"]["message"]
+        self.assertIn("target is outside", denied_text)
+        self.assertEqual(self.ask.lane, "Backlog")
+        self.assertNotIn("torque:ask-resolved", self.ask.labels)
+
+    async def test_legacy_worker_ask_refuses_stale_owner_and_non_ask_task(self):
+        self._freeze_self_task_update(self.engineer)
+        self.worker.owner_engineer_id = "removed-engineer"
+
+        stale = await self._call(
+            self.engineer.id, "agent_ask_answer",
+            {"task": self.ask.id, "answer": "Use the review gate."}, 6,
+        )
+        stale_text = stale.payload["error"]["message"]
+        self.assertIn("target is outside", stale_text)
+        self.assertEqual(self.ask.lane, "Backlog")
+
+        self.worker.owner_engineer_id = self.engineer.id
+        ordinary_task = self.state.board_add_task(
+            "Not a human ask", "g", lane="Backlog", id="ordinary-task",
+            reply_agent_id=self.worker.id,
+        )
+        ordinary = await self._call(
+            self.engineer.id, "agent_ask_answer",
+            {"task": ordinary_task.id, "answer": "No action."}, 7,
+        )
+        ordinary_text = ordinary.payload["error"]["message"]
+        self.assertIn("target is outside", ordinary_text)
+        self.assertEqual(ordinary_task.lane, "Backlog")
