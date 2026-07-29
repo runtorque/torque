@@ -6073,6 +6073,8 @@ class ServerReviewMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
             group="g",
             action_name="feature/review",
         )
+        # TORQUE:1316:15 had this shape: a detailed structured body put the
+        # final Ship line after the 2000-character stored-summary boundary.
         message = (
             "**Verification summary** — " + ("evidence " * 300) +
             "\nFinal review verdict: Ship"
