@@ -234,9 +234,11 @@ TOOLS = [
     {
         "name": "torque_done", "authority": {"requirements": [{"capability": "task.report","minimum_scope": "self","handler_scoped": True}]},
         "description": (
-            "Mark the current task as complete and move it to Done. "
-            "Triggers cascade completion — if all sibling tasks of "
-            "the parent are also Done, the parent moves to Done too."
+            "Record completion of the current worker's task. Normally moves "
+            "the task to Done and triggers cascade completion; if derived "
+            "follow-up work remains open, the task stays In Progress as "
+            "Worker Complete — Follow-up Open until the existing cascade "
+            "resolves the chain."
         ),
         "inputSchema": {
             "type": "object",
@@ -244,6 +246,15 @@ TOOLS = [
                 "message": {
                     "type": "string",
                     "description": "Optional completion summary.",
+                },
+                "terminal_declaration": {
+                    "type": "string",
+                    "description": (
+                        "Required when this task has an available derive "
+                        "transition. State that no further work is needed and "
+                        "that you will not derive after this; boilerplate is "
+                        "acceptable."
+                    ),
                 },
                 "deviation_statement": {
                     "type": "string",
@@ -414,12 +425,23 @@ TOOLS = [
         "name": "torque_ready", "authority": {"requirements": [{"capability": "task.report","minimum_scope": "self","handler_scoped": True}]},
         "description": (
             "Signal that this agent is done and ready for the next task. "
-            "Moves the task to Done, unlinks the agent, and cascades "
-            "completion up the parent chain if all siblings are done."
+            "Normally moves the task to Done, unlinks the agent, and "
+            "cascades completion up the parent chain. If derived follow-up "
+            "work remains open, it records the worker completion while the "
+            "task stays In Progress as Worker Complete — Follow-up Open."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
+                "terminal_declaration": {
+                    "type": "string",
+                    "description": (
+                        "Required when this task has an available derive "
+                        "transition. State that no further work is needed and "
+                        "that you will not derive after this; boilerplate is "
+                        "acceptable."
+                    ),
+                },
                 "deviation_statement": {
                     "type": "string",
                     "description": (
@@ -1831,7 +1853,11 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
     if action == "done":
         if args.get("message"):
             payload["message"] = args["message"]
-        for key in ("deviation_statement", "deviation_reason"):
+        for key in (
+                "terminal_declaration",
+                "deviation_statement",
+                "deviation_reason",
+        ):
             if args.get(key):
                 payload[key] = args[key]
     elif action == "blocked":
@@ -1865,7 +1891,11 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
             if key in args:
                 payload[key] = args[key]
     elif action == "ready":
-        for key in ("deviation_statement", "deviation_reason"):
+        for key in (
+                "terminal_declaration",
+                "deviation_statement",
+                "deviation_reason",
+        ):
             if args.get(key):
                 payload[key] = args[key]
     elif action == "name":

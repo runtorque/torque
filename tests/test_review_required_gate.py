@@ -545,6 +545,9 @@ class ReviewRequiredHandleCommandGateTests(unittest.IsolatedAsyncioTestCase):
             "cell_id": cell.id,
             "action": "done",
             "message": "Pre-approved fix shipped",
+            "terminal_declaration": (
+                "No further work is needed; I will not derive after this."
+            ),
         })
         self.assertNotEqual(
             result.get("type") if isinstance(result, dict) else None,
@@ -916,6 +919,9 @@ class ReviewerDeriveChainE2ETests(unittest.IsolatedAsyncioTestCase):
             "task_id": derived.id,
             "action": "done",
             "message": "Doc fix shipped",
+            "terminal_declaration": (
+                "No further work is needed; I will not derive after this."
+            ),
         })
         self.assertNotEqual(
             result.get("type") if isinstance(result, dict) else None,

@@ -170,12 +170,23 @@ class CatalogGateLiveValidationTests(unittest.IsolatedAsyncioTestCase):
             action_name=action_name, contract=contract)
         handle_command = self._extract_handle_command(
             state, action_mgr=action_mgr)
-
-        # 1. torque_done before uploading must be refused.
-        result = await handle_command({
+        completion_payload = {
             "cmd": "ai_report",
             "cell_id": cell.id,
             "action": "done",
+        }
+        if any(
+                isinstance(transition, dict)
+                and transition.get("action")
+                for transition in action_mgr.get_transitions(
+                    action_name, base_dir=str(REPO_ROOT))):
+            completion_payload["terminal_declaration"] = (
+                "No further work is needed; I will not derive after this."
+            )
+
+        # 1. torque_done before uploading must be refused.
+        result = await handle_command({
+            **completion_payload,
             "message": "Pretend report goes here",
         })
         self.assertEqual(
@@ -218,9 +229,7 @@ class CatalogGateLiveValidationTests(unittest.IsolatedAsyncioTestCase):
 
         # 3. torque_done now must succeed and move the task to Done.
         result = await handle_command({
-            "cmd": "ai_report",
-            "cell_id": cell.id,
-            "action": "done",
+            **completion_payload,
             "message": "Report attached.",
         })
         self.assertNotEqual(

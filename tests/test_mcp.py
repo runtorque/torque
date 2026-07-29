@@ -60,6 +60,9 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         text, is_error = await self.mcp_mod._dispatch_tool(
             "torque_ready",
             {
+                "terminal_declaration": (
+                    "No further work is needed; I will not derive after this."
+                ),
                 "deviation_statement": "Implemented the backend only.",
                 "deviation_reason": "The frontend follow-up is separately assigned.",
             },
@@ -74,6 +77,9 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             "torque_done",
             {
                 "message": "Delivered the design analysis.",
+                "terminal_declaration": (
+                    "No further work is needed; I will not derive after this."
+                ),
                 "deviation_statement": "Implementation was deliberately deferred.",
                 "deviation_reason": "The mechanism needs an approved design first.",
             },
@@ -141,6 +147,9 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                     "cmd": "ai_report",
                     "cell_id": "agent-1",
                     "action": "ready",
+                    "terminal_declaration": (
+                        "No further work is needed; I will not derive after this."
+                    ),
                     "deviation_statement": "Implemented the backend only.",
                     "deviation_reason": "The frontend follow-up is separately assigned.",
                 },
@@ -149,6 +158,9 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                     "cell_id": "agent-1",
                     "action": "done",
                     "message": "Delivered the design analysis.",
+                    "terminal_declaration": (
+                        "No further work is needed; I will not derive after this."
+                    ),
                     "deviation_statement": "Implementation was deliberately deferred.",
                     "deviation_reason": "The mechanism needs an approved design first.",
                 },

@@ -453,6 +453,19 @@ def build_dispatch_postscript(*,
     if review_block:
         lines.extend(review_block)
 
+    if has_transitions:
+        lines.extend([
+            "**Terminal declaration**",
+            "",
+            ("Because this task has an available derive transition, any "
+             "terminal completion report must include "
+             "`terminal_declaration=\"No further work is needed; I will "
+             "not derive after this.\"`. This boilerplate records the "
+             "terminal decision; it does not require additional diligence "
+             "evidence."),
+            "",
+        ])
+
     lines.append("Available completion paths for this task:")
     for tr in transitions:
         if isinstance(tr, dict) and tr.get("action"):

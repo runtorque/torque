@@ -28,6 +28,7 @@ from ..state import task_counts_as_done, task_is_closed
 
 
 _REVIEW_GATE_ACTION = "feature/review"
+_WORKER_COMPLETE_FOLLOW_UP_OPEN = "Worker Complete — Follow-up Open"
 TORQUE_AI_MCP_REPORT_ACTIONS = frozenset({
     "progress", "done", "blocked", "error", "ask", "derive",
     "ready", "verify", "name",
@@ -154,6 +155,7 @@ async def handle_ai_report_command(
     action = data.get("action", "")
     message = data.get("message", "")
     task_id = data.get("task_id", "")
+    terminal_declaration = data.get("terminal_declaration", "")
     deviation_statement = data.get("deviation_statement", "")
     deviation_reason = data.get("deviation_reason", "")
 
@@ -320,6 +322,105 @@ async def handle_ai_report_command(
                 group=group_name,
             )
 
+        async def _derive_is_available(t) -> bool:
+            """Whether this task's action currently offers a derive transition."""
+            if not t:
+                return False
+            base_dir = cell.worktree_repo_root \
+                or cell.directory \
+                or await _resolve_base_dir(t.group or cell.group)
+            transitions = action_mgr.get_transitions(
+                t.action_name, base_dir)
+            return any(
+                isinstance(transition, dict)
+                and transition.get("action")
+                for transition in transitions
+            )
+
+        def _has_terminal_declaration(value) -> bool:
+            """Require the deliberate terminal statement, not diligence prose."""
+            text = str(value or "").strip().lower()
+            return (
+                "no further work" in text
+                and "will not" in text
+                and "derive" in text
+            )
+
+        async def _reject_missing_terminal_declaration(t, action_name):
+            if not await _derive_is_available(t):
+                return None
+            if _has_terminal_declaration(terminal_declaration):
+                return None
+            corrected_call = (
+                'torque_done(message="brief summary", '
+                'terminal_declaration="No further work is needed; '
+                'I will not derive after this.")'
+                if action_name == "done"
+                else 'torque_ready(terminal_declaration="No further work '
+                'is needed; I will not derive after this.")'
+            )
+            return {
+                "type": "error",
+                "message": (
+                    f"Cannot mark task {action_name}: terminal_declaration "
+                    "is required because this task has an available derive "
+                    f"transition. Call {corrected_call}"
+                ),
+                "task_id": t.id if t else "",
+            }
+
+        def _completion_message(default: str) -> str:
+            """Persist the required terminal decision with the completion."""
+            summary = str(message or "").strip() or default
+            declaration = str(terminal_declaration or "").strip()
+            if declaration:
+                return (
+                    f"{summary}\n\n"
+                    f"Terminal declaration: {declaration}"
+                )
+            return summary
+
+        def _complete_task_or_leave_follow_up_open(t) -> bool:
+            """Close a task only when its derived follow-up chain is resolved.
+
+            A worker may finish its own work before a derived task does.  In
+            that case the worker report is terminal, while the board task
+            remains visibly active so the existing cascade remains the sole
+            authority that advances the chain.
+            """
+            if not t:
+                return False
+            if state.task_has_unresolved_descendants(t.id):
+                t.agent_id = ""
+                t.status = _WORKER_COMPLETE_FOLLOW_UP_OPEN
+                _save_task(t)
+                return False
+            if not task_counts_as_done(t):
+                state.board_move_task(t.id, "Done")
+                _auto_resolve_product_proposal_roots_and_enqueue(
+                    state,
+                    t,
+                    board_sync_manager=board_sync_manager,
+                )
+            t.agent_id = ""
+            t.status = ""
+            _save_task(t)
+            _cascade_done(t.id)
+            return True
+
+        def _notify_unblocked_dependents(t):
+            if not t:
+                return
+            for dependent in state.board_get_dependents(t.id):
+                if not task_is_closed(dependent) \
+                        and state.board_deps_met(dependent):
+                    _panel_event(
+                        "task_unblocked", "",
+                        "", dependent.group,
+                        f"Task '{dependent.task[:60]}'"
+                        " is now unblocked",
+                        task_id=dependent.id)
+
         if action in {
             "progress", "done", "blocked", "error",
             "ask", "derive", "ready", "verify",
@@ -380,10 +481,8 @@ async def handle_ai_report_command(
             if mandatory_review_rejection:
                 result = mandatory_review_rejection
             else:
-                rejected = (
-                    _reject_completion_with_open_descendants(
-                        state, task, "done")
-                )
+                rejected = await _reject_missing_terminal_declaration(
+                    task, "done")
                 if rejected:
                     result = rejected
                 elif not result:
@@ -445,31 +544,32 @@ async def handle_ai_report_command(
             pass
 
         elif action == "done":
+            completion_message = _completion_message("Done")
             cell.activity = ""
             cell.activity_detail = ""
             cell.needs_attention = False
             cell.error_message = ""
-            if message:
-                cell.last_summary = message
+            if completion_message:
+                cell.last_summary = completion_message
             cell.current_task_id = ""
-            _append_mcp(cell, "done", message or "Done")
+            _append_mcp(cell, "done", completion_message)
             _append_task_msg(task, "done",
-                             message or "Done", cell.name)
+                             completion_message, cell.name)
             _record_history_msg(
-                cell, "done", message or "Done")
+                cell, "done", completion_message)
             if task:
                 state.history_complete_task(
                     cell.id, task.id, "done")
             if task:
                 await _record_task_boundary(
-                    task, cell, message or "Done"
+                    task, cell, completion_message
                 )
                 _record_task_completion_evidence_snapshot(
                     state,
                     task,
                     cell=cell,
                     action="done",
-                    message=message or "Done",
+                    message=completion_message,
                     deviation_statement=deviation_statement,
                     deviation_reason=deviation_reason,
                     board_sync_manager=board_sync_manager,
@@ -479,7 +579,7 @@ async def handle_ai_report_command(
                     task,
                     cell=cell,
                     source_action="done",
-                    message=message or "Done",
+                    message=completion_message,
                     append_task_msg=_append_task_msg,
                     record_history_msg=_record_history_msg,
                 )
@@ -524,23 +624,15 @@ async def handle_ai_report_command(
                         log.exception(
                             "done auto-checkpoint failed for"
                             " '%s'", cell.name)
-            if task and not task_counts_as_done(task):
-                state.board_move_task(task.id, "Done")
-                _auto_resolve_product_proposal_roots_and_enqueue(
-                    state,
-                    task,
-                    board_sync_manager=board_sync_manager,
-                )
             if task:
-                task.status = ""
-                _save_task(task)
+                task_completed = _complete_task_or_leave_follow_up_open(task)
                 if data.get("push_external") \
                         and (task.provider or task.external_url):
                     try:
                         posted = post_ticket_comment(
                             task,
                             comment=build_completion_comment(
-                                task.task, message),
+                                task.task, completion_message),
                         )
                         _append_task_msg(
                             task, "external_comment",
@@ -561,18 +653,8 @@ async def handle_ai_report_command(
                             "message": str(exc),
                             "task_id": task.id,
                         }
-                _cascade_done(task.id)
-                # Notify dependents that are now unblocked
-                for _dt in state.board_get_dependents(
-                        task.id):
-                    if not task_is_closed(_dt) \
-                            and state.board_deps_met(_dt):
-                        _panel_event(
-                            "task_unblocked", "",
-                            "", _dt.group,
-                            f"Task '{_dt.task[:60]}'"
-                            " is now unblocked",
-                            task_id=_dt.id)
+                if task_completed:
+                    _notify_unblocked_dependents(task)
             if review_verdict:
                 _panel_event(
                     "review_verdict", cell.id,
@@ -582,7 +664,7 @@ async def handle_ai_report_command(
             _panel_event(
                 "task_completed", cell.id,
                 cell.name, cell.group,
-                message or "Task completed",
+                completion_message,
                 task_id=task.id if task else "")
             await _maybe_auto_resume_targets(
                 state,
@@ -791,63 +873,44 @@ async def handle_ai_report_command(
             rejected = (
                 deliverable_rejection
                 or review_rejection
-                or _reject_completion_with_open_descendants(
-                    state, task, "ready")
+                or await _reject_missing_terminal_declaration(
+                    task, "ready")
             )
             if rejected:
                 result = rejected
             else:
+                completion_message = _completion_message("Ready")
                 cell.activity = ""
                 cell.activity_detail = "ready"
                 cell.needs_attention = False
                 cell.error_message = ""
                 cell.current_task_id = ""
-                _append_mcp(cell, "ready", "Ready")
+                _append_mcp(cell, "ready", completion_message)
                 _append_task_msg(task, "ready",
-                                 message or "Ready", cell.name)
+                                 completion_message, cell.name)
                 _record_history_msg(
-                    cell, "ready", message or "Ready")
+                    cell, "ready", completion_message)
                 if task:
                     state.history_complete_task(
                         cell.id, task.id, "ready")
                     await _record_task_boundary(
-                        task, cell, message or "Ready"
+                        task, cell, completion_message
                     )
                     _record_task_completion_evidence_snapshot(
                         state,
                         task,
                         cell=cell,
                         action="ready",
-                        message=message or "Ready",
+                        message=completion_message,
                         deviation_statement=deviation_statement,
                         deviation_reason=deviation_reason,
                         board_sync_manager=board_sync_manager,
                     )
                 state._emit_agent(cell)
                 if task:
-                    if not task_counts_as_done(task):
-                        state.board_move_task(
-                            task.id, "Done")
-                        _auto_resolve_product_proposal_roots_and_enqueue(
-                            state,
-                            task,
-                            board_sync_manager=board_sync_manager,
-                        )
-                    task.agent_id = ""
-                    task.status = ""
-                    _save_task(task)
-                    _cascade_done(task.id)
-                    # Notify dependents now unblocked
-                    for _dt in state.board_get_dependents(
-                            task.id):
-                        if not task_is_closed(_dt) \
-                                and state.board_deps_met(_dt):
-                            _panel_event(
-                                "task_unblocked", "",
-                                "", _dt.group,
-                                f"Task '{_dt.task[:60]}'"
-                                " is now unblocked",
-                                task_id=_dt.id)
+                    task_completed = _complete_task_or_leave_follow_up_open(task)
+                    if task_completed:
+                        _notify_unblocked_dependents(task)
                 _panel_event(
                     "task_completed", cell.id,
                     cell.name, cell.group,
@@ -894,6 +957,18 @@ async def handle_ai_report_command(
                 result = {"type": "error",
                           "message":
                               "No linked task to derive from"}
+            elif (
+                    task_counts_as_done(task)
+                    or task.status == _WORKER_COMPLETE_FOLLOW_UP_OPEN
+            ):
+                result = {
+                    "type": "error",
+                    "message": (
+                        "Cannot derive from a completed task; continue "
+                        "from the derived follow-up task instead"
+                    ),
+                    "task_id": task.id,
+                }
             elif not message:
                 result = {"type": "error",
                           "message":

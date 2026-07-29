@@ -152,6 +152,7 @@ class CatalogDispatchPostscriptTests(unittest.TestCase):
         # ...AND the user-approval ask path is still wired through.
         self.assertIn("raise", ps)
         self.assertNotIn("user_ask", ps)
+        self.assertIn("terminal_declaration", ps)
         # The block precedes the completion-paths section so the worker
         # reads the contract before deciding which path to take.
         self.assertLess(
