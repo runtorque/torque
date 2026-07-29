@@ -3471,6 +3471,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                         "task": task.id,
                         "title": "Should not update",
                         "action_name": "oneshot/fix",
+                        "suggested_action": "oneshot/fix",
                     },
                     architect.id,
                 )
@@ -3481,6 +3482,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                     "Should not update",
                 )
                 self.assertEqual(self.state.board_tasks[task.id].action_name, "")
+                self.assertEqual(self.state.board_tasks[task.id].suggested_action, "")
 
         user_text, user_error = await self._call(
             "architect_task_update",

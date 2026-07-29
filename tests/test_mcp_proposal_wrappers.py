@@ -597,11 +597,17 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("outside Product Manager group scope", self._error_text(cross_group_show))
 
         retained = await self._call(
-            "task_update", {"task": product_task.id, "labels": ["retained"]},
+            "task_update",
+            {
+                "task": product_task.id,
+                "labels": ["retained"],
+                "suggested_action": "oneshot/fix",
+            },
             req_id=2,
         )
         self.assertIn("must retain", self._error_text(retained))
         self.assertTrue({"product-proposal", "proposal-only"} <= set(product_task.labels))
+        self.assertEqual("", product_task.suggested_action)
 
         updated = await self._call(
             "task_update", {"task": engineer_task.id, "title": "PM-updated engineer task"},
