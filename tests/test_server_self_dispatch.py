@@ -1901,6 +1901,62 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(task.messages[-1]["action"], "review_verdict")
 
+    def test_feature_review_blocking_derive_bypasses_prose_verdict_parser(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        cell = self.state_mod.AgentCell(
+            id="reviewer-1",
+            name="Reviewer",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+        )
+        state.agents[cell.id] = cell
+
+        for index, message in enumerate((
+                "Final review verdict: Revert",
+                "No verdict line can be parsed here.",
+        ), start=1):
+            with self.subTest(message=message):
+                task = state.board_add_task(
+                    "Review worker change",
+                    "g",
+                    id=f"TORQUE:171:{index}",
+                    lane="In Progress",
+                    action_name="feature/review",
+                    agent_id=cell.id,
+                )
+                review = self.server_mod._record_review_verdict_evidence(
+                    state,
+                    task,
+                    cell=cell,
+                    source_action="derive",
+                    message=message,
+                    derived_action="feature/implement",
+                    derived_task_id=f"TORQUE:172:{index}",
+                )
+
+                self.assertEqual(review["verdict"], "block")
+                self.assertEqual(
+                    review["follow_up_classification"], "blocking")
+                self.assertFalse(
+                    self.server_mod._review_task_has_ship_verdict(task))
+
+    def test_unknown_review_verdict_does_not_satisfy_ship_gate(self):
+        task = self.state_mod.BoardTask(
+            id="TORQUE:unknown-review",
+            task="Review worker change",
+            group="g",
+            action_name="feature/review",
+            completion_evidence={"review": {"verdict": "unknown"}},
+            messages=[{
+                "action": "done",
+                "message": "Blocking issues: unresolved migration failure",
+            }],
+        )
+
+        self.assertFalse(self.server_mod._review_task_has_ship_verdict(task))
+
     def test_completion_evidence_snapshot_includes_verification_and_artifacts(self):
         state = self.state_mod.MatrixState()
         state.add_group("g")
@@ -5957,6 +6013,85 @@ class ServerReviewMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
                     self.server_mod._review_verdict_from_message(message),
                     expected,
                 )
+
+    def test_review_verdict_parser_accepts_all_instructed_verdict_forms(self):
+        cases = {
+            "Ship": "ship",
+            "Ship with fixes": "ship_with_fixes",
+            "Revert": "needs_rework",
+        }
+        for verdict, expected in cases.items():
+            for message in (
+                    f"Final review verdict: {verdict}",
+                    f"Final review verdict: {verdict}.",
+                    f"**Final review verdict** — **{verdict}** — details",
+            ):
+                with self.subTest(verdict=verdict, message=message):
+                    self.assertEqual(
+                        self.server_mod._review_verdict_from_message(message),
+                        expected,
+                    )
+
+    def test_review_verdict_parser_preserves_punctuation_and_july_27_inputs(self):
+        cases = (
+            (
+                "Final review verdict: Ship. "
+                "No blocking issues; ready to merge.",
+                "ship",
+            ),
+            ("Final review verdict: Ship.", "ship"),
+            (
+                "Final review verdict: Ship — no blocking issues; work is "
+                "ready to merge. Follow-up classification: none.",
+                "ship",
+            ),
+            # Captured in the TORQUE:1227 review record on 2026-07-27.
+            (
+                "**Final review verdict** — Ship. No blocking issues; "
+                "ready to merge.\nFollow-up classification: none",
+                "ship",
+            ),
+            # Captured in the TORQUE:1209 review record on 2026-07-27.
+            (
+                "**Final review verdict** — Ship. No blocking issues; "
+                "ready to merge at the unchanged exact SHA. "
+                "Follow-up classification: none.",
+                "ship",
+            ),
+        )
+        for message, expected in cases:
+            with self.subTest(message=message):
+                self.assertEqual(
+                    self.server_mod._review_verdict_from_message(message),
+                    expected,
+                )
+
+    def test_review_verdict_payload_parses_full_report_before_storing_summary(self):
+        review_task = self.state_mod.BoardTask(
+            id="TORQUE:long-review",
+            task="Review worker change",
+            group="g",
+            action_name="feature/review",
+        )
+        # TORQUE:1316:15 had this shape: a detailed structured body put the
+        # final Ship line after the 2000-character stored-summary boundary.
+        message = (
+            "**Verification summary** — " + ("evidence " * 300) +
+            "\nFinal review verdict: Ship"
+        )
+
+        payload = self.server_mod._build_review_verdict_payload(
+            task=review_task,
+            source_action="done",
+            message=message,
+        )
+
+        self.assertGreater(len(message), 2000)
+        self.assertEqual(payload["verdict"], "ship")
+        self.assertEqual(payload["parsed_verdict"], "ship")
+        self.assertEqual(len(payload["summary"]), 2000)
+        self.assertNotIn("Final review verdict", payload["summary"])
+        self.assertTrue(payload["summary_truncated"])
 
     async def test_ship_review_cleanup_fires_after_parent_merge(self):
         state, impl, reviewer = self._make_state(

@@ -340,6 +340,22 @@ class ServerAiReportMandatoryReviewGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task.lane, "Done")
         self.assertEqual(cell.current_task_id, "")
 
+    async def test_unknown_structured_review_never_satisfies_ship_gate(self):
+        state, cell, task = self._state_cell_task()
+        review = self._add_review(
+            state,
+            task,
+            message="Final review verdict: Ship",
+        )
+        # A recorded unknown must fail closed even if an old fallback could
+        # find Ship in the durable message.
+        review.completion_evidence = {"review": {"verdict": "unknown"}}
+
+        result = await self._ai_done(state, cell)
+
+        self.assertEqual(result["type"], "error")
+        self.assertEqual(task.lane, "In Progress")
+
     async def test_worker_feature_implement_with_in_progress_review_is_rejected(self):
         state, cell, task = self._state_cell_task()
         self._add_review(state, task, lane="In Progress", message="Verdict: Ship")
