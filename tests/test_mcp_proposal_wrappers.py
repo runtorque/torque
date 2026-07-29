@@ -79,6 +79,15 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
 
     async def _handle_command(self, payload):
         self.calls.append(dict(payload))
+        if payload.get("cmd") == "list_actions":
+            return {
+                "type": "actions",
+                "group": payload.get("group", ""),
+                "actions": [
+                    {"name": "feature/implement"},
+                    {"name": "oneshot/fix"},
+                ],
+            }
         if payload.get("cmd") == "board_update_task":
             task_id = payload.get("id", "")
             self.state.board_update_task(
@@ -588,11 +597,17 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("outside Product Manager group scope", self._error_text(cross_group_show))
 
         retained = await self._call(
-            "task_update", {"task": product_task.id, "labels": ["retained"]},
+            "task_update",
+            {
+                "task": product_task.id,
+                "labels": ["retained"],
+                "suggested_action": "oneshot/fix",
+            },
             req_id=2,
         )
         self.assertIn("must retain", self._error_text(retained))
         self.assertTrue({"product-proposal", "proposal-only"} <= set(product_task.labels))
+        self.assertEqual("", product_task.suggested_action)
 
         updated = await self._call(
             "task_update", {"task": engineer_task.id, "title": "PM-updated engineer task"},
@@ -1319,7 +1334,10 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("product-proposal", task.labels)
         self.assertIn("proposal-only", task.labels)
         self.assertIn("normal queued Board task", payload["caveat"])
-        self.assertEqual([], self.calls)
+        self.assertEqual(
+            [{"cmd": "list_actions", "group": "g"}],
+            self.calls,
+        )
 
         before = set(self.state.board_tasks)
         rejected = await self._call(

@@ -119,12 +119,14 @@ def _normalize_architect_task_list_label_filter(value) -> tuple[list[str], str]:
     return labels, ""
 
 
-async def _validate_task_update_action_name(
-        action_name: str,
+async def _validate_catalog_action_name(
+        value: str,
         group: str,
-        handle_command) -> str:
-    """Return an error message if an architect action binding is invalid."""
-    name = str(action_name or "").strip()
+        handle_command,
+        *,
+        field_name: str) -> str:
+    """Return an error unless an Architect action field names a live action."""
+    name = str(value or "").strip()
     if not name:
         return ""
     result = await handle_command({
@@ -133,13 +135,13 @@ async def _validate_task_update_action_name(
     })
     if isinstance(result, dict) and result.get("type") == "error":
         return (
-            "Unable to validate action_name via ActionManager.list_actions(): "
+            f"Unable to validate {field_name} via ActionManager.list_actions(): "
             f"{result.get('message', 'Unknown error')}"
         )
     actions = result.get("actions") if isinstance(result, dict) else None
     if not isinstance(actions, list):
         return (
-            "Unable to validate action_name via ActionManager.list_actions(): "
+            f"Unable to validate {field_name} via ActionManager.list_actions(): "
             "list_actions returned an unexpected response"
         )
     action_names = {
@@ -149,11 +151,44 @@ async def _validate_task_update_action_name(
     }
     if name not in action_names:
         return (
-            f"Unknown action_name '{name}' "
+            f"Unknown {field_name} '{name}' "
             "(validated against ActionManager.list_actions() "
             f"for group '{str(group or '').strip()}')"
         )
     return ""
+
+
+async def _validate_task_update_action_name(
+        action_name: str,
+        group: str,
+        handle_command) -> str:
+    """Validate an Architect action binding against the live action catalog."""
+    return await _validate_catalog_action_name(
+        action_name,
+        group,
+        handle_command,
+        field_name="action_name",
+    )
+
+
+async def _validate_suggested_action(
+        suggested_action: str,
+        group: str,
+        handle_command) -> str:
+    """Validate a non-binding Architect action hint against the live catalog.
+
+    ``suggested_action`` is not the task's eventual binding, but it must name
+    a currently available action for the same reason an explicit binding must:
+    an invalid hint cannot help the Engineer route the work. Keep this on the
+    exact same ActionManager-backed rule as ``action_name`` rather than
+    creating a second catalog interpretation.
+    """
+    return await _validate_catalog_action_name(
+        suggested_action,
+        group,
+        handle_command,
+        field_name="suggested_action",
+    )
 
 
 def _normalize_architect_task_list_limit(value) -> tuple[int, str]:

@@ -47,6 +47,30 @@ class ArchitectPromptTests(unittest.TestCase):
         self.assertIn("**Shared memory**: memory_publish, memory_list", prompt)
         self.assertIn("worktree_rebase, worktree_create_pr, worktree_merge", prompt)
 
+    def test_prompt_explains_suggested_action_lifecycle_without_catalog_list(self):
+        prompt = self.architect_mod.build_architect_system_prompt("Torque")
+
+        self.assertIn("inspect the live action catalog with `action_list`", prompt)
+        self.assertNotIn("torque_actions_list", prompt)
+        self.assertIn("worker's prompt template", prompt)
+        self.assertIn("whether a worktree is created", prompt)
+        self.assertIn("applied\n   labels", prompt)
+        self.assertIn("dispatched role", prompt)
+        self.assertIn("declared `transitions`", prompt)
+        self.assertIn("cannot derive\n   review or fix tasks", prompt)
+        self.assertIn("`feature/implement` and `feature/review`", prompt)
+        self.assertIn("Prefer a `oneshot/*` action", prompt)
+        self.assertIn("state the reason when reaching for\n   `feature/*`", prompt)
+
+        # Existing routing taxonomy and changed-file concurrency guidance stay
+        # intact in the rendered prompt.
+        self.assertIn(
+            "`ui-ux`, `orchestration-core`, `runtime-pty`, `desktop-shell`,\n"
+            "   `worktree-release`, `prompts-config`, or `quality-observability`",
+            prompt,
+        )
+        self.assertIn("shared changed-file surface, not Engineer\n  capacity", prompt)
+
     def test_agent_class_preamble_uses_canonical_context_tool(self):
         class_snapshot = self._class_prompt_context("default-architect")
 

@@ -2146,6 +2146,32 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(denied_error)
         self.assertEqual(denied_text, "engineer not found in scope")
 
+    async def test_architect_task_create_rejects_unknown_suggested_action_before_write(self):
+        architect = self._add_architect("arch-1", "Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+
+        text, is_error = await self._call(
+            "architect_task_create",
+            {
+                "title": "Invalid action hint",
+                "group": "torque",
+                "assigned_engineer_id": alice.id,
+                "suggested_action": "bogus/nonexistent-action",
+            },
+            architect.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertIn("Unknown suggested_action 'bogus/nonexistent-action'", text)
+        self.assertIn("ActionManager.list_actions()", text)
+        self.assertEqual(self.state.board_tasks, {})
+        self.assertEqual(
+            self.handle_calls,
+            [{"cmd": "list_actions", "group": "torque"}],
+        )
+
     async def test_architect_task_create_can_atomically_dispatch_and_mark_live(self):
         architect = self._add_architect("arch-1", "Architect")
         alice = self._add_engineer(
@@ -3348,6 +3374,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "Action target",
             action_name="feature/implement",
             action_vars={"old": "value", "drop": "me"},
+            suggested_action="feature/implement",
             created_by_architect_id=architect.id,
         )
 
@@ -3357,6 +3384,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                 "task": task.id,
                 "action_name": "oneshot/fix",
                 "action_vars": {"mode": "focused"},
+                "suggested_action": "oneshot/fix",
             },
             architect.id,
         )
@@ -3364,14 +3392,16 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(is_error, text)
         self.assertEqual(
             json.loads(text)["updated_fields"],
-            ["action_name", "action_vars"],
+            ["action_name", "action_vars", "suggested_action"],
         )
         updated = self.state.board_tasks[task.id]
         self.assertEqual(updated.action_name, "oneshot/fix")
         self.assertEqual(updated.action_vars, {"mode": "focused"})
+        self.assertEqual(updated.suggested_action, "oneshot/fix")
         persisted = self.db.load_all()["board_tasks"][task.id]
         self.assertEqual(persisted["action_name"], "oneshot/fix")
         self.assertEqual(persisted["action_vars"], {"mode": "focused"})
+        self.assertEqual(persisted["suggested_action"], "oneshot/fix")
 
         bad_text, bad_error = await self._call(
             "architect_task_update",
@@ -3384,6 +3414,17 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ActionManager.list_actions()", bad_text)
         self.assertEqual(self.state.board_tasks[task.id].action_name, "oneshot/fix")
         self.assertEqual(self.state.board_tasks[task.id].action_vars, {"mode": "focused"})
+
+        bad_hint_text, bad_hint_error = await self._call(
+            "architect_task_update",
+            {"task": task.id, "suggested_action": "bogus/nonexistent-action"},
+            architect.id,
+        )
+
+        self.assertTrue(bad_hint_error)
+        self.assertIn("Unknown suggested_action 'bogus/nonexistent-action'", bad_hint_text)
+        self.assertIn("ActionManager.list_actions()", bad_hint_text)
+        self.assertEqual(self.state.board_tasks[task.id].suggested_action, "oneshot/fix")
 
     async def test_architect_task_update_enforces_creator_and_group_scope(self):
         architect = self._add_architect("arch-1", "Architect")
@@ -3430,6 +3471,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                         "task": task.id,
                         "title": "Should not update",
                         "action_name": "oneshot/fix",
+                        "suggested_action": "oneshot/fix",
                     },
                     architect.id,
                 )
@@ -3440,6 +3482,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                     "Should not update",
                 )
                 self.assertEqual(self.state.board_tasks[task.id].action_name, "")
+                self.assertEqual(self.state.board_tasks[task.id].suggested_action, "")
 
         user_text, user_error = await self._call(
             "architect_task_update",

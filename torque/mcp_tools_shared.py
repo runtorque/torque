@@ -187,6 +187,7 @@ from .mcp_scoped.architect_reports import (
     _stream_unhealthy_task_items,
     _task_parked_or_deferred,
     _validate_architect_task_creator_filter,
+    _validate_suggested_action,
     _validate_task_update_action_name,
     _wave_summary_bool_known,
     _wave_summary_category,
