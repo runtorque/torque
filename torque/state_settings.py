@@ -809,7 +809,11 @@ class StateSettingsMixin:
         created_by_id = str(
             getattr(agent, "created_by_engineer_id", "") or ""
         ).strip()
-        if owner_id == engineer_id or created_by_id == engineer_id:
+        # An explicit owner is authoritative.  ``created_by_engineer_id`` is
+        # retained as provenance and is only a legacy ownership fallback when
+        # old rows have no explicit owner.  Otherwise transferring ownership
+        # would leave the former creator able to inspect the worker.
+        if owner_id == engineer_id or (not owner_id and created_by_id == engineer_id):
             return True
 
         if agent.cell_type == "terminal":
@@ -832,7 +836,10 @@ class StateSettingsMixin:
                         str(getattr(parent, "id", "") or "").strip()
                         == engineer_id
                         or parent_owner_id == engineer_id
-                        or parent_created_by_id == engineer_id
+                        or (
+                            not parent_owner_id
+                            and parent_created_by_id == engineer_id
+                        )
                 ):
                     return True
 

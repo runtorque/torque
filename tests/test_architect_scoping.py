@@ -3235,6 +3235,113 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             hired_peer.id,
         )
 
+    async def test_task_reassign_transfers_linked_worker_and_preserves_scope(self):
+        architect = self._add_architect("arch-1", "Architect")
+        previous_owner = self._add_engineer(
+            "eng-previous", "Previous", hired_by_architect_id=architect.id
+        )
+        receiving_owner = self._add_engineer(
+            "eng-receiving", "Receiving", hired_by_architect_id=architect.id
+        )
+        unrelated = self._add_engineer("eng-unrelated", "Unrelated")
+        worker = self._add_worker("worker-1", "Worker", previous_owner.id)
+        task = self._add_task(
+            "task-transfer",
+            "Transfer a live worker",
+            lane="In Progress",
+            assigned_engineer_id=previous_owner.id,
+            created_by_architect_id=architect.id,
+            agent_id=worker.id,
+        )
+
+        # Verbatim receiving-seat before state: the worker is outside scope.
+        before_text, before_error = await self._call_engineer(
+            "engineer_agent_show", {"agent": worker.id}, receiving_owner.id
+        )
+        self.assertTrue(before_error)
+        self.assertEqual(before_text, "agent not found in scope")
+
+        reassign_text, reassign_error = await self._call(
+            "architect_task_reassign",
+            {"task": task.id, "new_engineer_id": receiving_owner.id},
+            architect.id,
+        )
+        self.assertFalse(reassign_error, reassign_text)
+        reassign = json.loads(reassign_text)
+        self.assertEqual(reassign["assigned_engineer_id"], receiving_owner.id)
+        self.assertEqual(reassign["worker_transfer"], {
+            "status": "transferred",
+            "transferred_count": 1,
+            "worker_ids": [worker.id],
+        })
+        self.assertEqual(reassign["orphaned_task_worker_count"], 0)
+        self.assertEqual(worker.owner_engineer_id, receiving_owner.id)
+        # Creation provenance remains intact; explicit ownership controls scope.
+        self.assertEqual(worker.created_by_engineer_id, previous_owner.id)
+        await self.state.flush_db_writes()
+        persisted = self.db._conn.execute(
+            "SELECT t.assigned_engineer_id, a.owner_engineer_id "
+            "FROM board_tasks t JOIN agents a ON a.id=t.agent_id "
+            "WHERE t.id=?",
+            (task.id,),
+        ).fetchone()
+        self.assertEqual(persisted, (receiving_owner.id, receiving_owner.id))
+
+        # Verbatim receiving-seat after state: the worker is now accessible.
+        after_text, after_error = await self._call_engineer(
+            "engineer_agent_show", {"agent": worker.id}, receiving_owner.id
+        )
+        self.assertFalse(after_error, after_text)
+        self.assertEqual(json.loads(after_text)["id"], worker.id)
+
+        previous_text, previous_error = await self._call_engineer(
+            "engineer_agent_show", {"agent": worker.id}, previous_owner.id
+        )
+        unrelated_text, unrelated_error = await self._call_engineer(
+            "engineer_agent_show", {"agent": worker.id}, unrelated.id
+        )
+        self.assertTrue(previous_error)
+        self.assertEqual(previous_text, "agent not found in scope")
+        self.assertTrue(unrelated_error)
+        self.assertEqual(unrelated_text, "agent not found in scope")
+
+        # Unrelated task mutations never move worker ownership.
+        self.state.board_update_task(task.id, lane="Done")
+        self.assertEqual(worker.owner_engineer_id, receiving_owner.id)
+
+    async def test_task_reassign_without_live_workers_reports_warning_and_orphans(self):
+        architect = self._add_architect("arch-1", "Architect")
+        previous_owner = self._add_engineer(
+            "eng-previous", "Previous", hired_by_architect_id=architect.id
+        )
+        receiving_owner = self._add_engineer(
+            "eng-receiving", "Receiving", hired_by_architect_id=architect.id
+        )
+        task = self._add_task(
+            "task-no-worker",
+            "Reassign without a worker",
+            assigned_engineer_id=previous_owner.id,
+            created_by_architect_id=architect.id,
+        )
+
+        text, error = await self._call(
+            "architect_task_reassign",
+            {"task": task.id, "new_engineer_id": receiving_owner.id},
+            architect.id,
+        )
+        self.assertFalse(error, text)
+        payload = json.loads(text)
+        self.assertEqual(payload["worker_transfer"], {
+            "status": "not_applicable",
+            "transferred_count": 0,
+            "worker_ids": [],
+            "warning": (
+                "No live workers are linked to this task; no worker "
+                "ownership changed."
+            ),
+        })
+        self.assertEqual(payload["orphaned_task_worker_count"], 0)
+
     async def test_architect_task_create_and_reassign_reject_non_engineer_targets(self):
         architect = self._add_architect("arch-1", "Architect")
         other_architect = self._add_architect("arch-2", "Other Architect")
