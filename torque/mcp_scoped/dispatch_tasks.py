@@ -1,11 +1,50 @@
 """Domain dispatcher extracted from :mod:`torque.mcp_tools_shared`."""
 
+import copy
+from dataclasses import asdict
+from datetime import datetime, timezone
+
 from torque.agent_classes import (
     has_frozen_platform_group_board_authority,
     has_frozen_platform_task_authority_mode,
 )
+from torque.config import log
 from torque.mcp_scoped.dispatch_context import ScopedDispatchContext, UNHANDLED
 from torque.mcp_scoped.dispatch_runtime import *  # noqa: F403
+
+
+def _live_workers_linked_to_task(state, task) -> list:
+    """Return active worker cells directly linked to *task*.
+
+    ``BoardTask.agent_id`` is the durable task-to-worker relation.  Do not
+    infer ownership from lanes, health, or branch names: those are unrelated
+    state transitions and must never transfer a worker.
+    """
+    agent_id = str(getattr(task, "agent_id", "") or "").strip()
+    if not agent_id:
+        return []
+    cell = state.agents.get(agent_id)
+    if not cell or getattr(cell, "cell_type", "") != "agent":
+        return []
+    if str(getattr(cell, "kind", "") or "").strip() != "worker":
+        return []
+    if state.agent_is_tombstoned(cell):
+        return []
+    return [cell]
+
+
+def _orphaned_task_worker_count(state) -> int:
+    """Count reportable task/worker ownership mismatches without changing them."""
+    count = 0
+    for task in state.board_tasks.values():
+        assigned_engineer_id = _effective_assigned_engineer_id(task)
+        for worker in _live_workers_linked_to_task(state, task):
+            owner_engineer_id = str(
+                getattr(worker, "owner_engineer_id", "") or ""
+            ).strip()
+            if owner_engineer_id != assigned_engineer_id:
+                count += 1
+    return count
 
 async def dispatch_tasks(ctx: ScopedDispatchContext):
     name = ctx.name
@@ -428,18 +467,68 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         engineer = real_state.agents.get(engineer_id)
         if _agent_dismissed_at(engineer):
             return _engineer_dismissed_error(engineer_id), True
-        real_state.board_update_task(tid, assigned_engineer_id=engineer_id)
+        workers = _live_workers_linked_to_task(real_state, task)
+        prospective_task = copy.deepcopy(task)
+        prospective_task.assigned_engineer_id = engineer_id
+        prospective_task.updated_at = datetime.now(timezone.utc).isoformat()
+        prospective_workers = []
+        for worker in workers:
+            prospective_worker = copy.deepcopy(worker)
+            prospective_worker.owner_engineer_id = engineer_id
+            prospective_workers.append(prospective_worker)
+
+        # Commit both sides before making the new projection visible.  This
+        # keeps SQLite readers from ever observing the task reassigned without
+        # the linked live worker(s) following it.  No worker is inferred from
+        # lanes, health, or branch names; only this explicit reassignment can
+        # trigger the transfer.
+        if real_state.db:
+            try:
+                await real_state.flush_db_writes()
+                await real_state.db.save_task_and_agents_async(
+                    prospective_task,
+                    prospective_workers,
+                )
+            except Exception:
+                log.exception(
+                    "Failed to persist task/worker ownership transfer for %s",
+                    tid,
+                )
+                return "Failed to persist task and worker ownership transfer", True
+
+        for worker in workers:
+            worker.owner_engineer_id = engineer_id
+            real_state._emit_agent(worker)
+        task.assigned_engineer_id = engineer_id
+        task.updated_at = prospective_task.updated_at
+        real_state._emit("task_upsert", **asdict(task))
+        real_state.recompute_task_health()
+        worker_transfer = {
+            "status": "transferred" if workers else "not_applicable",
+            "transferred_count": len(workers),
+            "worker_ids": [worker.id for worker in workers],
+        }
+        if not workers:
+            worker_transfer["warning"] = (
+                "No live workers are linked to this task; no worker "
+                "ownership changed."
+            )
+        remaining_orphans = _orphaned_task_worker_count(real_state)
         if caller_kind == "architect":
             return json.dumps({
                 "type": "ok",
                 "task_id": tid,
                 "assigned_engineer_id": engineer_id,
+                "worker_transfer": worker_transfer,
+                "orphaned_task_worker_count": remaining_orphans,
             }), False
         return json.dumps({
             "type": "ok",
             "task_id": tid,
             "from": old_engineer_id,
             "to": engineer_id,
+            "worker_transfer": worker_transfer,
+            "orphaned_task_worker_count": remaining_orphans,
         }), False
 
     if tool_name == "task_coverage_reconcile":

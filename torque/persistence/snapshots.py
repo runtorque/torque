@@ -14,11 +14,43 @@ from torque.persistence.common import (
     GROUP_SETTINGS_JSON_FIELDS as _GS_JSON_FIELDS,
     group_settings_field_names as _group_settings_field_names,
     json_loads_default as _json_loads_default,
+    snapshot_db_payload as _snapshot_db_payload,
 )
 
 
 class SnapshotPersistenceMixin:
     """Save and restore complete state snapshots at migration/startup boundaries."""
+
+    def save_task_and_agents(self, task, agents) -> None:
+        """Atomically persist one task and its linked worker snapshots."""
+        agent_rows = list(agents or [])
+
+        def _operation():
+            try:
+                self._conn.execute("BEGIN")
+                for cell in agent_rows:
+                    self._insert_agent_row(self._conn, cell)
+                self._insert_board_task_row(self._conn, task)
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+
+        with profiling.timer("sqlite_write_ms"), \
+                profiling.timer("sqlite_write_save_task_and_agents_ms"):
+            self._run_sqlite_write_with_lock_retry(
+                _operation,
+                surface="task_and_agents",
+            )
+
+    async def save_task_and_agents_async(self, task, agents) -> None:
+        """Queue and await the task/worker ownership transaction."""
+        return await self._enqueue_async_write(
+            "task_and_agents",
+            "save_task_and_agents",
+            _snapshot_db_payload(task),
+            _snapshot_db_payload(list(agents or [])),
+        )
 
     def save_agents(self, cells) -> None:
         """Upsert multiple agent snapshots in one SQLite transaction."""
