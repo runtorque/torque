@@ -1979,3 +1979,41 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         entries = self._result_payload(read)["entries"]
         self.assertIn("observation", [entry["type"] for entry in entries])
         self.assertTrue(any("Scratch product-planning recovery note" in entry.get("entry", "") for entry in entries))
+
+    async def test_frozen_engineer_can_route_owned_worker_ask_to_typed_resolution(self):
+        """Worker asks are self-owned Engineer tasks, not a new broad grant."""
+        self.engineer.effective_agent_class_snapshot = {
+            "effective_authority": {
+                "schema_version": 1,
+                "base_kind": "engineer",
+                "acl_mode": "allow",
+                "capabilities": {"task.update": "self"},
+            },
+        }
+        self.worker.owner_engineer_id = self.engineer.id
+        parent = self.state.board_add_task(
+            "Implement release", "g", lane="In Progress", id="ask-parent",
+            agent_id=self.worker.id, assigned_engineer_id=self.engineer.id,
+        )
+        ask = self.state.board_add_task(
+            "Which release gate applies?", "g", lane="Backlog", id="ask-row",
+            labels=["torque:human", "torque:derived", "torque:non-user-ask"],
+            parent_task_id=parent.id, reply_agent_id=self.worker.id,
+            assigned_engineer_id=self.engineer.id,
+        )
+
+        tools = await self._list_tools(agent_id=self.engineer.id)
+        self.assertIn("agent_ask_answer", tools)
+        response = await self._call(
+            "agent_ask_answer",
+            {"task": ask.id, "answer": "Use the review gate."},
+            agent_id=self.engineer.id,
+            req_id=91,
+        )
+        self._result_payload(response)
+        resolve_calls = [
+            call for call in self.calls if call.get("cmd") == "resolve_ask"
+        ]
+        self.assertEqual(len(resolve_calls), 1)
+        self.assertEqual(resolve_calls[0]["id"], ask.id)
+        self.assertEqual(resolve_calls[0]["answer"], "Use the review gate.")

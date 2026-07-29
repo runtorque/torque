@@ -1559,6 +1559,12 @@ async def handle_ai_report_command(
                     or task.id
                 ask_desc = data.get(
                     "description", "")
+                ask_assigned_engineer_id = ""
+                if str(getattr(cell, "kind", "") or "") == "worker":
+                    ask_assigned_engineer_id = (
+                        _ownership_engineer_id_for_dispatch_source(cell)
+                        or str(getattr(cell, "owner_engineer_id", "") or "")
+                    )
                 new_task = state.board_add_task(
                     task=message,
                     group=grp,
@@ -1574,6 +1580,13 @@ async def handle_ai_report_command(
                     pipeline_root_id=root_id,
                     description=ask_desc,
                     reply_agent_id=cell.id,
+                    # A worker-level ask is owned by the Engineer that owns
+                    # the asking worker.  This is deliberately task
+                    # ownership, not a new Engineer capability: it lets the
+                    # existing self-scoped ask-answer tool authorize the
+                    # named recipient instead of leaving the row only
+                    # group-visible to the board.
+                    assigned_engineer_id=ask_assigned_engineer_id,
                 )
                 if new_task:
                     result = {

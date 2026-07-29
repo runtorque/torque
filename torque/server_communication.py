@@ -1934,8 +1934,6 @@ async def _resolve_human_ask_task(
                 ),
             }
 
-    if not task_is_closed(task):
-        state.board_move_task(task.id, "Done")
     messages = list(getattr(task, "messages", []) or [])
     messages.append({
         "timestamp": time.time(),
@@ -1943,7 +1941,24 @@ async def _resolve_human_ask_task(
         "message": answer,
         "agent_name": "Human",
     })
-    state.board_update_task(task.id, status="", messages=messages)
+    # An open ``torque:human`` row intentionally suppresses the ordinary Done
+    # cascade.  Once a typed answer is durably recorded, remove that *open*
+    # marker before moving the row so the normal cascade sees the resolved
+    # task rather than a permanently human-gated descendant.
+    labels = [
+        label for label in (getattr(task, "labels", []) or [])
+        if label != "torque:human"
+    ]
+    if "torque:ask-resolved" not in labels:
+        labels.append("torque:ask-resolved")
+    state.board_update_task(
+        task.id,
+        status="",
+        messages=messages,
+        labels=labels,
+    )
+    if not task_is_closed(task):
+        state.board_move_task(task.id, "Done")
     state._clear_parent_awaiting_input(parent, exclude_task_id=task.id)
 
     q = question

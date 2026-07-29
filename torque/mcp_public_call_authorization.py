@@ -20,6 +20,7 @@ from .mcp_engineer_tools.shared import (
     resolve_agent as resolve_mcp_agent,
     resolve_task as resolve_mcp_task,
 )
+from .state import task_counts_as_done
 from .worktree_scope import architect_can_access_user_owned_worker_worktree
 
 
@@ -324,6 +325,45 @@ def _task_target_scope(state, caller_cell, task) -> str:
     return "global"
 
 
+def _legacy_open_worker_ask_scope(state, caller_cell, task) -> str:
+    """Return ``self`` for the one legacy Worker-ask resolution route.
+
+    Old Worker asks predate their ``assigned_engineer_id`` ownership stamp.
+    They are intentionally discoverable through their reply Worker, whose
+    current owner is the only Engineer that may resolve the open ask.  This is
+    not a general task relationship: it applies only to the typed Engineer
+    ask resolver, an open human ask, and a Worker in the same group.
+    """
+
+    if not caller_cell or not task:
+        return ""
+    caller_id = str(getattr(caller_cell, "id", "") or "").strip()
+    caller_group = str(getattr(caller_cell, "group", "") or "").strip()
+    if (
+        not caller_id
+        or str(getattr(caller_cell, "kind", "") or "").strip() != "engineer"
+        or not caller_group
+        or str(getattr(task, "assigned_engineer_id", "") or "").strip()
+        or task_counts_as_done(task)
+        or "torque:human" not in (getattr(task, "labels", []) or [])
+        or str(getattr(task, "group", "") or "").strip() != caller_group
+    ):
+        return ""
+    worker = state.agents.get(
+        str(getattr(task, "reply_agent_id", "") or "").strip()
+    )
+    if (
+        not worker
+        or str(getattr(worker, "cell_type", "") or "").strip() != "agent"
+        or str(getattr(worker, "kind", "") or "").strip() != "worker"
+        or str(getattr(worker, "group", "") or "").strip() != caller_group
+        or str(getattr(worker, "owner_engineer_id", "") or "").strip()
+        != caller_id
+    ):
+        return ""
+    return "self"
+
+
 def _record_target_scope(state, caller_cell, record: dict | None) -> str:
     """Return scope for a persisted planning/artifact record."""
 
@@ -515,6 +555,16 @@ def _handler_scoped_target_scope(
         requirement.target_kind,
         target,
     )
+    # Legacy Worker asks were created before their assigned-Engineer stamp.
+    # The existing task resolver is the sole write route that may derive
+    # self-scope from the reply Worker, and only while that exact ask remains
+    # open.  Keep every other task tool on normal ownership scope.
+    if (
+        tool_name == "engineer_task_resolve"
+        and requirement.target_kind == "task"
+        and _legacy_open_worker_ask_scope(state, caller_cell, target) == "self"
+    ):
+        return "self"
     if (
         not requirement.handler_scoped
         or str(getattr(caller_cell, "kind", "") or "").strip() != "architect"

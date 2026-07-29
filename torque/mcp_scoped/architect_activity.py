@@ -25,6 +25,46 @@ _ARCHITECT_EVENTS_RECENT_MESSAGE_LIMIT = 120
 _ARCHITECT_EVENTS_RECENT_RESPONSE_LIMIT = 10_000
 _ARCHITECT_TASK_CHAIN_NODE_LIMIT = 50
 
+
+def _open_worker_ask_for_engineer(state, engineer_id: str):
+    """Return one unresolved Worker ask owned by ``engineer_id``.
+
+    Engineer-level user asks live in the group pending-question slot.  Worker
+    asks instead live as board descendants, so consult their stamped assignee
+    (and the reply worker for rows created before the stamp existed).  This is
+    read-only discoverability for the Architect, not Architect authority to
+    answer the Worker ask.
+    """
+    engineer_id = str(engineer_id or "").strip()
+    if not engineer_id:
+        return None
+    engineer = getattr(state, "agents", {}).get(engineer_id)
+    engineer_group = str(getattr(engineer, "group", "") or "").strip()
+    for task in sorted(
+            getattr(state, "board_tasks", {}).values(),
+            key=lambda item: (str(getattr(item, "created_at", "") or ""),
+                              str(getattr(item, "id", "") or "")),
+    ):
+        if task_counts_as_done(task) or "torque:human" not in (
+                getattr(task, "labels", []) or []):
+            continue
+        if str(getattr(task, "assigned_engineer_id", "") or "").strip() == engineer_id:
+            return task
+        worker = getattr(state, "agents", {}).get(
+            str(getattr(task, "reply_agent_id", "") or "").strip()
+        )
+        if (
+            str(getattr(worker, "cell_type", "") or "").strip() == "agent"
+            and str(getattr(worker, "kind", "") or "").strip() == "worker"
+            and engineer_group
+            and str(getattr(task, "group", "") or "").strip() == engineer_group
+            and str(getattr(worker, "group", "") or "").strip() == engineer_group
+            and str(getattr(worker, "owner_engineer_id", "") or "").strip()
+            == engineer_id
+        ):
+            return task
+    return None
+
 def _event_agent_kind(cell) -> str:
     kind = str(getattr(cell, "kind", "") or "").strip() if cell else ""
     if kind:
@@ -742,6 +782,18 @@ def _architect_engineer_pending_question_json(
         getattr(ws, "pending_question_actor_id", "") or ""
     ).strip()
     if not question or pending_owner_id != engineer_id:
+        worker_ask = _open_worker_ask_for_engineer(state, engineer_id)
+        if worker_ask:
+            payload.update({
+                "question": str(getattr(worker_ask, "task", "") or ""),
+                "ask_task_id": str(getattr(worker_ask, "id", "") or ""),
+                "ask_level": "worker",
+                "note": (
+                    "Worker-level ask awaiting the owning Engineer; resolve "
+                    "it with agent_ask_answer(task=...)."
+                ),
+            })
+            return _compact_json(payload), False
         payload["note"] = "No pending question for engineer."
         return _compact_json(payload), False
     payload.update({
@@ -777,5 +829,13 @@ def _resolve_architect_pending_question_engineer(
     question = str(getattr(ws, "pending_question", "") or "").strip()
     actor_id = str(getattr(ws, "pending_question_actor_id", "") or "").strip()
     if not question or actor_id != engineer_id:
+        worker_ask = _open_worker_ask_for_engineer(state, engineer_id)
+        if worker_ask:
+            return engineer, group, "", (
+                "This is a worker-level ask, not an engineer-level pending "
+                "question. The owning Engineer must resolve it with "
+                "agent_ask_answer(task="
+                f"{str(getattr(worker_ask, 'id', '') or '')})."
+            )
         return engineer, group, "", "No pending blocking question for that engineer"
     return engineer, group, question, ""

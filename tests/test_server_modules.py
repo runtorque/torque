@@ -5705,6 +5705,11 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['delivery_state'], 'buffered')
         self.assertEqual(result['delivery_reason'], 'no_session')
         self.assertEqual(state.board_tasks[ask.id].lane, 'Done')
+        self.assertNotIn('torque:human', state.board_tasks[ask.id].labels)
+        self.assertIn('torque:ask-resolved', state.board_tasks[ask.id].labels)
+        # The answered ask is no longer a human-gated open descendant, so the
+        # ordinary Done cascade releases its otherwise-ready parent.
+        self.assertEqual(state.board_tasks[parent.id].lane, 'Done')
         self.assertEqual(state.board_tasks[parent.id].status, '')
         self.assertEqual(events[0][0][0], 'ask_resolved')
         direct_rows = self.db.load_direct_messages_for_agent(worker.id)
