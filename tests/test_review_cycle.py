@@ -360,7 +360,7 @@ class ReviewCycleBranchIsolationTests(unittest.IsolatedAsyncioTestCase):
             "",
         )
 
-    def test_review_derived_fix_sibling_cascades_review_and_root_when_done(self):
+    def test_review_derived_fix_sibling_closes_review_but_holds_root_without_ship(self):
         state, _implementer, _reviewer, root, review, fix = (
             self._make_review_fix_handoff_graph()
         )
@@ -370,7 +370,10 @@ class ReviewCycleBranchIsolationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.board_tasks[fix.id].lane, "Done")
         self.assertEqual(state.board_tasks[review.id].lane, "Done")
         self.assertEqual(state.board_tasks[review.id].status, "")
-        self.assertEqual(state.board_tasks[root.id].lane, "Done")
+        # The original review sent the work down the fix path but did not
+        # record a Ship verdict.  Closing the fix cannot bypass the root's
+        # mandatory feature-review closeout gate.
+        self.assertEqual(state.board_tasks[root.id].lane, "In Progress")
         self.assertFalse(state.task_has_unresolved_descendants(root.id))
 
     def test_review_derived_fix_cascades_after_rereview_path_finishes(self):
@@ -401,6 +404,7 @@ class ReviewCycleBranchIsolationTests(unittest.IsolatedAsyncioTestCase):
             pipeline_root_id=root.id,
             pipeline_depth=3,
             agent_id=rereviewer.id,
+            messages=[{"action": "done", "message": "Verdict: Ship"}],
         )
 
         state.board_move_task(rereview.id, "Done")

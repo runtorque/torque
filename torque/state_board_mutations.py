@@ -669,6 +669,37 @@ class BoardMutationMixin:
         root.finalization_status = status_projection(result)
         return result
 
+    def _legacy_review_gate_applies(self, task: BoardTask) -> bool:
+        """Return whether a legacy root still carries the review closeout gate.
+
+        ``finalization_mode=legacy`` deliberately means that the newer
+        finalization-policy contract does not apply.  It must not, however,
+        erase the older mandatory feature-review contract.  ``requires_review``
+        is stamped at dispatch for actions with required transitions; the
+        feature implementation action is also recognized directly so a
+        pre-dispatch root cannot evade its mandatory review by reaching Done
+        through a child cascade.  Tasks with no action binding have no such
+        mandatory-review action contract and remain eligible for ordinary
+        cascade completion.
+        """
+        action_name = str(getattr(task, "action_name", "") or "").strip()
+        if not action_name:
+            return False
+        return (
+            bool(getattr(task, "requires_review", False))
+            or action_name.lower() == "feature/implement"
+        )
+
+    def _legacy_review_gate_is_satisfied(self, task: BoardTask) -> bool:
+        """Use the canonical Ship predicate, including its message fallback."""
+        if not self._legacy_review_gate_applies(task):
+            return True
+        # Import lazily: server_review imports MatrixState, while this method
+        # runs only after state construction.  Keeping the predicate canonical
+        # prevents legacy cascade from drifting from verdict parsing/storage.
+        from .server_review import _task_has_shipped_review_descendant
+        return _task_has_shipped_review_descendant(self, task)
+
     def _finalization_done_allowed(self, task: BoardTask, *, caller: str) -> tuple[bool, dict]:
         """Evaluate/audit the root immediately before any Done mutation."""
         root_id = str(getattr(task, "pipeline_root_id", "") or "").strip()
@@ -1107,6 +1138,16 @@ class BoardMutationMixin:
                 pid = next_pid
                 continue
             if self.task_has_unresolved_descendants(parent.id):
+                break
+            # Legacy finalization intentionally does not activate the newer
+            # six-condition policy.  Cascade is nevertheless the one root-Done
+            # writer that does not first pass through the mandatory review
+            # command gate, so enforce that pre-existing contract here.
+            if (
+                    normalize_mode(getattr(
+                        parent, "finalization_mode", "legacy")) == "legacy"
+                    and not self._legacy_review_gate_is_satisfied(parent)
+            ):
                 break
             allowed, _result = self._finalization_done_allowed(
                 parent, caller="board_cascade_done"
