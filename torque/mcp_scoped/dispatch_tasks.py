@@ -297,6 +297,26 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         ):
             return "Task was not created by this architect", True
 
+        # ``dispatch_state`` is the durable boundary between a staged card and
+        # work that has been handed to an execution stream.  Assignment and
+        # lane do not imply dispatch, so neither may participate in this gate.
+        # Refuse before validating or forwarding any part of the patch: a
+        # dispatched task must be stopped and re-laned explicitly before its
+        # durable handoff may be amended.
+        dispatch_state = str(
+            getattr(task, "dispatch_state", "queued") or "queued"
+        ).strip().lower()
+        if dispatch_state == "live":
+            return json.dumps({
+                "type": "error",
+                "reason": "task_dispatched",
+                "dispatch_state": dispatch_state,
+                "message": (
+                    "Task is dispatched. Stop the work and move the task to "
+                    "Backlog or To Do before editing it."
+                ),
+            }), True
+
         patch = {}
         updated_fields = []
         if "title" in args:

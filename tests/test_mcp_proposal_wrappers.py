@@ -639,6 +639,59 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Unknown tool", denied.payload["error"]["message"])
         self.assertEqual(before, (other_task.task, other_task.lane, list(other_task.messages)))
 
+    async def test_pm_task_update_refuses_dispatched_same_group_task(self):
+        task = self.state.board_add_task(
+            "Live execution task",
+            "g",
+            lane="In Progress",
+            description="Original description",
+            labels=["execution", "keep"],
+            action_name="feature/implement",
+            action_vars={"original": "value"},
+            created_by_engineer_id=self.engineer.id,
+            dispatch_state="live",
+        )
+        task.updated_at = "2000-01-01T00:00:00+00:00"
+        self.state._db_save_task(task)
+        before = (
+            task.task,
+            task.description,
+            list(task.labels),
+            task.action_name,
+            dict(task.action_vars),
+            task.updated_at,
+            len(self.calls),
+        )
+
+        refused = await self._call(
+            "task_update",
+            {
+                "task": task.id,
+                "title": "Unsafe amendment",
+                "description": "Unsafe amended description",
+                "labels": ["unsafe"],
+                "action_name": "oneshot/fix",
+                "action_vars": {"unsafe": "value"},
+            },
+        )
+
+        error = json.loads(self._error_text(refused))
+        self.assertEqual(error["reason"], "task_dispatched")
+        self.assertEqual(error["dispatch_state"], "live")
+        self.assertIn("Stop the work and move the task to Backlog or To Do", error["message"])
+        self.assertEqual(
+            (
+                task.task,
+                task.description,
+                task.labels,
+                task.action_name,
+                task.action_vars,
+                task.updated_at,
+                len(self.calls),
+            ),
+            before,
+        )
+
     async def test_custom_metadata_cannot_activate_product_manager_exceptions(self):
         # Custom classes may author metadata.  A custom Architect that copies
         # the PM marker must not receive the PM-only same-group reassignment
