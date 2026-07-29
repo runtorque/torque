@@ -22,20 +22,26 @@ from .state import MatrixState, task_counts_as_done
 def _watch_local_response(data: dict, state: MatrixState, target, command_id: str, content: str) -> dict:
     idempotency_key = _user_agent_message_idempotency_key(data)
     message_id = _user_direct_message_id_from_idempotency_key(idempotency_key) or "msg-" + uuid.uuid4().hex[:12]
+    command_text = str(data.get("_watch_command", "") or "")
     existing = state.db.load_direct_message(message_id) if idempotency_key else None
     if existing:
         snapshot = existing.get("context_snapshot", {}) or {}
-        if (str(existing.get("recipient_id", "")) != target.id or snapshot.get("slash_command") != command_id):
+        if (str(existing.get("recipient_id", "")) != target.id
+                or snapshot.get("slash_command") != command_id
+                or snapshot.get("watch_command", "") != command_text):
             return {"type": "error", "message": "idempotency key was reused for a different user_agent_message"}
         append = getattr(state, "append_direct_message_to_caches", None)
         if callable(append): append(existing)
         return {"type": "ok", "message_id": message_id, "thread_id": existing.get("thread_id", ""), "agent_id": target.id, "delivered": True, "buffered": False, "deduped": True}
-    saved = _save_user_agent_system_audit_message(state, target, content, message_id=message_id, idempotency_key=idempotency_key, context_snapshot={"slash_command": command_id, "command_response": command_id})
+    saved = _save_user_agent_system_audit_message(state, target, content, message_id=message_id, idempotency_key=idempotency_key, context_snapshot={"slash_command": command_id, "command_response": command_id, "watch_command": command_text})
     if not saved: return {"type": "error", "message": "Failed to save command response"}
     return {"type": "ok", "message_id": saved["id"], "thread_id": saved["thread_id"], "agent_id": target.id, "delivered": True, "buffered": False, "deduped": False}
 
 def _handle_task_watch_command(data: dict, state: MatrixState, target, message_text: str, command_id: str) -> dict:
     # Idempotency is checked before every mutation, including immediate fire.
+    data = dict(data or {})
+    raw = str(message_text or "").strip()
+    data["_watch_command"] = raw
     key = _user_agent_message_idempotency_key(data)
     mid = _user_direct_message_id_from_idempotency_key(key)
     if mid and state.db.load_direct_message(mid):
@@ -45,7 +51,6 @@ def _handle_task_watch_command(data: dict, state: MatrixState, target, message_t
         load_request = getattr(state.db, "load_task_watch_by_request_key", None)
         if command_id != "watch" or not callable(load_request) or not load_request(key):
             return _watch_local_response(data, state, target, command_id, "")
-    raw = str(message_text or "").strip()
     # Case variants/mixed forms are recognized but intentionally rejected locally.
     expected = "/" + command_id
     if not raw.startswith(expected) or (len(raw) > len(expected) and not raw[len(expected)].isspace()):

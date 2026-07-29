@@ -238,6 +238,39 @@ class NotificationManagerTests(unittest.IsolatedAsyncioTestCase):
             "message_type": "message",
         }))
 
+    async def test_task_watch_notification_is_gated_and_uses_generic_body(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="agent-1", name="Alpha", group="g", cell_type="agent",
+            kind="worker",
+        )
+        state.agents[cell.id] = cell
+        manager = self.notifications_mod.NotificationManager(state)
+        manager.start()
+        sent = []
+        original = self.notifications_mod._send_notification
+
+        async def fake_send(title, body):
+            sent.append((title, body))
+
+        self.notifications_mod._send_notification = fake_send
+        try:
+            state.group_settings["g"].notifications = False
+            self.assertFalse(manager.on_task_watch({
+                "requester_agent_id": cell.id, "group_name": "g",
+                "task_ids": ["TORQUE:123"],
+            }))
+            state.group_settings["g"].notifications = True
+            self.assertTrue(manager.on_task_watch({
+                "requester_agent_id": cell.id, "group_name": "g",
+                "task_ids": ["TORQUE:123"],
+            }))
+            await asyncio.sleep(0)
+        finally:
+            self.notifications_mod._send_notification = original
+
+        self.assertEqual(sent, [("Watched tasks completed", "All watched tasks are Done.")])
+
     async def test_direct_user_message_notification_failure_is_best_effort(self):
         state = self._make_state()
         cell = self.state_mod.AgentCell(

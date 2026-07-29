@@ -12884,6 +12884,18 @@ test('embedded terminal direct-message System rows render as right-aligned green
         created_at: 11.5,
       },
       {
+        message_id: 'watch-abc123:complete',
+        message_type: 'system',
+        message: 'All watched tasks are Done: TORQUE:123',
+        sender_id: 'torque-server',
+        sender_kind: 'system',
+        sender_name: 'Torque',
+        recipient_id: 'agent-1',
+        recipient_kind: 'worker',
+        created_at: 11.75,
+        context_snapshot: { task_watch_id: 'watch-abc123', server_owned: true },
+      },
+      {
         message_id: 'dm-agent',
         message_type: 'message',
         message: 'Acknowledged',
@@ -12900,6 +12912,7 @@ test('embedded terminal direct-message System rows render as right-aligned green
   runInContext(context, `
     selectedTerminalId = 'agent-1';
     selectedAgentId = 'agent-1';
+    _terminalDirectMessageSelectedByAgent['agent-1'] = 'watch-abc123:complete';
     renderTerminalWorkspace();
   `);
 
@@ -12918,12 +12931,16 @@ test('embedded terminal direct-message System rows render as right-aligned green
   assert.match(html, /terminal-direct-message--agent-to-user/);
   assert.match(html, /terminal-direct-message--system/);
   assert.match(html, /terminal-direct-message--status-card/);
-  assert.equal((html.match(/terminal-direct-message--status-card/g) || []).length, 2);
+  assert.equal((html.match(/terminal-direct-message--status-card/g) || []).length, 3);
   assert.match(html, /<span class="terminal-direct-message-sender">System<\/span>/);
   assert.match(html, /<span class="terminal-direct-message-badge">System<\/span>/);
   assert.match(html, /terminal-direct-message--reminder/);
   assert.match(html, /<span class="terminal-direct-message-sender">Torque reminder<\/span>/);
   assert.match(html, /<span class="terminal-direct-message-badge">Reminder<\/span>/);
+  assert.match(html, /All watched tasks are Done: TORQUE:123/);
+  assert.match(html, /data-direct-message-id="watch-abc123:complete"/);
+  assert.match(html, /data-direct-message-id="watch-abc123:complete"[\s\S]*?role="button" tabindex="0"/);
+  assert.match(html, /terminal-direct-message--system[^"]* selected/);
   assert.match(html, /<div class="terminal-direct-message-body torque-markdown"><p>\/loop started: Every 5m — run checks<\/p><\/div>/);
 
   const css = appStylesheetSource();
@@ -19002,6 +19019,68 @@ test('incoming direct_message_upsert refreshes the real terminal direct-message 
   assert.deepEqual(JSON.parse(JSON.stringify(runInContext(context, `__noticeLifecycleCommands.pop()`))), {
     cmd: 'operator_notice_mark_read', id: 'notice-delta-dm-1',
   });
+});
+
+test('incoming watch completion delta preserves a focused composer draft and caret', () => {
+  const { sandbox, document } = createSandbox();
+  const workspace = document.register('terminal-workspace');
+  workspace.classList.add('active');
+  document.body.classList.add('runtime-embedded');
+  const context = vm.createContext(sandbox);
+  [
+    'static/js/ws.js', 'static/js/render.js', 'static/js/grid/group-tabs.js',
+    'static/js/grid/agent-card.js', 'static/js/grid/terminal-row.js',
+    'static/js/grid/sections.js', 'static/js/agent-detail.js',
+    'static/js/agent-focus.js', 'static/js/grid/main.js', 'static/js/terminal.js',
+    'static/js/terminal/direct-messages.js', 'static/js/terminal/composer.js',
+    'static/js/terminal/composer-attachments.js', 'static/js/terminal/xterm-runtime.js',
+  ].forEach((path) => loadScript(context, path));
+  const dom = attachTerminalWorkspaceDom(document);
+  runInContext(context, `
+    render = function(opts) { if (!opts || !opts.skipTerminalRefresh) renderTerminalWorkspace(); };
+    updateEventsAttentionBadge = function() {};
+    _expectedSeq = 1;
+    state.runtime = { embedded_terminal: true };
+    state.groups = { alpha: ['worker-1'] };
+    state.group_settings = { alpha: {} };
+    state.children = { 'worker-1': [] };
+    state.agents = { 'worker-1': { id: 'worker-1', name: 'Worker', group: 'alpha', cell_type: 'agent', kind: 'worker', session_id: '', status: 'stopped' } };
+    selectedTerminalId = 'worker-1'; selectedAgentId = 'worker-1'; focusedItemId = 'worker-1';
+    var __watchToastCalls = 0; _showNoticeToast = function() { __watchToastCalls += 1; };
+    renderTerminalWorkspace();
+  `);
+  const form = new FakeElement('terminal-compose-form');
+  form.classList.add('terminal-compose'); form.dataset.cellId = 'worker-1'; form.dataset.agentId = 'worker-1';
+  const input = document.register('terminal-compose-input-worker-1');
+  input.tagName = 'TEXTAREA'; input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'worker-1'; input.dataset.agentId = 'worker-1';
+  input.value = 'draft survives watch completion'; input.selectionStart = 7; input.selectionEnd = 14;
+  dom.compose.appendChild(form); form.appendChild(input);
+  dom.compose.setQuerySelector('.terminal-compose', form);
+  dom.compose.setQuerySelector('.terminal-compose-input', input);
+  dom.workspace.setQuerySelector('.terminal-compose-input', input);
+  document.activeElement = input;
+  context.__watchCompletionCompose = input;
+  runInContext(context, `terminalComposeInput(__watchCompletionCompose);`);
+
+  context._handleDelta({ seq: 1, ops: [{
+    op: 'direct_message_upsert', message_id: 'watch-delta:complete', agent_id: 'worker-1', group: 'alpha',
+    message: {
+      message_id: 'watch-delta:complete', thread_id: 'user-agent:user:worker-1',
+      message: 'All watched tasks are Done: TORQUE:123', message_type: 'system',
+      created_at: '2026-05-22T12:45:00Z', sender_id: 'torque-server', sender_kind: 'system', sender_name: 'Torque',
+      recipient_id: 'worker-1', recipient_kind: 'worker',
+      context_snapshot: { task_watch_id: 'watch-delta', command_response: 'watch_complete', server_owned: true },
+    },
+  }] });
+
+  assert.match(dom.directMessages.innerHTML, /All watched tasks are Done: TORQUE:123/);
+  assert.match(dom.directMessages.innerHTML, /terminal-direct-message--system/);
+  assert.equal(document.activeElement, input);
+  assert.equal(input.value, 'draft survives watch completion');
+  assert.equal(input.selectionStart, 7);
+  assert.equal(input.selectionEnd, 14);
+  assert.equal(runInContext(context, `__watchToastCalls`), 0);
 });
 
 test('mcp_call_append for non-focused agent does NOT invalidate engineer panel (TORQUE:236 v4)', () => {

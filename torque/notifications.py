@@ -204,6 +204,21 @@ class NotificationManager:
             error_message="Failed to send reminder notification",
         )
 
+    def on_task_watch(self, watch: dict) -> bool:
+        """Best-effort desktop fanout after a watch's thread row is durable."""
+        watch = watch or {}
+        target = self._state.agents.get(
+            str(watch.get("requester_agent_id", "") or "")
+        )
+        group = str(watch.get("group_name", "") or "").strip()
+        if not target or not group or not self._state.get_group_settings(group).notifications:
+            return False
+        return self._send_immediate_best_effort(
+            "Watched tasks completed",
+            "All watched tasks are Done.",
+            error_message="Failed to send task watch notification",
+        )
+
     def on_task_health_alert(self, task_id: str, health_state: str):
         """Keep task health out of the operator notification channel.
 

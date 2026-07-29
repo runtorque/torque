@@ -10,6 +10,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from ..db import canonical_user_agent_thread_id
+from ..config import log
 
 WATCH_MAX_TASKS = 20
 WATCH_MAX_ACTIVE = 100
@@ -39,6 +40,24 @@ class TaskWatchService:
             watch["id"],
             cancelled_at=now,
         )
+
+    def _cancel_delivery(self, watch, *, now=None):
+        """Terminate one fired outbox when its task scope vanishes."""
+        if not self._has_watch_api("cancel_task_watch_delivery"):
+            return None
+        return self._db.cancel_task_watch_delivery(
+            watch["id"], cancelled_at=float(now if now is not None else time.time())
+        )
+
+    def _terminate_unauthorized_delivery(self, watch, tasks, *, now=None):
+        """Cancel just this watch unless the requester itself lost scope."""
+        requester = self._state.get_active_agent(watch.get("requester_agent_id", ""))
+        if (not requester
+                or getattr(requester, "group", "") != watch.get("group_name", "")):
+            return self.invalidate_requester(
+                watch.get("requester_agent_id", ""), now=now
+            )
+        return self._cancel_delivery(watch, now=now)
 
     def invalidate_requester(self, requester_agent_id: str, *, now=None) -> int:
         """Atomically stop active/fired watches before requester teardown."""
@@ -75,6 +94,11 @@ class TaskWatchService:
                 "list_task_watches", "save_task_watch", "load_task_watch",
                 "update_task_watch", "claim_task_watch_fired"):
             raise ValueError("Task watch store is unavailable")
+        task_ids = [str(task_id or "").strip() for task_id in (task_ids or [])]
+        if (not task_ids or len(task_ids) > WATCH_MAX_TASKS
+                or any(not task_id for task_id in task_ids)
+                or len(set(task_ids)) != len(task_ids)):
+            raise ValueError("A task watch requires 1–20 unique task IDs")
         now = float(now if now is not None else time.time())
         request_key = str(request_idempotency_key or "").strip()
         if request_key and not self._has_watch_api("load_task_watch_by_request_key"):
@@ -193,14 +217,14 @@ class TaskWatchService:
     def deliver_outbox(self, watch, *, now=None):
         if (not self._has_watch_api(
                     "claim_task_watch_outbox", "claim_task_watch_notice_delivery",
-                    "load_operator_notice_for_dedupe", "update_task_watch")
+                    "load_direct_message", "update_task_watch")
                 or not watch or watch.get("status") != "fired"):
             return
         now = float(now if now is not None else time.time())
         tasks = [self._state.board_tasks.get(task_id)
                  for task_id in watch.get("task_ids", [])]
         if not tasks or any(not self._visible(watch, task) for task in tasks):
-            self.invalidate_requester(watch.get("requester_agent_id", ""), now=now)
+            self._terminate_unauthorized_delivery(watch, tasks, now=now)
             return
         if not self._db.claim_task_watch_outbox(watch["id"], attempted_at=now):
             return
@@ -210,44 +234,83 @@ class TaskWatchService:
         tasks = [self._state.board_tasks.get(task_id)
                  for task_id in watch.get("task_ids", [])]
         if not tasks or any(not self._visible(watch, task) for task in tasks):
-            self.invalidate_requester(watch.get("requester_agent_id", ""), now=now)
+            self._terminate_unauthorized_delivery(watch, tasks, now=now)
             return
         if not self._db.claim_task_watch_notice_delivery(watch["id"], attempted_at=now):
             return
         try:
+            # The final claim is deliberately followed by another authorization
+            # check.  Lifecycle invalidation also claims ``notifying`` rows, so
+            # an invalidator that wins at this boundary prevents the only
+            # required side effect: the durable originating-thread row.
+            current = self._db.load_task_watch(watch["id"])
+            # Do not retain object references from before the final claim.  A
+            # task can be removed from the board in that interval, while the
+            # former dataclass instance would still appear group-visible.
+            tasks = [self._state.board_tasks.get(task_id)
+                     for task_id in watch.get("task_ids", [])]
             task_ids = list(watch.get("task_ids") or [])
-            title = "Watched tasks completed"
             message = "All watched tasks are Done: " + ", ".join(task_ids)
-            # OperatorNoticeService intentionally treats a repeated publish as
-            # a recurrence.  A task watch outbox must instead *ensure* its one
-            # occurrence before retrying later effects (the durable thread row).
-            existing_notice = self._db.load_operator_notice_for_dedupe(
-                watch["dedupe_key"]
-            )
-            if not existing_notice:
-                self._state.publish_operator_notice(
-                    notice_type="notification", severity="success",
-                    category="task_watch", title=title, message=message,
-                    group_name=watch["group_name"],
-                    task_id=task_ids[0] if task_ids else "",
-                    action_kind="open_task",
-                    action_payload={"task_id": task_ids[0] if task_ids else ""},
-                    dedupe_key=watch["dedupe_key"], broadcast=True,
-                )
             target = self._state.get_active_agent(watch["requester_agent_id"])
-            if target:
+            if (not current or current.get("status") != "fired"
+                    or current.get("outbox_state") != "notifying"):
+                return
+            requester_lost = (
+                not target
+                or getattr(target, "group", "") != watch.get("group_name", "")
+            )
+            if requester_lost:
+                self.invalidate_requester(watch.get("requester_agent_id", ""), now=now)
+                return
+            if not tasks or any(not self._visible(watch, task) for task in tasks):
+                self._cancel_delivery(watch, now=now)
+                return
+
+            # The thread row is the notification.  It is committed before any
+            # optional desktop fanout, has a stable idempotency key, and is
+            # explicitly checked on recovery so a crash cannot create a second
+            # message or rewrite a non-watch row with a colliding id.
+            row_id = watch["id"] + ":complete"
+            row = self._db.load_direct_message(row_id)
+            if row is not None:
+                snapshot = row.get("context_snapshot", {}) or {}
+                if (row.get("thread_id") != watch["thread_id"]
+                        or row.get("recipient_id") != target.id
+                        or snapshot.get("task_watch_id") != watch["id"]):
+                    raise RuntimeError("task watch completion row collision")
+            else:
                 row = self._state.save_direct_message({
                     "id": watch["id"] + ":complete", "thread_id": watch["thread_id"], "reply_to_id": "",
                     "idempotency_key": watch["dedupe_key"] + ":thread", "group_name": watch["group_name"],
-                    "sender_id": "system", "sender_kind": "system", "sender_name": "System",
+                    "sender_id": "torque-server", "sender_kind": "system", "sender_name": "Torque",
                     "recipient_id": target.id, "recipient_kind": getattr(target, "kind", "worker"), "recipient_name": getattr(target, "name", ""),
                     "message": message, "message_type": "system", "created_at": now, "ack_required": False, "blocking": False,
-                    "context_snapshot": {"task_watch_id": watch["id"], "command_response": "watch_complete"},
+                    "context_snapshot": {"task_watch_id": watch["id"], "command_response": "watch_complete", "server_owned": True},
                     "delivery_state": "delivered", "delivery_reason": "", "delivered_at": now,
                 })
-                append = getattr(self._state, "append_direct_message_to_caches", None)
-                if callable(append): append(row)
-            self._db.update_task_watch(watch["id"], {"outbox_state": "sent", "outbox_attempted_at": now, "updated_at": now}, only_status="fired")
+                if not row:
+                    raise RuntimeError("failed to save task watch completion row")
+            terminal = self._db.update_task_watch(
+                watch["id"],
+                {"outbox_state": "sent", "outbox_attempted_at": now, "updated_at": now},
+                only_status="fired",
+            )
+            if (not terminal or terminal.get("status") != "fired"
+                    or terminal.get("outbox_state") != "sent"):
+                return
         except Exception:
             # Fired is intentionally not rolled back. Startup/event reconciliation retries a stable outbox.
+            log.exception("Task watch durable thread delivery failed: watch_id=%s", watch.get("id", ""))
             self._db.update_task_watch(watch["id"], {"outbox_state": "pending", "outbox_attempted_at": now, "updated_at": now}, only_status="fired")
+            return
+
+        # Desktop notification is deliberately after the durable thread row
+        # and terminal outbox update.  It is optional and never retries or
+        # rolls back durable delivery when an OS notification path fails.
+        notifier = getattr(self._state, "notification_manager", None)
+        callback = getattr(notifier, "on_task_watch", None)
+        if callable(callback):
+            try:
+                callback(watch)
+            except Exception:
+                log.exception("Task watch desktop notification failed")
