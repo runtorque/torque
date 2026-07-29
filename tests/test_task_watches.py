@@ -41,9 +41,10 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
         self.state.board_move_task('G:1','Done')
         result=await self._command('/watch G:1','immediate')
         self.assertEqual(self.db.list_task_watches(requester_agent_id='agent')[0]['status'],'fired')
-        self.assertEqual(len(self.db.list_operator_notices()),1)
+        self.assertIsNotNone(self.db.load_direct_message(
+            self.db.list_task_watches(requester_agent_id='agent')[0]['id'] + ':complete'))
         again=await self._command('/watch G:1','immediate')
-        self.assertTrue(again['deduped']); self.assertEqual(len(self.db.list_operator_notices()),1)
+        self.assertTrue(again['deduped']); self.assertEqual(len(self.db.list_operator_notices()), 0)
         for i,text in enumerate(('/watch','/watch G:1 G:1','/watch O:1','/WATCH G:1','/unwatch','/watches x')):
             response=await self._command(text,'bad'+str(i)); self.assertEqual(response['type'],'ok')
         sent=[]
@@ -57,23 +58,45 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
         watch=self.state.create_task_watch(target=self.agent,task_ids=['G:2'])
         self.state.board_remove_task('G:2'); self.assertEqual(self.db.load_task_watch(watch['id'])['status'],'cancelled')
 
+    async def test_watch_bounds_are_enforced_at_command_and_service_boundaries(self):
+        for number in range(3, 22):
+            self.state.board_add_task(f'Task {number}', 'g', lane='To Do', id=f'G:{number}')
+        refs = [f'G:{number}' for number in range(1, 21)]
+        created_at = 1234.5
+        watch = self.state.create_task_watch(
+            target=self.agent, task_ids=refs, now=created_at,
+        )
+        self.assertEqual(watch['expires_at'], created_at + 30 * 24 * 60 * 60)
+        with self.assertRaisesRegex(ValueError, '1–20 unique task IDs'):
+            self.state.create_task_watch(target=self.agent, task_ids=refs + ['G:21'])
+        response = await self._command('/watch ' + ' '.join(refs + ['G:21']), 'too-many-refs')
+        self.assertEqual(response['type'], 'ok')
+        self.assertIn('1–20 unique task IDs', self.db.load_direct_message(response['message_id'])['message'])
+        for _ in range(99):
+            self.state.create_task_watch(target=self.agent, task_ids=['G:1'])
+        self.assertEqual(len(self.db.list_task_watches(requester_agent_id='agent', status='active', limit=101)), 100)
+        with self.assertRaisesRegex(ValueError, 'At most 100 active watches'):
+            self.state.create_task_watch(target=self.agent, task_ids=['G:1'])
+
     async def test_outbox_failure_reconciles_once_without_rolling_back_fired(self):
         self.state.board_move_task('G:1', 'Done')
-        original = self.state.publish_operator_notice
-        calls = []
-        def fail_once(**kwargs):
-            calls.append(kwargs)
-            raise RuntimeError('notice unavailable')
-        self.state.publish_operator_notice = fail_once
+        original = self.state.save_direct_message
+        def fail_once(row):
+            if row.get('id', '').endswith(':complete'):
+                raise RuntimeError('thread row unavailable')
+            return original(row)
+        self.state.save_direct_message = fail_once
         watch = self.state.create_task_watch(target=self.agent, task_ids=['G:1'])
         self.assertEqual(watch['status'], 'fired')
         self.assertEqual(self.db.load_task_watch(watch['id'])['outbox_state'], 'pending')
-        self.state.publish_operator_notice = original
+        self.assertIsNone(self.db.load_direct_message(watch['id'] + ':complete'))
+        self.state.save_direct_message = original
         self.state.reconcile_task_watches()
         self.assertEqual(self.db.load_task_watch(watch['id'])['outbox_state'], 'sent')
-        self.assertEqual(len(self.db.list_operator_notices()), 1)
+        self.assertIsNotNone(self.db.load_direct_message(watch['id'] + ':complete'))
         self.state.reconcile_task_watches()
-        self.assertEqual(len(self.db.list_operator_notices()), 1)
+        self.assertEqual(len([row for row in self.db.load_direct_messages_for_thread(watch['thread_id'])
+                              if row['id'] == watch['id'] + ':complete']), 1)
 
     async def test_unwatch_all_and_requester_isolation(self):
         one = self.state.create_task_watch(target=self.agent, task_ids=['G:1'])
@@ -84,29 +107,35 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.db.load_task_watch(one['id'])['status'], 'cancelled')
         self.assertEqual(self.db.load_task_watch(two['id'])['status'], 'active')
 
-    async def test_halfway_thread_failure_retries_without_notice_recurrence(self):
+    async def test_watch_command_audits_reject_idempotency_reuse_for_different_text(self):
+        first = self.state.create_task_watch(target=self.agent, task_ids=['G:1'])
+        second = self.state.create_task_watch(target=self.agent, task_ids=['G:2'])
+        response = await self._command('/unwatch ' + first['id'], 'same-command-key')
+        self.assertEqual(response['type'], 'ok')
+        conflict = await self._command('/unwatch ' + second['id'], 'same-command-key')
+        self.assertEqual(conflict['type'], 'error')
+        self.assertEqual(self.db.load_task_watch(second['id'])['status'], 'active')
+        await self._command('/watches', 'list-command-key')
+        conflict = await self._command('/unwatch all', 'list-command-key')
+        self.assertEqual(conflict['type'], 'error')
+        self.assertEqual(self.db.load_task_watch(second['id'])['status'], 'active')
+
+    async def test_thread_row_is_durable_before_optional_fanout_and_fanout_failure_is_terminal(self):
         self.state.board_move_task('G:1', 'Done')
-        original = self.state.save_direct_message
-        def fail_thread_row(record):
-            if record.get('id', '').endswith(':complete'):
-                raise RuntimeError('thread store unavailable after notice commit')
-            return original(record)
-        self.state.save_direct_message = fail_thread_row
+        class BrokenNotifier:
+            def __init__(self, state): self.state = state; self.rows = []
+            def on_task_watch(self, watch):
+                self.rows.append(self.state.db.load_direct_message(watch['id'] + ':complete'))
+                raise RuntimeError('desktop unavailable')
+        notifier = BrokenNotifier(self.state)
+        self.state.notification_manager = notifier
         watch = self.state.create_task_watch(target=self.agent, task_ids=['G:1'])
-        notice = self.db.load_operator_notice_for_dedupe(watch['dedupe_key'])
         self.assertEqual(watch['status'], 'fired')
-        self.assertEqual(self.db.load_task_watch(watch['id'])['outbox_state'], 'pending')
-        self.assertEqual(notice['occurrence_count'], 1)
-        self.assertIsNone(self.db.load_direct_message(watch['id'] + ':complete'))
-        notice_events = len([op for op in self.state._delta_ops
-                             if op.get('op') == 'operator_notice_upsert'])
-        self.state.save_direct_message = original
-        self.state.reconcile_task_watches()
-        notice = self.db.load_operator_notice_for_dedupe(watch['dedupe_key'])
         self.assertEqual(self.db.load_task_watch(watch['id'])['outbox_state'], 'sent')
-        self.assertEqual(notice['occurrence_count'], 1)
-        self.assertEqual(len([op for op in self.state._delta_ops
-                              if op.get('op') == 'operator_notice_upsert']), notice_events)
+        self.assertIsNotNone(notifier.rows[0], 'fanout runs only after durable thread commit')
+        self.assertEqual(len(self.db.list_operator_notices()), 0)
+        self.state.reconcile_task_watches()
+        self.assertEqual(self.db.load_task_watch(watch['id'])['outbox_state'], 'sent')
         self.assertEqual(len([row for row in self.db.load_direct_messages_for_thread(watch['thread_id'])
                               if row['id'] == watch['id'] + ':complete']), 1)
 
@@ -124,13 +153,11 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
             await self._command('/watch G:1', 'request-retry')
         watch = self.db.list_task_watches(requester_agent_id='agent')[0]
         self.assertEqual(len(self.db.list_task_watches(requester_agent_id='agent')), 1)
-        self.assertEqual(len(self.db.list_operator_notices()), 1)
         self.assertIsNotNone(self.db.load_direct_message(watch['id'] + ':complete'))
         self.state.save_direct_message = original
         retried = await self._command('/watch G:1', 'request-retry')
         self.assertEqual(retried['type'], 'ok')
         self.assertEqual(len(self.db.list_task_watches(requester_agent_id='agent')), 1)
-        self.assertEqual(len(self.db.list_operator_notices()), 1)
         self.assertEqual(len([row for row in self.db.load_direct_messages_for_thread(watch['thread_id'])
                               if row['id'] == watch['id'] + ':complete']), 1)
         again = await self._command('/watch G:1', 'request-retry')
@@ -153,7 +180,6 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
         retried = await self._command('/watch G:1', 'request-crash')
         self.assertEqual(retried['type'], 'ok')
         self.assertEqual(len(self.db.list_task_watches(requester_agent_id='agent')), 1)
-        self.assertEqual(len(self.db.list_operator_notices()), 1)
         self.assertEqual(len([row for row in self.db.load_direct_messages_for_thread(watch['thread_id'])
                               if row['id'] == watch['id'] + ':complete']), 1)
         conflict = await self._command('/watch G:2', 'request-crash')
@@ -176,15 +202,15 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
             self._save_paged_watch(f'page-fire-{index:04}', expires_at=time.time() + 3600)
         self.state.board_move_task('G:1', 'Done')
         self.assertEqual(self.db.load_task_watch('page-fire-1000')['status'], 'fired')
-        self.assertIsNotNone(self.db.load_operator_notice_for_dedupe('task-watch:page-fire-1000'))
-        self.assertEqual(self.db._conn.execute('SELECT COUNT(*) FROM operator_notices').fetchone()[0], 1001)
+        self.assertIsNotNone(self.db.load_direct_message('page-fire-1000:complete'))
+        self.assertEqual(self.db._conn.execute("SELECT COUNT(*) FROM agent_peer_messages WHERE id LIKE 'page-fire-%:complete'").fetchone()[0], 1001)
         self.state.reconcile_task_watches()
-        self.assertEqual(self.db._conn.execute('SELECT COUNT(*) FROM operator_notices').fetchone()[0], 1001)
+        self.assertEqual(self.db._conn.execute("SELECT COUNT(*) FROM agent_peer_messages WHERE id LIKE 'page-fire-%:complete'").fetchone()[0], 1001)
         for index in range(1001):
             self._save_paged_watch(f'page-expire-{index:04}', expires_at=1)
         self.state.reconcile_task_watches(now=2)
         self.assertEqual(self.db.load_task_watch('page-expire-1000')['status'], 'cancelled')
-        self.assertEqual(self.db._conn.execute('SELECT COUNT(*) FROM operator_notices').fetchone()[0], 1001)
+        self.assertEqual(self.db._conn.execute("SELECT COUNT(*) FROM agent_peer_messages WHERE id LIKE 'page-fire-%:complete'").fetchone()[0], 1001)
 
     async def test_minimal_db_keeps_event_driven_evaluation_a_safe_noop(self):
         class MinimalDB:
@@ -219,12 +245,12 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_lifecycle_invalidation_stops_fired_pending_outbox_delivery(self):
         self.state.board_move_task('G:1', 'Done')
-        original = self.state.publish_operator_notice
-        self.state.publish_operator_notice = lambda **kwargs: (_ for _ in ()).throw(RuntimeError('fail'))
+        original = self.state.save_direct_message
+        self.state.save_direct_message = lambda row: (_ for _ in ()).throw(RuntimeError('fail'))
         watch = self.state.create_task_watch(target=self.agent, task_ids=['G:1'])
         self.assertEqual(self.db.load_task_watch(watch['id'])['status'], 'fired')
         self.state.remove_agent(self.agent.id)
-        self.state.publish_operator_notice = original
+        self.state.save_direct_message = original
         self.state.reconcile_task_watches()
         self.assertEqual(self.db.load_task_watch(watch['id'])['status'], 'cancelled')
         self.assertEqual(self.db.list_operator_notices(), [])
@@ -258,7 +284,6 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
         self.db.claim_task_watch_notice_delivery = original_gate
         self.state.reconcile_task_watches()
         self.assertEqual(self.db.load_task_watch(watch['id'])['outbox_state'], 'sent')
-        self.assertEqual(len(self.db.list_operator_notices()), 1)
         self.assertIsNotNone(self.db.load_direct_message(watch['id'] + ':complete'))
 
     async def test_lifecycle_invalidation_winning_after_outbox_claim_never_notifies(self):
@@ -278,4 +303,43 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stored['status'], 'cancelled')
         self.assertEqual(stored['outbox_state'], 'cancelled')
         self.assertEqual(self.db.list_operator_notices(), [])
+        self.assertIsNone(self.db.load_direct_message(watch['id'] + ':complete'))
+
+    async def test_lifecycle_invalidation_after_final_claim_never_writes_thread_row(self):
+        """The notifying state remains cancellable until the thread row exists."""
+        self.state.board_move_task('G:1', 'Done')
+        original_load = self.db.load_task_watch
+        invalidated = False
+
+        def invalidate_after_final_claim(watch_id):
+            nonlocal invalidated
+            row = original_load(watch_id)
+            if (not invalidated and row and row.get('outbox_state') == 'notifying'):
+                invalidated = True
+                self.state.remove_agent(self.agent.id)
+            return original_load(watch_id)
+
+        self.db.load_task_watch = invalidate_after_final_claim
+        watch = self.state.create_task_watch(target=self.agent, task_ids=['G:1'])
+        stored = original_load(watch['id'])
+        self.assertTrue(invalidated)
+        self.assertEqual(stored['status'], 'cancelled')
+        self.assertEqual(stored['outbox_state'], 'cancelled')
+        self.assertIsNone(self.db.load_direct_message(watch['id'] + ':complete'))
+
+    async def test_task_scope_loss_after_final_claim_cancels_only_that_watch(self):
+        self.state.board_move_task('G:1', 'Done')
+        unaffected = self.state.create_task_watch(target=self.agent, task_ids=['G:2'])
+        original_gate = self.db.claim_task_watch_notice_delivery
+
+        def hide_task_after_final_claim(watch_id, *, attempted_at):
+            claimed = original_gate(watch_id, attempted_at=attempted_at)
+            if claimed:
+                self.one.group = 'hidden-scope'
+            return claimed
+
+        self.db.claim_task_watch_notice_delivery = hide_task_after_final_claim
+        watch = self.state.create_task_watch(target=self.agent, task_ids=['G:1'])
+        self.assertEqual(self.db.load_task_watch(watch['id'])['status'], 'cancelled')
+        self.assertEqual(self.db.load_task_watch(unaffected['id'])['status'], 'active')
         self.assertIsNone(self.db.load_direct_message(watch['id'] + ':complete'))

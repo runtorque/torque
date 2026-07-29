@@ -160,6 +160,25 @@ class TaskWatchPersistenceMixin:
             return None
         return self.load_task_watch(watch_id)
 
+    def cancel_task_watch_delivery(
+        self,
+        watch_id: str,
+        *,
+        cancelled_at: float,
+    ) -> dict | None:
+        """Safely terminate one fired outbox whose task scope disappeared."""
+        cursor = self._conn.execute(
+            "UPDATE task_watches SET status='cancelled', cancelled_at=?, "
+            "outbox_state='cancelled', updated_at=? "
+            "WHERE id=? AND status='fired' "
+            "AND outbox_state IN ('pending', 'sending', 'notifying')",
+            (cancelled_at, cancelled_at, str(watch_id or '').strip()),
+        )
+        self._conn.commit()
+        if not cursor.rowcount:
+            return None
+        return self.load_task_watch(watch_id)
+
     def terminate_task_watches_for_requester(
         self,
         requester_agent_id: str,
@@ -171,7 +190,7 @@ class TaskWatchPersistenceMixin:
             "UPDATE task_watches SET status='cancelled', cancelled_at=?, "
             "outbox_state='cancelled', updated_at=? "
             "WHERE requester_agent_id=? AND (status='active' OR "
-            "(status='fired' AND outbox_state IN ('pending', 'sending')))",
+            "(status='fired' AND outbox_state IN ('pending', 'sending', 'notifying')))",
             (cancelled_at, cancelled_at, str(requester_agent_id or '').strip()),
         )
         self._conn.commit()
@@ -188,7 +207,7 @@ class TaskWatchPersistenceMixin:
             "UPDATE task_watches SET status='cancelled', cancelled_at=?, "
             "outbox_state='cancelled', updated_at=? "
             "WHERE group_name=? AND (status='active' OR "
-            "(status='fired' AND outbox_state IN ('pending', 'sending')))",
+            "(status='fired' AND outbox_state IN ('pending', 'sending', 'notifying')))",
             (cancelled_at, cancelled_at, str(group_name or '').strip()),
         )
         self._conn.commit()
