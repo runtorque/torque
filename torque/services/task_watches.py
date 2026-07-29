@@ -244,6 +244,11 @@ class TaskWatchService:
             # an invalidator that wins at this boundary prevents the only
             # required side effect: the durable originating-thread row.
             current = self._db.load_task_watch(watch["id"])
+            # Do not retain object references from before the final claim.  A
+            # task can be removed from the board in that interval, while the
+            # former dataclass instance would still appear group-visible.
+            tasks = [self._state.board_tasks.get(task_id)
+                     for task_id in watch.get("task_ids", [])]
             task_ids = list(watch.get("task_ids") or [])
             message = "All watched tasks are Done: " + ", ".join(task_ids)
             target = self._state.get_active_agent(watch["requester_agent_id"])

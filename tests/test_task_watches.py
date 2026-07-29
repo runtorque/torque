@@ -331,15 +331,20 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
         self.state.board_move_task('G:1', 'Done')
         unaffected = self.state.create_task_watch(target=self.agent, task_ids=['G:2'])
         original_gate = self.db.claim_task_watch_notice_delivery
+        original_reconcile = self.state.reconcile_task_watches
 
-        def hide_task_after_final_claim(watch_id, *, attempted_at):
+        def remove_task_after_final_claim(watch_id, *, attempted_at):
             claimed = original_gate(watch_id, attempted_at=attempted_at)
             if claimed:
-                self.one.group = 'hidden-scope'
+                self.state.board_remove_task('G:1')
             return claimed
 
-        self.db.claim_task_watch_notice_delivery = hide_task_after_final_claim
+        self.db.claim_task_watch_notice_delivery = remove_task_after_final_claim
+        # Let the in-flight final-claim path, rather than board removal's
+        # usual follow-up reconciliation, prove it reloads task refs.
+        self.state.reconcile_task_watches = lambda *args, **kwargs: None
         watch = self.state.create_task_watch(target=self.agent, task_ids=['G:1'])
+        self.state.reconcile_task_watches = original_reconcile
         self.assertEqual(self.db.load_task_watch(watch['id'])['status'], 'cancelled')
         self.assertEqual(self.db.load_task_watch(unaffected['id'])['status'], 'active')
         self.assertIsNone(self.db.load_direct_message(watch['id'] + ':complete'))
