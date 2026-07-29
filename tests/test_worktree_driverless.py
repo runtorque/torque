@@ -3,6 +3,7 @@ import subprocess
 import tempfile
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 try:
     from helpers import install_aiohttp_stub
@@ -88,16 +89,27 @@ class DriverlessWorktreeGateParityTests(unittest.IsolatedAsyncioTestCase):
             boundary_reason_message=lambda reason, boundary=None: reason,
         )
 
-        live_result = await server._preflight_worktree_merge_gates(
-            cell=live,
-            aid=live.id,
-            **kwargs,
-        )
-        driverless_result = await server._preflight_worktree_merge_gates(
-            cell=driverless,
-            aid=driverless.id,
-            **kwargs,
-        )
+        backend_modularity_result = {
+            "ok": True,
+            "applicable": False,
+            "phase": "backend_modularity",
+            "checked_files": [],
+            "crossings": [],
+        }
+        with patch(
+            "torque.services.worktrees.preflight.check_backend_modularity_crossings",
+            return_value=backend_modularity_result,
+        ):
+            live_result = await server._preflight_worktree_merge_gates(
+                cell=live,
+                aid=live.id,
+                **kwargs,
+            )
+            driverless_result = await server._preflight_worktree_merge_gates(
+                cell=driverless,
+                aid=driverless.id,
+                **kwargs,
+            )
 
         for result in (live_result, driverless_result):
             result.pop("boundary_state", None)
@@ -144,7 +156,7 @@ class BackendModularityMergeGateTests(unittest.IsolatedAsyncioTestCase):
             stderr=subprocess.PIPE,
         )
 
-    async def _preflight(self, branch: str):
+    async def _preflight(self, branch: str, *, repo_root: str | None = None):
         from torque import server
         from torque.state import MatrixState
 
@@ -157,7 +169,9 @@ class BackendModularityMergeGateTests(unittest.IsolatedAsyncioTestCase):
             slug="worker",
             worktree_path=str(self.repo),
             worktree_branch=branch,
-            worktree_repo_root=str(self.repo),
+            worktree_repo_root=(
+                str(self.repo) if repo_root is None else repo_root
+            ),
             git_root=str(self.repo),
             worktree_base_branch="main",
             worktree_merge_squash=True,
@@ -196,6 +210,16 @@ class BackendModularityMergeGateTests(unittest.IsolatedAsyncioTestCase):
             boundary_reason_message=lambda reason, boundary=None: reason,
         )
         return result, mgr
+
+    async def test_shared_merge_preflight_blocks_invalid_repo_root_before_merge_check(self):
+        invalid_root = str(self.repo / "missing-repository-root")
+        result, mgr = await self._preflight("worker", repo_root=invalid_root)
+
+        self.assertFalse(result["ok"])
+        self.assertFalse(mgr.merge_check_called)
+        self.assertEqual(result["result"]["phase"], "backend_modularity")
+        self.assertEqual(result["backend_modularity"]["phase"], "backend_modularity")
+        self.assertIn("repo_root", result["backend_modularity"]["error"])
 
     async def test_shared_merge_preflight_blocks_crossing_without_author_check(self):
         result, mgr = await self._preflight("worker")
@@ -308,16 +332,27 @@ class BoundaryTipGateTests(unittest.IsolatedAsyncioTestCase):
                 return server._boundary_tip_mismatch_message(boundary)
             return reason or "Latest task boundary is not mergeable."
 
-        result = await server._preflight_worktree_merge_gates(
-            state=state,
-            cell=cell,
-            worktree_mgr=mgr,
-            aid=cell.id,
-            data=data or {},
-            latest_boundary_state_for_cell=latest_boundary,
-            boundary_reason_message=boundary_reason_message,
-            panel_event=panel_event,
-        )
+        backend_modularity_result = {
+            "ok": True,
+            "applicable": False,
+            "phase": "backend_modularity",
+            "checked_files": [],
+            "crossings": [],
+        }
+        with patch(
+            "torque.services.worktrees.preflight.check_backend_modularity_crossings",
+            return_value=backend_modularity_result,
+        ):
+            result = await server._preflight_worktree_merge_gates(
+                state=state,
+                cell=cell,
+                worktree_mgr=mgr,
+                aid=cell.id,
+                data=data or {},
+                latest_boundary_state_for_cell=latest_boundary,
+                boundary_reason_message=boundary_reason_message,
+                panel_event=panel_event,
+            )
         return result, mgr, panel_events
 
     def _mismatched_boundary_state(self):

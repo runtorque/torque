@@ -6,11 +6,9 @@ import asyncio
 import os
 from dataclasses import asdict
 from datetime import datetime, timezone
-from pathlib import Path
 
 from ...artifacts import normalize_artifacts
 from ...backend_invariants import (
-    BackendInvariantCheckError,
     check_backend_modularity_crossings,
     format_backend_modularity_crossings,
 )
@@ -197,22 +195,16 @@ async def _preflight_worktree_merge_gates(
     base_ref = str(cell.worktree_base_branch or "").strip()
     candidate_ref = str(cell.worktree_branch or "").strip()
     try:
-        if not repo_root or not Path(repo_root).is_dir():
-            backend_modularity = {
-                "ok": True,
-                "applicable": False,
-                "phase": "backend_modularity",
-                "checked_files": [],
-                "crossings": [],
-            }
-        else:
-            backend_modularity = await asyncio.to_thread(
-                check_backend_modularity_crossings,
-                repo_root,
-                base_ref,
-                candidate_ref,
-            )
-    except BackendInvariantCheckError as exc:
+        # The invariant checker validates the repository and revisions itself.
+        # Do not turn a missing or stale configured root into an exclusion: an
+        # unverifiable merge must fail closed before any merge-side effects.
+        backend_modularity = await asyncio.to_thread(
+            check_backend_modularity_crossings,
+            repo_root,
+            base_ref,
+            candidate_ref,
+        )
+    except Exception as exc:
         result = _worktree_merge_error(
             aid,
             f"Backend modularity preflight could not run: {exc}",
