@@ -1971,6 +1971,18 @@ class ServerPrClosingRefsTests(unittest.IsolatedAsyncioTestCase):
         self.state_mod = importlib.reload(self.state_mod)
         self.server_mod = importlib.import_module("torque.server")
         self.server_mod = importlib.reload(self.server_mod)
+        self._backend_modularity_patch = mock.patch(
+            "torque.services.worktrees.preflight.check_backend_modularity_crossings",
+            return_value={
+                "ok": True,
+                "applicable": True,
+                "phase": "backend_modularity",
+                "checked_files": [],
+                "crossings": [],
+            },
+        )
+        self._backend_modularity_patch.start()
+        self.addCleanup(self._backend_modularity_patch.stop)
 
     class _FakePrWorktreeManager:
         def __init__(self, *, existing=False, existing_body=""):

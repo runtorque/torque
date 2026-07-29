@@ -33,6 +33,10 @@ class WorktreeStreamTests(unittest.TestCase):
         self.state_mod = importlib.reload(self.state_mod)
         self.streams_mod = importlib.import_module("torque.worktree_streams")
         self.streams_mod = importlib.reload(self.streams_mod)
+        self.readiness_mod = importlib.import_module(
+            "torque.worktree_stream_readiness"
+        )
+        self.readiness_mod = importlib.reload(self.readiness_mod)
 
 
     def test_branch_prefill_async_timeout_is_bounded(self):
@@ -55,11 +59,11 @@ class WorktreeStreamTests(unittest.TestCase):
 
         proc = HangingProc()
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
-            self.streams_mod,
+            self.readiness_mod,
             "_BRANCH_EXISTS_GIT_TIMEOUT_SECONDS",
             0.01,
         ), mock.patch(
-            "torque.worktree_streams.asyncio.create_subprocess_exec",
+            "torque.worktree_stream_readiness.asyncio.create_subprocess_exec",
             new=mock.AsyncMock(return_value=proc),
         ):
             branches = asyncio.run(
@@ -73,6 +77,19 @@ class WorktreeStreamTests(unittest.TestCase):
         state = self.state_mod.MatrixState()
         state.groups["g"] = []
         return state
+
+    def test_exported_prefill_path_handles_empty_state(self):
+        class EmptyState:
+            agents = {}
+            board_tasks = {}
+
+            @staticmethod
+            def iter_active_agents():
+                return iter(())
+
+        asyncio.run(
+            self.streams_mod.prefill_branch_exists_for_state(EmptyState())
+        )
 
     def _add_agent(self, state, *, agent_id="agent-1", branch="torque/worker",
                    current_task_id="", status="running",

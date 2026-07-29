@@ -20,6 +20,43 @@ All other backend Python modules must stay at or below 2,500 lines unless an
 architecture review adds a documented structural exception and a tighter
 file-specific budget.
 
+## Responsibility splits
+
+- `torque/server_user_commands.py` handles local task-watch plus
+  one-shot-reminder user commands.
+- `torque/server_engineer_commands.py` handles Engineer journal, digest, plus
+  flush commands.
+- `torque/worktree_stream_readiness.py` provides cached Git probes for
+  worktree stream synthesis.
+- `torque/backend_invariants.py` detects backend file-size invariant crossings
+  between Git revisions.
+
+Each purpose above is intentionally singular. A future split that cannot state
+each resulting module's purpose in one sentence without using "and" needs an
+explicit architecture review rather than a size-driven partition.
+
+## Merge-path invariant preflight
+
+The shared direct/PR worktree preflight calls
+`check_backend_modularity_crossings()` before merge side effects. It checks
+backend Python files touched between the target base ref and candidate branch,
+then blocks files whose candidate line count newly exceeds the applicable
+reviewed limit. Applicability comes from Torque's backend-modularity test
+marker on the trusted target base, so a candidate cannot self-disable the gate
+by deleting or renaming that marker. Target bases without the marker are
+outside this repository-specific gate.
+
+The same check remains author-runnable for diagnosis:
+
+```bash
+python3 -m torque.backend_invariants \
+  --repo . --base-ref <base> --candidate-ref <candidate>
+```
+
+Exit status `1` means a crossing was found. Exit status `2` means the check
+could not produce trustworthy evidence; the automated merge preflight treats
+that outcome as blocking.
+
 ## Domain ownership
 
 - `torque/commands/` owns backend command semantics and route manifests.

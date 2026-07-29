@@ -1,5 +1,9 @@
+from pathlib import Path
+import subprocess
+import tempfile
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 try:
     from helpers import install_aiohttp_stub
@@ -85,20 +89,168 @@ class DriverlessWorktreeGateParityTests(unittest.IsolatedAsyncioTestCase):
             boundary_reason_message=lambda reason, boundary=None: reason,
         )
 
-        live_result = await server._preflight_worktree_merge_gates(
-            cell=live,
-            aid=live.id,
-            **kwargs,
-        )
-        driverless_result = await server._preflight_worktree_merge_gates(
-            cell=driverless,
-            aid=driverless.id,
-            **kwargs,
-        )
+        backend_modularity_result = {
+            "ok": True,
+            "applicable": False,
+            "phase": "backend_modularity",
+            "checked_files": [],
+            "crossings": [],
+        }
+        with patch(
+            "torque.services.worktrees.preflight.check_backend_modularity_crossings",
+            return_value=backend_modularity_result,
+        ):
+            live_result = await server._preflight_worktree_merge_gates(
+                cell=live,
+                aid=live.id,
+                **kwargs,
+            )
+            driverless_result = await server._preflight_worktree_merge_gates(
+                cell=driverless,
+                aid=driverless.id,
+                **kwargs,
+            )
 
         for result in (live_result, driverless_result):
             result.pop("boundary_state", None)
         self.assertEqual(live_result, driverless_result)
+
+
+class BackendModularityMergeGateTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        install_aiohttp_stub()
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.repo = Path(self.temp.name)
+        self._git("init", "-q", "-b", "main")
+        self._git("config", "user.email", "test@example.com")
+        self._git("config", "user.name", "Test")
+        marker = self.repo / "tests" / "test_backend_modularity.py"
+        marker.parent.mkdir()
+        marker.write_text("# marker\n")
+        backend = self.repo / "torque" / "sample.py"
+        backend.parent.mkdir()
+        backend.write_text("x = 1\n" * 2500)
+        self._git("add", ".")
+        self._git("commit", "-qm", "baseline")
+        self._git("switch", "-qc", "worker")
+        backend.write_text("x = 1\n" * 2501)
+        self._git("add", "torque/sample.py")
+        self._git("commit", "-qm", "cross limit")
+        self._git("switch", "-qc", "safe", "main")
+        backend.write_text("x = 1\n" * 2499)
+        self._git("add", "torque/sample.py")
+        self._git("commit", "-qm", "stay below limit")
+        self._git("switch", "-qc", "marker-deleted", "main")
+        marker.unlink()
+        backend.write_text("x = 1\n" * 2501)
+        self._git("add", "-A")
+        self._git("commit", "-qm", "delete marker while crossing limit")
+
+    def _git(self, *args):
+        return subprocess.run(
+            ["git", "-C", str(self.repo), *args],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    async def _preflight(self, branch: str, *, repo_root: str | None = None):
+        from torque import server
+        from torque.state import MatrixState
+
+        state = MatrixState()
+        state.groups["g"] = []
+        cell = SimpleNamespace(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            slug="worker",
+            worktree_path=str(self.repo),
+            worktree_branch=branch,
+            worktree_repo_root=(
+                str(self.repo) if repo_root is None else repo_root
+            ),
+            git_root=str(self.repo),
+            worktree_base_branch="main",
+            worktree_merge_squash=True,
+            current_task_id="",
+        )
+
+        class FakeWorktreeManager:
+            def __init__(self):
+                self.merge_check_called = False
+
+            async def has_uncommitted_changes(self, _cell, worktree_submodules=None):
+                return False
+
+            async def stale_base_info(self, _cell, worktree_submodules=None):
+                return {"stale": False}
+
+            async def check_merge_conflicts(self, _cell, worktree_submodules=None):
+                self.merge_check_called = True
+                return {"clean": True, "tree_sha": "tree", "conflicts": []}
+
+            async def merge_untracked_overwrite_paths(self, *_args):
+                return []
+
+        mgr = FakeWorktreeManager()
+
+        async def latest_boundary(_cell):
+            return {"latest": None, "clean": True, "reason": ""}
+
+        result = await server._preflight_worktree_merge_gates(
+            state=state,
+            cell=cell,
+            worktree_mgr=mgr,
+            aid=cell.id,
+            data={},
+            latest_boundary_state_for_cell=latest_boundary,
+            boundary_reason_message=lambda reason, boundary=None: reason,
+        )
+        return result, mgr
+
+    async def test_shared_merge_preflight_blocks_invalid_repo_root_before_merge_check(self):
+        invalid_root = str(self.repo / "missing-repository-root")
+        result, mgr = await self._preflight("worker", repo_root=invalid_root)
+
+        self.assertFalse(result["ok"])
+        self.assertFalse(mgr.merge_check_called)
+        self.assertEqual(result["result"]["phase"], "backend_modularity")
+        self.assertEqual(result["backend_modularity"]["phase"], "backend_modularity")
+        self.assertIn("repo_root", result["backend_modularity"]["error"])
+
+    async def test_shared_merge_preflight_blocks_crossing_without_author_check(self):
+        result, mgr = await self._preflight("worker")
+
+        self.assertFalse(result["ok"])
+        self.assertFalse(mgr.merge_check_called)
+        self.assertEqual(result["result"]["phase"], "backend_modularity")
+        self.assertEqual(
+            result["backend_modularity"]["crossings"][0]["path"],
+            "torque/sample.py",
+        )
+
+    async def test_shared_merge_preflight_blocks_marker_deletion_bypass(self):
+        result, mgr = await self._preflight("marker-deleted")
+
+        self.assertFalse(result["ok"])
+        self.assertFalse(mgr.merge_check_called)
+        self.assertEqual(result["result"]["phase"], "backend_modularity")
+        self.assertTrue(result["backend_modularity"]["applicable"])
+        self.assertEqual(
+            result["backend_modularity"]["crossings"][0]["path"],
+            "torque/sample.py",
+        )
+
+    async def test_shared_merge_preflight_allows_change_without_crossing(self):
+        result, mgr = await self._preflight("safe")
+
+        self.assertTrue(result["ok"], result.get("result"))
+        self.assertTrue(mgr.merge_check_called)
+        self.assertTrue(result["backend_modularity"]["ok"])
+        self.assertEqual(result["backend_modularity"]["crossings"], [])
 
 
 class BoundaryTipGateTests(unittest.IsolatedAsyncioTestCase):
@@ -180,16 +332,27 @@ class BoundaryTipGateTests(unittest.IsolatedAsyncioTestCase):
                 return server._boundary_tip_mismatch_message(boundary)
             return reason or "Latest task boundary is not mergeable."
 
-        result = await server._preflight_worktree_merge_gates(
-            state=state,
-            cell=cell,
-            worktree_mgr=mgr,
-            aid=cell.id,
-            data=data or {},
-            latest_boundary_state_for_cell=latest_boundary,
-            boundary_reason_message=boundary_reason_message,
-            panel_event=panel_event,
-        )
+        backend_modularity_result = {
+            "ok": True,
+            "applicable": False,
+            "phase": "backend_modularity",
+            "checked_files": [],
+            "crossings": [],
+        }
+        with patch(
+            "torque.services.worktrees.preflight.check_backend_modularity_crossings",
+            return_value=backend_modularity_result,
+        ):
+            result = await server._preflight_worktree_merge_gates(
+                state=state,
+                cell=cell,
+                worktree_mgr=mgr,
+                aid=cell.id,
+                data=data or {},
+                latest_boundary_state_for_cell=latest_boundary,
+                boundary_reason_message=boundary_reason_message,
+                panel_event=panel_event,
+            )
         return result, mgr, panel_events
 
     def _mismatched_boundary_state(self):
