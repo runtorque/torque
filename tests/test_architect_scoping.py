@@ -3107,6 +3107,133 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updated.description, "Final description")
         self.assertEqual(updated.labels, ["final"])
 
+    async def test_architect_task_update_requires_stop_and_relane_after_dispatch(self):
+        creator = self._add_architect("arch-creator", "Creator")
+        execution_architect = self._add_architect("arch-execution", "Executor")
+        engineer = self._add_engineer(
+            "eng-assigned", "Assigned Engineer",
+            hired_by_architect_id=execution_architect.id,
+        )
+        assigned_undispatched = self._add_task(
+            "task-assigned-undispatched-update",
+            "Assigned but staged",
+            description="This has not been dispatched.",
+            assigned_engineer_id=engineer.id,
+            assigned_architect_id=execution_architect.id,
+            agent_id="worker-already-assigned",
+            lane="In Progress",
+            dispatch_state="queued",
+            created_by_architect_id=creator.id,
+        )
+
+        queued_text, queued_error = await self._call(
+            "architect_task_update",
+            {"task": assigned_undispatched.id, "title": "Still amendable"},
+            creator.id,
+        )
+        self.assertFalse(queued_error, queued_text)
+        self.assertEqual(
+            self.state.board_tasks[assigned_undispatched.id].task,
+            "Still amendable",
+        )
+
+        dispatched = self._add_task(
+            "task-dispatched-update",
+            "Original title",
+            description="Original description",
+            labels=["original", "keep"],
+            action_name="feature/implement",
+            action_vars={"original": "value"},
+            assigned_engineer_id=engineer.id,
+            assigned_architect_id=execution_architect.id,
+            lane="In Progress",
+            dispatch_state="live",
+            created_by_architect_id=creator.id,
+        )
+        dispatched.updated_at = "2000-01-01T00:00:00+00:00"
+        self.state._db_save_task(dispatched)
+        before_refusal = {
+            "task": dispatched.task,
+            "description": dispatched.description,
+            "labels": list(dispatched.labels),
+            "action_name": dispatched.action_name,
+            "action_vars": dict(dispatched.action_vars),
+            "updated_at": dispatched.updated_at,
+        }
+        rejected_patch = {
+            "task": dispatched.id,
+            "title": "Amended title",
+            "description": "Amended description",
+            "labels": ["amended"],
+            "action_name": "oneshot/fix",
+            "action_vars": {"amended": "value"},
+        }
+
+        for caller_id in (creator.id, execution_architect.id):
+            with self.subTest(caller_id=caller_id):
+                text, is_error = await self._call(
+                    "architect_task_update",
+                    rejected_patch,
+                    caller_id,
+                )
+                self.assertTrue(is_error)
+                error = json.loads(text)
+                self.assertEqual(error["reason"], "task_dispatched")
+                self.assertEqual(error["dispatch_state"], "live")
+                self.assertEqual(
+                    error["message"],
+                    "Task is dispatched. Stop the work and move the task to "
+                    "Backlog or To Do before editing it.",
+                )
+
+        # The refusal returned before validating or forwarding the patch, so
+        # both in-memory and persisted task fields (including its update
+        # version/timestamp) remain exactly as they were.
+        self.assertEqual(self.handle_calls, [
+            {
+                "cmd": "board_update_task",
+                "id": assigned_undispatched.id,
+                "task": "Still amendable",
+            },
+        ])
+        refused = self.state.board_tasks[dispatched.id]
+        self.assertEqual(refused.task, before_refusal["task"])
+        self.assertEqual(refused.description, before_refusal["description"])
+        self.assertEqual(refused.labels, before_refusal["labels"])
+        self.assertEqual(refused.action_name, before_refusal["action_name"])
+        self.assertEqual(refused.action_vars, before_refusal["action_vars"])
+        self.assertEqual(refused.updated_at, before_refusal["updated_at"])
+        persisted_refused = self.db.load_all()["board_tasks"][dispatched.id]
+        for field in ("task", "description", "labels", "action_name", "action_vars", "updated_at"):
+            with self.subTest(persisted_field=field):
+                self.assertEqual(persisted_refused[field], before_refusal[field])
+
+        # Stopping is a separate lifecycle operation; model its completed
+        # dispatch-state transition, then use the public lane move tool before
+        # verifying that the execution Architect may amend the re-staged card.
+        self.state.board_update_task(dispatched.id, dispatch_state="queued")
+        moved_text, moved_error = await self._call(
+            "architect_task_move",
+            {"task": dispatched.id, "new_lane": "To Do"},
+            execution_architect.id,
+        )
+        self.assertFalse(moved_error, moved_text)
+        self.assertEqual(self.state.board_tasks[dispatched.id].dispatch_state, "queued")
+        self.assertEqual(self.state.board_tasks[dispatched.id].lane, "To Do")
+
+        resumed_text, resumed_error = await self._call(
+            "architect_task_update",
+            rejected_patch,
+            execution_architect.id,
+        )
+        self.assertFalse(resumed_error, resumed_text)
+        resumed = self.state.board_tasks[dispatched.id]
+        self.assertEqual(resumed.task, "Amended title")
+        self.assertEqual(resumed.description, "Amended description")
+        self.assertEqual(resumed.labels, ["amended"])
+        self.assertEqual(resumed.action_name, "oneshot/fix")
+        self.assertEqual(resumed.action_vars, {"amended": "value"})
+
     async def test_architect_task_update_sets_action_fields_and_rejects_unknown(self):
         architect = self._add_architect("arch-1", "Architect")
         task = self._add_task(
