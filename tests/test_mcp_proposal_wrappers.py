@@ -501,6 +501,37 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("outside Product Manager group scope", self._error_text(outside_group))
 
     async def test_pm_has_full_same_group_board_authority(self):
+        # Revoking task.dispatch must not remove the independently granted
+        # PM board surface.  Keep these retained-authority assertions direct
+        # so a future projection change fails closed rather than silently
+        # shrinking PM's permitted product-follow-through operations.
+        tool_names = await self._list_tools()
+        self.assertTrue({
+            "task_create", "task_reassign", "task_update", "task_move",
+            "task_get",
+        } <= tool_names)
+        self.assertNotIn("task_dispatch", tool_names)
+        dispatch_denied = await self._call(
+            "task_dispatch", {"task": "not-a-task"}, req_id=1,
+        )
+        self.assertIn("Unknown tool", self._error_text(dispatch_denied))
+
+        created = self._result_payload(await self._call(
+            "task_create",
+            {
+                "title": "PM queued product intake",
+                "group": "g",
+                "labels": ["product-proposal", "proposal-only"],
+            },
+            req_id=2,
+        ))
+        created_task = self.state.board_tasks[created["id"]]
+        self.assertEqual("product_task_proposal_created", created["type"])
+        self.assertEqual("queued", created["dispatch_state"])
+        self.assertEqual("queued", created_task.dispatch_state)
+        self.assertEqual("", created_task.assigned_engineer_id)
+        self.assertEqual(self.architect.id, created_task.created_by_architect_id)
+
         product_task = self.state.board_add_task(
             "Product-label retention", "g", lane="Backlog",
             labels=["product-proposal", "proposal-only"],
