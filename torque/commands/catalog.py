@@ -19,6 +19,7 @@ CATALOG_COMMAND_NAMES = frozenset({
     'publish_playbook_draft',
     'discard_playbook_draft',
     'list_actions',
+    'list_action_catalog',
     'list_specializations',
     'get_specialization',
     'save_specialization',
@@ -160,6 +161,18 @@ async def handle_catalog_command(
         discarded = discard_playbook_record(playbook)
         state.save_playbook(discarded)
         return {"type": "playbook_detail", "playbook": discarded}
+
+    # list_action_catalog: dispatch-effective, read-only action metadata.
+    # Keep ``list_actions`` below unchanged for the editor, which needs
+    # shadowed user entries to remain visible and editable.
+    if cmd == "list_action_catalog":
+        base_dir = await _resolve_base_dir(data.get("group", ""))
+        actions = action_mgr.list_effective_actions(base_dir)
+        return {
+            "type": "action_catalog",
+            "group": data.get("group", ""),
+            "actions": actions,
+        }
 
     # list_actions: respond directly
     if cmd == "list_actions":

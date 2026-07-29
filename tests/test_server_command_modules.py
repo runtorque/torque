@@ -133,6 +133,7 @@ EXPECTED_CATALOG_COMMANDS = {
     "publish_playbook_draft",
     "discard_playbook_draft",
     "list_actions",
+    "list_action_catalog",
     "list_specializations",
     "get_specialization",
     "save_specialization",
