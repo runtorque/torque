@@ -295,3 +295,22 @@ class BranchCleanupDryRunTests(unittest.TestCase):
         self.assertIn("apply local: succeeded=1 failed=0 never_attempted=0", text)
         self.assertIn("apply remote: succeeded=1 failed=0 never_attempted=0", text)
         self.assertIn("apply post eligible refs: local=0 origin=0", text)
+
+    def test_completion_summary_reserves_unchanged_refs_claim_for_dry_run_only(self):
+        report = {"refs_unchanged": True}
+        apply_result = {
+            "mutation_started": True,
+            "post_measurement_totals": {"eligible_local_refs": 0, "eligible_origin_refs": 0},
+            "local": {"succeeded": [{}], "failed": [], "never_attempted": []},
+            "remote": {"succeeded": [{}], "failed": [], "never_attempted": []},
+        }
+        apply_output = io.StringIO()
+        with contextlib.redirect_stdout(apply_output):
+            cleanup.print_completion_summary(report, apply_result)
+        self.assertNotIn("refs unchanged:", apply_output.getvalue())
+        self.assertIn("apply mutation started: True", apply_output.getvalue())
+
+        dry_output = io.StringIO()
+        with contextlib.redirect_stdout(dry_output):
+            cleanup.print_completion_summary(report, None)
+        self.assertEqual(dry_output.getvalue(), "refs unchanged: True\n")

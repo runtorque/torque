@@ -427,6 +427,29 @@ def _phase_counts(phase: dict) -> str:
     )
 
 
+def print_completion_summary(report: dict, apply_result: dict | None) -> None:
+    """Print mutually exclusive dry-run and apply completion summaries.
+
+    An apply report's ``pre_mutation`` snapshot can truthfully say refs were
+    unchanged *before* mutation, but it must never be presented as an
+    end-of-run state.  Keeping this in a separate dry-run-only branch makes
+    that ambiguous console state unavailable to apply callers.
+    """
+    if apply_result is None:
+        print(f"refs unchanged: {report['refs_unchanged']}")
+        return
+
+    post_counts = apply_result["post_measurement_totals"]
+    print(f"apply mutation started: {apply_result['mutation_started']}")
+    print(f"apply local: {_phase_counts(apply_result['local'])}")
+    print(f"apply remote: {_phase_counts(apply_result['remote'])}")
+    print(
+        "apply post eligible refs: "
+        f"local={post_counts.get('eligible_local_refs', 0)} "
+        f"origin={post_counts.get('eligible_origin_refs', 0)}"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=Path.cwd())
@@ -499,18 +522,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"outside valid agent namespace: {len(report['outside_namespace'])} -> {outside_namespace}")
     print(f"full report: {summary}")
-    if apply_result is None:
-        print(f"refs unchanged: {report['refs_unchanged']}")
-    else:
-        post_counts = apply_result["post_measurement_totals"]
-        print(f"apply mutation started: {apply_result['mutation_started']}")
-        print(f"apply local: {_phase_counts(apply_result['local'])}")
-        print(f"apply remote: {_phase_counts(apply_result['remote'])}")
-        print(
-            "apply post eligible refs: "
-            f"local={post_counts.get('eligible_local_refs', 0)} "
-            f"origin={post_counts.get('eligible_origin_refs', 0)}"
-        )
+    print_completion_summary(report, apply_result)
     if not report["refs_unchanged"]:
         return 3
     if apply_result and apply_result.get("refusal"):
