@@ -58,6 +58,11 @@ _TASK_ID_REFERENCE_RE = re.compile(
     r"\b[A-Z][A-Z0-9_]*:[1-9][0-9]*(?::[1-9][0-9]*)?\b"
 )
 
+_ARCHITECT_EXPLICIT_DISPATCH_ADVISORY = (
+    "This message referenced one eligible staged task but did not dispatch it. "
+    "Pass task=<task id or slug> explicitly to dispatch."
+)
+
 _TASK_SLUG_REFERENCE_BOUNDARY_RE = r"[A-Za-z0-9_-]"
 
 def _append_cross_kind_message(cell, entry: dict) -> None:
@@ -383,22 +388,28 @@ def _resolve_architect_dispatch_task(state, caller_id: str, engineer_id: str,
     return task, ""
 
 
-def _infer_architect_dispatch_task_id_from_message(
+def _architect_message_needs_explicit_dispatch_advisory(
         state,
         caller_id: str,
         engineer_id: str,
         group: str,
-        message: str) -> str:
+        message: str) -> bool:
+    """Whether one eligible staged task was referenced without dispatch intent.
+
+    This intentionally preserves the former matcher only as a non-mutating
+    migration affordance.  It must not select a task for dispatch or expose
+    its identity in the response.
+    """
     message_text = str(message or "")
     if not message_text:
-        return ""
+        return False
     exact_task_refs = {
         task_id
         for raw in _TASK_ID_REFERENCE_RE.findall(message_text)
         for task_id in [_resolve_exact_task_reference(state, raw)]
         if task_id
     }
-    matches: list[str] = []
+    matches: set[str] = set()
     for task in state.board_tasks.values():
         task_id = str(getattr(task, "id", "") or "").strip()
         if not task_id:
@@ -420,8 +431,8 @@ def _infer_architect_dispatch_task_id_from_message(
             task_id,
         )
         if valid_task:
-            matches.append(valid_task.id)
-    return matches[0] if len(matches) == 1 else ""
+            matches.add(valid_task.id)
+    return len(matches) == 1
 
 
 async def _send_architect_engineer_message(real_state, handle_command,
@@ -442,15 +453,11 @@ async def _send_architect_engineer_message(real_state, handle_command,
     architect = real_state.agents.get(str(caller_id or "").strip())
     message = str(args.get("message", "") or "").strip()
     architect_group = str(getattr(architect, "group", "") or "")
+    # Dispatch is an explicit operation.  Message text often references a
+    # staged task as context, so it must never select or launch a task.
+    # ``dispatch_task_id`` is supplied by task_create(dispatch=true); direct
+    # messages opt in through their explicit ``task`` argument.
     task_ident = str(dispatch_task_id or args.get("task", "") or "").strip()
-    if not task_ident:
-        task_ident = _infer_architect_dispatch_task_id_from_message(
-            real_state,
-            caller_id,
-            engineer_id,
-            architect_group,
-            message,
-        )
     dispatch_task = None
     if task_ident:
         dispatch_task, task_error = _resolve_architect_dispatch_task(
@@ -486,6 +493,13 @@ async def _send_architect_engineer_message(real_state, handle_command,
         real_state.board_update_task(dispatch_task.id, dispatch_state="live")
         response["task_id"] = dispatch_task.id
         response["dispatch_state"] = "live"
+    elif _architect_message_needs_explicit_dispatch_advisory(
+            real_state,
+            caller_id,
+            engineer_id,
+            architect_group,
+            message):
+        response["dispatch_advisory"] = _ARCHITECT_EXPLICIT_DISPATCH_ADVISORY
     return response, ""
 
 

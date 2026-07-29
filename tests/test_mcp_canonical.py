@@ -227,6 +227,19 @@ class CanonicalMCPContractTests(unittest.TestCase):
                 )
                 self.assertEqual(expected_handler, resolved)
 
+    def test_architect_agent_message_schema_requires_explicit_task_dispatch(self):
+        tools = {
+            tool["name"]: tool
+            for tool in _canonical_tools_for_caller(_State("architect"), "caller")
+        }
+
+        task_description = tools["agent_message"]["inputSchema"]["properties"][
+            "task"
+        ]["description"]
+        self.assertIn("Only this explicit argument marks a task live", task_description)
+        self.assertIn("when omitted, the message marks no task live", task_description)
+        self.assertIn("mentions task IDs or slugs", task_description)
+
     def test_coverage_reconcile_discovery_and_selection_are_truthful(self):
         """Discovery presents the provisional route before a planner calls it."""
         docs = Path("docs/reference/mcp-tools.md").read_text(encoding="utf-8")

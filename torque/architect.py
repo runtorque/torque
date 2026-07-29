@@ -389,6 +389,8 @@ passed.
 Assignment or staging is not dispatch. Preserve the required explicit
 assignee-message step when dispatching; neither that message nor a staged
 assignment may be the only place that required execution context exists.
+For Architect `agent_message`, only an explicit `task` argument dispatches;
+mentioning a task ID or slug in message text does not dispatch it.
 """
 
 

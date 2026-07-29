@@ -1325,8 +1325,10 @@ _ARCHITECT_TOOL_SPECS = [
                 "task": {
                     "type": "string",
                     "description": (
-                        "Optional task id/slug being dispatched by this "
-                        "message; when provided, the task is marked live."
+                        "Optional task id/slug to dispatch. Only this explicit "
+                        "argument marks a task live; when omitted, the message "
+                        "marks no task live even if its text mentions task IDs "
+                        "or slugs."
                     ),
                 },
             },
