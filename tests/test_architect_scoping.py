@@ -3360,13 +3360,25 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             agent_id=worker.id,
         )
 
-        # The task and worker snapshots are persisted before their in-memory
-        # fields are changed.  A database failure must therefore be a clean
-        # refusal rather than a half-reassigned live projection.
+        # Inject the failure after SQLite stages the worker row and before it
+        # writes the task row.  The transaction must roll back both durable
+        # rows, and the dispatcher must return before it changes memory.
+        db_type = type(self.db)
+        original_insert_agent = db_type._insert_agent_row
+        staged_worker_ids = []
+
+        def record_worker_stage(db, executor, cell):
+            if getattr(cell, "id", "") == worker.id:
+                staged_worker_ids.append(worker.id)
+            return original_insert_agent(db, executor, cell)
+
+        def fail_task_stage(_db, _executor, _task):
+            raise RuntimeError("injected task-row failure")
+
         with mock.patch.object(
-                self.db,
-                "save_task_and_agents_async",
-                side_effect=RuntimeError("injected write failure"),
+                db_type, "_insert_agent_row", new=record_worker_stage
+        ), mock.patch.object(
+                db_type, "_insert_board_task_row", new=fail_task_stage
         ):
             text, error = await self._call(
                 "architect_task_reassign",
@@ -3375,6 +3387,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertTrue(error)
+        self.assertEqual(staged_worker_ids, [worker.id])
         self.assertEqual(
             text,
             "Failed to persist task and worker ownership transfer",
