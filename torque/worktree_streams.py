@@ -7,7 +7,6 @@ introduced here.
 
 from __future__ import annotations
 
-import asyncio
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Iterable
@@ -17,6 +16,7 @@ from .task_ids import parse_task_id
 from .worktree_stream_readiness import (
     _branch_exists_locally,
     _list_repo_branches_async,
+    _merge_readiness_cache_get,
     _merge_readiness_cache_put,
     _probe_merge_readiness,
     invalidate_branch_exists_cache,

@@ -125,6 +125,10 @@ class BackendModularityMergeGateTests(unittest.IsolatedAsyncioTestCase):
         backend.write_text("x = 1\n" * 2501)
         self._git("add", "torque/sample.py")
         self._git("commit", "-qm", "cross limit")
+        self._git("switch", "-qc", "safe", "main")
+        backend.write_text("x = 1\n" * 2499)
+        self._git("add", "torque/sample.py")
+        self._git("commit", "-qm", "stay below limit")
 
     def _git(self, *args):
         return subprocess.run(
@@ -135,7 +139,7 @@ class BackendModularityMergeGateTests(unittest.IsolatedAsyncioTestCase):
             stderr=subprocess.PIPE,
         )
 
-    async def test_shared_merge_preflight_blocks_crossing_without_author_check(self):
+    async def _preflight(self, branch: str):
         from torque import server
         from torque.state import MatrixState
 
@@ -147,7 +151,7 @@ class BackendModularityMergeGateTests(unittest.IsolatedAsyncioTestCase):
             group="g",
             slug="worker",
             worktree_path=str(self.repo),
-            worktree_branch="worker",
+            worktree_branch=branch,
             worktree_repo_root=str(self.repo),
             git_root=str(self.repo),
             worktree_base_branch="main",
@@ -169,6 +173,9 @@ class BackendModularityMergeGateTests(unittest.IsolatedAsyncioTestCase):
                 self.merge_check_called = True
                 return {"clean": True, "tree_sha": "tree", "conflicts": []}
 
+            async def merge_untracked_overwrite_paths(self, *_args):
+                return []
+
         mgr = FakeWorktreeManager()
 
         async def latest_boundary(_cell):
@@ -183,6 +190,10 @@ class BackendModularityMergeGateTests(unittest.IsolatedAsyncioTestCase):
             latest_boundary_state_for_cell=latest_boundary,
             boundary_reason_message=lambda reason, boundary=None: reason,
         )
+        return result, mgr
+
+    async def test_shared_merge_preflight_blocks_crossing_without_author_check(self):
+        result, mgr = await self._preflight("worker")
 
         self.assertFalse(result["ok"])
         self.assertFalse(mgr.merge_check_called)
@@ -191,6 +202,14 @@ class BackendModularityMergeGateTests(unittest.IsolatedAsyncioTestCase):
             result["backend_modularity"]["crossings"][0]["path"],
             "torque/sample.py",
         )
+
+    async def test_shared_merge_preflight_allows_change_without_crossing(self):
+        result, mgr = await self._preflight("safe")
+
+        self.assertTrue(result["ok"], result.get("result"))
+        self.assertTrue(mgr.merge_check_called)
+        self.assertTrue(result["backend_modularity"]["ok"])
+        self.assertEqual(result["backend_modularity"]["crossings"], [])
 
 
 class BoundaryTipGateTests(unittest.IsolatedAsyncioTestCase):

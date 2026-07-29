@@ -1,4 +1,4 @@
-"""Local user commands for task watches and one-shot reminders."""
+"""Handle local task-watch plus one-shot-reminder user commands."""
 
 from __future__ import annotations
 

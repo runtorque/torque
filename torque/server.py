@@ -253,12 +253,14 @@ from .server_communication import (
     _is_architect_ask_task,
     _architect_ask_reply_prompt,
     _resolve_architect_ask_task,
-    _handle_engineer_flush_now_command,
-    _engineer_journal_source_key,
-    _append_engineer_journal_entry,
-    _handle_engineer_dismiss_note_command,
-    _handle_digest_pause_resume_command,
     _queue_cell_prompt_send,
+)
+from .server_engineer_commands import (
+    _append_engineer_journal_entry,
+    _engineer_journal_source_key,
+    _handle_digest_pause_resume_command,
+    _handle_engineer_dismiss_note_command,
+    _handle_engineer_flush_now_command,
 )
 from .server_user_commands import (
     _handle_reminder_command,

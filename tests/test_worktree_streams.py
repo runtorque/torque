@@ -63,7 +63,7 @@ class WorktreeStreamTests(unittest.TestCase):
             "_BRANCH_EXISTS_GIT_TIMEOUT_SECONDS",
             0.01,
         ), mock.patch(
-            "torque.worktree_streams.asyncio.create_subprocess_exec",
+            "torque.worktree_stream_readiness.asyncio.create_subprocess_exec",
             new=mock.AsyncMock(return_value=proc),
         ):
             branches = asyncio.run(

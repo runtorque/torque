@@ -52,6 +52,7 @@ class BackendSizeGuardrailTests(unittest.TestCase):
         return ast.parse(path.read_text(), filename=str(path))
 
     def test_composition_facades_stay_below_explicit_budgets(self):
+        self.assertEqual(DEFAULT_BACKEND_LINE_LIMIT, 2500)
         budgets = {
             "torque/server.py": 6000,
             # Shared state contracts plus the MatrixState composition root.
@@ -64,8 +65,15 @@ class BackendSizeGuardrailTests(unittest.TestCase):
             "torque/mcp_tools_shared.py": 2500,
             "torque/worktree.py": 2500,
         }
-        for relative_path, maximum in BACKEND_LINE_LIMITS.items():
-            self.assertEqual(maximum, budgets[relative_path])
+        self.assertEqual(
+            BACKEND_LINE_LIMITS,
+            {
+                "torque/server.py": 6000,
+                "torque/state.py": 5000,
+                "torque/db_schema.py": 3800,
+                "torque/doctor.py": 2600,
+            },
+        )
         for relative_path, maximum in budgets.items():
             with self.subTest(path=relative_path):
                 line_count = len(
@@ -95,6 +103,19 @@ class BackendSizeGuardrailTests(unittest.TestCase):
             "backend files above 2500 lines require an explicit architecture "
             "review and budget or must be split by responsibility",
         )
+
+    def test_responsibility_split_modules_have_singular_purposes(self):
+        for relative_path in (
+            "torque/backend_invariants.py",
+            "torque/server_engineer_commands.py",
+            "torque/server_user_commands.py",
+            "torque/worktree_stream_readiness.py",
+        ):
+            with self.subTest(path=relative_path):
+                purpose = ast.get_docstring(self._module_tree(relative_path))
+                self.assertTrue(purpose)
+                self.assertNotIn(" and ", purpose.lower())
+                self.assertEqual(purpose.count("."), 1)
 
 
     def test_new_domain_modules_stay_below_2500_lines(self):
