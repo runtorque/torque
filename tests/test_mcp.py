@@ -801,6 +801,44 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             }],
         )
 
+    async def test_dispatch_tool_returns_live_action_catalog(self):
+        state = self.state_mod.MatrixState()
+        cell = self.state_mod.AgentCell(
+            id="agent-1", name="Worker", group="g", cell_type="agent",
+        )
+        state.agents[cell.id] = cell
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            return {
+                "type": "action_catalog",
+                "group": "g",
+                "actions": [{
+                    "name": "oneshot/fix", "description": "Fix",
+                    "transitions": [], "worktree": False,
+                    "labels": ["bugfix"],
+                    "agent": {"kind": "role", "name": "fixer"},
+                    "scope": "project",
+                }],
+            }
+
+        text, is_error = await self.mcp_mod._dispatch_tool(
+            "torque_actions_list", {}, cell.id, fake_handle_command, state,
+        )
+        self.assertFalse(is_error)
+        self.assertEqual(calls, [{"cmd": "list_action_catalog", "group": "g"}])
+        payload = json.loads(text)
+        self.assertEqual(payload["type"], "action_catalog")
+        self.assertEqual(payload["actions"][0]["transitions"], [])
+
+        _text, is_error = await self.mcp_mod._dispatch_tool(
+            "torque_actions_list", {"group": "other"}, cell.id,
+            fake_handle_command, state,
+        )
+        self.assertTrue(is_error)
+        self.assertEqual(len(calls), 1)
+
     async def test_dispatch_tool_maps_memory_commands(self):
         state = self.state_mod.MatrixState()
         cell = self.state_mod.AgentCell(

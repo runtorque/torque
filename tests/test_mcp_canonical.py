@@ -143,9 +143,9 @@ class CanonicalMCPContractTests(unittest.TestCase):
 
     def test_default_surfaces_are_unique_canonical_and_bounded(self):
         limits = {
-            "worker": (25, 25),
+            "worker": (26, 26),
             "engineer": (59, 77),
-            "architect": (57, 103),
+            "architect": (57, 104),
         }
         legacy_names = {tool["name"] for tool in ALL_TOOLS}
         for kind, (eager_limit, total_limit) in limits.items():
@@ -165,6 +165,33 @@ class CanonicalMCPContractTests(unittest.TestCase):
                     for tool in tools[len(eager):]
                 ))
                 self.assertFalse(set(names) & legacy_names)
+
+    def test_action_catalog_is_callable_for_every_agent_kind(self):
+        # Broad read availability is deliberate: task creators need this to
+        # choose suggested_action, and workers need it to inspect legal derive
+        # exits. It remains read-only and scoped to the caller's group.
+        for kind in ("worker", "engineer", "architect"):
+            with self.subTest(kind=kind):
+                tools = {
+                    tool["name"]: tool
+                    for tool in _canonical_tools_for_caller(_State(kind), "caller")
+                }
+                self.assertIn("action_list", tools)
+                self.assertIn(
+                    "transitions", tools["action_list"]["description"],
+                )
+                self.assertIn(
+                    "action_list",
+                    {tool["name"] for tool in _visible_tools(_State(kind), "caller")},
+                )
+                resolved, translated = _resolve_public_tool_call(
+                    _State(kind), "caller", "action_list", {"group": "g"},
+                )
+                self.assertIn(
+                    resolved,
+                    CANONICAL_CALLABLE_HANDLER_REGISTRY["action_list"],
+                )
+                self.assertEqual(translated, {"group": "g"})
 
     def test_architect_advertised_catalog_has_callable_registered_handlers(self):
         """Eager/deferred public names must share the runtime handler registry."""
@@ -423,7 +450,9 @@ class CanonicalMCPContractTests(unittest.TestCase):
                 "caller",
             )
         }
-        self.assertEqual(set(tools), {"context", "tool_search"})
+        self.assertEqual(
+            set(tools), {"context", "tool_search", "action_list"},
+        )
         for denied in (
             "peer_message",
             "task_create",
@@ -575,7 +604,9 @@ class CanonicalMCPContractTests(unittest.TestCase):
                 "caller",
             )
         }
-        self.assertEqual(set(restricted_tools), {"context", "tool_search"})
+        self.assertEqual(
+            set(restricted_tools), {"context", "tool_search", "action_list"},
+        )
         for denied in (
             "memory_get",
             "semantic_recall",

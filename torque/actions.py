@@ -477,6 +477,82 @@ class ActionManager:
                         seen_names.add(name)
         return sorted(results, key=lambda t: (t["global"], t["name"]))
 
+    def list_effective_actions(self, base_dir: str = "") -> list[dict]:
+        """Return the live dispatch-effective action catalog.
+
+        Action lookup walks project scope before user scope.  Unlike
+        :meth:`list_actions`, which intentionally retains shadowed entries for
+        the editor, this projection emits exactly one entry per action name:
+        the same definition :meth:`load_action` will resolve at dispatch time.
+        It contains only routing metadata, never the rendered prompt.
+        """
+        results = []
+        seen_names = set()
+        user_dir = os.path.expanduser("~/.torque/actions")
+        for tdir in self.find_actions_dirs(base_dir):
+            is_global = tdir == user_dir
+            for dirpath, _dirnames, filenames in os.walk(tdir):
+                for fname in sorted(filenames):
+                    if not fname.endswith((".yaml", ".yml")):
+                        continue
+                    rel = os.path.relpath(
+                        os.path.join(dirpath, fname), tdir)
+                    name = rel.rsplit(".", 1)[0]
+                    if name in seen_names:
+                        continue
+                    seen_names.add(name)
+                    path = os.path.join(dirpath, fname)
+                    meta = {}
+                    parse_error = False
+                    try:
+                        with open(path) as f:
+                            parsed = parse_yaml(f.read()) or {}
+                        if isinstance(parsed, dict):
+                            meta = parsed
+                        else:
+                            parse_error = True
+                    except Exception:
+                        parse_error = True
+
+                    transitions = meta.get("transitions", [])
+                    if not isinstance(transitions, list):
+                        transitions = []
+                    labels = meta.get("labels", [])
+                    if not isinstance(labels, list):
+                        labels = []
+                    raw_agent = meta.get("agent", None)
+                    if isinstance(raw_agent, dict):
+                        # Catalog callers need the inline agent identity, not
+                        # launch settings such as its environment variables.
+                        agent = {
+                            "kind": "inline",
+                            "name": str(raw_agent.get("name_prefix", "") or ""),
+                        }
+                    elif isinstance(raw_agent, str):
+                        agent = {"kind": "role", "name": raw_agent}
+                    else:
+                        agent = None
+                    # ``worktree`` is an action directive, not the final
+                    # launch outcome: null means it is absent and may inherit
+                    # from role/group launch settings.
+                    worktree = meta.get("worktree")
+                    if not isinstance(worktree, bool):
+                        worktree = None
+                    results.append({
+                        "name": name,
+                        "description": (
+                            "(parse error)" if parse_error
+                            else str(meta.get("description", "") or "")
+                        ),
+                        "transitions": transitions,
+                        "worktree": worktree,
+                        "labels": labels,
+                        # A normalized role/template or inline-agent target.
+                        "agent": agent,
+                        "scope": "user" if is_global else "project",
+                    })
+        return sorted(results, key=lambda action: action["name"])
+
     def load_action(self, name: str, base_dir: str = "") -> dict | None:
         """Load action metadata (parsed as plain YAML). Returns dict or None."""
         raw = self._load_raw(name, base_dir)

@@ -706,9 +706,12 @@ async def dispatch_inventory(ctx: ScopedDispatchContext):
         return json.dumps(d), False
 
     if tool_name == "actions_list":
+        requested_group = str(args.get("group", "") or "").strip()
+        if requested_group and requested_group != _engineer_group:
+            return "Action catalog is limited to the caller's group", True
         result = await handle_command({
-            "cmd": "list_actions",
-            "group": args.get("group", "") or _engineer_group,
+            "cmd": "list_action_catalog",
+            "group": _engineer_group,
         })
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True

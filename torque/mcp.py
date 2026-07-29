@@ -71,6 +71,11 @@ from .mcp_tools_shared import (
     _direct_user_message_response,
     save_agent_user_direct_message_from_mcp,
 )
+from .mcp_scoped.action_catalog import (
+    ACTION_CATALOG_TOOL,
+    SHARED_ACTION_CATALOG_TOOL_NAMES,
+    dispatch_action_catalog_tool,
+)
 from .mcp_retry import (
     IDEMPOTENCY_HEADER,
     derive_idempotency_key,
@@ -172,6 +177,7 @@ TOOLS = [
         },
     },
     *help_tool_specs("torque_"),
+    ACTION_CATALOG_TOOL,
     {
         "name": "torque_task_upload_artifact", "authority": {"requirements": [{"capability": "task.artifact.write","minimum_scope": "self","handler_scoped": True}]},
         "description": (
@@ -1072,6 +1078,7 @@ def _raw_tools_for_caller(
             "torque_help_show",
             "torque_help_search",
             "torque_help_query",
+            *SHARED_ACTION_CATALOG_TOOL_NAMES,
             "torque_memory_publish",
             "torque_memory_list",
             "torque_memory_read",
@@ -1574,6 +1581,12 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
             "tasks_returned": len(selected),
             "tasks_capped": len(selected) < len(tasks),
         }, indent=2), False
+
+    action_catalog_result = await dispatch_action_catalog_tool(
+        name, args, cell_id, handle_command, state,
+    )
+    if action_catalog_result is not None:
+        return action_catalog_result
 
     if name in {"torque_area_list", "torque_area_show"}:
         cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
