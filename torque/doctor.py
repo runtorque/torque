@@ -2394,6 +2394,20 @@ def format_doctor_report(report: dict) -> str:
                 if summary:
                     base += f": {summary}"
                 lines.append(base)
+            elif name == "engineer_generalist_specialization":
+                entries = details.get("engineers", []) or []
+                summary = ", ".join(
+                    str(entry.get("name") or entry.get("id") or "")
+                    for entry in entries
+                )
+                line = (
+                    "  - Engineer(s) with empty specialization bindings are "
+                    "routable generalists; explicit assignment works and "
+                    "hint routing uses them only after matching specialists"
+                )
+                if summary:
+                    line += f": {summary}"
+                lines.append(line)
             elif name == "stale_pending_hire":
                 architect_name = str(details.get("architect_name", "") or "").strip()
                 architect_display = architect_name or str(
