@@ -58,8 +58,6 @@ _TASK_ID_REFERENCE_RE = re.compile(
     r"\b[A-Z][A-Z0-9_]*:[1-9][0-9]*(?::[1-9][0-9]*)?\b"
 )
 
-_TASK_SLUG_REFERENCE_BOUNDARY_RE = r"[A-Za-z0-9_-]"
-
 def _append_cross_kind_message(cell, entry: dict) -> None:
     if not cell:
         return
@@ -141,34 +139,6 @@ def _mcp_worker_provider_override_arg(args: dict) -> tuple[str, str]:
             "value for the new worker"
         )
     return provider or agent_type, ""
-
-
-def _resolve_exact_task_reference(state, task_ident: str) -> str:
-    """Resolve a message token as an exact task ID/alias, never as a prefix."""
-    ident = str(task_ident or "").strip()
-    if not ident:
-        return ""
-    resolver = getattr(state, "resolve_board_task_id", None)
-    if callable(resolver):
-        return str(resolver(ident, allow_prefix=False) or "").strip()
-    alias_resolver = getattr(state, "resolve_task_alias", None)
-    if callable(alias_resolver):
-        aliased = str(alias_resolver(ident) or "").strip()
-        if aliased != ident:
-            return aliased if aliased in getattr(state, "board_tasks", {}) else ""
-    return ident if ident in getattr(state, "board_tasks", {}) else ""
-
-
-def _message_mentions_task_slug(message_text: str, slug: str) -> bool:
-    slug = str(slug or "").strip()
-    if not slug:
-        return False
-    pattern = (
-        rf"(?<!{_TASK_SLUG_REFERENCE_BOUNDARY_RE})"
-        rf"{re.escape(slug)}"
-        rf"(?!{_TASK_SLUG_REFERENCE_BOUNDARY_RE})"
-    )
-    return bool(re.search(pattern, str(message_text or ""), re.IGNORECASE))
 
 
 def _deliverable_awareness_for_referenced_tasks(state, message_text: str) -> str:
@@ -383,47 +353,6 @@ def _resolve_architect_dispatch_task(state, caller_id: str, engineer_id: str,
     return task, ""
 
 
-def _infer_architect_dispatch_task_id_from_message(
-        state,
-        caller_id: str,
-        engineer_id: str,
-        group: str,
-        message: str) -> str:
-    message_text = str(message or "")
-    if not message_text:
-        return ""
-    exact_task_refs = {
-        task_id
-        for raw in _TASK_ID_REFERENCE_RE.findall(message_text)
-        for task_id in [_resolve_exact_task_reference(state, raw)]
-        if task_id
-    }
-    matches: list[str] = []
-    for task in state.board_tasks.values():
-        task_id = str(getattr(task, "id", "") or "").strip()
-        if not task_id:
-            continue
-        if (
-            str(getattr(task, "dispatch_state", "") or "queued").strip().lower()
-            != "queued"
-        ):
-            continue
-        if task_id not in exact_task_refs:
-            slug = str(getattr(task, "slug", "") or "").strip()
-            if not slug or not _message_mentions_task_slug(message_text, slug):
-                continue
-        valid_task, _error = _resolve_architect_dispatch_task(
-            state,
-            caller_id,
-            engineer_id,
-            group,
-            task_id,
-        )
-        if valid_task:
-            matches.append(valid_task.id)
-    return matches[0] if len(matches) == 1 else ""
-
-
 async def _send_architect_engineer_message(real_state, handle_command,
                                            caller_id: str, args: dict, *,
                                            dispatch_task_id: str = ""):
@@ -442,15 +371,11 @@ async def _send_architect_engineer_message(real_state, handle_command,
     architect = real_state.agents.get(str(caller_id or "").strip())
     message = str(args.get("message", "") or "").strip()
     architect_group = str(getattr(architect, "group", "") or "")
+    # Dispatch is an explicit operation.  Message text often references a
+    # staged task as context, so it must never select or launch a task.
+    # ``dispatch_task_id`` is supplied by task_create(dispatch=true); direct
+    # messages opt in through their explicit ``task`` argument.
     task_ident = str(dispatch_task_id or args.get("task", "") or "").strip()
-    if not task_ident:
-        task_ident = _infer_architect_dispatch_task_id_from_message(
-            real_state,
-            caller_id,
-            engineer_id,
-            architect_group,
-            message,
-        )
     dispatch_task = None
     if task_ident:
         dispatch_task, task_error = _resolve_architect_dispatch_task(
