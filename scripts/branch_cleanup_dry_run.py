@@ -420,6 +420,13 @@ def apply_left_behind(report: dict) -> dict:
     }
 
 
+def _phase_counts(phase: dict) -> str:
+    return " ".join(
+        f"{name}={len(phase.get(name, []))}"
+        for name in ("succeeded", "failed", "never_attempted")
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=Path.cwd())
@@ -492,7 +499,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"outside valid agent namespace: {len(report['outside_namespace'])} -> {outside_namespace}")
     print(f"full report: {summary}")
-    print(f"refs unchanged: {report['refs_unchanged']}")
+    if apply_result is None:
+        print(f"refs unchanged: {report['refs_unchanged']}")
+    else:
+        post_counts = apply_result["post_measurement_totals"]
+        print(f"apply mutation started: {apply_result['mutation_started']}")
+        print(f"apply local: {_phase_counts(apply_result['local'])}")
+        print(f"apply remote: {_phase_counts(apply_result['remote'])}")
+        print(
+            "apply post eligible refs: "
+            f"local={post_counts.get('eligible_local_refs', 0)} "
+            f"origin={post_counts.get('eligible_origin_refs', 0)}"
+        )
     if not report["refs_unchanged"]:
         return 3
     if apply_result and apply_result.get("refusal"):

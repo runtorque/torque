@@ -266,3 +266,32 @@ class BranchCleanupDryRunTests(unittest.TestCase):
         self.assertEqual(result["stop_reason"], "local_delete_failed")
         self.assertEqual([x["branch"] for x in result["local"]["never_attempted"]], ["torque/e/local-two"])
         self.assertEqual([x["branch"] for x in result["remote"]["never_attempted"]], ["torque/e/remote"])
+
+    def test_main_apply_prints_post_apply_summary_not_pre_mutation_ref_snapshot(self):
+        pre = self.report([])
+        pre.update({
+            "main_sha": "main-sha", "refs_unchanged": True,
+            "counts": {"eligible_local_refs": 1, "eligible_origin_refs": 1},
+        })
+        post = self.report([])
+        post["counts"] = {"eligible_local_refs": 0, "eligible_origin_refs": 0}
+        apply_result = {
+            "pre_mutation": pre,
+            "post_measurement": post,
+            "mutation_started": True,
+            "local": {"succeeded": [{}], "failed": [], "never_attempted": []},
+            "remote": {"succeeded": [{}], "failed": [], "never_attempted": []},
+        }
+        output = io.StringIO()
+        with mock.patch.object(cleanup, "apply_cleanup", return_value=apply_result), contextlib.redirect_stdout(output):
+            exit_code = cleanup.main([
+                "--apply", "--expected-eligible-count", "2", "--acknowledge-expected-baseline", "2",
+                "--output-dir", str(Path(self.tmp.name) / "apply-report"),
+            ])
+        self.assertEqual(exit_code, 0)
+        text = output.getvalue()
+        self.assertNotIn("refs unchanged:", text)
+        self.assertIn("apply mutation started: True", text)
+        self.assertIn("apply local: succeeded=1 failed=0 never_attempted=0", text)
+        self.assertIn("apply remote: succeeded=1 failed=0 never_attempted=0", text)
+        self.assertIn("apply post eligible refs: local=0 origin=0", text)
