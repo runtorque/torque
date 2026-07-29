@@ -232,8 +232,6 @@ from .server_communication import (
     _save_user_agent_loop_audit_message,
     _user_agent_loop_response,
     _handle_user_agent_loop_command,
-    _handle_task_watch_command,
-    _handle_reminder_command,
     _restore_user_agent_restart_focus,
     _user_agent_restart_response,
     _handle_user_agent_restart_command,
@@ -261,6 +259,10 @@ from .server_communication import (
     _handle_engineer_dismiss_note_command,
     _handle_digest_pause_resume_command,
     _queue_cell_prompt_send,
+)
+from .server_user_commands import (
+    _handle_reminder_command,
+    _handle_task_watch_command,
 )
 from .server_agent_operations import (
     GUIDANCE_HINT_IDENTITY_LAUNCH,

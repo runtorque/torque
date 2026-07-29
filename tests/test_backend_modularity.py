@@ -3,8 +3,15 @@
 import ast
 import builtins
 from pathlib import Path
+import subprocess
+import tempfile
 import unittest
 
+from torque.backend_invariants import (
+    BACKEND_LINE_LIMITS,
+    DEFAULT_BACKEND_LINE_LIMIT,
+    check_backend_modularity_crossings,
+)
 from torque.worktree import WorktreeManager
 from torque.worktree_manager.changes import ChangesMixin
 from torque.worktree_manager.github import GithubMixin
@@ -57,6 +64,8 @@ class BackendSizeGuardrailTests(unittest.TestCase):
             "torque/mcp_tools_shared.py": 2500,
             "torque/worktree.py": 2500,
         }
+        for relative_path, maximum in BACKEND_LINE_LIMITS.items():
+            self.assertEqual(maximum, budgets[relative_path])
         for relative_path, maximum in budgets.items():
             with self.subTest(path=relative_path):
                 line_count = len(
@@ -70,17 +79,15 @@ class BackendSizeGuardrailTests(unittest.TestCase):
                 )
 
     def test_no_unreviewed_backend_file_exceeds_2500_lines(self):
-        reviewed_structural_files = {
-            "torque/server.py",
-            "torque/state.py",
-            "torque/db_schema.py",
-            "torque/doctor.py",
-        }
         violations = []
         for path in (REPO_ROOT / "torque").rglob("*.py"):
             relative_path = str(path.relative_to(REPO_ROOT))
             line_count = len(path.read_text().splitlines())
-            if line_count > 2500 and relative_path not in reviewed_structural_files:
+            maximum = BACKEND_LINE_LIMITS.get(
+                relative_path,
+                DEFAULT_BACKEND_LINE_LIMIT,
+            )
+            if line_count > maximum:
                 violations.append(f"{relative_path}: {line_count}")
         self.assertEqual(
             [],
@@ -88,6 +95,7 @@ class BackendSizeGuardrailTests(unittest.TestCase):
             "backend files above 2500 lines require an explicit architecture "
             "review and budget or must be split by responsibility",
         )
+
 
     def test_new_domain_modules_stay_below_2500_lines(self):
         domain_roots = (
@@ -291,6 +299,75 @@ class BackendSizeGuardrailTests(unittest.TestCase):
             violations,
             "runtime builders must receive main-local callbacks explicitly",
         )
+
+
+class BackendInvariantCrossingTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.repo = Path(self.temp.name)
+        self._git("init", "-q", "-b", "main")
+        self._git("config", "user.email", "test@example.com")
+        self._git("config", "user.name", "Test")
+        marker = self.repo / "tests" / "test_backend_modularity.py"
+        marker.parent.mkdir()
+        marker.write_text("# marker\n")
+        backend = self.repo / "torque" / "sample.py"
+        backend.parent.mkdir()
+        backend.write_text("x = 1\n" * DEFAULT_BACKEND_LINE_LIMIT)
+        self._git("add", ".")
+        self._git("commit", "-qm", "baseline")
+        self.base = self._git("rev-parse", "HEAD").stdout.strip()
+
+    def _git(self, *args):
+        return subprocess.run(
+            ["git", "-C", str(self.repo), *args],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    def _commit_lines(self, count: int, message: str) -> str:
+        (self.repo / "torque" / "sample.py").write_text("x = 1\n" * count)
+        self._git("add", "torque/sample.py")
+        self._git("commit", "-qm", message)
+        return self._git("rev-parse", "HEAD").stdout.strip()
+
+    def test_reports_only_a_new_limit_crossing(self):
+        crossing = self._commit_lines(
+            DEFAULT_BACKEND_LINE_LIMIT + 1,
+            "cross limit",
+        )
+        result = check_backend_modularity_crossings(
+            self.repo,
+            self.base,
+            crossing,
+        )
+        self.assertFalse(result["ok"])
+        self.assertEqual(
+            result["crossings"],
+            [{
+                "path": "torque/sample.py",
+                "limit": DEFAULT_BACKEND_LINE_LIMIT,
+                "base_lines": DEFAULT_BACKEND_LINE_LIMIT,
+                "candidate_lines": DEFAULT_BACKEND_LINE_LIMIT + 1,
+            }],
+        )
+
+    def test_does_not_fire_when_changed_file_stays_below_limit(self):
+        below = self._commit_lines(
+            DEFAULT_BACKEND_LINE_LIMIT - 1,
+            "stay below",
+        )
+        result = check_backend_modularity_crossings(
+            self.repo,
+            self.base,
+            below,
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["crossings"], [])
+        self.assertEqual(result["checked_files"], ["torque/sample.py"])
 
 
 if __name__ == "__main__":

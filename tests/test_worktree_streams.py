@@ -33,6 +33,10 @@ class WorktreeStreamTests(unittest.TestCase):
         self.state_mod = importlib.reload(self.state_mod)
         self.streams_mod = importlib.import_module("torque.worktree_streams")
         self.streams_mod = importlib.reload(self.streams_mod)
+        self.readiness_mod = importlib.import_module(
+            "torque.worktree_stream_readiness"
+        )
+        self.readiness_mod = importlib.reload(self.readiness_mod)
 
 
     def test_branch_prefill_async_timeout_is_bounded(self):
@@ -55,7 +59,7 @@ class WorktreeStreamTests(unittest.TestCase):
 
         proc = HangingProc()
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
-            self.streams_mod,
+            self.readiness_mod,
             "_BRANCH_EXISTS_GIT_TIMEOUT_SECONDS",
             0.01,
         ), mock.patch(

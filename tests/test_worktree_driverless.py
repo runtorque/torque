@@ -1,3 +1,6 @@
+from pathlib import Path
+import subprocess
+import tempfile
 import unittest
 from types import SimpleNamespace
 
@@ -99,6 +102,95 @@ class DriverlessWorktreeGateParityTests(unittest.IsolatedAsyncioTestCase):
         for result in (live_result, driverless_result):
             result.pop("boundary_state", None)
         self.assertEqual(live_result, driverless_result)
+
+
+class BackendModularityMergeGateTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        install_aiohttp_stub()
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.repo = Path(self.temp.name)
+        self._git("init", "-q", "-b", "main")
+        self._git("config", "user.email", "test@example.com")
+        self._git("config", "user.name", "Test")
+        marker = self.repo / "tests" / "test_backend_modularity.py"
+        marker.parent.mkdir()
+        marker.write_text("# marker\n")
+        backend = self.repo / "torque" / "sample.py"
+        backend.parent.mkdir()
+        backend.write_text("x = 1\n" * 2500)
+        self._git("add", ".")
+        self._git("commit", "-qm", "baseline")
+        self._git("switch", "-qc", "worker")
+        backend.write_text("x = 1\n" * 2501)
+        self._git("add", "torque/sample.py")
+        self._git("commit", "-qm", "cross limit")
+
+    def _git(self, *args):
+        return subprocess.run(
+            ["git", "-C", str(self.repo), *args],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    async def test_shared_merge_preflight_blocks_crossing_without_author_check(self):
+        from torque import server
+        from torque.state import MatrixState
+
+        state = MatrixState()
+        state.groups["g"] = []
+        cell = SimpleNamespace(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            slug="worker",
+            worktree_path=str(self.repo),
+            worktree_branch="worker",
+            worktree_repo_root=str(self.repo),
+            git_root=str(self.repo),
+            worktree_base_branch="main",
+            worktree_merge_squash=True,
+            current_task_id="",
+        )
+
+        class FakeWorktreeManager:
+            def __init__(self):
+                self.merge_check_called = False
+
+            async def has_uncommitted_changes(self, _cell, worktree_submodules=None):
+                return False
+
+            async def stale_base_info(self, _cell, worktree_submodules=None):
+                return {"stale": False}
+
+            async def check_merge_conflicts(self, _cell, worktree_submodules=None):
+                self.merge_check_called = True
+                return {"clean": True, "tree_sha": "tree", "conflicts": []}
+
+        mgr = FakeWorktreeManager()
+
+        async def latest_boundary(_cell):
+            return {"latest": None, "clean": True, "reason": ""}
+
+        result = await server._preflight_worktree_merge_gates(
+            state=state,
+            cell=cell,
+            worktree_mgr=mgr,
+            aid=cell.id,
+            data={},
+            latest_boundary_state_for_cell=latest_boundary,
+            boundary_reason_message=lambda reason, boundary=None: reason,
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertFalse(mgr.merge_check_called)
+        self.assertEqual(result["result"]["phase"], "backend_modularity")
+        self.assertEqual(
+            result["backend_modularity"]["crossings"][0]["path"],
+            "torque/sample.py",
+        )
 
 
 class BoundaryTipGateTests(unittest.IsolatedAsyncioTestCase):

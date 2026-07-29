@@ -9,6 +9,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ...artifacts import normalize_artifacts
+from ...backend_invariants import (
+    BackendInvariantCheckError,
+    check_backend_modularity_crossings,
+    format_backend_modularity_crossings,
+)
 from ...board_sync import get_provider as get_board_sync_provider
 from ...commands.board import _resolve_task_id
 from ...config import log
@@ -186,6 +191,67 @@ async def _preflight_worktree_merge_gates(
             )
         )
 
+    repo_root = str(
+        cell.worktree_repo_root or cell.git_root or cell.worktree_path or ""
+    ).strip()
+    base_ref = str(cell.worktree_base_branch or "").strip()
+    candidate_ref = str(cell.worktree_branch or "").strip()
+    try:
+        if not repo_root or not Path(repo_root).is_dir():
+            backend_modularity = {
+                "ok": True,
+                "applicable": False,
+                "phase": "backend_modularity",
+                "checked_files": [],
+                "crossings": [],
+            }
+        else:
+            backend_modularity = await asyncio.to_thread(
+                check_backend_modularity_crossings,
+                repo_root,
+                base_ref,
+                candidate_ref,
+            )
+    except BackendInvariantCheckError as exc:
+        result = _worktree_merge_error(
+            aid,
+            f"Backend modularity preflight could not run: {exc}",
+            phase="backend_modularity",
+        )
+        _attach_stale_base(result, stale_base)
+        return {
+            "ok": False,
+            "boundary_state": boundary_state,
+            "stale_base": stale_base,
+            "backend_modularity": {
+                "ok": False,
+                "phase": "backend_modularity",
+                "error": str(exc),
+            },
+            "workflow_breach": (
+                boundary_override_event or stale_base_override_event
+            ),
+            "result": result,
+        }
+    if not backend_modularity.get("ok"):
+        result = _worktree_merge_error(
+            aid,
+            format_backend_modularity_crossings(backend_modularity),
+            phase="backend_modularity",
+            backend_modularity=backend_modularity,
+        )
+        _attach_stale_base(result, stale_base)
+        return {
+            "ok": False,
+            "boundary_state": boundary_state,
+            "stale_base": stale_base,
+            "backend_modularity": backend_modularity,
+            "workflow_breach": (
+                boundary_override_event or stale_base_override_event
+            ),
+            "result": result,
+        }
+
     # Always run the initial superproject merge/overwrite guard before any
     # nested submodule publish/merge side effects.  Do not pass
     # worktree_submodules here: that variant runs nested publish preflight
@@ -301,6 +367,7 @@ async def _preflight_worktree_merge_gates(
         "boundary_state": boundary_state,
         "stale_base": stale_base,
         "precheck": precheck,
+        "backend_modularity": backend_modularity,
         "workflow_breach": (
             boundary_override_event or stale_base_override_event
         ),
