@@ -2690,7 +2690,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                      push_result=None, force_retry_result=None,
                      sync_results=None, create_result=None,
                      base_sha="base789", remote_base_sha=None,
-                     nested_result=None):
+                     nested_result=None, delete_result=None):
             self.merge_result = merge_result
             self.direct_result = direct_result or {"ok": True, "sha": "direct123"}
             self.push_result = push_result or {
@@ -2703,6 +2703,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             self.base_sha = base_sha
             self.remote_base_sha = remote_base_sha
             self.nested_result = nested_result
+            self.delete_result = delete_result
             self.calls = []
             self.sync_calls = 0
             self.remote_base_sha_calls = 0
@@ -2856,6 +2857,28 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                     if self.remote_base_sha is not None
                     else self.base_sha
                 ),
+            }
+
+        async def github_delete_remote_branch(
+            self,
+            worktree_path,
+            remote,
+            branch,
+        ):
+            self.calls.append(
+                ("delete_remote_branch", worktree_path, remote, branch)
+            )
+            if self.delete_result is not None:
+                return dict(self.delete_result)
+            return {
+                "ok": True,
+                "phase": "remote_branch_delete",
+                "remote": remote,
+                "branch": branch,
+                "deleted": True,
+                "branch_delete_failed": False,
+                "branch_delete_returncode": 0,
+                "branch_delete_stderr": "",
             }
 
         async def github_request_squash_merge(
@@ -4400,6 +4423,156 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             evidence["merge"]["origin_summary"],
             "origin/main == squash789",
         )
+
+    async def test_worktree_merge_pr_deletes_verified_remote_head_and_records_evidence(self):
+        state, worker, task = self._make_pr_merge_state()
+        worktree_mgr = self._FakePrWorktreeManager(
+            {
+                "ok": True,
+                "phase": "pr_merge",
+                "url": "https://github.com/acme/repo/pull/7",
+                "number": 7,
+                "head_sha": "head123",
+                "merge_commit_sha": "squash789",
+                "pending": False,
+                "pr_status": {"ok": True, "state": "MERGED"},
+            },
+            sync_results=[
+                {"ok": True, "phase": "remote_base_sync", "synced": False},
+                {
+                    "ok": True,
+                    "phase": "remote_base_sync",
+                    "remote": "origin",
+                    "base_branch": "main",
+                    "remote_sha": "squash789",
+                },
+            ],
+        )
+
+        async def fake_cleanup_after_merge(*_args, **_kwargs):
+            return {"errors": []}
+
+        handle_command, restore = self._pr_handle_command(
+            state, worker, worktree_mgr, fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge", "id": worker.id,
+            })
+        finally:
+            restore()
+
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["remote_branch_cleanup"]["status"], "deleted")
+        self.assertTrue(result["remote_branch_cleanup"]["branch_deleted"])
+        self.assertIn(
+            ("delete_remote_branch", "/tmp/worker", "origin", "torque/worker"),
+            worktree_mgr.calls,
+        )
+        cleanup = task.completion_evidence["merge"]["remote_branch_cleanup"]
+        self.assertTrue(cleanup["attempted"])
+        self.assertEqual(cleanup["status"], "deleted")
+        self.assertTrue(cleanup["branch_deleted"])
+
+    async def test_worktree_merge_pr_remote_head_delete_refusal_keeps_merge_successful(self):
+        state, worker, task = self._make_pr_merge_state()
+        worktree_mgr = self._FakePrWorktreeManager(
+            {
+                "ok": True,
+                "phase": "pr_merge",
+                "url": "https://github.com/acme/repo/pull/7",
+                "number": 7,
+                "head_sha": "head123",
+                "merge_commit_sha": "squash789",
+                "pending": False,
+                "pr_status": {"ok": True, "state": "MERGED"},
+            },
+            sync_results=[
+                {"ok": True, "phase": "remote_base_sync", "synced": False},
+                {
+                    "ok": True,
+                    "phase": "remote_base_sync",
+                    "remote": "origin",
+                    "base_branch": "main",
+                    "remote_sha": "squash789",
+                },
+            ],
+            delete_result={
+                "ok": False,
+                "phase": "remote_branch_delete",
+                "error": "protected branch",
+                "branch_delete_failed": True,
+                "branch_delete_returncode": 1,
+                "branch_delete_stderr": "protected branch",
+            },
+        )
+
+        async def fake_cleanup_after_merge(*_args, **_kwargs):
+            return {"errors": []}
+
+        handle_command, restore = self._pr_handle_command(
+            state, worker, worktree_mgr, fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge", "id": worker.id,
+            })
+        finally:
+            restore()
+
+        self.assertTrue(result["ok"], result)
+        cleanup = result["remote_branch_cleanup"]
+        self.assertEqual(cleanup["status"], "refused")
+        self.assertTrue(cleanup["attempted"])
+        self.assertTrue(cleanup["branch_delete_failed"])
+        self.assertEqual(cleanup["branch_delete_stderr"], "protected branch")
+        evidence_cleanup = task.completion_evidence["merge"]["remote_branch_cleanup"]
+        self.assertEqual(evidence_cleanup["status"], "refused")
+        self.assertTrue(evidence_cleanup["branch_delete_failed"])
+
+    async def test_worktree_merge_pr_skips_remote_head_delete_without_origin_verification(self):
+        state, worker, task = self._make_pr_merge_state()
+        worktree_mgr = self._FakePrWorktreeManager(
+            {
+                "ok": True,
+                "phase": "pr_merge",
+                "url": "https://github.com/acme/repo/pull/7",
+                "number": 7,
+                "head_sha": "head123",
+                "merge_commit_sha": "squash789",
+                "pending": False,
+                "pr_status": {"ok": True, "state": "MERGED"},
+            },
+            sync_results=[
+                {"ok": True, "phase": "remote_base_sync", "synced": False},
+                {"ok": False, "phase": "remote_base_sync", "error": "network down"},
+            ],
+            base_sha="not-the-merge-sha",
+            remote_base_sha="not-the-merge-sha",
+        )
+
+        async def fake_cleanup_after_merge(*_args, **_kwargs):
+            return {"errors": []}
+
+        handle_command, restore = self._pr_handle_command(
+            state, worker, worktree_mgr, fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge", "id": worker.id,
+            })
+        finally:
+            restore()
+
+        self.assertTrue(result["ok"], result)
+        cleanup = result["remote_branch_cleanup"]
+        self.assertEqual(cleanup["status"], "not_attempted")
+        self.assertEqual(cleanup["reason"], "origin_merge_not_verified")
+        self.assertFalse(cleanup["attempted"])
+        self.assertFalse(any(call[0] == "delete_remote_branch" for call in worktree_mgr.calls))
+        evidence_cleanup = task.completion_evidence["merge"]["remote_branch_cleanup"]
+        self.assertEqual(evidence_cleanup["status"], "not_attempted")
+        self.assertEqual(evidence_cleanup["reason"], "origin_merge_not_verified")
 
     async def test_worktree_merge_pr_post_merge_sync_ref_lock_uses_remote_ground_truth(self):
         state, worker, task = self._make_pr_merge_state()

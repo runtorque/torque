@@ -971,29 +971,40 @@ class GithubMixin:
         delete = await self._run_capture(
             "git", "-C", worktree_path, "push", remote, "--delete", branch
         )
-        if delete.get("returncode") != 0:
-            err = delete.get("stderr") or delete.get("stdout") \
-                or "remote branch delete failed"
+        returncode = delete.get("returncode")
+        stderr = str(delete.get("stderr") or "").strip()
+        stdout = str(delete.get("stdout") or "").strip()
+        if returncode != 0:
+            err = stderr or stdout or "remote branch delete failed"
             lowered = err.lower()
-            if "remote ref does not exist" in lowered \
-                    or "not found" in lowered:
+            if "remote ref does not exist" in lowered:
                 return _worktree_ok(
                     phase,
                     remote=remote,
                     branch=branch,
                     deleted=False,
+                    already_absent=True,
+                    branch_delete_failed=False,
+                    branch_delete_returncode=returncode,
+                    branch_delete_stderr=stderr,
                 )
             return _worktree_error(
                 phase,
                 f"Failed to delete remote branch: {err}",
                 remote=remote,
                 branch=branch,
+                branch_delete_failed=True,
+                branch_delete_returncode=returncode,
+                branch_delete_stderr=stderr,
             )
         return _worktree_ok(
             phase,
             remote=remote,
             branch=branch,
             deleted=True,
+            branch_delete_failed=False,
+            branch_delete_returncode=returncode,
+            branch_delete_stderr=stderr,
         )
 
     async def create_pr(self, cell, title: str = "",
