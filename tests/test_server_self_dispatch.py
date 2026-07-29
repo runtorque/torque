@@ -717,6 +717,9 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertIn("continues in the same agent", prompt)
         self.assertIn("raise(question=\"title\", description=\"details\")", prompt)
         self.assertIn("task_complete(message=\"brief summary\")", prompt)
+        self.assertIn("terminal_declaration", prompt)
+        self.assertIn("Because this task has an available derive transition",
+                      prompt)
         self.assertIn("deviation_statement", prompt)
         self.assertIn("Other reporting tools when relevant:", prompt)
         self.assertIn("task_blocked(reason=", prompt)
@@ -746,6 +749,7 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertIn("Available completion paths for this task:", prompt)
         self.assertIn("issues were found that need to be fixed", prompt)
         self.assertIn("task_complete(message=\"brief summary\")", prompt)
+        self.assertIn("terminal_declaration", prompt)
         self.assertIn("Other reporting tools when relevant:", prompt)
         self.assertIn("task_blocked(reason=", prompt)
         self.assertIn("task_error(message=", prompt)
@@ -769,6 +773,7 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertIn("task_verify(state=", prompt)
         self.assertNotIn("IMPORTANT:", prompt)
         self.assertNotIn("torque_derive(description=", prompt)
+        self.assertNotIn("terminal_declaration", prompt)
         self.assertNotIn("torque_ask(question=\"title\", description=\"details\")", prompt)
 
     def test_startup_prompt_for_new_codex_worker_uses_persistent_prompt(self):

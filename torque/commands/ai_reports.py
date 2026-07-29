@@ -351,13 +351,20 @@ async def handle_ai_report_command(
                 return None
             if _has_terminal_declaration(terminal_declaration):
                 return None
+            corrected_call = (
+                'torque_done(message="brief summary", '
+                'terminal_declaration="No further work is needed; '
+                'I will not derive after this.")'
+                if action_name == "done"
+                else 'torque_ready(terminal_declaration="No further work '
+                'is needed; I will not derive after this.")'
+            )
             return {
                 "type": "error",
                 "message": (
-                    f"Cannot mark task {action_name}: a task with an "
-                    "available derive transition requires a terminal "
-                    "declaration stating that no further work is needed and "
-                    "the worker will not derive after this"
+                    f"Cannot mark task {action_name}: terminal_declaration "
+                    "is required because this task has an available derive "
+                    f"transition. Call {corrected_call}"
                 ),
                 "task_id": t.id if t else "",
             }

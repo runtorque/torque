@@ -307,7 +307,16 @@ class ServerAiReportMandatoryReviewGateTests(unittest.IsolatedAsyncioTestCase):
     async def test_worker_feature_implement_without_ship_review_is_rejected(self):
         state, cell, task = self._state_cell_task()
 
-        result = await self._ai_done(state, cell)
+        # feature/implement has a derive transition, but its mandatory-review
+        # gate is evaluated first.  The terminal-declaration rule therefore
+        # does not create a reachable completion path while review is open.
+        handle_command = self._extract_handle_command(state)
+        result = await handle_command({
+            "cmd": "ai_report",
+            "cell_id": cell.id,
+            "action": "done",
+            "message": "Implementation complete",
+        })
 
         self.assertEqual(result["type"], "error")
         self.assertIn(
@@ -318,6 +327,7 @@ class ServerAiReportMandatoryReviewGateTests(unittest.IsolatedAsyncioTestCase):
             'torque_derive(description="Review Implement mandatory gate", action="feature/review")',
             result["message"],
         )
+        self.assertNotIn("terminal_declaration", result["message"])
         self.assertEqual(task.lane, "In Progress")
 
     async def test_worker_feature_implement_with_ship_review_succeeds(self):
@@ -431,13 +441,18 @@ class ServerAiReportMandatoryReviewGateTests(unittest.IsolatedAsyncioTestCase):
         rejected = await self._complete_pipeline_task(state, cell, task, "done")
 
         self.assertEqual(rejected["type"], "error")
-        self.assertIn("terminal declaration", rejected["message"])
+        self.assertIn("terminal_declaration", rejected["message"])
+        self.assertIn("because this task has an available derive transition",
+                      rejected["message"])
+        self.assertIn("torque_done(message=", rejected["message"])
         self.assertEqual(task.lane, "In Progress")
 
         ready_rejected = await self._complete_pipeline_task(
             state, cell, task, "ready")
         self.assertEqual(ready_rejected["type"], "error")
-        self.assertIn("terminal declaration", ready_rejected["message"])
+        self.assertIn("terminal_declaration", ready_rejected["message"])
+        self.assertIn("torque_ready(terminal_declaration=",
+                      ready_rejected["message"])
         self.assertEqual(task.lane, "In Progress")
 
         state, cell, task = self._state_cell_task(

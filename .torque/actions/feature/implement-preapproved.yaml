@@ -45,6 +45,6 @@ prompt: |
   - In your closeout, state the exact review item addressed, files changed, tests/checks run, and why the fix stayed within the pre-approved scope
   - If Torque blocks a fallback re-review derive because the worktree has a stale base, run the suggested rebase command and include `post_rebase_head_sha`, `base_head_sha`, exact `rerun_tests` command(s), and `review_boundary_updated` in the next `feature/review` derive context
 
-  When the small fix is in and tests pass, call `torque_done(message="brief summary")` directly. No re-review derivation is required for this task — the reviewer's `pre_approved: true` transition is the structural bypass.
+  When the small fix is in and tests pass, call `torque_done(message="brief summary", terminal_declaration="No further work is needed; I will not derive after this.")` directly. No re-review derivation is required for this task — the reviewer's `pre_approved: true` transition is the structural bypass.
 
   Do NOT deploy, run `make deploy`/`make deploy-toolbelt`, or restart services. Only write code and commit.

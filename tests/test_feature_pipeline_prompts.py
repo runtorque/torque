@@ -62,7 +62,12 @@ class FeaturePipelinePromptTests(unittest.TestCase):
         self.assertIn("If you derive a fix, make the handoff self-contained", rendered_prompt)
         self.assertIn("expected fix scope", rendered_prompt)
         self.assertIn("Pick exactly one closeout path", rendered_prompt)
-        self.assertIn("No blocking issues: your FINAL action MUST be `torque ai done`", rendered_prompt)
+        self.assertIn(
+            "No blocking issues: your FINAL action MUST be "
+            "`task_complete(message=\"brief review summary\", "
+            "terminal_declaration=",
+            rendered_prompt,
+        )
         self.assertIn("Final review verdict: Ship", rendered_prompt)
         self.assertIn("Replying via `agent_reply`", rendered_prompt)
         self.assertTrue(rendered_prompt.rstrip().endswith("silence is read as a stall."))
@@ -91,7 +96,12 @@ class FeaturePipelinePromptTests(unittest.TestCase):
         self.assertIn("Do NOT call `torque ai done` after deriving the fix task", closeout)
         self.assertIn("Include the original goal, blocking issues, expected fix scope", rendered_prompt)
         self.assertIn("unresolved fix handoff is the valid blocking-review closeout path", rendered_prompt)
-        self.assertIn("No blocking issues: your FINAL action MUST be `torque ai done`", closeout)
+        self.assertIn(
+            "No blocking issues: your FINAL action MUST be "
+            "`task_complete(message=\"brief review summary\", "
+            "terminal_declaration=",
+            closeout,
+        )
         self.assertIn("NOT a substitute for either closeout path", closeout)
 
     def test_feature_prompts_require_targeted_verification_and_reporting(self):
