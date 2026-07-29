@@ -1343,25 +1343,17 @@ async def handle_ai_report_command(
                             elif target_id:
                                 # Dispatch to different
                                 # existing agent
-                                tgt = state.agents.get(
-                                    target_id)
                                 dispatch_data = {
                                     "cmd": "dispatch_task",
                                     "id": new_task.id,
                                     "agent_id": target_id,
                                 }
-                                # Inherit worktree from
-                                # target agent
-                                if tgt and \
-                                        tgt.worktree_path:
-                                    dispatch_data[
-                                        "inherit_worktree"
-                                        "_from"
-                                    ] = target_id
-                                if not (tgt and
-                                        tgt.worktree_path) \
-                                        and cell.worktree_path \
-                                        and derive_parent_task_id == task.id:
+                                # The derived task reviews the caller's
+                                # current worktree, not an idle reused
+                                # reviewer's predecessor worktree.  Existing
+                                # agents receive this handoff in
+                                # dispatch_task before their prompt.
+                                if cell.worktree_path:
                                     dispatch_data[
                                         "inherit_worktree"
                                         "_from"
