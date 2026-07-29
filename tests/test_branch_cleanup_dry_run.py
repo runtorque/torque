@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import importlib.util
+import contextlib
+import io
 import json
 import sqlite3
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -75,6 +78,26 @@ class BranchCleanupDryRunTests(unittest.TestCase):
     def branch_at_main(self, branch: str) -> None:
         git(self.repo, "branch", branch, self.main)
 
+    @staticmethod
+    def eligible(branch: str, location: str) -> dict:
+        return {
+            "ref": f"refs/{'heads' if location == 'local' else 'remotes/origin'}/{branch}",
+            "branch": branch,
+            "location": location,
+            "gate_evidence": {"not_live_excluded": True, "valid_agent_namespace": True},
+            "tree_evidence": {"identical": True, "merge_tree": "tree", "main_tree": "tree"},
+        }
+
+    @classmethod
+    def report(cls, eligible: list[dict]) -> dict:
+        return {
+            "eligible": eligible,
+            "excluded_for_live_work": [],
+            "outside_namespace": [],
+            "protected_status": [],
+            "ineligible": [],
+        }
+
     def test_normalize_ref_handles_local_and_origin_names(self):
         self.assertEqual(cleanup.normalize_ref("refs/heads/topic"), "topic")
         self.assertEqual(cleanup.normalize_ref("refs/remotes/origin/topic"), "topic")
@@ -137,3 +160,76 @@ class BranchCleanupDryRunTests(unittest.TestCase):
         self.assertEqual(report["counts"]["eligible_local_refs"], 2)
         self.assertEqual(report["counts"]["eligible_origin_refs"], 1)
         self.assertTrue(any(item["branch"] == "torque/engineer/content" for item in report["ineligible"]))
+
+    def test_apply_refuses_drift_before_any_mutation_in_either_direction(self):
+        for actual in (148, 204):
+            with self.subTest(actual=actual):
+                report = self.report([self.eligible(f"torque/e/w{i}", "local") for i in range(actual)])
+                calls = []
+                with mock.patch.object(cleanup, "_apply_command", side_effect=calls.append):
+                    result = cleanup.apply_cleanup(
+                        self.repo, self.db, expected_eligible_count=176, max_count_drift=27,
+                        measure=lambda *_: report,
+                    )
+                self.assertEqual(result["refusal"], "eligible_count_drift_exceeds_threshold")
+                self.assertFalse(result["mutation_started"])
+                self.assertEqual(calls, [])
+                self.assertEqual(result["drift"]["difference"], 28)
+
+    def test_apply_does_not_accept_an_eligible_artifact_argument(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+            cleanup.main([
+                "--output-dir", str(Path(self.tmp.name) / "out"),
+                "--eligible-artifact", "untrusted.json",
+            ])
+        self.assertEqual(raised.exception.code, 2)
+
+    def test_apply_runs_gated_force_local_before_one_at_a_time_remote_and_remeasures(self):
+        candidates = [
+            self.eligible("torque/e/local", "local"),
+            self.eligible("torque/e/remote", "origin"),
+        ]
+        reports = [self.report(candidates), self.report([])]
+        measured = []
+        commands = []
+
+        def measure(*_):
+            measured.append(True)
+            return reports[len(measured) - 1]
+
+        def command(_repo, *args):
+            commands.append(args)
+            return {"command": list(args), "returncode": 0, "stdout": "", "stderr": ""}
+
+        with mock.patch.object(cleanup, "_apply_command", side_effect=command):
+            result = cleanup.apply_cleanup(
+                self.repo, self.db, expected_eligible_count=2, max_count_drift=0, measure=measure,
+            )
+        self.assertEqual(commands, [("branch", "-D", "torque/e/local"), ("push", "origin", "--delete", "torque/e/remote")])
+        self.assertEqual(len(measured), 2)
+        local = result["local"]["succeeded"][0]
+        self.assertTrue(local["gate_evidence"]["not_live_excluded"])
+        self.assertTrue(local["tree_evidence"]["identical"])
+        self.assertEqual(result["post_measurement"], reports[1])
+
+    def test_remote_failure_stops_and_partitions_remaining_refs(self):
+        candidates = [
+            self.eligible("torque/e/local", "local"),
+            self.eligible("torque/e/remote-one", "origin"),
+            self.eligible("torque/e/remote-two", "origin"),
+            self.eligible("torque/e/remote-three", "origin"),
+        ]
+        outcomes = iter((0, 0, 1))
+
+        def command(_repo, *args):
+            return {"command": list(args), "returncode": next(outcomes), "stdout": "", "stderr": "denied"}
+
+        with mock.patch.object(cleanup, "_apply_command", side_effect=command):
+            result = cleanup.apply_cleanup(
+                self.repo, self.db, expected_eligible_count=4, max_count_drift=0,
+                measure=lambda *_: self.report(candidates),
+            )
+        self.assertEqual(result["stop_reason"], "remote_delete_failed")
+        self.assertEqual([x["branch"] for x in result["remote"]["succeeded"]], ["torque/e/remote-one"])
+        self.assertEqual([x["branch"] for x in result["remote"]["failed"]], ["torque/e/remote-two"])
+        self.assertEqual([x["branch"] for x in result["remote"]["never_attempted"]], ["torque/e/remote-three"])

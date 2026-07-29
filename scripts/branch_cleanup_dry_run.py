@@ -178,16 +178,20 @@ def apply_non_idle_id_exclusions(
                 reasons[ref.branch].add(f"non_idle_agent_id:{agent_id}")
 
 
-def merge_tree_is_main(repo: Path, ref: GitRef, main_tree: str) -> tuple[bool, str]:
+def merge_tree_is_main(repo: Path, ref: GitRef, main_tree: str) -> tuple[bool, str, str]:
     """Return tree identity, or a non-empty reason when it cannot be proven."""
     result = _run(repo, "merge-tree", "--write-tree", ref.ref, "main", check=False)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip().replace("\n", " ")
-        return False, f"merge_tree_failed:{detail[:240] or result.returncode}"
+        return False, f"merge_tree_failed:{detail[:240] or result.returncode}", ""
     tree = result.stdout.strip().splitlines()[0] if result.stdout.strip() else ""
     if not tree:
-        return False, "merge_tree_failed:no_tree_output"
-    return tree == main_tree, "" if tree == main_tree else f"adds_content:merge_tree={tree}"
+        return False, "merge_tree_failed:no_tree_output", ""
+    return (
+        tree == main_tree,
+        "" if tree == main_tree else f"adds_content:merge_tree={tree}",
+        tree,
+    )
 
 
 def enumerate_cleanup(
@@ -242,8 +246,22 @@ def enumerate_cleanup(
             or ref.branch in outside_names
         ):
             continue
-        identical, reason = merge_tree_is_main(repo, ref, main_tree)
-        item = {"ref": ref.ref, "branch": ref.branch, "location": ref.location}
+        identical, reason, merged_tree = merge_tree_is_main(repo, ref, main_tree)
+        item = {
+            "ref": ref.ref,
+            "branch": ref.branch,
+            "location": ref.location,
+            "tree_evidence": {
+                "merge_tree": merged_tree,
+                "main_tree": main_tree,
+                "identical": identical,
+            },
+            "gate_evidence": {
+                "not_live_excluded": ref.branch not in live_reasons,
+                "not_explicitly_protected": ref.branch not in protected_reasons,
+                "valid_agent_namespace": ref.branch not in outside_names,
+            },
+        }
         if identical:
             eligible.append(item)
         else:
@@ -298,18 +316,169 @@ def write_report(report: dict, output_dir: Path) -> tuple[Path, Path, Path, Path
     return exclusions, eligible, outside_namespace, summary
 
 
+def _apply_command(repo: Path, *args: str) -> dict:
+    """Run one mutating command and preserve its attribution evidence."""
+    result = _run(repo, *args, check=False)
+    return {
+        "command": ["git", "-C", str(repo), *args],
+        "returncode": result.returncode,
+        "stdout": result.stdout[-2000:],
+        "stderr": result.stderr[-2000:],
+    }
+
+
+def _phase_result(items: list[dict]) -> dict:
+    return {"succeeded": [], "failed": [], "never_attempted": items}
+
+
+def apply_cleanup(
+    repo: Path,
+    db_path: Path,
+    *,
+    expected_eligible_count: int,
+    max_count_drift: int,
+    measure=enumerate_cleanup,
+) -> dict:
+    """Apply the recomputed set only after an explicit conservative drift gate.
+
+    No caller-provided artifact or prior report participates in authorization.
+    ``measure`` is deliberately invoked in this function immediately before the
+    first mutation, then once again after the attempt.  On any local or remote
+    failure this stops the rest of that phase and leaves all later refs in
+    ``never_attempted`` rather than hiding an ambiguous partial cleanup.
+    """
+    # This recomputation is the sole authority for mutation.
+    pre = measure(repo, db_path)
+    actual = len(pre["eligible"])
+    drift = abs(actual - expected_eligible_count)
+    result = {
+        "apply_requested": True,
+        "expected_eligible_count": expected_eligible_count,
+        "max_count_drift": max_count_drift,
+        "pre_mutation": pre,
+        "drift": {"actual": actual, "difference": drift, "allowed": drift <= max_count_drift},
+        "local": _phase_result([]),
+        "remote": _phase_result([]),
+        "mutation_started": False,
+    }
+    if drift > max_count_drift:
+        result["refusal"] = "eligible_count_drift_exceeds_threshold"
+        result["post_measurement"] = measure(repo, db_path)
+        return result
+
+    local = [item for item in pre["eligible"] if item["location"] == "local"]
+    remote = [item for item in pre["eligible"] if item["location"] == "origin"]
+    result["local"] = _phase_result(local.copy())
+    result["remote"] = _phase_result(remote.copy())
+    result["mutation_started"] = bool(local or remote)
+
+    # Local phase: -D is allowed only because every item came from this exact
+    # pre-mutation recomputation and carries both gate and tree evidence.
+    for index, item in enumerate(local):
+        evidence = {"ref": item["ref"], "branch": item["branch"], "gate_evidence": item["gate_evidence"], "tree_evidence": item["tree_evidence"]}
+        command = _apply_command(repo, "branch", "-D", item["branch"])
+        evidence["command"] = command
+        result["local"]["never_attempted"] = local[index + 1:]
+        if command["returncode"]:
+            result["local"]["failed"].append(evidence)
+            result["remote"]["never_attempted"] = remote
+            result["stop_reason"] = "local_delete_failed"
+            result["post_measurement"] = measure(repo, db_path)
+            return result
+        result["local"]["succeeded"].append(evidence)
+    result["local"]["never_attempted"] = []
+
+    # Remote phase comes strictly after every local candidate succeeded.  One
+    # push per ref keeps a failed remote attributable; first failure stops.
+    for index, item in enumerate(remote):
+        evidence = {"ref": item["ref"], "branch": item["branch"], "gate_evidence": item["gate_evidence"], "tree_evidence": item["tree_evidence"]}
+        command = _apply_command(repo, "push", "origin", "--delete", item["branch"])
+        evidence["command"] = command
+        result["remote"]["never_attempted"] = remote[index + 1:]
+        if command["returncode"]:
+            result["remote"]["failed"].append(evidence)
+            result["stop_reason"] = "remote_delete_failed"
+            result["post_measurement"] = measure(repo, db_path)
+            return result
+        result["remote"]["succeeded"].append(evidence)
+    result["remote"]["never_attempted"] = []
+    result["post_measurement"] = measure(repo, db_path)
+    return result
+
+
+def apply_left_behind(report: dict) -> dict:
+    """Make the deliberately retained categories auditable after an apply."""
+    return {
+        "live_work": report.get("excluded_for_live_work", []),
+        "outside_namespace": report.get("outside_namespace", []),
+        "protected": report.get("protected_status", []),
+        "ineligible": report.get("ineligible", []),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=Path.cwd())
     parser.add_argument("--db", type=Path, default=_default_db())
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="perform the separately authorized local-then-remote cleanup (default is dry run)",
+    )
+    parser.add_argument(
+        "--expected-eligible-count",
+        type=int,
+        help="explicit baseline acknowledgement required with --apply",
+    )
+    parser.add_argument(
+        "--acknowledge-expected-baseline",
+        type=int,
+        help="must exactly repeat --expected-eligible-count when --apply is used",
+    )
+    parser.add_argument(
+        "--max-count-drift",
+        type=int,
+        default=27,
+        help="absolute eligible-ref drift allowed before apply (default: 27, 15%% of baseline 176)",
+    )
     args = parser.parse_args(argv)
+    if args.apply and (
+        args.expected_eligible_count is None
+        or args.acknowledge_expected_baseline != args.expected_eligible_count
+    ):
+        parser.error(
+            "--apply requires --expected-eligible-count N and "
+            "--acknowledge-expected-baseline N"
+        )
+    if args.max_count_drift < 0:
+        parser.error("--max-count-drift must be non-negative")
     try:
-        report = enumerate_cleanup(args.repo.resolve(), args.db.expanduser())
+        repo = args.repo.resolve()
+        db = args.db.expanduser()
+        if args.apply:
+            apply_result = apply_cleanup(
+                repo,
+                db,
+                expected_eligible_count=args.expected_eligible_count,
+                max_count_drift=args.max_count_drift,
+            )
+            report = apply_result["pre_mutation"]
+            apply_result["post_measurement_totals"] = apply_result["post_measurement"].get("counts", {})
+            apply_result["left_behind"] = apply_left_behind(
+                apply_result["post_measurement"]
+            )
+        else:
+            apply_result = None
+            report = enumerate_cleanup(repo, db)
     except (FileNotFoundError, subprocess.CalledProcessError, sqlite3.Error) as exc:
         print(f"branch cleanup dry run failed: {exc}", file=sys.stderr)
         return 2
     exclusions, eligible, outside_namespace, summary = write_report(report, args.output_dir)
+    if apply_result is not None:
+        apply_report = args.output_dir / "branch-cleanup-apply-report.json"
+        apply_report.write_text(json.dumps(apply_result, indent=2) + "\n")
+        print(f"apply report: {apply_report}")
     print(f"main: {report['main_sha']}")
     print(f"excluded for live work: {len(report['excluded_for_live_work'])} -> {exclusions}")
     print(
@@ -320,7 +489,15 @@ def main(argv: list[str] | None = None) -> int:
     print(f"outside valid agent namespace: {len(report['outside_namespace'])} -> {outside_namespace}")
     print(f"full report: {summary}")
     print(f"refs unchanged: {report['refs_unchanged']}")
-    return 0 if report["refs_unchanged"] else 3
+    if not report["refs_unchanged"]:
+        return 3
+    if apply_result and apply_result.get("refusal"):
+        return 4
+    if apply_result and (
+        apply_result["local"]["failed"] or apply_result["remote"]["failed"]
+    ):
+        return 5
+    return 0
 
 
 if __name__ == "__main__":
