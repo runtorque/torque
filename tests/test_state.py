@@ -4462,6 +4462,127 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         self.assertIn(child.id, upsert_ids)
         self.assertIn(parent.id, upsert_ids)
 
+    def test_done_cascade_holds_mandatory_review_root_without_ship(self):
+        """Regression for TORQUE:1353's legacy-cascade bypass."""
+        state = self._make_state()
+        root = state.board_add_task(
+            "Implement feature",
+            "g",
+            lane="In Progress",
+            id="task-implement",
+            action_name="feature/implement",
+            requires_review=True,
+        )
+        review = state.board_add_task(
+            "Review feature",
+            "g",
+            lane="In Progress",
+            id="task-review",
+            action_name="feature/review",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+            completion_evidence={"review": {"verdict": "unknown"}},
+        )
+
+        state.board_move_task(review.id, "Done")
+
+        self.assertEqual(review.lane, "Done")
+        self.assertEqual(root.lane, "In Progress")
+
+    def test_done_cascade_allows_root_without_action_review_gate(self):
+        state = self._make_state()
+        root = state.board_add_task(
+            "General follow-up",
+            "g",
+            lane="In Progress",
+            id="task-root",
+            # A stale/manual structural flag alone must not invent an action
+            # contract for an unbound task.
+            requires_review=True,
+        )
+        child = state.board_add_task(
+            "Finish follow-up",
+            "g",
+            lane="In Progress",
+            id="task-child",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+        )
+
+        state.board_move_task(child.id, "Done")
+
+        self.assertEqual(root.lane, "Done")
+
+    def test_done_cascade_holds_root_while_second_review_is_open(self):
+        """Model TORQUE:1215: a Ship cannot outrun an outstanding review."""
+        state = self._make_state()
+        root = state.board_add_task(
+            "Implement feature",
+            "g",
+            lane="In Progress",
+            id="task-implement",
+            action_name="feature/implement",
+            requires_review=True,
+        )
+        first_review = state.board_add_task(
+            "Review pass one",
+            "g",
+            lane="In Progress",
+            id="task-review-one",
+            action_name="feature/review",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+            # Deliberately rely on the canonical raw-message fallback rather
+            # than completion_evidence, as the live record must be read.
+            messages=[{"action": "done", "message": "Verdict: Ship"}],
+        )
+        second_review = state.board_add_task(
+            "Review pass two",
+            "g",
+            lane="In Progress",
+            id="task-review-two",
+            action_name="feature/review",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+        )
+
+        state.board_move_task(first_review.id, "Done")
+
+        self.assertEqual(first_review.lane, "Done")
+        self.assertEqual(second_review.lane, "In Progress")
+        self.assertEqual(root.lane, "In Progress")
+
+    def test_done_cascade_allows_ship_without_implementer_done(self):
+        """TORQUE:1358 shape: reviewer Ship, not parent self-done, closes it."""
+        state = self._make_state()
+        root = state.board_add_task(
+            "Implement feature",
+            "g",
+            lane="In Progress",
+            id="task-implement",
+            action_name="feature/implement",
+            requires_review=True,
+        )
+        review = state.board_add_task(
+            "Review feature",
+            "g",
+            lane="In Progress",
+            id="task-review",
+            action_name="feature/review",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+            messages=[{"action": "done", "message": "Verdict: Ship"}],
+        )
+
+        state.board_move_task(review.id, "Done")
+
+        self.assertEqual(root.lane, "Done")
+
     def test_done_cascades_multi_pass_review_chain_after_ship_verdict(self):
         state = self._make_state()
         root = state.board_add_task(
