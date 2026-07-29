@@ -41,8 +41,10 @@ The shared direct/PR worktree preflight calls
 `check_backend_modularity_crossings()` before merge side effects. It checks
 backend Python files touched between the target base ref and candidate branch,
 then blocks files whose candidate line count newly exceeds the applicable
-reviewed limit. Repositories without Torque's backend-modularity test marker
-are outside this repository-specific gate.
+reviewed limit. Applicability comes from Torque's backend-modularity test
+marker on the trusted target base, so a candidate cannot self-disable the gate
+by deleting or renaming that marker. Target bases without the marker are
+outside this repository-specific gate.
 
 The same check remains author-runnable for diagnosis:
 

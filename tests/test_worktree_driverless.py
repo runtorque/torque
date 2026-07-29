@@ -129,6 +129,11 @@ class BackendModularityMergeGateTests(unittest.IsolatedAsyncioTestCase):
         backend.write_text("x = 1\n" * 2499)
         self._git("add", "torque/sample.py")
         self._git("commit", "-qm", "stay below limit")
+        self._git("switch", "-qc", "marker-deleted", "main")
+        marker.unlink()
+        backend.write_text("x = 1\n" * 2501)
+        self._git("add", "-A")
+        self._git("commit", "-qm", "delete marker while crossing limit")
 
     def _git(self, *args):
         return subprocess.run(
@@ -198,6 +203,18 @@ class BackendModularityMergeGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["ok"])
         self.assertFalse(mgr.merge_check_called)
         self.assertEqual(result["result"]["phase"], "backend_modularity")
+        self.assertEqual(
+            result["backend_modularity"]["crossings"][0]["path"],
+            "torque/sample.py",
+        )
+
+    async def test_shared_merge_preflight_blocks_marker_deletion_bypass(self):
+        result, mgr = await self._preflight("marker-deleted")
+
+        self.assertFalse(result["ok"])
+        self.assertFalse(mgr.merge_check_called)
+        self.assertEqual(result["result"]["phase"], "backend_modularity")
+        self.assertTrue(result["backend_modularity"]["applicable"])
         self.assertEqual(
             result["backend_modularity"]["crossings"][0]["path"],
             "torque/sample.py",

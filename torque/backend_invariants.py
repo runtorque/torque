@@ -90,7 +90,7 @@ def check_backend_modularity_crossings(
         root,
         "cat-file",
         "-e",
-        f"{candidate_ref}:tests/test_backend_modularity.py",
+        f"{base_ref}:tests/test_backend_modularity.py",
         check=False,
     )
     if marker.returncode != 0:

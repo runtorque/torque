@@ -376,6 +376,88 @@ class BackendInvariantCrossingTests(unittest.TestCase):
             }],
         )
 
+    def test_candidate_cannot_disable_gate_by_deleting_marker(self):
+        (self.repo / "tests" / "test_backend_modularity.py").unlink()
+        (self.repo / "torque" / "sample.py").write_text(
+            "x = 1\n" * (DEFAULT_BACKEND_LINE_LIMIT + 1)
+        )
+        self._git("add", "-A")
+        self._git("commit", "-qm", "delete marker while crossing limit")
+        candidate = self._git("rev-parse", "HEAD").stdout.strip()
+
+        result = check_backend_modularity_crossings(
+            self.repo,
+            self.base,
+            candidate,
+        )
+
+        self.assertTrue(result["applicable"])
+        self.assertFalse(result["ok"])
+        self.assertEqual(
+            result["crossings"][0]["path"],
+            "torque/sample.py",
+        )
+
+    def test_non_torque_base_remains_outside_repo_specific_gate(self):
+        with tempfile.TemporaryDirectory() as non_torque_temp:
+            repo = Path(non_torque_temp)
+
+            def git(*args):
+                return subprocess.run(
+                    ["git", "-C", str(repo), *args],
+                    check=True,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+
+            git("init", "-q", "-b", "main")
+            git("config", "user.email", "test@example.com")
+            git("config", "user.name", "Test")
+            backend = repo / "torque" / "sample.py"
+            backend.parent.mkdir()
+            backend.write_text("x = 1\n" * DEFAULT_BACKEND_LINE_LIMIT)
+            git("add", ".")
+            git("commit", "-qm", "non-Torque baseline")
+            base = git("rev-parse", "HEAD").stdout.strip()
+            backend.write_text(
+                "x = 1\n" * (DEFAULT_BACKEND_LINE_LIMIT + 1)
+            )
+            git("add", ".")
+            git("commit", "-qm", "cross limit")
+            candidate = git("rev-parse", "HEAD").stdout.strip()
+
+            result = check_backend_modularity_crossings(
+                repo,
+                base,
+                candidate,
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["applicable"])
+        self.assertEqual(result["checked_files"], [])
+        self.assertEqual(result["crossings"], [])
+
+    def test_does_not_fire_when_file_remains_over_limit(self):
+        already_over = self._commit_lines(
+            DEFAULT_BACKEND_LINE_LIMIT + 1,
+            "cross limit",
+        )
+        still_over = self._commit_lines(
+            DEFAULT_BACKEND_LINE_LIMIT + 2,
+            "remain over limit",
+        )
+
+        result = check_backend_modularity_crossings(
+            self.repo,
+            already_over,
+            still_over,
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["applicable"])
+        self.assertEqual(result["crossings"], [])
+
     def test_does_not_fire_when_changed_file_stays_below_limit(self):
         below = self._commit_lines(
             DEFAULT_BACKEND_LINE_LIMIT - 1,
