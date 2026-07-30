@@ -54,6 +54,7 @@ from .mcp_public_call_authorization import (
     _resolve_public_tool_call as _resolve_public_tool_call_with_dependencies,
     _resolve_scoped_resource,
     _scoped_resource_relationship,
+    public_argument_validation_error,
     public_call_refusal_message,
 )
 from .mcp_tool_search import deferred_tool_specs, public_tool_spec
@@ -2192,6 +2193,16 @@ async def dispatch_mcp_rpc_body(
                 message,
                 undeclared_public_arguments,
             ), 200
+        argument_error = public_argument_validation_error(
+            requested_tool_name,
+            public_arguments,
+            caller_kind,
+        )
+        if argument_error:
+            return _jsonrpc_ok(req_id, {
+                "content": [{"type": "text", "text": argument_error}],
+                "isError": True,
+            }), 200
         write_tool = is_mcp_write_tool(tool_name)
         idempotency_key = ""
         request_hash = ""

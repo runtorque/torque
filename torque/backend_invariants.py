@@ -15,11 +15,10 @@ BACKEND_LINE_LIMITS = {
     "torque/state.py": 5000,
     "torque/db_schema.py": 3800,
     "torque/doctor.py": 2600,
-    # Behavior-overlay conditional validation must run after authorization but
-    # before write/idempotency setup; no other seam preserves that rejection
-    # boundary. Moving it would couple authorization to JSON-RPC/wake/
-    # idempotency or defer validation until translation/dispatch solely to
-    # satisfy this limit.
+    # Architecture-reviewed transport seam: behavior-overlay conditional
+    # validation must run after authorization and before write/idempotency
+    # setup. Moving it outward would couple JSON-RPC/wake/idempotency response
+    # concerns to authorization or change the rejection boundary.
     "torque/mcp.py": 2600,
 }
 

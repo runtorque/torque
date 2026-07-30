@@ -38,6 +38,32 @@ class PublicCallAuthorizationDependencies:
     tool_allowed_by_authority: Callable
 
 
+def public_argument_validation_error(
+    requested_tool_name: str,
+    arguments: dict,
+    caller_kind: str,
+) -> str:
+    """Return a public-handler error for conditional canonical arguments.
+
+    Public schemas remain deliberately plain objects for provider-native tool
+    indexes. Conditional constraints therefore belong at the public-call
+    boundary, after authorization and before write/idempotency setup.
+    """
+
+    if (
+        str(requested_tool_name or "").strip() != "behavior_overlay_propose"
+        or caller_kind != "architect"
+        or not isinstance(arguments, dict)
+    ):
+        return ""
+    target_kind = str(arguments.get("target_kind", "") or "").strip()
+    if target_kind == "self" and "target" in arguments:
+        return "target must not be provided when target_kind is self"
+    if target_kind in {"agent", "role"} and "target" not in arguments:
+        return "target is required when target_kind is agent or role"
+    return ""
+
+
 def _resolve_public_tool_call(
     state,
     cell_id: str,

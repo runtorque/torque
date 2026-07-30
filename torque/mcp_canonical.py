@@ -637,16 +637,6 @@ def _canonical_schema(name: str, schema: dict, *, caller_kind: str) -> dict:
             add("target_kind", {"type": "string", "enum": ["self", "agent", "role"]})
             add("target", {"type": "string", "description": "Agent reference or role kind for non-self targets."})
             required = [*required, "target_kind"]
-            one_of = [
-                {
-                    "properties": {"target_kind": {"const": "self"}},
-                    "not": {"required": ["target"]},
-                },
-                {
-                    "properties": {"target_kind": {"enum": ["agent", "role"]}},
-                    "required": ["target"],
-                },
-            ]
     elif name == "behavior_overlay_rollback":
         if caller_kind == "architect":
             for legacy in ("agent_id", "engineer_id", "role_kind"):
