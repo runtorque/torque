@@ -607,6 +607,22 @@ _ARCHITECT_TOOL_SPECS = [
                     "items": {"type": "string"},
                     "description": "Optional labels.",
                 },
+                "required_review_gates": {
+                    "type": "array",
+                    "description": (
+                        "Optional durable legacy review-cardinality declaration. "
+                        "Each named gate adds one distinct independent Ship "
+                        "review required before the root can close."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "role": {"type": "string"},
+                        },
+                        "required": ["id"],
+                    },
+                },
                 "lane": {
                     "type": "string",
                     "description": "Optional lane override.",
@@ -695,6 +711,22 @@ _ARCHITECT_TOOL_SPECS = [
                         "Replacement structured action variables. Provide {} "
                         "to clear action variables."
                     ),
+                },
+                "required_review_gates": {
+                    "type": "array",
+                    "description": (
+                        "Replacement durable review-cardinality declaration. "
+                        "A dispatched task must first be stopped and re-laned "
+                        "before this declaration can be amended."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "role": {"type": "string"},
+                        },
+                        "required": ["id"],
+                    },
                 },
             },
             "required": ["task"],

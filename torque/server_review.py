@@ -1027,6 +1027,115 @@ def _task_has_shipped_review_descendant(state: MatrixState, task) -> bool:
     return False
 
 
+def _reviewer_identity_for_cardinality(task) -> str:
+    """Return a durable reviewer identity for a closed Ship review.
+
+    Legacy review messages predate structured completion evidence.  Prefer the
+    structured actor when it exists, then the durable task assignment, and
+    finally an id carried by the particular Ship message.  A display name is
+    deliberately not an identity: a cardinality declaration must fail closed
+    rather than treating two coincidentally named people as distinct reviewers.
+    """
+    review = _task_review_evidence(task)
+    identity = str(review.get("agent_id", "") or "").strip()
+    if identity:
+        return identity
+    identity = str(getattr(task, "agent_id", "") or "").strip()
+    if identity:
+        return identity
+    for entry in reversed(getattr(task, "messages", []) or []):
+        if str(entry.get("action", "") or "").lower() != "done":
+            continue
+        if _review_verdict_from_message(entry.get("message", "")) != "ship":
+            continue
+        identity = str(entry.get("agent_id", "") or "").strip()
+        if identity:
+            return identity
+    return ""
+
+
+def _reviewer_is_independent_for_cardinality(
+        state: MatrixState, review_task, reviewer_id: str) -> bool:
+    """Reject a Ship from anyone assigned to the reviewed task ancestry."""
+    reviewer_id = str(reviewer_id or "").strip()
+    if not reviewer_id:
+        return False
+    root_id = str(
+        getattr(review_task, "pipeline_root_id", "") or ""
+    ).strip()
+    root = state.board_tasks.get(root_id) if root_id else None
+    if (root and root is not review_task
+            and str(getattr(root, "agent_id", "") or "").strip()
+            == reviewer_id):
+        return False
+    seen = set()
+    parent_id = str(getattr(review_task, "parent_task_id", "") or "").strip()
+    while parent_id and parent_id not in seen:
+        seen.add(parent_id)
+        parent = state.board_tasks.get(parent_id)
+        if not parent:
+            break
+        if str(getattr(parent, "agent_id", "") or "").strip() == reviewer_id:
+            return False
+        parent_id = str(getattr(parent, "parent_task_id", "") or "").strip()
+    return True
+
+
+def _legacy_review_cardinality_status(state: MatrixState, task) -> dict:
+    """Evaluate an explicit legacy review-cardinality declaration.
+
+    ``required_review_gates`` is the existing durable declaration slot.  In
+    legacy mode its normalized entries declare *how many* independent Ship
+    reviews are required; they do not activate the newer exact-boundary policy.
+    Empty declarations intentionally retain the historic any-Ship predicate.
+    """
+    from .finalization import normalize_required_review_gates
+
+    if not state or not task:
+        return {"declared_count": 0, "satisfied_count": 0, "shortfall": 0,
+                "eligible": True, "reviewer_ids": []}
+    root_id = str(getattr(task, "pipeline_root_id", "") or task.id).strip()
+    root = state.board_tasks.get(root_id, task)
+    gates = normalize_required_review_gates(
+        getattr(root, "required_review_gates", []) or [])
+    declared_count = len(gates)
+    if not declared_count:
+        return {"declared_count": 0, "satisfied_count": 0, "shortfall": 0,
+                "eligible": True, "reviewer_ids": []}
+
+    reviewer_ids = set()
+    for candidate in state.board_get_chain(root.id):
+        if not _task_is_pipeline_descendant(state, root, candidate):
+            continue
+        if not task_counts_as_done(candidate) or not _is_feature_review_task(candidate):
+            continue
+        if not _review_task_has_ship_verdict(candidate):
+            continue
+        reviewer_id = _reviewer_identity_for_cardinality(candidate)
+        if not _reviewer_is_independent_for_cardinality(
+                state, candidate, reviewer_id):
+            continue
+        reviewer_ids.add(reviewer_id)
+    satisfied_count = len(reviewer_ids)
+    shortfall = max(0, declared_count - satisfied_count)
+    return {
+        "declared_count": declared_count,
+        "satisfied_count": satisfied_count,
+        "shortfall": shortfall,
+        "eligible": shortfall == 0,
+        "reviewer_ids": sorted(reviewer_ids),
+    }
+
+
+def _legacy_review_cardinality_error(status: dict) -> str:
+    return (
+        "Legacy review-cardinality gate is not satisfied: "
+        f"declared count={int(status.get('declared_count', 0) or 0)}, "
+        f"satisfied distinct count={int(status.get('satisfied_count', 0) or 0)}, "
+        f"shortfall={int(status.get('shortfall', 0) or 0)}."
+    )
+
+
 def _mandatory_review_done_error(task, action_name: str) -> str:
     title = str(getattr(task, "task", "") or "").strip()
     if not title:
@@ -1188,6 +1297,17 @@ def _reject_mandatory_review_done_without_ship(
         return None
     if agent_kind_for_identity(cell) != "worker":
         return None
+    # A nonempty durable declaration is a legacy compatibility contract, not
+    # prose inference.  It must be checked before the older action heuristic
+    # so a root cannot self-close after only one of several required reviews.
+    root_id = str(getattr(task, "pipeline_root_id", "") or task.id).strip()
+    if root_id == str(getattr(task, "id", "") or "").strip():
+        cardinality = _legacy_review_cardinality_status(state, task)
+        if cardinality["declared_count"] and not cardinality["eligible"]:
+            return {
+                "type": "error",
+                "message": _legacy_review_cardinality_error(cardinality),
+            }
     # Reviewer-issued pre-approval bypass (TORQUE:256) — when the parent
     # review derived this task via a ``pre_approved: true`` transition,
     # the structural flag overrides this heuristic gate too. Workers
