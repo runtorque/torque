@@ -3555,6 +3555,34 @@ class MatrixStateTaskBacklinkHydrationTests(unittest.TestCase):
         self.assertEqual(restored.status, "stopped")
         self.assertEqual(restored.current_task_id, live.id)
 
+    def test_cold_load_selects_latest_of_multiple_live_assignments(self):
+        db, state, worker = self._new_persisted_state()
+        older = state.board_add_task(
+            "Synthetic earlier live dispatch",
+            "g",
+            lane="In Progress",
+            id="TASK-LIVE-EARLIER",
+            agent_id=worker.id,
+            dispatch_state="live",
+        )
+        later = state.board_add_task(
+            "Synthetic later live dispatch",
+            "g",
+            lane="In Progress",
+            id="TASK-LIVE-LATER",
+            agent_id=worker.id,
+            dispatch_state="live",
+        )
+        older.created_at = older.updated_at = "2026-01-01T00:00:00+00:00"
+        later.created_at = later.updated_at = "2026-01-02T00:00:00+00:00"
+        state._db_save_task(older)
+        state._db_save_task(later)
+
+        reloaded = self.state_mod.MatrixState(db=db)
+        reloaded.load()
+
+        self.assertEqual(reloaded.agents[worker.id].current_task_id, later.id)
+
     def test_cold_load_does_not_restore_terminal_or_workerless_backlinks(self):
         db, state, worker = self._new_persisted_state()
         terminal = state.board_add_task(

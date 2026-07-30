@@ -482,11 +482,15 @@ class StateLoadingMixin:
         ``BoardTask.agent_id`` is the sole persisted side of a dispatch link.
         Agent ``current_task_id`` is intentionally ephemeral, so cold loading
         derives it after every task row is available instead of storing a
-        duplicate column. Closed tasks and agentless tasks must not revive an
-        execution link.
+        duplicate column. Only durable ``live`` dispatches qualify; assigned
+        queued follow-ups must remain queued. Closed and agentless tasks must
+        not revive an execution link.
         """
+        candidates = {}
         for task in self.board_tasks.values():
-            if task_is_closed(task):
+            if (
+                    task_is_closed(task)
+                    or task.dispatch_state != TASK_DISPATCH_STATE_LIVE):
                 continue
             agent_id = str(getattr(task, "agent_id", "") or "").strip()
             if not agent_id:
@@ -494,14 +498,30 @@ class StateLoadingMixin:
             cell = self.agents.get(agent_id)
             if not cell or cell.cell_type != "agent":
                 continue
-            if cell.current_task_id and cell.current_task_id != task.id:
+            candidate = candidates.get(agent_id)
+            if candidate:
                 log.warning(
                     "Multiple live tasks assigned to agent '%s' during load; "
-                    "using task '%s' as the current backlink",
+                    "selecting one deterministically",
                     cell.name or cell.id,
+                )
+                candidate_key = (
+                    candidate.lane == "In Progress",
+                    candidate.updated_at,
+                    candidate.created_at,
+                    candidate.id,
+                )
+                task_key = (
+                    task.lane == "In Progress",
+                    task.updated_at,
+                    task.created_at,
                     task.id,
                 )
-            cell.current_task_id = task.id
+                if task_key <= candidate_key:
+                    continue
+            candidates[agent_id] = task
+        for agent_id, task in candidates.items():
+            self.agents[agent_id].current_task_id = task.id
 
     def _rebuild_children(self):
         """Rebuild the parent→children index from parent_id fields."""
