@@ -12,6 +12,7 @@ from torque.config import log
 from torque.finalization import normalize_required_review_gates
 from torque.mcp_scoped.dispatch_context import ScopedDispatchContext, UNHANDLED
 from torque.mcp_scoped.dispatch_runtime import *  # noqa: F403
+from torque.task_dispatch_gate import active_dispatch_edit_error, task_has_active_dispatch
 
 
 def _live_workers_linked_to_task(state, task) -> list:
@@ -327,25 +328,11 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         ):
             return "Task was not created by this architect", True
 
-        # ``dispatch_state`` is the durable boundary between a staged card and
-        # work that has been handed to an execution stream.  Assignment and
-        # lane do not imply dispatch, so neither may participate in this gate.
-        # Refuse before validating or forwarding any part of the patch: a
-        # dispatched task must be stopped and re-laned explicitly before its
-        # durable handoff may be amended.
-        dispatch_state = str(
-            getattr(task, "dispatch_state", "queued") or "queued"
-        ).strip().lower()
-        if dispatch_state == "live":
-            return json.dumps({
-                "type": "error",
-                "reason": "task_dispatched",
-                "dispatch_state": dispatch_state,
-                "message": (
-                    "Task is dispatched. Stop the work and move the task to "
-                    "Backlog or To Do before editing it."
-                ),
-            }), True
+        # ``dispatch_state`` preserves the handoff history after a worker
+        # exits. Protect amendments only while that execution stream is
+        # actually running; otherwise a stopped-worker repair is safe.
+        if task_has_active_dispatch(real_state, task):
+            return json.dumps(active_dispatch_edit_error(task)), True
 
         patch = {}
         updated_fields = []
@@ -669,11 +656,8 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
             return gates_error, True
         if required_review_gates is not None:
             task = real_state.board_tasks.get(tid)
-            if str(getattr(task, "dispatch_state", "queued") or "queued").strip().lower() == "live":
-                return (
-                    "Task is dispatched. Stop the work and move the task to "
-                    "Backlog or To Do before editing it."
-                ), True
+            if task_has_active_dispatch(real_state, task):
+                return json.dumps(active_dispatch_edit_error(task)), True
         payload = {"cmd": "board_update_task", "id": tid}
         if "title" in args:
             payload["task"] = args["title"]

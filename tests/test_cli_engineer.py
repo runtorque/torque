@@ -36,6 +36,44 @@ class CliEngineerTests(unittest.TestCase):
         self.assertEqual(args.task_cmd, "edit")
         self.assertEqual(args.engineer, "alice")
 
+    def test_task_edit_t_sets_title_and_requests_dispatch_gate(self):
+        parser = self.cli.build_parser()
+        args = parser.parse_args([
+            "task", "edit", "task-1", "-t", "Corrected title",
+        ])
+        args.port = 18932
+        state = {
+            "agents": {},
+            "board_tasks": {
+                "task-1": {
+                    "id": "task-1", "task": "Original title",
+                    "description": "Long description", "slug": "original-title",
+                    "group": "torque", "verification_summary": {},
+                },
+            },
+        }
+        with mock.patch.object(self.cli, "get_state_local", return_value=state), \
+             mock.patch.object(
+                 self.cli, "api_call", return_value={"ok": True, "data": {}},
+             ) as api_call:
+            self.cli.cmd_task_edit(args)
+
+        api_call.assert_called_once_with(
+            "board_update_task", port=18932, id="task-1",
+            enforce_dispatch_edit_gate=True, task="Corrected title",
+        )
+        task_parser = next(
+            action.choices["task"] for action in parser._actions
+            if isinstance(getattr(action, "choices", None), dict)
+            and "task" in action.choices
+        )
+        edit_parser = next(
+            action.choices["edit"] for action in task_parser._actions
+            if isinstance(getattr(action, "choices", None), dict)
+            and "edit" in action.choices
+        )
+        self.assertIn("New task title", edit_parser.format_help())
+
     def test_parser_accepts_engineer_list_json_flag(self):
         parser = self.cli.build_parser()
         args = parser.parse_args(["engineer", "list", "--json"])
@@ -378,6 +416,7 @@ class CliEngineerTests(unittest.TestCase):
             "board_update_task",
             port=18932,
             id="task-1",
+            enforce_dispatch_edit_gate=True,
             assigned_engineer_id="eng-alice",
         )
         self.assertIn("Updated task ship-it", out.getvalue())

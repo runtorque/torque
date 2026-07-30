@@ -383,6 +383,51 @@ class FinalizationLaneRemovalRegressionTests(unittest.TestCase):
         self.assertNotEqual(root.lane, "Done")
 
 class FinalizationProductionAdmissionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cli_marked_update_refuses_active_dispatch_and_allows_stopped_worker_repair(self):
+        _install_aiohttp_stub()
+        from dataclasses import fields
+        from torque.commands.board_operations import BoardOperationRuntime, handle_board_operation_command
+        from torque.state import AgentCell, MatrixState
+
+        state = MatrixState()
+        state.groups["g"] = []
+        worker = AgentCell(
+            id="worker", name="Worker", group="g", cell_type="agent",
+            kind="worker", status="running",
+        )
+        state.agents[worker.id] = worker
+        state.groups["g"].append(worker.id)
+        task = state.board_add_task(
+            "Original title", "g", id="TORQUE:939", agent_id=worker.id,
+            dispatch_state="live",
+        )
+        values = {field.name: None for field in fields(BoardOperationRuntime)}
+        values.update({
+            "state": state,
+            "resolve_task_id": lambda _state, value: value,
+            "capture_auto_resume_targets": lambda *_args, **_kwargs: [],
+            "maybe_auto_resume_targets": (
+                lambda *_args, **_kwargs: __import__("asyncio").sleep(0)
+            ),
+        })
+        runtime = BoardOperationRuntime(**values)
+
+        refused = await handle_board_operation_command({
+            "cmd": "board_update_task", "id": task.id,
+            "task": "Unsafe replacement", "enforce_dispatch_edit_gate": True,
+        }, runtime)
+        self.assertEqual(refused["reason"], "task_dispatched")
+        self.assertEqual(task.task, "Original title")
+
+        worker.status = "stopped"
+        repaired = await handle_board_operation_command({
+            "cmd": "board_update_task", "id": task.id,
+            "task": "Corrected title", "enforce_dispatch_edit_gate": True,
+        }, runtime)
+        self.assertIsNone(repaired)
+        self.assertEqual(task.task, "Corrected title")
+        self.assertEqual(task.dispatch_state, "live")
+
     async def test_board_operation_admits_explicit_policy_and_gates_done(self):
         _install_aiohttp_stub()
         from dataclasses import fields

@@ -655,6 +655,8 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(before, (other_task.task, other_task.lane, list(other_task.messages)))
 
     async def test_pm_task_update_refuses_dispatched_same_group_task(self):
+        self.worker.status = "running"
+        self.state._db_save_agent(self.worker)
         task = self.state.board_add_task(
             "Live execution task",
             "g",
@@ -663,6 +665,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             labels=["execution", "keep"],
             action_name="feature/implement",
             action_vars={"original": "value"},
+            agent_id=self.worker.id,
             created_by_engineer_id=self.engineer.id,
             dispatch_state="live",
         )
@@ -693,7 +696,11 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         error = json.loads(self._error_text(refused))
         self.assertEqual(error["reason"], "task_dispatched")
         self.assertEqual(error["dispatch_state"], "live")
-        self.assertIn("Stop the work and move the task to Backlog or To Do", error["message"])
+        self.assertEqual(
+            "Task has active dispatched work. Stop the active execution "
+            "stream before editing it.",
+            error["message"],
+        )
         self.assertEqual(
             (
                 task.task,
