@@ -505,6 +505,9 @@ class StateLoadingMixin:
                     "selecting one deterministically",
                     cell.name or cell.id,
                 )
+                # Prefer the running task, then the newest durable mutation
+                # as the closest proxy for the latest dispatch. IDs make an
+                # exact timestamp tie deterministic without inventing state.
                 candidate_key = (
                     candidate.lane == "In Progress",
                     candidate.updated_at,

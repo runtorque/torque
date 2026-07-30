@@ -3555,7 +3555,7 @@ class MatrixStateTaskBacklinkHydrationTests(unittest.TestCase):
         self.assertEqual(restored.status, "stopped")
         self.assertEqual(restored.current_task_id, live.id)
 
-    def test_cold_load_selects_latest_of_multiple_live_assignments(self):
+    def test_cold_load_selects_latest_live_assignment_with_id_tiebreak(self):
         db, state, worker = self._new_persisted_state()
         older = state.board_add_task(
             "Synthetic earlier live dispatch",
@@ -3573,15 +3573,39 @@ class MatrixStateTaskBacklinkHydrationTests(unittest.TestCase):
             agent_id=worker.id,
             dispatch_state="live",
         )
+        tied_lower = state.board_add_task(
+            "Synthetic tied live dispatch A",
+            "g",
+            lane="In Progress",
+            id="TASK-LIVE-TIE-A",
+            agent_id=worker.id,
+            dispatch_state="live",
+        )
+        tied_higher = state.board_add_task(
+            "Synthetic tied live dispatch B",
+            "g",
+            lane="In Progress",
+            id="TASK-LIVE-TIE-B",
+            agent_id=worker.id,
+            dispatch_state="live",
+        )
         older.created_at = older.updated_at = "2026-01-01T00:00:00+00:00"
         later.created_at = later.updated_at = "2026-01-02T00:00:00+00:00"
+        tied_lower.created_at = tied_lower.updated_at = "2026-01-03T00:00:00+00:00"
+        tied_higher.created_at = tied_higher.updated_at = "2026-01-03T00:00:00+00:00"
         state._db_save_task(older)
         state._db_save_task(later)
+        state._db_save_task(tied_lower)
+        state._db_save_task(tied_higher)
 
         reloaded = self.state_mod.MatrixState(db=db)
         reloaded.load()
 
-        self.assertEqual(reloaded.agents[worker.id].current_task_id, later.id)
+        # Later durable mutation wins; equal timestamps use the stable ID.
+        self.assertEqual(
+            reloaded.agents[worker.id].current_task_id,
+            tied_higher.id,
+        )
 
     def test_cold_load_does_not_restore_terminal_or_workerless_backlinks(self):
         db, state, worker = self._new_persisted_state()

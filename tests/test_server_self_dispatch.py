@@ -6994,6 +6994,42 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             [queued.id],
         )
 
+        state.board_move_task(active.id, "Done")
+        state.agents[worker.id].current_task_id = ""
+        calls = []
+
+        async def dispatch_follow_up(payload):
+            calls.append(dict(payload))
+            self.assertEqual(payload, {
+                "cmd": "dispatch_task",
+                "id": queued.id,
+                "agent_id": worker.id,
+            })
+            state.board_update_task(
+                queued.id,
+                agent_id=worker.id,
+                lane="In Progress",
+                dispatch_state="live",
+            )
+            state.agents[worker.id].current_task_id = queued.id
+            return {
+                "type": "ok",
+                "task_id": queued.id,
+                "agent_id": worker.id,
+            }
+
+        dispatched = await self.server_mod._pump_auto_dispatch_queue(
+            state,
+            dispatch_follow_up,
+            lambda *args, **kwargs: None,
+            group="g",
+        )
+
+        self.assertEqual([call["id"] for call in calls], [queued.id])
+        self.assertEqual([item["task_id"] for item in dispatched], [queued.id])
+        self.assertEqual(state.board_tasks[queued.id].lane, "In Progress")
+        self.assertNotIn("g", state.auto_dispatch_queues)
+
     async def test_pump_defers_same_agent_queue_when_active_task_survived_restart(self):
         state = self._make_state()
         worker = self.state_mod.AgentCell(
