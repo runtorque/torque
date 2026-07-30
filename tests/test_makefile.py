@@ -1,6 +1,10 @@
+import base64
+import os
 import re
 import shutil
 import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -175,6 +179,82 @@ class MakefileInstallTests(unittest.TestCase):
                     stale_target_re.search(path.read_text(encoding="utf-8")),
                     f"{path.relative_to(ROOT)} advertises a removed Toolbelt Makefile target",
                 )
+
+    def test_test_target_preserves_user_site_and_isolates_fixture_profile(self):
+        """Test isolation must retain user-site dependencies while moving logs."""
+        if not shutil.which("make"):
+            self.skipTest("make is not available")
+
+        with tempfile.TemporaryDirectory() as td:
+            operator_home = Path(td) / "operator-home"
+            live_log = operator_home / ".torque" / "profiles" / "default" / "torque.log"
+            live_log.parent.mkdir(parents=True)
+            live_log.write_text("operator log sentinel\n", encoding="utf-8")
+
+            fixture = """import os
+for name in tuple(os.environ):
+    if name.startswith("TORQUE_"):
+        del os.environ[name]
+import make_test_user_site_fixture
+assert make_test_user_site_fixture.VALUE == "available"
+from torque import config
+config.log.info("test fixture log sentinel")
+for handler in config.log.handlers:
+    handler.flush()
+print(config.LOG_FILE)
+"""
+            env = os.environ.copy()
+            env.pop("PYTHONUSERBASE", None)
+            env.update({
+                "HOME": str(operator_home),
+                "TORQUE_DATA_DIR": str(live_log.parent),
+                "TORQUE_PROFILE": "default",
+            })
+            user_site = Path(subprocess.check_output(
+                [sys.executable, "-c", "import site; print(site.getusersitepackages())"],
+                text=True,
+                env=env,
+            ).strip())
+            user_site.mkdir(parents=True)
+            (user_site / "make_test_user_site_fixture.py").write_text(
+                'VALUE = "available"\n', encoding="utf-8"
+            )
+            fixture_b64 = base64.b64encode(fixture.encode("utf-8")).decode("ascii")
+            fixture_command = (
+                f'{sys.executable} -c "import base64; exec(compile('
+                f'base64.b64decode(\'{fixture_b64}\'), \'<fixture>\', \'exec\'))"'
+            )
+            proc = subprocess.run(
+                [
+                    "make",
+                    "test",
+                    f"TEST_PYTHON={sys.executable}",
+                    f"TEST_COMMAND={fixture_command}",
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                env=env,
+                check=True,
+            )
+
+            self.assertEqual(live_log.read_text(encoding="utf-8"), "operator log sentinel\n")
+            self.assertNotIn(str(live_log), proc.stdout)
+            self.assertIn("/torque-test.", proc.stdout)
+            self.assertIn("/.torque/profiles/default/torque.log", proc.stdout)
+
+    def test_test_targets_allocate_disposable_home_and_data_dirs(self):
+        for target in ("test", "test-ee"):
+            with self.subTest(target=target):
+                proc = self._run_make_dry(target)
+                self.assertIn('scratch_root=$(mktemp -d "${TMPDIR:-/tmp}/torque-test.XXXXXX")', proc.stdout)
+                self.assertIn('HOME="$scratch_root/home"', proc.stdout)
+                self.assertIn('TORQUE_DATA_DIR="$scratch_root/profile"', proc.stdout)
+                self.assertIn('TORQUE_PROFILE="test"', proc.stdout)
+                self.assertIn("TEST_PYTHON ?= python3", (ROOT / "Makefile").read_text(encoding="utf-8"))
+                self.assertIn("test_user_base=$(python3 -c 'import site; print(site.USER_BASE)')", proc.stdout)
+                self.assertIn('PYTHONUSERBASE="$test_user_base"', proc.stdout)
+                self.assertIn('trap \'rm -rf \"$scratch_root\"\' EXIT HUP INT TERM', proc.stdout)
 
     def test_test_ee_target_runs_explicit_enterprise_suite(self):
         text = (ROOT / "Makefile").read_text(encoding="utf-8")

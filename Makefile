@@ -9,6 +9,14 @@ TORQUE_AI_REQUIREMENTS ?= requirements/ai.txt
 PRIMARY_PORT    ?= 18933
 TORQUE_MIN_PYTHON := 3.10
 TORQUE_PYTHON  := $(TORQUE_RUNTIME_PYTHON)
+TEST_PYTHON ?= python3
+TEST_COMMAND ?= $(TEST_PYTHON) -m unittest discover -s tests -v
+TEST_EE_COMMAND ?= $(TEST_PYTHON) -m unittest -v \
+	tests.test_ee_connector \
+	tests.test_ee_license_boundary \
+	tests.test_ee_python_package \
+	tests.test_relay_probe \
+	tests.test_frontend_remote
 
 PERF_MATRIX    ?= 10,20,30
 PERF_DURATION  ?= 15
@@ -339,7 +347,16 @@ assert-community-package:
 
 ## test: Run the automated regression suite
 test: lint
-	@$(SANITIZE_TORQUE_TEST_ENV) python3 -m unittest discover -s tests -v
+	@test_user_base=$$($(TEST_PYTHON) -c 'import site; print(site.USER_BASE)'); \
+	scratch_root=$$(mktemp -d "$${TMPDIR:-/tmp}/torque-test.XXXXXX"); \
+	trap 'rm -rf "$$scratch_root"' EXIT HUP INT TERM; \
+	mkdir -p "$$scratch_root/home" "$$scratch_root/profile"; \
+	$(SANITIZE_TORQUE_TEST_ENV) \
+		PYTHONUSERBASE="$$test_user_base" \
+		HOME="$$scratch_root/home" \
+		TORQUE_DATA_DIR="$$scratch_root/profile" \
+		TORQUE_PROFILE="test" \
+		$(TEST_COMMAND)
 
 ## test-ee: Run enterprise-only regression tests (requires ee/ checkout)
 test-ee: lint
@@ -353,12 +370,17 @@ test-ee: lint
 		ee/relay/README.md; do \
 		[ -e "$$path" ] || { echo "Error: $$path is required for make test-ee"; exit 1; }; \
 	done
-	@$(SANITIZE_TORQUE_TEST_ENV) TORQUE_WITH_EE=1 python3 -m unittest -v \
-		tests.test_ee_connector \
-		tests.test_ee_license_boundary \
-		tests.test_ee_python_package \
-		tests.test_relay_probe \
-		tests.test_frontend_remote
+	@test_user_base=$$($(TEST_PYTHON) -c 'import site; print(site.USER_BASE)'); \
+	scratch_root=$$(mktemp -d "$${TMPDIR:-/tmp}/torque-test.XXXXXX"); \
+	trap 'rm -rf "$$scratch_root"' EXIT HUP INT TERM; \
+	mkdir -p "$$scratch_root/home" "$$scratch_root/profile"; \
+	$(SANITIZE_TORQUE_TEST_ENV) \
+		PYTHONUSERBASE="$$test_user_base" \
+		HOME="$$scratch_root/home" \
+		TORQUE_DATA_DIR="$$scratch_root/profile" \
+		TORQUE_PROFILE="test" \
+		TORQUE_WITH_EE=1 \
+		$(TEST_EE_COMMAND)
 
 ## perf-deps: Prepare the cached Python environment used by perf harness targets
 perf-deps:
