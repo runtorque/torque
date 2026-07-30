@@ -67,7 +67,8 @@ class BackendSizeGuardrailTests(unittest.TestCase):
             "torque/db_schema.py": 3800,
             # Read-only diagnostic collection and text rendering surface.
             "torque/doctor.py": 2600,
-            # Authorization-adjacent behavior-overlay validation boundary.
+            # Architecture-reviewed post-authorization/pre-write transport
+            # seam for behavior-overlay conditional public argument validation.
             "torque/mcp.py": 2600,
             "torque/mcp_tools_shared.py": 2500,
             "torque/worktree.py": 2500,

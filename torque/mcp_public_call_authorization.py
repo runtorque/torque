@@ -47,7 +47,7 @@ def public_argument_validation_error(
 
     Public schemas remain deliberately plain objects for provider-native tool
     indexes. Conditional constraints therefore belong at the public-call
-    boundary, after caller classification and before legacy translation.
+    boundary, after authorization and before write/idempotency setup.
     """
 
     if (
