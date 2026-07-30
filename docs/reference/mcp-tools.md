@@ -281,6 +281,7 @@ does not guess a reply target from historical conversation rows.
 | `proposal_root_backlog_hygiene` | Inventory covered product-proposal roots and optionally finalize eligible roots. |
 | `task_artifact_upload` | Attach an artifact to a visible task. |
 | `task_verify` | Record tests, deploy, restart, and smoke evidence. |
+| `review_verdict_amend` | The original reviewer may append one attributable correction to an otherwise immutable recorded `unknown` final verdict; completed/merged review tasks remain reachable through the recorded reviewer identity. |
 | `task_progress` | Report current Worker activity. |
 | `task_complete` | Complete a Worker's linked task. |
 | `task_blocked` | Mark a Worker's task blocked. |
