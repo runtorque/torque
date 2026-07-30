@@ -341,12 +341,12 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         async def unexpected_command(payload):
             self.fail(f"amendment must not dispatch a completion command: {payload}")
 
-        async def call(cell, request_id):
+        async def call(cell, request_id, target=task):
             return await self.mcp_mod.dispatch_mcp_rpc_body(
                 {
                     "jsonrpc": "2.0", "id": request_id, "method": "tools/call",
                     "params": {"name": "review_verdict_amend", "arguments": {
-                        "task": task.id, "verdict": "ship", "reason": "parser correction",
+                        "task": target.id, "verdict": "ship", "reason": "parser correction",
                     }},
                 }, cell_id=cell.id, handle_command=unexpected_command, state=state,
             )
@@ -367,6 +367,23 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("original reviewer", message)
                 self.assertIn("review_verdict_amend", message)
                 self.assertNotIn(task.id, message)
+
+        padded = state.board_add_task(
+            "Malformed reviewer identity", "g", id="TORQUE:amend-padded",
+            lane="Done", action_name="feature/review", agent_id="",
+        )
+        padded.completion_evidence = {"review": {
+            "verdict": "unknown", "agent_id": f" {reviewer.id} ",
+            "agent_name": reviewer.name,
+        }}
+        response, status = await call(reviewer, 5, padded)
+        self.assertEqual(status, 200)
+        self.assertIn("error", response)
+        message = response["error"]["message"]
+        self.assertIn("original reviewer", message)
+        self.assertIn("review_verdict_amend", message)
+        self.assertNotIn(padded.id, message)
+        self.assertNotIn("amendments", padded.completion_evidence["review"])
 
     async def test_dispatch_tool_forwards_partial_deviation_for_ready_and_done(self):
         state = self.state_mod.MatrixState()

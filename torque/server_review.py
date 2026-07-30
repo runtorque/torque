@@ -729,8 +729,8 @@ def _review_verdict_amendment_verdict(review: dict) -> str:
         return ""
     if str(review.get("verdict", "") or "").strip() != "unknown":
         return ""
-    reviewer_id = str(review.get("agent_id", "") or "").strip()
-    if not reviewer_id:
+    reviewer_id = review.get("agent_id")
+    if not isinstance(reviewer_id, str) or not reviewer_id:
         return ""
     amendments = review.get("amendments", []) if isinstance(review, dict) else []
     # The durable correction contract is deliberately one-shot. A Block
@@ -746,8 +746,7 @@ def _review_verdict_amendment_verdict(review: dict) -> str:
             != "unknown"
             or str(amendment.get("prior_verdict", "") or "").strip()
             != "unknown"
-            or str(amendment.get("amended_by_id", "") or "").strip()
-            != reviewer_id
+            or amendment.get("amended_by_id") != reviewer_id
     ):
         return ""
     if not str(amendment.get("amended_by_name", "") or "").strip():
@@ -790,11 +789,14 @@ def _amend_review_verdict_evidence(
     if not isinstance(original_review, dict):
         return {}, "Task has no structured feature/review verdict to amend."
     original_verdict = str(original_review.get("verdict", "") or "").strip()
-    original_reviewer_id = str(
-        original_review.get("agent_id", "") or ""
-    ).strip()
-    caller_id = str(getattr(cell, "id", "") or "").strip()
-    if not original_reviewer_id or original_reviewer_id != caller_id:
+    original_reviewer_id = original_review.get("agent_id")
+    caller_id = getattr(cell, "id", None)
+    if (
+            not isinstance(original_reviewer_id, str)
+            or not original_reviewer_id
+            or not isinstance(caller_id, str)
+            or original_reviewer_id != caller_id
+    ):
         return {}, (
             "Authorization denied: only the original reviewer may amend this "
             "recorded verdict. Use review_verdict_amend from the reviewer that "

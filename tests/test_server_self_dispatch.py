@@ -2110,6 +2110,32 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(self.server_mod._review_task_has_ship_verdict(task))
 
+    def test_amendment_writer_requires_byte_exact_reviewer_identity(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        reviewer = self.state_mod.AgentCell(
+            id="reviewer-exact", name="Reviewer", group="g",
+            cell_type="agent", kind="worker",
+        )
+        task = state.board_add_task(
+            "Review", "g", id="TORQUE:amend-exact", lane="Done",
+            action_name="feature/review", agent_id="",
+        )
+        task.completion_evidence = {"review": {
+            "verdict": "unknown", "agent_id": f" {reviewer.id} ",
+        }}
+
+        amendment, error = self.server_mod._amend_review_verdict_evidence(
+            state, task, cell=reviewer, verdict="ship", reason="must refuse",
+        )
+
+        self.assertEqual(amendment, {})
+        self.assertIn("only the original reviewer", error)
+        self.assertEqual(
+            task.completion_evidence,
+            {"review": {"verdict": "unknown", "agent_id": f" {reviewer.id} "}},
+        )
+
     def test_completion_evidence_snapshot_includes_verification_and_artifacts(self):
         state = self.state_mod.MatrixState()
         state.add_group("g")

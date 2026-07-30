@@ -574,10 +574,15 @@ def _handler_scoped_target_scope(
     ):
         evidence = getattr(target, "completion_evidence", {}) or {}
         review = evidence.get("review", {}) if isinstance(evidence, dict) else {}
+        recorded_reviewer_id = (
+            review.get("agent_id") if isinstance(review, dict) else None
+        )
+        caller_id = getattr(caller_cell, "id", None)
         if (
-                isinstance(review, dict)
-                and str(review.get("agent_id", "") or "").strip()
-                == str(getattr(caller_cell, "id", "") or "").strip()
+                isinstance(recorded_reviewer_id, str)
+                and bool(recorded_reviewer_id)
+                and isinstance(caller_id, str)
+                and recorded_reviewer_id == caller_id
         ):
             return "self"
         # This correction capability has no generic task-owner fallback.
