@@ -286,7 +286,7 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         if not task:
             return "Task not found", True
         caller_id_str = str(caller_id or "").strip()
-        authorization, auth_error = _routed_product_proposal_root_pickup_authorization(
+        authorization, auth_error = _architect_task_pickup_authorization(
             real_state,
             caller_id_str,
             task,
@@ -341,7 +341,10 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
                 task,
                 caller_id_str,
         ):
-            return "Task was not created by this architect", True
+            handoff_refusal = _engineer_created_task_handoff_refusal(
+                task, caller_id_str,
+            )
+            return handoff_refusal or "Task was not created by this architect", True
 
         # ``dispatch_state`` preserves the handoff history after a worker
         # exits. Protect amendments only while that execution stream is

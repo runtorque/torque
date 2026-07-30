@@ -3539,7 +3539,14 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                     architect.id,
                 )
                 self.assertTrue(is_error)
-                self.assertEqual(text, "Task was not created by this architect")
+                expected = (
+                    "Task has engineer provenance; claim it with task_claim before "
+                    "action-binding, reassignment, or dispatch. Only the Architect "
+                    "who hired its filing Engineer may claim it."
+                    if task.id == engineer_task.id
+                    else "Task was not created by this architect"
+                )
+                self.assertEqual(text, expected)
                 self.assertNotEqual(
                     self.state.board_tasks[task.id].task,
                     "Should not update",

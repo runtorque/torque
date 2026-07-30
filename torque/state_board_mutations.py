@@ -414,7 +414,7 @@ class BoardMutationMixin:
             reason: str = "",
             source: str = "",
             authorization: dict | None = None) -> dict:
-        """Claim a routed product-proposal task for an Architect with audit evidence."""
+        """Claim an authorized Architect handoff with durable audit evidence."""
         tid = self.resolve_task_alias(tid)
         task = self.board_tasks.get(tid)
         if not task:

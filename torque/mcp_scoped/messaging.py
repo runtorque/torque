@@ -33,7 +33,10 @@ from torque.mcp_scoped.peer_inbox import (
     _peer_message_id_from_idempotency_key,
     _validate_architect_peer_message_length,
 )
-from torque.mcp_scoped.proposals import _architect_task_owned_by_caller
+from torque.mcp_scoped.proposals import (
+    _architect_task_owned_by_caller,
+    _engineer_created_task_handoff_refusal,
+)
 from torque.server_prompts import build_engineer_deliverable_awareness
 from torque.state import board_task_is_closed
 
@@ -384,7 +387,10 @@ def _resolve_architect_dispatch_task(state, caller_id: str, engineer_id: str,
         task,
         caller_id_str,
     ):
-        return None, "Task was not created by this architect"
+        handoff_refusal = _engineer_created_task_handoff_refusal(
+            task, caller_id_str,
+        )
+        return None, handoff_refusal or "Task was not created by this architect"
     if _effective_assigned_engineer_id(task) != str(engineer_id or "").strip():
         return None, "Task is not assigned to this engineer"
     if board_task_is_closed(task):
@@ -397,8 +403,8 @@ def _architect_message_needs_explicit_dispatch_advisory(
         caller_id: str,
         engineer_id: str,
         group: str,
-        message: str) -> bool:
-    """Whether one eligible staged task was referenced without dispatch intent.
+        message: str) -> str:
+    """Return an explicit no-dispatch advisory for one referenced staged task.
 
     This intentionally preserves the former matcher only as a non-mutating
     migration affordance.  It must not select a task for dispatch or expose
@@ -406,7 +412,7 @@ def _architect_message_needs_explicit_dispatch_advisory(
     """
     message_text = str(message or "")
     if not message_text:
-        return False
+        return ""
     exact_task_refs = {
         task_id
         for raw in _TASK_ID_REFERENCE_RE.findall(message_text)
@@ -414,6 +420,7 @@ def _architect_message_needs_explicit_dispatch_advisory(
         if task_id
     }
     matches: set[str] = set()
+    provenance_declines: set[str] = set()
     for task in state.board_tasks.values():
         task_id = str(getattr(task, "id", "") or "").strip()
         if not task_id:
@@ -436,7 +443,16 @@ def _architect_message_needs_explicit_dispatch_advisory(
         )
         if valid_task:
             matches.add(valid_task.id)
-    return len(matches) == 1
+        elif _error and "engineer provenance" in _error:
+            provenance_declines.add(_error)
+    if len(matches) == 1:
+        return _ARCHITECT_EXPLICIT_DISPATCH_ADVISORY
+    if len(provenance_declines) == 1:
+        return (
+            "No task was dispatched: " + provenance_declines.pop()
+            + " Pass task=<task id or slug> only after task_claim succeeds."
+        )
+    return ""
 
 
 async def _send_architect_engineer_message(real_state, handle_command,
@@ -499,13 +515,16 @@ async def _send_architect_engineer_message(real_state, handle_command,
         real_state.board_update_task(dispatch_task.id, dispatch_state="live")
         response["task_id"] = dispatch_task.id
         response["dispatch_state"] = "live"
-    elif _architect_message_needs_explicit_dispatch_advisory(
+    else:
+        dispatch_advisory = _architect_message_needs_explicit_dispatch_advisory(
             real_state,
             caller_id,
             engineer_id,
             architect_group,
-            message):
-        response["dispatch_advisory"] = _ARCHITECT_EXPLICIT_DISPATCH_ADVISORY
+            message,
+        )
+        if dispatch_advisory:
+            response["dispatch_advisory"] = dispatch_advisory
     return response, ""
 
 

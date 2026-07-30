@@ -535,18 +535,18 @@ _ARCHITECT_TOOL_SPECS = [
     {
         "name": "architect_task_pickup", "authority": {"requirements": [{"capability": "task.update","minimum_scope": "self","target_argument": "task","target_kind": "task","handler_scoped": True}]},
         "description": (
-            "Claim a routed product-proposal product task in this architect's group "
-            "without creating a covering duplicate. Requires durable inbound "
-            "product-peer route evidence from the product proposal creator, "
-            "sets assigned_architect_id on the original task, and records "
-            "pickup audit evidence."
+            "Claim either a routed product-proposal task or a task filed by this "
+            "Architect's hired Engineer, without recreation. Product proposals "
+            "require durable inbound product-peer route evidence; Engineer-filed "
+            "tasks require matching creator, assignment, group, and hiring "
+            "provenance. Sets assigned_architect_id and records pickup audit evidence."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "product-proposal product task ID or alias to claim.",
+                    "description": "Eligible routed product or hired-Engineer task ID or alias to claim.",
                 },
                 "reason": {
                     "type": "string",
@@ -665,7 +665,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_task_update", "authority": {"requirements": [{"capability": "task.update","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
+        "name": "architect_task_update", "authority": {"requirements": [{"capability": "task.update","minimum_scope": "self","target_argument": "task","target_kind": "task","handler_scoped": True}]},
         "description": (
             "Update title, description, labels, suggested action, and/or action binding for a "
             "task in this architect's group within its frozen authority. "
@@ -754,7 +754,9 @@ _ARCHITECT_TOOL_SPECS = [
     {
         "name": "architect_task_reassign", "authority": {"requirements": [{"capability": "task.reassign","minimum_scope": "self","target_argument": "task","target_kind": "task"},{"capability": "task.reassign","minimum_scope": "self","target_argument": "new_engineer_id","target_kind": "agent","handler_scoped": True}]},
         "description": (
-            "Reassign a task created by this architect to another visible engineer."
+            "Reassign a caller-owned task to another visible engineer. The trusted "
+            "Product Manager may reassign any same-group task; other Architects may "
+            "reassign their created or explicitly claimed tasks."
         ),
         "inputSchema": {
             "type": "object",

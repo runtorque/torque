@@ -819,6 +819,130 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(route_id, pickup_evidence["source"])
         self.assertEqual("architect_pickup", refreshed.messages[-1]["action"])
 
+    async def test_hired_engineer_task_claim_action_bind_assign_and_dispatch(self):
+        """The hiring Architect has a bounded no-recreation Engineer handoff."""
+        self._freeze_default_architect(self.torqly)
+        task = self.state.board_add_task(
+            "Engineer-filed dispatch handoff",
+            "g",
+            assigned_engineer_id=self.torqly_engineer.id,
+            created_by_engineer_id=self.torqly_engineer.id,
+            dispatch_state="queued",
+        )
+        original = (
+            task.assigned_architect_id,
+            task.action_name,
+            task.dispatch_state,
+        )
+
+        before_claim_update = await self._call(
+            "task_update",
+            {"task": task.id, "action_name": "feature/implement"},
+            req_id=80,
+            agent_id=self.torqly.id,
+        )
+        self.assertIn("engineer provenance", self._error_text(before_claim_update))
+        self.assertEqual(original, (
+            task.assigned_architect_id, task.action_name, task.dispatch_state,
+        ))
+
+        before_claim_dispatch = await self._call(
+            "agent_message",
+            {
+                "agent": self.torqly_engineer.id,
+                "task": task.id,
+                "message": "Dispatch this engineer-filed task.",
+            },
+            req_id=81,
+            agent_id=self.torqly.id,
+        )
+        self.assertIn("engineer provenance", self._error_text(before_claim_dispatch))
+        self.assertEqual("queued", task.dispatch_state)
+
+        inferred_decline = await self._call(
+            "agent_message",
+            {
+                "agent": self.torqly_engineer.id,
+                "message": f"Please pick up {task.id}.",
+            },
+            req_id=82,
+            agent_id=self.torqly.id,
+        )
+        advisory = self._result_payload(inferred_decline)["dispatch_advisory"]
+        self.assertIn("No task was dispatched", advisory)
+        self.assertIn("engineer provenance", advisory)
+        self.assertEqual("queued", task.dispatch_state)
+
+        self._freeze_default_architect(self.full_peer)
+        unrelated_claim = await self._call(
+            "task_claim", {"task": task.id}, req_id=83,
+            agent_id=self.full_peer.id,
+        )
+        self.assertIn("engineer provenance", self._error_text(unrelated_claim))
+        self.assertEqual("", task.assigned_architect_id)
+
+        claim = await self._call(
+            "task_claim",
+            {"task": task.id, "reason": "Accept Engineer finding."},
+            req_id=84,
+            agent_id=self.torqly.id,
+        )
+        claim_payload = self._result_payload(claim)
+        self.assertEqual("task_picked_up", claim_payload["type"])
+        self.assertEqual(self.torqly.id, task.assigned_architect_id)
+        self.assertEqual(
+            "engineer_created_task_handoff",
+            task.completion_evidence["architect_pickup"]["authorization"]["scope"],
+        )
+        self.assertEqual(self.torqly_engineer.id, task.created_by_engineer_id)
+        self.assertEqual("", task.created_by_architect_id)
+
+        action_bound = await self._call(
+            "task_update",
+            {"task": task.id, "action_name": "feature/implement"},
+            req_id=85,
+            agent_id=self.torqly.id,
+        )
+        self.assertEqual("ok", self._result_payload(action_bound)["type"])
+        self.assertEqual("feature/implement", task.action_name)
+
+        reassigned = await self._call(
+            "task_reassign",
+            {"task": task.id, "new_engineer_id": self.torqly_engineer.id},
+            req_id=86,
+            agent_id=self.torqly.id,
+        )
+        self.assertEqual(self.torqly_engineer.id,
+                         self._result_payload(reassigned)["assigned_engineer_id"])
+
+        dispatched = await self._call(
+            "agent_message",
+            {
+                "agent": self.torqly_engineer.id,
+                "task": task.id,
+                "message": "Dispatch the accepted task now.",
+            },
+            req_id=87,
+            agent_id=self.torqly.id,
+        )
+        self.assertEqual("live", self._result_payload(dispatched)["dispatch_state"])
+        self.assertEqual("live", task.dispatch_state)
+        # TORQUE:1215 protects an actually active execution stream, not the
+        # durable historical ``live`` marker after a worker has exited.
+        self.worker.status = "running"
+        self.state._db_save_agent(self.worker)
+        self.state.board_update_task(task.id, agent_id=self.worker.id)
+
+        protected = await self._call(
+            "task_update",
+            {"task": task.id, "action_name": "oneshot/fix"},
+            req_id=88,
+            agent_id=self.torqly.id,
+        )
+        protected_error = json.loads(self._error_text(protected))
+        self.assertEqual("task_dispatched", protected_error["reason"])
+        self.assertEqual("feature/implement", task.action_name)
+
     async def test_frozen_default_architect_reassigns_claimed_product_root_canonically(self):
         # The product manager creates and routes a peer-owned proposal root;
         # the frozen default Architect claims it through the public route.

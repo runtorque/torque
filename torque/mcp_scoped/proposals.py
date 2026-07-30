@@ -480,6 +480,86 @@ def _routed_product_proposal_root_pickup_authorization(
     return authorization, ""
 
 
+def _engineer_created_task_handoff_authorization(
+        state, caller_id: str, task) -> tuple[dict, str]:
+    """Authorize the Architect handoff for its hired Engineer's task.
+
+    An Engineer-created task remains in the filing Engineer's stream until the
+    Architect who hired that Engineer explicitly claims it. This is not a
+    same-group Architect ownership grant: the creator, current assignment,
+    group, and hiring relation must all agree before the claim can proceed.
+    """
+    caller_id = str(caller_id or "").strip()
+    caller = state.agents.get(caller_id)
+    creator_id = str(getattr(task, "created_by_engineer_id", "") or "").strip()
+    assigned_engineer_id = str(
+        getattr(task, "assigned_engineer_id", "") or ""
+    ).strip()
+    caller_group = str(getattr(caller, "group", "") or "").strip()
+    task_group = str(getattr(task, "group", "") or "").strip()
+    creator = state.agents.get(creator_id) if creator_id else None
+
+    if not creator_id:
+        return {}, "Task does not have engineer provenance"
+    if not caller or str(getattr(caller, "kind", "") or "").strip() != "architect":
+        return {}, "Engineer-created task handoff is available only to Architects"
+    if not caller_group or task_group != caller_group:
+        return {}, "Engineer-created task handoff requires same-group provenance"
+    if not creator or str(getattr(creator, "group", "") or "").strip() != caller_group:
+        return {}, "Engineer-created task provenance does not resolve to this group"
+    if str(getattr(creator, "hired_by_architect_id", "") or "").strip() != caller_id:
+        return {}, (
+            "Task has engineer provenance; only the Architect who hired its "
+            "creator may claim, action-bind, assign, or dispatch it."
+        )
+    if assigned_engineer_id != creator_id:
+        return {}, (
+            "Task has engineer provenance but is no longer assigned to its "
+            "filing Engineer; the original Architect handoff cannot be claimed."
+        )
+    if board_task_is_closed(task):
+        return {}, "Task is already closed"
+    assigned_architect_id = str(
+        getattr(task, "assigned_architect_id", "") or ""
+    ).strip()
+    if assigned_architect_id and assigned_architect_id != caller_id:
+        return {}, "Task is already assigned to another architect"
+    return {
+        "scope": "engineer_created_task_handoff",
+        "source": "hired_engineer_provenance",
+        "task_id": str(getattr(task, "id", "") or "").strip(),
+        "created_by_engineer_id": creator_id,
+        "assigned_engineer_id": assigned_engineer_id,
+        "claiming_architect_id": caller_id,
+    }, ""
+
+
+def _engineer_created_task_handoff_refusal(task, caller_id: str) -> str:
+    """Explain the required explicit handoff without implying broad ownership."""
+    creator_id = str(getattr(task, "created_by_engineer_id", "") or "").strip()
+    if not creator_id:
+        return ""
+    if str(getattr(task, "assigned_architect_id", "") or "").strip() == str(
+            caller_id or ""
+    ).strip():
+        return ""
+    return (
+        "Task has engineer provenance; claim it with task_claim before "
+        "action-binding, reassignment, or dispatch. Only the Architect who "
+        "hired its filing Engineer may claim it."
+    )
+
+
+def _architect_task_pickup_authorization(
+        state, caller_id: str, task) -> tuple[dict, str]:
+    """Authorize either a routed product pickup or a hired-Engineer handoff."""
+    if str(getattr(task, "created_by_engineer_id", "") or "").strip():
+        return _engineer_created_task_handoff_authorization(state, caller_id, task)
+    return _routed_product_proposal_root_pickup_authorization(
+        state, caller_id, task,
+    )
+
+
 def _architect_task_owned_by_caller(task, caller_id: str) -> bool:
     caller_id = str(caller_id or "").strip()
     if not task or not caller_id:
