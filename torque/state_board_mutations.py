@@ -712,24 +712,9 @@ class BoardMutationMixin:
         root_id = str(getattr(task, "pipeline_root_id", "") or "").strip()
         root = self.board_tasks.get(root_id, task) if root_id else task
         result = self._sync_finalization_projection(root)
-        # Code-owning roots may only become Done after every durable code
-        # boundary in the pipeline carries durable merge evidence. This common
-        # admission guard covers direct moves and legacy descendant cascades;
-        # it deliberately never invokes live Git at Done time.
-        code_gate = code_boundary_done_status(self.board_get_chain(root.id))
-        if not code_gate["eligible"]:
-            return False, {
-                "eligible": False,
-                "mode": "code_boundary",
-                "stage": "awaiting_merge",
-                "boundary": "",
-                "missing_gates": ["code_boundary_not_durably_merged"],
-                "explanations": [
-                    "Code-bearing or unclassified task boundary remains open; "
-                    "Done requires durable merged status and merge SHA."
-                ],
-                "code_boundary": code_gate,
-            }
+        code_result = self._code_boundary_done_allowed(root)
+        if code_result is not None:
+            return False, code_result
         if normalize_mode(getattr(root, "finalization_mode", "legacy")) == "legacy":
             cardinality = self._legacy_review_cardinality_status(root)
             if cardinality["declared_count"] and not cardinality["eligible"]:
@@ -759,6 +744,29 @@ class BoardMutationMixin:
         self._db_save_task(root)
         return bool(result.get("eligible")), result
 
+    def _code_boundary_done_allowed(self, root: BoardTask) -> dict | None:
+        """Return the durable code-boundary rejection, if the root has one.
+
+        This shared admission primitive deliberately reads only persisted task
+        boundaries.  It is used for ordinary, cascade, and detached candidate
+        Done evaluations so an atomic policy update cannot bypass the gate.
+        """
+        code_gate = code_boundary_done_status(self.board_get_chain(root.id))
+        if code_gate["eligible"]:
+            return None
+        return {
+            "eligible": False,
+            "mode": "code_boundary",
+            "stage": "awaiting_merge",
+            "boundary": "",
+            "missing_gates": ["code_boundary_not_durably_merged"],
+            "explanations": [
+                "Code-bearing or unclassified task boundary remains open; "
+                "Done requires durable merged status and merge SHA."
+            ],
+            "code_boundary": code_gate,
+        }
+
     def _candidate_finalization_done_allowed(
             self, task: BoardTask, fields: dict, *, caller: str) -> tuple[bool, dict]:
         """Evaluate an atomic policy/Done update before mutating the root.
@@ -781,9 +789,12 @@ class BoardMutationMixin:
         self.board_tasks[task.id] = candidate
         try:
             result = evaluate_finalization(self, candidate)
+            code_result = self._code_boundary_done_allowed(candidate)
         finally:
             self.board_tasks[task.id] = task
 
+        if code_result is not None:
+            result = code_result
         if result.get("eligible"):
             return True, result
 

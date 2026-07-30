@@ -1,6 +1,7 @@
 import asyncio
 import importlib
 import sys
+import subprocess
 import tempfile
 import types
 import unittest
@@ -55,6 +56,32 @@ class CodeBoundaryDoneGateTests(unittest.TestCase):
         review = self._ship(root, boundary=_boundary("present"))
         self.state.board_cascade_done(review.id)
         self.assertEqual(root.lane, "In Progress")
+
+    def test_atomic_policy_done_update_cannot_bypass_open_code_boundary(self):
+        root = self._root(boundary=_boundary("present"))
+        review = self.state.board_add_task(
+            "Audit", "g", id="audit", lane="Done", parent_task_id=root.id,
+            pipeline_root_id=root.id, pipeline_depth=1,
+            completion_evidence={"finalization_review": {
+                "executed": True, "gate_id": "audit", "verdict": "ship",
+                "has_blocking_issues": False,
+                "required_follow_up_resolved": True, "boundary": "d|v|e",
+            }},
+        )
+        result = self.state.board_update_task(
+            root.id, lane="Done", finalization_mode="review_only",
+            required_review_gates=[{
+                "id": "audit", "role": "audit", "review_task_id": review.id,
+            }],
+            finalization_boundary={
+                "artifact_digest": "d", "artifact_version": "v",
+                "source_identity": "e", "immutable": True,
+            },
+        )
+        self.assertFalse(result["eligible"])
+        self.assertIn("code_boundary_not_durably_merged", result["missing_gates"])
+        self.assertEqual(root.lane, "In Progress")
+        self.assertEqual(root.finalization_mode, "legacy")
 
     def test_two_successive_ship_reviews_cannot_bypass_unmerged_code_gate(self):
         root = self._root()
@@ -141,6 +168,36 @@ class CodeBoundaryDoneGateTests(unittest.TestCase):
             self.state.board_tasks.values(), repo_root="/repo", branch="topic", merge_sha="merge")
         self.assertEqual(root.worktree_boundary["code_delta"]["state"], "present")
         self.assertEqual(root.worktree_boundary["merge_commit_sha"], "merge")
+
+    def test_classifier_records_present_and_absent_from_real_checkpointed_git(self):
+        boundaries = importlib.import_module("torque.worktree_boundaries")
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            def git(*args):
+                subprocess.run(["git", "-C", str(repo), *args], check=True,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            git("init", "-b", "main")
+            git("config", "user.email", "test@example.invalid")
+            git("config", "user.name", "Torque Test")
+            (repo / "base.txt").write_text("base\n")
+            git("add", "base.txt")
+            git("commit", "-m", "base")
+            base_sha = subprocess.check_output(
+                ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+            absent = asyncio.run(boundaries.classify_boundary_code_delta(
+                worktree_path=str(repo), base_branch="main", commit_sha=base_sha))
+            self.assertEqual(absent["state"], "absent")
+            git("checkout", "-b", "topic")
+            (repo / "code.py").write_text("VALUE = 1\n")
+            git("add", "code.py")
+            git("commit", "-m", "code")
+            head = subprocess.check_output(
+                ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+            present = asyncio.run(boundaries.classify_boundary_code_delta(
+                worktree_path=str(repo), base_branch="main", commit_sha=head))
+            self.assertEqual(present["state"], "present")
+            self.assertEqual(present["commit_sha"], head)
+            self.assertEqual(present["path_count"], 1)
 
     def test_classifier_failure_is_persistable_unknown(self):
         boundaries = importlib.import_module("torque.worktree_boundaries")
