@@ -152,16 +152,6 @@ async def handle_dispatch_task_command(
                     + ", ".join(unmet)}
         else:
             cell = None
-            if not task_has_action_binding(task):
-                return {
-                    "type": "error",
-                    "reason": "action_binding_required",
-                    "task_id": tid,
-                    "dispatch_state": str(
-                        getattr(task, "dispatch_state", "queued") or "queued"
-                    ),
-                    "message": ACTION_BINDING_REQUIRED_FOR_DISPATCH,
-                }
             base_dir = await _resolve_base_dir(group)
             act_meta = action_mgr.load_action(
                 task.action_name, base_dir) \
@@ -300,6 +290,16 @@ async def handle_dispatch_task_command(
                         assigned_engineer_id)
             if result:
                 pass
+            elif not task_has_action_binding(task):
+                result = {
+                    "type": "error",
+                    "reason": "action_binding_required",
+                    "task_id": tid,
+                    "dispatch_state": str(
+                        getattr(task, "dispatch_state", "queued") or "queued"
+                    ),
+                    "message": ACTION_BINDING_REQUIRED_FOR_DISPATCH,
+                }
             elif agent_id:
                 # Dispatch to existing agent
                 cell = state.agents.get(agent_id)
