@@ -608,21 +608,28 @@ def _handler_scoped_target_scope(
         # relationship is its same-group task stream, checked by this
         # side-effect-free predicate before the handler is reached.
         return "children"
-    # Keep this exception tied to the exact legacy handlers whose documented
-    # contract permits a routed product proposal owned by another architect.
-    # The predicates inspect persisted route evidence only; they do not
-    # mutate state or dispatch a handler.
+    # Engineer-created tasks are visible to same-group Architects, but the
+    # handler must explain their bounded hiring-provenance handoff instead of
+    # letting transport return a misleading bare scope denial. The handler
+    # still requires an explicit claim by the Engineer's hiring Architect;
+    # this branch never grants a general same-group ownership right.
+    if (
+            tool_name in {"architect_task_pickup", "architect_task_update"}
+            and requirement.target_kind == "task"
+            and str(getattr(target, "created_by_engineer_id", "") or "").strip()
+            and str(getattr(target, "group", "") or "").strip()
+            == str(getattr(caller_cell, "group", "") or "").strip()
+    ):
+        return "self"
+    # Keep the remaining exception tied to the exact legacy handler whose
+    # documented contract permits a routed product proposal owned by another
+    # Architect. The predicate inspects persisted route evidence only; it
+    # does not mutate state or dispatch a handler.
     if tool_name == "architect_task_pickup":
-        from .mcp_scoped.proposals import (
-            _routed_product_proposal_root_pickup_authorization,
-        )
+        from .mcp_scoped.proposals import _architect_task_pickup_authorization
 
-        authorization, _error = (
-            _routed_product_proposal_root_pickup_authorization(
-                state,
-                caller_id,
-                target,
-            )
+        authorization, _error = _architect_task_pickup_authorization(
+            state, caller_id, target,
         )
         return "self" if authorization else scope
     if tool_name == "architect_task_mark_covered":
