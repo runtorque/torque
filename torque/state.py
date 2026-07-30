@@ -2202,6 +2202,27 @@ def _normalize_worktree_boundary(boundary) -> dict:
                 normalized_pr["requested_cleanup"] = cleanup
         if normalized_pr:
             out["pr"] = normalized_pr
+    # A boundary classifier is durable, machine-computed evidence. Preserve its
+    # compact diagnostic fields; malformed/missing facts intentionally remain
+    # unclassified and fail closed while a boundary is still open.
+    code_delta = boundary.get("code_delta")
+    if isinstance(code_delta, dict):
+        normalized_delta = {}
+        for key in (
+                "state", "base_sha", "commit_sha", "comparison", "reason",
+                "classified_at"):
+            value = code_delta.get(key, "")
+            if value is None:
+                value = ""
+            if not isinstance(value, str):
+                value = str(value)
+            if value.strip():
+                normalized_delta[key] = value.strip()
+        path_count = code_delta.get("path_count")
+        if isinstance(path_count, int) and path_count >= 0:
+            normalized_delta["path_count"] = path_count
+        if normalized_delta:
+            out["code_delta"] = normalized_delta
     return out
 
 

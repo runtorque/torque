@@ -119,6 +119,7 @@ from .worktree_boundaries import (
     branch_boundary_tasks,
     latest_boundary_base_branch,
     latest_boundary_task,
+    classify_boundary_code_delta,
     mark_branch_boundaries_merged,
     queued_successor_tasks,
     refresh_latest_boundary_after_rebase,
@@ -5114,6 +5115,11 @@ async def main(connection=None):
         }
         if submodule_states:
             task.worktree_boundary["submodules"] = submodule_states
+        task.worktree_boundary["code_delta"] = await classify_boundary_code_delta(
+            worktree_path=cell.worktree_path,
+            base_branch=cell.worktree_base_branch,
+            commit_sha=boundary_sha,
+        )
         _save_task_record(task)
 
         for queued_task in retarget_queued_successor_tasks(

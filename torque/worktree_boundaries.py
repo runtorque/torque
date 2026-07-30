@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Iterable
 
@@ -36,6 +37,113 @@ def _clean_text(value) -> str:
         value = str(value)
     return value.strip()
 
+
+# Durable code-ownership classification recorded when a task boundary is made.
+# Done evaluation intentionally consumes only this stored fact; it never probes
+# a live branch/worktree, which may legitimately have been cleaned up on merge.
+CODE_DELTA_PRESENT = "present"
+CODE_DELTA_ABSENT = "absent"
+CODE_DELTA_UNKNOWN = "unknown"
+CODE_DELTA_LEGACY_UNCLASSIFIED = "legacy_unclassified"
+
+
+def boundary_code_delta_state(boundary: dict | None) -> str:
+    """Return the stored code-delta state, conservatively handling old rows.
+
+    No boundary at all means this pipeline has not asserted a code-bearing
+    boundary and remains an ordinary no-code root. A boundary with no valid
+    classifier fact is legacy/incomplete evidence and must not look absent.
+    """
+    if not isinstance(boundary, dict) or not boundary:
+        return CODE_DELTA_ABSENT
+    fact = boundary.get("code_delta")
+    if not isinstance(fact, dict):
+        return CODE_DELTA_LEGACY_UNCLASSIFIED
+    state = _clean_text(fact.get("state", "")).lower()
+    if state in {CODE_DELTA_PRESENT, CODE_DELTA_ABSENT, CODE_DELTA_UNKNOWN}:
+        return state
+    return CODE_DELTA_LEGACY_UNCLASSIFIED
+
+
+def boundary_is_durably_merged(boundary: dict | None) -> bool:
+    """True only for persisted merge status *and* merge SHA evidence."""
+    if not isinstance(boundary, dict):
+        return False
+    if _clean_text(boundary.get("status", "")).lower() != "merged":
+        return False
+    return bool(_clean_text(boundary.get("merge_commit_sha", "")))
+
+
+def code_boundary_done_status(tasks: Iterable) -> dict:
+    """Evaluate the common Done gate for a root pipeline's boundaries.
+
+    ``present`` is code ownership. ``unknown`` and old unclassified facts are
+    open-until-merged, while durable merge evidence wins after cleanup so old
+    records do not become permanently unsatisfiable.
+    """
+    blocking = []
+    present = []
+    unknown = []
+    for task in tasks:
+        boundary = task_boundary(task)
+        if not boundary:
+            continue
+        state = boundary_code_delta_state(boundary)
+        merged = boundary_is_durably_merged(boundary)
+        item = {
+            "task_id": _clean_text(getattr(task, "id", "")),
+            "state": state,
+            "merged": merged,
+        }
+        if state == CODE_DELTA_PRESENT:
+            present.append(item)
+        elif state in {CODE_DELTA_UNKNOWN, CODE_DELTA_LEGACY_UNCLASSIFIED}:
+            unknown.append(item)
+        if state != CODE_DELTA_ABSENT and not merged:
+            blocking.append(item)
+    return {"eligible": not blocking, "present": present,
+            "unknown": unknown, "blocking": blocking}
+
+
+async def classify_boundary_code_delta(*, worktree_path: str, base_branch: str,
+                                       commit_sha: str) -> dict:
+    """Classify a checkpointed boundary against its branch fork point.
+
+    Standard Git tree diff intentionally includes gitlink changes.  Any Git
+    failure is stored as ``unknown``; callers must persist this result rather
+    than re-trying from a later, potentially cleaned-up worktree.
+    """
+    classified_at = datetime.now(timezone.utc).isoformat()
+    base_branch = _clean_text(base_branch)
+    commit_sha = _clean_text(commit_sha)
+    if not _clean_text(worktree_path) or not base_branch or not commit_sha:
+        return {"state": CODE_DELTA_UNKNOWN, "reason": "missing_boundary_inputs",
+                "commit_sha": commit_sha, "classified_at": classified_at}
+    async def run(*args):
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", worktree_path, *args,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            return proc.returncode, stdout.decode("utf-8", errors="replace")
+        except Exception:
+            return 1, ""
+    code, fork = await run("merge-base", base_branch, commit_sha)
+    fork = fork.strip()
+    if code or not fork:
+        return {"state": CODE_DELTA_UNKNOWN, "reason": "merge_base_failed",
+                "commit_sha": commit_sha, "classified_at": classified_at}
+    code, names = await run("diff", "--name-only", fork, commit_sha)
+    if code:
+        return {"state": CODE_DELTA_UNKNOWN, "reason": "diff_failed",
+                "base_sha": fork, "commit_sha": commit_sha,
+                "classified_at": classified_at}
+    paths = [line for line in names.splitlines() if line.strip()]
+    return {"state": CODE_DELTA_PRESENT if paths else CODE_DELTA_ABSENT,
+            "base_sha": fork, "commit_sha": commit_sha,
+            "comparison": "fork_point..boundary", "path_count": len(paths),
+            "classified_at": classified_at}
 
 def _normalize_pr_state(value, *, pending: bool | None = None) -> str:
     state = _clean_text(value).lower()
@@ -817,6 +925,8 @@ def mark_branch_boundaries_merged(tasks: Iterable, *,
             }
             if source_boundary.get("submodules"):
                 boundary["submodules"] = list(source_boundary.get("submodules") or [])
+            if isinstance(source_boundary.get("code_delta"), dict):
+                boundary["code_delta"] = dict(source_boundary["code_delta"])
         else:
             if not boundary.get("version"):
                 boundary["version"] = source_boundary.get("version", "1") or "1"
@@ -839,6 +949,10 @@ def mark_branch_boundaries_merged(tasks: Iterable, *,
             boundary.setdefault("message", "")
             if source_boundary.get("submodules") and not boundary.get("submodules"):
                 boundary["submodules"] = list(source_boundary.get("submodules") or [])
+            # The merged projection represents this source boundary, so carry
+            # its classifier even when an older root boundary already exists.
+            if isinstance(source_boundary.get("code_delta"), dict):
+                boundary["code_delta"] = dict(source_boundary["code_delta"])
 
         boundary["status"] = "merged"
         boundary["merged_at"] = merged_at
