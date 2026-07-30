@@ -94,6 +94,18 @@ class LegacyReviewCardinalityTests(unittest.TestCase):
             0,
         )
 
+    def test_implementer_cannot_satisfy_its_own_declared_review(self):
+        root = self._root([{"id": "review-one"}])
+        review = self._review(root, "self-review", "implementer", lane="Done")
+
+        self.state.board_cascade_done(review.id)
+
+        self.assertEqual(root.lane, "In Progress")
+        self.assertEqual(
+            self.review_mod._legacy_review_cardinality_status(self.state, root)["satisfied_count"],
+            0,
+        )
+
     def test_direct_close_refusal_names_declared_satisfied_and_shortfall(self):
         root = self._root(self._two_gates())
         self._review(root, "review-1", "reviewer-1", lane="Done")
