@@ -686,6 +686,71 @@ class CanonicalMCPContractTests(unittest.TestCase):
         ]["inputSchema"]["properties"]
         self.assertNotIn("covering_task_id", covered_properties)
 
+    def test_depth_zero_combinator_debt_is_inventory_locked(self):
+        """Keep new public schemas from reintroducing top-level combinators.
+
+        Part A deliberately flattens only ``behavior_overlay_propose``.  The
+        remaining entries are pre-existing, separately scoped debt, so lock
+        their exact inventory until their mechanical follow-up is scheduled.
+        ``task_list`` remains the nested-combinator control.
+        """
+        expected_depth_zero = {
+            "worker": {"help_search"},
+            "engineer": {
+                "event_delivery_update",
+                "help_search",
+                "task_dispatch",
+            },
+            "architect": {
+                "area_note",
+                "behavior_overlay_rollback",
+                "engineer_lifecycle",
+                "help_search",
+                "hire_list",
+                "idea_brief_update",
+                "mind_map_link_update",
+                "mind_map_node_update",
+                "mind_map_update",
+                "scratchpad_update",
+                "task_dispatch",
+            },
+        }
+        combinators = {"oneOf", "anyOf", "allOf", "not"}
+        for kind, expected in expected_depth_zero.items():
+            with self.subTest(kind=kind):
+                tools = {
+                    tool["name"]: tool["inputSchema"]
+                    for tool in _canonical_tools_for_caller(_State(kind), "caller")
+                }
+                actual = {
+                    name
+                    for name, schema in tools.items()
+                    if combinators & set(schema)
+                }
+                self.assertEqual(actual, expected)
+                self.assertNotIn("behavior_overlay_propose", actual)
+
+        task_list_schema = {
+            tool["name"]: tool["inputSchema"]
+            for tool in _canonical_tools_for_caller(_State("architect"), "caller")
+        }["task_list"]
+        self.assertFalse(combinators & set(task_list_schema))
+        self.assertIn(
+            "oneOf",
+            task_list_schema["properties"]["label_filter"],
+        )
+
+    def test_behavior_overlay_propose_schema_is_plain_object(self):
+        tools = {
+            tool["name"]: tool["inputSchema"]
+            for tool in _canonical_tools_for_caller(_State("architect"), "caller")
+        }
+        schema = tools["behavior_overlay_propose"]
+        self.assertEqual(schema["type"], "object")
+        self.assertTrue({"target_kind", "target"} <= set(schema["properties"]))
+        self.assertIn("target_kind", schema["required"])
+        self.assertFalse({"oneOf", "anyOf", "allOf", "not"} & set(schema))
+
     def test_maintained_prompts_and_docs_use_only_canonical_tool_names(self):
         legacy_names = self._legacy_tool_names()
         pattern = re.compile(

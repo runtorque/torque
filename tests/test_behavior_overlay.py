@@ -13,7 +13,7 @@ try:
 except ModuleNotFoundError:
     from tests.helpers import install_aiohttp_stub
 
-install_aiohttp_stub()
+install_aiohttp_stub(include_json_helpers=True)
 
 from torque.behavior_overlay import (  # noqa: E402
     BEHAVIOR_OVERLAY_ROLE_MAX_BYTES,
@@ -27,6 +27,10 @@ from torque.behavior_overlay import (  # noqa: E402
     validate_overlay_text,
 )
 from torque.db import TorqueDB  # noqa: E402
+from torque.mcp import (  # noqa: E402
+    _public_argument_validation_error,
+    dispatch_mcp_rpc_body,
+)
 from torque.mcp_tools_shared import dispatch_scoped_tool  # noqa: E402
 from torque.server import (  # noqa: E402
     _handle_delete_architect_command,
@@ -733,6 +737,76 @@ class BehaviorOverlayTests(unittest.TestCase):
         ))
         self.assertTrue(is_error)
         self.assertIn("architect_dismissed", text)
+
+    def test_mcp_architect_propose_rejects_invalid_canonical_target_shape(self):
+        """The flattened public schema delegates its conditional rule here."""
+        async def handle_command(payload):
+            self.fail(f"invalid target shape reached command handler: {payload}")
+
+        for arguments, expected_error in (
+            (
+                {
+                    "target_kind": "self",
+                    "target": self.engineer.id,
+                    "text": "Prefer brevity.",
+                    "rationale": "test",
+                },
+                "target must not be provided when target_kind is self",
+            ),
+            (
+                {
+                    "target_kind": "agent",
+                    "text": "Prefer brevity.",
+                    "rationale": "test",
+                },
+                "target is required when target_kind is agent or role",
+            ),
+        ):
+            with self.subTest(arguments=arguments):
+                response, status = asyncio.run(dispatch_mcp_rpc_body(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "invalid-overlay-target",
+                        "method": "tools/call",
+                        "params": {
+                            "name": "behavior_overlay_propose",
+                            "arguments": arguments,
+                        },
+                    },
+                    cell_id=self.architect.id,
+                    handle_command=handle_command,
+                    state=self.state,
+                ))
+                self.assertEqual(status, 200)
+                self.assertTrue(response["result"]["isError"])
+                self.assertIn(
+                    expected_error,
+                    response["result"]["content"][0]["text"],
+                )
+
+    def test_mcp_architect_propose_handler_matches_replaced_one_of_surface(self):
+        """The plain schema plus handler accepts exactly the old branches."""
+        for target_kind, target_present, accepted in (
+            ("self", False, True),
+            ("self", True, False),
+            ("agent", False, False),
+            ("agent", True, True),
+            ("role", False, False),
+            ("role", True, True),
+        ):
+            with self.subTest(
+                target_kind=target_kind,
+                target_present=target_present,
+            ):
+                arguments = {"target_kind": target_kind}
+                if target_present:
+                    arguments["target"] = "target-ref"
+                error = _public_argument_validation_error(
+                    "behavior_overlay_propose",
+                    arguments,
+                    "architect",
+                )
+                self.assertEqual(not error, accepted)
 
     def test_mcp_role_scope_write_and_engineer_read_only(self):
         async def handle_command(payload):
