@@ -319,11 +319,43 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             id="architect-closed", name="Architect", group="g",
             kind="architect", cell_type="agent",
         )
-        for cell in (reviewer, other, owner, architect):
+        hired_engineer = self.state_mod.AgentCell(
+            id="engineer-handoff", name="Hired Engineer", group="g",
+            kind="engineer", cell_type="agent",
+            hired_by_architect_id=architect.id,
+        )
+        for cell in (reviewer, other, owner, architect, hired_engineer):
             state.apply_effective_agent_class_for_launch(
                 cell, base_dir=str(Path(__file__).resolve().parents[1]),
             )
             state.agents[cell.id] = cell
+
+        # Current-main grants the hiring Architect a deliberately narrow
+        # handler-scoped route to claim its Engineer's open task. Confirm that
+        # route exists, then prove it cannot spill into the unrelated review
+        # amendment capability below.
+        handoff_task = state.board_add_task(
+            "Engineer handoff", "g", id="TORQUE:amend-handoff",
+            lane="To Do", assigned_engineer_id=hired_engineer.id,
+            created_by_engineer_id=hired_engineer.id,
+        )
+        proposals_mod = importlib.import_module("torque.mcp_scoped.proposals")
+        handoff, handoff_error = proposals_mod._architect_task_pickup_authorization(
+            state, architect.id, handoff_task,
+        )
+        self.assertFalse(handoff_error)
+        self.assertEqual("engineer_created_task_handoff", handoff["scope"])
+        auth_mod = importlib.import_module("torque.mcp_public_call_authorization")
+        requirement = type("Requirement", (), {
+            "target_kind": "task", "handler_scoped": True,
+        })()
+        self.assertEqual(
+            "self",
+            auth_mod._handler_scoped_target_scope(
+                state, "architect_task_pickup", {}, architect, requirement,
+                handoff_task,
+            ),
+        )
         task = state.board_add_task(
             "Merged completed review", "g", id="TORQUE:amend-closed",
             lane="Done", action_name="feature/review", agent_id="",
