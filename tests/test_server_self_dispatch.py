@@ -6220,6 +6220,29 @@ class ServerReviewMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
                     expected,
                 )
 
+    def test_review_verdict_parser_accepts_explicit_inline_final_label_only(self):
+        # TORQUE:1259:1 completed with the authoritative final label after a
+        # completed prose sentence, rather than on its own line.
+        self.assertEqual(
+            self.server_mod._review_verdict_from_message(
+                "Blocking issues: None. Final review verdict: Ship."
+            ),
+            "ship",
+        )
+
+        # An inline label is authoritative only at a sentence boundary. Do
+        # not turn quoted labels, examples, or ordinary prose into verdicts.
+        for message in (
+                'The reviewer wrote "Final review verdict: Ship." in a quote.',
+                "For example, Final review verdict: Revert is a blocking form.",
+                "This prose mentions the verdict word ship, but has no label.",
+        ):
+            with self.subTest(message=message):
+                self.assertEqual(
+                    self.server_mod._review_verdict_from_message(message),
+                    "",
+                )
+
     def test_review_verdict_payload_parses_full_report_before_storing_summary(self):
         review_task = self.state_mod.BoardTask(
             id="TORQUE:long-review",

@@ -431,36 +431,68 @@ def _normalized_review_verdict_line(line: str) -> str:
     return text.strip()
 
 
+_INLINE_FINAL_REVIEW_VERDICT_RE = re.compile(
+    r"(?:^|(?<=[.!?])\s+)final\s+review\s+verdict\s*"
+    r"(?:[:—–-])\s*(?P<verdict>\S.*)$",
+    re.IGNORECASE,
+)
+
+
+def _inline_final_review_verdict_text(line: str) -> str:
+    """Return a conservatively anchored inline final-verdict value.
+
+    A bare ``Final review verdict`` label may appear after a completed prose
+    sentence in a reviewer report.  Deliberately require that sentence
+    boundary and the complete label rather than searching arbitrary prose:
+    quoted labels and examples remain non-authoritative.
+    """
+    match = _INLINE_FINAL_REVIEW_VERDICT_RE.search(str(line or "").strip())
+    return match.group("verdict").strip() if match else ""
+
+
+def _review_verdict_from_text(text: str) -> str:
+    """Classify one already-isolated candidate verdict value."""
+    lower = str(text or "").lower().strip(" .")
+    if lower.startswith("ship with fixes"):
+        return "ship_with_fixes"
+    if lower.startswith(("needs rework", "needs changes", "blocker")):
+        return "needs_rework"
+    if lower == "revert" or (
+            lower.startswith("revert")
+            and len(lower) > len("revert")
+            and lower[len("revert")] in {
+                " ", ":", "-", "—", "–", ",", ";",
+            }):
+        return "needs_rework"
+    if lower == "ship" or lower == "ship it":
+        return "ship"
+    if lower.startswith("ship") and len(lower) > 4:
+        next_char = lower[4]
+        if next_char in {" ", ".", ":", "-", "—", "–", ",", ";"}:
+            return "ship"
+    return ""
+
+
 def _review_verdict_from_message(message: str) -> str:
     """Return ``ship`` or a non-ship verdict parsed from a review message.
 
     This is intentionally a lightweight free-form parser: explicit verdict
     lines may have markdown/bullet prefixes and varied casing, but paraphrases
     such as "looks good" or "approved" fail closed so reviewer cleanup does
-    not fire from an ambiguous message.
+    not fire from an ambiguous message. An inline final label is allowed only
+    after a sentence boundary, never by arbitrary substring matching.
     """
     for line in reversed(str(message or "").splitlines()):
         text = _normalized_review_verdict_line(line)
         if not text:
             continue
-        lower = text.lower().strip(" .")
-        if lower.startswith("ship with fixes"):
-            return "ship_with_fixes"
-        if lower.startswith(("needs rework", "needs changes", "blocker")):
-            return "needs_rework"
-        if lower == "revert" or (
-                lower.startswith("revert")
-                and len(lower) > len("revert")
-                and lower[len("revert")] in {
-                    " ", ":", "-", "—", "–", ",", ";",
-                }):
-            return "needs_rework"
-        if lower == "ship" or lower == "ship it":
-            return "ship"
-        if lower.startswith("ship") and len(lower) > 4:
-            next_char = lower[4]
-            if next_char in {" ", ".", ":", "-", "—", "–", ",", ";"}:
-                return "ship"
+        verdict = _review_verdict_from_text(text)
+        if verdict:
+            return verdict
+        verdict = _review_verdict_from_text(
+            _inline_final_review_verdict_text(line))
+        if verdict:
+            return verdict
     return ""
 
 
