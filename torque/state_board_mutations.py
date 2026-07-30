@@ -11,6 +11,7 @@ from typing import Optional
 from .artifacts import normalize_artifacts, normalize_attachments
 from .task_ids import format_root_task_id, is_canonical_task_id, parse_task_id
 from .finalization import audit_entry, evaluate_finalization, normalize_mode, status_projection
+from .worktree_boundaries import code_boundary_done_status
 from .state import (
     ARCHIVED_LANE,
     _ENGINEER_MESSAGE_EXPIRY_NOTE,
@@ -711,6 +712,24 @@ class BoardMutationMixin:
         root_id = str(getattr(task, "pipeline_root_id", "") or "").strip()
         root = self.board_tasks.get(root_id, task) if root_id else task
         result = self._sync_finalization_projection(root)
+        # Code-owning roots may only become Done after every durable code
+        # boundary in the pipeline carries durable merge evidence. This common
+        # admission guard covers direct moves and legacy descendant cascades;
+        # it deliberately never invokes live Git at Done time.
+        code_gate = code_boundary_done_status(self.board_get_chain(root.id))
+        if not code_gate["eligible"]:
+            return False, {
+                "eligible": False,
+                "mode": "code_boundary",
+                "stage": "awaiting_merge",
+                "boundary": "",
+                "missing_gates": ["code_boundary_not_durably_merged"],
+                "explanations": [
+                    "Code-bearing or unclassified task boundary remains open; "
+                    "Done requires durable merged status and merge SHA."
+                ],
+                "code_boundary": code_gate,
+            }
         if normalize_mode(getattr(root, "finalization_mode", "legacy")) == "legacy":
             cardinality = self._legacy_review_cardinality_status(root)
             if cardinality["declared_count"] and not cardinality["eligible"]:
