@@ -2318,6 +2318,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "Referenced staged task",
             assigned_engineer_id=alice.id,
             created_by_architect_id=architect.id,
+            action_name="feature/implement",
             dispatch_state="queued",
         )
         other_staged = self._add_task(

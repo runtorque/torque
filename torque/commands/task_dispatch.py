@@ -152,7 +152,6 @@ async def handle_dispatch_task_command(
                     + ", ".join(unmet)}
         else:
             cell = None
-            base_dir = await _resolve_base_dir(group)
             if not task_has_action_binding(task):
                 return {
                     "type": "error",
@@ -163,6 +162,7 @@ async def handle_dispatch_task_command(
                     ),
                     "message": ACTION_BINDING_REQUIRED_FOR_DISPATCH,
                 }
+            base_dir = await _resolve_base_dir(group)
             act_meta = action_mgr.load_action(
                 task.action_name, base_dir) \
                 if task.action_name else None

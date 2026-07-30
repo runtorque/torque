@@ -646,7 +646,10 @@ _ARCHITECT_TOOL_SPECS = [
                     "type": "boolean",
                     "description": (
                         "When true, atomically sends a dispatch message to "
-                        "the assigned engineer and marks the task live."
+                        "the assigned engineer and marks the task live, but "
+                        "only when the group's configured default action has "
+                        "bound the new task. Otherwise create it staged so "
+                        "the Engineer can choose and bind the final action."
                     ),
                 },
                 "dispatch_message": {
@@ -1368,7 +1371,8 @@ _ARCHITECT_TOOL_SPECS = [
                         "Optional task id/slug to dispatch. Only this explicit "
                         "argument marks a task live; when omitted, the message "
                         "marks no task live even if its text mentions task IDs "
-                        "or slugs."
+                        "or slugs. The selected task must already have an "
+                        "action binding."
                     ),
                 },
             },
