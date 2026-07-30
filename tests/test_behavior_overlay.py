@@ -27,9 +27,9 @@ from torque.behavior_overlay import (  # noqa: E402
     validate_overlay_text,
 )
 from torque.db import TorqueDB  # noqa: E402
-from torque.mcp import (  # noqa: E402
-    _public_argument_validation_error,
-    dispatch_mcp_rpc_body,
+from torque.mcp import dispatch_mcp_rpc_body  # noqa: E402
+from torque.mcp_public_call_authorization import (  # noqa: E402
+    public_argument_validation_error,
 )
 from torque.mcp_tools_shared import dispatch_scoped_tool  # noqa: E402
 from torque.server import (  # noqa: E402
@@ -801,12 +801,69 @@ class BehaviorOverlayTests(unittest.TestCase):
                 arguments = {"target_kind": target_kind}
                 if target_present:
                     arguments["target"] = "target-ref"
-                error = _public_argument_validation_error(
+                error = public_argument_validation_error(
                     "behavior_overlay_propose",
                     arguments,
                     "architect",
                 )
                 self.assertEqual(not error, accepted)
+
+    def test_mcp_architect_propose_accepts_replaced_one_of_branches(self):
+        calls = []
+
+        async def handle_command(payload):
+            calls.append(payload)
+            return {"type": "ok"}
+
+        for arguments, expected_target_field, expected_target in (
+            (
+                {
+                    "target_kind": "self",
+                    "text": "Prefer brevity.",
+                    "rationale": "test",
+                },
+                "agent_id",
+                self.architect.id,
+            ),
+            (
+                {
+                    "target_kind": "agent",
+                    "target": self.engineer.id,
+                    "text": "Prefer brevity.",
+                    "rationale": "test",
+                },
+                "agent_id",
+                self.engineer.id,
+            ),
+            (
+                {
+                    "target_kind": "role",
+                    "target": "engineer",
+                    "text": "Prefer brevity.",
+                    "rationale": "test",
+                },
+                "role_kind",
+                "engineer",
+            ),
+        ):
+            with self.subTest(arguments=arguments):
+                response, status = asyncio.run(dispatch_mcp_rpc_body(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "valid-overlay-target",
+                        "method": "tools/call",
+                        "params": {
+                            "name": "behavior_overlay_propose",
+                            "arguments": arguments,
+                        },
+                    },
+                    cell_id=self.architect.id,
+                    handle_command=handle_command,
+                    state=self.state,
+                ))
+                self.assertEqual(status, 200)
+                self.assertFalse(response["result"]["isError"])
+                self.assertEqual(calls[-1][expected_target_field], expected_target)
 
     def test_mcp_role_scope_write_and_engineer_read_only(self):
         async def handle_command(payload):
