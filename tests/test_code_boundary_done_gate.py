@@ -56,6 +56,21 @@ class CodeBoundaryDoneGateTests(unittest.TestCase):
         self.state.board_cascade_done(review.id)
         self.assertEqual(root.lane, "In Progress")
 
+    def test_two_successive_ship_reviews_cannot_bypass_unmerged_code_gate(self):
+        root = self._root()
+        first = self._ship(root, boundary=_boundary("present"))
+        self.state.board_cascade_done(first.id)
+        self.assertEqual(root.lane, "In Progress")
+        second = self.state.board_add_task(
+            "Second independent review", "g", id="review-2", lane="Done",
+            action_name="feature/review", parent_task_id=root.id,
+            pipeline_root_id=root.id, pipeline_depth=1,
+            completion_evidence={"review": {"verdict": "ship", "agent_id": "reviewer-2"}},
+            worktree_boundary=_boundary("present", sha="candidate-2"),
+        )
+        self.state.board_cascade_done(second.id)
+        self.assertEqual(root.lane, "In Progress")
+
     def test_explicit_absent_boundary_cascades_normally(self):
         root = self._root()
         review = self._ship(root, boundary=_boundary("absent"))
