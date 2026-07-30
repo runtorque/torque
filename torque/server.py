@@ -984,6 +984,7 @@ from .server_review import (
     _task_review_evidence,
     _review_event_message,
     _build_review_verdict_payload,
+    _amend_review_verdict_evidence,
     _record_review_verdict_evidence,
     _review_task_has_ship_verdict,
     _coerce_action_bool,
