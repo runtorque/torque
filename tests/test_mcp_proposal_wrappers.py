@@ -927,6 +927,27 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("hired-engineer provenance", pickup["source"])
         self.assertIn("Source: hired-engineer provenance", task.messages[-1]["message"])
 
+        messages_before_unbound_dispatch = len(self.torqly_engineer.mcp_messages)
+        unbound_dispatch = await self._call(
+            "agent_message",
+            {
+                "agent": self.torqly_engineer.id,
+                "task": task.id,
+                "message": "This must not dispatch before action binding.",
+            },
+            req_id=845,
+            agent_id=self.torqly.id,
+        )
+        self.assertIn(
+            "requires an action binding before dispatch",
+            self._error_text(unbound_dispatch),
+        )
+        self.assertEqual("queued", task.dispatch_state)
+        self.assertEqual(
+            messages_before_unbound_dispatch,
+            len(self.torqly_engineer.mcp_messages),
+        )
+
         action_bound = await self._call(
             "task_update",
             {"task": task.id, "action_name": "feature/implement"},
