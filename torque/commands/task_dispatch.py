@@ -12,6 +12,21 @@ GUIDANCE_HINT_IDENTITY_DISPATCH = "agent_identity_anchor.dispatch"
 GUIDANCE_HINT_IDENTITY_LAUNCH = "agent_identity_anchor.launch"
 
 
+# ``suggested_action`` is deliberately only a routing hint. A task may not
+# cross the dispatch boundary until the assigned Engineer has selected and
+# bound its actual action: that binding supplies the worker contract and the
+# legal derive transitions.
+ACTION_BINDING_REQUIRED_FOR_DISPATCH = (
+    "Task requires an action binding before dispatch. The assigned Engineer "
+    "must choose and bind the final action, then dispatch the task."
+)
+
+
+def task_has_action_binding(task) -> bool:
+    """Whether *task* has the explicit action required for dispatch."""
+    return bool(str(getattr(task, "action_name", "") or "").strip())
+
+
 @dataclass(slots=True)
 class TaskDispatchRuntime:
     agent_can_receive_dispatch: Any
@@ -33,7 +48,6 @@ class TaskDispatchRuntime:
     new_agent_prompt_sequence: Any
     owner_is_user_from_ids: Any
     panel_event: Any
-    promote_suggested_action: Any
     record_task_dispatch: Any
     resolve_base_dir: Any
     resolve_inherited_worktree_source: Any
@@ -82,7 +96,6 @@ async def handle_dispatch_task_command(
     _new_agent_prompt_sequence = runtime.new_agent_prompt_sequence
     _owner_is_user_from_ids = runtime.owner_is_user_from_ids
     _panel_event = runtime.panel_event
-    _promote_suggested_action = runtime.promote_suggested_action
     _record_task_dispatch = runtime.record_task_dispatch
     _resolve_base_dir = runtime.resolve_base_dir
     _resolve_inherited_worktree_source = runtime.resolve_inherited_worktree_source
@@ -140,7 +153,6 @@ async def handle_dispatch_task_command(
         else:
             cell = None
             base_dir = await _resolve_base_dir(group)
-            task = _promote_suggested_action(state, task)
             act_meta = action_mgr.load_action(
                 task.action_name, base_dir) \
                 if task.action_name else None
@@ -278,6 +290,16 @@ async def handle_dispatch_task_command(
                         assigned_engineer_id)
             if result:
                 pass
+            elif not task_has_action_binding(task):
+                result = {
+                    "type": "error",
+                    "reason": "action_binding_required",
+                    "task_id": tid,
+                    "dispatch_state": str(
+                        getattr(task, "dispatch_state", "queued") or "queued"
+                    ),
+                    "message": ACTION_BINDING_REQUIRED_FOR_DISPATCH,
+                }
             elif agent_id:
                 # Dispatch to existing agent
                 cell = state.agents.get(agent_id)

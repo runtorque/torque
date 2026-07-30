@@ -2172,7 +2172,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             [{"cmd": "list_actions", "group": "torque"}],
         )
 
-    async def test_architect_task_create_can_atomically_dispatch_and_mark_live(self):
+    async def test_architect_task_create_refuses_actionless_atomic_dispatch(self):
         architect = self._add_architect("arch-1", "Architect")
         alice = self._add_engineer(
             "eng-alice", "Alice", hired_by_architect_id=architect.id
@@ -2186,8 +2186,45 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                 "group": "torque",
                 "description": "Wire backend field and create dispatch.",
                 "assigned_engineer_id": alice.id,
+                "suggested_action": "feature/implement",
                 "dispatch": True,
                 "dispatch_message": "Start this immediately.",
+            },
+            architect.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertIn("requires an action binding before dispatch", text)
+        # A suggestion is deliberately not promoted to a binding and the
+        # atomic create leaves no queued-or-live partial task behind.
+        self.assertEqual(self.state.board_tasks, {})
+        self.assertEqual(alice.mcp_messages, [])
+        self.assertEqual(
+            self.handle_calls,
+            [{"cmd": "list_actions", "group": "torque"}],
+        )
+
+    async def test_architect_task_create_can_dispatch_when_group_default_is_bound(self):
+        architect = self._add_architect("arch-1", "Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        alice.session_id = "session-alice"
+        self.state.group_settings["torque"] = self.state_mod.GroupSettings(
+            board_default_action="feature/implement"
+        )
+        self.assertEqual(
+            self.state.get_group_settings("torque").board_default_action,
+            "feature/implement",
+        )
+
+        text, is_error = await self._call(
+            "architect_task_create",
+            {
+                "title": "Implement task dispatch state",
+                "group": "torque",
+                "assigned_engineer_id": alice.id,
+                "dispatch": True,
             },
             architect.id,
         )
@@ -2195,29 +2232,9 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(is_error, text)
         payload = json.loads(text)
         task = self.state.board_tasks[payload["task_id"]]
+        self.assertEqual(task.action_name, "feature/implement")
         self.assertEqual(task.dispatch_state, "live")
-        self.assertEqual(task.lane, "To Do")
         self.assertEqual(payload["dispatch_state"], "live")
-        self.assertEqual(payload["dispatch"]["task_id"], task.id)
-        self.assertEqual(payload["dispatch"]["dispatch_state"], "live")
-        self.assertEqual(payload["dispatch"]["engineer_id"], alice.id)
-        self.assertNotIn("dispatch_advisory", payload["dispatch"])
-        creates = [
-            call for call in self.handle_calls
-            if call.get("cmd") == "board_add_task"
-        ]
-        self.assertEqual(creates[0]["lane"], "To Do")
-        injects = [
-            call for call in self.handle_calls
-            if call.get("cmd") == "inject_mcp_message"
-        ]
-        self.assertEqual(len(injects), 1)
-        self.assertIn(task.id, injects[0]["message"])
-        self.assertIn("Start this immediately.", injects[0]["message"])
-        self.assertEqual(alice.mcp_messages[0]["action"], "architect_message")
-        self.assertIn(task.id, alice.mcp_messages[0]["message"])
-        self.assertEqual(self.state._delta_ops[-1]["op"], "task_upsert")
-        self.assertEqual(self.state._delta_ops[-1]["dispatch_state"], "live")
 
     async def test_architect_message_explicit_task_marks_existing_queued_task_live(self):
         architect = self._add_architect("arch-1", "Architect")
@@ -2238,6 +2255,18 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         task_id = json.loads(created_text)["task_id"]
         self.assertEqual(self.state.board_tasks[task_id].dispatch_state, "queued")
 
+        # The Engineer—not the Architect's suggestion—chooses and binds the
+        # action while the task is staged.
+        edit_text, edit_error = await self._call_engineer(
+            "engineer_task_edit",
+            {"task": task_id, "action": "feature/implement"},
+            alice.id,
+        )
+        self.assertFalse(edit_error, edit_text)
+        self.assertEqual(
+            self.state.board_tasks[task_id].action_name, "feature/implement"
+        )
+
         message_text, message_error = await self._call(
             "architect_engineer_message",
             {
@@ -2255,6 +2284,30 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.state.board_tasks[task_id].dispatch_state, "live")
         self.assertEqual(self.state.board_tasks[task_id].lane, "To Do")
 
+    async def test_architect_message_explicit_task_refuses_actionless_dispatch(self):
+        architect = self._add_architect("arch-1", "Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        task = self._add_task(
+            "TORQUE:1",
+            "Choose action before dispatch",
+            assigned_engineer_id=alice.id,
+            created_by_architect_id=architect.id,
+            dispatch_state="queued",
+        )
+
+        text, is_error = await self._call(
+            "architect_engineer_message",
+            {"engineer_id": alice.id, "task": task.id, "message": "Start."},
+            architect.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertIn("requires an action binding before dispatch", text)
+        self.assertEqual(task.dispatch_state, "queued")
+        self.assertEqual(alice.mcp_messages, [])
+
     async def test_architect_message_task_references_do_not_dispatch_without_task(self):
         architect = self._add_architect("arch-1", "Architect")
         alice = self._add_engineer(
@@ -2265,6 +2318,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "Referenced staged task",
             assigned_engineer_id=alice.id,
             created_by_architect_id=architect.id,
+            action_name="feature/implement",
             dispatch_state="queued",
         )
         other_staged = self._add_task(

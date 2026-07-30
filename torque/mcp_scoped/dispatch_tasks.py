@@ -4,6 +4,7 @@ import copy
 from dataclasses import asdict
 from datetime import datetime, timezone
 
+from torque.commands.task_dispatch import ACTION_BINDING_REQUIRED_FOR_DISPATCH
 from torque.agent_classes import (
     has_frozen_platform_group_board_authority,
     has_frozen_platform_task_authority_mode,
@@ -148,6 +149,20 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
             dispatch_message = str(args.get("dispatch_message", "") or "").strip()
             dispatch_requested = dispatch_requested or bool(dispatch_message)
 
+            # Architect task creation intentionally accepts only a
+            # non-binding ``suggested_action``. Do not infer that hint as
+            # the Engineer's eventual selection; an atomic dispatch is only
+            # valid when the group's pre-existing default has already bound
+            # the created task.
+            default_action = ""
+            if dispatch_requested:
+                group_settings = real_state.get_group_settings(_engineer_group)
+                default_action = str(
+                    getattr(group_settings, "board_default_action", "") or ""
+                ).strip()
+                if not default_action:
+                    return ACTION_BINDING_REQUIRED_FOR_DISPATCH, True
+
             suggested_specialization = str(
                 args.get("suggested_specialization", "") or ""
             ).strip()
@@ -188,7 +203,7 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
                     "created_by_architect_id": str(caller_id or "").strip(),
                     "suggested_action": suggested_action,
                     "suggested_specialization": suggested_specialization,
-                    "action_name": "",
+                    "action_name": default_action,
                     "action_vars": action_vars,
                 })
                 if update_result and update_result.get("type") == "error":
