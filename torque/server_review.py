@@ -414,9 +414,9 @@ def _shared_review_checkpoint_block_reason(state: MatrixState, cell) -> str:
 
 def _normalized_review_verdict_line(line: str) -> str:
     text = str(line or "").strip()
-    while text[:1] in {"#", ">", "-", "*"}:
+    while text[:1] in {"#", "-", "*"}:
         text = text[1:].strip()
-    for token in ("**", "__", "`"):
+    for token in ("**", "__"):
         text = text.replace(token, "")
     text = text.strip()
     lower = text.lower()
@@ -431,36 +431,77 @@ def _normalized_review_verdict_line(line: str) -> str:
     return text.strip()
 
 
+_INLINE_FINAL_REVIEW_VERDICT_RE = re.compile(
+    r"(?:^|(?<=[.!?])\s+)final\s+review\s+verdict\s*"
+    r"(?:[:—–-])\s*(?P<verdict>"
+    r"ship(?:\s+it|\s+with\s+fixes)?|needs\s+(?:rework|changes)|"
+    r"blocker|revert)\.?$",
+    re.IGNORECASE,
+)
+
+
+def _inline_final_review_verdict_text(line: str) -> str:
+    """Return a conservatively anchored inline final-verdict value.
+
+    A bare ``Final review verdict`` label may appear after a completed prose
+    sentence in a reviewer report. Deliberately require that sentence
+    boundary, the complete label, and a terminal instructed verdict rather
+    than searching arbitrary prose: quoted labels and examples remain
+    non-authoritative.
+    """
+    raw_line = str(line or "")
+    # A Markdown blockquote is illustrative/quoted material even when its
+    # contents include a sentence boundary before an otherwise-valid label.
+    # Reject it before the anchored search can scan inside the quoted prose.
+    if re.match(r"^\s{0,3}>", raw_line):
+        return ""
+    match = _INLINE_FINAL_REVIEW_VERDICT_RE.search(raw_line.strip())
+    return match.group("verdict").strip() if match else ""
+
+
+def _review_verdict_from_text(text: str) -> str:
+    """Classify one already-isolated candidate verdict value."""
+    lower = str(text or "").lower().strip(" .")
+    if lower.startswith("ship with fixes"):
+        return "ship_with_fixes"
+    if lower.startswith(("needs rework", "needs changes", "blocker")):
+        return "needs_rework"
+    if lower == "revert" or (
+            lower.startswith("revert")
+            and len(lower) > len("revert")
+            and lower[len("revert")] in {
+                " ", ":", "-", "—", "–", ",", ";",
+            }):
+        return "needs_rework"
+    if lower == "ship" or lower == "ship it":
+        return "ship"
+    if lower.startswith("ship") and len(lower) > 4:
+        next_char = lower[4]
+        if next_char in {" ", ".", ":", "-", "—", "–", ",", ";"}:
+            return "ship"
+    return ""
+
+
 def _review_verdict_from_message(message: str) -> str:
     """Return ``ship`` or a non-ship verdict parsed from a review message.
 
     This is intentionally a lightweight free-form parser: explicit verdict
     lines may have markdown/bullet prefixes and varied casing, but paraphrases
     such as "looks good" or "approved" fail closed so reviewer cleanup does
-    not fire from an ambiguous message.
+    not fire from an ambiguous message. An inline final label is allowed only
+    after a sentence boundary, never by arbitrary substring matching.
     """
     for line in reversed(str(message or "").splitlines()):
         text = _normalized_review_verdict_line(line)
         if not text:
             continue
-        lower = text.lower().strip(" .")
-        if lower.startswith("ship with fixes"):
-            return "ship_with_fixes"
-        if lower.startswith(("needs rework", "needs changes", "blocker")):
-            return "needs_rework"
-        if lower == "revert" or (
-                lower.startswith("revert")
-                and len(lower) > len("revert")
-                and lower[len("revert")] in {
-                    " ", ":", "-", "—", "–", ",", ";",
-                }):
-            return "needs_rework"
-        if lower == "ship" or lower == "ship it":
-            return "ship"
-        if lower.startswith("ship") and len(lower) > 4:
-            next_char = lower[4]
-            if next_char in {" ", ".", ":", "-", "—", "–", ",", ";"}:
-                return "ship"
+        verdict = _review_verdict_from_text(text)
+        if verdict:
+            return verdict
+        verdict = _review_verdict_from_text(
+            _inline_final_review_verdict_text(line))
+        if verdict:
+            return verdict
     return ""
 
 
