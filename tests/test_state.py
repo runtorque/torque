@@ -3500,6 +3500,92 @@ class MatrixStateCleanupTests(unittest.TestCase):
         )
 
 
+class MatrixStateTaskBacklinkHydrationTests(unittest.TestCase):
+    """Cold-load regression coverage for the derived agent→task backlink."""
+
+    def setUp(self):
+        _install_aiohttp_stub()
+        self.state_mod = importlib.import_module("torque.state")
+        self.state_mod = importlib.reload(self.state_mod)
+
+    def _new_persisted_state(self):
+        from torque.db import TorqueDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+
+        state = self.state_mod.MatrixState(db=db)
+        worker = self.state_mod.AgentCell(
+            id="worker-synthetic",
+            name="Synthetic Worker",
+            group="g",
+            kind="worker",
+            cell_type="agent",
+            current_task_id="stale-ephemeral-value",
+        )
+        state.agents[worker.id] = worker
+        state.groups["g"] = [worker.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            dispatch_lane="In Progress",
+        )
+        state._db_save_groups()
+        state._db_save_group_settings("g")
+        state._db_save_agent(worker)
+        return db, state, worker
+
+    def test_cold_load_rehydrates_live_assigned_task_backlink(self):
+        db, state, worker = self._new_persisted_state()
+        live = state.board_add_task(
+            "Synthetic live dispatch",
+            "g",
+            lane="In Progress",
+            id="TASK-LIVE",
+            action_name="feature/implement",
+            agent_id=worker.id,
+        )
+        self.assertIsNotNone(live)
+
+        reloaded = self.state_mod.MatrixState(db=db)
+        reloaded.load()
+
+        restored = reloaded.agents[worker.id]
+        self.assertEqual(restored.status, "stopped")
+        self.assertEqual(restored.current_task_id, live.id)
+
+    def test_cold_load_does_not_restore_terminal_or_workerless_backlinks(self):
+        db, state, worker = self._new_persisted_state()
+        terminal = state.board_add_task(
+            "Synthetic completed dispatch",
+            "g",
+            lane="Done",
+            id="TASK-DONE",
+            agent_id=worker.id,
+        )
+        child = state.board_add_task(
+            "Synthetic workerless derived child",
+            "g",
+            lane="In Progress",
+            id="TASK-CHILD",
+            parent_task_id=terminal.id,
+            pipeline_root_id=terminal.id,
+            pipeline_depth=1,
+            action_name="feature/review",
+        )
+        self.assertIsNotNone(terminal)
+        self.assertIsNotNone(child)
+        self.assertEqual(child.agent_id, "")
+
+        reloaded = self.state_mod.MatrixState(db=db)
+        reloaded.load()
+
+        self.assertEqual(reloaded.agents[worker.id].current_task_id, "")
+        self.assertEqual(reloaded.board_tasks[child.id].agent_id, "")
+
+
+
 class MatrixStateDurableSettingsTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         _install_aiohttp_stub()
