@@ -131,6 +131,29 @@ class LegacyReviewCardinalityTests(unittest.TestCase):
         self.assertFalse(result["eligible"])
         self.assertIn("declared count=2", result["explanations"][0])
 
+    def test_declared_legacy_root_created_done_is_relaned_and_reports_shortfall(self):
+        root = self.state.board_add_task(
+            "Implement feature", "g", id="created-done", lane="Done",
+            action_name="feature/implement", agent_id="implementer",
+            required_review_gates=self._two_gates(),
+        )
+
+        self.assertNotEqual(root.lane, "Done")
+        status = self.review_mod._legacy_review_cardinality_status(self.state, root)
+        self.assertEqual(status["declared_count"], 2)
+        self.assertEqual(status["satisfied_count"], 0)
+        self.assertEqual(status["shortfall"], 2)
+        self.assertFalse(status["eligible"])
+
+    def test_empty_legacy_root_created_done_retains_existing_behavior(self):
+        root = self.state.board_add_task(
+            "Legacy direct Done", "g", id="empty-created-done", lane="Done",
+            action_name="feature/implement", agent_id="implementer",
+            required_review_gates=[],
+        )
+
+        self.assertEqual(root.lane, "Done")
+
     def test_empty_declaration_retains_legacy_any_ship_cascade(self):
         root = self._root([])
         review = self._review(root, "review-1", "reviewer-1")

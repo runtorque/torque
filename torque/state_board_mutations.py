@@ -138,11 +138,12 @@ class BoardMutationMixin:
                 "created_at", "updated_at", "lane_entered_at")},
         )
         self.board_tasks[tid] = bt
-        # Creation is a Done attempt too.  An opt-in root never enters Done
-        # until the same canonical evaluator accepts it; derived review tasks
-        # remain free to close normally and drive their parent cascade.
-        if (lane == "Done" and self._is_finalization_root(bt)
-                and normalize_mode(getattr(bt, "finalization_mode", "legacy")) != "legacy"):
+        # Creation is a Done attempt too. A root never enters Done until the
+        # canonical admission guard accepts it; this includes opt-in legacy
+        # review-cardinality declarations while empty legacy cards retain
+        # their historical direct-Done behavior. Derived review tasks remain
+        # free to close normally and drive their parent cascade.
+        if lane == "Done" and self._is_finalization_root(bt):
             # Keep the task out of Done even transiently while we audit the
             # requested transition.  A client can never observe an ineligible
             # policy root in Done and then watch it be repaired.
