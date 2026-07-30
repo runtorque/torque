@@ -280,7 +280,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
     def _make_cell(value):
         return (lambda x: lambda: x)(value).__closure__[0]
 
-    def _extract_server_handle_command(self):
+    def _extract_server_handle_command(self, *, board_sync_manager=None):
         """Return the real server handle_command closure for live-path tests."""
         main_code = self.server_mod.main.__code__
         handle_code = next(
@@ -322,7 +322,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "_resolve_base_dir": noop_async,
             "_runtime_payload": lambda: {},
             "action_mgr": None,
-            "board_sync_manager": None,
+            "board_sync_manager": board_sync_manager,
             "bridge": DummyBridge(),
             "db": self.db,
             "handle_command": None,
@@ -349,11 +349,14 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def _call_with_server_handle(
-            self, tool_name: str, args: dict, caller_id: str):
+            self, tool_name: str, args: dict, caller_id: str,
+            *, board_sync_manager=None):
         return await self.mcp_architect_mod._dispatch_architect_tool(
             tool_name,
             args,
-            self._extract_server_handle_command(),
+            self._extract_server_handle_command(
+                board_sync_manager=board_sync_manager,
+            ),
             self.state,
             caller_id=caller_id,
         )
@@ -3293,6 +3296,191 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updated.task, "Final title")
         self.assertEqual(updated.description, "Final description")
         self.assertEqual(updated.labels, ["final"])
+
+    async def test_architect_task_update_rejects_known_tracked_provider_title_limit(self):
+        """The static GitHub constraint refuses before mutation or queueing."""
+        architect = self._add_architect("arch-title-limit", "Architect")
+        self.state.update_group_settings(
+            "torque",
+            board_sync_provider="github",
+            board_sync_enabled=True,
+        )
+        task = self._add_task(
+            "task-title-limit",
+            "Original title",
+            description="Original description",
+            provider="github",
+            external_id="owner/repo#1",
+            created_by_architect_id=architect.id,
+        )
+
+        class FakeBoardSyncManager:
+            def __init__(self):
+                self.calls = []
+
+            def enqueue_for_local_change(self, task_id, *, reason, fields):
+                self.calls.append((task_id, reason, tuple(fields)))
+
+        manager = FakeBoardSyncManager()
+        rejected, rejected_is_error = await self._call_with_server_handle(
+            "architect_task_update",
+            {"task": task.id, "title": "x" * 257},
+            architect.id,
+            board_sync_manager=manager,
+        )
+        self.assertTrue(rejected_is_error)
+        self.assertIn("GitHub board sync", rejected)
+        self.assertIn("256", rejected)
+        self.assertEqual(self.state.board_tasks[task.id].task, "Original title")
+        self.assertEqual(manager.calls, [])
+
+        accepted, accepted_is_error = await self._call_with_server_handle(
+            "architect_task_update",
+            {"task": task.id, "title": "Normal title"},
+            architect.id,
+            board_sync_manager=manager,
+        )
+        self.assertFalse(accepted_is_error, accepted)
+        self.assertEqual(self.state.board_tasks[task.id].task, "Normal title")
+        self.assertEqual(
+            manager.calls,
+            [(task.id, "task_update", ("task",))],
+        )
+
+    async def test_architect_task_update_rejects_auto_tracked_title_but_allows_opt_out(self):
+        architect = self._add_architect("arch-auto-title-limit", "Architect")
+        self.state.update_group_settings(
+            "torque",
+            board_sync_provider="github",
+            board_sync_enabled=True,
+            board_sync_github={"github_sync_default": "all"},
+        )
+        auto_tracked = self._add_task(
+            "task-auto-title-limit",
+            "Original title",
+            created_by_architect_id=architect.id,
+        )
+        self.assertEqual(auto_tracked.board_sync, {})
+        self.assertEqual(auto_tracked.provider, "")
+        self.assertEqual(auto_tracked.external_id, "")
+
+        rejected, rejected_is_error = await self._call(
+            "architect_task_update",
+            {"task": auto_tracked.id, "title": "x" * 257},
+            architect.id,
+        )
+        self.assertTrue(rejected_is_error)
+        self.assertIn("GitHub board sync", rejected)
+        self.assertEqual(auto_tracked.task, "Original title")
+
+        opted_out = self._add_task(
+            "task-auto-title-opt-out",
+            "Original opt-out title",
+            board_sync={"enabled": False},
+            created_by_architect_id=architect.id,
+        )
+        accepted, accepted_is_error = await self._call(
+            "architect_task_update",
+            {"task": opted_out.id, "title": "x" * 257},
+            architect.id,
+        )
+        self.assertFalse(accepted_is_error, accepted)
+        self.assertEqual(opted_out.task, "x" * 257)
+
+    async def test_architect_task_update_allows_existing_long_title_non_title_edits_and_shortening(self):
+        architect = self._add_architect("arch-existing-long", "Architect")
+        self.state.update_group_settings(
+            "torque",
+            board_sync_provider="github",
+            board_sync_enabled=True,
+        )
+        task = self._add_task(
+            "task-existing-long",
+            "x" * 257,
+            description="Original description",
+            provider="github",
+            external_id="owner/repo#2",
+            created_by_architect_id=architect.id,
+        )
+
+        description_result, description_error = await self._call(
+            "architect_task_update",
+            {"task": task.id, "description": "Still editable"},
+            architect.id,
+        )
+        self.assertFalse(description_error, description_result)
+        self.assertEqual(self.state.board_tasks[task.id].task, "x" * 257)
+        self.assertEqual(self.state.board_tasks[task.id].description, "Still editable")
+
+        title_result, title_error = await self._call(
+            "architect_task_update",
+            {"task": task.id, "title": "Short repair"},
+            architect.id,
+        )
+        self.assertFalse(title_error, title_result)
+        self.assertEqual(self.state.board_tasks[task.id].task, "Short repair")
+
+    async def test_architect_task_update_allows_long_title_without_active_known_provider_limit(self):
+        architect = self._add_architect("arch-no-sync-limit", "Architect")
+        task = self._add_task(
+            "task-no-sync-limit",
+            "Original title",
+            created_by_architect_id=architect.id,
+        )
+        for provider, enabled in (("github", False), ("none", True), ("unknown", True)):
+            with self.subTest(provider=provider, enabled=enabled):
+                self.state.update_group_settings(
+                    "torque",
+                    board_sync_provider=provider,
+                    board_sync_enabled=enabled,
+                )
+                text, is_error = await self._call(
+                    "architect_task_update",
+                    {"task": task.id, "title": "x" * 257},
+                    architect.id,
+                )
+                self.assertFalse(is_error, text)
+                self.assertEqual(self.state.board_tasks[task.id].task, "x" * 257)
+
+    async def test_architect_task_update_uses_static_limit_without_provider_reachability(self):
+        from torque.board_sync import BoardSyncFieldConstraints
+
+        architect = self._add_architect("arch-static-limit", "Architect")
+        self.state.update_group_settings(
+            "torque",
+            board_sync_provider="github",
+            board_sync_enabled=True,
+        )
+        task = self._add_task(
+            "task-static-limit",
+            "Original title",
+            provider="github",
+            external_id="external-1",
+            created_by_architect_id=architect.id,
+        )
+
+        class OfflineProvider:
+            name = "offline-static"
+
+            def field_constraints(self):
+                return BoardSyncFieldConstraints(title_max_length=3)
+
+            async def preflight(self, _settings):  # pragma: no cover - must not run
+                raise AssertionError("title validation must not preflight")
+
+        with mock.patch(
+                "torque.server_board_sync.get_provider",
+                return_value=OfflineProvider()) as provider_lookup:
+            text, is_error = await self._call(
+                "architect_task_update",
+                {"task": task.id, "title": "four"},
+                architect.id,
+            )
+
+        self.assertTrue(is_error)
+        self.assertIn("Offline Static board sync", text)
+        provider_lookup.assert_called_once_with("github")
+        self.assertEqual(self.state.board_tasks[task.id].task, "Original title")
 
     async def test_architect_task_update_refuses_only_while_dispatch_stream_is_active(self):
         creator = self._add_architect("arch-creator", "Creator")

@@ -13,6 +13,9 @@ from typing import Any, Awaitable, Callable, Sequence
 from urllib.parse import urlparse
 
 from ..config import log
+from . import BoardSyncFieldConstraints
+
+GITHUB_ISSUE_TITLE_MAX_LENGTH = 256
 
 _TORQUE_MARKER_RE = re.compile(
     r"<!--\s*torque-sync:v(?P<version>\d+)\s+task_id=(?P<task_id>[^\s>]+)"
@@ -487,6 +490,13 @@ class GitHubBoardSyncProvider:
     """GitHub implementation of the BoardSyncProvider protocol."""
 
     name = "github"
+    display_name = "GitHub"
+
+    def field_constraints(self) -> BoardSyncFieldConstraints:
+        """Known GitHub Issue field limits; this never calls GitHub."""
+        return BoardSyncFieldConstraints(
+            title_max_length=GITHUB_ISSUE_TITLE_MAX_LENGTH,
+        )
 
     def __init__(self, runner: GhRunner | None = None, cwd: str | None = None):
         self.runner = runner or default_gh_runner

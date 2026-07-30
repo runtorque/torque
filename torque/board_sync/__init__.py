@@ -31,10 +31,25 @@ class BoardSyncProviderError(Exception):
         }
 
 
+@dataclass(frozen=True)
+class BoardSyncFieldConstraints:
+    """Static outbound field limits exposed by a board-sync provider.
+
+    These are deliberately configuration- and reachability-independent: a
+    write guard must not perform a provider call merely to learn whether a
+    value would be accepted later by the asynchronous sync worker.
+    """
+
+    title_max_length: int | None = None
+
+
 class BoardSyncProvider(Protocol):
     """Contract implemented by board-sync adapters."""
 
     name: str
+
+    def field_constraints(self) -> BoardSyncFieldConstraints:
+        """Return known static limits for values sent to this provider."""
 
     async def preflight(self, group_settings: "GroupSettings") -> dict:
         """Return provider reachability/configuration metadata."""
@@ -94,6 +109,11 @@ class _StructuredErrorProvider:
         if self._skipped:
             result["skipped"] = True
         return result
+
+    def field_constraints(self) -> BoardSyncFieldConstraints:
+        # Unknown/disabled providers intentionally expose no deterministic
+        # limit. Their availability must never make a local task unwritable.
+        return BoardSyncFieldConstraints()
 
     async def preflight(self, _group_settings) -> dict:
         return self._result("provider_lookup")
@@ -186,10 +206,39 @@ def get_provider(name: str) -> BoardSyncProvider:
     return factory
 
 
+def title_validation_error(provider: BoardSyncProvider, title: str) -> str:
+    """Return a deterministic title-limit refusal, without provider I/O.
+
+    Providers opt into this guard by exposing a positive static title limit.
+    An unknown provider or an adapter without such a limit remains writable.
+    """
+    constraints_getter = getattr(provider, "field_constraints", None)
+    if not callable(constraints_getter):
+        # Third-party adapters written before static constraints were added
+        # retain the existing permissive behavior until they opt in.
+        return ""
+    constraints = constraints_getter()
+    limit = constraints.title_max_length
+    if not isinstance(limit, int) or limit <= 0 or len(title) <= limit:
+        return ""
+    provider_name = str(getattr(provider, "name", "board sync") or "board sync")
+    provider_label = str(
+        getattr(provider, "display_name", "") or ""
+    ).strip()
+    if not provider_label:
+        provider_label = provider_name.replace("_", " ").replace("-", " ").title()
+    return (
+        f"Title is {len(title)} characters; {provider_label} board sync "
+        f"supports at most {limit} characters for tracked task titles."
+    )
+
+
 __all__ = [
     "BoardSyncProvider",
+    "BoardSyncFieldConstraints",
     "BoardSyncProviderError",
     "get_provider",
     "normalize_provider_name",
     "register_provider",
+    "title_validation_error",
 ]
