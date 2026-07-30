@@ -496,6 +496,22 @@ ENGINEER_TOOLS = [
                     "items": {"type": "string"},
                     "description": "Task labels.",
                 },
+                "required_review_gates": {
+                    "type": "array",
+                    "description": (
+                        "Optional durable legacy review-cardinality declaration. "
+                        "Each named gate requires a distinct independent Ship "
+                        "review before the root can close."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "role": {"type": "string"},
+                        },
+                        "required": ["id"],
+                    },
+                },
                 "verification_mode": {
                     "type": "string",
                     "enum": ["", "deploy", "restart"],
@@ -566,6 +582,21 @@ ENGINEER_TOOLS = [
                     "type": "object",
                     "description": "New action variable values.",
                     "additionalProperties": {"type": "string"},
+                },
+                "required_review_gates": {
+                    "type": "array",
+                    "description": (
+                        "Replacement durable review-cardinality declaration. "
+                        "Amend only after stopping and re-laning dispatched work."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "role": {"type": "string"},
+                        },
+                        "required": ["id"],
+                    },
                 },
                 "verification_mode": {
                     "type": "string",

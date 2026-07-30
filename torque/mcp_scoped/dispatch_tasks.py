@@ -9,6 +9,7 @@ from torque.agent_classes import (
     has_frozen_platform_task_authority_mode,
 )
 from torque.config import log
+from torque.finalization import normalize_required_review_gates
 from torque.mcp_scoped.dispatch_context import ScopedDispatchContext, UNHANDLED
 from torque.mcp_scoped.dispatch_runtime import *  # noqa: F403
 
@@ -45,6 +46,21 @@ def _orphaned_task_worker_count(state) -> int:
             if owner_engineer_id != assigned_engineer_id:
                 count += 1
     return count
+
+
+def _required_review_gates_arg(args: dict) -> tuple[list | None, str]:
+    """Validate the durable cardinality declaration exposed by task tools."""
+    if "required_review_gates" not in args:
+        return None, ""
+    value = args.get("required_review_gates")
+    if not isinstance(value, list):
+        return None, "required_review_gates must be a list"
+    normalized = normalize_required_review_gates(value)
+    if len(normalized) != len(value):
+        return None, (
+            "required_review_gates entries require unique non-empty id values"
+        )
+    return normalized, ""
 
 async def dispatch_tasks(ctx: ScopedDispatchContext):
     name = ctx.name
@@ -84,6 +100,9 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         )
 
     if tool_name == "task_create":
+        required_review_gates, gates_error = _required_review_gates_arg(args)
+        if gates_error:
+            return gates_error, True
         if caller_kind == "architect":
             title = str(args.get("title", "") or "").strip()
             if not title:
@@ -150,6 +169,8 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
                 "labels": args.get("labels", []),
                 "assigned_engineer_id": assigned_engineer_id,
             }
+            if required_review_gates is not None:
+                architect_create_payload["required_review_gates"] = required_review_gates
             architect_deliverable = args.get("deliverable")
             if isinstance(architect_deliverable, dict):
                 architect_create_payload["deliverable"] = architect_deliverable
@@ -231,6 +252,8 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
             "assigned_engineer_id": str(caller_id or "").strip(),
             "created_by_engineer_id": str(caller_id or "").strip(),
         }
+        if required_review_gates is not None:
+            payload["required_review_gates"] = required_review_gates
         engineer_deliverable = args.get("deliverable")
         if isinstance(engineer_deliverable, dict):
             payload["deliverable"] = engineer_deliverable
@@ -385,6 +408,12 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
                 return "action_vars must be an object", True
             patch["action_vars"] = copy.deepcopy(action_vars)
             updated_fields.append("action_vars")
+        required_review_gates, gates_error = _required_review_gates_arg(args)
+        if gates_error:
+            return gates_error, True
+        if required_review_gates is not None:
+            patch["required_review_gates"] = required_review_gates
+            updated_fields.append("required_review_gates")
         if "suggested_action" in args:
             suggested_action = str(args.get("suggested_action", "") or "").strip()
             suggested_action_error = await _validate_suggested_action(
@@ -635,6 +664,16 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         tid = _resolve_task(state, args.get("task", ""))
         if not tid:
             return "Task not found", True
+        required_review_gates, gates_error = _required_review_gates_arg(args)
+        if gates_error:
+            return gates_error, True
+        if required_review_gates is not None:
+            task = real_state.board_tasks.get(tid)
+            if str(getattr(task, "dispatch_state", "queued") or "queued").strip().lower() == "live":
+                return (
+                    "Task is dispatched. Stop the work and move the task to "
+                    "Backlog or To Do before editing it."
+                ), True
         payload = {"cmd": "board_update_task", "id": tid}
         if "title" in args:
             payload["task"] = args["title"]
@@ -646,6 +685,8 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
             payload["action_name"] = args["action"]
         if "action_vars" in args:
             payload["action_vars"] = args["action_vars"]
+        if required_review_gates is not None:
+            payload["required_review_gates"] = required_review_gates
         for key in (
             "verification_mode",
             "verification_state",

@@ -700,12 +700,31 @@ class BoardMutationMixin:
         from .server_review import _task_has_shipped_review_descendant
         return _task_has_shipped_review_descendant(self, task)
 
+    def _legacy_review_cardinality_status(self, task: BoardTask) -> dict:
+        """Evaluate the opt-in legacy cardinality declaration without prose."""
+        from .server_review import _legacy_review_cardinality_status
+        return _legacy_review_cardinality_status(self, task)
+
     def _finalization_done_allowed(self, task: BoardTask, *, caller: str) -> tuple[bool, dict]:
         """Evaluate/audit the root immediately before any Done mutation."""
         root_id = str(getattr(task, "pipeline_root_id", "") or "").strip()
         root = self.board_tasks.get(root_id, task) if root_id else task
         result = self._sync_finalization_projection(root)
         if normalize_mode(getattr(root, "finalization_mode", "legacy")) == "legacy":
+            cardinality = self._legacy_review_cardinality_status(root)
+            if cardinality["declared_count"] and not cardinality["eligible"]:
+                from .server_review import _legacy_review_cardinality_error
+                return False, {
+                    "eligible": False,
+                    "mode": "legacy",
+                    "stage": "reviewing",
+                    "boundary": "",
+                    "missing_gates": ["legacy_review_cardinality_shortfall"],
+                    "explanations": [
+                        _legacy_review_cardinality_error(cardinality)
+                    ],
+                    **cardinality,
+                }
             return True, result
         outcome = "success" if result.get("eligible") else "blocked"
         entry = audit_entry(result, caller=caller, outcome=outcome)
@@ -1143,12 +1162,14 @@ class BoardMutationMixin:
             # six-condition policy.  Cascade is nevertheless the one root-Done
             # writer that does not first pass through the mandatory review
             # command gate, so enforce that pre-existing contract here.
-            if (
-                    normalize_mode(getattr(
-                        parent, "finalization_mode", "legacy")) == "legacy"
-                    and not self._legacy_review_gate_is_satisfied(parent)
-            ):
-                break
+            if normalize_mode(getattr(
+                    parent, "finalization_mode", "legacy")) == "legacy":
+                cardinality = self._legacy_review_cardinality_status(parent)
+                if cardinality["declared_count"]:
+                    if not cardinality["eligible"]:
+                        break
+                elif not self._legacy_review_gate_is_satisfied(parent):
+                    break
             allowed, _result = self._finalization_done_allowed(
                 parent, caller="board_cascade_done"
             )

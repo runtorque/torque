@@ -3291,6 +3291,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "labels": list(dispatched.labels),
             "action_name": dispatched.action_name,
             "action_vars": dict(dispatched.action_vars),
+            "required_review_gates": list(dispatched.required_review_gates),
             "updated_at": dispatched.updated_at,
         }
         rejected_patch = {
@@ -3300,6 +3301,9 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "labels": ["amended"],
             "action_name": "oneshot/fix",
             "action_vars": {"amended": "value"},
+            "required_review_gates": [
+                {"id": "review-one"}, {"id": "review-two"},
+            ],
         }
 
         for caller_id in (creator.id, execution_architect.id):
@@ -3335,9 +3339,13 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(refused.labels, before_refusal["labels"])
         self.assertEqual(refused.action_name, before_refusal["action_name"])
         self.assertEqual(refused.action_vars, before_refusal["action_vars"])
+        self.assertEqual(
+            refused.required_review_gates,
+            before_refusal["required_review_gates"],
+        )
         self.assertEqual(refused.updated_at, before_refusal["updated_at"])
         persisted_refused = self.db.load_all()["board_tasks"][dispatched.id]
-        for field in ("task", "description", "labels", "action_name", "action_vars", "updated_at"):
+        for field in ("task", "description", "labels", "action_name", "action_vars", "required_review_gates", "updated_at"):
             with self.subTest(persisted_field=field):
                 self.assertEqual(persisted_refused[field], before_refusal[field])
 
@@ -3366,6 +3374,10 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resumed.labels, ["amended"])
         self.assertEqual(resumed.action_name, "oneshot/fix")
         self.assertEqual(resumed.action_vars, {"amended": "value"})
+        self.assertEqual(
+            resumed.required_review_gates,
+            [{"id": "review-one", "role": ""}, {"id": "review-two", "role": ""}],
+        )
 
     async def test_architect_task_update_sets_action_fields_and_rejects_unknown(self):
         architect = self._add_architect("arch-1", "Architect")
