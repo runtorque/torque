@@ -311,18 +311,18 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             id="other-closed", name="Other", group="g",
             kind="worker", cell_type="agent",
         )
+        owner = self.state_mod.AgentCell(
+            id="owner", name="Owner", group="g",
+            kind="engineer", cell_type="agent",
+        )
         architect = self.state_mod.AgentCell(
             id="architect-closed", name="Architect", group="g",
             kind="architect", cell_type="agent",
         )
-        for cell in (reviewer, other, architect):
-            cell.effective_agent_class_snapshot = {
-                "effective_authority": {
-                    "base_kind": cell.kind,
-                    "acl_mode": "deny",
-                    "capabilities": {"task.review.amend": "self"},
-                },
-            }
+        for cell in (reviewer, other, owner, architect):
+            state.apply_effective_agent_class_for_launch(
+                cell, base_dir=str(Path(__file__).resolve().parents[1]),
+            )
             state.agents[cell.id] = cell
         task = state.board_add_task(
             "Merged completed review", "g", id="TORQUE:amend-closed",
@@ -358,8 +358,8 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             task.completion_evidence["review"]["amendments"][0]["amended_by_id"],
             reviewer.id,
         )
-        for cell, request_id in ((other, 2), (architect, 3)):
-            with self.subTest(caller=cell.kind):
+        for cell, request_id in ((other, 2), (owner, 3), (architect, 4)):
+            with self.subTest(caller=cell.name):
                 response, status = await call(cell, request_id)
                 self.assertEqual(status, 200)
                 self.assertIn("error", response)

@@ -580,6 +580,11 @@ def _handler_scoped_target_scope(
                 == str(getattr(caller_cell, "id", "") or "").strip()
         ):
             return "self"
+        # This correction capability has no generic task-owner fallback.
+        # Returning a non-self scope makes the public gate deny assigned
+        # engineers, architects, and every other non-reviewer before the
+        # writer, preserving its single durable reviewer relationship.
+        return "global"
     # Legacy Worker asks were created before their assigned-Engineer stamp.
     # The existing task resolver is the sole write route that may derive
     # self-scope from the reply Worker, and only while that exact ask remains
