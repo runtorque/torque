@@ -6268,6 +6268,47 @@ class ServerReviewMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
                     "",
                 )
 
+    def test_inline_final_verdict_blockquote_safety_matrix(self):
+        for quoted in (False, True):
+            for prior_prose in (False, True):
+                for terminal in (False, True):
+                    prefix = "> " if quoted else ""
+                    prior = "Blocking issues: None. " if prior_prose else ""
+                    trailing = "" if terminal else " Narrative continues."
+                    message = (
+                        f"{prefix}{prior}Final review verdict: Ship."
+                        f"{trailing}"
+                    )
+                    # Standalone verdict syntax retains its established
+                    # trailing-detail behavior. Inline support is narrower:
+                    # it must be terminal, and all blockquoted text is
+                    # illustrative rather than authoritative.
+                    expected = (
+                        "" if quoted or (prior_prose and not terminal)
+                        else "ship"
+                    )
+                    with self.subTest(
+                            quoted=quoted,
+                            prior_prose=prior_prose,
+                            terminal=terminal):
+                        self.assertEqual(
+                            self.server_mod._review_verdict_from_message(
+                                message),
+                            expected,
+                        )
+
+        # The conservative inline mechanism requires the complete label and
+        # delimiter; a missing colon is not rescued by the sentence boundary.
+        for message in (
+                "Blocking issues: None. Final review verdict Ship.",
+                "> Blocking issues: None. Final review verdict Ship.",
+        ):
+            with self.subTest(incomplete_label=message):
+                self.assertEqual(
+                    self.server_mod._review_verdict_from_message(message),
+                    "",
+                )
+
     def test_review_verdict_payload_parses_full_report_before_storing_summary(self):
         review_task = self.state_mod.BoardTask(
             id="TORQUE:long-review",
