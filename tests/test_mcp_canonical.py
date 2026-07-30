@@ -686,13 +686,11 @@ class CanonicalMCPContractTests(unittest.TestCase):
         ]["inputSchema"]["properties"]
         self.assertNotIn("covering_task_id", covered_properties)
 
-    def test_depth_zero_combinator_debt_is_inventory_locked(self):
-        """Keep new public schemas from reintroducing top-level combinators.
+    def test_depth_zero_combinator_inventory_is_exact_per_kind(self):
+        """Lock the emitted depth-zero combinator set for every caller kind.
 
-        Part A deliberately flattens only ``behavior_overlay_propose``.  The
-        remaining entries are pre-existing, separately scoped debt, so lock
-        their exact inventory until their mechanical follow-up is scheduled.
-        ``task_list`` remains the nested-combinator control.
+        ``behavior_overlay_propose`` must be absent from every set. The
+        nested ``task_list`` combinator remains the negative control.
         """
         expected_depth_zero = {
             "worker": {"help_search"},
