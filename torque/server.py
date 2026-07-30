@@ -889,28 +889,6 @@ def _log_path_for_target(target: str) -> tuple[str, Path]:
 
 
 
-def _promote_suggested_action(state, task):
-    """Promote ``suggested_action`` -> ``action_name`` when empty.
-
-    Architects set ``suggested_action`` as a non-binding hint. Workers
-    only inherit the action's deliverable contract / template / transitions
-    once ``action_name`` is recorded on the task. If the dispatch flow
-    skips this promotion, contract enforcement is silently bypassed
-    (TORQUE:262). Returns the (possibly refreshed) task.
-    """
-    if not task:
-        return task
-    if str(getattr(task, "action_name", "") or "").strip():
-        return task
-    suggested = str(getattr(task, "suggested_action", "") or "").strip()
-    if not suggested:
-        return task
-    state.board_update_task(task.id, action_name=suggested)
-    return state.board_tasks.get(task.id) or task
-
-
-
-
 def _relay_snapshot_group(state: MatrixState) -> str:
     """Return the group used for relay snapshots, matching roster semantics."""
     group = str(getattr(state, "active_group", "") or "").strip()
@@ -3140,7 +3118,6 @@ def _build_task_dispatch_runtime(
         new_agent_prompt_sequence=_new_agent_prompt_sequence,
         owner_is_user_from_ids=_owner_is_user_from_ids,
         panel_event=panel_event,
-        promote_suggested_action=_promote_suggested_action,
         record_task_dispatch=record_task_dispatch,
         resolve_base_dir=resolve_base_dir,
         resolve_inherited_worktree_source=_resolve_inherited_worktree_source,

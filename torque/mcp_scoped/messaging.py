@@ -7,6 +7,10 @@ import time
 import uuid
 
 from torque.config import log
+from torque.commands.task_dispatch import (
+    ACTION_BINDING_REQUIRED_FOR_DISPATCH,
+    task_has_action_binding,
+)
 from torque.persistence.agent_history import canonical_user_agent_thread_id
 from torque.identity import prepend_agent_identity_anchor
 from torque.mcp_engineer_tools.shared import resolve_task as _resolve_task
@@ -469,6 +473,8 @@ async def _send_architect_engineer_message(real_state, handle_command,
         )
         if not dispatch_task:
             return None, task_error
+        if not task_has_action_binding(dispatch_task):
+            return None, ACTION_BINDING_REQUIRED_FOR_DISPATCH
     if dispatch_task:
         message = _architect_dispatch_message_for_task(dispatch_task, message)
     if not message:
