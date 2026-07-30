@@ -654,6 +654,46 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Unknown tool", denied.payload["error"]["message"])
         self.assertEqual(before, (other_task.task, other_task.lane, list(other_task.messages)))
 
+    async def test_closed_root_recovery_matrix_is_caller_class_specific(self):
+        """Standard Architect ownership is narrow; PM retains full group board authority."""
+        self._freeze_default_architect(self.full_peer)
+        created = self.state.board_add_task(
+            "Created closed root", "g", lane="Done",
+            created_by_architect_id=self.full_peer.id,
+        )
+        preclaimed = self.state.board_add_task(
+            "Preclaimed closed root", "g", lane="Done",
+            assigned_architect_id=self.full_peer.id,
+        )
+        neither = self.state.board_add_task("Unowned closed root", "g", lane="Done")
+        for task in (created, preclaimed):
+            moved = await self._call(
+                "task_move", {"task": task.id, "new_lane": "In Progress"},
+                agent_id=self.full_peer.id,
+            )
+            self.assertEqual("task_moved", self._result_payload(moved)["type"])
+            self.assertEqual("In Progress", task.lane)
+        denied = await self._call(
+            "task_move", {"task": neither.id, "new_lane": "In Progress"},
+            req_id=3, agent_id=self.full_peer.id,
+        )
+        self.assertIn("outside this caller's authorized scope", self._error_text(denied))
+        self.assertEqual("Done", neither.lane)
+        claim = await self._call(
+            "task_claim", {"task": neither.id}, req_id=4,
+            agent_id=self.full_peer.id,
+        )
+        self.assertIn("authorization denied", self._error_text(claim).lower())
+        self.assertEqual("", neither.assigned_architect_id)
+        # The trusted Product Manager class is intentionally full-board within
+        # its group, including the no-owner recovery escalation.
+        pm_move = await self._call(
+            "task_move", {"task": neither.id, "new_lane": "In Progress"},
+            req_id=5, agent_id=self.architect.id,
+        )
+        self.assertEqual("task_moved", self._result_payload(pm_move)["type"])
+        self.assertEqual("In Progress", neither.lane)
+
     async def test_pm_task_update_refuses_dispatched_same_group_task(self):
         self.worker.status = "running"
         self.state._db_save_agent(self.worker)
