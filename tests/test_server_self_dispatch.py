@@ -1916,6 +1916,8 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         for index, message in enumerate((
                 "Final review verdict: Revert",
                 "No verdict line can be parsed here.",
+                "Blocking issues: missing migration test. "
+                "Final review verdict: Ship.",
         ), start=1):
             with self.subTest(message=message):
                 task = state.board_add_task(
@@ -6223,18 +6225,37 @@ class ServerReviewMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
     def test_review_verdict_parser_accepts_explicit_inline_final_label_only(self):
         # TORQUE:1259:1 completed with the authoritative final label after a
         # completed prose sentence, rather than on its own line.
+        inline_message = "Blocking issues: None. Final review verdict: Ship."
         self.assertEqual(
-            self.server_mod._review_verdict_from_message(
-                "Blocking issues: None. Final review verdict: Ship."
-            ),
+            self.server_mod._review_verdict_from_message(inline_message),
+            "ship",
+        )
+        review_task = self.state_mod.BoardTask(
+            id="TORQUE:inline-ship",
+            task="Review worker change",
+            group="g",
+            action_name="feature/review",
+        )
+        self.assertEqual(
+            self.server_mod._build_review_verdict_payload(
+                task=review_task,
+                source_action="done",
+                message=inline_message,
+            )["verdict"],
             "ship",
         )
 
         # An inline label is authoritative only at a sentence boundary. Do
         # not turn quoted labels, examples, or ordinary prose into verdicts.
         for message in (
-                'The reviewer wrote "Final review verdict: Ship." in a quote.',
-                "For example, Final review verdict: Revert is a blocking form.",
+                # Markdown code and blockquotes quote an illustrative label;
+                # neither is authoritative review formatting.
+                "`Final review verdict: Revert` as an example.",
+                "> Final review verdict: Revert",
+                # A sentence boundary alone is insufficient: this remains a
+                # narrative example because the label/value is not terminal.
+                "The review guide gives an example. "
+                "Final review verdict: Revert is a blocking form.",
                 "This prose mentions the verdict word ship, but has no label.",
         ):
             with self.subTest(message=message):
