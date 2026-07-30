@@ -14,6 +14,7 @@ from torque.finalization import normalize_required_review_gates
 from torque.mcp_scoped.dispatch_context import ScopedDispatchContext, UNHANDLED
 from torque.mcp_scoped.dispatch_runtime import *  # noqa: F403
 from torque.task_dispatch_gate import active_dispatch_edit_error, task_has_active_dispatch
+from torque.server_board_sync import task_title_sync_validation_error
 
 
 def _live_workers_linked_to_task(state, task) -> list:
@@ -363,6 +364,9 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
             title = str(args.get("title", "") or "").strip()
             if not title:
                 return "title is required", True
+            title_error = task_title_sync_validation_error(real_state, task, title)
+            if title_error:
+                return title_error, True
             patch["task"] = title
             updated_fields.append("title")
         if "description" in args:
@@ -670,7 +674,7 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
             return result.get("message", "Unknown error"), True
         return json.dumps(result) if result else '{"type":"ok"}', False
 
-    if tool_name == "task_edit":
+    if tool_name in {"task_edit", "task_update"}:
         tid = _resolve_task(state, args.get("task", ""))
         if not tid:
             return "Task not found", True
@@ -683,7 +687,14 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
                 return json.dumps(active_dispatch_edit_error(task)), True
         payload = {"cmd": "board_update_task", "id": tid}
         if "title" in args:
-            payload["task"] = args["title"]
+            title = str(args["title"] or "").strip()
+            if not title:
+                return "title is required", True
+            task = real_state.board_tasks.get(tid)
+            title_error = task_title_sync_validation_error(real_state, task, title)
+            if title_error:
+                return title_error, True
+            payload["task"] = title
         if "description" in args:
             payload["description"] = args["description"]
         if "labels" in args:

@@ -1283,6 +1283,38 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(is_error)
         self.assertEqual(text, "Task not found")
 
+    async def test_engineer_task_edit_rejects_over_limit_title_for_tracked_github_task(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        state.update_group_settings(
+            "torque",
+            board_sync_provider="github",
+            board_sync_enabled=True,
+        )
+        task = self._add_task(
+            state,
+            "task-title-limit",
+            "Original",
+            assigned_engineer_id=alice.id,
+            provider="github",
+            external_id="owner/repo#1",
+        )
+
+        async def fake_handle_command(_payload):
+            self.fail("over-limit title should be rejected before mutation")
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_task_edit",
+            {"task": task.id, "title": "x" * 257},
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertIn("GitHub board sync", text)
+        self.assertEqual(task.task, "Original")
+
     async def test_engineer_task_mark_covered_records_and_moves_owned_task(self):
         state = self._make_state()
         alice = self._add_engineer(state, "eng-alice", "Alice")
