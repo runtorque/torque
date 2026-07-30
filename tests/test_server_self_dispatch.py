@@ -6252,6 +6252,10 @@ class ServerReviewMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
                 # neither is authoritative review formatting.
                 "`Final review verdict: Revert` as an example.",
                 "> Final review verdict: Revert",
+                # A blockquote may itself contain sentence-boundary prose; it
+                # still quotes an example and must never supply a verdict.
+                "> Blocking issues: None. Final review verdict: Ship.",
+                "> Quote source. Final review verdict: Revert.",
                 # A sentence boundary alone is insufficient: this remains a
                 # narrative example because the label/value is not terminal.
                 "The review guide gives an example. "

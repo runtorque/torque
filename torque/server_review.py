@@ -449,7 +449,13 @@ def _inline_final_review_verdict_text(line: str) -> str:
     than searching arbitrary prose: quoted labels and examples remain
     non-authoritative.
     """
-    match = _INLINE_FINAL_REVIEW_VERDICT_RE.search(str(line or "").strip())
+    raw_line = str(line or "")
+    # A Markdown blockquote is illustrative/quoted material even when its
+    # contents include a sentence boundary before an otherwise-valid label.
+    # Reject it before the anchored search can scan inside the quoted prose.
+    if re.match(r"^\s{0,3}>", raw_line):
+        return ""
+    match = _INLINE_FINAL_REVIEW_VERDICT_RE.search(raw_line.strip())
     return match.group("verdict").strip() if match else ""
 
 
