@@ -683,6 +683,12 @@ def _record_review_verdict_evidence(
     """Persist a structured final feature/review verdict if one is present."""
     if not state or not task:
         return {}
+    # A final review is a factual statement by its reviewer.  Do not let a
+    # repeated completion/derive report replace the first structured record;
+    # an observed parser error has the explicit append-only amendment route.
+    existing_review = _task_review_evidence(task)
+    if str(existing_review.get("verdict", "") or "").strip():
+        return existing_review
     review = _build_review_verdict_payload(
         task=task,
         cell=cell,
@@ -717,11 +723,158 @@ def _record_review_verdict_evidence(
     return review
 
 
+def _review_verdict_amendment_verdict(review: dict) -> str:
+    """Return the one valid correction, failing closed on stored corruption."""
+    if not isinstance(review, dict):
+        return ""
+    if str(review.get("verdict", "") or "").strip() != "unknown":
+        return ""
+    reviewer_id = review.get("agent_id")
+    if not isinstance(reviewer_id, str) or not reviewer_id:
+        return ""
+    amendments = review.get("amendments", []) if isinstance(review, dict) else []
+    # The durable correction contract is deliberately one-shot. A Block
+    # correction is terminal, and a corrupted/multi-row history must never
+    # make the Ship gate permissive.
+    if not isinstance(amendments, list) or len(amendments) != 1:
+        return ""
+    amendment = amendments[0]
+    if not isinstance(amendment, dict):
+        return ""
+    if (
+            str(amendment.get("original_verdict", "") or "").strip()
+            != "unknown"
+            or str(amendment.get("prior_verdict", "") or "").strip()
+            != "unknown"
+            or amendment.get("amended_by_id") != reviewer_id
+    ):
+        return ""
+    if not str(amendment.get("amended_by_name", "") or "").strip():
+        return ""
+    if not str(amendment.get("reason", "") or "").strip():
+        return ""
+    amended_at = str(amendment.get("amended_at", "") or "").strip()
+    if not amended_at:
+        return ""
+    try:
+        datetime.fromisoformat(amended_at.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    verdict = str(amendment.get("corrected_verdict", "") or "").strip()
+    return verdict if verdict in {"ship", "block", "needs_followup"} else ""
+
+
+def _amend_review_verdict_evidence(
+        state: MatrixState,
+        task,
+        *,
+        cell,
+        verdict: str,
+        reason: str,
+        timestamp: str = "",
+        append_task_msg=None,
+) -> tuple[dict, str]:
+    """Append an attributable correction to an original ``unknown`` verdict.
+
+    The parsed review object is intentionally immutable. Corrections retain it
+    and append ordered facts, so the record is writable after completion or
+    merge without becoming a silent overwrite.
+    """
+    if not state or not task or not _is_feature_review_task(task):
+        return {}, "Task has no structured feature/review verdict to amend."
+    evidence = getattr(task, "completion_evidence", {}) or {}
+    if not isinstance(evidence, dict):
+        return {}, "Task has no structured feature/review verdict to amend."
+    original_review = evidence.get("review", {}) or {}
+    if not isinstance(original_review, dict):
+        return {}, "Task has no structured feature/review verdict to amend."
+    original_verdict = str(original_review.get("verdict", "") or "").strip()
+    original_reviewer_id = original_review.get("agent_id")
+    caller_id = getattr(cell, "id", None)
+    if (
+            not isinstance(original_reviewer_id, str)
+            or not original_reviewer_id
+            or not isinstance(caller_id, str)
+            or original_reviewer_id != caller_id
+    ):
+        return {}, (
+            "Authorization denied: only the original reviewer may amend this "
+            "recorded verdict. Use review_verdict_amend from the reviewer that "
+            "recorded the verdict."
+        )
+    if original_verdict != "unknown":
+        return {}, (
+            "Review verdict amendments are supported only for an original "
+            "structured unknown verdict; recorded ship, block, and "
+            "needs_followup verdicts are immutable."
+        )
+    existing_amendments = original_review.get("amendments", [])
+    if existing_amendments:
+        return {}, (
+            "Review verdict already has an append-only amendment and cannot "
+            "be amended again; a corrected block is terminal."
+        )
+    if not isinstance(existing_amendments, list):
+        return {}, (
+            "Review verdict amendment history is malformed and cannot be "
+            "amended."
+        )
+    corrected_verdict = str(verdict or "").strip().lower()
+    if corrected_verdict not in {"ship", "block", "needs_followup"}:
+        return {}, "verdict must be one of: ship, block, needs_followup"
+    amendment_reason = _completion_evidence_text(reason, limit=2000)
+    if not amendment_reason:
+        return {}, "reason is required"
+
+    prior_verdict = (
+        _review_verdict_amendment_verdict(original_review) or original_verdict
+    )
+    amended_at = timestamp or datetime.now(timezone.utc).isoformat()
+    amendment = {
+        "original_verdict": original_verdict,
+        "prior_verdict": prior_verdict,
+        "corrected_verdict": corrected_verdict,
+        "amended_by_id": caller_id,
+        "amended_by_name": _completion_evidence_text(
+            getattr(cell, "name", ""), limit=160
+        ) or "reviewer",
+        "amended_at": amended_at,
+        "reason": amendment_reason,
+    }
+    review = dict(original_review)
+    amendments = list(review.get("amendments", []) or [])
+    amendments.append(amendment)
+    review["amendments"] = amendments
+    updated_evidence = dict(evidence)
+    updated_evidence["review"] = review
+    sources = list(updated_evidence.get("sources", []) or [])
+    if "review" not in sources:
+        sources.append("review")
+    updated_evidence["sources"] = sources
+    updated_evidence["updated_at"] = amended_at
+    updated_evidence["updated_by"] = amendment["amended_by_name"]
+    task.completion_evidence = updated_evidence
+    event_message = (
+        "Review verdict amendment: "
+        f"{prior_verdict} -> {corrected_verdict}; original={original_verdict}"
+    )
+    if append_task_msg:
+        append_task_msg(
+            task, "review_verdict_amendment", event_message,
+            amendment["amended_by_name"],
+        )
+    _save_completion_evidence_task(state, task)
+    return amendment, ""
+
+
 def _review_task_has_ship_verdict(task) -> bool:
     if not task:
         return False
     review = _task_review_evidence(task)
     verdict = str(review.get("verdict", "") or "").strip()
+    amended_verdict = _review_verdict_amendment_verdict(review)
+    if amended_verdict:
+        return amended_verdict == "ship"
     if verdict:
         return verdict == "ship"
     for entry in reversed(getattr(task, "messages", []) or []):

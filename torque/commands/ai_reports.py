@@ -169,6 +169,35 @@ async def handle_ai_report_command(
             cell,
             task_id=task_id,
         )
+        if (
+                action == "done"
+                and not task
+                and "final review verdict" in str(message or "").lower()
+        ):
+            amendable_task_ids = []
+            for candidate in state.board_tasks.values():
+                evidence = getattr(candidate, "completion_evidence", {}) or {}
+                review = evidence.get("review", {}) if isinstance(evidence, dict) else {}
+                if (
+                        isinstance(review, dict)
+                        and str(review.get("agent_id", "") or "").strip()
+                        == str(cell.id or "").strip()
+                        and str(review.get("verdict", "") or "").strip()
+                        == "unknown"
+                ):
+                    amendable_task_ids.append(candidate.id)
+            if amendable_task_ids:
+                task_list = ", ".join(sorted(amendable_task_ids)[:5])
+                result = {
+                    "type": "error",
+                    "message": (
+                        "A completed review verdict is immutable; repeating "
+                        "task_complete cannot amend it. Use "
+                        "review_verdict_amend(task=\"TASK_ID\", verdict=\"ship\", "
+                        "reason=\"...\") as the original reviewer. "
+                        f"Eligible task(s): {task_list}"
+                    ),
+                }
         derive_stream_backstop = False
         if (
             not task

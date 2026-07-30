@@ -76,6 +76,10 @@ from .mcp_scoped.action_catalog import (
     SHARED_ACTION_CATALOG_TOOL_NAMES,
     dispatch_action_catalog_tool,
 )
+from .mcp_scoped.review_verdict_amendment import (
+    REVIEW_VERDICT_AMEND_TOOL,
+    dispatch_review_verdict_amendment,
+)
 from .mcp_retry import (
     IDEMPOTENCY_HEADER,
     derive_idempotency_key,
@@ -283,6 +287,7 @@ TOOLS = [
             },
         },
     },
+    REVIEW_VERDICT_AMEND_TOOL,
     {
         "name": "torque_blocked", "authority": {"requirements": [{"capability": "task.report","minimum_scope": "self","handler_scoped": True}]},
         "description": (
@@ -1074,6 +1079,12 @@ def _raw_tools_for_caller(
         # operations such as done, derive, ready, rename, or worker reply.
         shared_names = {
             "torque_context",
+            # This path is visible to persistent callers solely so an
+            # ineligible reviewer/architect receives the same safe, useful
+            # original-reviewer-only refusal. The writer independently
+            # authorizes the recorded reviewer and never grants a mutation to
+            # another caller.
+            "torque_review_verdict_amend",
             "torque_help_list",
             "torque_help_show",
             "torque_help_search",
@@ -1677,6 +1688,12 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
         return json.dumps(result) if result else '{"type":"ok"}', False
+
+    review_verdict_result = dispatch_review_verdict_amendment(
+        name, args, cell_id, state,
+    )
+    if review_verdict_result is not None:
+        return review_verdict_result
 
     if name == "torque_message_user":
         cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None

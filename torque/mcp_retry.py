@@ -32,6 +32,7 @@ DEFAULT_HTTP_TIMEOUT = 30
 _TORQUE_WRITE_TOOLS = {
     "torque_task_upload_artifact",
     "torque_done",
+    "torque_review_verdict_amend",
     "torque_blocked",
     "torque_error",
     "torque_progress",

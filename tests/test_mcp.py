@@ -196,6 +196,227 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_review_verdict_amendment_is_attributable_and_post_merge_safe(self):
+        """An original reviewer can repair a synthetic parser unknown only."""
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        reviewer = self.state_mod.AgentCell(
+            id="reviewer-1", name="Reviewer", group="g",
+            kind="worker", cell_type="agent",
+        )
+        other = self.state_mod.AgentCell(
+            id="other-1", name="Other", group="g",
+            kind="worker", cell_type="agent",
+        )
+        state.agents[reviewer.id] = reviewer
+        state.agents[other.id] = other
+        task = state.board_add_task(
+            "Review parser correction", "g", id="TORQUE:amend-1",
+            lane="Done", action_name="feature/review", agent_id=reviewer.id,
+        )
+        task.completion_evidence = {
+            "sources": ["review", "merge"],
+            "review": {
+                # Deliberately synthetic attested shape: prose said Ship,
+                # while the structured record was misparsed as unknown.
+                "verdict": "unknown",
+                "agent_id": reviewer.id,
+                "agent_name": reviewer.name,
+                "summary": "Final review verdict: Ship",
+                "recorded_at": "2026-07-28T10:00:00+00:00",
+            },
+            "merge": {"sha": "merged-sha", "origin_verified": True},
+        }
+
+        saved = []
+        class FakeDB:
+            def save_board_task_deferred(self, current_task):
+                saved.append(json.loads(json.dumps(
+                    current_task.completion_evidence)))
+        state.db = FakeDB()
+
+        async def unexpected_command(payload):
+            self.fail(f"review_verdict_amend must not use a completion command: {payload}")
+
+        tools = self.mcp_mod._visible_tools(state, reviewer.id)
+        self.assertIn("review_verdict_amend", [tool["name"] for tool in tools])
+        response, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+            {
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": {"name": "review_verdict_amend", "arguments": {
+                    "task": task.id,
+                    "verdict": "ship",
+                    "reason": "Parser missed explicit Ship.",
+                }},
+            },
+            cell_id=reviewer.id,
+            handle_command=unexpected_command,
+            state=state,
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(response["result"]["isError"])
+        payload = json.loads(response["result"]["content"][0]["text"])
+        self.assertEqual(payload["type"], "review_verdict_amended")
+        amendment = payload["amendment"]
+        self.assertEqual(amendment["original_verdict"], "unknown")
+        self.assertEqual(amendment["prior_verdict"], "unknown")
+        self.assertEqual(amendment["corrected_verdict"], "ship")
+        self.assertEqual(amendment["amended_by_id"], reviewer.id)
+        self.assertEqual(amendment["amended_by_name"], reviewer.name)
+        self.assertTrue(amendment["amended_at"])
+        self.assertEqual(task.completion_evidence["review"]["verdict"], "unknown")
+        self.assertEqual(task.completion_evidence["review"]["amendments"], [amendment])
+        self.assertEqual(saved[-1]["review"]["amendments"], [amendment])
+        self.assertEqual(task.messages[-1]["action"], "review_verdict_amendment")
+        self.assertEqual(state._delta_ops[-1]["op"], "task_upsert")
+        self.assertEqual(
+            state._delta_ops[-1]["completion_evidence"]["review"]["amendments"],
+            [amendment],
+        )
+
+        denied_text, denied = await self.mcp_mod._dispatch_tool(
+            "torque_review_verdict_amend",
+            {"task": task.id, "verdict": "ship", "reason": "not my review"},
+            other.id, unexpected_command, state,
+        )
+        self.assertTrue(denied)
+        self.assertIn("only the original reviewer", denied_text)
+        self.assertIn("review_verdict_amend", denied_text)
+
+        blocked = state.board_add_task(
+            "Immutable review", "g", id="TORQUE:amend-block",
+            lane="Done", action_name="feature/review", agent_id=reviewer.id,
+        )
+        blocked.completion_evidence = {"review": {
+            "verdict": "block", "agent_id": reviewer.id,
+        }}
+        blocked_text, blocked_error = await self.mcp_mod._dispatch_tool(
+            "torque_review_verdict_amend",
+            {"task": blocked.id, "verdict": "ship", "reason": "cannot rewrite block"},
+            reviewer.id, unexpected_command, state,
+        )
+        self.assertTrue(blocked_error)
+        self.assertIn("immutable", blocked_text)
+        self.assertEqual(blocked.completion_evidence["review"]["verdict"], "block")
+
+    async def test_review_verdict_amendment_reaches_completed_reviewer_only(self):
+        """Completion clears task.agent_id but not the recorded reviewer ACL."""
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        reviewer = self.state_mod.AgentCell(
+            id="reviewer-closed", name="Reviewer", group="g",
+            kind="worker", cell_type="agent",
+        )
+        other = self.state_mod.AgentCell(
+            id="other-closed", name="Other", group="g",
+            kind="worker", cell_type="agent",
+        )
+        owner = self.state_mod.AgentCell(
+            id="owner", name="Owner", group="g",
+            kind="engineer", cell_type="agent",
+        )
+        architect = self.state_mod.AgentCell(
+            id="architect-closed", name="Architect", group="g",
+            kind="architect", cell_type="agent",
+        )
+        hired_engineer = self.state_mod.AgentCell(
+            id="engineer-handoff", name="Hired Engineer", group="g",
+            kind="engineer", cell_type="agent",
+            hired_by_architect_id=architect.id,
+        )
+        for cell in (reviewer, other, owner, architect, hired_engineer):
+            state.apply_effective_agent_class_for_launch(
+                cell, base_dir=str(Path(__file__).resolve().parents[1]),
+            )
+            state.agents[cell.id] = cell
+
+        # Current-main grants the hiring Architect a deliberately narrow
+        # handler-scoped route to claim its Engineer's open task. Confirm that
+        # route exists, then prove it cannot spill into the unrelated review
+        # amendment capability below.
+        handoff_task = state.board_add_task(
+            "Engineer handoff", "g", id="TORQUE:amend-handoff",
+            lane="To Do", assigned_engineer_id=hired_engineer.id,
+            created_by_engineer_id=hired_engineer.id,
+        )
+        proposals_mod = importlib.import_module("torque.mcp_scoped.proposals")
+        handoff, handoff_error = proposals_mod._architect_task_pickup_authorization(
+            state, architect.id, handoff_task,
+        )
+        self.assertFalse(handoff_error)
+        self.assertEqual("engineer_created_task_handoff", handoff["scope"])
+        auth_mod = importlib.import_module("torque.mcp_public_call_authorization")
+        requirement = type("Requirement", (), {
+            "target_kind": "task", "handler_scoped": True,
+        })()
+        self.assertEqual(
+            "self",
+            auth_mod._handler_scoped_target_scope(
+                state, "architect_task_pickup", {}, architect, requirement,
+                handoff_task,
+            ),
+        )
+        task = state.board_add_task(
+            "Merged completed review", "g", id="TORQUE:amend-closed",
+            lane="Done", action_name="feature/review", agent_id="",
+            assigned_engineer_id="courier",
+        )
+        task.completion_evidence = {
+            "review": {
+                "verdict": "unknown", "agent_id": reviewer.id,
+                "agent_name": reviewer.name,
+                "summary": "Final review verdict: Ship",
+            },
+            "merge": {"sha": "merged-sha", "origin_verified": True},
+        }
+
+        async def unexpected_command(payload):
+            self.fail(f"amendment must not dispatch a completion command: {payload}")
+
+        async def call(cell, request_id, target=task):
+            return await self.mcp_mod.dispatch_mcp_rpc_body(
+                {
+                    "jsonrpc": "2.0", "id": request_id, "method": "tools/call",
+                    "params": {"name": "review_verdict_amend", "arguments": {
+                        "task": target.id, "verdict": "ship", "reason": "parser correction",
+                    }},
+                }, cell_id=cell.id, handle_command=unexpected_command, state=state,
+            )
+
+        reviewer_response, status = await call(reviewer, 1)
+        self.assertEqual(status, 200)
+        self.assertFalse(reviewer_response["result"]["isError"])
+        self.assertEqual(
+            task.completion_evidence["review"]["amendments"][0]["amended_by_id"],
+            reviewer.id,
+        )
+        for cell, request_id in ((other, 2), (owner, 3), (architect, 4)):
+            with self.subTest(caller=cell.name):
+                response, status = await call(cell, request_id)
+                self.assertEqual(status, 200)
+                self.assertIn("error", response)
+                message = response["error"]["message"]
+                self.assertIn("original reviewer", message)
+                self.assertIn("review_verdict_amend", message)
+                self.assertNotIn(task.id, message)
+
+        padded = state.board_add_task(
+            "Malformed reviewer identity", "g", id="TORQUE:amend-padded",
+            lane="Done", action_name="feature/review", agent_id="",
+        )
+        padded.completion_evidence = {"review": {
+            "verdict": "unknown", "agent_id": f" {reviewer.id} ",
+            "agent_name": reviewer.name,
+        }}
+        response, status = await call(reviewer, 5, padded)
+        self.assertEqual(status, 200)
+        self.assertIn("error", response)
+        message = response["error"]["message"]
+        self.assertIn("original reviewer", message)
+        self.assertIn("review_verdict_amend", message)
+        self.assertNotIn(padded.id, message)
+        self.assertNotIn("amendments", padded.completion_evidence["review"])
+
     async def test_dispatch_tool_forwards_partial_deviation_for_ready_and_done(self):
         state = self.state_mod.MatrixState()
         cell = self.state_mod.AgentCell(

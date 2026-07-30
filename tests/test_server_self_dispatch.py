@@ -1852,6 +1852,80 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(task.lane, "Done")
 
+    def test_synthetic_ship_misparse_can_be_amended_without_overwriting_record(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        reviewer = self.state_mod.AgentCell(
+            id="reviewer-amend", name="Reviewer", group="g",
+            cell_type="agent", kind="worker",
+        )
+        state.agents[reviewer.id] = reviewer
+        task = state.board_add_task(
+            "Review parser correction", "g", id="TORQUE:amend-synthetic",
+            lane="Done", action_name="feature/review", agent_id=reviewer.id,
+        )
+        # Deliberately construct the attested mismatch without relying on a
+        # currently broken parser: the complete report says Ship while this
+        # synthetic parser result records unknown.
+        with mock.patch(
+                "torque.server_review._review_verdict_from_message", return_value=""):
+            recorded = self.server_mod._record_review_verdict_evidence(
+                state, task, cell=reviewer, source_action="done",
+                message="Final review verdict: Ship",
+            )
+        self.assertEqual(recorded["verdict"], "unknown")
+        self.assertEqual(recorded["summary"], "Final review verdict: Ship")
+        repeated = self.server_mod._record_review_verdict_evidence(
+            state, task, cell=reviewer, source_action="done",
+            message="Final review verdict: Needs rework",
+        )
+        self.assertEqual(repeated["verdict"], "unknown")
+        self.assertEqual(task.completion_evidence["review"]["verdict"], "unknown")
+
+        amendment, error = self.server_mod._amend_review_verdict_evidence(
+            state, task, cell=reviewer, verdict="ship",
+            reason="Synthetic parser misparse of explicit Ship.",
+            timestamp="2026-07-30T12:00:00+00:00",
+            append_task_msg=lambda t, action, message, agent_name: t.messages.append({
+                "action": action, "message": message, "agent_name": agent_name,
+            }),
+        )
+        self.assertFalse(error)
+        self.assertEqual(task.completion_evidence["review"]["verdict"], "unknown")
+        self.assertEqual(amendment["corrected_verdict"], "ship")
+        self.assertEqual(amendment["amended_by_id"], reviewer.id)
+        self.assertEqual(amendment["amended_at"], "2026-07-30T12:00:00+00:00")
+        self.assertEqual(task.messages[-1]["action"], "review_verdict_amendment")
+        self.assertTrue(self.server_mod._review_task_has_ship_verdict(task))
+
+    async def test_repeat_review_completion_names_the_amendment_route(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        reviewer = self.state_mod.AgentCell(
+            id="reviewer-repeat", name="Reviewer", group="g",
+            cell_type="agent", kind="worker",
+        )
+        state.agents[reviewer.id] = reviewer
+        task = state.board_add_task(
+            "Completed review", "g", id="TORQUE:amend-repeat",
+            lane="Done", action_name="feature/review", agent_id="",
+        )
+        task.completion_evidence = {"review": {
+            "verdict": "unknown", "agent_id": reviewer.id,
+        }}
+        handle_command = self._extract_handle_command(state)
+
+        result = await handle_command({
+            "cmd": "ai_report", "cell_id": reviewer.id, "action": "done",
+            "message": "Final review verdict: Ship",
+        })
+
+        self.assertEqual(result["type"], "error")
+        self.assertIn("immutable", result["message"])
+        self.assertIn("review_verdict_amend", result["message"])
+        self.assertIn(task.id, result["message"])
+        self.assertEqual(task.completion_evidence["review"]["verdict"], "unknown")
+
     def test_feature_review_blocking_derive_records_block_verdict(self):
         state = self.state_mod.MatrixState()
         state.add_group("g")
@@ -1944,13 +2018,18 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(
                     self.server_mod._review_task_has_ship_verdict(task))
 
-    def test_unknown_review_verdict_does_not_satisfy_ship_gate(self):
+    def test_unknown_review_verdict_with_no_valid_amendment_stays_nonpermissive(self):
         task = self.state_mod.BoardTask(
             id="TORQUE:unknown-review",
             task="Review worker change",
             group="g",
             action_name="feature/review",
-            completion_evidence={"review": {"verdict": "unknown"}},
+            completion_evidence={"review": {
+                "verdict": "unknown",
+                # A malformed/non-explicit amendment must not turn unknown
+                # into a permissive Ship gate after amendment support exists.
+                "amendments": [{"corrected_verdict": "unknown"}],
+            }},
             messages=[{
                 "action": "done",
                 "message": "Blocking issues: unresolved migration failure",
@@ -1958,6 +2037,104 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertFalse(self.server_mod._review_task_has_ship_verdict(task))
+
+    def test_review_amendment_reader_fails_closed_on_adversarial_evidence(self):
+        for label, review in (
+            ("block-cannot-be-overridden", {
+                "verdict": "block", "agent_id": "reviewer",
+                "amendments": [{
+                    "original_verdict": "unknown", "prior_verdict": "unknown",
+                    "corrected_verdict": "ship", "amended_by_id": "reviewer",
+                    "amended_by_name": "Reviewer",
+                    "amended_at": "2026-07-30T12:00:00+00:00",
+                    "reason": "forged",
+                }],
+            }),
+            ("wrong-actor", {
+                "verdict": "unknown", "agent_id": "reviewer",
+                "amendments": [{
+                    "original_verdict": "unknown", "prior_verdict": "unknown",
+                    "corrected_verdict": "ship", "amended_by_id": "attacker",
+                    "amended_by_name": "Attacker",
+                    "amended_at": "2026-07-30T12:00:00+00:00",
+                    "reason": "forged",
+                }],
+            }),
+            ("missing-attribution", {
+                "verdict": "unknown", "agent_id": "reviewer",
+                "amendments": [{"corrected_verdict": "ship"}],
+            }),
+        ):
+            with self.subTest(label=label):
+                task = self.state_mod.BoardTask(
+                    id=f"TORQUE:adversarial-{label}", task="Review", group="g",
+                    action_name="feature/review", completion_evidence={"review": review},
+                    # A raw Ship-looking report must not bypass malformed
+                    # structured evidence once a structured verdict exists.
+                    messages=[{"action": "done", "message": "Final review verdict: Ship"}],
+                )
+                self.assertFalse(self.server_mod._review_task_has_ship_verdict(task))
+
+    def test_amended_block_is_terminal_and_cannot_be_changed_to_ship(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        reviewer = self.state_mod.AgentCell(
+            id="reviewer-block", name="Reviewer", group="g",
+            cell_type="agent", kind="worker",
+        )
+        task = state.board_add_task(
+            "Review", "g", id="TORQUE:amend-block-terminal", lane="Done",
+            action_name="feature/review", agent_id="",
+        )
+        task.completion_evidence = {"review": {
+            "verdict": "unknown", "agent_id": reviewer.id,
+        }}
+        first, error = self.server_mod._amend_review_verdict_evidence(
+            state, task, cell=reviewer, verdict="block", reason="blocking defect",
+            timestamp="2026-07-30T12:00:00+00:00",
+        )
+        self.assertFalse(error)
+        self.assertEqual(first["corrected_verdict"], "block")
+        self.assertFalse(self.server_mod._review_task_has_ship_verdict(task))
+
+        second, error = self.server_mod._amend_review_verdict_evidence(
+            state, task, cell=reviewer, verdict="ship", reason="cannot reopen",
+            timestamp="2026-07-30T12:01:00+00:00",
+        )
+        self.assertEqual(second, {})
+        self.assertIn("cannot be amended again", error)
+        self.assertEqual(len(task.completion_evidence["review"]["amendments"]), 1)
+        self.assertEqual(
+            task.completion_evidence["review"]["amendments"][0]["corrected_verdict"],
+            "block",
+        )
+        self.assertFalse(self.server_mod._review_task_has_ship_verdict(task))
+
+    def test_amendment_writer_requires_byte_exact_reviewer_identity(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        reviewer = self.state_mod.AgentCell(
+            id="reviewer-exact", name="Reviewer", group="g",
+            cell_type="agent", kind="worker",
+        )
+        task = state.board_add_task(
+            "Review", "g", id="TORQUE:amend-exact", lane="Done",
+            action_name="feature/review", agent_id="",
+        )
+        task.completion_evidence = {"review": {
+            "verdict": "unknown", "agent_id": f" {reviewer.id} ",
+        }}
+
+        amendment, error = self.server_mod._amend_review_verdict_evidence(
+            state, task, cell=reviewer, verdict="ship", reason="must refuse",
+        )
+
+        self.assertEqual(amendment, {})
+        self.assertIn("only the original reviewer", error)
+        self.assertEqual(
+            task.completion_evidence,
+            {"review": {"verdict": "unknown", "agent_id": f" {reviewer.id} "}},
+        )
 
     def test_completion_evidence_snapshot_includes_verification_and_artifacts(self):
         state = self.state_mod.MatrixState()

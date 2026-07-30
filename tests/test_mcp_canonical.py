@@ -143,9 +143,9 @@ class CanonicalMCPContractTests(unittest.TestCase):
 
     def test_default_surfaces_are_unique_canonical_and_bounded(self):
         limits = {
-            "worker": (26, 26),
+            "worker": (27, 27),
             "engineer": (59, 77),
-            "architect": (57, 104),
+            "architect": (57, 105),
         }
         legacy_names = {tool["name"] for tool in ALL_TOOLS}
         for kind, (eager_limit, total_limit) in limits.items():

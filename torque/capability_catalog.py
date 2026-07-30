@@ -216,6 +216,13 @@ CAPABILITY_CATALOG: dict[str, CapabilityDefinition] = {
             },
         ),
         _scoped(
+            "task.review.amend",
+            "Amend own review verdict",
+            "Append an attributable correction to a review verdict the caller recorded.",
+            scopes=("self",),
+            ceilings={kind: "self" for kind in _ALL},
+        ),
+        _scoped(
             "task.artifact.write",
             "Attach task artifacts",
             "Upload or attach artifacts to a visible task.",
