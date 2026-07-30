@@ -301,14 +301,19 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         reason = str(args.get("reason", "") or "").strip()
         source = str(args.get("source", "") or "").strip()
         if not source:
-            route_message_id = str(
-                authorization.get("route_message_id", "") or ""
-            ).strip()
-            source = (
-                f"product-peer route {route_message_id}"
-                if route_message_id else
-                "product-peer route"
-            )
+            if str(authorization.get("scope", "") or "").strip() == (
+                    "engineer_created_task_handoff"
+            ):
+                source = "hired-engineer provenance"
+            else:
+                route_message_id = str(
+                    authorization.get("route_message_id", "") or ""
+                ).strip()
+                source = (
+                    f"product-peer route {route_message_id}"
+                    if route_message_id else
+                    "product-peer route"
+                )
         result = await handle_command({
             "cmd": "board_pickup_architect_task",
             "id": tid,

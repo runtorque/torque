@@ -816,8 +816,35 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(route_id, pickup_evidence["authorization"]["route_message_id"])
         self.assertTrue(pickup_evidence["authorization"]["route_thread_id"])
-        self.assertIn(route_id, pickup_evidence["source"])
+        self.assertEqual(f"Blueprint peer message {route_id}", pickup_evidence["source"])
         self.assertEqual("architect_pickup", refreshed.messages[-1]["action"])
+
+        default_proposal = await self._call(
+            "architect_task_propose", {"title": "Default product pickup source"},
+            req_id=5,
+        )
+        default_task_id = self._result_payload(default_proposal)["id"]
+        default_route = await self._call(
+            "architect_proposal_peer_message",
+            {
+                "architect_id": self.torqly.id,
+                "message": "Claim with the default product route source.",
+                "context_task_ids": [default_task_id],
+            },
+            req_id=6,
+        )
+        default_route_id = self._result_payload(default_route)["message_id"]
+        default_pickup = await self._call(
+            "task_claim", {"task": default_task_id}, req_id=7,
+            agent_id=self.torqly.id,
+        )
+        self.assertEqual("task_picked_up", self._result_payload(default_pickup)["type"])
+        self.assertEqual(
+            f"product-peer route {default_route_id}",
+            self.state.board_tasks[default_task_id].completion_evidence[
+                "architect_pickup"
+            ]["source"],
+        )
 
     async def test_hired_engineer_task_claim_action_bind_assign_and_dispatch(self):
         """The hiring Architect has a bounded no-recreation Engineer handoff."""
@@ -896,6 +923,9 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(self.torqly_engineer.id, task.created_by_engineer_id)
         self.assertEqual("", task.created_by_architect_id)
+        pickup = task.completion_evidence["architect_pickup"]
+        self.assertEqual("hired-engineer provenance", pickup["source"])
+        self.assertIn("Source: hired-engineer provenance", task.messages[-1]["message"])
 
         action_bound = await self._call(
             "task_update",
