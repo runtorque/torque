@@ -1,7 +1,9 @@
 import importlib
 import sys
+import tempfile
 import types
 import unittest
+from pathlib import Path
 from enum import Enum
 
 
@@ -349,6 +351,49 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
             closure,
         )
 
+    def _dispatch_linker(self, state):
+        main_code = self.server_mod.main.__code__
+        linker_code = next(
+            const
+            for const in main_code.co_consts
+            if isinstance(const, type(main_code))
+            and const.co_name == "_record_task_dispatch"
+        )
+        closure = tuple(
+            self._make_cell(state)
+            for _name in linker_code.co_freevars
+        )
+        return types.FunctionType(
+            linker_code,
+            self.server_mod.__dict__,
+            "_record_task_dispatch",
+            None,
+            closure,
+        )
+
+    def test_dispatch_linker_keeps_lane_assignment_state_and_backlink_together(self):
+        """The one-step re-dispatch contract must remain a single code path."""
+        state = self._make_state()
+        worker = self._make_agent("worker-1", status="running")
+        state.agents[worker.id] = worker
+        state.groups["g"].append(worker.id)
+        task = state.board_add_task(
+            "Synthetic redispatch",
+            "g",
+            lane="Done",
+            id="TASK-REDISPATCH",
+            action_name="feature/implement",
+        )
+        self.assertIsNotNone(task)
+        self.assertEqual(task.dispatch_state, "queued")
+
+        self._dispatch_linker(state)(worker, task, "In Progress")
+
+        self.assertEqual(task.lane, "In Progress")
+        self.assertEqual(task.agent_id, worker.id)
+        self.assertEqual(task.dispatch_state, "live")
+        self.assertEqual(worker.current_task_id, task.id)
+
     def _recording_dispatch(self, state):
         calls = []
 
@@ -525,6 +570,56 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
             "recorded_by_agent_id": implementer.id,
         }
         return task
+
+    async def test_cold_loaded_backlink_allows_feature_review_derive(self):
+        """A durable assignment must restore the derive parent after restart."""
+        from torque.db import TorqueDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+
+        persisted = self.state_mod.MatrixState(db=db)
+        persisted.groups["g"] = []
+        persisted.group_settings["g"] = self.state_mod.GroupSettings(
+            dispatch_lane="In Progress",
+        )
+        implementer = self._make_agent("impl-1", status="running")
+        persisted.agents[implementer.id] = implementer
+        persisted.groups["g"].append(implementer.id)
+        persisted._db_save_groups()
+        persisted._db_save_group_settings("g")
+        persisted._db_save_agent(implementer)
+        parent = persisted.board_add_task(
+            "Synthetic implementation",
+            "g",
+            lane="In Progress",
+            id="TASK-IMPLEMENT",
+            action_name="feature/implement",
+            agent_id=implementer.id,
+        )
+        self.assertIsNotNone(parent)
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+        self.assertEqual(state.agents[implementer.id].current_task_id, parent.id)
+
+        calls, dispatch = self._recording_dispatch(state)
+        handle_command = self._extract_handle_command(state, dispatch)
+        result = await handle_command({
+            "cmd": "ai_report",
+            "cell_id": implementer.id,
+            "action": "derive",
+            "action_name": "feature/review",
+            "message": "Review synthetic implementation",
+        })
+
+        self.assertEqual(result["type"], "ok")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["cmd"], "dispatch_task")
+        self.assertEqual(calls[0]["id"], result["task_id"])
 
     async def test_feature_review_derive_stream_backstop_restores_shared_branch_review(self):
         state = self._make_state()

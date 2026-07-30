@@ -12,6 +12,7 @@ from .state import (
     _normalize_engineer_hint_snoozes, _normalize_messages_thread,
     _normalize_task_dispatch_state, _normalize_verification_fields,
     _normalize_worktree_boundary, log, normalize_architect_digest_verbosity,
+    task_is_closed,
     normalize_architect_enabled_events, normalize_artifacts,
     normalize_attachments, normalize_default_worker_concurrency,
     normalize_engineer_autonomy_mode, normalize_engineer_digest_verbosity,
@@ -211,6 +212,7 @@ class StateLoadingMixin:
                 ).items()
                 if root_id
             }
+            self._rehydrate_current_task_links()
             self._rebuild_task_indexes()
             self._clear_engineer_queue_empty_for_active_tasks()
             self.cleanup_stale_boundary_successors(emit=False)
@@ -473,6 +475,56 @@ class StateLoadingMixin:
                 )
         except (TypeError, KeyError):
             log.exception("Failed to load state from SQLite")
+
+    def _rehydrate_current_task_links(self) -> None:
+        """Restore ephemeral agent backlinks from durable live task assignments.
+
+        ``BoardTask.agent_id`` is the sole persisted side of a dispatch link.
+        Agent ``current_task_id`` is intentionally ephemeral, so cold loading
+        derives it after every task row is available instead of storing a
+        duplicate column. Only durable ``live`` dispatches qualify; assigned
+        queued follow-ups must remain queued. Closed and agentless tasks must
+        not revive an execution link.
+        """
+        candidates = {}
+        for task in self.board_tasks.values():
+            if (
+                    task_is_closed(task)
+                    or task.dispatch_state != TASK_DISPATCH_STATE_LIVE):
+                continue
+            agent_id = str(getattr(task, "agent_id", "") or "").strip()
+            if not agent_id:
+                continue
+            cell = self.agents.get(agent_id)
+            if not cell or cell.cell_type != "agent":
+                continue
+            candidate = candidates.get(agent_id)
+            if candidate:
+                log.warning(
+                    "Multiple live tasks assigned to agent '%s' during load; "
+                    "selecting one deterministically",
+                    cell.name or cell.id,
+                )
+                # Prefer the running task, then the newest durable mutation
+                # as the closest proxy for the latest dispatch. IDs make an
+                # exact timestamp tie deterministic without inventing state.
+                candidate_key = (
+                    candidate.lane == "In Progress",
+                    candidate.updated_at,
+                    candidate.created_at,
+                    candidate.id,
+                )
+                task_key = (
+                    task.lane == "In Progress",
+                    task.updated_at,
+                    task.created_at,
+                    task.id,
+                )
+                if task_key <= candidate_key:
+                    continue
+            candidates[agent_id] = task
+        for agent_id, task in candidates.items():
+            self.agents[agent_id].current_task_id = task.id
 
     def _rebuild_children(self):
         """Rebuild the parent→children index from parent_id fields."""

@@ -6913,6 +6913,123 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second.lane, "In Progress")
         self.assertNotIn("g", state.auto_dispatch_queues)
 
+    async def test_cold_load_preserves_targeted_followup_behind_live_task(self):
+        """A queued follow-up must not replace the restored active backlink."""
+        from pathlib import Path
+        from torque.db import TorqueDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+
+        persisted = self.state_mod.MatrixState(db=db)
+        worker = self.state_mod.AgentCell(
+            id="worker-synthetic",
+            name="Synthetic Worker",
+            group="g",
+            kind="worker",
+            cell_type="agent",
+            status="running",
+            session_id="synthetic-session",
+        )
+        persisted.agents[worker.id] = worker
+        persisted.groups["g"] = [worker.id]
+        persisted.group_settings["g"] = self.state_mod.GroupSettings(
+            dispatch_lane="In Progress",
+        )
+        persisted._db_save_groups()
+        persisted._db_save_group_settings("g")
+        persisted._db_save_agent(worker)
+        active = persisted.board_add_task(
+            "Synthetic active dispatch",
+            "g",
+            lane="In Progress",
+            id="TASK-ACTIVE",
+            action_name="feature/implement",
+            agent_id=worker.id,
+            dispatch_state="live",
+        )
+        queued = persisted.board_add_task(
+            "Synthetic queued follow-up",
+            "g",
+            lane="To Do",
+            id="TASK-QUEUED",
+            action_name="feature/implement",
+            agent_id=worker.id,
+            dispatch_state="queued",
+        )
+        persisted.auto_dispatch_queue_add(
+            "g",
+            queued.id,
+            target_agent_id=worker.id,
+            max_concurrent=1,
+        )
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        self.assertEqual(state.agents[worker.id].current_task_id, active.id)
+        self.assertEqual(state.board_tasks[queued.id].dispatch_state, "queued")
+        self.assertEqual(
+            [entry.task_id for entry in state.auto_dispatch_queues["g"]],
+            [queued.id],
+        )
+
+        async def dispatch_should_not_run(payload):
+            raise AssertionError(f"queue should defer: {payload}")
+
+        dispatched = await self.server_mod._pump_auto_dispatch_queue(
+            state,
+            dispatch_should_not_run,
+            lambda *args, **kwargs: None,
+            group="g",
+        )
+
+        self.assertEqual(dispatched, [])
+        self.assertEqual(state.board_tasks[queued.id].lane, "To Do")
+        self.assertEqual(
+            [entry.task_id for entry in state.auto_dispatch_queues["g"]],
+            [queued.id],
+        )
+
+        state.board_move_task(active.id, "Done")
+        state.agents[worker.id].current_task_id = ""
+        calls = []
+
+        async def dispatch_follow_up(payload):
+            calls.append(dict(payload))
+            self.assertEqual(payload, {
+                "cmd": "dispatch_task",
+                "id": queued.id,
+                "agent_id": worker.id,
+            })
+            state.board_update_task(
+                queued.id,
+                agent_id=worker.id,
+                lane="In Progress",
+                dispatch_state="live",
+            )
+            state.agents[worker.id].current_task_id = queued.id
+            return {
+                "type": "ok",
+                "task_id": queued.id,
+                "agent_id": worker.id,
+            }
+
+        dispatched = await self.server_mod._pump_auto_dispatch_queue(
+            state,
+            dispatch_follow_up,
+            lambda *args, **kwargs: None,
+            group="g",
+        )
+
+        self.assertEqual([call["id"] for call in calls], [queued.id])
+        self.assertEqual([item["task_id"] for item in dispatched], [queued.id])
+        self.assertEqual(state.board_tasks[queued.id].lane, "In Progress")
+        self.assertNotIn("g", state.auto_dispatch_queues)
+
     async def test_pump_defers_same_agent_queue_when_active_task_survived_restart(self):
         state = self._make_state()
         worker = self.state_mod.AgentCell(
