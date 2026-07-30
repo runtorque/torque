@@ -3240,13 +3240,16 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updated.description, "Final description")
         self.assertEqual(updated.labels, ["final"])
 
-    async def test_architect_task_update_requires_stop_and_relane_after_dispatch(self):
+    async def test_architect_task_update_refuses_only_while_dispatch_stream_is_active(self):
         creator = self._add_architect("arch-creator", "Creator")
         execution_architect = self._add_architect("arch-execution", "Executor")
         engineer = self._add_engineer(
             "eng-assigned", "Assigned Engineer",
             hired_by_architect_id=execution_architect.id,
         )
+        worker = self._add_worker("worker-dispatched", "Dispatched Worker", engineer.id)
+        worker.status = "running"
+        self.state._db_save_agent(worker)
         assigned_undispatched = self._add_task(
             "task-assigned-undispatched-update",
             "Assigned but staged",
@@ -3279,6 +3282,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             action_vars={"original": "value"},
             assigned_engineer_id=engineer.id,
             assigned_architect_id=execution_architect.id,
+            agent_id=worker.id,
             lane="In Progress",
             dispatch_state="live",
             created_by_architect_id=creator.id,
@@ -3319,8 +3323,8 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(error["dispatch_state"], "live")
                 self.assertEqual(
                     error["message"],
-                    "Task is dispatched. Stop the work and move the task to "
-                    "Backlog or To Do before editing it.",
+                    "Task has active dispatched work. Stop the active execution "
+                    "stream before editing it.",
                 )
 
         # The refusal returned before validating or forwarding the patch, so
@@ -3349,18 +3353,10 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(persisted_field=field):
                 self.assertEqual(persisted_refused[field], before_refusal[field])
 
-        # Stopping is a separate lifecycle operation; model its completed
-        # dispatch-state transition, then use the public lane move tool before
-        # verifying that the execution Architect may amend the re-staged card.
-        self.state.board_update_task(dispatched.id, dispatch_state="queued")
-        moved_text, moved_error = await self._call(
-            "architect_task_move",
-            {"task": dispatched.id, "new_lane": "To Do"},
-            execution_architect.id,
-        )
-        self.assertFalse(moved_error, moved_text)
-        self.assertEqual(self.state.board_tasks[dispatched.id].dispatch_state, "queued")
-        self.assertEqual(self.state.board_tasks[dispatched.id].lane, "To Do")
+        # A stopped worker leaves durable dispatch history intact, but no work
+        # is in flight, so a correction must be allowed without a fake relane.
+        worker.status = "stopped"
+        self.state._db_save_agent(worker)
 
         resumed_text, resumed_error = await self._call(
             "architect_task_update",
@@ -3369,6 +3365,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(resumed_error, resumed_text)
         resumed = self.state.board_tasks[dispatched.id]
+        self.assertEqual(resumed.dispatch_state, "live")
         self.assertEqual(resumed.task, "Amended title")
         self.assertEqual(resumed.description, "Amended description")
         self.assertEqual(resumed.labels, ["amended"])

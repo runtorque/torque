@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ..finalization import normalize_boundary, normalize_mode, normalize_required_review_gates
+from ..task_dispatch_gate import active_dispatch_edit_error, task_has_active_dispatch
 
 
 BOARD_OPERATION_COMMAND_NAMES = frozenset({
@@ -367,13 +368,17 @@ async def handle_board_operation_command(
     elif cmd == "board_update_task":
         tid = _resolve_task_id(state, data.get("id", ""))
         _update_task = state.board_tasks.get(tid)
+        enforce_dispatch_edit_gate = bool(data.get("enforce_dispatch_edit_gate"))
+        if enforce_dispatch_edit_gate and _update_task and task_has_active_dispatch(
+                state, _update_task):
+            return active_dispatch_edit_error(_update_task)
         _update_resume_targets = _capture_auto_resume_targets(
             state,
             task=_update_task,
             group=_update_task.group if _update_task else "",
         )
         fields = {k: v for k, v in data.items()
-                  if k not in ("cmd", "id")}
+                  if k not in ("cmd", "id", "enforce_dispatch_edit_gate")}
         if {"provider", "external_id", "external_url"} & set(fields):
             link = normalize_external_link(
                 fields.get("provider", ""),

@@ -3443,7 +3443,12 @@ def cmd_task_edit(args):
 
     _validate_task_group_assignment_change(st, t, fields)
 
-    resp = api_call("board_update_task", port=args.port, id=t["id"], **fields)
+    # The daemon re-evaluates this marker against current runtime state so a
+    # stale SQLite read cannot amend work that started after resolution.
+    resp = api_call(
+        "board_update_task", port=args.port, id=t["id"],
+        enforce_dispatch_edit_gate=True, **fields,
+    )
     check_ok(resp)
     print(f"Updated task {t.get('slug', '') or t['id'][:6]}")
 
@@ -6372,7 +6377,7 @@ def build_parser():
     p = tsk_sub.add_parser("edit", aliases=["e"],
                            help="Edit task fields")
     p.add_argument("identifier", help="Task ID, slug, or title")
-    p.add_argument("-t", "--task", help="New task description")
+    p.add_argument("-t", "--task", help="New task title")
     p.add_argument("--action", help="Set or change action")
     p.add_argument("-v", "--var", nargs="+", metavar="KEY=VALUE",
                    help="Set action variables")
