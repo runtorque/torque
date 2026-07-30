@@ -121,6 +121,14 @@ def public_call_refusal_message(classification: str,
     targets, preserving the no-target-oracle boundary.
     """
     tool_name = str(requested_tool_name or "").strip()
+    if canonical_tool_name(tool_name) == "review_verdict_amend":
+        # This wording is intentionally identical for an absent, out-of-
+        # scope, or ineligible task. It tells a caller the supported route
+        # without turning a task id into an existence oracle.
+        return (
+            "Authorization denied: review verdict amendments may only be "
+            "made by the original reviewer through review_verdict_amend."
+        )
     if classification == _PUBLIC_TOOL_CALL_NOT_PROJECTED:
         return (
             f"Authorization denied: {tool_name} is not projected for this "
@@ -555,6 +563,23 @@ def _handler_scoped_target_scope(
         requirement.target_kind,
         target,
     )
+    # Completed reviews clear ``task.agent_id`` as part of normal lifecycle
+    # completion, so generic task ownership alone cannot express the one
+    # durable relationship that authorizes a correction. Grant transport
+    # self-scope only to the exact reviewer recorded in immutable review
+    # evidence. The amendment writer repeats this check before mutation.
+    if (
+            tool_name == "torque_review_verdict_amend"
+            and requirement.target_kind == "task"
+    ):
+        evidence = getattr(target, "completion_evidence", {}) or {}
+        review = evidence.get("review", {}) if isinstance(evidence, dict) else {}
+        if (
+                isinstance(review, dict)
+                and str(review.get("agent_id", "") or "").strip()
+                == str(getattr(caller_cell, "id", "") or "").strip()
+        ):
+            return "self"
     # Legacy Worker asks were created before their assigned-Engineer stamp.
     # The existing task resolver is the sole write route that may derive
     # self-scope from the reply Worker, and only while that exact ask remains

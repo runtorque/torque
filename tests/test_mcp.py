@@ -299,6 +299,75 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("immutable", blocked_text)
         self.assertEqual(blocked.completion_evidence["review"]["verdict"], "block")
 
+    async def test_review_verdict_amendment_reaches_completed_reviewer_only(self):
+        """Completion clears task.agent_id but not the recorded reviewer ACL."""
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        reviewer = self.state_mod.AgentCell(
+            id="reviewer-closed", name="Reviewer", group="g",
+            kind="worker", cell_type="agent",
+        )
+        other = self.state_mod.AgentCell(
+            id="other-closed", name="Other", group="g",
+            kind="worker", cell_type="agent",
+        )
+        architect = self.state_mod.AgentCell(
+            id="architect-closed", name="Architect", group="g",
+            kind="architect", cell_type="agent",
+        )
+        for cell in (reviewer, other, architect):
+            cell.effective_agent_class_snapshot = {
+                "effective_authority": {
+                    "base_kind": cell.kind,
+                    "acl_mode": "deny",
+                    "capabilities": {"task.review.amend": "self"},
+                },
+            }
+            state.agents[cell.id] = cell
+        task = state.board_add_task(
+            "Merged completed review", "g", id="TORQUE:amend-closed",
+            lane="Done", action_name="feature/review", agent_id="",
+            assigned_engineer_id="courier",
+        )
+        task.completion_evidence = {
+            "review": {
+                "verdict": "unknown", "agent_id": reviewer.id,
+                "agent_name": reviewer.name,
+                "summary": "Final review verdict: Ship",
+            },
+            "merge": {"sha": "merged-sha", "origin_verified": True},
+        }
+
+        async def unexpected_command(payload):
+            self.fail(f"amendment must not dispatch a completion command: {payload}")
+
+        async def call(cell, request_id):
+            return await self.mcp_mod.dispatch_mcp_rpc_body(
+                {
+                    "jsonrpc": "2.0", "id": request_id, "method": "tools/call",
+                    "params": {"name": "review_verdict_amend", "arguments": {
+                        "task": task.id, "verdict": "ship", "reason": "parser correction",
+                    }},
+                }, cell_id=cell.id, handle_command=unexpected_command, state=state,
+            )
+
+        reviewer_response, status = await call(reviewer, 1)
+        self.assertEqual(status, 200)
+        self.assertFalse(reviewer_response["result"]["isError"])
+        self.assertEqual(
+            task.completion_evidence["review"]["amendments"][0]["amended_by_id"],
+            reviewer.id,
+        )
+        for cell, request_id in ((other, 2), (architect, 3)):
+            with self.subTest(caller=cell.kind):
+                response, status = await call(cell, request_id)
+                self.assertEqual(status, 200)
+                self.assertIn("error", response)
+                message = response["error"]["message"]
+                self.assertIn("original reviewer", message)
+                self.assertIn("review_verdict_amend", message)
+                self.assertNotIn(task.id, message)
+
     async def test_dispatch_tool_forwards_partial_deviation_for_ready_and_done(self):
         state = self.state_mod.MatrixState()
         cell = self.state_mod.AgentCell(

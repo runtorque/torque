@@ -724,17 +724,45 @@ def _record_review_verdict_evidence(
 
 
 def _review_verdict_amendment_verdict(review: dict) -> str:
-    """Return the latest explicit correction without mutating original evidence."""
-    amendments = review.get("amendments", []) if isinstance(review, dict) else []
-    if not isinstance(amendments, list):
+    """Return the one valid correction, failing closed on stored corruption."""
+    if not isinstance(review, dict):
         return ""
-    for amendment in reversed(amendments):
-        if not isinstance(amendment, dict):
-            continue
-        verdict = str(amendment.get("corrected_verdict", "") or "").strip()
-        if verdict in {"ship", "block", "needs_followup"}:
-            return verdict
-    return ""
+    if str(review.get("verdict", "") or "").strip() != "unknown":
+        return ""
+    reviewer_id = str(review.get("agent_id", "") or "").strip()
+    if not reviewer_id:
+        return ""
+    amendments = review.get("amendments", []) if isinstance(review, dict) else []
+    # The durable correction contract is deliberately one-shot. A Block
+    # correction is terminal, and a corrupted/multi-row history must never
+    # make the Ship gate permissive.
+    if not isinstance(amendments, list) or len(amendments) != 1:
+        return ""
+    amendment = amendments[0]
+    if not isinstance(amendment, dict):
+        return ""
+    if (
+            str(amendment.get("original_verdict", "") or "").strip()
+            != "unknown"
+            or str(amendment.get("prior_verdict", "") or "").strip()
+            != "unknown"
+            or str(amendment.get("amended_by_id", "") or "").strip()
+            != reviewer_id
+    ):
+        return ""
+    if not str(amendment.get("amended_by_name", "") or "").strip():
+        return ""
+    if not str(amendment.get("reason", "") or "").strip():
+        return ""
+    amended_at = str(amendment.get("amended_at", "") or "").strip()
+    if not amended_at:
+        return ""
+    try:
+        datetime.fromisoformat(amended_at.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    verdict = str(amendment.get("corrected_verdict", "") or "").strip()
+    return verdict if verdict in {"ship", "block", "needs_followup"} else ""
 
 
 def _amend_review_verdict_evidence(
@@ -777,6 +805,17 @@ def _amend_review_verdict_evidence(
             "Review verdict amendments are supported only for an original "
             "structured unknown verdict; recorded ship, block, and "
             "needs_followup verdicts are immutable."
+        )
+    existing_amendments = original_review.get("amendments", [])
+    if existing_amendments:
+        return {}, (
+            "Review verdict already has an append-only amendment and cannot "
+            "be amended again; a corrected block is terminal."
+        )
+    if not isinstance(existing_amendments, list):
+        return {}, (
+            "Review verdict amendment history is malformed and cannot be "
+            "amended."
         )
     corrected_verdict = str(verdict or "").strip().lower()
     if corrected_verdict not in {"ship", "block", "needs_followup"}:

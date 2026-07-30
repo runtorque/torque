@@ -1102,6 +1102,12 @@ def _raw_tools_for_caller(
         # operations such as done, derive, ready, rename, or worker reply.
         shared_names = {
             "torque_context",
+            # This path is visible to persistent callers solely so an
+            # ineligible reviewer/architect receives the same safe, useful
+            # original-reviewer-only refusal. The writer independently
+            # authorizes the recorded reviewer and never grants a mutation to
+            # another caller.
+            "torque_review_verdict_amend",
             "torque_help_list",
             "torque_help_show",
             "torque_help_search",
