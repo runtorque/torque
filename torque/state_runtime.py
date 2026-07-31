@@ -13,6 +13,7 @@ from .state import (
 # engineer-stream follow-up.  350 ms is long enough to collapse the normal
 # burst of terminal/event updates while keeping the panel perceptibly current.
 _ENGINEER_RECOMPUTE_DEBOUNCE_SECONDS = 0.35
+_ENGINEER_RECOMPUTE_HANDOFF_DELAY_SECONDS = 0.001
 
 
 class StateRuntimeMixin:
@@ -328,11 +329,15 @@ class StateRuntimeMixin:
         the new groups into its pending set — the worker re-checks
         after each iteration so it drains everything before exiting.
         """
-        if not groups:
+        groups = {str(group or "").strip() for group in groups}
+        groups.discard("")
+        self._engineer_recompute_pending |= groups
+        if (not self._engineer_recompute_pending
+                or self._engineer_recompute_shutdown):
             return
-        self._engineer_recompute_pending |= set(groups)
         task = self._engineer_recompute_task
-        if task is not None and not task.done():
+        if (task is not None and not task.done()
+                and not task.cancelling()):
             return
         try:
             loop = asyncio.get_running_loop()
@@ -340,14 +345,77 @@ class StateRuntimeMixin:
             # No event loop; caller is off the async path. Skip silently —
             # the next real broadcast will re-queue anything still dirty.
             return
-        self._engineer_recompute_task = loop.create_task(
-            self._engineer_recompute_worker()
+        worker = loop.create_task(self._engineer_recompute_worker())
+        self._engineer_recompute_task = worker
+        # A task cancelled before its coroutine first runs never reaches the
+        # worker's ``finally``. This callback performs that handoff.
+        worker.add_done_callback(self._engineer_recompute_task_done)
+
+    def _engineer_recompute_task_done(self, task) -> None:
+        """Recover pending groups when a worker ended before its body ran."""
+        if self._engineer_recompute_task is not task:
+            return
+        self._engineer_recompute_task = None
+        self._request_engineer_recompute_handoff()
+
+    def _finish_engineer_recompute_worker(self, task) -> None:
+        """Release ``task`` and hand preserved pending work to a successor."""
+        if self._engineer_recompute_task is not task:
+            return
+        self._engineer_recompute_task = None
+        self._request_engineer_recompute_handoff()
+
+    def _request_engineer_recompute_handoff(self) -> None:
+        """Schedule a successor without creating tasks during loop teardown."""
+        if (not self._engineer_recompute_pending
+                or self._engineer_recompute_shutdown):
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        if loop.is_closed():
+            return
+        handle = self._engineer_recompute_handoff
+        if handle is not None and not handle.cancelled():
+            return
+        # A tiny delayed handle runs on the next live-loop turn, but is not a
+        # task. asyncio.run()/IsolatedAsyncioTestCase teardown stops before it
+        # fires, avoiding an untracked replacement task after cancellation.
+        self._engineer_recompute_handoff = loop.call_later(
+            _ENGINEER_RECOMPUTE_HANDOFF_DELAY_SECONDS,
+            self._run_engineer_recompute_handoff,
         )
+
+    def _run_engineer_recompute_handoff(self) -> None:
+        self._engineer_recompute_handoff = None
+        self._schedule_engineer_recompute(set())
+
+    async def shutdown_engineer_recompute(self) -> None:
+        """Intentionally discard ephemeral recompute work during shutdown.
+
+        Stream payloads are rebuilt from durable state at next boot. This is
+        the sole intentional drop policy, and it prevents cancellation during
+        loop teardown from spawning a successor that cannot be awaited.
+        """
+        self._engineer_recompute_shutdown = True
+        handoff = self._engineer_recompute_handoff
+        if handoff is not None:
+            handoff.cancel()
+            self._engineer_recompute_handoff = None
+        task = self._engineer_recompute_task
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        self._engineer_recompute_task = None
+        self._engineer_recompute_pending.clear()
 
     async def _engineer_recompute_worker(self) -> None:
         """Drain `_engineer_recompute_pending`: prefill branch existence,
         compute stream payloads, broadcast a follow-up delta."""
         from .worktree_streams import prefill_branch_exists_for_state
+        worker = asyncio.current_task()
+        pending: set[str] = set()
         try:
             # Let a burst of primary broadcasts accumulate before paying for
             # one complete group read-model rebuild. Subsequent iterations do
@@ -366,8 +434,15 @@ class StateRuntimeMixin:
                 # loop after the thread returns so delta ordering remains
                 # single-threaded.
                 try:
+                    # Snapshot every mutable task/cell input on the event
+                    # loop. The thread below only observes this immutable
+                    # projection; unlike a generation-discard fence it cannot
+                    # starve under a sustained broadcast rate.
+                    snapshot = self._engineer_stream_compute_snapshot()
                     payloads = await asyncio.to_thread(
-                        self._compute_engineer_stream_payloads, pending
+                        self._compute_engineer_stream_payloads,
+                        pending,
+                        source=snapshot,
                     )
                 except Exception:
                     # A threaded read can lose its coherent view if a state
@@ -383,13 +458,13 @@ class StateRuntimeMixin:
                     # call returns empty (engineer_streams isn't a trigger
                     # op), so this does not recurse into another worker.
                     await self.broadcast()
+                pending = set()
+        except asyncio.CancelledError:
+            # Preserve a local batch drained before cancellation at any await
+            # (debounce, prefill, thread, or follow-up broadcast). A running
+            # thread cannot be stopped, so its result is deliberately ignored
+            # and the successor recomputes this dirty batch.
+            self._engineer_recompute_pending |= pending
+            raise
         finally:
-            self._engineer_recompute_task = None
-            # The normal event-loop path cannot interleave between the final
-            # empty-set check and this assignment, but cancellation and
-            # future cross-thread callers can. Never strand a late dirty
-            # group behind a completed worker.
-            if self._engineer_recompute_pending:
-                self._schedule_engineer_recompute(
-                    self._engineer_recompute_pending
-                )
+            self._finish_engineer_recompute_worker(worker)

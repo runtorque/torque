@@ -1760,6 +1760,14 @@ async def _shutdown_daemon_runtime(
             await state.broadcast()
         except Exception:
             log.exception("Shutdown stopped-status broadcast failed")
+    shutdown_engineer_recompute = getattr(
+        state, "shutdown_engineer_recompute", None,
+    )
+    if callable(shutdown_engineer_recompute):
+        try:
+            await shutdown_engineer_recompute()
+        except Exception:
+            log.exception("Engineer-stream recompute shutdown failed")
     for ws_clients in terminal_clients.values():
         for ws_client in list(ws_clients):
             try:

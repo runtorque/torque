@@ -2774,6 +2774,8 @@ class MatrixState(
         # hot path so UI mutations feel instant.
         self._engineer_recompute_pending: set[str] = set()
         self._engineer_recompute_task = None
+        self._engineer_recompute_shutdown = False
+        self._engineer_recompute_handoff = None
         self._critical_write_capture_var: contextvars.ContextVar[
             CriticalWriteCapture | None
         ] = contextvars.ContextVar(
@@ -3498,12 +3500,13 @@ class MatrixState(
             counts[state_name] = counts.get(state_name, 0) + 1
         return counts
 
-    def _engineer_stream_payload(self, group: str) -> dict:
+    def _engineer_stream_payload(self, group: str, *, source=None) -> dict:
         from .worktree_streams import compute_worktree_streams
 
+        source = source or self
         try:
             streams = compute_worktree_streams(
-                self,
+                source,
                 group=group,
                 visibility_limit=_ENGINEER_STREAM_CONTEXT_LIMIT,
                 include_orphaned=False,
@@ -3602,8 +3605,27 @@ class MatrixState(
             self._compute_engineer_stream_payloads(groups)
         )
 
+    def _engineer_stream_compute_snapshot(self):
+        """Clone every mutable task/cell input used by stream synthesis.
+
+        The threaded computation must not traverse live ``BoardTask`` or
+        ``AgentCell`` instances. A fresh MatrixState retains the exact query
+        helpers used by ``compute_worktree_streams`` while this projection
+        replaces its mutable inputs with deep copies.
+        """
+        snapshot = MatrixState()
+        snapshot.board_tasks = copy.deepcopy(self.board_tasks)
+        snapshot.agents = copy.deepcopy(self.agents)
+        snapshot.groups = copy.deepcopy(self.groups)
+        snapshot.group_settings = copy.deepcopy(self.group_settings)
+        snapshot.engineer_settings = copy.deepcopy(self.engineer_settings)
+        snapshot._tasks_by_group.clear()
+        for task in snapshot.board_tasks.values():
+            snapshot._tasks_by_group.setdefault(task.group, set()).add(task.id)
+        return snapshot
+
     def _compute_engineer_stream_payloads(
-        self, groups: set[str],
+        self, groups: set[str], *, source=None,
     ) -> list[tuple[str, dict]]:
         """Build stream payloads without mutating the delta accumulator.
 
@@ -3613,7 +3635,8 @@ class MatrixState(
         """
         if not groups:
             return []
-        known_groups = set(self._engineer_stream_groups())
+        source = source or self
+        known_groups = set(source._engineer_stream_groups())
         payloads: list[tuple[str, dict]] = []
         for group in groups:
             if not group:
@@ -3627,7 +3650,7 @@ class MatrixState(
                 }))
                 continue
             try:
-                payload = self._engineer_stream_payload(group)
+                payload = self._engineer_stream_payload(group, source=source)
             except Exception:
                 log.exception(
                     "engineer stream payload failed for group '%s'", group
