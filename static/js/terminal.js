@@ -193,14 +193,13 @@ function _terminalPrimaryAction(groupLabel, agentTarget) {
   return null;
 }
 
-function _embeddedTerminalCanTakeFocus(force) {
-  if (!_embeddedTerminal || !isEmbeddedTerminalMode()) return false;
-  if (!_embeddedTerminalSessionKey) return false;
-  if (!force && _embeddedTerminalPendingFocusKey !== _embeddedTerminalSessionKey) {
-    return false;
-  }
+function _embeddedTerminalActiveElementAllowsFocus(force, active, expectedActive) {
+  // A queued first-mount focus must not become an asynchronous focus command
+  // after the operator has already moved on to another control.  In
+  // particular, a terminal socket open/snapshot can land between a grid
+  // activity render and the next animation frame.
+  if (!force && expectedActive && active !== expectedActive) return false;
   if (document.querySelector && document.querySelector('.overlay.visible')) return false;
-  const active = document.activeElement;
   if (!active || active === document.body) return true;
   const workspace = document.getElementById('terminal-workspace');
   if (workspace && typeof workspace.contains === 'function' && workspace.contains(active)) {
@@ -215,6 +214,15 @@ function _embeddedTerminalCanTakeFocus(force) {
   return true;
 }
 
+function _embeddedTerminalCanTakeFocus(force) {
+  if (!_embeddedTerminal || !isEmbeddedTerminalMode()) return false;
+  if (!_embeddedTerminalSessionKey) return false;
+  if (!force && _embeddedTerminalPendingFocusKey !== _embeddedTerminalSessionKey) {
+    return false;
+  }
+  return _embeddedTerminalActiveElementAllowsFocus(!!force, document.activeElement, null);
+}
+
 function _terminalWorkspaceFocusBelongsToComposerOrDirectMessage(active) {
   if (!active) return false;
   if (active.classList && active.classList.contains('terminal-compose-input')) return true;
@@ -226,13 +234,20 @@ function _terminalWorkspaceFocusBelongsToComposerOrDirectMessage(active) {
 }
 
 function focusEmbeddedTerminalWorkspace(force) {
-  if (!_embeddedTerminalCanTakeFocus(!!force)) return false;
+  const explicit = !!force;
+  // Consume a non-forced request before scheduling it. Socket open and
+  // snapshot events often arrive together; they are one first-mount intent,
+  // not permission to reclaim focus on later agent-activity renders.
+  if (!_embeddedTerminal || !isEmbeddedTerminalMode() || !_embeddedTerminalSessionKey) return false;
+  if (!explicit && _embeddedTerminalPendingFocusKey !== _embeddedTerminalSessionKey) return false;
+  const expectedActive = document.activeElement || null;
+  if (!explicit) _embeddedTerminalPendingFocusKey = '';
+  if (!_embeddedTerminalActiveElementAllowsFocus(explicit, expectedActive, null)) return false;
   const expectedKey = _embeddedTerminalSessionKey;
   requestAnimationFrame(function() {
     if (_embeddedTerminalSessionKey !== expectedKey) return;
-    if (!_embeddedTerminalCanTakeFocus(!!force)) return;
+    if (!_embeddedTerminalActiveElementAllowsFocus(explicit, document.activeElement, expectedActive)) return;
     if (typeof _embeddedTerminal.focus === 'function') _embeddedTerminal.focus();
-    _embeddedTerminalPendingFocusKey = '';
   });
   return true;
 }
