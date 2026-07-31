@@ -16,6 +16,7 @@ from ..config import log
 from . import BoardSyncFieldConstraints
 
 GITHUB_ISSUE_TITLE_MAX_LENGTH = 256
+GITHUB_LABEL_NAME_MAX_LENGTH = 50
 
 _TORQUE_MARKER_RE = re.compile(
     r"<!--\s*torque-sync:v(?P<version>\d+)\s+task_id=(?P<task_id>[^\s>]+)"
@@ -496,6 +497,11 @@ class GitHubBoardSyncProvider:
         """Known GitHub Issue field limits; this never calls GitHub."""
         return BoardSyncFieldConstraints(
             title_max_length=GITHUB_ISSUE_TITLE_MAX_LENGTH,
+            label_name_max_length=GITHUB_LABEL_NAME_MAX_LENGTH,
+            # GitHub's official issue REST documentation describes ``body``
+            # only as a string and gives no deterministic maximum.  Do not
+            # invent a local guard for a limit the provider has not documented.
+            description_max_length=None,
         )
 
     def __init__(self, runner: GhRunner | None = None, cwd: str | None = None):

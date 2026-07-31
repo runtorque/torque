@@ -116,6 +116,13 @@ For existing merged-open issues, do a dry run before applying cleanup:
 ## Limits and recovery
 
 - GitHub Issues + Projects v2 only; Projects classic is not supported.
+- For a configured, enabled GitHub sync target (tracked or eligible for
+  auto-tracking), Torque refuses incoming titles over 256 characters and
+  outgoing label names over 50 characters before persisting the write. It does
+  not truncate values, inspect unrelated stored fields, or contact GitHub to
+  decide. GitHub's [issue REST reference](https://docs.github.com/en/rest/issues/issues)
+  documents `body` as a string but does not publish a deterministic issue-body
+  maximum, so Torque intentionally declares no description/body write cap.
 - No webhooks or background polling in V1. Remote changes require manual pull
   preview; new external issues are not auto-imported without an operator gate.
 - Automatic pushes use an idempotent outbound hash and short-lived GitHub

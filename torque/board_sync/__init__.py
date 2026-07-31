@@ -41,6 +41,8 @@ class BoardSyncFieldConstraints:
     """
 
     title_max_length: int | None = None
+    label_name_max_length: int | None = None
+    description_max_length: int | None = None
 
 
 class BoardSyncProvider(Protocol):
@@ -206,20 +208,48 @@ def get_provider(name: str) -> BoardSyncProvider:
     return factory
 
 
-def title_validation_error(provider: BoardSyncProvider, title: str) -> str:
-    """Return a deterministic title-limit refusal, without provider I/O.
+_FIELD_CONSTRAINTS = {
+    "title": (
+        "title_max_length",
+        "Title",
+        "tracked task titles",
+    ),
+    "label_name": (
+        "label_name_max_length",
+        "Label name",
+        "tracked task label names",
+    ),
+    "description": (
+        "description_max_length",
+        "Description",
+        "tracked task descriptions",
+    ),
+}
 
-    Providers opt into this guard by exposing a positive static title limit.
-    An unknown provider or an adapter without such a limit remains writable.
+
+def field_validation_error(
+    provider: BoardSyncProvider,
+    field: str,
+    value: str,
+) -> str:
+    """Return a deterministic declared-field refusal, without provider I/O.
+
+    Providers opt into a field guard by exposing that field's positive static
+    limit. Unknown fields, unknown providers, and adapters without a matching
+    limit intentionally remain writable.
     """
+    constraint = _FIELD_CONSTRAINTS.get(str(field or "").strip())
+    if not constraint:
+        return ""
+    constraint_name, field_label, subject = constraint
     constraints_getter = getattr(provider, "field_constraints", None)
     if not callable(constraints_getter):
         # Third-party adapters written before static constraints were added
         # retain the existing permissive behavior until they opt in.
         return ""
     constraints = constraints_getter()
-    limit = constraints.title_max_length
-    if not isinstance(limit, int) or limit <= 0 or len(title) <= limit:
+    limit = getattr(constraints, constraint_name, None)
+    if not isinstance(limit, int) or limit <= 0 or len(value) <= limit:
         return ""
     provider_name = str(getattr(provider, "name", "board sync") or "board sync")
     provider_label = str(
@@ -228,9 +258,24 @@ def title_validation_error(provider: BoardSyncProvider, title: str) -> str:
     if not provider_label:
         provider_label = provider_name.replace("_", " ").replace("-", " ").title()
     return (
-        f"Title is {len(title)} characters; {provider_label} board sync "
-        f"supports at most {limit} characters for tracked task titles."
+        f"{field_label} is {len(value)} characters; {provider_label} board sync "
+        f"supports at most {limit} characters for {subject}."
     )
+
+
+def title_validation_error(provider: BoardSyncProvider, title: str) -> str:
+    """Return a deterministic title-limit refusal, without provider I/O."""
+    return field_validation_error(provider, "title", title)
+
+
+def label_name_validation_error(provider: BoardSyncProvider, label: str) -> str:
+    """Return a deterministic label-name refusal, without provider I/O."""
+    return field_validation_error(provider, "label_name", label)
+
+
+def description_validation_error(provider: BoardSyncProvider, description: str) -> str:
+    """Return a deterministic description-limit refusal, without provider I/O."""
+    return field_validation_error(provider, "description", description)
 
 
 __all__ = [
@@ -238,6 +283,9 @@ __all__ = [
     "BoardSyncFieldConstraints",
     "BoardSyncProviderError",
     "get_provider",
+    "field_validation_error",
+    "description_validation_error",
+    "label_name_validation_error",
     "normalize_provider_name",
     "register_provider",
     "title_validation_error",

@@ -17,6 +17,24 @@ from torque.server_board_sync import (
 from torque.state import MatrixState, Schedule
 
 
+class BoardSyncProviderConstraintTests(unittest.TestCase):
+    def test_github_declares_label_cap_but_no_unverified_description_cap(self):
+        from torque.board_sync.github import (
+            GITHUB_ISSUE_TITLE_MAX_LENGTH,
+            GITHUB_LABEL_NAME_MAX_LENGTH,
+            GitHubBoardSyncProvider,
+        )
+
+        constraints = GitHubBoardSyncProvider().field_constraints()
+
+        self.assertEqual(constraints.title_max_length, GITHUB_ISSUE_TITLE_MAX_LENGTH)
+        self.assertEqual(constraints.label_name_max_length, GITHUB_LABEL_NAME_MAX_LENGTH)
+        self.assertEqual(constraints.label_name_max_length, 50)
+        # GitHub's official issue REST reference documents body as a string,
+        # not a deterministic maximum, so the adapter must not guess one.
+        self.assertIsNone(constraints.description_max_length)
+
+
 class FakeBoardSyncProvider:
     name = "github"
 

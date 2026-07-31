@@ -19,7 +19,13 @@ import json
 import re
 from typing import Awaitable, Callable, Iterable
 
-from .board_sync import get_provider, normalize_provider_name, title_validation_error
+from .board_sync import (
+    description_validation_error,
+    get_provider,
+    label_name_validation_error,
+    normalize_provider_name,
+    title_validation_error,
+)
 from .config import log
 from .state import ARCHIVED_LANE, BoardTask, MatrixState
 
@@ -387,30 +393,67 @@ def task_auto_tracks_for_board_sync(state, task: BoardTask | None, settings) -> 
     )
 
 
-def task_title_sync_validation_error(state, task: BoardTask | None, title: str) -> str:
-    """Return a local refusal for a known limit on a tracked sync target.
+def _task_sync_validation_provider(state, task: BoardTask | None):
+    """Return the local provider for a guarded write, without provider I/O.
 
     This intentionally inspects only stable local configuration and provider
     metadata. It never preflights or contacts the external board, so provider
     outages cannot make normal task maintenance impossible.
     """
     if not task:
-        return ""
+        return None
     settings = state.get_group_settings(task.group)
     provider_name = normalize_provider_name(
         getattr(settings, "board_sync_provider", "")
     )
     if provider_name == "none" or not bool(
             getattr(settings, "board_sync_enabled", False)):
-        return ""
+        return None
     sync = getattr(task, "board_sync", {}) or {}
     if isinstance(sync, dict) and sync.get("enabled") is False:
-        return ""
+        return None
     if not (
             task_is_tracked_for_board_sync(task)
             or task_auto_tracks_for_board_sync(state, task, settings)):
+        return None
+    return get_provider(provider_name)
+
+
+def task_title_sync_validation_error(state, task: BoardTask | None, title: str) -> str:
+    """Return a local refusal for an incoming title over a declared cap."""
+    provider = _task_sync_validation_provider(state, task)
+    return title_validation_error(provider, title) if provider else ""
+
+
+def task_description_sync_validation_error(
+    state,
+    task: BoardTask | None,
+    description: str,
+) -> str:
+    """Return a local refusal for an incoming description over a declared cap."""
+    provider = _task_sync_validation_provider(state, task)
+    return description_validation_error(provider, description) if provider else ""
+
+
+def task_labels_sync_validation_error(
+    state,
+    task: BoardTask | None,
+    labels: Iterable[str],
+) -> str:
+    """Return a local refusal for an incoming outbound label over a declared cap."""
+    provider = _task_sync_validation_provider(state, task)
+    if not provider:
         return ""
-    return title_validation_error(get_provider(provider_name), title)
+    for raw_label in labels:
+        label = str(raw_label or "").strip()
+        # Match the GitHub adapter's payload: Torque-internal labels never
+        # leave Torque and must not be rejected by an external name cap.
+        if not label or label.casefold().startswith("torque:"):
+            continue
+        error = label_name_validation_error(provider, label)
+        if error:
+            return error
+    return ""
 
 
 def board_sync_fields_trigger(fields: Iterable[str]) -> bool:
