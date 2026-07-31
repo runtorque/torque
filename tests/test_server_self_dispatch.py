@@ -2307,6 +2307,82 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.board_tasks["task-move"].lane, "Done")
         self.assertEqual(state.board_tasks["task-move"].status, "")
 
+    async def test_board_move_task_handler_reports_finalization_refusal(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        state.board_lanes = ["Backlog", "To Do", "In Progress", "Done"]
+        root = state.board_add_task(
+            "Code-owning root", "g", lane="In Progress", id="move-root",
+            status="On Review",
+        )
+        state.board_add_task(
+            "Unmerged implementation", "g", lane="Done", id="move-child",
+            parent_task_id=root.id, pipeline_root_id=root.id, pipeline_depth=1,
+            worktree_boundary={
+                "status": "open", "commit_sha": "candidate",
+                "code_delta": {"state": "present"},
+            },
+        )
+        handle_command = self._extract_handle_command(state)
+
+        result = await handle_command({
+            "cmd": "board_move_task",
+            "id": root.id,
+            "lane": "Done",
+            "clear_status": True,
+        })
+
+        self.assertEqual("error", result["type"])
+        self.assertEqual("code_boundary_not_durably_merged", result["reason"])
+        self.assertFalse(result["clear_status_applied"])
+        self.assertIn("Code-bearing", result["message"])
+        self.assertEqual(
+            ["code_boundary_not_durably_merged"],
+            result["details"]["missing_gates"],
+        )
+        # The refusal occurs before clear_status, so callers are told that
+        # both requested mutations were declined rather than seeing a false
+        # task_moved response.
+        self.assertEqual("In Progress", root.lane)
+        self.assertEqual("On Review", root.status)
+
+    async def test_board_move_refusal_does_not_auto_resume_aggressive_streams(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        state.update_engineer_settings(
+            "g", autonomy_mode="aggressive_auto_continue",
+        )
+        state.board_lanes = ["Backlog", "To Do", "In Progress", "Done"]
+        root = state.board_add_task(
+            "Code-owning root", "g", lane="In Progress", id="move-root",
+        )
+        state.board_add_task(
+            "Unmerged implementation", "g", lane="Done", id="move-child",
+            parent_task_id=root.id, pipeline_root_id=root.id, pipeline_depth=1,
+            worktree_boundary={
+                "status": "open", "commit_sha": "candidate",
+                "code_delta": {"state": "present"},
+            },
+        )
+        resume_calls = []
+
+        async def maybe_auto_resume(*args, **kwargs):
+            resume_calls.append((args, kwargs))
+            return []
+
+        with mock.patch.object(
+                self.server_mod,
+                "_maybe_auto_resume_targets",
+                side_effect=maybe_auto_resume,
+        ):
+            handle_command = self._extract_handle_command(state)
+            result = await handle_command({
+                "cmd": "board_move_task", "id": root.id, "lane": "Done",
+            })
+
+        self.assertEqual("error", result["type"])
+        self.assertEqual([], resume_calls)
+
     async def test_worktree_merge_auto_moves_sole_linked_task_to_done(self):
         state = self.state_mod.MatrixState()
         state.add_group("g")

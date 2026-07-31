@@ -654,6 +654,32 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Unknown tool", denied.payload["error"]["message"])
         self.assertEqual(before, (other_task.task, other_task.lane, list(other_task.messages)))
 
+    async def test_task_move_wrapper_propagates_command_refusal(self):
+        task = self.state.board_add_task(
+            "Refused completion", "g", lane="In Progress",
+            status="On Review",
+        )
+
+        async def refused_move(payload):
+            self.assertEqual("board_move_task", payload["cmd"])
+            self.assertEqual(task.id, payload["id"])
+            self.assertTrue(payload["clear_status"])
+            return {
+                "type": "error",
+                "message": "Done requires durable merged evidence",
+                "reason": "code_boundary_not_durably_merged",
+            }
+
+        self._handle_command = refused_move
+        response = await self._call(
+            "task_move",
+            {"task": task.id, "new_lane": "Done", "clear_status": True},
+        )
+
+        self.assertIn("durable merged evidence", self._error_text(response))
+        self.assertEqual("In Progress", task.lane)
+        self.assertEqual("On Review", task.status)
+
     async def test_closed_root_recovery_matrix_is_caller_class_specific(self):
         """Standard Architect ownership is narrow; PM retains full group board authority."""
         self._freeze_default_architect(self.full_peer)
