@@ -1206,5 +1206,11 @@ def _record_merge_completion_evidence(
             task,
             board_sync_manager=board_sync_manager,
         )
+        # Merge evidence is a root Done-gate input.  A descendant may already
+        # have completed, causing its normal cascade to (correctly) refuse
+        # before this durable evidence exists.  Reuse the state-layer cascade
+        # now that the input has changed; it retains every existing review,
+        # descendant, and merge-boundary admission check.
+        state.board_recheck_done_cascade(task.id)
         updated_ids.append(task.id)
     return updated_ids

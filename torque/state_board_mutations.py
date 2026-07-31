@@ -1223,6 +1223,53 @@ class BoardMutationMixin:
             self.recompute_task_health()
         return changed
 
+    def board_recheck_done_cascade(self, tid: str, *,
+                                   recompute: bool = True) -> list[str]:
+        """Re-evaluate a tree after an ancestor's Done-gate input changes.
+
+        ``board_cascade_done`` is intentionally driven by a descendant that
+        has already reached Done.  Some of its root-admission inputs (most
+        notably durable merge evidence) are recorded later, after that normal
+        trigger correctly refused the root.  Seed the existing cascade from
+        every completed descendant rather than duplicating its admission or
+        descendant checks here.  This keeps the recheck a no-op until all
+        descendants are resolved and preserves the canonical Done gate.
+        """
+        tid = self.resolve_task_alias(tid)
+        task = self.board_tasks.get(tid)
+        if not task:
+            return []
+        if task_counts_as_done(task):
+            return self.board_cascade_done(tid, recompute=recompute)
+
+        completed_descendants: list[BoardTask] = []
+        stack = self.board_get_children(task.id)
+        stack.extend(self.review_handoff_followups(task.id))
+        seen = set()
+        while stack:
+            current = stack.pop()
+            if current.id in seen:
+                continue
+            seen.add(current.id)
+            stack.extend(self.board_get_children(current.id))
+            if self._is_review_handoff_source(current):
+                stack.extend(self.review_handoff_followups(current.id))
+            if task_counts_as_done(current):
+                completed_descendants.append(current)
+
+        changed: list[str] = []
+        for descendant in sorted(
+                completed_descendants,
+                key=lambda item: (-item.pipeline_depth, item.created_at, item.id),
+        ):
+            for changed_id in self.board_cascade_done(
+                    descendant.id, recompute=False):
+                if changed_id not in changed:
+                    changed.append(changed_id)
+        if changed and recompute:
+            self.recompute_task_health()
+        return changed
+
     def board_archive_task(self, tid: str, *,
                            position: Optional[int] = None):
         tid = self.resolve_task_alias(tid)
