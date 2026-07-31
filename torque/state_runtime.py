@@ -5,7 +5,7 @@ from __future__ import annotations
 from .state import (
     AgentMessageLoop, Optional, Schedule, _ENGINEER_STREAM_CARD_LIMIT,
     _ENGINEER_STREAM_CONTEXT_LIMIT, _slugify, _unique_slug, asdict, copy,
-    asyncio, cloud_hooks, datetime, hot_json_dumps, hot_json_dumps_async,
+    asyncio, cloud_hooks, datetime, hot_json_dumps_async,
     log, profiling, time, timezone, uuid, web,
 )
 
@@ -198,20 +198,6 @@ class StateRuntimeMixin:
         """Return enabled schedules whose next_run_at is <= now."""
         return [s for s in self.schedules.values()
                 if s.enabled and s.next_run_at and s.next_run_at <= now_iso]
-
-    def snapshot_msg(self) -> str:
-        """Generate a full state snapshot message (for initial connect / resync)."""
-        msg = hot_json_dumps({
-            "type": "state", "seq": self._seq, **self.to_dict()})
-        if profiling.is_enabled():
-            profiling.recorder().observe(
-                "snapshot_json_bytes", len(msg.encode("utf-8")))
-        return msg
-
-    async def snapshot_msg_async(self) -> str:
-        """Generate a full state snapshot without serializing on the event loop."""
-        return await hot_json_dumps_async({
-            "type": "state", "seq": self._seq, **self.to_dict()})
 
     async def broadcast(self):
         """Send accumulated deltas to all WS clients.

@@ -136,7 +136,7 @@ data with `scripts/migrate_toolbelt_to_profile.py`.
 
 ## State broadcast model
 
-Every mutation calls `_emit()` to queue a delta op. `broadcast()` sends `{"type": "delta", "seq": N, "ops": [...]}` to WebSocket clients. Full state (`snapshot_msg()`) is sent only on initial connect or `resync` request.
+Every mutation calls `_emit()` to queue a delta op. `broadcast()` sends `{"type": "delta", "seq": N, "ops": [...]}` to WebSocket clients. The server builds full state for initial connect or `resync` requests, using compact-v1 by default; the legacy full snapshot remains available as a rollback hatch.
 
 There are 12 delta op types: `agent_upsert`, `agent_remove`, `group_update`, `group_remove`, `group_rename`, `groups_reorder`, `group_settings_update`, `global_settings_update`, `task_upsert`, `task_remove`, `lanes_update`, `ui_update`, `focus_update`. The frontend patches its in-memory state from these and re-renders affected surfaces.
 

@@ -497,35 +497,6 @@ class MatrixStateCleanupTests(unittest.TestCase):
         snap["relay_config"]["config"]["enabled"] = True
         self.assertFalse(state.relay_config["config"]["enabled"])
 
-    def test_snapshot_msg_hot_json_round_trips(self):
-        state = self.state_mod.MatrixState()
-        state.groups["g"] = ["agent-1"]
-        state.agents["agent-1"] = self.state_mod.AgentCell(
-            id="agent-1",
-            name="Worker",
-            group="g",
-            cell_type="agent",
-            activity_detail="Serializing café payload",
-        )
-        state.board_tasks["task-1"] = self.state_mod.BoardTask(
-            id="task-1",
-            task="Check JSON 🚀",
-            group="g",
-            lane="Backlog",
-        )
-
-        raw = state.snapshot_msg()
-        decoded = json.loads(raw)
-
-        self.assertEqual(decoded, {
-            "type": "state",
-            "seq": state._seq,
-            **state.to_dict(),
-        })
-
-        if self.state_mod.orjson is not None:
-            self.assertNotIn(": ", raw)
-
     def test_worktree_boundary_normalization_preserves_pr_metadata(self):
         boundary = self.state_mod._normalize_worktree_boundary({
             "repo_root": "/repo",
@@ -5673,17 +5644,6 @@ class MatrixStateEngineerStreamTests(unittest.IsolatedAsyncioTestCase):
             summary["items"][0]["merge_readiness"]["stale_base"]["source"],
             "merge_readiness_check",
         )
-
-    async def test_snapshot_msg_async_round_trips_state_payload(self):
-        state, _product = self._make_state_with_open_stream()
-
-        raw = await state.snapshot_msg_async()
-
-        self.assertEqual(json.loads(raw), {
-            "type": "state",
-            "seq": state._seq,
-            **state.to_dict(),
-        })
 
     async def test_broadcast_appends_engineer_stream_deltas_for_task_changes(self):
         state, product = self._make_state_with_open_stream()
