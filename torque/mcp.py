@@ -657,9 +657,9 @@ TOOLS = [
     {
         "name": "torque_memory_publish", "authority": {"requirements": [{"capability": "memory.write","minimum_scope": "group","handler_scoped": True}]},
         "description": (
-            "Publish an explicit shared memory entry for the current "
-            "task, pipeline, group, or project. Durable decisions/warnings "
-            "are preserved automatically; transient notes can decay over time."
+            "Publish an explicit, time-bounded shared memory entry for the "
+            "current task, pipeline, group, or project. Every entry expires "
+            "per the group's configured context TTL."
         ),
         "inputSchema": {
             "type": "object",
@@ -672,6 +672,13 @@ TOOLS = [
                 "content": {
                     "type": "string",
                     "description": "The shared memory content.",
+                },
+                "entry_id": {
+                    "type": "string",
+                    "description": (
+                        "Optional existing entry ID to update. Only the "
+                        "original author may update an entry."
+                    ),
                 },
                 "title": {
                     "type": "string",
@@ -697,8 +704,9 @@ TOOLS = [
                     "type": "string",
                     "enum": ["durable", "transient"],
                     "description": (
-                        "Optional retention override. Defaults from entry "
-                        "type; pinned entries always become durable."
+                        "Deprecated compatibility input. It is accepted but "
+                        "does not affect expiry: all entries use the group "
+                        "TTL, and pinning affects ranking/visibility only."
                     ),
                 },
             },
@@ -1894,6 +1902,8 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
             payload["cmd"] = "memory_publish"
             payload["entry_type"] = args.get("entry_type", "")
             payload["content"] = args.get("content", "")
+            if args.get("entry_id"):
+                payload["entry_id"] = args["entry_id"]
             if args.get("title"):
                 payload["title"] = args["title"]
             if args.get("scope_kind"):

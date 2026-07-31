@@ -162,7 +162,6 @@ from .memory import (
     load_visible_memory_entries,
     normalize_entry_type,
     normalize_link_target_kind,
-    normalize_retention_kind,
 )
 from .roles import RoleManager
 from .specializations import SpecializationManager

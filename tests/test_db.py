@@ -1491,6 +1491,21 @@ class TorqueDBTests(unittest.TestCase):
             4,
         )
 
+    def test_context_default_ttl_round_trips_and_group_updates_clamp(self):
+        state = MatrixState(db=self.db)
+        state.add_group("g")
+        state.update_group_settings("g", context_default_ttl_days=0)
+        self.assertEqual(state.get_group_settings("g").context_default_ttl_days, 1)
+        state.update_group_settings("g", context_default_ttl_days=999)
+        self.assertEqual(state.get_group_settings("g").context_default_ttl_days, 60)
+        state.update_group_settings("g", context_default_ttl_days=12)
+
+        loaded = self.db.load_all()
+        self.assertEqual(
+            loaded["group_settings"]["g"]["context_default_ttl_days"], 12,
+        )
+        self.assertEqual(GroupSettings().context_default_ttl_days, 30)
+
     def test_worker_launch_settings_round_trip_and_default_empty(self):
         self.db.save_groups({"g": [], "h": []}, {"g": "g", "h": "h"})
         self.db.save_group_settings(
@@ -4196,12 +4211,14 @@ class TorqueDBTests(unittest.TestCase):
         )
         self.assertEqual([entry["id"] for entry in linked], ["mem-1"])
 
+        original_expiry = 4_102_444_800.0
         self.db.set_memory_entry_pinned("mem-2", True, 30.0)
+        self.db.set_memory_entry_pinned("mem-2", False, 31.0)
         entry = self.db.load_memory_entry("mem-2")
-        self.assertTrue(entry["pinned"])
-        self.assertEqual(entry["retention_kind"], "durable")
-        self.assertIsNone(entry["expires_at"])
-        self.assertEqual(entry["updated_at"], 30.0)
+        self.assertFalse(entry["pinned"])
+        self.assertEqual(entry["retention_kind"], "transient")
+        self.assertEqual(entry["expires_at"], original_expiry)
+        self.assertEqual(entry["updated_at"], 31.0)
         self.assertEqual(
             entry["links"],
             [
@@ -4214,7 +4231,7 @@ class TorqueDBTests(unittest.TestCase):
             ],
         )
 
-    def test_memory_entries_purge_expired_transient_rows_on_read(self):
+    def test_memory_entries_purge_expired_rows_regardless_of_legacy_retention_kind(self):
         self.db.save_memory_entry(
             {
                 "id": "mem-active",
@@ -4258,10 +4275,66 @@ class TorqueDBTests(unittest.TestCase):
             }
         )
 
+        self.db.save_memory_entry(
+            {
+                "id": "mem-expired-durable", "project_key": "/repo",
+                "group_name": "g", "scope_kind": "group", "scope_ref": "g",
+                "entry_type": "decision", "title": "Old decision",
+                "content": "Expired despite former durable class.", "pinned": False,
+                "task_id": "", "source_kind": "agent", "source_id": "agent-3",
+                "source_name": "Worker 3", "retention_kind": "durable",
+                "expires_at": 15.0, "created_at": 12.0, "updated_at": 12.0,
+            }
+        )
+
         entries = self.db.load_memory_entries(group_name="g", limit=10, now=20.0)
 
         self.assertEqual([entry["id"] for entry in entries], ["mem-active"])
         self.assertIsNone(self.db.load_memory_entry("mem-expired", now=20.0))
+        self.assertIsNone(self.db.load_memory_entry("mem-expired-durable", now=20.0))
+
+    def test_legacy_null_expiry_remains_null_after_read_paths(self):
+        self.db.save_memory_entry(
+            {
+                "id": "legacy-null", "project_key": "/repo", "group_name": "g",
+                "scope_kind": "group", "scope_ref": "g", "entry_type": "decision",
+                "title": "Legacy", "content": "Await separate migration.",
+                "pinned": False, "task_id": "", "source_kind": "agent",
+                "source_id": "agent-1", "source_name": "Worker",
+                "retention_kind": "durable", "expires_at": None,
+                "created_at": 1.0, "updated_at": 1.0,
+            }
+        )
+
+        self.db.load_memory_entries(group_name="g", now=20.0)
+        self.db.load_memory_entry("legacy-null", now=20.0)
+
+        stored = self.db._conn.execute(
+            "SELECT expires_at FROM memory_entries WHERE id='legacy-null'"
+        ).fetchone()[0]
+        self.assertIsNone(stored)
+
+    def test_init_startup_sweep_purges_elapsed_expiry_after_migrations(self):
+        path = Path(self.tmp.name) / "startup-sweep.db"
+        db = TorqueDB(path)
+        db.init()
+        db.save_memory_entry(
+            {
+                "id": "expired-on-start", "project_key": "/repo", "group_name": "g",
+                "scope_kind": "group", "scope_ref": "g", "entry_type": "note",
+                "title": "Expired", "content": "Remove on next daemon start.",
+                "pinned": True, "task_id": "", "source_kind": "agent",
+                "source_id": "agent-1", "source_name": "Worker",
+                "retention_kind": "durable", "expires_at": 1.0,
+                "created_at": 0.0, "updated_at": 0.0,
+            }
+        )
+        db.close()
+
+        restarted = TorqueDB(path)
+        self.addCleanup(restarted.close)
+        restarted.init()
+        self.assertIsNone(restarted.load_memory_entry("expired-on-start"))
 
     def test_init_upgrades_legacy_memory_entries_before_retention_indexes(self):
         legacy_path = Path(self.tmp.name) / "legacy-memory.db"
@@ -4304,7 +4377,7 @@ class TorqueDBTests(unittest.TestCase):
 
         entry = upgraded.load_memory_entry("mem-1")
         self.assertIsNotNone(entry)
-        self.assertEqual(entry["retention_kind"], "durable")
+        self.assertEqual(entry["retention_kind"], "ttl")
         cols = upgraded._conn.execute(
             "PRAGMA table_info(memory_entries)"
         ).fetchall()

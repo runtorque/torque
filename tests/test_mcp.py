@@ -1083,6 +1083,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             {
                 "entry_type": "decision",
                 "content": "Use durable storage.",
+                "entry_id": "mem-existing",
                 "title": "Storage choice",
                 "scope_kind": "task",
                 "scope_ref": "task-1",
@@ -1156,6 +1157,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                     "cell_id": "agent-1",
                     "entry_type": "decision",
                     "content": "Use durable storage.",
+                    "entry_id": "mem-existing",
                     "title": "Storage choice",
                     "scope_kind": "task",
                     "scope_ref": "task-1",
@@ -1195,6 +1197,21 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                 },
             ],
         )
+
+    async def test_memory_publish_contract_exposes_update_and_ttl_compatibility(self):
+        tool = next(
+            item for item in self.mcp_mod.TOOLS
+            if item["name"] == "torque_memory_publish"
+        )
+        properties = tool["inputSchema"]["properties"]
+
+        self.assertIn("entry_id", properties)
+        self.assertNotIn("entry_id", tool["inputSchema"]["required"])
+        description = properties["retention_kind"]["description"]
+        self.assertIn("Deprecated", description)
+        self.assertIn("group TTL", description)
+        self.assertIn("ranking/visibility", description)
+        self.assertNotIn("override", description.lower())
 
     async def test_torque_message_user_persists_worker_direct_message(self):
         db_mod = importlib.import_module("torque.db")

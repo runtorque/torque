@@ -644,6 +644,9 @@ class TorqueDB(
             self.backfill_agent_history,
             post_init_runners=self._post_init_migration_runners(),
         )
+        # Migrations (including the separate legacy-memory stamping migration)
+        # must run before this sweep so NULL legacy rows remain available to it.
+        self.purge_expired_memory_entries()
 
     def close(self):
         if self._conn:

@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 import tempfile
 import unittest
@@ -49,8 +50,11 @@ class MemoryHelpersTests(unittest.TestCase):
         self.assertEqual(entry["group_name"], "g")
         self.assertEqual(entry["project_key"], "/repo")
         self.assertEqual(entry["entry_type"], "decision")
-        self.assertEqual(entry["retention_kind"], "durable")
-        self.assertIsNone(entry["expires_at"])
+        self.assertEqual(entry["retention_kind"], "ttl")
+        self.assertAlmostEqual(
+            entry["expires_at"],
+            entry["created_at"] + 30 * 24 * 60 * 60,
+        )
 
     def test_build_memory_entry_defaults_to_group_without_task(self):
         state = self.state_mod.MatrixState()
@@ -84,21 +88,25 @@ class MemoryHelpersTests(unittest.TestCase):
                 scope_ref="g",
             )
 
-    def test_build_memory_entry_marks_notes_transient_by_default(self):
+    def test_build_memory_entry_applies_the_same_ttl_to_every_type(self):
         state = self.state_mod.MatrixState()
-        entry = self.memory_mod.build_memory_entry(
-            state,
-            entry_type="note",
-            content="Scratch note for the current task.",
-            scope_kind="group",
-            scope_ref="g",
-        )
-
-        self.assertEqual(entry["retention_kind"], "transient")
-        self.assertAlmostEqual(
-            entry["expires_at"],
-            entry["created_at"] + self.memory_mod.TRANSIENT_RETENTION_SECS,
-        )
+        state.add_group("g")
+        state.update_group_settings("g", context_default_ttl_days=7)
+        for entry_type in self.memory_mod.ENTRY_TYPES:
+            entry = self.memory_mod.build_memory_entry(
+                state,
+                entry_type=entry_type,
+                content=f"{entry_type} context.",
+                scope_kind="group",
+                scope_ref="g",
+                retention_kind="durable",
+                pinned=True,
+            )
+            self.assertEqual(entry["retention_kind"], "ttl")
+            self.assertAlmostEqual(
+                entry["expires_at"],
+                entry["created_at"] + 7 * 24 * 60 * 60,
+            )
 
     def test_build_memory_link_defaults_from_current_context(self):
         state = self.state_mod.MatrixState()
@@ -309,45 +317,130 @@ class MemoryHelpersTests(unittest.TestCase):
         self.assertLessEqual(len(block), 220)
         self.assertEqual(block.count("\n- "), 1)
 
-    def test_compact_memory_entries_summarizes_old_transient_batches(self):
-        now = 1_000_000.0
-        entries = [
-            {
-                "id": "mem-decision",
-                "entry_type": "decision",
-                "title": "Keep DB-backed memory",
-                "content": "Persist durable choices.",
-                "pinned": False,
-                "retention_kind": "durable",
-                "created_at": now - 20,
-                "updated_at": now - 20,
-            },
-            {
-                "id": "mem-note-1",
-                "entry_type": "note",
-                "title": "Old scratch",
-                "content": "Remove after rollout.",
-                "pinned": False,
-                "retention_kind": "transient",
-                "created_at": now - self.memory_mod.TRANSIENT_SUMMARY_AFTER_SECS - 10,
-                "updated_at": now - 10,
-            },
-            {
-                "id": "mem-note-2",
-                "entry_type": "handoff",
-                "title": "Old handoff",
-                "content": "Reviewed by worker 2.",
-                "pinned": False,
-                "retention_kind": "transient",
-                "created_at": now - self.memory_mod.TRANSIENT_SUMMARY_AFTER_SECS - 20,
-                "updated_at": now - 5,
-            },
-        ]
 
-        compacted = self.memory_mod.compact_memory_entries(entries, now=now)
+class MemoryCommandTests(unittest.TestCase):
+    def setUp(self):
+        install_aiohttp_stub()
+        self.state_mod = importlib.import_module("torque.state")
+        self.state_mod = importlib.reload(self.state_mod)
+        self.db_mod = importlib.import_module("torque.db")
+        self.db_mod = importlib.reload(self.db_mod)
+        self.commands_mod = importlib.import_module("torque.commands.memory")
+        self.commands_mod = importlib.reload(self.commands_mod)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.db = self.db_mod.TorqueDB(Path(self.tmp.name) / "torque.db")
+        self.db.init()
+        self.addCleanup(self.db.close)
+        self.state = self.state_mod.MatrixState(db=self.db)
+        self.state.add_group("g")
+        self.author = self.state_mod.AgentCell(
+            id="author", name="Author", group="g", directory="/repo",
+        )
+        self.other = self.state_mod.AgentCell(
+            id="other", name="Other", group="g", directory="/repo",
+        )
+        self.state.agents = {self.author.id: self.author, self.other.id: self.other}
 
-        self.assertEqual(compacted[0]["id"], "mem-decision")
-        self.assertEqual(compacted[1]["entry_type"], "summary")
-        self.assertTrue(compacted[1]["synthetic"])
-        self.assertEqual(compacted[1]["summary_entry_count"], 2)
-        self.assertIn("older transient entries", compacted[1]["title"])
+    def _resolve_cell_and_task(self, state, cell_id, _task_id):
+        return state.agents.get(cell_id), None
+
+    @staticmethod
+    def _resolve_scope_ref(_scope_kind, scope_ref, *, cell, task):
+        del cell, task
+        return scope_ref
+
+    @staticmethod
+    def _resolve_link_ref(_target_kind, target_ref, *, cell, task):
+        del cell, task
+        return target_ref
+
+    @staticmethod
+    def _resolve_task_id(_state, task_id):
+        return task_id
+
+    def _command(self, data):
+        return asyncio.run(self.commands_mod._handle_memory_command(
+            data,
+            self.state,
+            resolve_cell_and_task=self._resolve_cell_and_task,
+            resolve_scope_ref=self._resolve_scope_ref,
+            resolve_link_ref=self._resolve_link_ref,
+            resolve_task_id=self._resolve_task_id,
+        ))
+
+    def test_publish_legacy_retention_argument_uses_group_ttl_and_reports_notice(self):
+        self.state.update_group_settings("g", context_default_ttl_days=9)
+
+        result = self._command({
+            "cmd": "memory_publish", "cell_id": "author",
+            "entry_type": "decision", "content": "Use a bounded TTL.",
+            "scope_kind": "group", "scope_ref": "g", "pinned": True,
+            "retention_kind": "durable",
+        })
+
+        self.assertEqual(result["type"], "memory_entry")
+        self.assertIn("deprecated", result["retention_note"])
+        entry = result["entry"]
+        self.assertEqual(entry["retention_kind"], "ttl")
+        self.assertTrue(entry["pinned"])
+        self.assertAlmostEqual(
+            entry["expires_at"], entry["created_at"] + 9 * 24 * 60 * 60,
+        )
+
+    def test_non_author_cannot_update_shared_memory_entry(self):
+        created = self._command({
+            "cmd": "memory_publish", "cell_id": "author",
+            "entry_type": "finding", "content": "Original content.",
+            "scope_kind": "group", "scope_ref": "g",
+        })["entry"]
+
+        refused = self._command({
+            "cmd": "memory_publish", "cell_id": "other", "entry_id": created["id"],
+            "content": "Misattributed overwrite.",
+        })
+
+        self.assertEqual(refused["type"], "error")
+        self.assertIn("original author", refused["message"])
+        stored = self.db.load_memory_entry(created["id"])
+        self.assertEqual(stored["content"], "Original content.")
+        self.assertEqual(stored["source_id"], "author")
+
+    def test_unresolved_agent_cannot_update_shared_memory_entry(self):
+        created = self._command({
+            "cmd": "memory_publish", "cell_id": "author",
+            "entry_type": "finding", "content": "Original content.",
+            "scope_kind": "group", "scope_ref": "g",
+        })["entry"]
+
+        refused = self._command({
+            "cmd": "memory_publish", "cell_id": "unknown-agent",
+            "entry_id": created["id"], "content": "Unauthorized overwrite.",
+        })
+
+        self.assertEqual(refused["type"], "error")
+        self.assertIn("original author", refused["message"])
+        self.assertEqual(
+            self.db.load_memory_entry(created["id"])["content"],
+            "Original content.",
+        )
+
+    def test_author_update_preserves_existing_expiry_including_legacy_null(self):
+        self.db.save_memory_entry({
+            "id": "legacy", "project_key": "/repo", "group_name": "g",
+            "scope_kind": "group", "scope_ref": "g", "entry_type": "note",
+            "title": "Legacy", "content": "Before update.", "pinned": False,
+            "task_id": "", "source_kind": "agent", "source_id": "author",
+            "source_name": "Author", "retention_kind": "durable", "expires_at": None,
+            "created_at": 1.0, "updated_at": 1.0,
+        })
+
+        result = self._command({
+            "cmd": "memory_publish", "cell_id": "author", "entry_id": "legacy",
+            "content": "After update.",
+        })
+
+        self.assertEqual(result["type"], "memory_entry")
+        self.assertIsNone(self.db._conn.execute(
+            "SELECT expires_at FROM memory_entries WHERE id='legacy'"
+        ).fetchone()[0])

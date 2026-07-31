@@ -15,7 +15,6 @@ from ..memory import (
     load_visible_memory_entries,
     normalize_entry_type,
     normalize_link_target_kind,
-    normalize_retention_kind,
 )
 from ..state import MatrixState
 
@@ -119,7 +118,6 @@ async def _handle_memory_command(
             linked_target_ref=linked_target_ref,
             limit=int(data.get("limit", 20) or 20),
             offset=int(data.get("offset", 0) or 0),
-            compact=not bool(search_text),
         )
         return {
             "type": "memory_entries",
@@ -149,6 +147,19 @@ async def _handle_memory_command(
         existing = state.db.load_memory_entry(entry_id) if entry_id else None
         if entry_id and not existing:
             return {"type": "error", "message": "Memory entry not found"}
+        # Agent-originated updates are author-only. Operator/UI calls omit
+        # ``cell_id`` and retain their established edit path; a supplied but
+        # unresolved ID must fail closed rather than bypass that authority.
+        requested_cell_id = str(data.get("cell_id", "") or "").strip()
+        if (existing and requested_cell_id
+                and (not cell or existing.get("source_id", "") != cell.id)):
+            return {
+                "type": "error",
+                "message": (
+                    "Only the original author may update a shared memory "
+                    "entry; publish a new entry and link it instead."
+                ),
+            }
 
         try:
             scope_kind = (data.get("scope_kind", "") or "").strip()
@@ -178,13 +189,9 @@ async def _handle_memory_command(
                 if existing
                 else False
             )
-            retention_kind = (
-                (data.get("retention_kind", "") or "").strip()
-                if "retention_kind" in data
-                else (existing.get("retention_kind", "") if existing else "")
-            )
-            if retention_kind:
-                retention_kind = normalize_retention_kind(retention_kind)
+            # Accepted for callers dispatched before the TTL lifecycle, but
+            # intentionally ignored by ``build_memory_entry``.
+            retention_kind = (data.get("retention_kind", "") or "").strip()
             source_kind = data.get("source_kind", "")
             if not source_kind and existing:
                 source_kind = existing.get("source_kind", "agent")
@@ -234,12 +241,22 @@ async def _handle_memory_command(
             )
             for field in ("source_kind", "source_id", "source_name"):
                 entry[field] = existing.get(field, entry[field])
+            # Updating content must neither extend a TTL nor stamp legacy NULL
+            # rows; TORQUE:1477 owns the latter migration.
+            entry["expires_at"] = existing.get("expires_at")
         state.db.save_memory_entry(entry)
         for link in pending_links:
             link["entry_id"] = entry["id"]
             state.db.save_memory_link(link)
         entry = state.db.load_memory_entry(entry["id"]) or entry
-        return {"type": "memory_entry", "entry": entry}
+        return {
+            "type": "memory_entry",
+            "entry": entry,
+            "retention_note": (
+                "retention_kind is deprecated; all entries expire per group "
+                "TTL, and pinning affects ranking only"
+            ),
+        }
 
     if cmd in {"memory_pin", "memory_unpin"}:
         entry_id = (data.get("entry_id", "") or "").strip()
