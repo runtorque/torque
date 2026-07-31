@@ -1148,21 +1148,60 @@ def _proposal_peer_inbox_json(state, caller_id: str,
     db = getattr(state, "db", None)
     if not db:
         return _compact_json({"type": "proposal_peer_inbox", "threads": []}), False
-    row_limit = min(max(limit * 20, limit), 1000)
-    rows = db.load_agent_peer_messages_for_agent(
+    # Product-peer eligibility depends on live authority state, so resolve it
+    # before asking SQLite to page or count threads. Binding the concrete peer
+    # ids into both aggregate queries keeps the count from leaking unscoped
+    # threads and keeps eligible threads from falling behind an unrelated
+    # message or thread window.
+    eligible_peer_ids = sorted({
+        _cell_id(peer)
+        for peer in getattr(state, "agents", {}).values()
+        if _proposal_peer_eligible(state, caller_id, peer)
+    })
+    if peer_id:
+        eligible_peer_ids = [peer_id]
+    thread_rows = db.load_agent_peer_threads_for_agent(
         caller_id,
-        limit=row_limit,
+        limit=limit,
         since=since_value,
         peer_id=peer_id,
+        peer_ids=eligible_peer_ids,
         thread_id=thread_id,
+        sender_kind="architect",
+        recipient_kind="architect",
+        requires_reply=requires_reply,
     )
-    grouped: dict[str, list[dict]] = {}
-    for row in rows:
-        if not _proposal_peer_row_visible(state, caller_id, row, peer_id=peer_id):
-            continue
-        grouped.setdefault(str(row.get("thread_id", "") or ""), []).append(row)
+    total = db.count_agent_peer_threads_for_agent(
+        caller_id,
+        since=since_value,
+        peer_id=peer_id,
+        peer_ids=eligible_peer_ids,
+        thread_id=thread_id,
+        sender_kind="architect",
+        recipient_kind="architect",
+        requires_reply=requires_reply,
+    )
     threads = []
-    for group_thread_id, messages in grouped.items():
+    for thread_row in thread_rows:
+        group_thread_id = str(thread_row.get("thread_id", "") or "")
+        messages = db.load_agent_peer_messages_for_agent(
+            caller_id,
+            limit=1000,
+            since=since_value,
+            peer_id=peer_id,
+            thread_id=group_thread_id,
+        )
+        messages = [
+            row for row in messages
+            if _proposal_peer_row_visible(
+                state,
+                caller_id,
+                row,
+                peer_id=peer_id,
+            )
+        ]
+        if not messages:
+            continue
         messages.sort(
             key=lambda row: (
                 float(row.get("created_at", 0) or 0),
@@ -1195,7 +1234,6 @@ def _proposal_peer_inbox_json(state, caller_id: str,
         ),
         reverse=True,
     )
-    total = len(threads)
     selected = threads[:limit]
     detail = bool(args.get("detail", False))
     return _compact_json({

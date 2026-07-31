@@ -825,6 +825,51 @@ class TorqueDBTests(unittest.TestCase):
         )
         self.assertEqual(
             [
+                row["thread_id"]
+                for row in self.db.load_agent_peer_threads_for_agent(
+                    "arch-a",
+                    peer_ids=["arch-b"],
+                )
+            ],
+            ["thread-1"],
+        )
+        self.assertEqual(
+            self.db.count_agent_peer_threads_for_agent(
+                "arch-a",
+                peer_ids=["arch-b"],
+            ),
+            1,
+        )
+        self.assertEqual(
+            self.db.load_agent_peer_threads_for_agent(
+                "arch-a",
+                peer_ids=[],
+            ),
+            [],
+        )
+        self.assertEqual(
+            self.db.count_agent_peer_threads_for_agent(
+                "arch-a",
+                peer_ids=[],
+            ),
+            0,
+        )
+        # The concrete live-authority scope is bound as one JSON value, not
+        # one SQLite parameter per peer.
+        many_peer_ids = [f"unused-peer-{index}" for index in range(2_000)]
+        many_peer_ids.append("arch-c")
+        self.assertEqual(
+            [
+                row["thread_id"]
+                for row in self.db.load_agent_peer_threads_for_agent(
+                    "arch-a",
+                    peer_ids=many_peer_ids,
+                )
+            ],
+            ["thread-3"],
+        )
+        self.assertEqual(
+            [
                 row["id"]
                 for row in self.db.load_agent_peer_messages_for_thread(
                     "thread-1",

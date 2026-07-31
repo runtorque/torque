@@ -6661,19 +6661,23 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         architect = self._add_architect("arch-window-caller", "Window Caller")
         peer = self._add_architect("arch-window-peer", "Window Peer")
         engineer = self._add_engineer("eng-window-filler", "Window Filler")
-        pending_thread_id = "thread-architect-pending-beyond-flat-window"
-        self.db.save_agent_peer_message({
-            "id": "message-architect-pending-beyond-flat-window",
-            "thread_id": pending_thread_id,
-            "group_name": architect.group,
-            "sender_id": peer.id,
-            "sender_kind": "architect",
-            "recipient_id": architect.id,
-            "recipient_kind": "architect",
-            "message": "Old Architect request still needs a reply.",
-            "created_at": 1.0,
-            "ack_required": True,
-        })
+        pending_thread_ids = [
+            f"thread-architect-pending-beyond-flat-window-{index}"
+            for index in range(8)
+        ]
+        for index, pending_thread_id in enumerate(pending_thread_ids):
+            self.db.save_agent_peer_message({
+                "id": f"message-architect-pending-beyond-flat-window-{index}",
+                "thread_id": pending_thread_id,
+                "group_name": architect.group,
+                "sender_id": peer.id,
+                "sender_kind": "architect",
+                "recipient_id": architect.id,
+                "recipient_kind": "architect",
+                "message": "Old Architect request still needs a reply.",
+                "created_at": float(index + 1),
+                "ack_required": True,
+            })
         for index in range(130):
             self.db.save_agent_peer_message({
                 "id": f"message-architect-window-filler-{index:03d}",
@@ -6693,7 +6697,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(len(flat_window), 6 * 20)
         self.assertNotIn(
-            pending_thread_id,
+            pending_thread_ids[0],
             {row["thread_id"] for row in flat_window},
         )
 
@@ -6705,12 +6709,12 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(inbox_error, inbox_text)
         inbox = json.loads(inbox_text)
-        self.assertEqual(inbox["threads_total"], 1)
-        self.assertEqual(inbox["threads_returned"], 1)
-        self.assertFalse(inbox["threads_capped"])
+        self.assertEqual(inbox["threads_total"], 8)
+        self.assertEqual(inbox["threads_returned"], 6)
+        self.assertTrue(inbox["threads_capped"])
         self.assertEqual(
             [thread["thread_id"] for thread in inbox["threads"]],
-            [pending_thread_id],
+            list(reversed(pending_thread_ids[2:])),
         )
 
     async def test_architect_wave_summary_from_decision_groups_evidence_and_exclusions(self):
