@@ -242,6 +242,11 @@ function focusEmbeddedTerminalWorkspace(force) {
   if (!explicit && _embeddedTerminalPendingFocusKey !== _embeddedTerminalSessionKey) return false;
   const expectedActive = document.activeElement || null;
   if (!explicit) _embeddedTerminalPendingFocusKey = '';
+  // A missing active element is not evidence that the desktop focus is free:
+  // WKWebView can report null while another document/native control owns the
+  // keyboard. Keep explicit focus available, but do not turn that unknown
+  // state into an asynchronous first-mount focus licence.
+  if (!explicit && !expectedActive) return false;
   if (!_embeddedTerminalActiveElementAllowsFocus(explicit, expectedActive, null)) return false;
   const expectedKey = _embeddedTerminalSessionKey;
   requestAnimationFrame(function() {
