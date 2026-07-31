@@ -12830,6 +12830,42 @@ test('embedded terminal direct-message panel renders blocking asks, ask replies,
   assert.match(dom.directMessages.innerHTML, /terminal-direct-message--ask selected/);
 });
 
+test('embedded terminal direct-message panel labels a persisted buffered message until PTY delivery completes', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  document.body.classList.add('runtime-embedded');
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['agent-1'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = { 'agent-1': [] };
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1', name: 'Builder', group: 'alpha', cell_type: 'agent',
+      kind: 'worker', session_id: 'sess-1', status: 'idle',
+    },
+  };
+  sandbox.state.direct_messages_by_agent = {
+    'agent-1': [{
+      message_id: 'dm-buffered', message_type: 'message',
+      message: 'Please continue', sender_id: 'user', sender_kind: 'user',
+      recipient_id: 'agent-1', recipient_kind: 'worker', created_at: 10,
+      delivery_state: 'buffered',
+    }],
+  };
+
+  runInContext(context, `selectedTerminalId = 'agent-1'; renderTerminalWorkspace();`);
+  assert.match(dom.directMessages.innerHTML, /Please continue/);
+  assert.match(dom.directMessages.innerHTML, /terminal-direct-message-delivery--buffered/);
+  assert.match(dom.directMessages.innerHTML, />Sending…<\/span>/);
+
+  sandbox.state.direct_messages_by_agent['agent-1'][0].delivery_state = 'delivered';
+  runInContext(context, `renderTerminalWorkspace();`);
+  assert.doesNotMatch(dom.directMessages.innerHTML, /Sending…/);
+  assert.doesNotMatch(dom.directMessages.innerHTML, /terminal-direct-message-delivery--/);
+});
+
 test('embedded terminal direct-message System rows render as right-aligned green status cards without changing order or text', () => {
   const { context, document, sandbox } = createEmbeddedTerminalHarness({
     loadRenderHelpers: true,
