@@ -6,7 +6,7 @@ header.
 
 Settings are organized into four tabs: **Group**, **Workers**, **Engineers**,
 and **Architects**. The Group tab contains sub-tabs for workspace settings,
-all-agent launch defaults, sync provider configuration, and advanced actions.
+all-agent launch defaults, task defaults and sync configuration, and advanced actions.
 
 ## Group tab
 
@@ -29,11 +29,19 @@ When enabled, the group starts collapsed each time the Torque workspace webview 
 
 When enabled, the group only appears in workspace windows where it has active sessions. If all sessions are closed, the group appears in every window so you can relaunch.
 
+## Tasks tab
+
+**Group → Tasks** keeps task-scoped defaults and external synchronization together.
+**Task defaults** exposes the existing default action, labels, and board lane used
+when a new task omits those fields, plus the dispatch lane used when a task becomes
+active. These controls write the existing group settings; they introduce no new
+policy or storage.
+
 ### Sync provider
 
-Use **Group → Sync provider** to configure external board sync for this group.
-The pane is organized into **Connection**, **Repository & project**, **Board
-mapping**, **Issue behavior**, and **Assignees**. V1 supports GitHub Issues plus
+Use **Group → Tasks** to configure external board sync for this group. The pane
+keeps **Connection**, **Repository & project**, **Board mapping**, **Issue
+behavior**, and **Assignees** together with their provider. V1 supports GitHub Issues plus
 Projects v2. Select GitHub, configure the repository and project, test the
 connection, then enable synchronization. The preflight is the same one used by
 `torque board sync test -g GROUP` and surfaces `gh` auth, missing `project`

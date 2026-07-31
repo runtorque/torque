@@ -1759,6 +1759,53 @@ test('group settings sub-tab switching preserves scroll focus and inline draft s
   );
 });
 
+test('dirty group-settings rerender captures and restores draft focus, caret, and active-pane scroll', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+
+  const modal = ensure('modal-group-settings');
+  modal.classList.add('visible');
+  let captured = null;
+  let restored = null;
+  let restoredControls = null;
+  let markedDirty = 0;
+  sandbox._settingsShellState = { 'modal-group-settings': { dirty: true } };
+  sandbox._settingsShellSerialize = () => ({
+    'gs-board-default-action': 'draft action',
+  });
+  sandbox._settingsShellRestoreControls = (_modal, values) => {
+    restoredControls = values;
+    ensure('gs-board-default-action').value = values['gs-board-default-action'];
+  };
+  sandbox._captureSurfaceState = (_modal, options) => {
+    captured = options;
+    return { focus: { key: '#gs-board-default-action', selectionStart: 3, selectionEnd: 8 }, scrolls: [] };
+  };
+  sandbox._restoreSurfaceState = (_modal, snapshot, options) => {
+    restored = { snapshot, options };
+  };
+  sandbox.settingsShellMarkDirty = () => { markedDirty += 1; };
+
+  vm.runInContext('_settingsGroup = "alpha";', context);
+  ensure('gs-board-default-action').value = 'draft action';
+  ensure('gs-board-default-action').selectionStart = 3;
+  ensure('gs-board-default-action').selectionEnd = 8;
+  ensure('gs-board-default-action').focus();
+  vm.runInContext(`_showGroupSettings("alpha", {
+    settings: { board_default_action: "server value" },
+    engineer_settings: {}, profiles: ["Default"]
+  })`, context);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(captured)), { scrollSelectors: ['.gs-pane.active'] });
+  assert.deepEqual(JSON.parse(JSON.stringify(restoredControls)), { 'gs-board-default-action': 'draft action' });
+  assert.equal(ensure('gs-board-default-action').value, 'draft action');
+  assert.deepEqual(JSON.parse(JSON.stringify(restored.options)), { scrollSelectors: ['.gs-pane.active'] });
+  assert.equal(restored.snapshot.focus.selectionStart, 3);
+  assert.equal(restored.snapshot.focus.selectionEnd, 8);
+  assert.equal(markedDirty, 1);
+});
+
 test('group settings sub-tab CSS remains reusable in narrow embedded layouts', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   const css = appStylesheetSource();
@@ -2050,7 +2097,50 @@ test('group settings no longer renders the legacy no-engineer placeholder copy',
   assert.deepEqual(JSON.parse(JSON.stringify(callsWithoutSpecFetch)), []);
 });
 
-test('Group Settings board sync fields populate, gate GitHub config, and submit payload', () => {
+test('Group Settings Tasks defaults load and submit through existing GroupSettings keys', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+
+  vm.runInContext('_gsInitialSubtab = "group-tasks"', context);
+  vm.runInContext(`_showGroupSettings("alpha", {
+    settings: {
+      board_default_action: "feature/implement",
+      board_default_labels: ["frontend", "urgent"],
+      board_default_lane: "To Do",
+      dispatch_lane: "In Progress"
+    },
+    engineer_settings: {},
+    profiles: ["Default"]
+  })`, context);
+
+  assert.equal(ensure('gs-board-default-action').value, 'feature/implement');
+  assert.equal(ensure('gs-board-default-labels').value, 'frontend, urgent');
+  assert.equal(ensure('gs-board-default-lane').value, 'To Do');
+  assert.equal(ensure('gs-dispatch-lane').value, 'In Progress');
+
+  ensure('gs-board-default-action').value = 'feature/review';
+  ensure('gs-board-default-labels').value = ' reviewed, ui , reviewed ';
+  ensure('gs-board-default-lane').value = 'Backlog';
+  ensure('gs-dispatch-lane').value = 'Ready';
+  vm.runInContext('submitGroupSettings()', context);
+
+  const groupCall = sandbox.sendCalls.find((msg) => msg.cmd === 'update_group_settings');
+  assert.ok(groupCall, 'update_group_settings should be sent');
+  assert.deepEqual(JSON.parse(JSON.stringify({
+    board_default_action: groupCall.settings.board_default_action,
+    board_default_labels: groupCall.settings.board_default_labels,
+    board_default_lane: groupCall.settings.board_default_lane,
+    dispatch_lane: groupCall.settings.dispatch_lane,
+  })), {
+    board_default_action: 'feature/review',
+    board_default_labels: ['reviewed', 'ui', 'reviewed'],
+    board_default_lane: 'Backlog',
+    dispatch_lane: 'Ready',
+  });
+});
+
+test('relocated Sync Provider writes the exact pre-move board sync settings payload', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
   loadModals(context);
@@ -2116,18 +2206,27 @@ test('Group Settings board sync fields populate, gate GitHub config, and submit 
   const groupCall = sandbox.sendCalls.find(
     (msg) => msg.cmd === 'update_group_settings');
   assert.ok(groupCall, 'update_group_settings should be sent');
-  assert.equal(groupCall.settings.board_sync_provider, 'github');
-  assert.equal(groupCall.settings.board_sync_enabled, false);
-  assert.deepEqual(JSON.parse(JSON.stringify(groupCall.settings.board_sync_github)), {
-    github_repo: 'acme/torque',
-    github_project_owner: 'octo-org',
-    github_project_number: 7,
-    github_project_id: 'PVT_7',
-    github_project_status_field: 'Status',
-    github_lane_status_map: { Backlog: 'Ready', Done: 'Done' },
-    github_close_issues_via_pr: true,
-    github_create_missing_labels: true,
-    github_assignee_map: { 'worker-1': 'monalisa' },
+  // This is the literal legacy sync-settings shape. Location changed, not the
+  // update payload: provider, enablement, and every GitHub adapter setting
+  // remain the same keys and values.
+  assert.deepEqual(JSON.parse(JSON.stringify({
+    board_sync_provider: groupCall.settings.board_sync_provider,
+    board_sync_enabled: groupCall.settings.board_sync_enabled,
+    board_sync_github: groupCall.settings.board_sync_github,
+  })), {
+    board_sync_provider: 'github',
+    board_sync_enabled: false,
+    board_sync_github: {
+      github_repo: 'acme/torque',
+      github_project_owner: 'octo-org',
+      github_project_number: 7,
+      github_project_id: 'PVT_7',
+      github_project_status_field: 'Status',
+      github_lane_status_map: { Backlog: 'Ready', Done: 'Done' },
+      github_close_issues_via_pr: true,
+      github_create_missing_labels: true,
+      github_assignee_map: { 'worker-1': 'monalisa' },
+    },
   });
 });
 
