@@ -105,7 +105,7 @@ function createSandbox() {
   });
   const paneByName = Object.fromEntries(gsPanes.map((pane) => [pane.dataset.pane, pane]));
   const subtabNamesByPane = {
-    group: ['group-general', 'group-worker-defaults', 'group-sync', 'group-advanced'],
+    group: ['group-general', 'group-worker-defaults', 'group-tasks', 'group-advanced'],
     workers: ['worker-execution', 'worker-worktree', 'worker-notifications'],
     engineer: ['engineer-general', 'engineer-behavior', 'engineer-system'],
     architect: ['architect-general', 'architect-behavior', 'architect-system'],
@@ -272,11 +272,13 @@ test('group settings renders system prompt preview controls for Engineer and Arc
   assert.match(css, /body\.standalone-mode\s+\.preview-popup\s*{\s*max-width:\s*min\(80vw,\s*1180px\);/);
 });
 
-test('group settings markup renders board sync provider subtab and task sync mount', () => {
+test('group settings Tasks subtab renders task defaults and board sync controls', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   const css = appStylesheetSource();
 
-  assert.match(html, /data-subtab="group-sync"[\s\S]*>Sync provider<\/button>/);
+  assert.match(html, /data-subtab="group-tasks"[\s\S]*>Tasks<\/button>/);
+  assert.doesNotMatch(html, /data-subtab="group-sync"/);
+  assert.match(html, /Task defaults[\s\S]*id="gs-board-default-action"[\s\S]*id="gs-board-default-labels"[\s\S]*id="gs-board-default-lane"[\s\S]*id="gs-dispatch-lane"/);
   assert.match(html, /<select id="gs-board-sync-provider"[\s\S]*<option value="none">None<\/option>[\s\S]*<option value="github">GitHub<\/option>/);
   assert.match(html, /id="gs-board-sync-enabled"[\s\S]*Enable sync/);
   assert.match(html, /id="gs-board-sync-github-project-select"[\s\S]*Reload projects/);
@@ -1323,7 +1325,7 @@ test('group settings uses Group/Workers split plus scoped Engineer and Architect
 
   assert.match(
     html,
-    /<div class="gs-pane active" data-pane="group">[\s\S]*?data-subtab="group-general"[\s\S]*?data-subtab="group-worker-defaults"[\s\S]*?data-subtab="group-sync"[\s\S]*?data-subtab="group-advanced"/,
+    /<div class="gs-pane active" data-pane="group">[\s\S]*?data-subtab="group-general"[\s\S]*?data-subtab="group-worker-defaults"[\s\S]*?data-subtab="group-tasks"[\s\S]*?data-subtab="group-advanced"/,
   );
   assert.match(html, /data-subtab="group-worker-defaults"[^>]*>Agents<\/button>/);
   assert.doesNotMatch(html, /data-subtab="group-worker-defaults"[^>]*>Worker defaults<\/button>/);
@@ -1410,7 +1412,7 @@ test('group settings places all-kind defaults under Group and worker overrides u
   const groupPane = html.slice(groupStart, workersStart);
   const workersPane = html.slice(workersStart, engineerStart);
   const workerDefaults = groupPane.indexOf('data-subpane="group-worker-defaults"');
-  const sync = groupPane.indexOf('data-subpane="group-sync"');
+  const sync = groupPane.indexOf('data-subpane="group-tasks"');
   const advanced = groupPane.indexOf('data-subpane="group-advanced"');
   assert.ok(workerDefaults < groupPane.indexOf('id="gs-agent-provider"'));
   assert.ok(workerDefaults < groupPane.indexOf('id="gs-agent-model"'));
@@ -1494,8 +1496,8 @@ test('remaining settings panes use the shared section hierarchy and concise labe
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   const css = appStylesheetSource();
   const pane = (start, end) => html.slice(html.indexOf(`data-subpane="${start}"`), html.indexOf(`data-subpane="${end}"`));
-  const agents = pane('group-worker-defaults', 'group-sync');
-  const sync = pane('group-sync', 'group-advanced');
+  const agents = pane('group-worker-defaults', 'group-tasks');
+  const sync = pane('group-tasks', 'group-advanced');
   const advanced = pane('group-advanced', 'worker-execution');
   const notifications = pane('worker-notifications', 'engineer-general');
   const engineerBehavior = pane('engineer-behavior', 'engineer-system');
@@ -1503,7 +1505,7 @@ test('remaining settings panes use the shared section hierarchy and concise labe
 
   assert.match(agents, /gs-settings-section-title">Shared launch defaults/);
   assert.doesNotMatch(agents, />Default (provider|role|model|reasoning effort)</i);
-  for (const title of ['Connection', 'Repository &amp; project', 'Board mapping', 'Issue behavior', 'Assignees']) {
+  for (const title of ['Task defaults', 'Connection', 'Repository &amp; project', 'Board mapping', 'Issue behavior', 'Assignees']) {
     assert.match(sync, new RegExp(`gs-settings-section-title">${title}`));
   }
   assert.match(advanced, /gs-settings-section-title">Guidance/);
@@ -1755,6 +1757,53 @@ test('group settings sub-tab switching preserves scroll focus and inline draft s
     sandbox.document.querySelector('.gs-pane[data-pane="architect"] .gs-subtab[data-subtab="architect-general"]').classList.contains('active'),
     true,
   );
+});
+
+test('dirty group-settings rerender captures and restores draft focus, caret, and active-pane scroll', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+
+  const modal = ensure('modal-group-settings');
+  modal.classList.add('visible');
+  let captured = null;
+  let restored = null;
+  let restoredControls = null;
+  let markedDirty = 0;
+  sandbox._settingsShellState = { 'modal-group-settings': { dirty: true } };
+  sandbox._settingsShellSerialize = () => ({
+    'gs-board-default-action': 'draft action',
+  });
+  sandbox._settingsShellRestoreControls = (_modal, values) => {
+    restoredControls = values;
+    ensure('gs-board-default-action').value = values['gs-board-default-action'];
+  };
+  sandbox._captureSurfaceState = (_modal, options) => {
+    captured = options;
+    return { focus: { key: '#gs-board-default-action', selectionStart: 3, selectionEnd: 8 }, scrolls: [] };
+  };
+  sandbox._restoreSurfaceState = (_modal, snapshot, options) => {
+    restored = { snapshot, options };
+  };
+  sandbox.settingsShellMarkDirty = () => { markedDirty += 1; };
+
+  vm.runInContext('_settingsGroup = "alpha";', context);
+  ensure('gs-board-default-action').value = 'draft action';
+  ensure('gs-board-default-action').selectionStart = 3;
+  ensure('gs-board-default-action').selectionEnd = 8;
+  ensure('gs-board-default-action').focus();
+  vm.runInContext(`_showGroupSettings("alpha", {
+    settings: { board_default_action: "server value" },
+    engineer_settings: {}, profiles: ["Default"]
+  })`, context);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(captured)), { scrollSelectors: ['.gs-pane.active'] });
+  assert.deepEqual(JSON.parse(JSON.stringify(restoredControls)), { 'gs-board-default-action': 'draft action' });
+  assert.equal(ensure('gs-board-default-action').value, 'draft action');
+  assert.deepEqual(JSON.parse(JSON.stringify(restored.options)), { scrollSelectors: ['.gs-pane.active'] });
+  assert.equal(restored.snapshot.focus.selectionStart, 3);
+  assert.equal(restored.snapshot.focus.selectionEnd, 8);
+  assert.equal(markedDirty, 1);
 });
 
 test('group settings sub-tab CSS remains reusable in narrow embedded layouts', () => {
@@ -2048,13 +2097,56 @@ test('group settings no longer renders the legacy no-engineer placeholder copy',
   assert.deepEqual(JSON.parse(JSON.stringify(callsWithoutSpecFetch)), []);
 });
 
-test('Group Settings board sync fields populate, gate GitHub config, and submit payload', () => {
+test('Group Settings Tasks defaults load and submit through existing GroupSettings keys', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+
+  vm.runInContext('_gsInitialSubtab = "group-tasks"', context);
+  vm.runInContext(`_showGroupSettings("alpha", {
+    settings: {
+      board_default_action: "feature/implement",
+      board_default_labels: ["frontend", "urgent"],
+      board_default_lane: "To Do",
+      dispatch_lane: "In Progress"
+    },
+    engineer_settings: {},
+    profiles: ["Default"]
+  })`, context);
+
+  assert.equal(ensure('gs-board-default-action').value, 'feature/implement');
+  assert.equal(ensure('gs-board-default-labels').value, 'frontend, urgent');
+  assert.equal(ensure('gs-board-default-lane').value, 'To Do');
+  assert.equal(ensure('gs-dispatch-lane').value, 'In Progress');
+
+  ensure('gs-board-default-action').value = 'feature/review';
+  ensure('gs-board-default-labels').value = ' reviewed, ui , reviewed ';
+  ensure('gs-board-default-lane').value = 'Backlog';
+  ensure('gs-dispatch-lane').value = 'Ready';
+  vm.runInContext('submitGroupSettings()', context);
+
+  const groupCall = sandbox.sendCalls.find((msg) => msg.cmd === 'update_group_settings');
+  assert.ok(groupCall, 'update_group_settings should be sent');
+  assert.deepEqual(JSON.parse(JSON.stringify({
+    board_default_action: groupCall.settings.board_default_action,
+    board_default_labels: groupCall.settings.board_default_labels,
+    board_default_lane: groupCall.settings.board_default_lane,
+    dispatch_lane: groupCall.settings.dispatch_lane,
+  })), {
+    board_default_action: 'feature/review',
+    board_default_labels: ['reviewed', 'ui', 'reviewed'],
+    board_default_lane: 'Backlog',
+    dispatch_lane: 'Ready',
+  });
+});
+
+test('relocated Sync Provider writes the exact pre-move board sync settings payload', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
   loadModals(context);
   seedProviders(context, sandbox._cachedProviders);
 
-  vm.runInContext('_gsInitialSubtab = "group-sync"', context);
+  vm.runInContext('_gsInitialSubtab = "group-tasks"', context);
   vm.runInContext(`_showGroupSettings("alpha", {
     settings: {
       board_sync_provider: "github",
@@ -2087,7 +2179,7 @@ test('Group Settings board sync fields populate, gate GitHub config, and submit 
   assert.equal(ensure('gs-board-sync-github-close-via-pr').checked, false);
   assert.equal(ensure('gs-board-sync-github-create-labels').checked, true);
   assert.match(ensure('gs-board-sync-github-assignee-map').value, /"worker-1": "octocat"/);
-  assert.equal(ensure('gs-board-sync-provider').focused, true);
+  assert.equal(ensure('gs-board-default-action').focused, true);
   assert.equal(
     sandbox.sendCalls.filter((msg) => msg.cmd === 'board_sync_list_projects').length,
     1,
@@ -2114,18 +2206,27 @@ test('Group Settings board sync fields populate, gate GitHub config, and submit 
   const groupCall = sandbox.sendCalls.find(
     (msg) => msg.cmd === 'update_group_settings');
   assert.ok(groupCall, 'update_group_settings should be sent');
-  assert.equal(groupCall.settings.board_sync_provider, 'github');
-  assert.equal(groupCall.settings.board_sync_enabled, false);
-  assert.deepEqual(JSON.parse(JSON.stringify(groupCall.settings.board_sync_github)), {
-    github_repo: 'acme/torque',
-    github_project_owner: 'octo-org',
-    github_project_number: 7,
-    github_project_id: 'PVT_7',
-    github_project_status_field: 'Status',
-    github_lane_status_map: { Backlog: 'Ready', Done: 'Done' },
-    github_close_issues_via_pr: true,
-    github_create_missing_labels: true,
-    github_assignee_map: { 'worker-1': 'monalisa' },
+  // This is the literal legacy sync-settings shape. Location changed, not the
+  // update payload: provider, enablement, and every GitHub adapter setting
+  // remain the same keys and values.
+  assert.deepEqual(JSON.parse(JSON.stringify({
+    board_sync_provider: groupCall.settings.board_sync_provider,
+    board_sync_enabled: groupCall.settings.board_sync_enabled,
+    board_sync_github: groupCall.settings.board_sync_github,
+  })), {
+    board_sync_provider: 'github',
+    board_sync_enabled: false,
+    board_sync_github: {
+      github_repo: 'acme/torque',
+      github_project_owner: 'octo-org',
+      github_project_number: 7,
+      github_project_id: 'PVT_7',
+      github_project_status_field: 'Status',
+      github_lane_status_map: { Backlog: 'Ready', Done: 'Done' },
+      github_close_issues_via_pr: true,
+      github_create_missing_labels: true,
+      github_assignee_map: { 'worker-1': 'monalisa' },
+    },
   });
 });
 

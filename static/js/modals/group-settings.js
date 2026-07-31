@@ -66,6 +66,9 @@ function _normalizeGsSelection(tab, subtab) {
     nextSubtab = 'worker-notifications';
   } else if (rawSubtab === 'group-terminals') {
     nextSubtab = 'group-general';
+  } else if (rawSubtab === 'group-sync') {
+    // Preserve saved links to the former Sync provider pane.
+    nextSubtab = 'group-tasks';
   }
 
   if (nextSubtab.indexOf('group-') === 0) nextTab = 'group';
@@ -659,7 +662,7 @@ function switchGsSubTab(pane, btn) {
     ? container.dataset.pane
     : pane;
   if (paneName && target) _gsActiveSubTabs[paneName] = target;
-  if (target === 'group-sync') _gsBoardSyncMaybeLoadProjects();
+  if (target === 'group-tasks') _gsBoardSyncMaybeLoadProjects();
   if (typeof settingsShellSyncView === 'function') {
     settingsShellSyncView('modal-group-settings');
   }
@@ -1363,7 +1366,40 @@ function _resetGsArchitectSections() {
   _resetGsSubTabs('architect', 'architect-general');
 }
 
+function _captureGroupSettingsRerenderState(group) {
+  const modal = document.getElementById('modal-group-settings');
+  if (_settingsGroup !== group || !modal || !modal.classList
+      || !modal.classList.contains('visible')) {
+    return null;
+  }
+  return {
+    modal: modal,
+    controls: typeof _settingsShellSerialize === 'function'
+      ? _settingsShellSerialize(modal)
+      : null,
+    surface: typeof _captureSurfaceState === 'function'
+      ? _captureSurfaceState(modal, { scrollSelectors: ['.gs-pane.active'] })
+      : null,
+  };
+}
+
+function _restoreGroupSettingsRerenderState(snapshot) {
+  if (!snapshot) return;
+  if (snapshot.controls && typeof _settingsShellRestoreControls === 'function') {
+    _settingsShellRestoreControls(snapshot.modal, snapshot.controls);
+  }
+  if (snapshot.surface && typeof _restoreSurfaceState === 'function') {
+    _restoreSurfaceState(snapshot.modal, snapshot.surface, {
+      scrollSelectors: ['.gs-pane.active'],
+    });
+  }
+  if (typeof settingsShellMarkDirty === 'function') {
+    settingsShellMarkDirty(snapshot.modal);
+  }
+}
+
 function _showGroupSettings(group, data) {
+  const rerenderState = _captureGroupSettingsRerenderState(group);
   _settingsGroup = group;
   _wireGroupSettingsTooltipText();
   const s = data.settings;
@@ -1437,7 +1473,15 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-agent-env-vars').value = _envToText(s.agent_env_vars);
   document.getElementById('gs-agent-env-file').value = s.agent_env_file || '';
 
-  /* -- Group > Sync provider sub-tab -- */
+  /* -- Group > Tasks sub-tab -- */
+  const taskDefaultLabels = Array.isArray(s.board_default_labels)
+    ? s.board_default_labels
+    : [];
+  document.getElementById('gs-board-default-action').value = s.board_default_action || '';
+  document.getElementById('gs-board-default-labels').value = taskDefaultLabels.join(', ');
+  document.getElementById('gs-board-default-lane').value = s.board_default_lane || '';
+  document.getElementById('gs-dispatch-lane').value = s.dispatch_lane || 'In Progress';
+
   const syncProvider = s.board_sync_provider || 'none';
   const syncGithub = (s.board_sync_github && typeof s.board_sync_github === 'object')
     ? s.board_sync_github
@@ -1453,8 +1497,10 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-board-sync-github-close-via-pr').checked = syncGithub.github_close_issues_via_pr !== false;
   document.getElementById('gs-board-sync-github-create-labels').checked = syncGithub.github_create_missing_labels !== false;
   document.getElementById('gs-board-sync-github-assignee-map').value = _gsStringifyJsonMap(syncGithub.github_assignee_map);
-  gsBoardSyncMapRender('lane');
-  gsBoardSyncMapRender('assignee');
+  if (!rerenderState) {
+    gsBoardSyncMapRender('lane');
+    gsBoardSyncMapRender('assignee');
+  }
   _gsBoardSyncProjectOptions = [];
   _gsBoardSyncProjectsLoadedKey = '';
   _gsBoardSyncRenderProjectOptions();
@@ -1576,14 +1622,20 @@ function _showGroupSettings(group, data) {
   const selection = _normalizeGsSelection(_gsInitialTab || 'group', _gsInitialSubtab || '');
   const initialTab = selection.tab;
   const initialSubtab = selection.subtab;
-  switchGsTab(initialTab);
-  if (initialSubtab) {
-    const btn = document.querySelector(`.gs-pane[data-pane="${initialTab}"] .gs-subtab[data-subtab="${initialSubtab}"]`);
-    if (btn) switchGsSubTab(initialTab, btn);
+  if (!rerenderState) {
+    switchGsTab(initialTab);
+    if (initialSubtab) {
+      const btn = document.querySelector(`.gs-pane[data-pane="${initialTab}"] .gs-subtab[data-subtab="${initialSubtab}"]`);
+      if (btn) switchGsSubTab(initialTab, btn);
+    }
   }
   _gsInitialTab = 'group';
   _gsInitialSubtab = '';
   document.getElementById('modal-group-settings').classList.add('visible');
+  if (rerenderState) {
+    _restoreGroupSettingsRerenderState(rerenderState);
+    return;
+  }
   if (typeof settingsShellCaptureBaseline === 'function') {
     settingsShellCaptureBaseline('modal-group-settings');
   }
@@ -1595,14 +1647,14 @@ function _showGroupSettings(group, data) {
         ? 'gs-default-agent-template'
         : initialSubtab === 'group-worker-defaults'
           ? 'gs-agent-provider'
-      : initialSubtab === 'group-sync'
-          ? 'gs-board-sync-provider'
+      : initialSubtab === 'group-tasks'
+          ? 'gs-board-default-action'
         : initialSubtab === 'group-advanced'
           ? 'gs-guidance-hint-cadence'
         : 'gs-directory';
   const focusEl = document.getElementById(focusId);
   if (focusEl) focusEl.focus();
-  if (initialTab === 'group' && initialSubtab === 'group-sync') {
+  if (initialTab === 'group' && initialSubtab === 'group-tasks') {
     _gsBoardSyncMaybeLoadProjects();
   }
 }
@@ -1673,6 +1725,12 @@ function submitGroupSettings() {
     notify_on_finish: document.getElementById('gs-notify-finish').checked,
     notify_on_error: document.getElementById('gs-notify-error').checked,
     notify_on_attention: document.getElementById('gs-notify-attention').checked,
+    /* Task defaults */
+    board_default_action: document.getElementById('gs-board-default-action').value.trim(),
+    board_default_labels: document.getElementById('gs-board-default-labels').value
+      .split(',').map(function(label) { return label.trim(); }).filter(Boolean),
+    board_default_lane: document.getElementById('gs-board-default-lane').value.trim(),
+    dispatch_lane: document.getElementById('gs-dispatch-lane').value.trim() || 'In Progress',
     /* Board sync */
     board_sync_provider: document.getElementById('gs-board-sync-provider').value || 'none',
     board_sync_enabled: document.getElementById('gs-board-sync-enabled').checked,
