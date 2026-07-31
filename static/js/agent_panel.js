@@ -942,9 +942,20 @@ function _agentPanelSetActiveTabChrome(root, activeTab) {
       tabKey = String(btn.getAttribute('data-agent-panel-tab-key') || '');
     }
     if (!tabKey && btn.id) tabKey = String(btn.id).replace(/^agent-panel-tab-/, '');
-    if (!btn.classList) continue;
-    if (tabKey === activeTab) btn.classList.add('active');
-    else btn.classList.remove('active');
+    var selected = tabKey === activeTab;
+    // These buttons are deliberately reused by the in-place/delta render
+    // path. Keep every selector which represents selection in sync: the
+    // shared tab CSS treats either `.active` or `aria-selected="true"` as
+    // active, so changing only the class can leave a second, stale visual
+    // tab selected even when the body has already changed.
+    if (btn.classList) {
+      if (selected) btn.classList.add('active');
+      else btn.classList.remove('active');
+    }
+    if (typeof btn.setAttribute === 'function') {
+      btn.setAttribute('aria-selected', selected ? 'true' : 'false');
+      btn.setAttribute('tabindex', selected ? '0' : '-1');
+    }
   }
 }
 

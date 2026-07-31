@@ -141,6 +141,62 @@ function countText(haystack, needle) {
   return String(haystack || '').split(needle).length - 1;
 }
 
+function makeReusableAgentPanelTab(tabKey, selected) {
+  const classes = new Set(['agent-panel-tab']);
+  if (selected) classes.add('active');
+  const attributes = {
+    'aria-selected': selected ? 'true' : 'false',
+    tabindex: selected ? '0' : '-1',
+  };
+  return {
+    dataset: { agentPanelTabKey: tabKey },
+    classList: {
+      add(name) { classes.add(name); },
+      remove(name) { classes.delete(name); },
+      contains(name) { return classes.has(name); },
+    },
+    setAttribute(name, value) { attributes[name] = String(value); },
+    getAttribute(name) { return attributes[name] || null; },
+  };
+}
+
+function installReusableAgentPanelDom(panel, agentId, kind, tabKeys, activeTab) {
+  const content = {
+    innerHTML: '',
+    _torqueLastHtml: '',
+    scrollTop: 0,
+    clientHeight: 400,
+    scrollHeight: 800,
+    querySelectorAll() { return []; },
+    querySelector() { return null; },
+    getBoundingClientRect() { return { top: 0, bottom: 400 }; },
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  const headerRight = { innerHTML: '', _torqueLastHtml: '' };
+  const shell = {
+    dataset: {
+      agentPanelAgentId: agentId,
+      agentPanelKind: kind,
+      agentPanelTab: activeTab,
+    },
+    setAttribute(name, value) {
+      if (name === 'data-agent-panel-tab') this.dataset.agentPanelTab = String(value || '');
+    },
+  };
+  const tabButtons = tabKeys.map((tab) => makeReusableAgentPanelTab(tab, tab === activeTab));
+  panel.querySelector = function(selector) {
+    if (selector === '.agent-panel-panel') return shell;
+    if (selector === '.agent-panel-content') return content;
+    if (selector === '[data-agent-panel-header-right]' || selector === '.agent-panel-header-right') return headerRight;
+    return null;
+  };
+  panel.querySelectorAll = function(selector) {
+    return selector === '.agent-panel-tab' ? tabButtons : [];
+  };
+  return { content, shell, tabButtons };
+}
+
 test('renderAgentPanel shows an empty state when no grid item is focused', () => {
   const { context, panel, captureCalls, restoreCalls } = createHarness();
 
@@ -4018,46 +4074,9 @@ test('agent panel shows Agent Class summary only on Behavior tab and opens modal
 
 test('agent panel in-place Behavior tab render includes Agent Class summary only on Behavior', () => {
   const { context, panel } = createHarness();
-  const content = {
-    innerHTML: '',
-    _torqueLastHtml: '',
-    scrollTop: 0,
-    clientHeight: 400,
-    scrollHeight: 800,
-    querySelectorAll() { return []; },
-    querySelector() { return null; },
-    getBoundingClientRect() { return { top: 0, bottom: 400 }; },
-    addEventListener() {},
-    removeEventListener() {},
-  };
-  const headerRight = {
-    innerHTML: '',
-    _torqueLastHtml: '',
-  };
-  const shell = {
-    dataset: {
-      agentPanelAgentId: 'blueprint',
-      agentPanelKind: 'architect',
-      agentPanelTab: 'decisions',
-    },
-    setAttribute(name, value) {
-      if (name === 'data-agent-panel-tab') this.dataset.agentPanelTab = String(value || '');
-    },
-  };
-  const tabButtons = ['decisions', 'behavior', 'messages'].map((tab) => ({
-    dataset: { agentPanelTabKey: tab },
-    classList: { add() {}, remove() {} },
-  }));
-  panel.querySelector = function(selector) {
-    if (selector === '.agent-panel-panel') return shell;
-    if (selector === '.agent-panel-content') return content;
-    if (selector === '[data-agent-panel-header-right]' || selector === '.agent-panel-header-right') return headerRight;
-    return null;
-  };
-  panel.querySelectorAll = function(selector) {
-    if (selector === '.agent-panel-tab') return tabButtons;
-    return [];
-  };
+  const { content, shell } = installReusableAgentPanelDom(
+    panel, 'blueprint', 'architect', ['decisions', 'behavior', 'messages'], 'decisions'
+  );
   const productManagerClass = {
     id: 'product-manager',
     version: '2',
@@ -4095,6 +4114,79 @@ test('agent panel in-place Behavior tab render includes Agent Class summary only
   assert.equal(shell.dataset.agentPanelTab, 'messages');
   assert.doesNotMatch(content.innerHTML, /data-agent-class-manager=/);
   assert.doesNotMatch(content.innerHTML, /Change Class/);
+});
+
+test('reused Agent tabs retain exactly one active class after a switch and delta refresh', () => {
+  const { context, panel } = createHarness();
+  const { tabButtons } = installReusableAgentPanelDom(
+    panel, 'blueprint', 'architect', ['decisions', 'behavior', 'journal'], 'decisions'
+  );
+  setFocusedAgent(context, {
+    id: 'blueprint',
+    name: 'Blueprint',
+    kind: 'architect',
+    group: 'alpha',
+    cell_type: 'agent',
+    mcp_messages: [],
+  });
+
+  context.agentPanelSelectTab('behavior');
+  context._agentPanelRefreshCurrentTab();
+
+  assert.deepEqual(
+    tabButtons.filter((button) => button.classList.contains('active'))
+      .map((button) => button.dataset.agentPanelTabKey),
+    ['behavior'],
+  );
+});
+
+test('reused Agent tab indicator matches the tab body after a delta refresh', () => {
+  const { context, panel } = createHarness();
+  const { content, shell, tabButtons } = installReusableAgentPanelDom(
+    panel, 'blueprint', 'architect', ['decisions', 'behavior', 'journal'], 'decisions'
+  );
+  const productManagerClass = {
+    id: 'product-manager',
+    version: '2',
+    base_kind: 'architect',
+    display_name: 'Product Manager',
+    primary_identity_label: 'Product Manager',
+    secondary_base_kind_label: 'Architect-derived',
+    lifecycle: 'stable',
+    status: 'restricted',
+    launchable: true,
+    builtin: true,
+  };
+  setFocusedAgent(context, {
+    id: 'blueprint',
+    name: 'Blueprint',
+    kind: 'architect',
+    group: 'alpha',
+    cell_type: 'agent',
+    effective_agent_class_id: 'product-manager',
+    effective_agent_class_version: '2',
+    effective_agent_class_snapshot: productManagerClass,
+    mcp_messages: [],
+  });
+
+  context.agentPanelSelectTab('behavior');
+  context._agentPanelRefreshCurrentTab();
+
+  const selectedIndicators = tabButtons
+    .filter((button) => button.getAttribute('aria-selected') === 'true')
+    .map((button) => button.dataset.agentPanelTabKey);
+  assert.deepEqual(selectedIndicators, ['behavior']);
+  assert.deepEqual(
+    tabButtons
+      .filter((button) => button.classList.contains('active')
+        || button.getAttribute('aria-selected') === 'true')
+      .map((button) => button.dataset.agentPanelTabKey),
+    ['behavior'],
+    'the shared tab CSS must have exactly one active selector after the reused-DOM refresh',
+  );
+  assert.equal(shell.dataset.agentPanelTab, 'behavior');
+  assert.match(content.innerHTML, /data-agent-class-manager=/);
+  assert.match(content.innerHTML, /Change Class/);
 });
 
 test('agent class manager assignment errors remain routed to active panel operation', () => {
