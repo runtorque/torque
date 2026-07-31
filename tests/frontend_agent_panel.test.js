@@ -3938,7 +3938,7 @@ test('agent panel assigns and renders Creative as proposal-only Thinking class',
     metadata: { proposal_only: true },
     warnings: [
       'Creative Architect is proposal-only: ideas remain non-binding until accepted through normal Torque authority.',
-      'Use architect_thinking_* wrappers for Scratchpad/Mind Map work and proposal-oriented Architect tools for product proposals.',
+      'Use architect_thinking_* wrappers for Scratchpad work and proposal-oriented Architect tools for product proposals.',
     ],
     external_connector_caveat: 'External connector exposure is not governed by Agent Classes.',
     apply_state: { applies_at: 'next_launch_or_relaunch', relaunch_required_after_assignment: true },

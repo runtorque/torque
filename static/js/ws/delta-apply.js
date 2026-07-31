@@ -697,36 +697,12 @@ function _applyDelta(ops) {
       }
 
       case 'thinking_scratchpad_note_upsert': {
-        if (!state.thinking) state.thinking = { scratchpad_notes: {}, mind_maps: {} };
+        if (!state.thinking) state.thinking = { scratchpad_notes: {} };
         if (!state.thinking.scratchpad_notes) state.thinking.scratchpad_notes = {};
         var thinkingNote = Object.assign({}, op);
         delete thinkingNote.op;
         if (thinkingNote.id) state.thinking.scratchpad_notes[thinkingNote.id] = Object.assign({}, state.thinking.scratchpad_notes[thinkingNote.id] || {}, thinkingNote);
         if (typeof thinkingReceiveScratchpadDelta === 'function') thinkingReceiveScratchpadDelta(thinkingNote);
-        break;
-      }
-
-      case 'thinking_mind_map_upsert': {
-        if (!state.thinking) state.thinking = { scratchpad_notes: {}, mind_maps: {} };
-        if (!state.thinking.mind_maps) state.thinking.mind_maps = {};
-        var thinkingMap = Object.assign({}, op);
-        delete thinkingMap.op;
-        if (thinkingMap.id) state.thinking.mind_maps[thinkingMap.id] = Object.assign({}, state.thinking.mind_maps[thinkingMap.id] || {}, thinkingMap);
-        if (typeof thinkingReceiveMindMapDelta === 'function') thinkingReceiveMindMapDelta(thinkingMap);
-        break;
-      }
-
-      case 'thinking_mind_map_node_upsert': {
-        var thinkingNode = Object.assign({}, op);
-        delete thinkingNode.op;
-        if (typeof thinkingReceiveMindMapNodeDelta === 'function') thinkingReceiveMindMapNodeDelta(thinkingNode);
-        break;
-      }
-
-      case 'thinking_mind_map_link_upsert': {
-        var thinkingLink = Object.assign({}, op);
-        delete thinkingLink.op;
-        if (typeof thinkingReceiveMindMapLinkDelta === 'function') thinkingReceiveMindMapLinkDelta(thinkingLink);
         break;
       }
 

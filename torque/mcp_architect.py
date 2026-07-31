@@ -2157,51 +2157,6 @@ _ARCHITECT_THINKING_TOOL_SPECS = [
         "description": "Update a caller-owned Scratchpad note only; same-group notes owned by others are read-only.",
         "inputSchema": {"type": "object", "properties": {"note": {"type": "string"}, "note_id": {"type": "string"}, "id": {"type": "string"}, "title": {"type": "string"}, "body": {"type": "string"}, "context": {"type": "object"}, "links": {"type": "array", "items": {"type": "object"}}, "group": {"type": "string"}}},
     },
-    {
-        "name": "architect_thinking_mind_map_list", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self","result_kind": "mind_map","result_paths": ["mind_maps"]}]},
-        "description": "List same-group Mind Maps visible to this Architect; includes caller_owned for safe update decisions.",
-        "inputSchema": {"type": "object", "properties": {"group": {"type": "string"}, "include_archived": {"type": "boolean"}, "limit": {"type": "integer"}}},
-    },
-    {
-        "name": "architect_thinking_mind_map_show", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self","target_argument": "mind_map","target_kind": "mind_map"},{"capability": "thinking.read","minimum_scope": "self","target_argument": "map_id","target_kind": "mind_map"}]},
-        "description": "Show one same-group Mind Map with nodes and links.",
-        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "id": {"type": "string"}, "group": {"type": "string"}, "include_archived": {"type": "boolean"}}},
-    },
-    {
-        "name": "architect_thinking_mind_map_create", "authority": {"requirements": [{"capability": "thinking.write","minimum_scope": "self","handler_scoped": True}]},
-        "description": "Create a caller-owned Mind Map in the Architect's group.",
-        "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "description": {"type": "string"}, "metadata": {"type": "object"}, "group": {"type": "string"}}, "required": ["title"]},
-    },
-    {
-        "name": "architect_thinking_mind_map_update", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self","target_argument": "mind_map","target_kind": "mind_map"},{"capability": "thinking.read","minimum_scope": "self","target_argument": "map_id","target_kind": "mind_map"},{"capability": "thinking.write","minimum_scope": "self","handler_scoped": True}]},
-        "description": "Update a caller-owned Mind Map only.",
-        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "id": {"type": "string"}, "title": {"type": "string"}, "description": {"type": "string"}, "metadata": {"type": "object"}, "group": {"type": "string"}}},
-    },
-    {
-        "name": "architect_thinking_mind_map_node_create", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self","target_argument": "mind_map","target_kind": "mind_map"},{"capability": "thinking.read","minimum_scope": "self","target_argument": "map_id","target_kind": "mind_map"},{"capability": "thinking.write","minimum_scope": "self","handler_scoped": True}]},
-        "description": "Create a node in a caller-owned Mind Map.",
-        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "label": {"type": "string"}, "title": {"type": "string"}, "notes": {"type": "string"}, "node_type": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}, "color": {"type": "string"}, "position": {"type": "object"}, "x": {"type": "number"}, "y": {"type": "number"}, "sort_order": {"type": "integer"}, "group": {"type": "string"}}, "required": ["label"]},
-    },
-    {
-        "name": "architect_thinking_mind_map_node_update", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self","target_argument": "mind_map","target_kind": "mind_map"},{"capability": "thinking.read","minimum_scope": "self","target_argument": "map_id","target_kind": "mind_map"},{"capability": "thinking.write","minimum_scope": "self","handler_scoped": True}]},
-        "description": "Update a node in a caller-owned Mind Map only.",
-        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "node": {"type": "string"}, "node_id": {"type": "string"}, "id": {"type": "string"}, "label": {"type": "string"}, "title": {"type": "string"}, "notes": {"type": "string"}, "node_type": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}, "color": {"type": "string"}, "position": {"type": "object"}, "x": {"type": "number"}, "y": {"type": "number"}, "sort_order": {"type": "integer"}, "group": {"type": "string"}}},
-    },
-    {
-        "name": "architect_thinking_mind_map_node_position", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self","target_argument": "mind_map","target_kind": "mind_map"},{"capability": "thinking.read","minimum_scope": "self","target_argument": "map_id","target_kind": "mind_map"},{"capability": "thinking.write","minimum_scope": "self","handler_scoped": True}]},
-        "description": "Move a node in a caller-owned Mind Map only.",
-        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "node": {"type": "string"}, "node_id": {"type": "string"}, "id": {"type": "string"}, "position": {"type": "object"}, "x": {"type": "number"}, "y": {"type": "number"}, "group": {"type": "string"}}},
-    },
-    {
-        "name": "architect_thinking_mind_map_link_create", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self","target_argument": "mind_map","target_kind": "mind_map"},{"capability": "thinking.read","minimum_scope": "self","target_argument": "map_id","target_kind": "mind_map"},{"capability": "thinking.write","minimum_scope": "self","handler_scoped": True}]},
-        "description": "Create a link between nodes in a caller-owned Mind Map.",
-        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "source_node_id": {"type": "string"}, "source": {"type": "string"}, "target_node_id": {"type": "string"}, "target": {"type": "string"}, "label": {"type": "string"}, "link_type": {"type": "string"}, "sort_order": {"type": "integer"}, "group": {"type": "string"}}},
-    },
-    {
-        "name": "architect_thinking_mind_map_link_update", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self","target_argument": "mind_map","target_kind": "mind_map"},{"capability": "thinking.read","minimum_scope": "self","target_argument": "map_id","target_kind": "mind_map"},{"capability": "thinking.write","minimum_scope": "self","handler_scoped": True}]},
-        "description": "Update a link in a caller-owned Mind Map only.",
-        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "link": {"type": "string"}, "link_id": {"type": "string"}, "id": {"type": "string"}, "label": {"type": "string"}, "link_type": {"type": "string"}, "source_node_id": {"type": "string"}, "source": {"type": "string"}, "target_node_id": {"type": "string"}, "target": {"type": "string"}, "sort_order": {"type": "integer"}, "group": {"type": "string"}}},
-    },
 ]
 
 _ARCHITECT_TOOL_SPECS.extend([
@@ -2264,53 +2219,11 @@ _ARCHITECT_THINKING_TOOL_SPECS.extend([
             "properties": {
                 "artifact_type": {
                     "type": "string",
-                    "enum": ["scratchpad", "mind_map"],
+                    "enum": ["scratchpad"],
                 },
                 "artifact": {"type": "string"},
             },
             "required": ["artifact_type", "artifact"],
-        },
-    },
-    {
-        "name": "architect_thinking_mind_map_node_delete",
-        "authority": {
-            "requirements": [{
-                "capability": "thinking.write",
-                "minimum_scope": "self",
-                "handler_scoped": True,
-            }],
-        },
-        "description": "Delete a node from a caller-owned Mind Map.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "mind_map": {"type": "string"},
-                "map_id": {"type": "string"},
-                "node": {"type": "string"},
-                "node_id": {"type": "string"},
-            },
-            "required": ["node"],
-        },
-    },
-    {
-        "name": "architect_thinking_mind_map_link_delete",
-        "authority": {
-            "requirements": [{
-                "capability": "thinking.write",
-                "minimum_scope": "self",
-                "handler_scoped": True,
-            }],
-        },
-        "description": "Delete a link from a caller-owned Mind Map.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "mind_map": {"type": "string"},
-                "map_id": {"type": "string"},
-                "link": {"type": "string"},
-                "link_id": {"type": "string"},
-            },
-            "required": ["link"],
         },
     },
 ])

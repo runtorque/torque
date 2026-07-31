@@ -58,7 +58,7 @@ Audit of `translate_canonical_arguments`:
   `peer_architect_id`/`peer_engineer_id`; `help_search` mode-only key removal;
   `area_link`, `initiative_link`, and behavior-overlay target routing;
   `memory_set_pin`, event delivery, lifecycle, and hire-list mode selection;
-  thinking/scratchpad/mind-map aliases; and behavior-review compatibility
+  thinking/scratchpad aliases; and behavior-review compatibility
   fields. These paths either use their public name in validation or have no
   required-target error after translation.
 
@@ -352,12 +352,9 @@ make a decision authoritative require `decision.accept`.
 | `idea_brief_list` / `idea_brief_get` | Read Idea Briefs. |
 | `idea_brief_create` / `idea_brief_update` | Create or revise an Idea Brief. |
 | `idea_brief_transition` | Propose, park, or archive an Idea Brief. |
-| `thinking_list` / `thinking_get` | Read Scratchpads or Mind Maps by `artifact_type`. |
+| `thinking_list` / `thinking_get` | Read Scratchpads by `artifact_type`. |
 | `scratchpad_update` | Create or update a Scratchpad. |
-| `mind_map_update` | Create or update a Mind Map. |
-| `mind_map_node_update` | Create, update, move, or delete a node. |
-| `mind_map_link_update` | Create, update, or delete a link. |
-| `thinking_archive` | Archive a Scratchpad or Mind Map. |
+| `thinking_archive` | Archive a Scratchpad. |
 
 Create/update/delete variants are selected through `operation`, rather than
 separate tool names.

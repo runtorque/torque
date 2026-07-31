@@ -36,6 +36,7 @@ from torque.mcp_authority import (
     effective_authority_from_snapshot,
 )
 from torque.db import TorqueDB
+from torque.mcp import _canonical_tools_for_caller
 from torque.state import AgentCell, MatrixState
 
 
@@ -776,6 +777,25 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         audit = self.db.list_agent_class_audit(agent_id=cell.id)
         self.assertEqual(audit[0]["event"], "assignment_set")
 
+    def test_every_class_definition_applies_at_launch_after_removed_tool_cleanup(self):
+        classes, issues = load_agent_classes(base_dir=str(self.project))
+        self.assertEqual([], issues)
+        for definition in classes:
+            with self.subTest(class_id=definition.id):
+                cell = self._add_agent(
+                    kind=definition.base_kind,
+                    agent_id=f"launch-{definition.id}",
+                )
+                cell.agent_class_id = definition.id
+                snapshot = self.state.apply_effective_agent_class_for_launch(
+                    cell, base_dir=str(self.project)
+                )
+                self.assertEqual(definition.id, snapshot["id"])
+                projected = {
+                    tool["name"] for tool in _canonical_tools_for_caller(self.state, cell.id)
+                }
+                self.assertFalse({"mind_map_update", "mind_map_node_update", "mind_map_link_update"} & projected)
+
     def test_launch_freezes_class_effective_authority_snapshot(self):
         cell = self._add_agent(kind="architect")
         self.state.assign_agent_class(
@@ -937,7 +957,7 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         self.assertIn("Diverge first", prompt_block)
         self.assertIn("non-binding until accepted", prompt_block)
         self.assertTrue(mcp_tool_allowed_by_authority("architect_thinking_scratchpad_create", authority))
-        self.assertTrue(mcp_tool_allowed_by_authority("architect_thinking_mind_map_node_create", authority))
+        self.assertFalse(mcp_tool_allowed_by_authority("architect_thinking_mind_map_node_create", authority))
         self.assertTrue(mcp_tool_allowed_by_authority("architect_idea_brief_create", authority))
         self.assertTrue(mcp_tool_allowed_by_authority("architect_idea_brief_propose", authority))
         self.assertTrue(mcp_tool_allowed_by_authority("architect_task_propose", authority))

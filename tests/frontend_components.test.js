@@ -311,9 +311,6 @@ test('compact dialogs, icon actions, and primary fields retain accessible afford
   assert.match(modals, /@media \(max-width: 600px\), \(max-height: 520px\)\s*\{\s*\.overlay \{ padding: 8px; \}/s);
   assert.match(grid, /aria-label="' \+ esc\(closeTitle \+ ' ' \+ \(\(a && a\.name\) \|\| 'agent'\)\)/);
   assert.match(initiatives, /aria-label="Refresh planning data"/);
-  assert.match(thinking, /aria-label="Close Mind Map details"/);
-  assert.match(thinking, /aria-label="Move node left"/);
-  assert.match(thinking, /aria-label="Move node right"/);
   assert.match(taskArtifacts, /aria-label="Remove attachment /);
   assert.match(taskModal, /aria-label="Remove label /);
   assert.match(taskModal, /aria-label="Remove dependency /);

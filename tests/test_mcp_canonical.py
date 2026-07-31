@@ -93,6 +93,13 @@ class CanonicalMCPContractTests(unittest.TestCase):
             f"{set(schema.get('required') or []) - set(translated)}",
         )
 
+    def test_mind_map_tools_are_not_projected_for_any_caller_kind(self):
+        removed = {"mind_map_update", "mind_map_node_update", "mind_map_link_update"}
+        for kind in ("worker", "engineer", "architect"):
+            with self.subTest(kind=kind):
+                projected = {tool["name"] for tool in _canonical_tools_for_caller(_State(kind), "caller")}
+                self.assertFalse(projected & removed)
+
     def test_raise_is_the_only_public_blocking_escalation_name(self):
         expected_handlers = {
             "worker": "torque_ask",
@@ -706,9 +713,6 @@ class CanonicalMCPContractTests(unittest.TestCase):
                 "help_search",
                 "hire_list",
                 "idea_brief_update",
-                "mind_map_link_update",
-                "mind_map_node_update",
-                "mind_map_update",
                 "scratchpad_update",
                 "task_dispatch",
             },
@@ -1193,21 +1197,9 @@ class CanonicalMCPContractTests(unittest.TestCase):
             ),
             (
                 "architect",
-                "thinking_list",
-                {"artifact_type": "mind_map"},
-                "architect_thinking_mind_map_list",
-            ),
-            (
-                "architect",
                 "thinking_get",
                 {"artifact_type": "scratchpad", "artifact": "s1"},
                 "architect_thinking_scratchpad_show",
-            ),
-            (
-                "architect",
-                "thinking_get",
-                {"artifact_type": "mind_map", "artifact": "m1"},
-                "architect_thinking_mind_map_show",
             ),
             (
                 "architect",
@@ -1220,80 +1212,6 @@ class CanonicalMCPContractTests(unittest.TestCase):
                 "scratchpad_update",
                 {"operation": "update", "scratchpad": "s1", "title": "Scratch"},
                 "architect_thinking_scratchpad_update",
-            ),
-            (
-                "architect",
-                "mind_map_update",
-                {"operation": "create", "title": "Map"},
-                "architect_thinking_mind_map_create",
-            ),
-            (
-                "architect",
-                "mind_map_update",
-                {"operation": "update", "mind_map": "m1", "title": "Map"},
-                "architect_thinking_mind_map_update",
-            ),
-            (
-                "architect",
-                "mind_map_node_update",
-                {"operation": "create", "mind_map": "m1", "label": "Node"},
-                "architect_thinking_mind_map_node_create",
-            ),
-            (
-                "architect",
-                "mind_map_node_update",
-                {
-                    "operation": "update",
-                    "mind_map": "m1",
-                    "node": "n1",
-                    "label": "Node",
-                },
-                "architect_thinking_mind_map_node_update",
-            ),
-            (
-                "architect",
-                "mind_map_node_update",
-                {
-                    "operation": "move",
-                    "mind_map": "m1",
-                    "node": "n1",
-                    "x": 10,
-                },
-                "architect_thinking_mind_map_node_position",
-            ),
-            (
-                "architect",
-                "mind_map_node_update",
-                {"operation": "delete", "mind_map": "m1", "node": "n1"},
-                "architect_thinking_mind_map_node_delete",
-            ),
-            (
-                "architect",
-                "mind_map_link_update",
-                {
-                    "operation": "create",
-                    "mind_map": "m1",
-                    "source": "n1",
-                    "target": "n2",
-                },
-                "architect_thinking_mind_map_link_create",
-            ),
-            (
-                "architect",
-                "mind_map_link_update",
-                {
-                    "operation": "update",
-                    "mind_map": "m1",
-                    "link": "l1",
-                    "label": "depends on",
-                },
-                "architect_thinking_mind_map_link_update",
-            ),
-            (
-                "architect",
-                "mind_map_link_update",
-                {"operation": "delete", "mind_map": "m1", "link": "l1"},
-                "architect_thinking_mind_map_link_delete",
             ),
         ])
 

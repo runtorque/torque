@@ -636,9 +636,6 @@ function _deltaSurfaceInvalidations(ops, hints) {
         _markSurface(flags, 'initiatives');
         break;
       case 'thinking_scratchpad_note_upsert':
-      case 'thinking_mind_map_upsert':
-      case 'thinking_mind_map_node_upsert':
-      case 'thinking_mind_map_link_upsert':
         _markSurface(flags, 'thinking');
         break;
       case 'idea_brief_upsert':
@@ -1568,7 +1565,6 @@ function _opTouchesGroup(op, group, hint) {
     case 'direct_message_upsert':
     case 'direct_message_read':
     case 'thinking_scratchpad_note_upsert':
-    case 'thinking_mind_map_upsert':
     case 'idea_brief_upsert':
       return (op.group || op.group_name || '') === group;
     default:

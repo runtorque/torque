@@ -136,23 +136,12 @@ class IdeaBriefService:
                 item.get("id", "")
                 or item.get("ref", "")
                 or item.get("note_id", "")
-                or item.get("map_id", "")
-                or item.get("mind_map_id", "")
-                or item.get("node_id", "")
-                or item.get("link_id", "")
                 or ""
             ).strip()
             if not ident:
                 raise self._idea_brief_link_error("thinking link id is required")
-            if not raw_type:
-                if "-S:" in ident:
-                    raw_type = "scratchpad_note"
-                elif ":N" in ident:
-                    raw_type = "mind_map_node"
-                elif ":L" in ident:
-                    raw_type = "mind_map_link"
-                elif "-M:" in ident:
-                    raw_type = "mind_map"
+            if not raw_type and "-S:" in ident:
+                raw_type = "scratchpad_note"
             if raw_type in {"scratchpad", "note", "scratchpad_note"}:
                 note_id = self._state.resolve_scratchpad_note_id(ident, group=group)
                 note = self._state.load_scratchpad_note(note_id)
@@ -170,75 +159,6 @@ class IdeaBriefService:
                     "slug": str(note.get("slug", "") or ""),
                     "title": str(note.get("title", "") or ""),
                     "archived": bool(note.get("archived")),
-                }
-            elif raw_type in {"mind_map", "map"}:
-                map_id = self._state.resolve_mind_map_id(ident, group=group)
-                mind_map = self._state.load_mind_map(map_id, include_counts=True)
-                if (
-                        not mind_map
-                        or mind_map.get("deleted")
-                        or str(mind_map.get("group_name", "") or "").strip() != group):
-                    raise self._idea_brief_link_error(
-                        f"Mind Map not found: {ident}"
-                    )
-                payload = {
-                    "type": "mind_map",
-                    "id": str(mind_map.get("id", "") or ""),
-                    "group": group,
-                    "slug": str(mind_map.get("slug", "") or ""),
-                    "title": str(mind_map.get("title", "") or ""),
-                    "archived": bool(mind_map.get("archived")),
-                    "node_count": int(mind_map.get("node_count", 0) or 0),
-                    "link_count": int(mind_map.get("link_count", 0) or 0),
-                }
-            elif raw_type in {"mind_map_node", "node"}:
-                node = self._state.load_mind_map_node(ident)
-                map_id = str((node or {}).get("map_id", "") or "")
-                mind_map = self._state.load_mind_map(map_id, include_counts=True)
-                if (
-                        not node
-                        or node.get("deleted")
-                        or not mind_map
-                        or mind_map.get("deleted")
-                        or str(mind_map.get("group_name", "") or "").strip() != group):
-                    raise self._idea_brief_link_error(
-                        f"Mind Map node not found: {ident}"
-                    )
-                payload = {
-                    "type": "mind_map_node",
-                    "id": str(node.get("id", "") or ""),
-                    "group": group,
-                    "map_id": map_id,
-                    "map_title": str(mind_map.get("title", "") or ""),
-                    "label": str(node.get("label", "") or ""),
-                    "title": str(node.get("title", "") or ""),
-                    "node_type": str(node.get("node_type", "") or ""),
-                    "archived": bool(mind_map.get("archived")),
-                }
-            elif raw_type in {"mind_map_link", "link"}:
-                link = self._state.load_mind_map_link(ident)
-                map_id = str((link or {}).get("map_id", "") or "")
-                mind_map = self._state.load_mind_map(map_id, include_counts=True)
-                if (
-                        not link
-                        or link.get("deleted")
-                        or not mind_map
-                        or mind_map.get("deleted")
-                        or str(mind_map.get("group_name", "") or "").strip() != group):
-                    raise self._idea_brief_link_error(
-                        f"Mind Map link not found: {ident}"
-                    )
-                payload = {
-                    "type": "mind_map_link",
-                    "id": str(link.get("id", "") or ""),
-                    "group": group,
-                    "map_id": map_id,
-                    "map_title": str(mind_map.get("title", "") or ""),
-                    "source_node_id": str(link.get("source_node_id", "") or ""),
-                    "target_node_id": str(link.get("target_node_id", "") or ""),
-                    "label": str(link.get("label", "") or ""),
-                    "link_type": str(link.get("link_type", "") or ""),
-                    "archived": bool(mind_map.get("archived")),
                 }
             else:
                 raise self._idea_brief_link_error(

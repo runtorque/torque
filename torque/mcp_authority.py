@@ -25,7 +25,6 @@ RESOURCE_KINDS = frozenset({
     "idea_brief",
     "initiative",
     "message_peer",
-    "mind_map",
     "scratchpad_note",
     "semantic_recall",
     "task",

@@ -70,9 +70,8 @@ function _compactInitDeferredMaps() {
   if (!state.pending_hires) state.pending_hires = {};
   if (!state.initiatives) state.initiatives = {};
   if (!state.areas) state.areas = {};
-  if (!state.thinking) state.thinking = { scratchpad_notes: {}, mind_maps: {} };
+  if (!state.thinking) state.thinking = { scratchpad_notes: {} };
   if (!state.thinking.scratchpad_notes) state.thinking.scratchpad_notes = {};
-  if (!state.thinking.mind_maps) state.thinking.mind_maps = {};
   if (!state.idea_briefs) state.idea_briefs = {};
   if (!state.board_tasks_archived) state.board_tasks_archived = {};
   if (!state.engineer_journal) state.engineer_journal = {};
