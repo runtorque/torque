@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 from .state import (
-    AgentMessageLoop, Optional, Schedule, _slugify, _unique_slug, asdict,
+    AgentMessageLoop, Optional, Schedule, _ENGINEER_STREAM_CARD_LIMIT,
+    _ENGINEER_STREAM_CONTEXT_LIMIT, _slugify, _unique_slug, asdict, copy,
     asyncio, cloud_hooks, datetime, hot_json_dumps, hot_json_dumps_async,
     log, profiling, time, timezone, uuid, web,
 )
+
+
+# A primary delta frame is sent immediately; this only delays its derived
+# engineer-stream follow-up.  350 ms is long enough to collapse the normal
+# burst of terminal/event updates while keeping the panel perceptibly current.
+_ENGINEER_RECOMPUTE_DEBOUNCE_SECONDS = 0.35
+_ENGINEER_RECOMPUTE_HANDOFF_DELAY_SECONDS = 0.001
 
 
 class StateRuntimeMixin:
@@ -315,6 +323,116 @@ class StateRuntimeMixin:
         if engineer_groups:
             self._schedule_engineer_recompute(engineer_groups)
 
+    def _engineer_stream_counts(self, streams: list[dict]) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for stream in streams:
+            state_name = str(stream.get("state", "") or "").strip()
+            if not state_name:
+                continue
+            counts[state_name] = counts.get(state_name, 0) + 1
+        return counts
+
+    def _engineer_stream_payload(self, group: str, *, source=None) -> dict:
+        from .worktree_streams import compute_worktree_streams
+
+        source = source or self
+        try:
+            streams = compute_worktree_streams(
+                source,
+                group=group,
+                visibility_limit=_ENGINEER_STREAM_CONTEXT_LIMIT,
+                include_orphaned=False,
+            )
+        except Exception:
+            log.exception("Failed to compute engineer streams for %s", group)
+            streams = []
+        streams = [
+            stream for stream in streams
+            if str(stream.get("state", "") or "").strip() != "merged"
+        ]
+        return {
+            "count": len(streams),
+            "by_state": self._engineer_stream_counts(streams),
+            "items": streams[:_ENGINEER_STREAM_CARD_LIMIT],
+            "truncated": len(streams) > _ENGINEER_STREAM_CARD_LIMIT,
+        }
+
+    def _engineer_stream_compute_snapshot(self):
+        """Clone every mutable task/cell input used by stream synthesis.
+
+        The threaded computation must not traverse live ``BoardTask`` or
+        ``AgentCell`` instances. A fresh MatrixState retains the exact query
+        helpers used by ``compute_worktree_streams`` while this projection
+        replaces its mutable inputs with deep copies.
+        """
+        snapshot = type(self)()
+        snapshot.board_tasks = copy.deepcopy(self.board_tasks)
+        snapshot.agents = copy.deepcopy(self.agents)
+        snapshot.groups = copy.deepcopy(self.groups)
+        snapshot.group_settings = copy.deepcopy(self.group_settings)
+        snapshot.engineer_settings = copy.deepcopy(self.engineer_settings)
+        snapshot._tasks_by_group.clear()
+        for task in snapshot.board_tasks.values():
+            snapshot._tasks_by_group.setdefault(task.group, set()).add(task.id)
+        return snapshot
+
+    def _compute_engineer_stream_payloads(
+        self, groups: set[str], *, source=None,
+    ) -> list[tuple[str, dict]]:
+        """Build stream payloads without mutating the delta accumulator.
+
+        The deferred runtime invokes this CPU-only half in a worker thread;
+        keeping emission separate makes `_delta_ops` ownership remain with the
+        event loop. The synchronous wrapper above preserves existing callers.
+        """
+        if not groups:
+            return []
+        source = source or self
+        known_groups = set(source._engineer_stream_groups())
+        payloads: list[tuple[str, dict]] = []
+        for group in groups:
+            if not group:
+                continue
+            if group not in known_groups:
+                payloads.append((group, {
+                    "count": 0,
+                    "by_state": {},
+                    "items": [],
+                    "truncated": False,
+                }))
+                continue
+            try:
+                payload = self._engineer_stream_payload(group, source=source)
+            except Exception:
+                log.exception(
+                    "engineer stream payload failed for group '%s'", group
+                )
+                continue
+            payloads.append((group, payload))
+        return payloads
+
+    def _emit_engineer_stream_payloads(
+        self, payloads: list[tuple[str, dict]],
+    ) -> bool:
+        """Append precomputed payloads without duplicating an open delta."""
+        if not payloads:
+            return False
+        existing_groups = {
+            str((op or {}).get("group", "") or "").strip()
+            for op in self._delta_ops
+            if str((op or {}).get("op", "") or "") in {
+                "engineer_streams",
+                "engineer_streams_update",
+            }
+        }
+        emitted = False
+        for group, payload in payloads:
+            if not group or group in existing_groups:
+                continue
+            self._emit("engineer_streams", group=group, streams=payload)
+            emitted = True
+        return emitted
+
     def _schedule_engineer_recompute(self, groups: set[str]) -> None:
         """Queue a deferred engineer-stream recompute for ``groups``.
 
@@ -322,11 +440,15 @@ class StateRuntimeMixin:
         the new groups into its pending set — the worker re-checks
         after each iteration so it drains everything before exiting.
         """
-        if not groups:
+        groups = {str(group or "").strip() for group in groups}
+        groups.discard("")
+        self._engineer_recompute_pending |= groups
+        if (not self._engineer_recompute_pending
+                or self._engineer_recompute_shutdown):
             return
-        self._engineer_recompute_pending |= set(groups)
         task = self._engineer_recompute_task
-        if task is not None and not task.done():
+        if (task is not None and not task.done()
+                and not task.cancelling()):
             return
         try:
             loop = asyncio.get_running_loop()
@@ -334,15 +456,83 @@ class StateRuntimeMixin:
             # No event loop; caller is off the async path. Skip silently —
             # the next real broadcast will re-queue anything still dirty.
             return
-        self._engineer_recompute_task = loop.create_task(
-            self._engineer_recompute_worker()
+        worker = loop.create_task(self._engineer_recompute_worker())
+        self._engineer_recompute_task = worker
+        # A task cancelled before its coroutine first runs never reaches the
+        # worker's ``finally``. This callback performs that handoff.
+        worker.add_done_callback(self._engineer_recompute_task_done)
+
+    def _engineer_recompute_task_done(self, task) -> None:
+        """Recover pending groups when a worker ended before its body ran."""
+        if self._engineer_recompute_task is not task:
+            return
+        self._engineer_recompute_task = None
+        self._request_engineer_recompute_handoff()
+
+    def _finish_engineer_recompute_worker(self, task) -> None:
+        """Release ``task`` and hand preserved pending work to a successor."""
+        if self._engineer_recompute_task is not task:
+            return
+        self._engineer_recompute_task = None
+        self._request_engineer_recompute_handoff()
+
+    def _request_engineer_recompute_handoff(self) -> None:
+        """Schedule a successor without creating tasks during loop teardown."""
+        if (not self._engineer_recompute_pending
+                or self._engineer_recompute_shutdown):
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        if loop.is_closed():
+            return
+        handle = self._engineer_recompute_handoff
+        if handle is not None and not handle.cancelled():
+            return
+        # A tiny delayed handle runs on the next live-loop turn, but is not a
+        # task. asyncio.run()/IsolatedAsyncioTestCase teardown stops before it
+        # fires, avoiding an untracked replacement task after cancellation.
+        self._engineer_recompute_handoff = loop.call_later(
+            _ENGINEER_RECOMPUTE_HANDOFF_DELAY_SECONDS,
+            self._run_engineer_recompute_handoff,
         )
+
+    def _run_engineer_recompute_handoff(self) -> None:
+        self._engineer_recompute_handoff = None
+        self._schedule_engineer_recompute(set())
+
+    async def shutdown_engineer_recompute(self) -> None:
+        """Intentionally discard ephemeral recompute work during shutdown.
+
+        Stream payloads are rebuilt from durable state at next boot. This is
+        the sole intentional drop policy, and it prevents cancellation during
+        loop teardown from spawning a successor that cannot be awaited.
+        """
+        self._engineer_recompute_shutdown = True
+        handoff = self._engineer_recompute_handoff
+        if handoff is not None:
+            handoff.cancel()
+            self._engineer_recompute_handoff = None
+        task = self._engineer_recompute_task
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        self._engineer_recompute_task = None
+        self._engineer_recompute_pending.clear()
 
     async def _engineer_recompute_worker(self) -> None:
         """Drain `_engineer_recompute_pending`: prefill branch existence,
         compute stream payloads, broadcast a follow-up delta."""
         from .worktree_streams import prefill_branch_exists_for_state
+        worker = asyncio.current_task()
+        pending: set[str] = set()
         try:
+            # Let a burst of primary broadcasts accumulate before paying for
+            # one complete group read-model rebuild. Subsequent iterations do
+            # not wait: they exist only for groups dirtied during prefill,
+            # threaded computation, or the derived follow-up broadcast.
+            await asyncio.sleep(_ENGINEER_RECOMPUTE_DEBOUNCE_SECONDS)
             while self._engineer_recompute_pending:
                 pending = self._engineer_recompute_pending
                 self._engineer_recompute_pending = set()
@@ -350,10 +540,42 @@ class StateRuntimeMixin:
                     await prefill_branch_exists_for_state(self)
                 except Exception:
                     log.exception("Branch-exists prefill failed")
-                if self._emit_engineer_stream_ops(pending):
+                # `compute_worktree_streams` is CPU-heavy and only reads the
+                # state here. Keep the state mutation (`_emit`) on the event
+                # loop after the thread returns so delta ordering remains
+                # single-threaded.
+                try:
+                    # Snapshot every mutable task/cell input on the event
+                    # loop. The thread below only observes this immutable
+                    # projection; unlike a generation-discard fence it cannot
+                    # starve under a sustained broadcast rate.
+                    snapshot = self._engineer_stream_compute_snapshot()
+                    payloads = await asyncio.to_thread(
+                        self._compute_engineer_stream_payloads,
+                        pending,
+                        source=snapshot,
+                    )
+                except Exception:
+                    # A threaded read can lose its coherent view if a state
+                    # mutation races it. Preserve the dirty signal instead
+                    # of making that transient failure the terminal stream
+                    # result; back off before retrying a persistent failure.
+                    log.exception("Engineer stream payload computation failed")
+                    self._engineer_recompute_pending |= pending
+                    await asyncio.sleep(_ENGINEER_RECOMPUTE_DEBOUNCE_SECONDS)
+                    continue
+                if self._emit_engineer_stream_payloads(payloads):
                     # The follow-up broadcast's own _collect_engineer_*
                     # call returns empty (engineer_streams isn't a trigger
                     # op), so this does not recurse into another worker.
                     await self.broadcast()
+                pending = set()
+        except asyncio.CancelledError:
+            # Preserve a local batch drained before cancellation at any await
+            # (debounce, prefill, thread, or follow-up broadcast). A running
+            # thread cannot be stopped, so its result is deliberately ignored
+            # and the successor recomputes this dirty batch.
+            self._engineer_recompute_pending |= pending
+            raise
         finally:
-            self._engineer_recompute_task = None
+            self._finish_engineer_recompute_worker(worker)

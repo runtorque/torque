@@ -2774,6 +2774,8 @@ class MatrixState(
         # hot path so UI mutations feel instant.
         self._engineer_recompute_pending: set[str] = set()
         self._engineer_recompute_task = None
+        self._engineer_recompute_shutdown = False
+        self._engineer_recompute_handoff = None
         self._critical_write_capture_var: contextvars.ContextVar[
             CriticalWriteCapture | None
         ] = contextvars.ContextVar(
@@ -3489,39 +3491,6 @@ class MatrixState(
         groups.discard("")
         return sorted(groups)
 
-    def _engineer_stream_counts(self, streams: list[dict]) -> dict[str, int]:
-        counts: dict[str, int] = {}
-        for stream in streams:
-            state_name = str(stream.get("state", "") or "").strip()
-            if not state_name:
-                continue
-            counts[state_name] = counts.get(state_name, 0) + 1
-        return counts
-
-    def _engineer_stream_payload(self, group: str) -> dict:
-        from .worktree_streams import compute_worktree_streams
-
-        try:
-            streams = compute_worktree_streams(
-                self,
-                group=group,
-                visibility_limit=_ENGINEER_STREAM_CONTEXT_LIMIT,
-                include_orphaned=False,
-            )
-        except Exception:
-            log.exception("Failed to compute engineer streams for %s", group)
-            streams = []
-        streams = [
-            stream for stream in streams
-            if str(stream.get("state", "") or "").strip() != "merged"
-        ]
-        return {
-            "count": len(streams),
-            "by_state": self._engineer_stream_counts(streams),
-            "items": streams[:_ENGINEER_STREAM_CARD_LIMIT],
-            "truncated": len(streams) > _ENGINEER_STREAM_CARD_LIMIT,
-        }
-
     def _engineer_streams_snapshot(self) -> dict[str, dict]:
         return {
             group: self._engineer_stream_payload(group)
@@ -3598,46 +3567,9 @@ class MatrixState(
         the per-repo branch-exists cache is cold, but in practice
         callers should prefill first so no subprocess runs inline.
         """
-        if not groups:
-            return False
-        known_groups = set(self._engineer_stream_groups())
-        existing_groups = {
-            str((op or {}).get("group", "") or "").strip()
-            for op in self._delta_ops
-            if str((op or {}).get("op", "") or "") in {
-                "engineer_streams",
-                "engineer_streams_update",
-            }
-        }
-        emitted = False
-        for group in groups:
-            if not group or group in existing_groups:
-                continue
-            if group not in known_groups:
-                # Group was just removed; emit an empty payload so clients
-                # clear it from their local state.
-                self._emit(
-                    "engineer_streams",
-                    group=group,
-                    streams={
-                        "count": 0,
-                        "by_state": {},
-                        "items": [],
-                        "truncated": False,
-                    },
-                )
-                emitted = True
-                continue
-            try:
-                payload = self._engineer_stream_payload(group)
-            except Exception:
-                log.exception(
-                    "engineer stream payload failed for group '%s'", group
-                )
-                continue
-            self._emit("engineer_streams", group=group, streams=payload)
-            emitted = True
-        return emitted
+        return self._emit_engineer_stream_payloads(
+            self._compute_engineer_stream_payloads(groups)
+        )
 
     # -- Serialization ------------------------------------------------------
 

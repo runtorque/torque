@@ -8872,8 +8872,17 @@ class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
         async def fake_sleep(delay):
             delays.append(delay)
 
-        orig_sleep = self.server_agent_mod.asyncio.sleep
-        self.server_agent_mod.asyncio.sleep = fake_sleep
+        # server_agent and state_runtime share the process-global asyncio
+        # module. Replacing ``asyncio.sleep`` here used to capture the
+        # unrelated engineer-stream debounce, so capture only this prompt
+        # delivery call site.
+        prompt_asyncio = types.SimpleNamespace(
+            CancelledError=asyncio.CancelledError,
+            create_task=asyncio.create_task,
+            sleep=fake_sleep,
+        )
+        orig_asyncio = self.server_agent_mod.asyncio
+        self.server_agent_mod.asyncio = prompt_asyncio
         try:
             task = await service.send_agent_prompt(
                 cell,
@@ -8885,7 +8894,7 @@ class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
             )
             await task
         finally:
-            self.server_agent_mod.asyncio.sleep = orig_sleep
+            self.server_agent_mod.asyncio = orig_asyncio
 
         self.assertEqual(delays, [3])
         self.assertEqual(bridge.primed, ["session-derive"])
