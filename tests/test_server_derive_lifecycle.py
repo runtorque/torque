@@ -980,6 +980,12 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
                          implementer.worktree_branch)
         self.assertEqual(review.worktree_boundary["commit_sha"],
                          "reviewed-fix-sha")
+        assignment = review.completion_evidence["reviewer_assignment"]
+        self.assertEqual(assignment["reviewer_id"], reviewer.id)
+        self.assertEqual(
+            assignment["prior_review_task_ids"],
+            ["task-review"],
+        )
 
     async def test_dispatch_reused_reviewer_adopts_explicit_fix_worktree(self):
         """Existing-agent dispatch applies the review handoff before prompting."""
