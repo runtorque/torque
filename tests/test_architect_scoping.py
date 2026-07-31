@@ -6657,6 +6657,62 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(full_error, full_text)
         self.assertEqual(json.loads(full_text)["threads"][0]["messages"][0]["message"], long_text)
 
+    async def test_architect_peer_inbox_pages_threads_before_default_flat_window(self):
+        architect = self._add_architect("arch-window-caller", "Window Caller")
+        peer = self._add_architect("arch-window-peer", "Window Peer")
+        engineer = self._add_engineer("eng-window-filler", "Window Filler")
+        pending_thread_id = "thread-architect-pending-beyond-flat-window"
+        self.db.save_agent_peer_message({
+            "id": "message-architect-pending-beyond-flat-window",
+            "thread_id": pending_thread_id,
+            "group_name": architect.group,
+            "sender_id": peer.id,
+            "sender_kind": "architect",
+            "recipient_id": architect.id,
+            "recipient_kind": "architect",
+            "message": "Old Architect request still needs a reply.",
+            "created_at": 1.0,
+            "ack_required": True,
+        })
+        for index in range(130):
+            self.db.save_agent_peer_message({
+                "id": f"message-architect-window-filler-{index:03d}",
+                "thread_id": f"thread-architect-window-filler-{index:03d}",
+                "group_name": architect.group,
+                "sender_id": engineer.id,
+                "sender_kind": "engineer",
+                "recipient_id": architect.id,
+                "recipient_kind": "architect",
+                "message": "Recent non-Architect peer traffic.",
+                "created_at": float(100 + index),
+            })
+
+        flat_window = self.db.load_agent_peer_messages_for_agent(
+            architect.id,
+            limit=6 * 20,
+        )
+        self.assertEqual(len(flat_window), 6 * 20)
+        self.assertNotIn(
+            pending_thread_id,
+            {row["thread_id"] for row in flat_window},
+        )
+
+        inbox_text, inbox_error = await self._call(
+            "architect_peer_inbox",
+            {"requires_reply": True, "detail": True},
+            architect.id,
+        )
+
+        self.assertFalse(inbox_error, inbox_text)
+        inbox = json.loads(inbox_text)
+        self.assertEqual(inbox["threads_total"], 1)
+        self.assertEqual(inbox["threads_returned"], 1)
+        self.assertFalse(inbox["threads_capped"])
+        self.assertEqual(
+            [thread["thread_id"] for thread in inbox["threads"]],
+            [pending_thread_id],
+        )
+
     async def test_architect_wave_summary_from_decision_groups_evidence_and_exclusions(self):
         architect = self._add_architect("arch-1", "Architect")
         other_architect = self._add_architect("arch-2", "Other Architect")
