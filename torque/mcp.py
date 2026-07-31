@@ -499,7 +499,10 @@ TOOLS = [
             "In Progress with a status badge while the derived task "
             "is worked on. The action's transitions field controls "
             "which actions can be derived and where the task is routed "
-            "(new agent, self, parent agent, or root agent)."
+            "(new agent, self, parent agent, or root agent). For "
+            "feature/review, prior-reviewer reuse is disclosed in the "
+            "result and review record; context prose does not impose "
+            "reviewer exclusions."
         ),
         "inputSchema": {
             "type": "object",

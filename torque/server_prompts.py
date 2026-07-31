@@ -409,6 +409,35 @@ def compute_commit_hint(*,
     return hint
 
 
+def reviewer_assignment_disclosure(task) -> str:
+    """Render a mandatory prompt disclosure for prior-reviewer reuse."""
+    evidence = getattr(task, "completion_evidence", {}) or {}
+    if not isinstance(evidence, dict):
+        return ""
+    assignment = evidence.get("reviewer_assignment", {}) or {}
+    if not isinstance(assignment, dict):
+        return ""
+    if assignment.get("kind") != "prior_reviewer_reuse":
+        return ""
+    reviewer_id = str(assignment.get("reviewer_id", "") or "").strip()
+    prior_ids = [
+        str(task_id or "").strip()
+        for task_id in assignment.get("prior_review_task_ids", []) or []
+        if str(task_id or "").strip()
+    ]
+    if not reviewer_id or not prior_ids:
+        return ""
+    return (
+        "\n\n## Reviewer assignment disclosure\n\n"
+        f"You are reviewer `{reviewer_id}`, and you previously reviewed this "
+        "task chain in "
+        + ", ".join(f"`{task_id}`" for task_id in prior_ids)
+        + ". This is a prior-reviewer reuse assignment, not a fresh "
+        "independent reviewer assignment. Evaluate the current boundary on "
+        "its merits and preserve this disclosure in your review record."
+    )
+
+
 def build_dispatch_postscript(*,
                               transitions: list[dict] | None = None,
                               is_clean: bool = True,

@@ -128,6 +128,44 @@ class CliExternalTicketTests(unittest.TestCase):
             "generated rename only",
         )
 
+    def test_ai_derive_prints_prior_reviewer_reuse_disclosure(self):
+        self.cli._resolve_self_and_task = lambda _args: (
+            {"id": "agent-1"},
+            {"id": "task-1", "slug": "task-1"},
+        )
+        self.cli.api_call = lambda *_args, **_kwargs: {
+            "ok": True,
+            "data": {
+                "task_id": "task-review-2",
+                "agent_id": "reviewer-1",
+                "reviewer_reuse": {
+                    "kind": "prior_reviewer_reuse",
+                    "reviewer_id": "reviewer-1",
+                    "prior_review_task_ids": [
+                        "task-review-1",
+                        "task-review-1b",
+                    ],
+                },
+            },
+        }
+        args = SimpleNamespace(
+            port=18932,
+            description="Review the fix",
+            context="",
+            action="feature/review",
+            var=[],
+            group="",
+        )
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.cli.cmd_ai_derive(args)
+
+        rendered = out.getvalue()
+        self.assertIn("Reviewer reuse: reviewer-1", rendered)
+        self.assertIn("task-review-1, task-review-1b", rendered)
+        self.assertIn("not a fresh reviewer", rendered)
+
     def test_board_import_calls_external_import_endpoint(self):
         calls = []
         self.cli.get_state_local = lambda _port: {"groups": {"g": []}}

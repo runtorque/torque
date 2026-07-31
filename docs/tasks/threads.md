@@ -134,10 +134,26 @@ A thread can pass through multiple agents. The simplest case:
 Implementer Worker (LOOM:290)
   └→ Reviewer Worker (LOOM:290:1)        ← new agent on same worktree
        └→ Implementer Worker (LOOM:290:2) ← back to original via target: parent
-            └→ Reviewer Worker (LOOM:290:3) ← reviewer reused via target: parent
+            └→ Reviewer Worker (LOOM:290:3) ← prior reviewer reused for re-review
 ```
 
 In this thread, two agents handle four tasks. The Implementer keeps its full conversation context across `:290` and `:290:2`. The Reviewer keeps its conversation context across `:290:1` and `:290:3`. Neither has to be reminded what the work is — they were there.
+
+Prior-reviewer reuse is deliberate for block/fix continuity, but it is not a
+fresh independent reviewer assignment. Torque discloses reuse in the derive
+result, the CLI output, the review task's `torque:reviewer-reused` label and
+`completion_evidence.reviewer_assignment` record, and the reviewer's dispatch
+prompt. The record includes the reviewer id and prior review task ids.
+
+Reviewer distinctness is not inferred from derive prose. `task_derive` has no
+field for “different from every prior reviewer,” so a sentence naming excluded
+reviewer ids is context for the recipient, not a routing constraint. Likewise,
+the normal first-review path creates a new Worker and therefore normally keeps
+the reviewer distinct from the implementer, but this is default routing rather
+than a caller-selectable distinctness contract. A non-empty legacy
+`required_review_gates` declaration separately checks distinct reviewer
+cardinality and implementation-ancestry independence at finalization; it does
+not constrain reviewer selection during derive.
 
 This is one reason the dispatch postscript is dynamic: a fresh agent gets the full reference; an agent already in conversation gets a shorter reminder. → [Workers](../team/workers.md#what-a-worker-actually-receives-at-boot)
 

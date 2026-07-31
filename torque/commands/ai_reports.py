@@ -51,6 +51,78 @@ TORQUE_AI_MCP_REPORT_TOOL_NAMES = frozenset({
 _TORQUE_AI_MCP_REPORT_ACTIONS = TORQUE_AI_MCP_REPORT_ACTIONS
 
 
+def _prior_review_task_ids_for_agent(state, task, agent_id: str) -> list[str]:
+    """Return prior feature/review task ids assigned to ``agent_id``.
+
+    Review routing is allowed to reuse the reviewer who found a blocker, but
+    that assignment must remain distinguishable from a fresh independent
+    review.  This history lookup is structural: derive prose is not a routing
+    contract and is deliberately not parsed for reviewer exclusions.
+    """
+    agent_id = str(agent_id or "").strip()
+    if not state or not task or not agent_id:
+        return []
+    task_id = str(getattr(task, "id", "") or "").strip()
+    result = []
+    for candidate in state.board_get_chain(task_id):
+        action_name = str(
+            getattr(candidate, "action_name", "") or ""
+        ).strip().lower()
+        if action_name != _REVIEW_GATE_ACTION:
+            continue
+        reviewer_id = str(
+            getattr(candidate, "agent_id", "") or ""
+        ).strip()
+        if reviewer_id != agent_id:
+            continue
+        candidate_id = str(getattr(candidate, "id", "") or "").strip()
+        if candidate_id:
+            result.append(candidate_id)
+    return result
+
+
+def _reviewer_reuse_assignment(
+        *,
+        reviewer_id: str,
+        prior_review_task_ids: list[str],
+        selection_source: str) -> dict:
+    """Build the durable, reader-facing prior-reviewer reuse record."""
+    return {
+        "kind": "prior_reviewer_reuse",
+        "reviewer_id": str(reviewer_id or "").strip(),
+        "prior_review_task_ids": list(prior_review_task_ids),
+        "selection_source": (
+            str(selection_source or "").strip()
+            or "existing_agent_target"
+        ),
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _apply_reviewer_reuse_assignment(task, assignment: dict,
+                                     actor_name: str) -> None:
+    """Persist reader-facing reuse metadata on the derived review task."""
+    evidence = dict(getattr(task, "completion_evidence", {}) or {})
+    evidence["reviewer_assignment"] = assignment
+    task.completion_evidence = evidence
+    labels = list(getattr(task, "labels", []) or [])
+    if "torque:reviewer-reused" not in labels:
+        labels.append("torque:reviewer-reused")
+    task.labels = labels
+    reviewer_id = assignment["reviewer_id"]
+    prior_ids = ", ".join(assignment["prior_review_task_ids"])
+    task.messages.append({
+        "timestamp": time.time(),
+        "action": "reviewer_reused",
+        "message": (
+            "Prior reviewer reuse: "
+            f"reviewer {reviewer_id} previously reviewed this task chain in "
+            f"{prior_ids}. This assignment is not a fresh reviewer."
+        ),
+        "agent_name": actor_name,
+    })
+
+
 @dataclass(slots=True)
 class AIReportCommandRuntime:
     state: Any
@@ -965,6 +1037,10 @@ async def handle_ai_report_command(
             target_agent = (
                 data.get("target_agent", "") or ""
             ).strip()
+            reviewer_target_source = (
+                "explicit_target" if target_agent else ""
+            )
+            reviewer_reuse = None
             if (
                 task
                 and not target_agent
@@ -978,6 +1054,7 @@ async def handle_ai_report_command(
                     )
                 if prior_reviewer:
                     target_agent = prior_reviewer.id
+                    reviewer_target_source = "automatic_chain_reuse"
             is_auto_review_gate = bool(
                 data.get("_review_gate")
             ) and act_name == _REVIEW_GATE_ACTION
@@ -1271,8 +1348,10 @@ async def handle_ai_report_command(
                             if tr_target == "self":
                                 reuse_self = True
                                 target_agent = ""
+                                reviewer_target_source = "transition_self"
                             elif tr_target == "parent":
                                 reuse_self = False
+                                reviewer_target_source = "transition_parent"
                                 pt = state.board_tasks.get(
                                     derive_parent_task_id) \
                                     if derive_parent_task_id \
@@ -1285,6 +1364,7 @@ async def handle_ai_report_command(
                                             a.slug or a.name
                             elif tr_target == "root":
                                 reuse_self = False
+                                reviewer_target_source = "transition_root"
                                 rid = task.pipeline_root_id \
                                     or task.id
                                 rt = state.board_tasks.get(
@@ -1318,6 +1398,9 @@ async def handle_ai_report_command(
                                             ancestor_agent.slug
                                             or ancestor_agent.name
                                         )
+                                        reviewer_target_source = (
+                                            "automatic_ancestor_stage"
+                                        )
                                     else:
                                         target_agent = ""
                             target_id = None
@@ -1338,6 +1421,37 @@ async def handle_ai_report_command(
                                     }
                             elif reused_existing_task and new_task.agent_id:
                                 target_id = new_task.agent_id
+
+                            if (
+                                    target_id
+                                    and str(act_name or "").strip().lower()
+                                    == _REVIEW_GATE_ACTION
+                            ):
+                                prior_review_task_ids = (
+                                    _prior_review_task_ids_for_agent(
+                                        state,
+                                        task,
+                                        target_id,
+                                    )
+                                )
+                                if prior_review_task_ids:
+                                    reviewer_reuse = (
+                                        _reviewer_reuse_assignment(
+                                            reviewer_id=target_id,
+                                            prior_review_task_ids=(
+                                                prior_review_task_ids
+                                            ),
+                                            selection_source=(
+                                                reviewer_target_source
+                                            ),
+                                        )
+                                    )
+                                    _apply_reviewer_reuse_assignment(
+                                        new_task,
+                                        reviewer_reuse,
+                                        cell.name,
+                                    )
+                                    _save_task(new_task)
 
                             if result and \
                                     result.get("type") \
@@ -1514,6 +1628,8 @@ async def handle_ai_report_command(
                                     or ""
                                 ).strip()
                             )
+                            if reviewer_reuse and isinstance(result, dict):
+                                result["reviewer_reuse"] = reviewer_reuse
                             _record_derive_dispatch_shape_metric(
                                 state,
                                 engineer_id=owner_engineer_id,
