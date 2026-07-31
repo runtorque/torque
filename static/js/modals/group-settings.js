@@ -1368,11 +1368,8 @@ function _resetGsArchitectSections() {
 
 function _captureGroupSettingsRerenderState(group) {
   const modal = document.getElementById('modal-group-settings');
-  const shellState = typeof _settingsShellState !== 'undefined'
-    ? _settingsShellState['modal-group-settings']
-    : null;
   if (_settingsGroup !== group || !modal || !modal.classList
-      || !modal.classList.contains('visible') || !shellState || !shellState.dirty) {
+      || !modal.classList.contains('visible')) {
     return null;
   }
   return {
