@@ -673,6 +673,13 @@ TOOLS = [
                     "type": "string",
                     "description": "The shared memory content.",
                 },
+                "entry_id": {
+                    "type": "string",
+                    "description": (
+                        "Optional existing entry ID to update. Only the "
+                        "original author may update an entry."
+                    ),
+                },
                 "title": {
                     "type": "string",
                     "description": "Optional short title.",
@@ -697,8 +704,9 @@ TOOLS = [
                     "type": "string",
                     "enum": ["durable", "transient"],
                     "description": (
-                        "Optional retention override. Defaults from entry "
-                        "type; pinned entries always become durable."
+                        "Deprecated compatibility input. It is accepted but "
+                        "does not affect expiry: all entries use the group "
+                        "TTL, and pinning affects ranking/visibility only."
                     ),
                 },
             },
@@ -1894,6 +1902,8 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
             payload["cmd"] = "memory_publish"
             payload["entry_type"] = args.get("entry_type", "")
             payload["content"] = args.get("content", "")
+            if args.get("entry_id"):
+                payload["entry_id"] = args["entry_id"]
             if args.get("title"):
                 payload["title"] = args["title"]
             if args.get("scope_kind"):

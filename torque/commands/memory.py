@@ -147,10 +147,12 @@ async def _handle_memory_command(
         existing = state.db.load_memory_entry(entry_id) if entry_id else None
         if entry_id and not existing:
             return {"type": "error", "message": "Memory entry not found"}
-        # Agent-originated updates are author-only. Operator/UI calls do not
-        # carry ``cell_id`` and retain their established edit path.
-        if (existing and str(data.get("cell_id", "") or "").strip() and cell
-                and existing.get("source_id", "") != cell.id):
+        # Agent-originated updates are author-only. Operator/UI calls omit
+        # ``cell_id`` and retain their established edit path; a supplied but
+        # unresolved ID must fail closed rather than bypass that authority.
+        requested_cell_id = str(data.get("cell_id", "") or "").strip()
+        if (existing and requested_cell_id
+                and (not cell or existing.get("source_id", "") != cell.id)):
             return {
                 "type": "error",
                 "message": (

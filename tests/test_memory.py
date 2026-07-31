@@ -406,6 +406,25 @@ class MemoryCommandTests(unittest.TestCase):
         self.assertEqual(stored["content"], "Original content.")
         self.assertEqual(stored["source_id"], "author")
 
+    def test_unresolved_agent_cannot_update_shared_memory_entry(self):
+        created = self._command({
+            "cmd": "memory_publish", "cell_id": "author",
+            "entry_type": "finding", "content": "Original content.",
+            "scope_kind": "group", "scope_ref": "g",
+        })["entry"]
+
+        refused = self._command({
+            "cmd": "memory_publish", "cell_id": "unknown-agent",
+            "entry_id": created["id"], "content": "Unauthorized overwrite.",
+        })
+
+        self.assertEqual(refused["type"], "error")
+        self.assertIn("original author", refused["message"])
+        self.assertEqual(
+            self.db.load_memory_entry(created["id"])["content"],
+            "Original content.",
+        )
+
     def test_author_update_preserves_existing_expiry_including_legacy_null(self):
         self.db.save_memory_entry({
             "id": "legacy", "project_key": "/repo", "group_name": "g",
