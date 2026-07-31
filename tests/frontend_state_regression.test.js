@@ -26268,6 +26268,46 @@ test('submitTask includes structured artifacts alongside attachments when editin
   });
 });
 
+test('manual artifact drafts allocate at save after greatest suffix and retain edit IDs', () => {
+  const { context } = createModalHarness();
+
+  runInContext(context, `
+    _taskArtifacts = [
+      { id: 'artifact-1', type: 'log', title: 'first' },
+      { id: 'artifact-3', type: 'log', title: 'third' },
+    ];
+    _taskArtifactEditIndex = _taskArtifacts.length;
+    _taskArtifactDraft = _artifactDraftForType('log');
+  `);
+
+  assert.equal(runInContext(context, '_taskArtifactDraft.id'), undefined);
+  assert.equal(runInContext(context, '_nextTaskArtifactId(_taskArtifacts)'), 'artifact-4');
+  runInContext(context, 'taskArtifactSave()');
+  assert.deepEqual(jsonValue(context, '_taskArtifacts.map(function(a) { return a.id; })'), [
+    'artifact-1', 'artifact-3', 'artifact-4',
+  ]);
+
+  runInContext(context, `
+    _taskArtifactEditIndex = 1;
+    _taskArtifactDraft = _artifactClone(_taskArtifacts[1]);
+    taskArtifactSave();
+  `);
+  assert.equal(runInContext(context, '_taskArtifacts[1].id'), 'artifact-3');
+
+  runInContext(context, `
+    _taskArtifacts = [
+      { id: 'artifact-1', type: 'log', title: 'first' },
+      { type: 'log', title: 'legacy missing id' },
+    ];
+    _taskArtifactEditIndex = _taskArtifacts.length;
+    _taskArtifactDraft = _artifactDraftForType('log');
+    taskArtifactSave();
+  `);
+  assert.deepEqual(jsonValue(context, '_taskArtifacts.map(function(a) { return a.id || null; })'), [
+    'artifact-1', null, 'artifact-2',
+  ]);
+});
+
 function artifactPreviewOverlay(document) {
   return document.body.children.find((child) => child.id === 'modal-artifact-preview') || null;
 }

@@ -458,7 +458,7 @@ function _renderArtifactCollection(artifacts, opts) {
 function _artifactDraftForType(type) {
   var resolvedType = type || 'snippet';
   var storageKind = resolvedType === 'file_ref' ? 'file_ref' : 'inline';
-  return _artifactNormalizeClient({
+  var draft = _artifactNormalizeClient({
     type: resolvedType,
     title: '',
     summary: '',
@@ -476,6 +476,10 @@ function _artifactDraftForType(type) {
       line_end: null,
     },
   }, _taskArtifacts.length);
+  // New drafts must receive their ID at save time, after examining the
+  // current collection. This avoids reusing a gapped or high suffix.
+  delete draft.id;
+  return draft;
 }
 
 function _taskArtifactUploadId() {
@@ -728,7 +732,9 @@ function taskArtifactSave() {
   _taskArtifactDraft.storage = _taskArtifactDraft.storage || {};
   _taskArtifactDraft.storage.kind = _artifactStorageKind(_taskArtifactDraft);
   var source = _artifactClone(_taskArtifactDraft);
-  if (!source.id) source.id = _nextTaskArtifactId(_taskArtifacts);
+  if (_taskArtifactEditIndex >= _taskArtifacts.length || !source.id) {
+    source.id = _nextTaskArtifactId(_taskArtifacts);
+  }
   var artifact = _artifactNormalizeClient(source, _taskArtifactEditIndex);
   artifact.taskId = _taskArtifactUploadId();
   if (!artifact.title) {
