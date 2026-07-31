@@ -1484,6 +1484,29 @@ body.runtime-embedded #modal-group .modal-summary {
 .label-hint {
   font-weight: 400; color: var(--text-dim); font-size: 9px;
 }
+.task-schedule-field {
+  position: relative;
+}
+.task-schedule-placeholder {
+  display: none;
+  position: absolute;
+  inset: 0 var(--control-padding-x-sm);
+  align-items: center;
+  color: var(--text-faint);
+  font-size: var(--control-font-size-sm);
+  pointer-events: none;
+}
+.task-schedule-field.is-unset .task-schedule-placeholder {
+  display: flex;
+}
+/* Native datetime-local controls show a locale-specific format mask even when
+ * their value is empty. Hide that mask so the explicit unset placeholder is
+ * the only schedule state an operator reads. */
+.task-schedule-field.is-unset #task-scheduled-input,
+.task-schedule-field.is-unset #task-scheduled-input::-webkit-datetime-edit {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
 .label-req {
   color: var(--red); font-weight: 700;
 }

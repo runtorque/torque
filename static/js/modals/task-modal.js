@@ -444,6 +444,18 @@ function _taskScheduledInputValue(isoValue) {
   }
 }
 
+function _taskSetScheduledInputPresentation(input) {
+  if (!input) return;
+  var field = input.closest ? input.closest('.task-schedule-field') : null;
+  if (!field) return;
+  field.classList.toggle('is-unset', !input.value);
+}
+
+function taskScheduledInput(input) {
+  _taskSetScheduledInputPresentation(input);
+  taskPersistDraft();
+}
+
 function _taskVerificationSummaryFromDom() {
   var testsEl = document.getElementById('task-verification-tests-input');
   var smokeEl = document.getElementById('task-verification-smoke-input');
@@ -835,6 +847,7 @@ function _taskOpenModal(config) {
     schedEl.value = draft && draft.scheduled_input !== undefined
       ? draft.scheduled_input
       : (config.scheduledInput || '');
+    _taskSetScheduledInputPresentation(schedEl);
   }
 
   _setTaskLabels(
