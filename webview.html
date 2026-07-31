@@ -515,7 +515,7 @@
       <div class="gs-subtabs ui-tablist" role="tablist" aria-label="Group settings views" onkeydown="uiTablistKeydown(event)">
         <button type="button" role="tab" aria-selected="true" tabindex="0" class="ui-tab ui-tab--underline gs-subtab active" data-subtab="group-general" onclick="switchGsSubTab('group',this)">General</button>
         <button type="button" role="tab" aria-selected="false" tabindex="-1" class="ui-tab ui-tab--underline gs-subtab" data-subtab="group-worker-defaults" onclick="switchGsSubTab('group',this)">Agents</button>
-        <button type="button" role="tab" aria-selected="false" tabindex="-1" class="ui-tab ui-tab--underline gs-subtab" data-subtab="group-sync" onclick="switchGsSubTab('group',this)">Sync provider</button>
+        <button type="button" role="tab" aria-selected="false" tabindex="-1" class="ui-tab ui-tab--underline gs-subtab" data-subtab="group-tasks" onclick="switchGsSubTab('group',this)">Tasks</button>
         <button type="button" role="tab" aria-selected="false" tabindex="-1" class="ui-tab ui-tab--underline gs-subtab" data-subtab="group-advanced" onclick="switchGsSubTab('group',this)">Advanced</button>
       </div>
 
@@ -614,8 +614,34 @@
         </section>
       </div>
 
-      <!-- Sync provider sub-tab -->
-      <div class="gs-subpane" data-subpane="group-sync">
+      <!-- Tasks sub-tab -->
+      <div class="gs-subpane" data-subpane="group-tasks">
+        <section class="gs-settings-section">
+          <div class="gs-settings-section-title">Task defaults</div>
+          <div class="gs-settings-section-body settings-field-grid">
+            <div class="settings-field">
+              <label for="gs-board-default-action">Default action <span class="label-hint">optional</span></label>
+              <input id="gs-board-default-action" autocomplete="off" placeholder="feature/implement">
+              <div class="settings-field-help">Applied when a new task does not specify an action.</div>
+            </div>
+            <div class="settings-field">
+              <label for="gs-board-default-labels">Default labels <span class="label-hint">comma-separated</span></label>
+              <input id="gs-board-default-labels" autocomplete="off" placeholder="frontend, urgent">
+              <div class="settings-field-help">Applied when a new task has no labels.</div>
+            </div>
+            <div class="settings-field">
+              <label for="gs-board-default-lane">Default board lane <span class="label-hint">optional</span></label>
+              <input id="gs-board-default-lane" autocomplete="off" placeholder="First board lane">
+              <div class="settings-field-help">Used when a new task does not specify a lane.</div>
+            </div>
+            <div class="settings-field">
+              <label for="gs-dispatch-lane">Dispatch lane</label>
+              <input id="gs-dispatch-lane" autocomplete="off" placeholder="In Progress">
+              <div class="settings-field-help">Where dispatched tasks move when they become active.</div>
+            </div>
+          </div>
+        </section>
+
         <section class="gs-settings-section">
           <div class="gs-settings-section-title">Connection</div>
           <div class="gs-settings-section-body">

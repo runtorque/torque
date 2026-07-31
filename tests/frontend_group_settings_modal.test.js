@@ -105,7 +105,7 @@ function createSandbox() {
   });
   const paneByName = Object.fromEntries(gsPanes.map((pane) => [pane.dataset.pane, pane]));
   const subtabNamesByPane = {
-    group: ['group-general', 'group-worker-defaults', 'group-sync', 'group-advanced'],
+    group: ['group-general', 'group-worker-defaults', 'group-tasks', 'group-advanced'],
     workers: ['worker-execution', 'worker-worktree', 'worker-notifications'],
     engineer: ['engineer-general', 'engineer-behavior', 'engineer-system'],
     architect: ['architect-general', 'architect-behavior', 'architect-system'],
@@ -272,11 +272,13 @@ test('group settings renders system prompt preview controls for Engineer and Arc
   assert.match(css, /body\.standalone-mode\s+\.preview-popup\s*{\s*max-width:\s*min\(80vw,\s*1180px\);/);
 });
 
-test('group settings markup renders board sync provider subtab and task sync mount', () => {
+test('group settings Tasks subtab renders task defaults and board sync controls', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   const css = appStylesheetSource();
 
-  assert.match(html, /data-subtab="group-sync"[\s\S]*>Sync provider<\/button>/);
+  assert.match(html, /data-subtab="group-tasks"[\s\S]*>Tasks<\/button>/);
+  assert.doesNotMatch(html, /data-subtab="group-sync"/);
+  assert.match(html, /Task defaults[\s\S]*id="gs-board-default-action"[\s\S]*id="gs-board-default-labels"[\s\S]*id="gs-board-default-lane"[\s\S]*id="gs-dispatch-lane"/);
   assert.match(html, /<select id="gs-board-sync-provider"[\s\S]*<option value="none">None<\/option>[\s\S]*<option value="github">GitHub<\/option>/);
   assert.match(html, /id="gs-board-sync-enabled"[\s\S]*Enable sync/);
   assert.match(html, /id="gs-board-sync-github-project-select"[\s\S]*Reload projects/);
@@ -1323,7 +1325,7 @@ test('group settings uses Group/Workers split plus scoped Engineer and Architect
 
   assert.match(
     html,
-    /<div class="gs-pane active" data-pane="group">[\s\S]*?data-subtab="group-general"[\s\S]*?data-subtab="group-worker-defaults"[\s\S]*?data-subtab="group-sync"[\s\S]*?data-subtab="group-advanced"/,
+    /<div class="gs-pane active" data-pane="group">[\s\S]*?data-subtab="group-general"[\s\S]*?data-subtab="group-worker-defaults"[\s\S]*?data-subtab="group-tasks"[\s\S]*?data-subtab="group-advanced"/,
   );
   assert.match(html, /data-subtab="group-worker-defaults"[^>]*>Agents<\/button>/);
   assert.doesNotMatch(html, /data-subtab="group-worker-defaults"[^>]*>Worker defaults<\/button>/);
@@ -1410,7 +1412,7 @@ test('group settings places all-kind defaults under Group and worker overrides u
   const groupPane = html.slice(groupStart, workersStart);
   const workersPane = html.slice(workersStart, engineerStart);
   const workerDefaults = groupPane.indexOf('data-subpane="group-worker-defaults"');
-  const sync = groupPane.indexOf('data-subpane="group-sync"');
+  const sync = groupPane.indexOf('data-subpane="group-tasks"');
   const advanced = groupPane.indexOf('data-subpane="group-advanced"');
   assert.ok(workerDefaults < groupPane.indexOf('id="gs-agent-provider"'));
   assert.ok(workerDefaults < groupPane.indexOf('id="gs-agent-model"'));
@@ -1494,8 +1496,8 @@ test('remaining settings panes use the shared section hierarchy and concise labe
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   const css = appStylesheetSource();
   const pane = (start, end) => html.slice(html.indexOf(`data-subpane="${start}"`), html.indexOf(`data-subpane="${end}"`));
-  const agents = pane('group-worker-defaults', 'group-sync');
-  const sync = pane('group-sync', 'group-advanced');
+  const agents = pane('group-worker-defaults', 'group-tasks');
+  const sync = pane('group-tasks', 'group-advanced');
   const advanced = pane('group-advanced', 'worker-execution');
   const notifications = pane('worker-notifications', 'engineer-general');
   const engineerBehavior = pane('engineer-behavior', 'engineer-system');
@@ -1503,7 +1505,7 @@ test('remaining settings panes use the shared section hierarchy and concise labe
 
   assert.match(agents, /gs-settings-section-title">Shared launch defaults/);
   assert.doesNotMatch(agents, />Default (provider|role|model|reasoning effort)</i);
-  for (const title of ['Connection', 'Repository &amp; project', 'Board mapping', 'Issue behavior', 'Assignees']) {
+  for (const title of ['Task defaults', 'Connection', 'Repository &amp; project', 'Board mapping', 'Issue behavior', 'Assignees']) {
     assert.match(sync, new RegExp(`gs-settings-section-title">${title}`));
   }
   assert.match(advanced, /gs-settings-section-title">Guidance/);
@@ -2054,7 +2056,7 @@ test('Group Settings board sync fields populate, gate GitHub config, and submit 
   loadModals(context);
   seedProviders(context, sandbox._cachedProviders);
 
-  vm.runInContext('_gsInitialSubtab = "group-sync"', context);
+  vm.runInContext('_gsInitialSubtab = "group-tasks"', context);
   vm.runInContext(`_showGroupSettings("alpha", {
     settings: {
       board_sync_provider: "github",
@@ -2087,7 +2089,7 @@ test('Group Settings board sync fields populate, gate GitHub config, and submit 
   assert.equal(ensure('gs-board-sync-github-close-via-pr').checked, false);
   assert.equal(ensure('gs-board-sync-github-create-labels').checked, true);
   assert.match(ensure('gs-board-sync-github-assignee-map').value, /"worker-1": "octocat"/);
-  assert.equal(ensure('gs-board-sync-provider').focused, true);
+  assert.equal(ensure('gs-board-default-action').focused, true);
   assert.equal(
     sandbox.sendCalls.filter((msg) => msg.cmd === 'board_sync_list_projects').length,
     1,
