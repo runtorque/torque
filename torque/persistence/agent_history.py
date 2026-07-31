@@ -572,6 +572,7 @@ class AgentHistoryPersistenceMixin:
         *,
         since: float = 0,
         peer_id: str = "",
+        peer_ids: Optional[list[str]] = None,
         thread_id: str = "",
         sender_kind: str = "",
         recipient_kind: str = "",
@@ -596,6 +597,23 @@ class AgentHistoryPersistenceMixin:
                 "(sender_id=? AND recipient_id=?))"
             )
             params.extend([agent_id, peer_id, peer_id, agent_id])
+        if peer_ids is not None:
+            scoped_peer_ids = sorted({
+                str(item or "").strip()
+                for item in peer_ids
+                if str(item or "").strip()
+            })
+            if not scoped_peer_ids:
+                where.append("0")
+            else:
+                # Bind the live-authority peer scope as one JSON value instead
+                # of one SQL variable per peer. This keeps the query safe even
+                # if an unusually large group exceeds SQLite's variable limit.
+                where.append(
+                    "(CASE WHEN sender_id=? THEN recipient_id ELSE sender_id END) "
+                    "IN (SELECT CAST(value AS TEXT) FROM json_each(?))"
+                )
+                params.extend([agent_id, json.dumps(scoped_peer_ids)])
         if thread_id:
             where.append("thread_id=?")
             params.append(thread_id)
@@ -623,6 +641,7 @@ class AgentHistoryPersistenceMixin:
         limit: int = 100,
         since: float = 0,
         peer_id: str = "",
+        peer_ids: Optional[list[str]] = None,
         thread_id: str = "",
         sender_kind: str = "",
         recipient_kind: str = "",
@@ -635,8 +654,9 @@ class AgentHistoryPersistenceMixin:
         limit = max(1, min(int(limit or 100), 1000))
         query, params = self._agent_peer_thread_scope_query(
             agent_id, since=since, peer_id=str(peer_id or "").strip(),
-            thread_id=str(thread_id or "").strip(), sender_kind=sender_kind,
-            recipient_kind=recipient_kind, requires_reply=requires_reply,
+            peer_ids=peer_ids, thread_id=str(thread_id or "").strip(),
+            sender_kind=sender_kind, recipient_kind=recipient_kind,
+            requires_reply=requires_reply,
         )
         rows = self._conn.execute(
             query + " ORDER BY last_message_at DESC, thread_id DESC LIMIT ?",

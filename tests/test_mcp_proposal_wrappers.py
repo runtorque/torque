@@ -1921,6 +1921,122 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(2, len(self.calls))
         self.assertEqual("a5a7fc9e", self.calls[1]["agent_id"])
 
+    async def test_proposal_peer_inbox_pages_scoped_threads_before_default_bound(self):
+        """Old pending product-peer threads survive a busy flat message history."""
+        self.state.proposal_peer_allowlist = {
+            self.architect.id: [self.peer.id],
+        }
+        pending_thread_ids = [
+            f"thread-product-pending-beyond-flat-window-{index}"
+            for index in range(8)
+        ]
+        hidden_thread_id = "thread-product-hidden-from-caller"
+        for index, pending_thread_id in enumerate(pending_thread_ids):
+            self.db.save_agent_peer_message({
+                "id": f"message-product-pending-beyond-flat-window-{index}",
+                "thread_id": pending_thread_id,
+                "group_name": self.architect.group,
+                "sender_id": self.peer.id,
+                "sender_kind": "architect",
+                "recipient_id": self.architect.id,
+                "recipient_kind": "architect",
+                "message": "Old product-peer request still needs a reply.",
+                "created_at": float(index + 1),
+                "ack_required": True,
+            })
+        # This is a real pending Architect thread, but its peer is outside the
+        # caller's live product-peer scope. It must not leak through the count.
+        self.db.save_agent_peer_message({
+            "id": "message-product-hidden-from-caller",
+            "thread_id": hidden_thread_id,
+            "group_name": self.cross_group_architect.group,
+            "sender_id": self.cross_group_architect.id,
+            "sender_kind": "architect",
+            "recipient_id": self.architect.id,
+            "recipient_kind": "architect",
+            "message": "Cross-group request is not product-peer-visible.",
+            "created_at": 9.0,
+            "ack_required": True,
+        })
+        # More than the default limit*20 flat-row window. These rows are
+        # deliberately non-user peer rows so the legacy loader consumes its
+        # entire window before it can reach either pending Architect thread.
+        for index in range(130):
+            self.db.save_agent_peer_message({
+                "id": f"message-product-window-filler-{index:03d}",
+                "thread_id": f"thread-product-window-filler-{index:03d}",
+                "group_name": self.architect.group,
+                "sender_id": self.engineer.id,
+                "sender_kind": "engineer",
+                "recipient_id": self.architect.id,
+                "recipient_kind": "architect",
+                "message": "Recent non-product peer traffic.",
+                "created_at": float(100 + index),
+            })
+
+        flat_window = self.db.load_agent_peer_messages_for_agent(
+            self.architect.id,
+            limit=6 * 20,
+        )
+        self.assertEqual(len(flat_window), 6 * 20)
+        self.assertNotIn(
+            pending_thread_ids[0],
+            {row["thread_id"] for row in flat_window},
+        )
+        self.assertEqual(
+            self.db.count_agent_peer_threads_for_agent(
+                self.architect.id,
+                sender_kind="architect",
+                recipient_kind="architect",
+                requires_reply=True,
+            ),
+            9,
+        )
+
+        inbox = self._result_payload(await self._call(
+            "architect_proposal_peer_inbox",
+            {"requires_reply": True, "detail": True},
+            req_id=55,
+        ))
+
+        self.assertEqual(inbox["threads_total"], 8)
+        self.assertEqual(inbox["threads_returned"], 6)
+        self.assertTrue(inbox["threads_capped"])
+        self.assertEqual(
+            [thread["thread_id"] for thread in inbox["threads"]],
+            list(reversed(pending_thread_ids[2:])),
+        )
+        self.assertNotIn(
+            hidden_thread_id,
+            {thread["thread_id"] for thread in inbox["threads"]},
+        )
+
+        oldest_match = self._result_payload(await self._call(
+            "architect_proposal_peer_inbox",
+            {
+                "requires_reply": True,
+                "detail": True,
+                "thread_id": pending_thread_ids[0],
+            },
+            req_id=56,
+        ))
+        self.assertEqual(oldest_match["threads_total"], 1)
+        self.assertEqual(
+            [thread["thread_id"] for thread in oldest_match["threads"]],
+            [pending_thread_ids[0]],
+        )
+        hidden_lookup = self._result_payload(await self._call(
+            "architect_proposal_peer_inbox",
+            {
+                "requires_reply": True,
+                "detail": True,
+                "thread_id": hidden_thread_id,
+            },
+            req_id=57,
+        ))
+        self.assertEqual(hidden_lookup["threads_total"], 0)
+        self.assertEqual(hidden_lookup["threads"], [])
+
     async def test_proposal_peer_message_denies_cross_group_non_architect_and_mixed_context_before_side_effects(self):
         product_task = self.state.board_add_task(
             "PM anchor",
