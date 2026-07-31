@@ -25436,6 +25436,10 @@ test('openEditTask populates modal state from the task and preserves editable ve
       labels: ['bug', 'torque:blocked'],
       depends_on: ['dep'],
       attachments: [{ filename: 'screenshot.png' }],
+      artifacts: [
+        { id: 'artifact-3', type: 'log', title: 'high suffix' },
+        { type: 'log', title: 'legacy missing id' },
+      ],
       action_name: 'triage',
       agent_template: 'worker',
       action_vars: { OWNER: 'frontend' },
@@ -25495,6 +25499,9 @@ test('openEditTask populates modal state from the task and preserves editable ve
   assert.deepEqual(jsonValue(context, '_taskLabels'), ['bug']);
   assert.deepEqual(jsonValue(context, '_taskSystemLabels'), ['torque:blocked']);
   assert.deepEqual(jsonValue(context, '_taskDeps'), ['dep']);
+  assert.deepEqual(jsonValue(context, '_taskArtifacts.map(function(a) { return a.id; })'), [
+    'artifact-3', 'artifact-4',
+  ]);
   assert.equal(document.getElementById('task-group-select').value, 'beta');
   assert.equal(document.getElementById('task-external-provider-input').value, 'github');
   assert.equal(document.getElementById('task-external-id-input').value, 'openai/example#42');
@@ -26295,16 +26302,21 @@ test('manual artifact drafts allocate at save after greatest suffix and retain e
   assert.equal(runInContext(context, '_taskArtifacts[1].id'), 'artifact-3');
 
   runInContext(context, `
-    _taskArtifacts = [
+    _taskArtifacts = _normalizeClientArtifacts([
       { id: 'artifact-1', type: 'log', title: 'first' },
       { type: 'log', title: 'legacy missing id' },
-    ];
+    ]);
     _taskArtifactEditIndex = _taskArtifacts.length;
     _taskArtifactDraft = _artifactDraftForType('log');
     taskArtifactSave();
   `);
-  assert.deepEqual(jsonValue(context, '_taskArtifacts.map(function(a) { return a.id || null; })'), [
-    'artifact-1', null, 'artifact-2',
+  assert.deepEqual(jsonValue(context, '_taskArtifacts.map(function(a) { return a.id; })'), [
+    'artifact-1', 'artifact-2', 'artifact-3',
+  ]);
+  assert.deepEqual(jsonValue(context, `_normalizeClientArtifacts([
+    { id: 'artifact-1' }, { id: 'artifact-1' }, { type: 'log' }
+  ]).map(function(a) { return a.id; })`), [
+    'artifact-1', 'artifact-1', 'artifact-2',
   ]);
 });
 

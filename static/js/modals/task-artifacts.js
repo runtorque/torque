@@ -94,6 +94,27 @@ function _nextTaskArtifactId(artifacts) {
   return 'artifact-' + next;
 }
 
+function _normalizeClientArtifacts(artifacts) {
+  artifacts = Array.isArray(artifacts) ? artifacts : [];
+  // Reserve explicit IDs first. Missing legacy IDs are then allocated after
+  // the greatest suffix, without rewriting explicit historical collisions.
+  var assigned = [];
+  for (var i = 0; i < artifacts.length; i++) {
+    var source = artifacts[i] || {};
+    var explicitId = String(source.id || '').trim();
+    if (explicitId) assigned.push({ id: explicitId });
+  }
+  return artifacts.map(function(artifact, index) {
+    var source = artifact || {};
+    var normalized = _artifactNormalizeClient(source, index);
+    if (!String(source.id || '').trim()) {
+      normalized.id = _nextTaskArtifactId(assigned);
+      assigned.push({ id: normalized.id });
+    }
+    return normalized;
+  });
+}
+
 function _artifactFromAttachment(attachment, taskId, taskLabel, index) {
   var a = attachment || {};
   return _artifactNormalizeClient({
@@ -130,9 +151,9 @@ function _taskArtifactsCombined(task) {
       i,
     ));
   }
-  var artifacts = task.artifacts || [];
+  var artifacts = _normalizeClientArtifacts(task.artifacts || []);
   for (var j = 0; j < artifacts.length; j++) {
-    var item = _artifactNormalizeClient(artifacts[j], combined.length + j);
+    var item = artifacts[j];
     item.taskId = item.taskId || task.id || '';
     item.taskLabel = item.taskLabel || task.task || '';
     combined.push(item);
@@ -487,7 +508,10 @@ function _taskArtifactUploadId() {
 }
 
 function _artifactClone(artifact) {
-  return JSON.parse(JSON.stringify(_artifactNormalizeClient(artifact, 0)));
+  var source = artifact || {};
+  var cloned = _artifactNormalizeClient(source, 0);
+  if (!String(source.id || '').trim()) delete cloned.id;
+  return JSON.parse(JSON.stringify(cloned));
 }
 /* -- Task modal: artifact helpers ---------------------------------------- */
 
@@ -562,11 +586,9 @@ function _artifactFromUploadedFile(entry, file, content, existingArtifacts) {
 function _renderTaskArtifacts() {
   var container = document.getElementById('task-artifacts-list');
   if (!container) return;
-  var artifacts = [];
-  for (var i = 0; i < _taskArtifacts.length; i++) {
-    var item = _artifactNormalizeClient(_taskArtifacts[i], i);
-    item.taskId = item.taskId || _taskArtifactUploadId();
-    artifacts.push(item);
+  var artifacts = _normalizeClientArtifacts(_taskArtifacts);
+  for (var i = 0; i < artifacts.length; i++) {
+    artifacts[i].taskId = artifacts[i].taskId || _taskArtifactUploadId();
   }
   if (!artifacts.length) {
     container.innerHTML = '<div class="artifact-empty ui-state ui-state--empty ui-state--compact">No logs, reports, diffs, or references yet.</div>';
