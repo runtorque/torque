@@ -99,6 +99,8 @@ function buildSandbox(activeElement, lookup) {
     console,
     document: {
       activeElement,
+      body: { tagName: 'BODY' },
+      documentElement: { tagName: 'HTML' },
       getElementById(id) {
         const node = lookup[id];
         return node || null;
@@ -236,7 +238,7 @@ test('_restoreSurfaceState focuses the captured input with preventScroll', () =>
 
   // Simulate the DOM rebuild: focus is no longer on the textarea, but the same
   // id resolves to a *new* node with the same logical identity.
-  sandbox.document.activeElement = null;
+  sandbox.document.activeElement = sandbox.document.body;
   textarea.focusCalls.length = 0;
 
   sandbox._restoreSurfaceState(panel, snapshot);
@@ -248,6 +250,43 @@ test('_restoreSurfaceState focuses the captured input with preventScroll', () =>
     'focus must be invoked with {preventScroll: true} so scroll restoration is not'
     + ' overridden by the browser auto-scroll-into-view behavior'
     + ' (regression: empty inline-task textarea scroll-jumps to top)');
+});
+
+test('terminal workspace restore does not refocus the composer when desktop focus is unknown', () => {
+  const composer = makeFakeTextarea('terminal-compose-input-agent-1');
+  const sandbox = buildSandbox(composer, { [composer.id]: composer });
+  const workspace = makePanel(composer);
+  sandbox._captureTerminalDirectMessagesState = function() { return null; };
+  sandbox._restoreTerminalDirectMessagesState = function() {};
+  loadScript(sandbox, 'static/js/terminal/composer.js');
+  const snapshot = sandbox._captureTerminalWorkspaceState(workspace, { id: 'agent-1' });
+
+  // WKWebView can lose sight of its native focus owner while document has no
+  // active element. An automatic workspace redraw must treat that as unknown,
+  // not as permission to restore the formerly focused DM composer.
+  sandbox.document.activeElement = null;
+  composer.focusCalls.length = 0;
+
+  sandbox._restoreTerminalWorkspaceState(workspace, snapshot, { id: 'agent-1' });
+
+  assert.equal(composer.focusCalls.length, 0,
+    'an unknown desktop focus owner must not have focus taken by the DM composer');
+});
+
+test('_restoreSurfaceState does not refocus a composer after the operator moves to another control', () => {
+  const composer = makeFakeTextarea('terminal-compose-input-agent-1');
+  const operatorControl = { id: 'operator-settings-search', tagName: 'INPUT', isConnected: true };
+  const sandbox = buildSandbox(composer, { [composer.id]: composer });
+  const workspace = makePanel(composer);
+  const snapshot = sandbox._captureSurfaceState(workspace);
+
+  sandbox.document.activeElement = operatorControl;
+  composer.focusCalls.length = 0;
+
+  sandbox._restoreSurfaceState(workspace, snapshot);
+
+  assert.equal(composer.focusCalls.length, 0,
+    'a known operator-selected control must retain focus across the redraw');
 });
 
 test('_restoreSurfaceState falls back to no-arg focus if focus(opts) throws', () => {
@@ -264,7 +303,7 @@ test('_restoreSurfaceState falls back to no-arg focus if focus(opts) throws', ()
   const panel = makePanel(textarea);
 
   const snapshot = sandbox._captureSurfaceState(panel);
-  sandbox.document.activeElement = null;
+  sandbox.document.activeElement = sandbox.document.body;
   textarea.focusCalls.length = 0;
 
   sandbox._restoreSurfaceState(panel, snapshot);
@@ -275,6 +314,40 @@ test('_restoreSurfaceState falls back to no-arg focus if focus(opts) throws', ()
     'first attempt should pass {preventScroll: true}');
   assert.equal(textarea.focusCalls[1], null,
     'fallback should call focus() with no arguments');
+});
+
+test('_restoreSurfaceState keeps same-surface drafts and carets through composer, agent, events, and health refreshes', () => {
+  const cases = [
+    'terminal-compose-input-agent-1',
+    'agent-panel-draft',
+    'events-resolve-draft',
+    'health-check-notes',
+  ];
+
+  cases.forEach((id) => {
+    const active = makeFakeTextarea(id);
+    active.value = 'draft for ' + id;
+    active.selectionStart = 2;
+    active.selectionEnd = 7;
+    const restored = makeFakeTextarea(id);
+    const sandbox = buildSandbox(active, { [id]: active });
+    const panel = makePanel(active);
+    const snapshot = sandbox._captureSurfaceState(panel);
+
+    // A routine innerHTML refresh replaces the focused node and leaves the
+    // document on its normal body fallback. This is the legitimate path that
+    // must keep a streaming composer (and every other shared surface) editable.
+    sandbox.document.activeElement = sandbox.document.body;
+    sandbox.document.getElementById = function(key) {
+      return key === id ? restored : null;
+    };
+    sandbox._restoreSurfaceState(panel, snapshot);
+
+    assert.equal(restored.value, 'draft for ' + id, id + ' draft survives refresh');
+    assert.equal(restored.selectionStart, 2, id + ' caret start survives refresh');
+    assert.equal(restored.selectionEnd, 7, id + ' caret end survives refresh');
+    assert.equal(restored.focusCalls.length, 1, id + ' regains focus after its own refresh');
+  });
 });
 
 test('_restoreSurfaceState preserves textarea draft, caret, input scroll, and panel scroll positions', () => {
@@ -307,7 +380,7 @@ test('_restoreSurfaceState preserves textarea draft, caret, input scroll, and pa
 
   // Simulate a repaint: the focused textarea resolves to a new node and the
   // panel/log scroll containers have drifted to the top.
-  sandbox.document.activeElement = null;
+  sandbox.document.activeElement = sandbox.document.body;
   sandbox.document.getElementById = function(id) {
     return id === restoredTextarea.id ? restoredTextarea : null;
   };

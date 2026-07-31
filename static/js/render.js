@@ -1078,6 +1078,21 @@ function _captureSurfaceState(root, opts) {
   return snapshot;
 }
 
+function _surfaceRestoreAllowsFocus(target) {
+  const active = document.activeElement;
+  // A restore is allowed to re-focus its logical target only when the browser
+  // still has no competing focus owner. `null` is deliberately not treated as
+  // available: WKWebView can report it while a native control owns the
+  // keyboard, and turning that unknown state into a focus command steals the
+  // desktop message composer. Detached nodes and the document fallback are
+  // the normal aftermath of replacing a focused surface, so they remain safe
+  // restore states.
+  if (!active) return false;
+  if (active === target || active === document.body || active === document.documentElement) return true;
+  if (typeof active.isConnected === 'boolean' && !active.isConnected) return true;
+  return false;
+}
+
 function _restoreSurfaceState(root, snapshot, opts) {
   if (!root || !snapshot) return;
   opts = opts || {};
@@ -1095,6 +1110,7 @@ function _restoreSurfaceState(root, snapshot, opts) {
     el = opts.resolveFocus(root, snapshot.focus);
   }
   if (!el) return;
+  const restoreFocus = _surfaceRestoreAllowsFocus(el);
   // Skip the value/checked re-assignment when the element already holds the
   // captured value. Setting `el.value = ...` on a focused textarea resets the
   // browser's caret / selection range and briefly kills the visible cursor;
@@ -1118,14 +1134,14 @@ function _restoreSurfaceState(root, snapshot, opts) {
   // bookkeeping. Otherwise an inline-render that re-focuses an offscreen
   // input (e.g. an empty board "Add task" textarea) drags the page back to
   // the input via the browser's default scroll-into-view-on-focus behavior.
-  if (typeof el.focus === 'function') {
+  if (restoreFocus && typeof el.focus === 'function') {
     try { el.focus({ preventScroll: true }); }
     catch (_e) { el.focus(); }
   }
-  if (typeof snapshot.focus.selectionStart === 'number' && 'selectionStart' in el) {
+  if (restoreFocus && typeof snapshot.focus.selectionStart === 'number' && 'selectionStart' in el) {
     el.selectionStart = snapshot.focus.selectionStart;
   }
-  if (typeof snapshot.focus.selectionEnd === 'number' && 'selectionEnd' in el) {
+  if (restoreFocus && typeof snapshot.focus.selectionEnd === 'number' && 'selectionEnd' in el) {
     el.selectionEnd = snapshot.focus.selectionEnd;
   }
   // Restore the focused element's own scrollTop last — assigning value or
