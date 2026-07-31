@@ -19,6 +19,9 @@ _AGENT_PEER_MESSAGE_JSON_LIST_FIELDS = (
     "context_decision_ids",
 )
 _AGENT_PEER_MESSAGE_DELIVERY_STATES = {"buffered", "delivered", "failed"}
+_DIRECT_MESSAGE_DELIVERY_STATES = _AGENT_PEER_MESSAGE_DELIVERY_STATES | {
+    "cancelled",
+}
 _AGENT_PEER_MESSAGE_NON_USER_WHERE = (
     "(sender_kind!='user' AND recipient_kind!='user' "
     "AND message_type='message' AND blocking=0)"
@@ -30,6 +33,7 @@ _USER_PARTICIPANT_WHERE = (
     "((sender_kind='user' AND sender_id='user') "
     "OR (recipient_kind='user' AND recipient_id='user'))"
 )
+_USER_TO_AGENT_DIRECT_MESSAGE_WHERE = "(sender_kind='user' AND sender_id='user')"
 # Blocking raise mirrors are special: only resolver-stamped user destinations
 # are user-DM rows. Existing non-raise system/audit display rows retain their
 # established projection behavior.
@@ -1142,12 +1146,36 @@ class AgentHistoryPersistenceMixin:
         delivered_at: float | None = None,
     ) -> dict | None:
         """Persist transport delivery state for one direct message."""
-        return self.update_agent_peer_message_delivery(
-            message_id,
-            delivery_state,
-            reason=reason,
-            delivered_at=delivered_at,
+        message_id = str(message_id or "").strip()
+        if not message_id:
+            return None
+        state = str(delivery_state or "").strip()
+        if state not in _DIRECT_MESSAGE_DELIVERY_STATES:
+            raise ValueError(
+                "direct delivery_state must be delivered, buffered, failed, or cancelled"
+            )
+        # Cancellation is a terminal state for a user-originated prompt only.
+        # Keep generic peer-message delivery constrained to its existing three
+        # states, while retaining ask-reply transport support for the other
+        # direct delivery updates.
+        direct_where = (
+            _USER_TO_AGENT_DIRECT_MESSAGE_WHERE
+            if state == "cancelled"
+            else _BUFFERED_DIRECT_MESSAGE_TRANSPORT_WHERE
         )
+        if delivered_at is None:
+            delivered_value = time.time() if state == "delivered" else 0.0
+        else:
+            delivered_value = _peer_float(delivered_at, 0)
+        cursor = self._conn.execute(
+            "UPDATE agent_peer_messages SET delivery_state=?, "
+            "delivery_reason=?, delivered_at=? WHERE id=? AND " + direct_where,
+            (state, str(reason or ""), delivered_value, message_id),
+        )
+        self._conn.commit()
+        if not cursor.rowcount:
+            return None
+        return self.load_direct_message(message_id)
 
     def mark_direct_message_delivered(
         self,

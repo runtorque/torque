@@ -913,6 +913,27 @@ class TorqueDBTests(unittest.TestCase):
         self.assertEqual(delivered["delivery_state"], "delivered")
         self.assertEqual(delivered["delivered_at"], 30.0)
 
+        cancelled = self.db.save_direct_message({
+            "id": "direct-cancel",
+            "group_name": "g",
+            "sender_id": "user",
+            "sender_kind": "user",
+            "recipient_id": "worker-1",
+            "recipient_kind": "worker",
+            "message": "Cancel before submit.",
+            "message_type": "message",
+            "delivery_state": "buffered",
+        })
+        self.assertEqual(cancelled["delivery_state"], "buffered")
+        cancelled = self.db.update_direct_message_delivery(
+            "direct-cancel", "cancelled", reason="cancelled_by_user")
+        self.assertEqual(cancelled["delivery_state"], "cancelled")
+        self.assertEqual(cancelled["delivery_reason"], "cancelled_by_user")
+        self.assertEqual(cancelled["delivered_at"], 0)
+        with self.assertRaises(ValueError):
+            self.db.update_agent_peer_message_delivery(
+                "direct-cancel", "cancelled")
+
     def test_agent_message_loops_round_trip_through_load_all(self):
         loop = AgentMessageLoop(
             id="loop-1",

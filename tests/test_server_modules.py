@@ -3318,6 +3318,77 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(direct_notifications, [])
 
+    async def test_queued_user_direct_turn_cancel_marks_message_cancelled_and_audits(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id='agent-cancel',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            kind='worker',
+            session_id='session-cancel',
+            status='idle',
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+        turn_key = 'queued-user-turn'
+        expected_message_id = (
+            self.server_mod._user_direct_message_id_from_idempotency_key(
+                turn_key))
+        state.save_direct_message({
+            'id': expected_message_id,
+            'thread_id': 'user-agent:user:' + worker.id,
+            'idempotency_key': turn_key,
+            'group_name': 'g',
+            'sender_id': 'user',
+            'sender_kind': 'user',
+            'sender_name': 'User',
+            'recipient_id': worker.id,
+            'recipient_kind': 'worker',
+            'recipient_name': worker.name,
+            'message': 'Cancel me before delivery.',
+            'message_type': 'message',
+            'delivery_state': 'buffered',
+        })
+
+        test_case = self
+
+        class QueuedCancelSender:
+            async def cancel_user_direct_turn(self, target, *, message_id,
+                                               session_id):
+                test_case.assertIs(target, worker)
+                test_case.assertEqual(message_id, expected_message_id)
+                test_case.assertEqual(session_id, 'session-cancel')
+                return {'outcome': 'cancelled_queued'}
+
+        result = await self.server_mod._handle_user_agent_turn_cancel_command(
+            {
+                'agent_id': worker.id,
+                'session_id': worker.session_id,
+                'turn_idempotency_key': turn_key,
+                'idempotency_key': 'queued-cancel-request',
+            },
+            state,
+            QueuedCancelSender(),
+        )
+
+        self.assertEqual(result['type'], 'ok')
+        self.assertEqual(result['outcome'], 'cancelled_queued')
+        cancelled = self.db.load_direct_message(expected_message_id)
+        self.assertEqual(cancelled['delivery_state'], 'cancelled')
+        self.assertEqual(cancelled['delivery_reason'], 'cancelled_by_user')
+        self.assertEqual(cancelled['delivered_at'], 0)
+        self.assertEqual(
+            state.direct_messages_by_agent[worker.id][0]['delivery_state'],
+            'cancelled',
+        )
+        audit = self.db.load_direct_message(result['message_id'])
+        self.assertEqual(audit['message_type'], 'system')
+        self.assertEqual(audit['context_snapshot']['cancelled_message_id'],
+                         expected_message_id)
+        self.assertEqual(audit['context_snapshot']['cancel_outcome'],
+                         'cancelled_queued')
+
     async def test_user_agent_message_preserves_multiline_storage_and_prompt(self):
         state = self._make_state()
         worker = self.state_mod.AgentCell(

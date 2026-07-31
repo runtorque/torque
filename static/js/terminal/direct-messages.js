@@ -257,6 +257,17 @@ function _terminalDirectMessageTypeLabel(row) {
   return '';
 }
 
+function _terminalDirectMessageDeliveryLabel(row) {
+  const state = String((row && row.delivery_state) || '').trim().toLowerCase();
+  // A direct message is saved and rendered before the PTY submit finishes.
+  // Do not let that durable optimistic row look like an already delivered
+  // terminal prompt: an idle session can still be in its settle window.
+  if (state === 'buffered') return 'Sending…';
+  if (state === 'failed') return 'Delivery failed';
+  if (state === 'cancelled') return 'Cancelled';
+  return '';
+}
+
 function _terminalDirectMessagePreview(row) {
   const text = _terminalDirectMessageText(row).replace(/\s+/g, ' ').trim();
   if (!text) return 'message';
@@ -280,6 +291,7 @@ function _renderTerminalDirectMessageRow(row, agent) {
   const direction = _terminalDirectMessageDirection(row, agent);
   const selected = _terminalDirectMessageSelectedByAgent[String((agent && agent.id) || '')] === id;
   const typeLabel = _terminalDirectMessageTypeLabel(row);
+  const deliveryLabel = _terminalDirectMessageDeliveryLabel(row);
   const timeLabel = _terminalDirectMessageTimeLabel(row);
   const askReply = type === 'ask'
     ? '<button type="button" class="terminal-direct-message-reply"'
@@ -304,6 +316,9 @@ function _renderTerminalDirectMessageRow(row, agent) {
     + '    <span class="terminal-direct-message-sender">' + esc(_terminalDirectMessageSenderLabel(row, agent)) + '</span>'
     + (typeLabel
       ? '    <span class="terminal-direct-message-badge">' + esc(typeLabel) + '</span>'
+      : '')
+    + (deliveryLabel
+      ? '    <span class="terminal-direct-message-badge terminal-direct-message-delivery terminal-direct-message-delivery--' + esc(String((row && row.delivery_state) || '').trim().toLowerCase()) + '">' + esc(deliveryLabel) + '</span>'
       : '')
     + (timeLabel
       ? '    <span class="terminal-direct-message-time">' + esc(timeLabel) + '</span>'
