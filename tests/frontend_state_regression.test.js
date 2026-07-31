@@ -17206,9 +17206,10 @@ test('embedded terminal stopped tab keeps unrelated cached sessions alive', () =
 });
 
 test('embedded terminal auto-focuses new sessions when standalone mode is active', () => {
-  const { context, sockets, terminals } = createEmbeddedTerminalHarness();
+  const { context, document, sockets, terminals } = createEmbeddedTerminalHarness();
   const surface = new FakeElement('surface');
   context.__surface = surface;
+  document.activeElement = document.body;
 
   runInContext(context, `
     state.runtime = { embedded_terminal: true };
@@ -17459,7 +17460,7 @@ test('embedded terminal image drops upload files and paste quoted paths into the
     }
   }
 
-  const { context, sockets, terminals, status } = createEmbeddedTerminalHarness({
+  const { context, document, sockets, terminals, status } = createEmbeddedTerminalHarness({
     FormData: FakeFormData,
     fetch(url, options) {
       uploads.push({ url, entries: options.body.entries });
@@ -17475,6 +17476,7 @@ test('embedded terminal image drops upload files and paste quoted paths into the
   const nonImage = { type: 'application/pdf', name: 'skip.pdf' };
   const imageTwo = { type: 'image/jpeg', name: 'second.jpg' };
   context.__surface = surface;
+  document.activeElement = document.body;
 
   runInContext(context, `
     state.runtime = { embedded_terminal: true };

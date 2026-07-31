@@ -63,7 +63,10 @@ function buildHarness() {
     requestFirstMountFocus(focus) {
       sandbox._terminalFocusCalls = 0;
       vm.runInContext(
-        "_embeddedTerminal = { focus: function() { _terminalFocusCalls += 1; } };"
+        "_embeddedTerminal = { focus: function() {"
+          + '_terminalFocusCalls += 1;'
+          + "if (typeof _onTerminalFocus === 'function') _onTerminalFocus();"
+          + '} };'
           + "_embeddedTerminalSessionKey = 'agent-1:session-1';"
           + "_embeddedTerminalPendingFocusKey = 'agent-1:session-1';"
           + 'focusEmbeddedTerminalWorkspace(false);',
@@ -112,6 +115,28 @@ test('first terminal mount still focuses when the operator has not selected anot
 
   assert.equal(h.focusCalls(), 1,
     'first mount remains a deliberate terminal/composer-open focus path');
+});
+
+test('a falsy desktop active element cannot license a queued first-mount focus steal', () => {
+  const h = buildHarness();
+  const messageControl = { type: 'desktop-message-box' };
+
+  // WKWebView can report no active DOM element while the terminal socket
+  // schedules its first-mount focus even though the desktop focus owner is the
+  // message box. That unknown schedule-time state must not act as permission
+  // for xterm to reclaim the desktop keyboard focus on the animation frame.
+  h.sandbox._desktopFocusOwner = messageControl;
+  h.sandbox._onTerminalFocus = function() {
+    h.sandbox._desktopFocusOwner = 'terminal';
+  };
+  h.sandbox.document.activeElement = null;
+  h.requestFirstMountFocus();
+  h.flushFrames();
+
+  assert.equal(h.focusCalls(), 0,
+    'an unknown schedule-time focus owner must cancel automatic terminal focus');
+  assert.equal(h.sandbox._desktopFocusOwner, messageControl,
+    'the desktop message box retains keyboard focus');
 });
 
 test('agent-activity rerender cannot let a queued first-mount focus steal an unrelated control', () => {
