@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 import json
 import tempfile
@@ -185,18 +186,87 @@ class EngineerArtifactUploadTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(is_error, text)
                 second = json.loads(text)
                 self.assertEqual(second["type"], "task_artifact_uploaded")
+
+                concurrent = await asyncio.gather(
+                    self.mcp_engineer_mod._dispatch_engineer_tool(
+                        "engineer_task_upload_artifact",
+                        {
+                            "task_id": task.id,
+                            "filename": "parallel-a.md",
+                            "content_text": "parallel A",
+                        },
+                        handle_command,
+                        state,
+                        caller_id=engineer.id,
+                    ),
+                    self.mcp_engineer_mod._dispatch_engineer_tool(
+                        "engineer_task_upload_artifact",
+                        {
+                            "task_id": task.id,
+                            "filename": "parallel-b.md",
+                            "content_text": "parallel B",
+                        },
+                        handle_command,
+                        state,
+                        caller_id=engineer.id,
+                    ),
+                )
+                self.assertTrue(all(not is_error for _text, is_error in concurrent))
             finally:
                 self.server_artifacts.ATTACHMENTS_DIR = original_dir
 
         refreshed = state.board_tasks[task.id]
-        self.assertEqual(len(refreshed.artifacts), 2)
+        self.assertEqual(len(refreshed.artifacts), 4)
+        self.assertEqual(
+            [artifact["id"] for artifact in refreshed.artifacts],
+            ["artifact-1", "artifact-2", "artifact-3", "artifact-4"],
+        )
         self.assertEqual(
             [artifact["provenance"]["source"] for artifact in refreshed.artifacts],
-            ["engineer", "engineer"],
+            ["engineer", "engineer", "engineer", "engineer"],
         )
         self.assertEqual(
             [artifact["provenance"]["agent_id"] for artifact in refreshed.artifacts],
-            [engineer.id, engineer.id],
+            [engineer.id, engineer.id, engineer.id, engineer.id],
+        )
+
+    async def test_engineer_upload_normalizes_missing_existing_id_before_allocation(self):
+        state = self._make_state()
+        engineer = self._add_engineer(state, "eng-alice", "Alice")
+        task = self._add_task(
+            state,
+            "TORQUE:legacy-artifact",
+            "Attach alongside legacy artifact",
+            assigned_engineer_id=engineer.id,
+        )
+        task.artifacts = [{"type": "log", "filename": "legacy.log"}]
+        handle_command = self._extract_handle_command(state)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_dir = self.server_artifacts.ATTACHMENTS_DIR
+            self.server_artifacts.ATTACHMENTS_DIR = Path(tmpdir)
+            try:
+                text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+                    "engineer_task_upload_artifact",
+                    {
+                        "task_id": task.id,
+                        "filename": "new.log",
+                        "content_text": "new evidence",
+                    },
+                    handle_command,
+                    state,
+                    caller_id=engineer.id,
+                )
+            finally:
+                self.server_artifacts.ATTACHMENTS_DIR = original_dir
+
+        self.assertFalse(is_error, text)
+        payload = json.loads(text)
+        self.assertEqual(payload["type"], "task_artifact_uploaded")
+        self.assertEqual(payload["artifact"]["id"], "artifact-2")
+        self.assertEqual(
+            [artifact["id"] for artifact in state.board_tasks[task.id].artifacts],
+            ["artifact-1", "artifact-2"],
         )
 
     async def test_engineer_upload_rejects_out_of_scope_task_without_artifact(self):

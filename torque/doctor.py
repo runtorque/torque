@@ -29,6 +29,7 @@ from .doctor_agent_classes import (
     format_frozen_missing_tools_warning,
     frozen_missing_tools_warning,
 )
+from . import doctor_artifacts
 
 DOCTOR_SCHEMA_VERSION = 3
 _KINDS_MIGRATION_VERSION_KEY = "schema_kinds_migration_version"
@@ -1868,6 +1869,7 @@ _DOCTOR_CHECKS = [
 _DOCTOR_WARNINGS = [
     _warn_unassigned_tasks_when_engineer_present,
     _warn_task_aliases_missing_canonical,
+    doctor_artifacts.task_artifact_id_collision_warning,
     _warn_ignored_legacy_template_files,
     frozen_missing_tools_warning,
     _warn_no_engineers,
@@ -1913,6 +1915,8 @@ def build_doctor_report(
         ),
         "agents": agents,
         "tasks": tasks,
+        "task_artifact_ids": doctor_artifacts.collect_task_artifact_id_section(
+            conn, table_exists=_table_exists, column_exists=_column_exists),
         "task_aliases": _collect_task_aliases_section(conn),
         "mcp_health": _collect_mcp_health_section(conn),
         "mcp_idempotency_storage": _collect_mcp_idempotency_storage_section(conn),
@@ -2161,6 +2165,7 @@ def format_doctor_report(report: dict) -> str:
         f"  unassigned:  {int(tasks.get('unassigned', 0) or 0)}",
         "  unassigned_when_engineer_present: "
         f"{int(tasks.get('unassigned_when_engineer_present', 0) or 0)}",
+        *doctor_artifacts.format_task_artifact_id_section(report.get("task_artifact_ids", {})),
         "",
         "[task_aliases]",
         f"  total:                         {int(task_aliases.get('total', 0) or 0)}",
@@ -2380,6 +2385,8 @@ def format_doctor_report(report: dict) -> str:
                 if summary:
                     line += f": {summary}"
                 lines.append(line)
+            elif name == "task_artifact_id_collisions":
+                lines.append(doctor_artifacts.format_task_artifact_id_collision_warning(details))
             elif name == "legacy_template_files_ignored":
                 files = ", ".join(details.get("files", []) or [])
                 line = (

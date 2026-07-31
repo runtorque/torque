@@ -26392,6 +26392,93 @@ test('openTaskArtifactById prefers filename and path when artifact ids are dupli
   assert.match(overlay.innerHTML, /diff --git/);
 });
 
+test('openTaskArtifactById rejects an ambiguous id-only historical lookup', () => {
+  const fetched = [];
+  const { sandbox, document } = createSandbox({
+    fetch(url) {
+      fetched.push(url);
+      return Promise.resolve({ ok: true, text() { return Promise.resolve('unexpected'); } });
+    },
+  });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/modals/task-artifacts.js');
+
+  context.state.board_tasks = {
+    boundary: {
+      id: 'boundary',
+      task: 'Historical collision',
+      artifacts: [
+        { id: 'artifact-1', type: 'log', filename: 'first.log', path: '/tmp/first.log' },
+        { id: 'artifact-1', type: 'log', filename: 'second.log', path: '/tmp/second.log' },
+      ],
+    },
+  };
+
+  assert.equal(runInContext(context, `openTaskArtifactById('boundary', 'artifact-1')`), false);
+  assert.deepEqual(fetched, []);
+  assert.equal(artifactPreviewOverlay(document), null);
+});
+
+test('openTaskArtifactById rejects duplicate id and filename selectors without a path', () => {
+  const fetched = [];
+  const { sandbox, document } = createSandbox({
+    fetch(url) {
+      fetched.push(url);
+      return Promise.resolve({ ok: true, text() { return Promise.resolve('unexpected'); } });
+    },
+  });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/modals/task-artifacts.js');
+
+  context.state.board_tasks = {
+    boundary: {
+      id: 'boundary',
+      task: 'Historical same-filename collision',
+      artifacts: [
+        { id: 'artifact-1', type: 'log', filename: 'same.log', path: '/tmp/a/same.log' },
+        { id: 'artifact-1', type: 'log', filename: 'same.log', path: '/tmp/b/same.log' },
+      ],
+    },
+  };
+
+  assert.equal(
+    runInContext(context, `openTaskArtifactById('boundary', 'artifact-1', 'same.log')`),
+    false,
+  );
+  assert.deepEqual(fetched, []);
+  assert.equal(artifactPreviewOverlay(document), null);
+});
+
+test('openTaskArtifactById rejects inconsistent id and filename selectors', () => {
+  const fetched = [];
+  const { sandbox, document } = createSandbox({
+    fetch(url) {
+      fetched.push(url);
+      return Promise.resolve({ ok: true, text() { return Promise.resolve('unexpected'); } });
+    },
+  });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/modals/task-artifacts.js');
+
+  context.state.board_tasks = {
+    boundary: {
+      id: 'boundary',
+      task: 'Mismatched selector',
+      artifacts: [
+        { id: 'artifact-1', type: 'log', filename: 'first.log', path: '/tmp/first.log' },
+        { id: 'artifact-2', type: 'log', filename: 'second.log', path: '/tmp/second.log' },
+      ],
+    },
+  };
+
+  assert.equal(
+    runInContext(context, `openTaskArtifactById('boundary', 'artifact-1', 'second.log')`),
+    false,
+  );
+  assert.deepEqual(fetched, []);
+  assert.equal(artifactPreviewOverlay(document), null);
+});
+
 test('artifact preview popup renders png and svg images and mousedown-outside closes it', () => {
   const fetched = [];
   const { sandbox, document } = createSandbox({

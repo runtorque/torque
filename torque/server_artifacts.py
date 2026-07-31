@@ -13,6 +13,7 @@ from urllib.parse import quote
 
 from .artifacts import (
     attachment_to_artifact,
+    next_task_artifact_id,
     normalize_artifact,
     normalize_artifacts,
     normalize_attachments,
@@ -412,6 +413,7 @@ def store_preserved_merge_diff(
     diff_files=None,
     agent_id: str = "",
     agent_name: str = "",
+    existing_artifacts=None,
 ) -> dict:
     patch = "" if patch_text is None else str(patch_text)
     if not patch:
@@ -441,6 +443,7 @@ def store_preserved_merge_diff(
             "agent_id": agent_id,
             "agent_name": agent_name,
         },
+        existing_artifacts=existing_artifacts,
     )
 
     metadata = dict(artifact.get("metadata") or {})
@@ -592,6 +595,7 @@ def store_task_upload(
     summary: str = "",
     prompt_mode: str = "",
     provenance: dict | None = None,
+    existing_artifacts=None,
 ) -> dict:
     source_path = str(local_path or "").strip()
     b64 = str(content_base64 or "").strip()
@@ -638,6 +642,7 @@ def store_task_upload(
     preview_text = _inline_preview_text(raw_bytes, resolved_type, resolved_mime)
 
     artifact = normalize_artifact({
+        "id": next_task_artifact_id(existing_artifacts),
         "type": resolved_type,
         "title": title or safe_name,
         "filename": safe_name,

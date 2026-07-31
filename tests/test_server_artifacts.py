@@ -72,6 +72,26 @@ class ServerArtifactHelperTests(unittest.TestCase):
         self.assertEqual(first["filename"], "report.txt")
         self.assertEqual(second["filename"], "report_1.txt")
 
+    def test_store_task_upload_allocates_after_existing_ids_without_reusing_gaps(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_dir = self.helper.ATTACHMENTS_DIR
+            self.helper.ATTACHMENTS_DIR = Path(tmpdir)
+            try:
+                artifact = self.helper.store_task_upload(
+                    task_id="task-1",
+                    filename="report.txt",
+                    content_text="new evidence",
+                    existing_artifacts=[
+                        {"id": "artifact-1"},
+                        {"id": "artifact-3"},
+                        {"id": "historical-ref"},
+                    ],
+                )
+            finally:
+                self.helper.ATTACHMENTS_DIR = original_dir
+
+        self.assertEqual(artifact["id"], "artifact-4")
+
     def test_remove_task_owned_artifacts_by_filename_keeps_external_refs(self):
         artifacts = [
             {
@@ -239,12 +259,14 @@ class ServerArtifactHelperTests(unittest.TestCase):
                     }],
                     agent_id="agent-1",
                     agent_name="worker",
+                    existing_artifacts=[{"id": "artifact-1"}],
                 )
                 self.assertTrue(Path(artifact["path"]).is_file())
             finally:
                 self.helper.ATTACHMENTS_DIR = original_dir
 
         self.assertEqual(artifact["type"], "diff")
+        self.assertEqual(artifact["id"], "artifact-2")
         self.assertEqual(artifact["prompt"]["mode"], "summary")
         self.assertEqual(artifact["provenance"]["source"], "torque")
         self.assertTrue(artifact["metadata"]["preserved_on_merge"])

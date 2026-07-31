@@ -111,6 +111,7 @@ def _persist_preserved_merge_diff_warning_only(
             diff_files=(merge_diff_snapshot or {}).get("files"),
             agent_id=cell.id,
             agent_name=cell.slug or cell.name,
+            existing_artifacts=previous_artifacts,
         )
         state.board_update_task(
             boundary_task_for_diff.id,
