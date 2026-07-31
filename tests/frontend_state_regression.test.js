@@ -12864,6 +12864,16 @@ test('embedded terminal direct-message panel labels a persisted buffered message
   runInContext(context, `renderTerminalWorkspace();`);
   assert.doesNotMatch(dom.directMessages.innerHTML, /Sending…/);
   assert.doesNotMatch(dom.directMessages.innerHTML, /terminal-direct-message-delivery--/);
+
+  sandbox.state.direct_messages_by_agent['agent-1'][0].delivery_state = 'failed';
+  runInContext(context, `renderTerminalWorkspace();`);
+  assert.match(dom.directMessages.innerHTML, />Delivery failed<\/span>/);
+  assert.match(dom.directMessages.innerHTML, /terminal-direct-message-delivery--failed/);
+
+  sandbox.state.direct_messages_by_agent['agent-1'][0].delivery_state = 'cancelled';
+  runInContext(context, `renderTerminalWorkspace();`);
+  assert.match(dom.directMessages.innerHTML, />Cancelled<\/span>/);
+  assert.match(dom.directMessages.innerHTML, /terminal-direct-message-delivery--cancelled/);
 });
 
 test('embedded terminal direct-message System rows render as right-aligned green status cards without changing order or text', () => {
