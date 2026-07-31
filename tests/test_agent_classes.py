@@ -30,7 +30,11 @@ from torque.capability_catalog import CAPABILITY_CATALOG
 from torque.mcp import (
     mcp_tool_allowed_by_authority,
 )
-from torque.mcp_authority import compile_agent_class_acl, effective_authority_from_snapshot
+from torque.mcp_authority import (
+    AuthorityValidationError,
+    compile_agent_class_acl,
+    effective_authority_from_snapshot,
+)
 from torque.db import TorqueDB
 from torque.state import AgentCell, MatrixState
 
@@ -390,6 +394,38 @@ class AgentClassRegistryTests(unittest.TestCase):
         _definition, issues = validate_class_data(worker_with_architect_bucket, base_dir=str(self.project))
         codes = {issue.code for issue in issues}
         self.assertIn("invalid_capability_acl", codes)
+
+    def test_capability_validation_rejects_unknown_atoms(self):
+        definition, issues = validate_class_data({
+            "agent_class_schema_version": 5,
+            "id": "unknown-atom",
+            "version": "1",
+            "base_kind": "architect",
+            "display_name": "Unknown atom",
+            "acl": {
+                "mode": "allow",
+                "rules": [{"capability": "retired.capability"}],
+            },
+        }, base_dir=str(self.project))
+
+        self.assertIsNone(definition)
+        self.assertIn("invalid_capability_acl", {issue.code for issue in issues})
+        self.assertIn(
+            "unknown ACL capability: retired.capability",
+            "\n".join(issue.message for issue in issues),
+        )
+        with self.assertRaisesRegex(
+            AuthorityValidationError,
+            "unknown ACL capability: retired.capability",
+        ):
+            compile_agent_class_acl(
+                base_kind="architect",
+                acl={
+                    "mode": "allow",
+                    "rules": [{"capability": "retired.capability"}],
+                },
+                capabilities=CAPABILITY_CATALOG,
+            )
 
 
     def test_custom_architect_acls_cannot_author_pm_group_board_extension(self):
@@ -943,6 +979,30 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
             else:
                 self.assertNotIn("task.dispatch", authority.capabilities)
             self.assertEqual(agent_class_prompt_block_for_cell(cell), "")
+
+    def test_every_existing_class_launches_through_frozen_projection(self):
+        definitions, issues = load_agent_classes(base_dir=str(self.project))
+        self.assertFalse([issue for issue in issues if issue.severity == "error"])
+
+        for definition in definitions:
+            with self.subTest(agent_class=definition.id):
+                cell = self._add_agent(
+                    kind=definition.base_kind,
+                    agent_id=f"launch-{definition.id}",
+                )
+                self.state.assign_agent_class(
+                    cell.id,
+                    definition.id,
+                    actor_kind="user",
+                    base_dir=str(self.project),
+                )
+                snapshot = self.state.apply_effective_agent_class_for_launch(
+                    cell,
+                    base_dir=str(self.project),
+                )
+                self.assertEqual(snapshot["id"], definition.id)
+                self.assertIn("frozen_public_tools", snapshot)
+                self.assertTrue(all(snapshot["frozen_public_tools"]))
 
     def test_class_prompt_block_and_template_context_are_compact(self):
         cell = self._add_agent(kind="architect")

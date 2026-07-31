@@ -1060,6 +1060,81 @@ def _authority_project_tools(
     ]
 
 
+def frozen_public_tool_names_for_cell(state, cell_id: str) -> tuple[str, ...]:
+    """Freeze the canonical public surface a launched Agent Class projects.
+
+    The Agent Class ACL itself deliberately contains capability atoms rather
+    than raw tool names.  Retaining this derived, launch-time list in the
+    effective snapshot gives a later runtime (and ``torque doctor``) enough
+    evidence to identify a tool removed after the class was frozen.  It does
+    not participate in authorization: the current registry is still projected
+    through the frozen authority on every tools/list request.
+    """
+
+    tools, _cell, caller_kind = _raw_tools_for_caller(state, cell_id)
+    names: list[str] = []
+    seen: set[str] = set()
+    for tool in canonicalize_tool_specs(
+        tools,
+        caller_kind=caller_kind or "worker",
+        proposal_only=authority_is_proposal_only(
+            _effective_class_authority_for_cell(_cell)
+        ),
+    ):
+        name = str(tool.get("name", "") or "").strip()
+        if name and name not in seen:
+            names.append(name)
+            seen.add(name)
+    return tuple(names)
+
+
+def missing_frozen_public_tools(snapshot, available_tools) -> tuple[str, ...]:
+    """Return frozen public-tool references absent from the current registry.
+
+    Snapshots before this field existed do not claim any exact-tool references,
+    so they remain compatible.  A malformed reference list is intentionally
+    not tolerated: only an otherwise valid reference whose tool target was
+    removed is eligible for the warn-and-skip behavior.
+    """
+
+    if not isinstance(snapshot, dict):
+        raise AuthorityValidationError("frozen Agent Class snapshot must be a mapping")
+    references = snapshot.get("frozen_public_tools")
+    if references is None:
+        return ()
+    if not isinstance(references, list) or not all(
+        isinstance(name, str) and name.strip() for name in references
+    ):
+        raise AuthorityValidationError(
+            "frozen Agent Class public tool references must be a list of names"
+        )
+    available = {
+        str(name or "").strip()
+        for name in available_tools
+        if str(name or "").strip()
+    }
+    return tuple(name for name in references if name not in available)
+
+
+def _warn_missing_frozen_public_tools(cell) -> tuple[str, ...]:
+    """Log every missing target recorded in a frozen Agent Class surface."""
+
+    snapshot = getattr(cell, "effective_agent_class_snapshot", {}) or {}
+    missing = missing_frozen_public_tools(
+        snapshot,
+        (canonical_tool_name(tool.get("name", "")) for tool in ALL_TOOLS),
+    )
+    for tool_name in missing:
+        log.warning(
+            "Frozen Agent Class %s@%s references removed public tool %s; "
+            "skipping it during MCP projection",
+            str(snapshot.get("id", "") or "<unknown>"),
+            str(snapshot.get("version", "") or "<unknown>"),
+            tool_name,
+        )
+    return missing
+
+
 def _raw_tools_for_caller(
     state,
     cell_id: str,
@@ -1071,6 +1146,11 @@ def _raw_tools_for_caller(
     cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
     if cell and state.agent_is_tombstoned(cell) and not include_tombstoned:
         return [], cell, ""
+    if cell:
+        # A missing frozen tool is deliberately non-fatal.  The candidate
+        # registry below cannot project a deleted target, while this warning
+        # makes the resulting narrower surface observable.
+        _warn_missing_frozen_public_tools(cell)
     authority = _effective_class_authority_for_cell(cell)
     caller_kind = str(getattr(cell, "kind", "") or "").strip() if cell else ""
     base_tools = TOOLS

@@ -79,6 +79,50 @@ class MCPClassAuthorityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["total"], 1)
         self.assertTrue(payload["truncated"])
 
+    def test_frozen_removed_public_tool_warns_and_is_skipped_without_disturbing_others(self):
+        state, architect = self._state_with_architect()
+        architect.effective_agent_class_snapshot = {
+            "id": "retired-tool-class",
+            "version": "9",
+            "effective_authority": {
+                "schema_version": 1,
+                "base_kind": "architect",
+                "acl_mode": "allow",
+                "capabilities": {"task.read": "self"},
+            },
+            # This is a launch-frozen, derived record, not class authoring
+            # syntax.  Simulate an older launch before retired_tool vanished.
+            "frozen_public_tools": ["task_get", "retired_tool"],
+        }
+
+        baseline_snapshot = dict(architect.effective_agent_class_snapshot)
+        baseline_snapshot.pop("frozen_public_tools")
+        architect.effective_agent_class_snapshot = baseline_snapshot
+        baseline_names = [
+            tool["name"]
+            for tool in self.mcp_mod._canonical_tools_for_caller(state, architect.id)
+        ]
+        architect.effective_agent_class_snapshot = {
+            **baseline_snapshot,
+            "frozen_public_tools": ["task_get", "retired_tool"],
+        }
+
+        with self.assertLogs("torque", level="WARNING") as logs:
+            tools = self.mcp_mod._canonical_tools_for_caller(
+                state,
+                architect.id,
+            )
+
+        names = [tool["name"] for tool in tools]
+        self.assertEqual(names, baseline_names)
+        self.assertIn("task_get", names)
+        self.assertNotIn("retired_tool", names)
+        self.assertIn(
+            "Frozen Agent Class retired-tool-class@9 references removed "
+            "public tool retired_tool; skipping it during MCP projection",
+            "\n".join(logs.output),
+        )
+
     async def test_torque_steward_class_lists_canonical_observation_tools(self):
         state, architect = self._state_with_architect()
         state.assign_agent_class(

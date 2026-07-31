@@ -801,6 +801,7 @@ class StateLifecycleMixin:
             default_agent_class_id_for_kind,
             freeze_agent_class_snapshot,
             launch_frozen_platform_authority_for_definition,
+            snapshot_hash,
         )
 
         base_kind = str(getattr(cell, "kind", "") or "").strip()
@@ -840,6 +841,19 @@ class StateLifecycleMixin:
         cell.effective_agent_class_platform_authority = (
             launch_frozen_platform_authority_for_definition(definition)
         )
+        # Keep a derived record of the public MCP tools this frozen authority
+        # projected at launch.  ACLs remain capability-only; this record lets a
+        # future registry detect a deleted target without rewriting the frozen
+        # class definition or turning a safe omission into a launch failure.
+        from .mcp import frozen_public_tool_names_for_cell
+        class_snapshot["frozen_public_tools"] = list(
+            frozen_public_tool_names_for_cell(self, cell.id)
+        )
+        class_snapshot["snapshot_hash"] = snapshot_hash({
+            key: value
+            for key, value in class_snapshot.items()
+            if key != "snapshot_hash"
+        })
         cell.effective_agent_class_applied_at = frozen_at
         if desired_id and cell.agent_class_version != definition.version:
             cell.agent_class_version = definition.version

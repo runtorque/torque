@@ -24,6 +24,11 @@ from .agent_classes import (
     validate_all_agent_classes,
 )
 from .mcp_idempotency import collect_mcp_idempotency_storage_stats
+from .doctor_agent_classes import (
+    collect_frozen_missing_tools,
+    format_frozen_missing_tools_warning,
+    frozen_missing_tools_warning,
+)
 
 DOCTOR_SCHEMA_VERSION = 3
 _KINDS_MIGRATION_VERSION_KEY = "schema_kinds_migration_version"
@@ -1143,6 +1148,7 @@ def _collect_agent_classes_section(conn: sqlite3.Connection | None = None, base_
     previews = [enriched_agent_class_preview(definition, base_dir=base_dir) for definition in classes]
     assignments: list[dict] = []
     audit_recent: list[dict] = []
+    frozen_missing_tools = collect_frozen_missing_tools(conn)
     if conn is not None and _table_exists(conn, "agents"):
         cols = [
             "id", "name", "kind", "cell_type", "agent_class_id",
@@ -1209,6 +1215,8 @@ def _collect_agent_classes_section(conn: sqlite3.Connection | None = None, base_
         "assignment_count": len(assignments),
         "audit_recent": audit_recent,
         "audit_recent_count": len(audit_recent),
+        "frozen_missing_tools": frozen_missing_tools,
+        "frozen_missing_tool_count": len(frozen_missing_tools),
         "issues": [issue.as_dict() for issue in list(validation.get("issues", []) or [])],
         "runtime_enforcement": "launch_frozen_agent_class_authority",
         "schema_version": AGENT_CLASS_SCHEMA_VERSION,
@@ -1861,6 +1869,7 @@ _DOCTOR_WARNINGS = [
     _warn_unassigned_tasks_when_engineer_present,
     _warn_task_aliases_missing_canonical,
     _warn_ignored_legacy_template_files,
+    frozen_missing_tools_warning,
     _warn_no_engineers,
     _warn_engineer_generalist_specialization,
     _warn_engineer_binding_env_mismatch,
@@ -2227,6 +2236,8 @@ def format_doctor_report(report: dict) -> str:
         f"{int(agent_classes.get('assignment_count', 0) or 0)}",
         "  audit_recent_count:             "
         f"{int(agent_classes.get('audit_recent_count', 0) or 0)}",
+        "  frozen_missing_tool_count:      "
+        f"{int(agent_classes.get('frozen_missing_tool_count', 0) or 0)}",
         "  external_connector_caveat:      "
         f"{agent_classes.get('external_connector_caveat', '')}",
         "",
@@ -2509,6 +2520,8 @@ def format_doctor_report(report: dict) -> str:
                     "embedding model/dims"
                     f": {int(details.get('count', 0) or 0)}"
                 )
+            elif name == "frozen_agent_class_missing_tools":
+                lines.extend(format_frozen_missing_tools_warning(details))
             else:
                 lines.append(f"  - {name}")
     failed_checks = list(report.get("failed_checks", []) or [])
