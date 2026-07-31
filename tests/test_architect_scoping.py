@@ -2038,6 +2038,109 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "hired_engineers_only",
         )
 
+    async def test_architect_attention_digest_labels_sections_unreachable_without_hires(
+            self):
+        product_manager = self._add_architect(
+            "product-manager", "Product Manager"
+        )
+        product_manager.effective_agent_class_id = "product-manager"
+        product_manager.effective_agent_class_version = "2"
+        product_manager.effective_agent_class_snapshot = {
+            "id": "product-manager",
+            "version": "2",
+            "base_kind": "architect",
+            "display_name": "Product Manager",
+        }
+        blocking_ask = self._add_task(
+            "task-product-decision",
+            "Choose the launch cohort",
+            labels=["torque:human"],
+            created_by_architect_id=product_manager.id,
+        )
+
+        text, is_error = await self._call(
+            "architect_attention_digest",
+            {},
+            product_manager.id,
+        )
+
+        self.assertFalse(is_error, text)
+        payload = json.loads(text)
+        sections = payload["sections"]
+        expected_section_names = {
+            "blocking_asks",
+            "engineer_pending_questions",
+            "peer_ack_required",
+            "ready_to_merge_streams",
+            "blocker_or_stale_streams",
+            "unhealthy_tasks",
+            "unhealthy_streams",
+            "pending_hires",
+        }
+        self.assertEqual(set(sections), expected_section_names)
+        unreachable_section_names = {
+            "engineer_pending_questions",
+            "ready_to_merge_streams",
+            "blocker_or_stale_streams",
+            "unhealthy_streams",
+        }
+        for section_name in unreachable_section_names:
+            with self.subTest(section=section_name):
+                section = sections[section_name]
+                self.assertEqual(section["count"], 0)
+                self.assertEqual(section["items"], [])
+                self.assertEqual(
+                    section["count_scope"],
+                    "no_hired_engineers",
+                )
+                self.assertFalse(section["truncated"])
+                self.assertFalse(section["source_truncated"])
+
+        self.assertEqual(
+            [item["id"] for item in sections["blocking_asks"]["items"]],
+            [blocking_ask.id],
+        )
+        self.assertEqual(
+            payload["scoping"]["engineer_pending_questions"],
+            "hired_engineers_only",
+        )
+        reachable_count = sum(
+            int(section["count"])
+            for section in sections.values()
+            if section["count_scope"] != "no_hired_engineers"
+        )
+        self.assertEqual(payload["attention_count"], reachable_count)
+        self.assertGreater(payload["attention_count"], 0)
+
+    async def test_architect_attention_digest_keeps_complete_scope_with_hires(
+            self):
+        architect = self._add_architect("arch-with-hires", "Architect")
+        self._add_engineer(
+            "eng-hired",
+            "Hired Engineer",
+            hired_by_architect_id=architect.id,
+        )
+
+        text, is_error = await self._call(
+            "architect_attention_digest",
+            {},
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        sections = json.loads(text)["sections"]
+        for section_name in (
+            "engineer_pending_questions",
+            "ready_to_merge_streams",
+            "blocker_or_stale_streams",
+            "unhealthy_streams",
+        ):
+            with self.subTest(section=section_name):
+                self.assertEqual(
+                    sections[section_name]["count_scope"],
+                    "complete_set",
+                )
+
     async def test_architect_attention_digest_counts_peer_ack_truncation(self):
         architect = self._add_architect("arch-1", "Architect")
         peer = self._add_architect("arch-peer", "Peer Architect")
