@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from ..external_tickets import run_external_ticket_operation
 from ..finalization import normalize_boundary, normalize_mode, normalize_required_review_gates
 from ..task_dispatch_gate import active_dispatch_edit_error, task_has_active_dispatch
 
@@ -855,7 +856,8 @@ async def handle_board_operation_command(
                       "message": "Task not found"}
         else:
             try:
-                pushed = push_ticket_status(
+                pushed = await run_external_ticket_operation(
+                    push_ticket_status,
                     task,
                     status=data.get("status", "") or task.status
                     or task.lane,
@@ -890,7 +892,9 @@ async def handle_board_operation_command(
                         task.task,
                         data.get("summary", ""),
                     )
-                posted = post_ticket_comment(task, comment=comment)
+                posted = await run_external_ticket_operation(
+                    post_ticket_comment, task, comment=comment
+                )
                 task.messages.append({
                     "timestamp": time.time(),
                     "action": "external_comment",

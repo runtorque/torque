@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import subprocess
@@ -10,6 +11,12 @@ from dataclasses import dataclass
 
 class ExternalTicketError(RuntimeError):
     """Raised when an external ticket operation cannot be completed."""
+
+
+# A GitHub request should fail rather than occupy a worker thread forever.
+# Thirty seconds leaves room for transient GitHub/API latency without making a
+# stalled CLI invocation an unbounded operation.
+_GH_TIMEOUT_SECONDS = 30
 
 
 @dataclass
@@ -195,6 +202,7 @@ class GitHubExternalTicketAdapter(ExternalTicketAdapter):
                 check=True,
                 capture_output=True,
                 text=True,
+                timeout=_GH_TIMEOUT_SECONDS,
             )
         except FileNotFoundError as exc:
             raise ExternalTicketError(
@@ -203,6 +211,10 @@ class GitHubExternalTicketAdapter(ExternalTicketAdapter):
         except subprocess.CalledProcessError as exc:
             err = (exc.stderr or exc.stdout or "").strip()
             raise ExternalTicketError(err or "GitHub CLI command failed") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise ExternalTicketError(
+                f"GitHub CLI command timed out after {_GH_TIMEOUT_SECONDS} seconds"
+            ) from exc
         return (proc.stdout or "").strip()
 
     def import_ticket(self, ref: str, *, provider: str = "",
@@ -257,6 +269,16 @@ class GitHubExternalTicketAdapter(ExternalTicketAdapter):
                                     task.external_url)
         self._run_gh(["issue", "comment", issue_ref, "--body", comment])
         return comment
+
+
+async def run_external_ticket_operation(operation, /, *args, **kwargs):
+    """Run a synchronous adapter operation without blocking the event loop.
+
+    Adapters remain synchronous so CLI and offline callers continue to work.
+    Async daemon handlers must use this boundary for operations that may invoke
+    the GitHub CLI.
+    """
+    return await asyncio.to_thread(operation, *args, **kwargs)
 
 
 _ADAPTERS: dict[str, ExternalTicketAdapter] = {
