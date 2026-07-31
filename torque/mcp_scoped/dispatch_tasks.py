@@ -14,7 +14,11 @@ from torque.finalization import normalize_required_review_gates
 from torque.mcp_scoped.dispatch_context import ScopedDispatchContext, UNHANDLED
 from torque.mcp_scoped.dispatch_runtime import *  # noqa: F403
 from torque.task_dispatch_gate import active_dispatch_edit_error, task_has_active_dispatch
-from torque.server_board_sync import task_title_sync_validation_error
+from torque.server_board_sync import (
+    task_description_sync_validation_error,
+    task_labels_sync_validation_error,
+    task_title_sync_validation_error,
+)
 
 
 def _live_workers_linked_to_task(state, task) -> list:
@@ -373,6 +377,11 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
             description = str(args.get("description", "") or "")
             if not description.strip():
                 return "description is required", True
+            description_error = task_description_sync_validation_error(
+                real_state, task, description,
+            )
+            if description_error:
+                return description_error, True
             patch["description"] = description
             updated_fields.append("description")
         if "labels" in args:
@@ -389,6 +398,11 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
                     continue
                 normalized_labels.append(label)
                 seen_labels.add(label)
+            labels_error = task_labels_sync_validation_error(
+                real_state, task, normalized_labels,
+            )
+            if labels_error:
+                return labels_error, True
             if (
                     (is_creator_proposal_mode or is_group_board_authority_mode)
                     and {"product-proposal", "proposal-only"}.issubset(
@@ -696,8 +710,23 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
                 return title_error, True
             payload["task"] = title
         if "description" in args:
+            description = str(args["description"] or "")
+            task = real_state.board_tasks.get(tid)
+            description_error = task_description_sync_validation_error(
+                real_state, task, description,
+            )
+            if description_error:
+                return description_error, True
             payload["description"] = args["description"]
         if "labels" in args:
+            labels = args["labels"]
+            if isinstance(labels, list):
+                task = real_state.board_tasks.get(tid)
+                labels_error = task_labels_sync_validation_error(
+                    real_state, task, labels,
+                )
+                if labels_error:
+                    return labels_error, True
             payload["labels"] = args["labels"]
         if "action" in args:
             payload["action_name"] = args["action"]

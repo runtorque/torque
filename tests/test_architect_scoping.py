@@ -3463,24 +3463,102 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             name = "offline-static"
 
             def field_constraints(self):
-                return BoardSyncFieldConstraints(title_max_length=3)
+                return BoardSyncFieldConstraints(label_name_max_length=3)
 
             async def preflight(self, _settings):  # pragma: no cover - must not run
-                raise AssertionError("title validation must not preflight")
+                raise AssertionError("label validation must not preflight")
 
         with mock.patch(
                 "torque.server_board_sync.get_provider",
                 return_value=OfflineProvider()) as provider_lookup:
             text, is_error = await self._call(
                 "architect_task_update",
-                {"task": task.id, "title": "four"},
+                {"task": task.id, "labels": ["four"]},
                 architect.id,
             )
 
         self.assertTrue(is_error)
         self.assertIn("Offline Static board sync", text)
         provider_lookup.assert_called_once_with("github")
-        self.assertEqual(self.state.board_tasks[task.id].task, "Original title")
+        self.assertEqual(self.state.board_tasks[task.id].labels, [])
+
+    async def test_architect_task_update_refuses_only_incoming_over_limit_labels(self):
+        """GitHub's declared label cap guards writes without blocking repair."""
+        architect = self._add_architect("arch-label-limit", "Architect")
+        self.state.update_group_settings(
+            "torque",
+            board_sync_provider="github",
+            board_sync_enabled=True,
+        )
+        task = self._add_task(
+            "task-label-limit",
+            "Original title",
+            description="Original description",
+            labels=["normal"],
+            provider="github",
+            external_id="owner/repo#3",
+            created_by_architect_id=architect.id,
+        )
+
+        rejected, rejected_is_error = await self._call(
+            "architect_task_update",
+            {"task": task.id, "labels": ["x" * 51]},
+            architect.id,
+        )
+        self.assertTrue(rejected_is_error)
+        self.assertIn("Label name is 51 characters", rejected)
+        self.assertIn("50", rejected)
+        self.assertEqual(self.state.board_tasks[task.id].labels, ["normal"])
+
+        accepted, accepted_is_error = await self._call(
+            "architect_task_update",
+            {"task": task.id, "labels": ["triage"]},
+            architect.id,
+        )
+        self.assertFalse(accepted_is_error, accepted)
+        self.assertEqual(self.state.board_tasks[task.id].labels, ["triage"])
+
+        # Existing invalid records remain editable through unrelated fields;
+        # the guard inspects the incoming labels only.
+        self.state.board_update_task(task.id, labels=["x" * 51])
+        description_result, description_is_error = await self._call(
+            "architect_task_update",
+            {"task": task.id, "description": "Still editable"},
+            architect.id,
+        )
+        self.assertFalse(description_is_error, description_result)
+        self.assertEqual(self.state.board_tasks[task.id].labels, ["x" * 51])
+        self.assertEqual(self.state.board_tasks[task.id].description, "Still editable")
+
+        repaired, repaired_is_error = await self._call(
+            "architect_task_update",
+            {"task": task.id, "labels": ["short"]},
+            architect.id,
+        )
+        self.assertFalse(repaired_is_error, repaired)
+        self.assertEqual(self.state.board_tasks[task.id].labels, ["short"])
+
+    async def test_architect_task_update_allows_long_labels_without_active_known_provider_limit(self):
+        architect = self._add_architect("arch-no-label-limit", "Architect")
+        task = self._add_task(
+            "task-no-label-limit",
+            "Original title",
+            created_by_architect_id=architect.id,
+        )
+        for provider, enabled in (("github", False), ("none", True), ("unknown", True)):
+            with self.subTest(provider=provider, enabled=enabled):
+                self.state.update_group_settings(
+                    "torque",
+                    board_sync_provider=provider,
+                    board_sync_enabled=enabled,
+                )
+                text, is_error = await self._call(
+                    "architect_task_update",
+                    {"task": task.id, "labels": ["x" * 51]},
+                    architect.id,
+                )
+                self.assertFalse(is_error, text)
+                self.assertEqual(self.state.board_tasks[task.id].labels, ["x" * 51])
 
     async def test_architect_task_update_refuses_only_while_dispatch_stream_is_active(self):
         creator = self._add_architect("arch-creator", "Creator")
