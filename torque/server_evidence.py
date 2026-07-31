@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import datetime, timezone
+from typing import Iterable
 
 from .artifacts import normalize_artifacts
 from .config import log
@@ -1080,6 +1081,7 @@ def _record_merge_completion_evidence(
         state: MatrixState,
         *,
         result: dict,
+        task_ids: Iterable[str],
         cell=None,
         repo_root: str = "",
         branch: str = "",
@@ -1089,6 +1091,13 @@ def _record_merge_completion_evidence(
         board_sync_manager=None,
 ) -> list[str]:
     if not state or not isinstance(result, dict) or not result.get("ok"):
+        return []
+    attributed_task_ids = {
+        str(task_id or "").strip()
+        for task_id in task_ids
+        if str(task_id or "").strip()
+    }
+    if not attributed_task_ids:
         return []
     merge_sha = str(
         result.get("sha") or result.get("merge_commit_sha") or ""
@@ -1156,7 +1165,10 @@ def _record_merge_completion_evidence(
         "updated_by": actor_name,
     }
     updated_ids = []
-    for task in list(state.board_tasks.values()):
+    for task_id in attributed_task_ids:
+        task = state.board_tasks.get(task_id)
+        if not task:
+            continue
         boundary = getattr(task, "worktree_boundary", {}) or {}
         if not _merge_evidence_matches_boundary(
                 boundary,

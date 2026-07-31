@@ -526,6 +526,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
             repo_root="/repo",
             branch="torque/worker",
             merge_sha="abc123",
+            task_ids=["task-a", "task-b"],
             merged_at="2026-04-07T13:00:00+00:00",
         )
 
@@ -545,6 +546,45 @@ class WorktreeBoundaryTests(unittest.TestCase):
         self.assertEqual(queued_followup.labels, ["ready"])
         self.assertEqual(other_branch.worktree_boundary["status"], "open")
         self.assertEqual(other_branch.labels, ["ready"])
+
+    def test_mark_branch_boundaries_merged_does_not_contaminate_paused_task(self):
+        """A shared worker branch is not evidence that both tasks shipped."""
+        merged_task = _task(
+            "TORQUE:1290",
+            labels=["ready"],
+            boundary={
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+                "status": "open",
+                "recorded_at": "2026-07-28T10:00:00+00:00",
+            },
+        )
+        paused_task = _task(
+            "TORQUE:1298",
+            lane="In Progress",
+            labels=["paused"],
+            boundary={
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+                "status": "open",
+                "recorded_at": "2026-07-28T11:00:00+00:00",
+            },
+        )
+
+        updated = mark_branch_boundaries_merged(
+            [merged_task, paused_task],
+            repo_root="/repo",
+            branch="torque/worker",
+            merge_sha="landed1290",
+            task_ids=[merged_task.id],
+            merged_at="2026-07-28T12:00:00+00:00",
+        )
+
+        self.assertEqual([task.id for task in updated], [merged_task.id])
+        self.assertEqual(merged_task.worktree_boundary["status"], "merged")
+        self.assertEqual(paused_task.worktree_boundary["status"], "open")
+        self.assertNotIn("merge_commit_sha", paused_task.worktree_boundary)
+        self.assertEqual(paused_task.labels, ["paused"])
 
     def test_mark_branch_boundaries_merged_marks_pipeline_root_without_boundary(self):
         root = _task("task-root", lane="In Progress", labels=["ready"])
@@ -574,6 +614,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
             repo_root="/repo",
             branch="torque/worker",
             merge_sha="deadbeef",
+            task_ids=[review.id],
             merged_at="2026-04-07T11:00:00+00:00",
         )
 
@@ -637,6 +678,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
             repo_root="/repo",
             branch="torque/worker",
             merge_sha="squash-sha",
+            task_ids=[review.id],
             merged_at="2026-04-07T11:00:00+00:00",
             pr_metadata={"merge_state": "CLEAN"},
         )

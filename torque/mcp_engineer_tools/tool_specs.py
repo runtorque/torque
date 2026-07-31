@@ -1494,6 +1494,14 @@ ENGINEER_TOOLS = [
                     "type": "string",
                     "description": "Agent ID/name with worktree. Omit when using worktree_path+branch driverless mode.",
                 },
+                "task": {
+                    "type": "string",
+                    "description": (
+                        "Optional task ID for this merge. When a worker has "
+                        "multiple tasks on one branch, use this to attribute "
+                        "the durable merge evidence to the task that landed."
+                    ),
+                },
                 "worktree_path": {
                     "type": "string",
                     "description": "Existing git worktree path for driverless mode (requires branch).",

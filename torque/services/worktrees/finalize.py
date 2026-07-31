@@ -63,6 +63,7 @@ from .preflight import (
     _candidate_pr_statuses,
     _capture_worktree_merge_preserve_diff,
     _capture_worktree_merge_resume_targets,
+    _merge_attribution_task_id,
     _merge_commit_sha_from_sources,
     _merge_commit_sha_from_status,
     _post_success_cleanup_warning,
@@ -508,6 +509,7 @@ async def _recover_authoritative_post_success_from_boundary(
     _record_merge_completion_evidence(
         state,
         result=result,
+        task_ids=[str(getattr(task, "id", "") or "")],
         cell=cell,
         repo_root=boundary_repo_root or confirm_repo_root,
         branch=boundary_branch or branch,
@@ -557,6 +559,7 @@ async def _finalize_successful_worktree_merge(
     aid: str,
     data: dict,
     merge_sha: str,
+    merged_task_id: str,
     stale_base: dict | None,
     preserve_merge_diff: bool,
     boundary_task_for_diff,
@@ -577,7 +580,7 @@ async def _finalize_successful_worktree_merge(
         getattr(cell, "worktree_base_branch", "") or ""
     ).strip()
     merge_agent_name = str(getattr(cell, "name", "") or "").strip()
-    mark_branch_boundaries_merged(cell, merge_sha)
+    mark_branch_boundaries_merged(cell, merge_sha, merged_task_id)
     state.cleanup_stale_boundary_successors()
     preserve_diff_warning = ""
     if preserve_merge_diff:
@@ -781,6 +784,7 @@ async def _finalize_successful_driverless_worktree_merge(
     aid: str,
     data: dict,
     merge_sha: str,
+    merged_task_id: str,
     stale_base: dict | None,
     preserve_merge_diff: bool,
     boundary_task_for_diff,
@@ -789,7 +793,7 @@ async def _finalize_successful_driverless_worktree_merge(
     worktree_mgr: WorktreeManager,
 ) -> dict:
     """Apply branch/boundary side effects after a driverless merge succeeds."""
-    mark_branch_boundaries_merged(target, merge_sha)
+    mark_branch_boundaries_merged(target, merge_sha, merged_task_id)
     state.cleanup_stale_boundary_successors()
     preserve_diff_warning = ""
     if preserve_merge_diff:
@@ -904,6 +908,8 @@ async def _run_direct_worktree_merge(
         if gates.get("workflow_breach") and isinstance(result, dict):
             result["workflow_breach"] = gates["workflow_breach"]
         return result
+
+    merged_task_id = _merge_attribution_task_id(state, cell, data)
 
     squash = cell.worktree_merge_squash
     msg = str(data.get("message", "") or "").strip()
@@ -1022,6 +1028,7 @@ async def _run_direct_worktree_merge(
                 aid=aid,
                 data=data,
                 merge_sha=merge_result["sha"],
+                merged_task_id=merged_task_id,
                 stale_base=gates.get("stale_base"),
                 preserve_merge_diff=preserve_merge_diff,
                 boundary_task_for_diff=boundary_task_for_diff,
@@ -1036,6 +1043,7 @@ async def _run_direct_worktree_merge(
                 aid=aid,
                 data=data,
                 merge_sha=merge_result["sha"],
+                merged_task_id=merged_task_id,
                 stale_base=gates.get("stale_base"),
                 preserve_merge_diff=preserve_merge_diff,
                 boundary_task_for_diff=boundary_task_for_diff,
@@ -1064,6 +1072,7 @@ async def _run_direct_worktree_merge(
         _record_merge_completion_evidence(
             state,
             result=result,
+            task_ids=[merged_task_id],
             cell=getattr(cell, "cell", None) or cell,
             repo_root=str(getattr(cell, "worktree_repo_root", "")
                           or getattr(cell, "git_root", "") or ""),

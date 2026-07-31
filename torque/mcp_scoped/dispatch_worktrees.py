@@ -132,6 +132,19 @@ async def dispatch_worktrees(ctx: ScopedDispatchContext):
                 getattr(cell, "worktree_base_branch", "") or ""
             ).strip()
 
+        merge_task_id = ""
+        if not driverless and str(args.get("task", "") or "").strip():
+            merge_task_id = _resolve_task(real_state, args.get("task", "")) or ""
+            merge_task = real_state.board_tasks.get(merge_task_id)
+            if not merge_task:
+                return "Task not found", True
+            if str(getattr(merge_task, "agent_id", "") or "") != agent_id:
+                return (
+                    "Merge task must be assigned to the selected worker; "
+                    "branch identity cannot be used as task attribution.",
+                    True,
+                )
+
         # First check for conflicts / merge boundary eligibility
         if driverless:
             check_payload = {
@@ -192,6 +205,8 @@ async def dispatch_worktrees(ctx: ScopedDispatchContext):
             {"cmd": "worktree_merge", **path_payload}
             if driverless else {"cmd": "worktree_merge", "id": agent_id}
         )
+        if merge_task_id:
+            payload["merge_task_id"] = merge_task_id
         msg = args.get("message", "")
         if msg:
             payload["message"] = msg

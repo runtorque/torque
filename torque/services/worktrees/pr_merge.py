@@ -25,6 +25,7 @@ from ...server_worktrees import (
     _generate_merge_message,
     _pr_merge_failure_allows_auto,
     _pr_result_metadata,
+    _record_pr_metadata_on_task_boundary,
     _record_pr_metadata_on_latest_boundary,
     _rewrite_pr_torque_task_refs_metadata,
     _split_merge_message_for_pr,
@@ -74,6 +75,8 @@ from .preflight import (
     _attach_auto_force_push_metadata,
     _capture_worktree_merge_preserve_diff,
     _capture_worktree_merge_resume_targets,
+    _merge_task_attribution_error,
+    _merge_attribution_task_id,
     _post_success_result_error,
     _preflight_worktree_merge_gates,
     _worktree_merge_requested_cleanup,
@@ -277,6 +280,16 @@ async def _run_pr_worktree_merge(
             return recovered
         return _worktree_merge_error(aid, "Agent has no worktree.")
 
+    attribution_error = _merge_task_attribution_error(
+        state,
+        cell,
+        aid,
+        data,
+    )
+    if attribution_error:
+        attribution_error["mode"] = "pull_request"
+        return attribution_error
+
     wt = cell.worktree_path
     repo_root = cell.worktree_repo_root or cell.git_root or ""
     branch = cell.worktree_branch or ""
@@ -411,6 +424,8 @@ async def _run_pr_worktree_merge(
             if gates.get("workflow_breach"):
                 result["workflow_breach"] = gates["workflow_breach"]
         return result
+
+    merged_task_id = _merge_attribution_task_id(state, cell, data)
 
     squash = True
     msg = str(data.get("message", "") or "").strip()
@@ -776,12 +791,21 @@ async def _run_pr_worktree_merge(
         branch=branch,
         status="merged" if already_merged_pr else "created",
     )
-    _record_pr_metadata_on_latest_boundary(
-        state,
-        cell,
-        pr_metadata,
-        requested_cleanup=requested_cleanup,
-    )
+    if merged_task_id:
+        _record_pr_metadata_on_task_boundary(
+            state,
+            cell,
+            merged_task_id,
+            pr_metadata,
+            requested_cleanup=requested_cleanup,
+        )
+    else:
+        _record_pr_metadata_on_latest_boundary(
+            state,
+            cell,
+            pr_metadata,
+            requested_cleanup=requested_cleanup,
+        )
 
     if already_merged_pr:
         merge_sha = await _resolve_already_merged_sha(
@@ -877,12 +901,21 @@ async def _run_pr_worktree_merge(
             else "pending" if pending else "merge_failed"
         ),
     )
-    _record_pr_metadata_on_latest_boundary(
-        state,
-        cell,
-        pr_metadata,
-        requested_cleanup=requested_cleanup,
-    )
+    if merged_task_id:
+        _record_pr_metadata_on_task_boundary(
+            state,
+            cell,
+            merged_task_id,
+            pr_metadata,
+            requested_cleanup=requested_cleanup,
+        )
+    else:
+        _record_pr_metadata_on_latest_boundary(
+            state,
+            cell,
+            pr_metadata,
+            requested_cleanup=requested_cleanup,
+        )
 
     if pending:
         result = {
@@ -1009,6 +1042,7 @@ async def _run_pr_worktree_merge(
                 aid=aid,
                 data=data,
                 merge_sha=merge_sha,
+                merged_task_id=merged_task_id,
                 stale_base=gates.get("stale_base"),
                 preserve_merge_diff=preserve_merge_diff,
                 boundary_task_for_diff=boundary_task_for_diff,
@@ -1023,6 +1057,7 @@ async def _run_pr_worktree_merge(
                 aid=aid,
                 data=data,
                 merge_sha=merge_sha,
+                merged_task_id=merged_task_id,
                 stale_base=gates.get("stale_base"),
                 preserve_merge_diff=preserve_merge_diff,
                 boundary_task_for_diff=boundary_task_for_diff,
@@ -1138,6 +1173,7 @@ async def _run_pr_worktree_merge(
     _record_merge_completion_evidence(
         state,
         result=result,
+        task_ids=[merged_task_id],
         cell=cell,
         repo_root=repo_root or wt,
         branch=branch,
