@@ -93,6 +93,7 @@ class MCPClassAuthorityTests(unittest.IsolatedAsyncioTestCase):
             # This is a launch-frozen, derived record, not class authoring
             # syntax.  Simulate an older launch before retired_tool vanished.
             "frozen_public_tools": ["task_get", "retired_tool"],
+            "snapshot_hash": "sha256:retired-tool-class-v9",
         }
 
         baseline_snapshot = dict(architect.effective_agent_class_snapshot)
@@ -121,6 +122,88 @@ class MCPClassAuthorityTests(unittest.IsolatedAsyncioTestCase):
             "Frozen Agent Class retired-tool-class@9 references removed "
             "public tool retired_tool; skipping it during MCP projection",
             "\n".join(logs.output),
+        )
+
+    async def test_frozen_removed_tool_warns_once_per_snapshot_across_projection_and_call_paths(self):
+        state, architect = self._state_with_architect()
+        own_task = self.state_mod.BoardTask(
+            id="task-own",
+            task="Own",
+            group="g",
+            lane="Backlog",
+            created_by_architect_id=architect.id,
+        )
+        state.board_tasks[own_task.id] = own_task
+        architect.effective_agent_class_snapshot = {
+            "id": "retired-tool-class",
+            "version": "9",
+            "snapshot_hash": "sha256:frozen-v9",
+            "effective_authority": {
+                "schema_version": 1,
+                "base_kind": "architect",
+                "acl_mode": "allow",
+                "capabilities": {"task.read": "self"},
+            },
+            "frozen_public_tools": ["task_get", "retired_tool"],
+        }
+        handler = self.mcp_mod.create_mcp_handler(
+            lambda payload: self.fail(f"Unexpected command: {payload}"),
+            state,
+        )
+        headers = {"X-Torque-Cell-Id": architect.id}
+
+        with self.assertLogs("torque", level="WARNING") as logs:
+            await handler(FakeRequest(
+                {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                headers=headers,
+            ))
+            # A normal call reaches multiple raw/canonical projection paths.
+            called = await handler(FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "architect_task_list",
+                        "arguments": {},
+                    },
+                },
+                headers=headers,
+            ))
+            self.assertNotIn("error", called.payload)
+            await handler(FakeRequest(
+                {"jsonrpc": "2.0", "id": 3, "method": "tools/list"},
+                headers=headers,
+            ))
+
+        warning = (
+            "Frozen Agent Class retired-tool-class@9 references removed "
+            "public tool retired_tool; skipping it during MCP projection"
+        )
+        self.assertEqual(sum(warning in line for line in logs.output), 1)
+
+        architect.effective_agent_class_snapshot = {
+            **architect.effective_agent_class_snapshot,
+            "version": "10",
+            "snapshot_hash": "sha256:frozen-v10",
+        }
+        with self.assertLogs("torque", level="WARNING") as refreshed_logs:
+            await handler(FakeRequest(
+                {"jsonrpc": "2.0", "id": 4, "method": "tools/list"},
+                headers=headers,
+            ))
+            await handler(FakeRequest(
+                {"jsonrpc": "2.0", "id": 5, "method": "tools/list"},
+                headers=headers,
+            ))
+        self.assertEqual(
+            sum(
+                "Frozen Agent Class retired-tool-class@10 references removed "
+                "public tool retired_tool; skipping it during MCP projection"
+                in line
+                for line in refreshed_logs.output
+            ),
+            1,
         )
 
     async def test_torque_steward_class_lists_canonical_observation_tools(self):

@@ -92,6 +92,7 @@ from .mcp_retry import (
     strip_mcp_idempotency_args,
 )
 from .server_artifacts import serialize_task_for_mcp
+from .mcp_frozen_tool_warnings import warn_removed_frozen_public_tools
 
 log = logging.getLogger("torque")
 
@@ -1124,14 +1125,12 @@ def _warn_missing_frozen_public_tools(cell) -> tuple[str, ...]:
         snapshot,
         (canonical_tool_name(tool.get("name", "")) for tool in ALL_TOOLS),
     )
-    for tool_name in missing:
-        log.warning(
-            "Frozen Agent Class %s@%s references removed public tool %s; "
-            "skipping it during MCP projection",
-            str(snapshot.get("id", "") or "<unknown>"),
-            str(snapshot.get("version", "") or "<unknown>"),
-            tool_name,
-        )
+    warn_removed_frozen_public_tools(
+        cell_id=str(getattr(cell, "id", "") or ""),
+        snapshot=snapshot,
+        missing_tools=missing,
+        logger=log,
+    )
     return missing
 
 
