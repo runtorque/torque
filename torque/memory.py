@@ -1,29 +1,29 @@
 """Shared context memory helpers for Torque.
 
-Shared context intentionally stays explicit and deterministic, but it now
-distinguishes durable memory from transient notes so prompt/context views can
-retain high-signal decisions without accumulating stale noise forever.
+Shared context is explicit, deterministic, and deliberately time-bounded.
+Every new entry expires according to its group's configured TTL.
 """
 
 from __future__ import annotations
 
 import time
 import uuid
-from collections import Counter
 
 
 ENTRY_TYPES = ("finding", "decision", "warning", "handoff", "note")
 SCOPE_KINDS = ("task", "pipeline", "group", "project")
 LINK_TARGET_KINDS = ("task", "agent", "pipeline")
-RETENTION_KINDS = ("durable", "transient")
+# The maximum is a system policy, not a configurable setting.
+CONTEXT_TTL_MIN_DAYS = 1
+CONTEXT_TTL_MAX_DAYS = 60
+CONTEXT_DEFAULT_TTL_DAYS = 30
+CONTEXT_TTL_SECS_PER_DAY = 24 * 60 * 60
+DEPRECATED_RETENTION_KIND = "ttl"
 
 PROMPT_QUERY_LIMIT = 8
 PROMPT_MAX_ENTRIES = 4
 PROMPT_MAX_CHARS = 1200
 PROMPT_ITEM_MAX_CHARS = 220
-
-TRANSIENT_RETENTION_SECS = 14 * 24 * 60 * 60
-TRANSIENT_SUMMARY_AFTER_SECS = 3 * 24 * 60 * 60
 
 _PROMPT_REASON_WEIGHTS = {
     "scope_task": 4000,
@@ -78,15 +78,26 @@ def normalize_link_target_kind(value: str) -> str:
     return value
 
 
-def normalize_retention_kind(value: str) -> str:
-    value = (value or "").strip().lower()
-    if value not in RETENTION_KINDS:
-        raise ValueError(
-            f"Invalid retention kind '{value}'. "
-            f"Expected one of: {', '.join(RETENTION_KINDS)}"
-        )
-    return value
+def clamp_context_ttl_days(value) -> int:
+    """Coerce a group context TTL into the supported policy range."""
+    try:
+        days = int(value)
+    except (TypeError, ValueError):
+        days = CONTEXT_DEFAULT_TTL_DAYS
+    return max(CONTEXT_TTL_MIN_DAYS, min(CONTEXT_TTL_MAX_DAYS, days))
 
+
+def context_ttl_days_for_group(state, group_name: str) -> int:
+    """Return the configured, policy-clamped TTL for a group's context."""
+    settings = state.get_group_settings(group_name) if state else None
+    return clamp_context_ttl_days(getattr(
+        settings, "context_default_ttl_days", CONTEXT_DEFAULT_TTL_DAYS,
+    ))
+
+
+def expires_at_for_ttl(*, created_at: float, ttl_days: int) -> float:
+    """Return the expiry timestamp for a newly created memory entry."""
+    return float(created_at) + clamp_context_ttl_days(ttl_days) * CONTEXT_TTL_SECS_PER_DAY
 
 def clamp_text(value: str, max_len: int) -> str:
     value = (value or "").strip()
@@ -95,28 +106,9 @@ def clamp_text(value: str, max_len: int) -> str:
     return value
 
 
-def infer_retention_kind(entry_type: str, *, pinned: bool = False,
-                         retention_kind: str = "") -> str:
-    """Resolve the normalized retention kind for an entry."""
-    if pinned:
-        return "durable"
-    if retention_kind:
-        return normalize_retention_kind(retention_kind)
-    if entry_type in {"decision", "warning"}:
-        return "durable"
-    return "transient"
-
-
-def expires_at_for_retention(retention_kind: str, *, created_at: float,
-                             pinned: bool = False) -> float | None:
-    """Return the expiry timestamp for the given retention class."""
-    if pinned or retention_kind == "durable":
-        return None
-    return float(created_at) + TRANSIENT_RETENTION_SECS
-
 
 def is_entry_expired(entry: dict, *, now: float | None = None) -> bool:
-    """Return True when a transient entry is past its retention window."""
+    """Return True when an entry's stored expiry has elapsed."""
     expiry = entry.get("expires_at")
     if expiry in (None, "", 0):
         return False
@@ -125,113 +117,10 @@ def is_entry_expired(entry: dict, *, now: float | None = None) -> bool:
     return float(expiry) <= float(now)
 
 
-def _summarize_transient_batch(entries: list[dict]) -> dict | None:
-    """Build a synthetic summary entry for a compacted transient batch."""
-    if len(entries) < 2:
-        return entries[0] if entries else None
-
-    type_counts = Counter(
-        clamp_text(entry.get("entry_type", "") or "note", 24) or "note"
-        for entry in entries
-    )
-    type_summary = ", ".join(
-        f"{kind}×{count}" for kind, count in sorted(type_counts.items())
-    )
-    highlights = []
-    for entry in entries[:3]:
-        highlight = clamp_text(
-            entry.get("title") or entry.get("content") or "",
-            60,
-        )
-        if highlight:
-            highlights.append(highlight)
-    content = f"Covers {len(entries)} older transient entries ({type_summary})."
-    if highlights:
-        content += " Highlights: " + "; ".join(highlights) + "."
-    newest = max(float(entry.get("created_at", 0) or 0) for entry in entries)
-    updated = max(float(entry.get("updated_at", 0) or 0) for entry in entries)
-    first = entries[0]
-    return {
-        "id": "summary:" + ",".join(entry.get("id", "") for entry in entries[:4]),
-        "project_key": first.get("project_key", ""),
-        "group_name": first.get("group_name", ""),
-        "scope_kind": first.get("scope_kind", ""),
-        "scope_ref": first.get("scope_ref", ""),
-        "entry_type": "summary",
-        "title": f"{len(entries)} older transient entries",
-        "content": content,
-        "pinned": False,
-        "task_id": first.get("task_id", ""),
-        "source_kind": "system",
-        "source_id": "",
-        "source_name": "Torque",
-        "created_at": newest,
-        "updated_at": updated,
-        "retention_kind": "summary",
-        "expires_at": None,
-        "links": [],
-        "synthetic": True,
-        "summary_entry_count": len(entries),
-        "summarized_entry_ids": [entry.get("id", "") for entry in entries],
-    }
-
-
-def compact_memory_entries(entries: list[dict], *,
-                           now: float | None = None) -> list[dict]:
-    """Compact older transient entries into synthetic summaries.
-
-    Durable entries and pinned entries are preserved as-is. Older transient
-    entries are summarized in-place so list/prompt views stay bounded while
-    keeping recent detail accessible.
-    """
-    if now is None:
-        now = time.time()
-
-    compacted: list[dict] = []
-    pending: list[dict] = []
-
-    def flush_pending():
-        if not pending:
-            return
-        summary = _summarize_transient_batch(list(pending))
-        if summary is not None:
-            if summary.get("synthetic"):
-                compacted.append(summary)
-            else:
-                compacted.extend(list(pending))
-        pending.clear()
-
-    for raw_entry in entries:
-        entry = dict(raw_entry)
-        retention_kind = (entry.get("retention_kind", "") or "").strip().lower()
-        if retention_kind == "summary":
-            flush_pending()
-            compacted.append(entry)
-            continue
-        age = max(0.0, float(now) - float(entry.get("created_at", 0) or 0))
-        should_compact = (
-            entry.get("pinned") is not True
-            and retention_kind == "transient"
-            and age >= TRANSIENT_SUMMARY_AFTER_SECS
-        )
-        if should_compact:
-            pending.append(entry)
-            continue
-        flush_pending()
-        compacted.append(entry)
-
-    flush_pending()
-    return compacted
-
-
 def load_visible_memory_entries(db, *, now: float | None = None,
-                                compact: bool = True, **filters) -> list[dict]:
-    """Load non-expired entries from storage and optionally compact them."""
-    entries = db.load_memory_entries(now=now, **filters)
-    if not compact:
-        return entries
-    return compact_memory_entries(entries, now=now)
-
+                                **filters) -> list[dict]:
+    """Load non-expired entries from storage without synthetic compaction."""
+    return db.load_memory_entries(now=now, **filters)
 
 def detect_current_task(state, cell_id: str, explicit_task_id: str = ""):
     """Resolve the task currently associated with *cell_id*.
@@ -359,15 +248,12 @@ def build_memory_entry(state, *, cell=None, task=None,
         project_key = infer_project_key(cell=state.agents.get(task.agent_id))
     if not project_key and kind == "project":
         project_key = ref
-    retention_kind = infer_retention_kind(
-        entry_type,
-        pinned=bool(pinned),
-        retention_kind=retention_kind,
-    )
-    expires_at = expires_at_for_retention(
-        retention_kind,
+    # ``retention_kind`` remains an accepted legacy tool argument, but does
+    # not influence lifetime. Pinning is likewise visibility-only.
+    del retention_kind
+    expires_at = expires_at_for_ttl(
         created_at=now,
-        pinned=bool(pinned),
+        ttl_days=context_ttl_days_for_group(state, group_name),
     )
 
     return {
@@ -384,7 +270,9 @@ def build_memory_entry(state, *, cell=None, task=None,
         "source_kind": source_kind or "agent",
         "source_id": cell_id,
         "source_name": cell_name,
-        "retention_kind": retention_kind,
+        # Kept in read payloads for panel compatibility while the deprecated
+        # storage column exists; it no longer encodes a retention class.
+        "retention_kind": DEPRECATED_RETENTION_KIND,
         "expires_at": expires_at,
         "created_at": now,
         "updated_at": now,

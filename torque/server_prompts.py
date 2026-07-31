@@ -47,18 +47,22 @@ _SHARED_MEMORY_GUIDANCE = dedent("""\
     ## Shared memory
 
     Torque's Shared Context panel is populated by `torque_memory_publish`,
-    `torque_memory_pin`, and `torque_memory_link`. Use it for high-signal
-    durable knowledge that future agents should discover; do not rely on
-    provider-local files such as `MEMORY.md` for durable memory.
+    `torque_memory_pin`, and `torque_memory_link`. It is for high-signal,
+    time-bounded working context; entries expire per the group's configured TTL.
+    Do not rely on provider-local files such as `MEMORY.md` for shared context.
 
     Publish only when the item will likely prevent repeated work, wrong turns,
     or lost handoffs. Do not publish routine progress, obvious observations,
     transient test output, or details that already belong only in the task
     completion summary.
 
+    Promote rather than persist: put cross-task decisions in decision records,
+    and permanent constraints in documentation or board tasks. Do not use shared
+    memory as permanent storage.
+
     Publish with concrete entry types:
     - A non-obvious gotcha discovered while debugging → `entry_type="warning"`
-    - A cross-task decision that future agents will need → `entry_type="decision"`
+    - A cross-task decision that future agents need as working context → `entry_type="decision"`
     - A handoff note when one agent hands work to another → `entry_type="handoff"`
     - A finding specific to a pipeline or task scope → `entry_type="finding"`
 
@@ -68,11 +72,9 @@ _SHARED_MEMORY_GUIDANCE = dedent("""\
     - `scope_kind="group"` for this group's workflow, conventions, or repo area.
     - `scope_kind="project"` only for stable project-wide constraints or gotchas.
 
-    Pin only the most load-bearing entries — roughly the top 5 items whose
-    absence would likely cause repeated mistakes, bad architecture, or unsafe
-    handoffs. Do not pin ordinary findings or status notes.
+    Pin only the most load-bearing current entries. Pinning affects visibility
+    and ranking only; it does not extend an entry's expiry.
 """).strip()
-
 
 def build_shared_memory_guidance() -> str:
     """Return the shared-memory adoption guidance used by agent prompts."""

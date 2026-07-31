@@ -15,7 +15,7 @@ import json
 import sqlite3
 from typing import Callable, Iterable
 
-SCHEMA_VERSION = "25"
+SCHEMA_VERSION = "26"
 
 
 @dataclass(frozen=True)
@@ -544,9 +544,11 @@ AGENT_DIGEST_RUNTIME_COLUMNS = {
 }
 
 MEMORY_RETENTION_COLUMNS = {
-    "retention_kind": "TEXT NOT NULL DEFAULT 'durable'",
+    "retention_kind": "TEXT NOT NULL DEFAULT 'ttl'",
     "expires_at": "REAL",
 }
+
+GROUP_CONTEXT_TTL_COLUMNS = {"context_default_ttl_days": "INTEGER NOT NULL DEFAULT 30"}
 
 GLOBAL_SETTINGS_CACHE_COLUMNS = {
     "xterm_scrollback": "INTEGER NOT NULL DEFAULT 2000",
@@ -1000,6 +1002,7 @@ CREATE TABLE IF NOT EXISTS group_settings (
     agent_session_resume        INTEGER NOT NULL DEFAULT 1,
     agent_idle_timeout          INTEGER NOT NULL DEFAULT 0,
     guidance_hint_cadence       INTEGER NOT NULL DEFAULT 4,
+    context_default_ttl_days    INTEGER NOT NULL DEFAULT 30,
     engineer_hint_snoozes       TEXT NOT NULL DEFAULT '{}',
     notifications               INTEGER NOT NULL DEFAULT 0,
     notify_on_finish            INTEGER NOT NULL DEFAULT 1,
@@ -1834,7 +1837,7 @@ CREATE TABLE IF NOT EXISTS memory_entries (
     source_kind TEXT NOT NULL DEFAULT '',
     source_id   TEXT NOT NULL DEFAULT '',
     source_name TEXT NOT NULL DEFAULT '',
-    retention_kind TEXT NOT NULL DEFAULT 'durable',
+    retention_kind TEXT NOT NULL DEFAULT 'ttl',
     expires_at  REAL,
     created_at  REAL NOT NULL,
     updated_at  REAL NOT NULL
@@ -2997,6 +3000,15 @@ def _migration_0015_board_task_completion_contract(
     _ensure_columns(conn, "board_tasks", BOARD_TASK_COMPLETION_COLUMNS)
 
 
+def _migration_0026_shared_memory_ttl_contract(
+    conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Own the group-configurable Shared Context TTL and TTL-only indexes."""
+
+    _ensure_columns(conn, "group_settings", GROUP_CONTEXT_TTL_COLUMNS)
+    rebuild_memory_retention_indexes(conn, manage_transaction=False)
+
 def _migration_0025_finalization_policy_contract(
     conn: sqlite3.Connection,
     _backfill_agent_history,
@@ -3373,6 +3385,14 @@ SCHEMA_MIGRATIONS = (
         "finalization_policy_contract",
         "canonical-finalization-policy-v1",
         _migration_0025_finalization_policy_contract,
+        phase="post_init",
+        repair_on_boot=True,
+    ),
+    SchemaMigration(
+        26,
+        "shared_memory_ttl_contract",
+        "group-context-ttl-and-ttl-only-indexes-v1",
+        _migration_0026_shared_memory_ttl_contract,
         phase="post_init",
         repair_on_boot=True,
     ),
@@ -3756,17 +3776,17 @@ def rebuild_memory_retention_indexes(
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_memory_entries_scope "
         "ON memory_entries("
-        "scope_kind, scope_ref, pinned, retention_kind, created_at DESC)"
+        "scope_kind, scope_ref, pinned, created_at DESC)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_memory_entries_group "
         "ON memory_entries("
-        "group_name, pinned, retention_kind, created_at DESC)"
+        "group_name, pinned, created_at DESC)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_memory_entries_project "
         "ON memory_entries("
-        "project_key, pinned, retention_kind, created_at DESC)"
+        "project_key, pinned, created_at DESC)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_memory_entries_type "
@@ -3774,7 +3794,7 @@ def rebuild_memory_retention_indexes(
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_memory_entries_expiry "
-        "ON memory_entries(retention_kind, expires_at)"
+        "ON memory_entries(expires_at)"
     )
     if manage_transaction:
         conn.commit()

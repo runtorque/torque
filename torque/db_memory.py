@@ -48,7 +48,7 @@ class MemoryPersistenceMixin:
                 entry.get("source_kind", ""),
                 entry.get("source_id", ""),
                 entry.get("source_name", ""),
-                entry.get("retention_kind", "durable"),
+                entry.get("retention_kind", "ttl"),
                 None if entry.get("expires_at") in ("", 0) else entry.get("expires_at"),
                 float(entry.get("created_at", 0)),
                 float(entry.get("updated_at", 0)),
@@ -77,29 +77,19 @@ class MemoryPersistenceMixin:
     def set_memory_entry_pinned(self, entry_id: str, pinned: bool,
                                 updated_at: float):
         """Update the pinned state of a memory entry."""
-        if pinned:
-            self._conn.execute(
-                "UPDATE memory_entries "
-                "SET pinned=1, retention_kind='durable', expires_at=NULL, "
-                "updated_at=? WHERE id=?",
-                (float(updated_at), entry_id),
-            )
-        else:
-            self._conn.execute(
-                "UPDATE memory_entries "
-                "SET pinned=0, updated_at=? WHERE id=?",
-                (float(updated_at), entry_id),
-            )
+        self._conn.execute(
+            "UPDATE memory_entries SET pinned=?, updated_at=? WHERE id=?",
+            (1 if pinned else 0, float(updated_at), entry_id),
+        )
         self._conn.commit()
 
     def purge_expired_memory_entries(self, now: float | None = None) -> int:
-        """Delete transient memory entries whose retention window has elapsed."""
+        """Delete every memory entry whose stored expiry has elapsed."""
         if now is None:
             now = time.time()
         cur = self._conn.execute(
             "DELETE FROM memory_entries "
-            "WHERE retention_kind='transient' AND expires_at IS NOT NULL "
-            "AND expires_at<=?",
+            "WHERE expires_at IS NOT NULL AND expires_at<=?",
             (float(now),),
         )
         self._conn.commit()
@@ -192,7 +182,8 @@ class MemoryPersistenceMixin:
             "source_kind": row[10],
             "source_id": row[11],
             "source_name": row[12],
-            "retention_kind": row[13] or "durable",
+            # Keep the deprecated field available to current panel consumers.
+            "retention_kind": row[13] or "ttl",
             "expires_at": row[14],
             "created_at": row[15],
             "updated_at": row[16],
@@ -254,12 +245,7 @@ class MemoryPersistenceMixin:
                 params.append(linked_target_ref)
             sql += ")"
         sql += (
-            " ORDER BY pinned DESC, "
-            "CASE retention_kind "
-            "WHEN 'durable' THEN 0 "
-            "WHEN 'transient' THEN 1 "
-            "ELSE 2 END, "
-            "created_at DESC, id DESC "
+            " ORDER BY pinned DESC, created_at DESC, id DESC "
             "LIMIT ? OFFSET ?"
         )
         params.extend([max(1, int(limit)), max(0, int(offset))])

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .memory import clamp_context_ttl_days
+
 from .state import (
     AgentCell, AgentDigestSettings, ArchitectSettings, BoardTask,
     EngineerSettings, GroupSettings, Optional,
@@ -246,6 +248,8 @@ class StateSettingsMixin:
                     value = normalize_engineer_merge_mode(value)
                 elif key == "guidance_hint_cadence":
                     value = normalize_guidance_hint_cadence(value)
+                elif key == "context_default_ttl_days":
+                    value = clamp_context_ttl_days(value)
                 elif key == "engineer_hint_snoozes":
                     value = _normalize_engineer_hint_snoozes(value)
                 elif key == "board_sync_provider":

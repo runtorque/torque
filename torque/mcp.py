@@ -657,9 +657,9 @@ TOOLS = [
     {
         "name": "torque_memory_publish", "authority": {"requirements": [{"capability": "memory.write","minimum_scope": "group","handler_scoped": True}]},
         "description": (
-            "Publish an explicit shared memory entry for the current "
-            "task, pipeline, group, or project. Durable decisions/warnings "
-            "are preserved automatically; transient notes can decay over time."
+            "Publish an explicit, time-bounded shared memory entry for the "
+            "current task, pipeline, group, or project. Every entry expires "
+            "per the group's configured context TTL."
         ),
         "inputSchema": {
             "type": "object",

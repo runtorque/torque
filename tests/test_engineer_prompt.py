@@ -223,7 +223,9 @@ class EngineerPromptTests(unittest.TestCase):
         self.assertIn('entry_type="handoff"', prompt)
         self.assertIn('entry_type="finding"', prompt)
         self.assertIn("Scope narrowly", prompt)
-        self.assertIn("top 5", prompt)
+        self.assertIn("Promote rather than persist", prompt)
+        self.assertIn("expire per the group", prompt)
+        self.assertNotIn("top 5", prompt)
         self.assertIn("Do not publish routine progress", prompt)
 
     def test_prompt_includes_specializations_block(self):

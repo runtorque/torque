@@ -572,7 +572,9 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertIn('scope_kind="pipeline"', prompt)
         self.assertIn('scope_kind="group"', prompt)
         self.assertIn('scope_kind="project"', prompt)
-        self.assertIn("top 5", prompt)
+        self.assertIn("Promote rather than persist", prompt)
+        self.assertIn("expire per the group", prompt)
+        self.assertNotIn("top 5", prompt)
         self.assertIn("Do not publish routine progress", prompt)
         self.assertIn("MEMORY.md", prompt)
 

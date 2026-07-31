@@ -2276,6 +2276,7 @@ class GroupSettings:
     agent_session_resume: bool = True  # resume session on relaunch
     agent_idle_timeout: int = 0  # minutes before flagging agent as stuck (0=disable)
     guidance_hint_cadence: int = _DEFAULT_GUIDANCE_HINT_CADENCE  # 0=every time; otherwise 1st, then every N
+    context_default_ttl_days: int = 30  # Shared Context entry lifetime, clamped to 1..60.
     engineer_hint_snoozes: dict[str, float] = field(default_factory=dict)  # hint fingerprint -> unix expiry
     # Agent notifications
     notifications: bool = False
