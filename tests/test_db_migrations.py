@@ -919,6 +919,37 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
         })
         self.assertEqual(expiry_after_retry, expiry_before_retry)
 
+    def test_legacy_memory_ttl_runner_logs_already_stamped_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "already-stamped-memory.db"
+            now = 2_000_000_000.0
+            db = TorqueDB(path)
+            db.init()
+            db.save_memory_entry(self._memory_entry(
+                "fresh", created_at=now,
+                expires_at=now + 30 * 24 * 60 * 60, retention_kind="ttl",
+            ))
+            self._make_legacy_memory_ttl_migration_pending(db)
+            db.close()
+
+            migrated = TorqueDB(path)
+            self.addCleanup(migrated.close)
+            with mock.patch(
+                "torque.persistence.migrations.time.time", return_value=now
+            ), mock.patch(
+                "torque.db_memory.time.time", return_value=now
+            ), self.assertLogs("torque", level="INFO") as logs:
+                migrated.init()
+
+        report = next(
+            line for line in logs.output
+            if "legacy shared-memory TTL" in line
+        )
+        self.assertIn("before=1", report)
+        self.assertIn("stamped=0", report)
+        self.assertIn("already-stamped-and-skipped=1", report)
+        self.assertIn("expired-by-stamping=0", report)
+
     def test_legacy_memory_ttl_runner_logs_benign_empty_profile(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "empty-memory.db"
@@ -1015,10 +1046,23 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
             ledger = db._conn.execute(
                 "SELECT version FROM schema_migrations WHERE version=28"
             ).fetchone()
+            self.assertEqual(expiry, (None,))
+            self.assertIsNone(gate)
+            self.assertIsNone(ledger)
 
-        self.assertEqual(expiry, (None,))
-        self.assertIsNone(gate)
-        self.assertIsNone(ledger)
+            # With no stranded body gate, a retry can ledger the migration.
+            db._conn.execute("DROP TRIGGER fail_ttl_ledger")
+            db._conn.commit()
+            self.assertTrue(finalize_database_migrations(
+                db._conn,
+                db.backfill_agent_history,
+                post_init_runners=db._post_init_migration_runners(),
+            ))
+            retry_ledger = db._conn.execute(
+                "SELECT version FROM schema_migrations WHERE version=28"
+            ).fetchone()
+
+        self.assertEqual(retry_ledger, (28,))
 
     def test_legacy_memory_ttl_has_one_ledgered_invocation_path(self):
         import inspect
