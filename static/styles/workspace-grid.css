@@ -962,7 +962,9 @@ body.runtime-embedded .terminal-surface {
 body.runtime-embedded .terminal-surface .xterm {
   padding: 10px 8px;
 }
-body.runtime-embedded #terminal-workspace:focus-within .terminal-surface {
+/* The composer is also inside #terminal-workspace. Scope the active terminal
+   treatment to the stage so composing a DM cannot light up xterm. */
+body.runtime-embedded .terminal-stage:focus-within .terminal-surface {
   border-color: color-mix(in srgb, var(--accent) 40%, var(--border) 60%);
   box-shadow:
     0 16px 30px rgba(0,0,0,.15),
