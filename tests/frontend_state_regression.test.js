@@ -25350,7 +25350,10 @@ test('openEditTask populates modal state from the task and preserves editable ve
   document.register('task-deps-dropdown');
   document.register('task-deps-chips');
   document.register('task-action-vars');
-  document.register('task-scheduled-input');
+  const scheduleField = document.register('task-schedule-field');
+  scheduleField.classList.add('task-schedule-field');
+  const scheduledInput = document.register('task-scheduled-input');
+  scheduleField.appendChild(scheduledInput);
   document.register('task-group-select');
   document.register('task-template-select');
   document.register('task-action-select');
@@ -25440,6 +25443,7 @@ test('openEditTask populates modal state from the task and preserves editable ve
     document.getElementById('task-scheduled-input').value,
     new Date(futureIso).toISOString().slice(0, 16),
   );
+  assert.equal(scheduleField.classList.contains('is-unset'), false);
   assert.deepEqual(jsonValue(context, '_taskLabels'), ['bug']);
   assert.deepEqual(jsonValue(context, '_taskSystemLabels'), ['torque:blocked']);
   assert.deepEqual(jsonValue(context, '_taskDeps'), ['dep']);
@@ -25703,7 +25707,10 @@ test('openEditTask clears past scheduled times instead of showing stale dispatch
   document.register('task-deps-dropdown');
   document.register('task-deps-chips');
   document.register('task-action-vars');
-  document.register('task-scheduled-input');
+  const scheduleField = document.register('task-schedule-field');
+  scheduleField.classList.add('task-schedule-field');
+  const scheduledInput = document.register('task-scheduled-input');
+  scheduleField.appendChild(scheduledInput);
   document.register('task-group-select');
   document.register('task-template-select');
   document.register('task-action-select');
@@ -25722,6 +25729,41 @@ test('openEditTask clears past scheduled times instead of showing stale dispatch
   context.openEditTask('task-2');
 
   assert.equal(document.getElementById('task-scheduled-input').value, '');
+  assert.equal(scheduleField.classList.contains('is-unset'), true);
+
+  scheduledInput.value = '2099-02-03T04:05';
+  context.taskScheduledInput(scheduledInput);
+  context.openEditTask('task-2');
+
+  assert.equal(scheduledInput.value, '2099-02-03T04:05');
+  assert.equal(scheduleField.classList.contains('is-unset'), false);
+});
+
+test('task schedule exposes a non-numeric placeholder when no dispatch is scheduled', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const css = appStylesheetSource();
+
+  assert.match(html, /<div id="task-schedule-field" class="task-schedule-field is-unset">\s*<input type="datetime-local" id="task-scheduled-input"[\s\S]*?<span class="task-schedule-placeholder" aria-hidden="true">Not scheduled — dispatch manually<\/span>/);
+  assert.match(css, /\.task-schedule-field\.is-unset\s+\.task-schedule-placeholder\s*\{[^}]*display:\s*flex;/);
+  assert.match(css, /\.task-schedule-field\.is-unset\s+#task-scheduled-input::-webkit-datetime-edit\s*\{[^}]*color:\s*transparent;/);
+  assert.doesNotMatch('Not scheduled — dispatch manually', /\d/);
+});
+
+test('task schedule reveals an unset native editor while focused and restores its placeholder on blur', () => {
+  const { context, document } = createModalHarness();
+  const scheduleField = document.register('task-schedule-field');
+  scheduleField.classList.add('task-schedule-field');
+  const scheduledInput = document.register('task-scheduled-input');
+  scheduleField.appendChild(scheduledInput);
+
+  context._taskSetScheduledInputPresentation(scheduledInput);
+  assert.equal(scheduleField.classList.contains('is-unset'), true);
+
+  context.taskScheduledInputFocus(scheduledInput);
+  assert.equal(scheduleField.classList.contains('is-unset'), false);
+
+  context.taskScheduledInputBlur(scheduledInput);
+  assert.equal(scheduleField.classList.contains('is-unset'), true);
 });
 
 test('openEditTask resets task modal body scroll to the top', () => {

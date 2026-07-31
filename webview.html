@@ -1965,9 +1965,16 @@
     <label for="task-scheduled-input">Schedule dispatch
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Set a date/time to auto-dispatch this task. Leave empty to dispatch manually.">?</span>
     </label>
-    <input type="datetime-local" id="task-scheduled-input"
-           oninput="taskPersistDraft()"
-           onkeydown="if(event.key==='Escape')closeModals();">
+    <div id="task-schedule-field" class="task-schedule-field is-unset">
+      <input type="datetime-local" id="task-scheduled-input"
+             aria-describedby="task-schedule-hint"
+             oninput="taskScheduledInput(this)"
+             onfocus="taskScheduledInputFocus(this)"
+             onblur="taskScheduledInputBlur(this)"
+             onkeydown="if(event.key==='Escape')closeModals();">
+      <span class="task-schedule-placeholder" aria-hidden="true">Not scheduled — dispatch manually</span>
+    </div>
+    <div id="task-schedule-hint" class="label-hint">Leave empty to dispatch manually.</div>
     <label>Images
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Drag-and-drop screenshots or click Add images. Image paths are included in agent prompts and shown in artifact browsers.">?</span>
     </label>
