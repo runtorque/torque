@@ -22,6 +22,7 @@ from ..external_tickets import (
     ExternalTicketError,
     build_completion_comment,
     post_ticket_comment,
+    run_external_ticket_operation,
 )
 from ..mcp_canonical import canonical_tool_name
 from ..state import task_counts_as_done, task_is_closed
@@ -730,7 +731,8 @@ async def handle_ai_report_command(
                 if data.get("push_external") \
                         and (task.provider or task.external_url):
                     try:
-                        posted = post_ticket_comment(
+                        posted = await run_external_ticket_operation(
+                            post_ticket_comment,
                             task,
                             comment=build_completion_comment(
                                 task.task, completion_message),
