@@ -40,7 +40,12 @@ from torque.db_schema import (
 class SchemaMigrationLedgerTests(unittest.TestCase):
     @staticmethod
     def _post_init_runners(kinds_runner=lambda: None):
-        return {8: kinds_runner, 9: lambda: None, 10: lambda: None}
+        return {
+            8: kinds_runner,
+            9: lambda: None,
+            10: lambda: None,
+            28: lambda: None,
+        }
 
     def test_fresh_database_records_contiguous_migration_ledger(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -227,7 +232,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
 
         self.assertTrue(set(BOARD_TASK_ROUTING_COLUMNS) <= columns)
         self.assertIn((3, "board_task_routing_contract"), ledger)
-        self.assertEqual(ledger[-1], (27, "remove_mind_maps"))
+        self.assertEqual(ledger[-1], (28, "legacy_memory_ttl_backfill"))
         self.assertFalse(set(BOARD_TASK_ROUTING_COLUMNS) & backup_columns)
         self.assertEqual(backup_version, (2,))
         self.assertEqual(rerun_backup_mtime, backup_mtime)
@@ -322,7 +327,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
         self.assertTrue(set(AGENT_CLASS_AUDIT_COLUMNS) <= audit_columns)
         self.assertTrue(set(DECISION_COLUMNS) <= decision_columns)
         self.assertIn((4, "agent_lifecycle_contract"), ledger)
-        self.assertEqual(ledger[-1], (27, "remove_mind_maps"))
+        self.assertEqual(ledger[-1], (28, "legacy_memory_ttl_backfill"))
         self.assertFalse(set(AGENT_LIFECYCLE_COLUMNS) & backup_agent_columns)
         self.assertNotIn("agent_class_audit", backup_tables)
         self.assertNotIn("decisions", backup_tables)
@@ -358,7 +363,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
 
         self.assertTrue(set(AGENT_KIND_COLUMNS) <= columns)
         self.assertIn((7, "agent_kind_schema"), ledger)
-        self.assertEqual(ledger[-1], (27, "remove_mind_maps"))
+        self.assertEqual(ledger[-1], (28, "legacy_memory_ttl_backfill"))
 
     def test_version_twenty_five_owns_finalization_policy_columns(self):
         finalization_columns = (
@@ -396,7 +401,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
             ).fetchall()
 
         self.assertTrue(set(finalization_columns) <= columns)
-        self.assertEqual(ledger[-1], (27, "remove_mind_maps"))
+        self.assertEqual(ledger[-1], (28, "legacy_memory_ttl_backfill"))
 
     def test_version_twenty_six_owns_group_context_ttl_column(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -428,7 +433,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
             ).fetchall()
 
         self.assertTrue(set(GROUP_CONTEXT_TTL_COLUMNS) <= columns)
-        self.assertEqual(ledger[-1], (27, "remove_mind_maps"))
+        self.assertEqual(ledger[-1], (28, "legacy_memory_ttl_backfill"))
 
     def test_post_init_phase_waits_for_kinds_stage_four(self):
         conn = sqlite3.connect(":memory:")
@@ -464,7 +469,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
         self.assertEqual(before_meta, ("7",))
         self.assertFalse(skipped)
         self.assertTrue(finalized)
-        self.assertEqual(after[-1], (27, "remove_mind_maps"))
+        self.assertEqual(after[-1], (28, "legacy_memory_ttl_backfill"))
         self.assertEqual(after_meta, (SCHEMA_VERSION,))
 
     def test_post_init_runner_is_retryable_and_skipped_after_ledger(self):
@@ -767,6 +772,311 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(ledger, [(8,)])
         self.assertIsNone(table)
+
+    @staticmethod
+    def _memory_entry(entry_id, *, created_at, expires_at, pinned=False,
+                      retention_kind="durable"):
+        return {
+            "id": entry_id,
+            "project_key": "/synthetic",
+            "group_name": "g",
+            "scope_kind": "group",
+            "scope_ref": "g",
+            "entry_type": "decision",
+            "title": entry_id,
+            "content": "Synthetic migration fixture.",
+            "pinned": pinned,
+            "task_id": "",
+            "source_kind": "agent",
+            "source_id": "agent-1",
+            "source_name": "Worker",
+            "retention_kind": retention_kind,
+            "expires_at": expires_at,
+            "created_at": created_at,
+            "updated_at": created_at,
+        }
+
+    @staticmethod
+    def _make_legacy_memory_ttl_migration_pending(db):
+        """Reset only synthetic version-28 state to exercise the runner."""
+        db._conn.execute("DELETE FROM schema_migrations WHERE version=28")
+        db._conn.execute(
+            "UPDATE meta SET value='27' WHERE key='schema_version'"
+        )
+        db._conn.execute(
+            "DELETE FROM meta WHERE key='legacy_memory_ttl_backfill_version'"
+        )
+        db._conn.commit()
+
+    def test_legacy_memory_ttl_runner_is_ledgered_backed_up_and_runs_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "legacy-memory-ttl.db"
+            now = 2_000_000_000.0
+            initial = TorqueDB(path)
+            initial.init()
+            initial.save_memory_entry(self._memory_entry(
+                "older-than-60-days", created_at=now - 61 * 24 * 60 * 60,
+                expires_at=None,
+            ))
+            initial.save_memory_entry(self._memory_entry(
+                "45-days-old", created_at=now - 45 * 24 * 60 * 60,
+                expires_at=None,
+            ))
+            initial.save_memory_entry(self._memory_entry(
+                "pinned-formerly-durable", created_at=now - 20 * 24 * 60 * 60,
+                expires_at=None, pinned=True,
+            ))
+            fresh_expiry = now + 30 * 24 * 60 * 60
+            initial.save_memory_entry(self._memory_entry(
+                "fresh-already-stamped", created_at=now,
+                expires_at=fresh_expiry, retention_kind="ttl",
+            ))
+            initial.save_memory_link({
+                "entry_id": "older-than-60-days",
+                "target_kind": "task",
+                "target_ref": "TORQUE:synthetic",
+                "created_at": now,
+            })
+            self._make_legacy_memory_ttl_migration_pending(initial)
+            initial.close()
+
+            backup_path = path.with_name(
+                f"{path.name}.pre-schema-v{SCHEMA_VERSION}.bak"
+            )
+            backup_path.unlink(missing_ok=True)
+            migrated = TorqueDB(path)
+            self.addCleanup(migrated.close)
+            with mock.patch(
+                "torque.persistence.migrations.time.time", return_value=now
+            ), mock.patch(
+                "torque.db_memory.time.time", return_value=now
+            ), self.assertLogs("torque", level="INFO") as logs:
+                migrated.init()
+
+            report = next(
+                line for line in logs.output
+                if "legacy shared-memory TTL" in line
+            )
+            rows = migrated._conn.execute(
+                "SELECT id, retention_kind, expires_at FROM memory_entries "
+                "ORDER BY id"
+            ).fetchall()
+            ledger = migrated._conn.execute(
+                "SELECT name, checksum FROM schema_migrations WHERE version=28"
+            ).fetchone()
+            backup = sqlite3.connect(backup_path)
+            self.addCleanup(backup.close)
+            backup_version = backup.execute(
+                "SELECT MAX(version) FROM schema_migrations"
+            ).fetchone()
+            backup_expiry = backup.execute(
+                "SELECT expires_at FROM memory_entries "
+                "WHERE id='older-than-60-days'"
+            ).fetchone()
+            backup_exists = backup_path.exists()
+
+        migration = SCHEMA_MIGRATIONS[-1]
+        self.assertEqual(SCHEMA_VERSION, "28")
+        self.assertEqual(migration.version, 28)
+        self.assertEqual(migration.name, "legacy_memory_ttl_backfill")
+        self.assertTrue(migration.requires_runner)
+        self.assertEqual(ledger, (migration.name, migration.checksum))
+        self.assertTrue(backup_exists)
+        self.assertEqual(backup_version, (27,))
+        self.assertEqual(backup_expiry, (None,))
+        self.assertIn("before=4", report)
+        self.assertIn("stamped=3", report)
+        self.assertIn("already-stamped-and-skipped=1", report)
+        self.assertIn("expired-by-stamping=1", report)
+        # The post-init runner precedes the startup sweep: 4 before -> 3 after.
+        self.assertEqual([row[0] for row in rows], [
+            "45-days-old", "fresh-already-stamped", "pinned-formerly-durable",
+        ])
+        self.assertEqual(rows[0][1:], ("ttl", now + 15 * 24 * 60 * 60))
+        self.assertEqual(rows[1][2], fresh_expiry)
+        self.assertEqual(rows[2][1:], ("ttl", now + 40 * 24 * 60 * 60))
+        # Links use ON DELETE CASCADE, so the expired entry leaves no dangling row.
+        self.assertEqual(
+            migrated.load_memory_links(entry_id="older-than-60-days"), []
+        )
+
+        expiry_before_retry = migrated._conn.execute(
+            "SELECT id, expires_at FROM memory_entries ORDER BY id"
+        ).fetchall()
+        self._make_legacy_memory_ttl_migration_pending(migrated)
+        with mock.patch(
+            "torque.persistence.migrations.time.time", return_value=now
+        ):
+            retry_counts = migrated._migrate_legacy_memory_entries_to_ttl_if_needed()
+        expiry_after_retry = migrated._conn.execute(
+            "SELECT id, expires_at FROM memory_entries ORDER BY id"
+        ).fetchall()
+        self.assertEqual(retry_counts, {
+            "before": 3,
+            "stamped": 0,
+            "already_stamped_skipped": 3,
+            "expired_by_stamping": 0,
+        })
+        self.assertEqual(expiry_after_retry, expiry_before_retry)
+
+    def test_legacy_memory_ttl_runner_logs_already_stamped_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "already-stamped-memory.db"
+            now = 2_000_000_000.0
+            db = TorqueDB(path)
+            db.init()
+            db.save_memory_entry(self._memory_entry(
+                "fresh", created_at=now,
+                expires_at=now + 30 * 24 * 60 * 60, retention_kind="ttl",
+            ))
+            self._make_legacy_memory_ttl_migration_pending(db)
+            db.close()
+
+            migrated = TorqueDB(path)
+            self.addCleanup(migrated.close)
+            with mock.patch(
+                "torque.persistence.migrations.time.time", return_value=now
+            ), mock.patch(
+                "torque.db_memory.time.time", return_value=now
+            ), self.assertLogs("torque", level="INFO") as logs:
+                migrated.init()
+
+        report = next(
+            line for line in logs.output
+            if "legacy shared-memory TTL" in line
+        )
+        self.assertIn("before=1", report)
+        self.assertIn("stamped=0", report)
+        self.assertIn("already-stamped-and-skipped=1", report)
+        self.assertIn("expired-by-stamping=0", report)
+
+    def test_legacy_memory_ttl_runner_logs_benign_empty_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "empty-memory.db"
+            db = TorqueDB(path)
+            db.init()
+            self._make_legacy_memory_ttl_migration_pending(db)
+            db.close()
+
+            migrated = TorqueDB(path)
+            self.addCleanup(migrated.close)
+            with self.assertLogs("torque", level="INFO") as logs:
+                migrated.init()
+
+        report = next(
+            line for line in logs.output
+            if "legacy shared-memory TTL" in line
+        )
+        self.assertIn("before=0", report)
+        self.assertIn("stamped=0", report)
+        self.assertIn("already-stamped-and-skipped=0", report)
+        self.assertIn("expired-by-stamping=0", report)
+
+    def test_legacy_memory_ttl_runner_failure_during_stamp_rolls_back(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = TorqueDB(Path(tmp) / "rollback-during-stamp.db")
+            self.addCleanup(db.close)
+            db.init()
+            db.save_memory_entry(self._memory_entry(
+                "legacy", created_at=1.0, expires_at=None,
+            ))
+            self._make_legacy_memory_ttl_migration_pending(db)
+
+            def failing_stamp():
+                db._conn.execute(
+                    "UPDATE memory_entries SET expires_at=999 WHERE id='legacy'"
+                )
+                raise RuntimeError("injected stamp failure")
+
+            with mock.patch.object(db, "_stamp_legacy_memory_entries_to_ttl",
+                                   side_effect=failing_stamp):
+                with self.assertRaisesRegex(RuntimeError, "injected stamp"):
+                    finalize_database_migrations(
+                        db._conn,
+                        db.backfill_agent_history,
+                        post_init_runners=db._post_init_migration_runners(),
+                    )
+
+            expiry = db._conn.execute(
+                "SELECT expires_at FROM memory_entries WHERE id='legacy'"
+            ).fetchone()
+            gate = db._conn.execute(
+                "SELECT value FROM meta WHERE key='legacy_memory_ttl_backfill_version'"
+            ).fetchone()
+            ledger = db._conn.execute(
+                "SELECT version FROM schema_migrations WHERE version=28"
+            ).fetchone()
+
+        self.assertEqual(expiry, (None,))
+        self.assertIsNone(gate)
+        self.assertIsNone(ledger)
+
+    def test_legacy_memory_ttl_runner_failure_after_stamp_rolls_back_atomically(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = TorqueDB(Path(tmp) / "rollback-after-stamp.db")
+            self.addCleanup(db.close)
+            db.init()
+            db.save_memory_entry(self._memory_entry(
+                "legacy", created_at=1.0, expires_at=None,
+            ))
+            self._make_legacy_memory_ttl_migration_pending(db)
+            db._conn.execute("""
+                CREATE TRIGGER fail_ttl_ledger
+                BEFORE INSERT ON schema_migrations
+                WHEN NEW.version=28
+                BEGIN
+                    SELECT RAISE(ABORT, 'injected ledger failure');
+                END
+            """)
+            db._conn.commit()
+
+            with self.assertRaisesRegex(sqlite3.IntegrityError, "injected ledger"):
+                finalize_database_migrations(
+                    db._conn,
+                    db.backfill_agent_history,
+                    post_init_runners=db._post_init_migration_runners(),
+                )
+
+            expiry = db._conn.execute(
+                "SELECT expires_at FROM memory_entries WHERE id='legacy'"
+            ).fetchone()
+            gate = db._conn.execute(
+                "SELECT value FROM meta WHERE key='legacy_memory_ttl_backfill_version'"
+            ).fetchone()
+            ledger = db._conn.execute(
+                "SELECT version FROM schema_migrations WHERE version=28"
+            ).fetchone()
+            self.assertEqual(expiry, (None,))
+            self.assertIsNone(gate)
+            self.assertIsNone(ledger)
+
+            # With no stranded body gate, a retry can ledger the migration.
+            db._conn.execute("DROP TRIGGER fail_ttl_ledger")
+            db._conn.commit()
+            self.assertTrue(finalize_database_migrations(
+                db._conn,
+                db.backfill_agent_history,
+                post_init_runners=db._post_init_migration_runners(),
+            ))
+            retry_ledger = db._conn.execute(
+                "SELECT version FROM schema_migrations WHERE version=28"
+            ).fetchone()
+
+        self.assertEqual(retry_ledger, (28,))
+
+    def test_legacy_memory_ttl_has_one_ledgered_invocation_path(self):
+        import inspect
+
+        init_source = inspect.getsource(TorqueDB.init)
+        runners_source = inspect.getsource(TorqueDB._post_init_migration_runners)
+        self.assertNotIn(
+            "self._migrate_legacy_memory_entries_to_ttl_if_needed()",
+            init_source,
+        )
+        self.assertEqual(
+            runners_source.count("_migrate_legacy_memory_entries_to_ttl_if_needed("),
+            1,
+        )
 
     def test_atomic_backup_failure_leaves_source_and_destination_untouched(self):
         with tempfile.TemporaryDirectory() as tmp:

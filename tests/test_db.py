@@ -4336,7 +4336,7 @@ class TorqueDBTests(unittest.TestCase):
         restarted.init()
         self.assertIsNone(restarted.load_memory_entry("expired-on-start"))
 
-    def test_init_upgrades_legacy_memory_entries_before_retention_indexes(self):
+    def test_init_stamps_then_purges_expired_legacy_memory_entries(self):
         legacy_path = Path(self.tmp.name) / "legacy-memory.db"
         conn = sqlite3.connect(str(legacy_path))
         conn.executescript("""
@@ -4375,9 +4375,9 @@ class TorqueDBTests(unittest.TestCase):
 
         upgraded.init()
 
-        entry = upgraded.load_memory_entry("mem-1")
-        self.assertIsNotNone(entry)
-        self.assertEqual(entry["retention_kind"], "ttl")
+        # The registered 60-day backfill precedes startup purge; this ancient
+        # synthetic legacy row is intentionally deleted.
+        self.assertIsNone(upgraded.load_memory_entry("mem-1"))
         cols = upgraded._conn.execute(
             "PRAGMA table_info(memory_entries)"
         ).fetchall()

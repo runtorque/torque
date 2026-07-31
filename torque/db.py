@@ -623,6 +623,9 @@ class TorqueDB(
             10: lambda: self.migrate_task_ids_if_needed(
                 manage_transaction=False
             ),
+            28: lambda: self._migrate_legacy_memory_entries_to_ttl_if_needed(
+                manage_transaction=False
+            ),
         }
 
     def init(self):
@@ -637,8 +640,8 @@ class TorqueDB(
             self.backfill_agent_history,
             post_init_runners=self._post_init_migration_runners(),
         )
-        # Migrations (including the separate legacy-memory stamping migration)
-        # must run before this sweep so NULL legacy rows remain available to it.
+        # The ledgered legacy-memory runner above must precede this sweep so
+        # NULL legacy rows are available for its 60-day stamp.
         self.purge_expired_memory_entries()
 
     def close(self):

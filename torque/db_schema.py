@@ -15,7 +15,7 @@ import json
 import sqlite3
 from typing import Callable, Iterable
 
-SCHEMA_VERSION = "27"
+SCHEMA_VERSION = "28"
 
 
 @dataclass(frozen=True)
@@ -2838,6 +2838,14 @@ def _migration_0027_remove_mind_maps(
     ):
         conn.execute(f"DROP TABLE IF EXISTS {table}")
 
+
+def _migration_0028_legacy_memory_ttl_backfill(
+    _conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Ledger the runner-owned legacy Shared Context TTL backfill."""
+
+
 def _migration_0025_finalization_policy_contract(
     conn: sqlite3.Connection,
     _backfill_agent_history,
@@ -3231,6 +3239,14 @@ SCHEMA_MIGRATIONS = (
         "remove-mind-maps-v1",
         _migration_0027_remove_mind_maps,
         phase="post_init",
+    ),
+    SchemaMigration(
+        28,
+        "legacy_memory_ttl_backfill",
+        "legacy-shared-memory-ttl-backfill-v1",
+        _migration_0028_legacy_memory_ttl_backfill,
+        phase="post_init",
+        requires_runner=True,
     ),
 )
 

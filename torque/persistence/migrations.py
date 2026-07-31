@@ -6,6 +6,7 @@ import os
 import re
 import sqlite3
 import sys
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -73,6 +74,12 @@ _KINDS_ENGINEER_OVERRIDE_ENV = "TORQUE_MIGRATE_ENGINEER_ID"
 _KINDS_ENGINEER_GROUP = "torque"
 
 _KINDS_ENGINEER_NAME = "Engineer"
+
+# This runner-backed one-time migration gives pre-TTL Shared Context rows the
+# policy maximum. New rows already carry the per-group TTL lifecycle value.
+_LEGACY_MEMORY_TTL_SECONDS = 60 * 24 * 60 * 60
+_LEGACY_MEMORY_TTL_MIGRATION_KEY = "legacy_memory_ttl_backfill_version"
+_LEGACY_MEMORY_TTL_MIGRATION_VERSION = "1"
 
 def _quote_ident(name: str) -> str:
     return '"' + str(name).replace('"', '""') + '"'
@@ -171,6 +178,77 @@ class MigrationPersistenceMixin:
             return int(raw or 0)
         except (TypeError, ValueError):
             return 0
+
+    def _migrate_legacy_memory_entries_to_ttl_if_needed(
+        self,
+        *,
+        manage_transaction: bool = True,
+    ) -> dict[str, int] | None:
+        """Stamp legacy Shared Context rows within the caller's transaction."""
+        if self._read_meta_value(_LEGACY_MEMORY_TTL_MIGRATION_KEY):
+            return None
+        try:
+            if manage_transaction:
+                self._conn.execute("BEGIN")
+            counts = self._stamp_legacy_memory_entries_to_ttl()
+            self._conn.execute(
+                "INSERT INTO meta(key, value) VALUES (?, ?)",
+                (
+                    _LEGACY_MEMORY_TTL_MIGRATION_KEY,
+                    _LEGACY_MEMORY_TTL_MIGRATION_VERSION,
+                ),
+            )
+            if manage_transaction:
+                self._conn.commit()
+        except Exception:
+            if manage_transaction:
+                self._conn.rollback()
+            raise
+        return counts
+
+    def _stamp_legacy_memory_entries_to_ttl(self) -> dict[str, int]:
+        """Stamp NULL legacy expiries exactly once with the 60-day maximum."""
+        now = float(time.time())
+        before = int((self._conn.execute(
+            "SELECT COUNT(*) FROM memory_entries"
+        ).fetchone() or (0,))[0] or 0)
+        stamped = int((self._conn.execute(
+            "SELECT COUNT(*) FROM memory_entries WHERE expires_at IS NULL"
+        ).fetchone() or (0,))[0] or 0)
+        expired_by_stamping = int((self._conn.execute(
+            "SELECT COUNT(*) FROM memory_entries "
+            "WHERE expires_at IS NULL AND created_at + ? <= ?",
+            (_LEGACY_MEMORY_TTL_SECONDS, now),
+        ).fetchone() or (0,))[0] or 0)
+
+        # The NULL predicate is the idempotency guarantee. It must remain in
+        # the write itself rather than relying only on the ledger/meta gates.
+        self._conn.execute(
+            "UPDATE memory_entries "
+            "SET expires_at=created_at + ?, retention_kind='ttl' "
+            "WHERE expires_at IS NULL",
+            (_LEGACY_MEMORY_TTL_SECONDS,),
+        )
+        # 1476 retains this deprecated compatibility field as ``ttl``.
+        self._conn.execute(
+            "UPDATE memory_entries SET retention_kind='ttl' "
+            "WHERE COALESCE(retention_kind, '') != 'ttl'"
+        )
+
+        counts = {
+            "before": before,
+            "stamped": stamped,
+            "already_stamped_skipped": before - stamped,
+            "expired_by_stamping": expired_by_stamping,
+        }
+        log.info(
+            "migration: legacy shared-memory TTL "
+            "before=%(before)d stamped=%(stamped)d "
+            "already-stamped-and-skipped=%(already_stamped_skipped)d "
+            "expired-by-stamping=%(expired_by_stamping)d",
+            counts,
+        )
+        return counts
 
     def _maybe_backup_pre_kinds_db(self):
         if not self.db_path.exists():
