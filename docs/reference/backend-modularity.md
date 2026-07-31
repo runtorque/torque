@@ -9,16 +9,66 @@ composition roots, not default homes for new behavior.
 | Module | Maximum lines | Direct-ownership rule |
 | --- | ---: | --- |
 | `torque/server.py` | 6,000 | Transport/bootstrap composition; `handle_command` stays at or below 450 lines. |
-| `torque/state.py` | 5,000 | Shared state contracts and `MatrixState` composition; direct methods may not increase beyond the audited baseline. |
-| `torque/db.py` | 2,500 | `TorqueDB` connection/core persistence facade; domain methods belong in persistence mixins. |
+| `torque/state.py` | 5,000 | Shared state contracts and `MatrixState` composition; `MatrixState` has at most 103 direct methods. |
+| `torque/db.py` | 2,500 | `TorqueDB` connection/core persistence facade; it has at most 50 direct methods and domain methods belong in persistence mixins. |
 | `torque/mcp_tools_shared.py` | 2,500 | Authentication/scoped-dispatch composition only. |
-| `torque/worktree.py` | 2,500 | `WorktreeManager` composition plus initialization only. |
-| `torque/db_schema.py` | 3,750 | Declarative DDL inventory and ordered migration ledger. |
+| `torque/worktree.py` | 2,500 | `WorktreeManager` is a structural composition facade: its only direct method is `__init__`. |
+| `torque/db_schema.py` | 3,800 | Declarative DDL inventory and ordered migration ledger. |
 | `torque/doctor.py` | 2,600 | Read-only diagnostic collection and text rendering. |
+| `torque/mcp.py` | 2,600 | Reviewed post-authorization/pre-write validation seam in the transport composition root. |
 
 All other backend Python modules must stay at or below 2,500 lines unless an
 architecture review adds a documented structural exception and a tighter
 file-specific budget.
+
+## Headroom reporting and budget policy
+
+The modularity guard reports its current, explicitly reviewed margins on every
+green `tests.test_backend_modularity` run: the three direct-facade method
+budgets and the five file-specific line budgets above.  The report uses
+`actual/limit (headroom N)`, so a green `103/103` is visibly different from a
+green `30/103`.  This is reporting, not a new failure mode; one concise line
+keeps regular test output actionable without making a green suite appear red.
+
+The merge preflight keeps its crossing-only blocking predicate.  Its successful
+result now includes `headroom` for each changed backend file, with both the
+target-base and candidate margins, plus a non-blocking `warnings` entry when
+the candidate has 0--10 lines remaining.  The author-runnable command prints
+that data as JSON:
+
+```bash
+python3 -m torque.backend_invariants \
+  --repo . --base-ref <current-target-ref> --candidate-ref <candidate-ref>
+```
+
+This answers five policy questions deliberately:
+
+1. **Proximity is reported, not inferred from a verdict.**  The green test
+   report covers all eight reviewed quantities; the merge preflight covers
+   each changed candidate file against its target.
+2. **Slack is not a silently raised limit.**  Limits remain architectural caps.
+   Headroom is an observable margin, and zero is a visible signal to extract
+   responsibility rather than padding a number.  Changing a limit requires a
+   separate architecture decision, rationale, documentation, and review; this
+   guard does not create such a bypass.
+3. **`WorktreeManager` at 1/1 is structural, not capacity planning.**  It
+   defends a facade that constructs and composes domain mixins only.  Direct
+   worktree behavior belongs to exactly one `worktree_manager/` mixin.
+4. **Legitimate facade growth has a non-`force` path.**  Put the behavior in
+   the existing or a new focused mixin/service and compose it into the facade.
+   If the public contract truly requires changing the facade boundary itself,
+   propose a separately reviewed architectural boundary change with its tests
+   and documentation before implementation.  Do not edit around the guard or
+   force a merge.
+5. **Concurrent work uses the current target as the source of truth.**  Before
+   handoff/merge, run the command above (or let the mandatory preflight run)
+   against the current target tip; it exposes target and candidate margins and
+   blocks a newly crossed limit.  Git has no authoritative record of an
+   unmerged sibling's intended future line count, so this change deliberately
+   does not invent a reservation system.  A future worktree-stream surface can
+   compare every live candidate to the current target using this returned
+   headroom data; until then, target refresh/rebase plus the documented command
+   is the supported coordination path.
 
 ## Responsibility splits
 

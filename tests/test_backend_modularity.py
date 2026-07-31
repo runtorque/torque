@@ -14,8 +14,11 @@ import unittest
 from tests.helpers import install_aiohttp_stub
 from torque.backend_invariants import (
     BACKEND_LINE_LIMITS,
+    COMPATIBILITY_FACADE_METHOD_LIMITS,
     DEFAULT_BACKEND_LINE_LIMIT,
+    backend_modularity_headroom,
     check_backend_modularity_crossings,
+    format_backend_modularity_headroom,
 )
 from torque.worktree import WorktreeManager
 from torque.worktree_manager.changes import ChangesMixin
@@ -57,6 +60,11 @@ class BackendSizeGuardrailTests(unittest.TestCase):
         return ast.parse(path.read_text(), filename=str(path))
 
     def test_composition_facades_stay_below_explicit_budgets(self):
+        print(
+            format_backend_modularity_headroom(
+                backend_modularity_headroom(REPO_ROOT)
+            )
+        )
         self.assertEqual(DEFAULT_BACKEND_LINE_LIMIT, 2500)
         budgets = {
             "torque/server.py": 6000,
@@ -94,6 +102,31 @@ class BackendSizeGuardrailTests(unittest.TestCase):
                     f"{relative_path} grew to {line_count} lines; move domain "
                     "behavior behind its existing composition boundary",
                 )
+
+    def test_green_guard_reports_current_headroom(self):
+        measurements = backend_modularity_headroom(REPO_ROOT)
+        report = format_backend_modularity_headroom(measurements)
+
+        self.assertEqual(len(measurements), 8)
+        self.assertEqual(
+            [
+                (item["kind"], item["path"], item.get("subject"))
+                for item in measurements
+            ],
+            [
+                ("method", "torque/state.py", "MatrixState"),
+                ("method", "torque/db.py", "TorqueDB"),
+                ("method", "torque/worktree.py", "WorktreeManager"),
+                ("line", "torque/server.py", None),
+                ("line", "torque/state.py", None),
+                ("line", "torque/db_schema.py", None),
+                ("line", "torque/doctor.py", None),
+                ("line", "torque/mcp.py", None),
+            ],
+        )
+        self.assertIn("method torque/state.py:MatrixState", report)
+        self.assertIn("line torque/mcp.py", report)
+        self.assertEqual(report.count("headroom "), 8)
 
     def test_no_unreviewed_backend_file_exceeds_2500_lines(self):
         violations = []
@@ -211,12 +244,17 @@ class BackendSizeGuardrailTests(unittest.TestCase):
         )
 
     def test_compatibility_facades_have_bounded_direct_ownership(self):
-        class_budgets = {
-            ("torque/state.py", "MatrixState"): 103,
-            ("torque/db.py", "TorqueDB"): 50,
-            ("torque/worktree.py", "WorktreeManager"): 1,
-        }
-        for (relative_path, class_name), maximum in class_budgets.items():
+        self.assertEqual(
+            COMPATIBILITY_FACADE_METHOD_LIMITS,
+            {
+                ("torque/state.py", "MatrixState"): 103,
+                ("torque/db.py", "TorqueDB"): 50,
+                ("torque/worktree.py", "WorktreeManager"): 1,
+            },
+        )
+        for (relative_path, class_name), maximum in (
+            COMPATIBILITY_FACADE_METHOD_LIMITS.items()
+        ):
             tree = self._module_tree(relative_path)
             class_node = next(
                 node
@@ -465,6 +503,31 @@ class BackendInvariantCrossingTests(unittest.TestCase):
                 "candidate_lines": DEFAULT_BACKEND_LINE_LIMIT + 1,
             }],
         )
+
+    def test_reports_nonblocking_headroom_warning_before_a_crossing(self):
+        near_limit = self._commit_lines(
+            DEFAULT_BACKEND_LINE_LIMIT - 6,
+            "leave visible headroom",
+        )
+
+        result = check_backend_modularity_crossings(
+            self.repo,
+            self.base,
+            near_limit,
+        )
+
+        expected = {
+            "path": "torque/sample.py",
+            "limit": DEFAULT_BACKEND_LINE_LIMIT,
+            "base_lines": DEFAULT_BACKEND_LINE_LIMIT,
+            "candidate_lines": DEFAULT_BACKEND_LINE_LIMIT - 6,
+            "base_headroom": 0,
+            "candidate_headroom": 6,
+        }
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["crossings"], [])
+        self.assertEqual(result["headroom"], [expected])
+        self.assertEqual(result["warnings"], [expected])
 
     def test_candidate_cannot_disable_gate_by_deleting_marker(self):
         (self.repo / "tests" / "test_backend_modularity.py").unlink()
