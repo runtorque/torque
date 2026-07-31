@@ -456,6 +456,15 @@ function taskScheduledInput(input) {
   taskPersistDraft();
 }
 
+function taskScheduledInputFocus(input) {
+  var field = input && input.closest ? input.closest('.task-schedule-field') : null;
+  if (field) field.classList.remove('is-unset');
+}
+
+function taskScheduledInputBlur(input) {
+  _taskSetScheduledInputPresentation(input);
+}
+
 function _taskVerificationSummaryFromDom() {
   var testsEl = document.getElementById('task-verification-tests-input');
   var smokeEl = document.getElementById('task-verification-smoke-input');

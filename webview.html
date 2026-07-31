@@ -1969,6 +1969,8 @@
       <input type="datetime-local" id="task-scheduled-input"
              aria-describedby="task-schedule-hint"
              oninput="taskScheduledInput(this)"
+             onfocus="taskScheduledInputFocus(this)"
+             onblur="taskScheduledInputBlur(this)"
              onkeydown="if(event.key==='Escape')closeModals();">
       <span class="task-schedule-placeholder" aria-hidden="true">Not scheduled — dispatch manually</span>
     </div>

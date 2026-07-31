@@ -25749,6 +25749,23 @@ test('task schedule exposes a non-numeric placeholder when no dispatch is schedu
   assert.doesNotMatch('Not scheduled — dispatch manually', /\d/);
 });
 
+test('task schedule reveals an unset native editor while focused and restores its placeholder on blur', () => {
+  const { context, document } = createModalHarness();
+  const scheduleField = document.register('task-schedule-field');
+  scheduleField.classList.add('task-schedule-field');
+  const scheduledInput = document.register('task-scheduled-input');
+  scheduleField.appendChild(scheduledInput);
+
+  context._taskSetScheduledInputPresentation(scheduledInput);
+  assert.equal(scheduleField.classList.contains('is-unset'), true);
+
+  context.taskScheduledInputFocus(scheduledInput);
+  assert.equal(scheduleField.classList.contains('is-unset'), false);
+
+  context.taskScheduledInputBlur(scheduledInput);
+  assert.equal(scheduleField.classList.contains('is-unset'), true);
+});
+
 test('openEditTask resets task modal body scroll to the top', () => {
   const { context, document } = createModalHarness();
 
