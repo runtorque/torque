@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from .state import (
-    AgentMessageLoop, Optional, Schedule, _slugify, _unique_slug, asdict,
+    AgentMessageLoop, Optional, Schedule, _ENGINEER_STREAM_CARD_LIMIT,
+    _ENGINEER_STREAM_CONTEXT_LIMIT, _slugify, _unique_slug, asdict, copy,
     asyncio, cloud_hooks, datetime, hot_json_dumps, hot_json_dumps_async,
     log, profiling, time, timezone, uuid, web,
 )
@@ -321,6 +322,116 @@ class StateRuntimeMixin:
                 self._discard_ws_clients_locked(dead)
         if engineer_groups:
             self._schedule_engineer_recompute(engineer_groups)
+
+    def _engineer_stream_counts(self, streams: list[dict]) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for stream in streams:
+            state_name = str(stream.get("state", "") or "").strip()
+            if not state_name:
+                continue
+            counts[state_name] = counts.get(state_name, 0) + 1
+        return counts
+
+    def _engineer_stream_payload(self, group: str, *, source=None) -> dict:
+        from .worktree_streams import compute_worktree_streams
+
+        source = source or self
+        try:
+            streams = compute_worktree_streams(
+                source,
+                group=group,
+                visibility_limit=_ENGINEER_STREAM_CONTEXT_LIMIT,
+                include_orphaned=False,
+            )
+        except Exception:
+            log.exception("Failed to compute engineer streams for %s", group)
+            streams = []
+        streams = [
+            stream for stream in streams
+            if str(stream.get("state", "") or "").strip() != "merged"
+        ]
+        return {
+            "count": len(streams),
+            "by_state": self._engineer_stream_counts(streams),
+            "items": streams[:_ENGINEER_STREAM_CARD_LIMIT],
+            "truncated": len(streams) > _ENGINEER_STREAM_CARD_LIMIT,
+        }
+
+    def _engineer_stream_compute_snapshot(self):
+        """Clone every mutable task/cell input used by stream synthesis.
+
+        The threaded computation must not traverse live ``BoardTask`` or
+        ``AgentCell`` instances. A fresh MatrixState retains the exact query
+        helpers used by ``compute_worktree_streams`` while this projection
+        replaces its mutable inputs with deep copies.
+        """
+        snapshot = type(self)()
+        snapshot.board_tasks = copy.deepcopy(self.board_tasks)
+        snapshot.agents = copy.deepcopy(self.agents)
+        snapshot.groups = copy.deepcopy(self.groups)
+        snapshot.group_settings = copy.deepcopy(self.group_settings)
+        snapshot.engineer_settings = copy.deepcopy(self.engineer_settings)
+        snapshot._tasks_by_group.clear()
+        for task in snapshot.board_tasks.values():
+            snapshot._tasks_by_group.setdefault(task.group, set()).add(task.id)
+        return snapshot
+
+    def _compute_engineer_stream_payloads(
+        self, groups: set[str], *, source=None,
+    ) -> list[tuple[str, dict]]:
+        """Build stream payloads without mutating the delta accumulator.
+
+        The deferred runtime invokes this CPU-only half in a worker thread;
+        keeping emission separate makes `_delta_ops` ownership remain with the
+        event loop. The synchronous wrapper above preserves existing callers.
+        """
+        if not groups:
+            return []
+        source = source or self
+        known_groups = set(source._engineer_stream_groups())
+        payloads: list[tuple[str, dict]] = []
+        for group in groups:
+            if not group:
+                continue
+            if group not in known_groups:
+                payloads.append((group, {
+                    "count": 0,
+                    "by_state": {},
+                    "items": [],
+                    "truncated": False,
+                }))
+                continue
+            try:
+                payload = self._engineer_stream_payload(group, source=source)
+            except Exception:
+                log.exception(
+                    "engineer stream payload failed for group '%s'", group
+                )
+                continue
+            payloads.append((group, payload))
+        return payloads
+
+    def _emit_engineer_stream_payloads(
+        self, payloads: list[tuple[str, dict]],
+    ) -> bool:
+        """Append precomputed payloads without duplicating an open delta."""
+        if not payloads:
+            return False
+        existing_groups = {
+            str((op or {}).get("group", "") or "").strip()
+            for op in self._delta_ops
+            if str((op or {}).get("op", "") or "") in {
+                "engineer_streams",
+                "engineer_streams_update",
+            }
+        }
+        emitted = False
+        for group, payload in payloads:
+            if not group or group in existing_groups:
+                continue
+            self._emit("engineer_streams", group=group, streams=payload)
+            emitted = True
+        return emitted
 
     def _schedule_engineer_recompute(self, groups: set[str]) -> None:
         """Queue a deferred engineer-stream recompute for ``groups``.
