@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 from pathlib import Path
 import subprocess
@@ -10,6 +11,7 @@ from typing import Sequence
 
 
 DEFAULT_BACKEND_LINE_LIMIT = 2500
+HEADROOM_WARNING_THRESHOLD = 10
 BACKEND_LINE_LIMITS = {
     "torque/server.py": 6000,
     "torque/state.py": 5000,
@@ -20,6 +22,15 @@ BACKEND_LINE_LIMITS = {
     # setup. Moving it outward would couple JSON-RPC/wake/idempotency response
     # concerns to authorization or change the rejection boundary.
     "torque/mcp.py": 2600,
+}
+
+# These facades preserve long-lived import contracts, but direct behavior
+# belongs in their domain mixins/services.  WorktreeManager is deliberately a
+# structural exception: its sole direct method is construction.
+COMPATIBILITY_FACADE_METHOD_LIMITS = {
+    ("torque/state.py", "MatrixState"): 103,
+    ("torque/db.py", "TorqueDB"): 50,
+    ("torque/worktree.py", "WorktreeManager"): 1,
 }
 
 
@@ -33,6 +44,56 @@ def backend_file_line_limit(relative_path: str) -> int | None:
     if not relative_path.startswith("torque/") or not relative_path.endswith(".py"):
         return None
     return BACKEND_LINE_LIMITS.get(relative_path, DEFAULT_BACKEND_LINE_LIMIT)
+
+
+def backend_modularity_headroom(repo_root: str | Path) -> list[dict]:
+    """Return the current margin for the explicitly reviewed guard budgets."""
+    root = Path(repo_root).expanduser().resolve()
+    measurements = []
+    for (relative_path, class_name), limit in (
+        COMPATIBILITY_FACADE_METHOD_LIMITS.items()
+    ):
+        path = root / relative_path
+        tree = ast.parse(path.read_text(), filename=str(path))
+        class_node = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == class_name
+        )
+        actual = sum(
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            for node in class_node.body
+        )
+        measurements.append({
+            "kind": "method",
+            "path": relative_path,
+            "subject": class_name,
+            "actual": actual,
+            "limit": limit,
+            "headroom": limit - actual,
+        })
+    for relative_path, limit in BACKEND_LINE_LIMITS.items():
+        actual = len((root / relative_path).read_text().splitlines())
+        measurements.append({
+            "kind": "line",
+            "path": relative_path,
+            "actual": actual,
+            "limit": limit,
+            "headroom": limit - actual,
+        })
+    return measurements
+
+
+def format_backend_modularity_headroom(measurements: Sequence[dict]) -> str:
+    """Format a compact report that keeps green-run budget margins visible."""
+    details = []
+    for item in measurements:
+        subject = f":{item['subject']}" if item["kind"] == "method" else ""
+        details.append(
+            f"{item['kind']} {item['path']}{subject} "
+            f"{item['actual']}/{item['limit']} (headroom {item['headroom']})"
+        )
+    return "Backend modularity headroom: " + "; ".join(details)
 
 
 def _git(repo_root: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -107,6 +168,8 @@ def check_backend_modularity_crossings(
             "candidate_ref": candidate_ref,
             "checked_files": [],
             "crossings": [],
+            "headroom": [],
+            "warnings": [],
         }
 
     changed = _git(
@@ -125,6 +188,8 @@ def check_backend_modularity_crossings(
         if backend_file_line_limit(path) is not None
     })
     crossings = []
+    headroom = []
+    warnings = []
     for relative_path in checked_files:
         limit = backend_file_line_limit(relative_path)
         base_lines = _revision_file_line_count(root, base_ref, relative_path)
@@ -133,6 +198,17 @@ def check_backend_modularity_crossings(
             candidate_ref,
             relative_path,
         )
+        measurement = {
+            "path": relative_path,
+            "limit": limit,
+            "base_lines": base_lines,
+            "candidate_lines": candidate_lines,
+            "base_headroom": limit - base_lines,
+            "candidate_headroom": limit - candidate_lines,
+        }
+        headroom.append(measurement)
+        if 0 <= measurement["candidate_headroom"] <= HEADROOM_WARNING_THRESHOLD:
+            warnings.append(measurement)
         if base_lines <= limit < candidate_lines:
             crossings.append({
                 "path": relative_path,
@@ -148,6 +224,10 @@ def check_backend_modularity_crossings(
         "candidate_ref": candidate_ref,
         "checked_files": checked_files,
         "crossings": crossings,
+        # Green candidates remain green.  The warning payload makes a nearly
+        # exhausted margin visible to the caller before it becomes a crossing.
+        "headroom": headroom,
+        "warnings": warnings,
     }
 
 
