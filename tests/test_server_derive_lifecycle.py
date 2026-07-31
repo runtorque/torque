@@ -881,6 +881,9 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
             "action": "derive",
             "action_name": "feature/review",
             "message": "Review the fixes",
+            "description": (
+                "Hard requirement: use a reviewer distinct from review-1."
+            ),
         })
 
         self.assertEqual(result["type"], "ok")
@@ -892,6 +895,7 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reuse["kind"], "prior_reviewer_reuse")
         self.assertEqual(reuse["reviewer_id"], reviewer.id)
         self.assertEqual(reuse["prior_review_task_ids"], ["task-review"])
+        self.assertEqual(reuse["selection_source"], "automatic_chain_reuse")
 
         review_task = state.board_tasks[result["task_id"]]
         self.assertEqual(
@@ -1000,6 +1004,13 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
             parent_task_id=fix.id,
             pipeline_root_id="task-root",
         )
+        review.completion_evidence = {
+            "reviewer_assignment": {
+                "kind": "prior_reviewer_reuse",
+                "reviewer_id": reviewer.id,
+                "prior_review_task_ids": ["task-review"],
+            },
+        }
         sent_prompts = []
 
         def record_task_dispatch(cell, task, lane):
@@ -1038,6 +1049,10 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reviewer.worktree_path, implementer.worktree_path)
         self.assertEqual(reviewer.worktree_branch, implementer.worktree_branch)
         self.assertEqual(sent_prompts[0][0], reviewer.id)
+        self.assertIn("Reviewer assignment disclosure", sent_prompts[0][1])
+        self.assertIn(reviewer.id, sent_prompts[0][1])
+        self.assertIn("task-review", sent_prompts[0][1])
+        self.assertIn("not a fresh independent reviewer", sent_prompts[0][1])
 
     async def test_feature_review_derive_refuses_stale_base_before_dispatch(self):
         state = self._make_state()
@@ -1132,6 +1147,7 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["agent_id"], explicit.id)
         self.assertEqual(calls[0]["agent_id"], explicit.id)
         self.assertNotEqual(calls[0]["agent_id"], reviewer.id)
+        self.assertNotIn("reviewer_reuse", result)
 
     async def test_first_feature_review_derive_creates_new_agent(self):
         state = self._make_state()
@@ -1169,6 +1185,7 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(result["agent_id"], implementer.id)
         self.assertTrue(calls[0]["create_agent"])
         self.assertNotIn("agent_id", calls[0])
+        self.assertNotIn("reviewer_reuse", result)
         summary = state.engineer_dispatch_shape_summary(engineer.id)
         self.assertEqual(summary["total"], 0)
         self.assertEqual(summary["derives_by_shape"]["serial"], 1)

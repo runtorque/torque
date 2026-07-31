@@ -67,6 +67,7 @@ class TaskDispatchRuntime:
     is_architect_execution_target: Any
     normalize_default_worker_concurrency: Any
     prepend_agent_identity_anchor: Any
+    reviewer_assignment_disclosure: Any
     state: Any
     task_counts_as_done: Any
     template_mgr: Any
@@ -115,6 +116,7 @@ async def handle_dispatch_task_command(
     is_architect_execution_target = runtime.is_architect_execution_target
     normalize_default_worker_concurrency = runtime.normalize_default_worker_concurrency
     prepend_agent_identity_anchor = runtime.prepend_agent_identity_anchor
+    reviewer_assignment_disclosure = runtime.reviewer_assignment_disclosure
     state = runtime.state
     task_counts_as_done = runtime.task_counts_as_done
     template_mgr = runtime.template_mgr
@@ -623,6 +625,7 @@ async def handle_dispatch_task_command(
                         prompt = task.task
 
                     if prompt:
+                        prompt += reviewer_assignment_disclosure(task)
                         upstream_artifacts = (
                             torque_ctx["task"]["upstream_artifacts"]
                         )

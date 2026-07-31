@@ -719,6 +719,7 @@ from .server_prompts import (
     build_torque_system_prompt,
     compute_commit_hint,
     deliverable_word,
+    reviewer_assignment_disclosure,
 )
 from .engineer_session_map import build_engineer_session_map
 from .codex_usage_backfill import (
@@ -3149,6 +3150,7 @@ def _build_task_dispatch_runtime(
         is_architect_execution_target=is_architect_execution_target,
         normalize_default_worker_concurrency=normalize_default_worker_concurrency,
         prepend_agent_identity_anchor=prepend_agent_identity_anchor,
+        reviewer_assignment_disclosure=reviewer_assignment_disclosure,
         state=state,
         task_counts_as_done=task_counts_as_done,
         template_mgr=template_mgr,

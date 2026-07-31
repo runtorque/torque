@@ -5156,6 +5156,16 @@ def cmd_ai_derive(args):
     print(f"Derived task {new_tid}{act}")
     if new_aid:
         print(f"  Agent: {new_aid}")
+    reviewer_reuse = data.get("reviewer_reuse") or {}
+    if reviewer_reuse.get("kind") == "prior_reviewer_reuse":
+        reviewer_id = reviewer_reuse.get("reviewer_id", "") or new_aid
+        prior_ids = reviewer_reuse.get("prior_review_task_ids", []) or []
+        print(
+            "  Reviewer reuse: "
+            f"{reviewer_id} previously reviewed "
+            + (", ".join(prior_ids) if prior_ids else "this task chain")
+            + " (not a fresh reviewer)"
+        )
 
 
 def cmd_ai_ask(args):
