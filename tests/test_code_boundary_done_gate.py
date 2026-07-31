@@ -51,6 +51,28 @@ class CodeBoundaryDoneGateTests(unittest.TestCase):
             worktree_boundary=boundary or {},
         )
 
+    @staticmethod
+    def _merge_boundary(*, merged=False):
+        boundary = _boundary("present", merged=merged, sha="candidate",
+                             merge_sha="merge123")
+        boundary.update({
+            "repo_root": "/repo",
+            "branch": "topic",
+            "base_branch": "main",
+        })
+        return boundary
+
+    def _record_merge_evidence(self):
+        evidence = importlib.import_module("torque.server_evidence")
+        return evidence._record_merge_completion_evidence(
+            self.state,
+            result={"ok": True, "sha": "merge123", "mode": "direct"},
+            repo_root="/repo",
+            branch="topic",
+            base_branch="main",
+            origin_verification={"verified": True},
+        )
+
     def test_ship_code_present_unmerged_blocks_fresh_1315_shape(self):
         root = self._root()
         review = self._ship(root, boundary=_boundary("present"))
@@ -127,6 +149,52 @@ class CodeBoundaryDoneGateTests(unittest.TestCase):
         # live Git; only the durable boundary evidence is consumed.
         self.state.board_cascade_done(review.id)
         self.assertEqual(root.lane, "Done")
+
+    def test_merge_evidence_rechecks_cascade_after_last_descendant_done(self):
+        """Evidence arriving after the normal cascade must re-ask its gate."""
+        root = self._root(boundary=self._merge_boundary())
+        review = self._ship(root)
+
+        # This is the production ordering: review completion occurs first and
+        # correctly refuses the still-open code boundary.
+        self.state.board_cascade_done(review.id)
+        self.assertEqual(root.lane, "In Progress")
+        self.assertEqual(root.completion_evidence, {})
+
+        root.worktree_boundary.update(self._merge_boundary(merged=True))
+        updated = self._record_merge_evidence()
+
+        self.assertEqual(updated, [root.id])
+        self.assertTrue(root.completion_evidence["verified"])
+        self.assertEqual(root.completion_evidence["merge"]["sha"], "merge123")
+        self.assertEqual(root.lane, "Done")
+
+    def test_last_descendant_without_merge_evidence_remains_blocked(self):
+        root = self._root(boundary=self._merge_boundary())
+        review = self._ship(root)
+
+        self.state.board_cascade_done(review.id)
+
+        # Preserve ba5a8bfa behavior: a Ship alone cannot pass an open code
+        # boundary, and no recheck occurs until evidence is durably recorded.
+        self.assertEqual(root.lane, "In Progress")
+        self.assertEqual(root.completion_evidence, {})
+
+    def test_merge_evidence_recheck_preserves_unresolved_descendant_block(self):
+        root = self._root(boundary=self._merge_boundary())
+        review = self._ship(root)
+        pending = self.state.board_add_task(
+            "Still implementing", "g", id="pending", lane="In Progress",
+            parent_task_id=root.id, pipeline_root_id=root.id, pipeline_depth=1,
+        )
+        self.state.board_cascade_done(review.id)
+        self.assertEqual(root.lane, "In Progress")
+
+        root.worktree_boundary.update(self._merge_boundary(merged=True))
+        self._record_merge_evidence()
+
+        self.assertEqual(pending.lane, "In Progress")
+        self.assertEqual(root.lane, "In Progress")
 
     def test_system_created_root_still_blocks_unmerged_code(self):
         root = self._root(creator="", assignee="")
