@@ -1,7 +1,9 @@
+import asyncio
 import importlib
 import json
 import sys
 import tempfile
+import threading
 import time
 import types
 import unittest
@@ -5729,6 +5731,115 @@ class MatrixStateEngineerStreamTests(unittest.IsolatedAsyncioTestCase):
             stream_ops[0]["streams"]["items"][0]["branch"],
             "torque/worker",
         )
+
+    async def test_engineer_recompute_debounces_a_broadcast_burst(self):
+        state, _product = self._make_state_with_open_stream()
+        runtime_mod = importlib.import_module("torque.state_runtime")
+        computed = []
+
+        def compute(groups):
+            computed.append(set(groups))
+            return []
+
+        state._compute_engineer_stream_payloads = compute
+        original = runtime_mod._ENGINEER_RECOMPUTE_DEBOUNCE_SECONDS
+        runtime_mod._ENGINEER_RECOMPUTE_DEBOUNCE_SECONDS = 0.05
+        try:
+            for index in range(5):
+                state._emit("task_upsert", id=f"burst-{index}", group="g")
+                await state.broadcast()
+            # Allow the worker to enter its debounce wait, then add another
+            # primary-broadcast group inside the coalescing window.
+            await asyncio.sleep(0.01)
+            state._schedule_engineer_recompute({"other"})
+            await state._engineer_recompute_task
+        finally:
+            runtime_mod._ENGINEER_RECOMPUTE_DEBOUNCE_SECONDS = original
+
+        self.assertEqual(computed, [{"g", "other"}])
+        self.assertLess(len(computed), 5)
+
+    async def test_engineer_recompute_drains_group_dirtied_during_threaded_compute(self):
+        state, _product = self._make_state_with_open_stream()
+        runtime_mod = importlib.import_module("torque.state_runtime")
+        computed = []
+        started = threading.Event()
+        release = threading.Event()
+        main_thread = threading.get_ident()
+
+        def compute(groups):
+            computed.append((set(groups), threading.get_ident()))
+            if groups == {"g"}:
+                started.set()
+                release.wait(timeout=1)
+            return []
+
+        state._compute_engineer_stream_payloads = compute
+        original = runtime_mod._ENGINEER_RECOMPUTE_DEBOUNCE_SECONDS
+        runtime_mod._ENGINEER_RECOMPUTE_DEBOUNCE_SECONDS = 0.01
+        try:
+            state._schedule_engineer_recompute({"g"})
+            await asyncio.wait_for(asyncio.to_thread(started.wait), timeout=1)
+            # This arrives while the first CPU pass is off-loop. It must be
+            # consumed by the worker's next drain iteration, not discarded.
+            state._schedule_engineer_recompute({"g"})
+            release.set()
+            await state._engineer_recompute_task
+        finally:
+            runtime_mod._ENGINEER_RECOMPUTE_DEBOUNCE_SECONDS = original
+            release.set()
+
+        self.assertEqual([groups for groups, _thread in computed], [
+            {"g"}, {"g"},
+        ])
+        self.assertTrue(all(thread != main_thread for _groups, thread in computed))
+
+    async def test_engineer_recompute_reschedules_pending_work_on_cancellation(self):
+        state, _product = self._make_state_with_open_stream()
+        runtime_mod = importlib.import_module("torque.state_runtime")
+        computed = []
+        state._compute_engineer_stream_payloads = lambda groups: (
+            computed.append(set(groups)) or []
+        )
+        original = runtime_mod._ENGINEER_RECOMPUTE_DEBOUNCE_SECONDS
+        runtime_mod._ENGINEER_RECOMPUTE_DEBOUNCE_SECONDS = 0.01
+        try:
+            state._schedule_engineer_recompute({"g"})
+            cancelled_worker = state._engineer_recompute_task
+            await asyncio.sleep(0)
+            cancelled_worker.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await cancelled_worker
+            replacement_worker = state._engineer_recompute_task
+            self.assertIsNotNone(replacement_worker)
+            self.assertIsNot(replacement_worker, cancelled_worker)
+            await replacement_worker
+        finally:
+            runtime_mod._ENGINEER_RECOMPUTE_DEBOUNCE_SECONDS = original
+
+        self.assertEqual(computed, [{"g"}])
+
+    async def test_engineer_recompute_retries_a_threaded_payload_failure(self):
+        state, _product = self._make_state_with_open_stream()
+        runtime_mod = importlib.import_module("torque.state_runtime")
+        computed = []
+
+        def compute(groups):
+            computed.append(set(groups))
+            if len(computed) == 1:
+                raise RuntimeError("transient threaded read failure")
+            return []
+
+        state._compute_engineer_stream_payloads = compute
+        original = runtime_mod._ENGINEER_RECOMPUTE_DEBOUNCE_SECONDS
+        runtime_mod._ENGINEER_RECOMPUTE_DEBOUNCE_SECONDS = 0.01
+        try:
+            state._schedule_engineer_recompute({"g"})
+            await state._engineer_recompute_task
+        finally:
+            runtime_mod._ENGINEER_RECOMPUTE_DEBOUNCE_SECONDS = original
+
+        self.assertEqual(computed, [{"g"}, {"g"}])
 
 
 class AgentCellActivityClockTests(unittest.TestCase):

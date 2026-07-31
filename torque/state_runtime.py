@@ -9,6 +9,12 @@ from .state import (
 )
 
 
+# A primary delta frame is sent immediately; this only delays its derived
+# engineer-stream follow-up.  350 ms is long enough to collapse the normal
+# burst of terminal/event updates while keeping the panel perceptibly current.
+_ENGINEER_RECOMPUTE_DEBOUNCE_SECONDS = 0.35
+
+
 class StateRuntimeMixin:
     def agent_message_loops_snapshot(self) -> dict[str, dict]:
         """Return persisted user→agent /loop state for UI snapshots."""
@@ -343,6 +349,11 @@ class StateRuntimeMixin:
         compute stream payloads, broadcast a follow-up delta."""
         from .worktree_streams import prefill_branch_exists_for_state
         try:
+            # Let a burst of primary broadcasts accumulate before paying for
+            # one complete group read-model rebuild. Subsequent iterations do
+            # not wait: they exist only for groups dirtied during prefill,
+            # threaded computation, or the derived follow-up broadcast.
+            await asyncio.sleep(_ENGINEER_RECOMPUTE_DEBOUNCE_SECONDS)
             while self._engineer_recompute_pending:
                 pending = self._engineer_recompute_pending
                 self._engineer_recompute_pending = set()
@@ -350,10 +361,35 @@ class StateRuntimeMixin:
                     await prefill_branch_exists_for_state(self)
                 except Exception:
                     log.exception("Branch-exists prefill failed")
-                if self._emit_engineer_stream_ops(pending):
+                # `compute_worktree_streams` is CPU-heavy and only reads the
+                # state here. Keep the state mutation (`_emit`) on the event
+                # loop after the thread returns so delta ordering remains
+                # single-threaded.
+                try:
+                    payloads = await asyncio.to_thread(
+                        self._compute_engineer_stream_payloads, pending
+                    )
+                except Exception:
+                    # A threaded read can lose its coherent view if a state
+                    # mutation races it. Preserve the dirty signal instead
+                    # of making that transient failure the terminal stream
+                    # result; back off before retrying a persistent failure.
+                    log.exception("Engineer stream payload computation failed")
+                    self._engineer_recompute_pending |= pending
+                    await asyncio.sleep(_ENGINEER_RECOMPUTE_DEBOUNCE_SECONDS)
+                    continue
+                if self._emit_engineer_stream_payloads(payloads):
                     # The follow-up broadcast's own _collect_engineer_*
                     # call returns empty (engineer_streams isn't a trigger
                     # op), so this does not recurse into another worker.
                     await self.broadcast()
         finally:
             self._engineer_recompute_task = None
+            # The normal event-loop path cannot interleave between the final
+            # empty-set check and this assignment, but cancellation and
+            # future cross-thread callers can. Never strand a late dirty
+            # group behind a completed worker.
+            if self._engineer_recompute_pending:
+                self._schedule_engineer_recompute(
+                    self._engineer_recompute_pending
+                )

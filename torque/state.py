@@ -3598,9 +3598,50 @@ class MatrixState(
         the per-repo branch-exists cache is cold, but in practice
         callers should prefill first so no subprocess runs inline.
         """
+        return self._emit_engineer_stream_payloads(
+            self._compute_engineer_stream_payloads(groups)
+        )
+
+    def _compute_engineer_stream_payloads(
+        self, groups: set[str],
+    ) -> list[tuple[str, dict]]:
+        """Build stream payloads without mutating the delta accumulator.
+
+        The deferred runtime invokes this CPU-only half in a worker thread;
+        keeping emission separate makes `_delta_ops` ownership remain with the
+        event loop. The synchronous wrapper above preserves existing callers.
+        """
         if not groups:
-            return False
+            return []
         known_groups = set(self._engineer_stream_groups())
+        payloads: list[tuple[str, dict]] = []
+        for group in groups:
+            if not group:
+                continue
+            if group not in known_groups:
+                payloads.append((group, {
+                    "count": 0,
+                    "by_state": {},
+                    "items": [],
+                    "truncated": False,
+                }))
+                continue
+            try:
+                payload = self._engineer_stream_payload(group)
+            except Exception:
+                log.exception(
+                    "engineer stream payload failed for group '%s'", group
+                )
+                continue
+            payloads.append((group, payload))
+        return payloads
+
+    def _emit_engineer_stream_payloads(
+        self, payloads: list[tuple[str, dict]],
+    ) -> bool:
+        """Append precomputed payloads without duplicating an open delta."""
+        if not payloads:
+            return False
         existing_groups = {
             str((op or {}).get("group", "") or "").strip()
             for op in self._delta_ops
@@ -3610,30 +3651,8 @@ class MatrixState(
             }
         }
         emitted = False
-        for group in groups:
+        for group, payload in payloads:
             if not group or group in existing_groups:
-                continue
-            if group not in known_groups:
-                # Group was just removed; emit an empty payload so clients
-                # clear it from their local state.
-                self._emit(
-                    "engineer_streams",
-                    group=group,
-                    streams={
-                        "count": 0,
-                        "by_state": {},
-                        "items": [],
-                        "truncated": False,
-                    },
-                )
-                emitted = True
-                continue
-            try:
-                payload = self._engineer_stream_payload(group)
-            except Exception:
-                log.exception(
-                    "engineer stream payload failed for group '%s'", group
-                )
                 continue
             self._emit("engineer_streams", group=group, streams=payload)
             emitted = True
