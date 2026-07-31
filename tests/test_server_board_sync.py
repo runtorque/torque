@@ -287,6 +287,153 @@ class BoardSyncManagerTests(unittest.IsolatedAsyncioTestCase):
             state.board_tasks[task.id].board_sync["last_error_current"],
         )
 
+    async def test_over_cap_label_failure_notice_is_actionable(self):
+        class ErrorProvider(FakeBoardSyncProvider):
+            async def push_task(self, task, settings):
+                await super().push_task(task, settings)
+                return {
+                    "version": 1,
+                    "provider": self.name,
+                    "enabled": True,
+                    "sync_state": "error",
+                    "phase": "labels",
+                    "last_error": (
+                        "HTTP 422: Validation Failed; "
+                        "name is too long (maximum is 50 characters)"
+                    ),
+                }
+
+        label = "branch-deletion-refused-safely-deferred-to:TORQUE:1444"
+        provider = ErrorProvider()
+        state = make_state()
+        events = []
+        task = state.board_add_task(
+            "Close out the superseded children",
+            "g",
+            id="TORQUE:1441",
+            labels=[label],
+            provider="github",
+            external_id="owner/repo#1",
+        )
+        self.manager = BoardSyncManager(
+            state,
+            provider_factory=lambda _name: provider,
+            panel_event=lambda kind, _cell_id, _agent_name, _group, message, task_id="": events.append(
+                (kind, message, task_id)
+            ),
+            debounce_seconds=0,
+        )
+        self.manager.start()
+
+        self.manager.enqueue_task(task.id, reason="explicit", explicit=True)
+        await asyncio.wait_for(self.manager.queue.join(), timeout=1)
+
+        kind, message, task_id = events[-1]
+        self.assertEqual(kind, "board_sync_failed")
+        self.assertEqual(task_id, task.id)
+        self.assertIn("TORQUE:1441", message)
+        self.assertIn(f'label "{label}" is {len(label)}, cap 50', message)
+        self.assertIn("Remedy: shorten the label to 50 characters or fewer", message)
+
+    async def test_over_cap_title_failure_notice_is_actionable(self):
+        class ErrorProvider(FakeBoardSyncProvider):
+            async def push_task(self, task, settings):
+                await super().push_task(task, settings)
+                return {
+                    "version": 1,
+                    "provider": self.name,
+                    "enabled": True,
+                    "sync_state": "error",
+                    "phase": "issue",
+                    "last_error": (
+                        "GraphQL: Title is too long "
+                        "(maximum is 256 characters)"
+                    ),
+                }
+
+        provider = ErrorProvider()
+        state = make_state()
+        events = []
+        title = "T" * 257
+        task = state.board_add_task(
+            title,
+            "g",
+            id="TORQUE:1402",
+            provider="github",
+            external_id="owner/repo#1",
+        )
+        self.manager = BoardSyncManager(
+            state,
+            provider_factory=lambda _name: provider,
+            panel_event=lambda kind, _cell_id, _agent_name, _group, message, task_id="": events.append(
+                (kind, message, task_id)
+            ),
+            debounce_seconds=0,
+        )
+        self.manager.start()
+
+        self.manager.enqueue_task(task.id, reason="explicit", explicit=True)
+        await asyncio.wait_for(self.manager.queue.join(), timeout=1)
+
+        kind, message, task_id = events[-1]
+        self.assertEqual(kind, "board_sync_failed")
+        self.assertEqual(task_id, task.id)
+        self.assertIn("TORQUE:1402", message)
+        self.assertIn("title is 257, cap 256", message)
+        self.assertIn("Remedy: shorten the title to 256 characters or fewer", message)
+
+    async def test_success_notice_visibly_supersedes_a_cleared_failure(self):
+        class FailOnceProvider(FakeBoardSyncProvider):
+            async def push_task(self, task, settings):
+                await super().push_task(task, settings)
+                if len(self.push_calls) == 1:
+                    return {
+                        "version": 1,
+                        "provider": self.name,
+                        "enabled": True,
+                        "sync_state": "error",
+                        "last_error": "temporary validation failure",
+                    }
+                return {
+                    "version": 1,
+                    "provider": self.name,
+                    "enabled": True,
+                    "sync_state": "idle",
+                    "last_error": "",
+                }
+
+        provider = FailOnceProvider()
+        state = make_state()
+        events = []
+        task = state.board_add_task(
+            "Recovered board sync",
+            "g",
+            id="TORQUE:1402",
+            provider="github",
+            external_id="owner/repo#1",
+        )
+        self.manager = BoardSyncManager(
+            state,
+            provider_factory=lambda _name: provider,
+            panel_event=lambda kind, _cell_id, _agent_name, _group, message, task_id="": events.append(
+                (kind, message, task_id)
+            ),
+            debounce_seconds=0,
+        )
+        self.manager.start()
+
+        self.manager.enqueue_task(task.id, reason="explicit", explicit=True)
+        await asyncio.wait_for(self.manager.queue.join(), timeout=1)
+        self.manager.enqueue_task(task.id, reason="manual_retry", explicit=True)
+        await asyncio.wait_for(self.manager.queue.join(), timeout=1)
+
+        kind, message, task_id = events[-1]
+        self.assertEqual(kind, "board_sync_succeeded")
+        self.assertEqual(task_id, task.id)
+        self.assertIn("RESOLVED", message)
+        self.assertIn("no longer live", message)
+        self.assertIn("TORQUE:1402", message)
+
     async def test_failed_sync_then_success_clears_stale_error_metadata(self):
         class FailOnceProvider(FakeBoardSyncProvider):
             async def push_task(self, task, settings):
