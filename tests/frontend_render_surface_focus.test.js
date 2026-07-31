@@ -289,6 +289,46 @@ test('_restoreSurfaceState does not refocus a composer after the operator moves 
     'a known operator-selected control must retain focus across the redraw');
 });
 
+test('_restoreSurfaceState restores focus when its captured composer remains the active owner', () => {
+  const composer = makeFakeTextarea('terminal-compose-input-agent-1');
+  const restoredComposer = makeFakeTextarea('terminal-compose-input-agent-1');
+  const sandbox = buildSandbox(composer, { [composer.id]: composer });
+  const workspace = makePanel(composer);
+  const snapshot = sandbox._captureSurfaceState(workspace);
+
+  // Some DOM hosts retain the pre-replacement focused node until the restore
+  // completes. It is safe only because it is the exact captured owner.
+  sandbox.document.getElementById = function(id) {
+    return id === restoredComposer.id ? restoredComposer : null;
+  };
+  sandbox._restoreSurfaceState(workspace, snapshot);
+
+  assert.equal(restoredComposer.focusCalls.length, 1,
+    'the exact captured composer owner remains a legitimate restore state');
+});
+
+test('_restoreSurfaceState does not refocus a composer when a competing control is detached', () => {
+  const composer = makeFakeTextarea('terminal-compose-input-agent-1');
+  const staleOperatorControl = {
+    id: 'operator-settings-search',
+    tagName: 'INPUT',
+    isConnected: false,
+  };
+  const sandbox = buildSandbox(composer, { [composer.id]: composer });
+  const workspace = makePanel(composer);
+  const snapshot = sandbox._captureSurfaceState(workspace);
+
+  // A disconnected active element is not proof that the old composer still
+  // owns focus: another surface can detach the operator's selected control.
+  sandbox.document.activeElement = staleOperatorControl;
+  composer.focusCalls.length = 0;
+
+  sandbox._restoreSurfaceState(workspace, snapshot);
+
+  assert.equal(composer.focusCalls.length, 0,
+    'a detached competing focus owner must not license composer refocus');
+});
+
 test('_restoreSurfaceState falls back to no-arg focus if focus(opts) throws', () => {
   const textarea = makeFakeTextarea('board-add-task-input');
   // Override focus to reject the options arg the first time, simulating an

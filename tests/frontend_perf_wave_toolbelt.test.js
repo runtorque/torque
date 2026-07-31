@@ -337,7 +337,12 @@ function createSurfaceStateHarness() {
     console,
     state: { runtime: { embedded_terminal: false } },
     _activePanelApp: 'engineer',
-    document: { activeElement: null, getElementById() { return null; } },
+    document: {
+      activeElement: null,
+      body: { tagName: 'BODY' },
+      documentElement: { tagName: 'HTML' },
+      getElementById() { return null; },
+    },
   };
   sandbox.global = sandbox;
   sandbox.globalThis = sandbox;
@@ -446,7 +451,7 @@ test('[toolbelt] _restoreSurfaceState preserves textarea scrollTop after value+s
     scrollLeft: 0,
     focus() { sandbox._focusCalls = (sandbox._focusCalls || 0) + 1; },
   };
-  sandbox.document.activeElement = null;
+  sandbox.document.activeElement = sandbox.document.body;
   resolveTextarea = postRenderTextarea;
 
   vm.runInContext(
