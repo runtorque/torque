@@ -705,9 +705,19 @@ def _architect_attention_digest_json(state, architect_id: str,
         "unhealthy_streams": _bounded_items(unhealthy_streams, limit, source_truncated=False, source_limit=None),
         "pending_hires": _bounded_items(pending_hires, limit, source_truncated=False, source_limit=None),
     }
+    hired_engineer_section_names = (
+        "engineer_pending_questions",
+        "ready_to_merge_streams",
+        "blocker_or_stale_streams",
+        "unhealthy_streams",
+    )
+    if not hired_engineer_ids:
+        for section_name in hired_engineer_section_names:
+            sections[section_name]["count_scope"] = "no_hired_engineers"
     attention_total = sum(
         int(section.get("count", 0) or 0)
         for section in sections.values()
+        if section.get("count_scope") != "no_hired_engineers"
     )
     return _compact_json({
         "type": "architect_attention_digest",
@@ -729,6 +739,7 @@ def _architect_attention_digest_json(state, architect_id: str,
         "scoping": {
             "group": architect_group,
             "hired_engineer_ids": sorted(hired_engineer_ids),
+            "engineer_pending_questions": "hired_engineers_only",
             "ready_merge_and_stream_loops": "hired_engineers_only",
             "tasks": "same_group_open_non_archived",
             "pending_hires": "caller_architect_only",
