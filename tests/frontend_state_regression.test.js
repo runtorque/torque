@@ -25436,6 +25436,10 @@ test('openEditTask populates modal state from the task and preserves editable ve
       labels: ['bug', 'torque:blocked'],
       depends_on: ['dep'],
       attachments: [{ filename: 'screenshot.png' }],
+      artifacts: [
+        { id: 'artifact-3', type: 'log', title: 'high suffix' },
+        { type: 'log', title: 'legacy missing id' },
+      ],
       action_name: 'triage',
       agent_template: 'worker',
       action_vars: { OWNER: 'frontend' },
@@ -25495,6 +25499,9 @@ test('openEditTask populates modal state from the task and preserves editable ve
   assert.deepEqual(jsonValue(context, '_taskLabels'), ['bug']);
   assert.deepEqual(jsonValue(context, '_taskSystemLabels'), ['torque:blocked']);
   assert.deepEqual(jsonValue(context, '_taskDeps'), ['dep']);
+  assert.deepEqual(jsonValue(context, '_taskArtifacts.map(function(a) { return a.id; })'), [
+    'artifact-3', 'artifact-4',
+  ]);
   assert.equal(document.getElementById('task-group-select').value, 'beta');
   assert.equal(document.getElementById('task-external-provider-input').value, 'github');
   assert.equal(document.getElementById('task-external-id-input').value, 'openai/example#42');
@@ -26268,6 +26275,51 @@ test('submitTask includes structured artifacts alongside attachments when editin
   });
 });
 
+test('manual artifact drafts allocate at save after greatest suffix and retain edit IDs', () => {
+  const { context } = createModalHarness();
+
+  runInContext(context, `
+    _taskArtifacts = [
+      { id: 'artifact-1', type: 'log', title: 'first' },
+      { id: 'artifact-3', type: 'log', title: 'third' },
+    ];
+    _taskArtifactEditIndex = _taskArtifacts.length;
+    _taskArtifactDraft = _artifactDraftForType('log');
+  `);
+
+  assert.equal(runInContext(context, '_taskArtifactDraft.id'), undefined);
+  assert.equal(runInContext(context, '_nextTaskArtifactId(_taskArtifacts)'), 'artifact-4');
+  runInContext(context, 'taskArtifactSave()');
+  assert.deepEqual(jsonValue(context, '_taskArtifacts.map(function(a) { return a.id; })'), [
+    'artifact-1', 'artifact-3', 'artifact-4',
+  ]);
+
+  runInContext(context, `
+    _taskArtifactEditIndex = 1;
+    _taskArtifactDraft = _artifactClone(_taskArtifacts[1]);
+    taskArtifactSave();
+  `);
+  assert.equal(runInContext(context, '_taskArtifacts[1].id'), 'artifact-3');
+
+  runInContext(context, `
+    _taskArtifacts = _normalizeClientArtifacts([
+      { id: 'artifact-1', type: 'log', title: 'first' },
+      { type: 'log', title: 'legacy missing id' },
+    ]);
+    _taskArtifactEditIndex = _taskArtifacts.length;
+    _taskArtifactDraft = _artifactDraftForType('log');
+    taskArtifactSave();
+  `);
+  assert.deepEqual(jsonValue(context, '_taskArtifacts.map(function(a) { return a.id; })'), [
+    'artifact-1', 'artifact-2', 'artifact-3',
+  ]);
+  assert.deepEqual(jsonValue(context, `_normalizeClientArtifacts([
+    { id: 'artifact-1' }, { id: 'artifact-1' }, { type: 'log' }
+  ]).map(function(a) { return a.id; })`), [
+    'artifact-1', 'artifact-1', 'artifact-2',
+  ]);
+});
+
 function artifactPreviewOverlay(document) {
   return document.body.children.find((child) => child.id === 'modal-artifact-preview') || null;
 }
@@ -26390,6 +26442,93 @@ test('openTaskArtifactById prefers filename and path when artifact ids are dupli
   assert.ok(overlay);
   assert.match(overlay.innerHTML, /worker-pre-merge\.patch/);
   assert.match(overlay.innerHTML, /diff --git/);
+});
+
+test('openTaskArtifactById rejects an ambiguous id-only historical lookup', () => {
+  const fetched = [];
+  const { sandbox, document } = createSandbox({
+    fetch(url) {
+      fetched.push(url);
+      return Promise.resolve({ ok: true, text() { return Promise.resolve('unexpected'); } });
+    },
+  });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/modals/task-artifacts.js');
+
+  context.state.board_tasks = {
+    boundary: {
+      id: 'boundary',
+      task: 'Historical collision',
+      artifacts: [
+        { id: 'artifact-1', type: 'log', filename: 'first.log', path: '/tmp/first.log' },
+        { id: 'artifact-1', type: 'log', filename: 'second.log', path: '/tmp/second.log' },
+      ],
+    },
+  };
+
+  assert.equal(runInContext(context, `openTaskArtifactById('boundary', 'artifact-1')`), false);
+  assert.deepEqual(fetched, []);
+  assert.equal(artifactPreviewOverlay(document), null);
+});
+
+test('openTaskArtifactById rejects duplicate id and filename selectors without a path', () => {
+  const fetched = [];
+  const { sandbox, document } = createSandbox({
+    fetch(url) {
+      fetched.push(url);
+      return Promise.resolve({ ok: true, text() { return Promise.resolve('unexpected'); } });
+    },
+  });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/modals/task-artifacts.js');
+
+  context.state.board_tasks = {
+    boundary: {
+      id: 'boundary',
+      task: 'Historical same-filename collision',
+      artifacts: [
+        { id: 'artifact-1', type: 'log', filename: 'same.log', path: '/tmp/a/same.log' },
+        { id: 'artifact-1', type: 'log', filename: 'same.log', path: '/tmp/b/same.log' },
+      ],
+    },
+  };
+
+  assert.equal(
+    runInContext(context, `openTaskArtifactById('boundary', 'artifact-1', 'same.log')`),
+    false,
+  );
+  assert.deepEqual(fetched, []);
+  assert.equal(artifactPreviewOverlay(document), null);
+});
+
+test('openTaskArtifactById rejects inconsistent id and filename selectors', () => {
+  const fetched = [];
+  const { sandbox, document } = createSandbox({
+    fetch(url) {
+      fetched.push(url);
+      return Promise.resolve({ ok: true, text() { return Promise.resolve('unexpected'); } });
+    },
+  });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/modals/task-artifacts.js');
+
+  context.state.board_tasks = {
+    boundary: {
+      id: 'boundary',
+      task: 'Mismatched selector',
+      artifacts: [
+        { id: 'artifact-1', type: 'log', filename: 'first.log', path: '/tmp/first.log' },
+        { id: 'artifact-2', type: 'log', filename: 'second.log', path: '/tmp/second.log' },
+      ],
+    },
+  };
+
+  assert.equal(
+    runInContext(context, `openTaskArtifactById('boundary', 'artifact-1', 'second.log')`),
+    false,
+  );
+  assert.deepEqual(fetched, []);
+  assert.equal(artifactPreviewOverlay(document), null);
 });
 
 test('artifact preview popup renders png and svg images and mousedown-outside closes it', () => {

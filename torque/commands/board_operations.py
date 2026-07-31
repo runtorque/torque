@@ -995,6 +995,10 @@ async def handle_board_operation_command(
                 "agent_name": (actor.slug or actor.name) if actor else "",
             }
             if not result:
+                # Normalize missing historical ids before allocating this
+                # upload.  Passing the raw list would let allocation miss an
+                # implicit artifact-1 that normalization assigns below.
+                artifacts = normalize_artifacts(task.artifacts or [])
                 try:
                     artifact = store_task_upload(
                         task_id=tid,
@@ -1008,13 +1012,13 @@ async def handle_board_operation_command(
                         summary=data.get("summary", ""),
                         prompt_mode=data.get("prompt_mode", ""),
                         provenance=provenance,
+                        existing_artifacts=artifacts,
                     )
                 except FileNotFoundError as exc:
                     result = {"type": "error", "message": str(exc)}
                 except ValueError as exc:
                     result = {"type": "error", "message": str(exc)}
                 else:
-                    artifacts = normalize_artifacts(task.artifacts or [])
                     artifacts.append(artifact)
                     state.board_update_task(tid, artifacts=artifacts)
                     refreshed = state.board_tasks.get(tid)

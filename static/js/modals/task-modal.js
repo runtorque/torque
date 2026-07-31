@@ -816,12 +816,12 @@ function _taskOpenModal(config) {
   _taskDraftId = config.editId ? '' : ((draft && draft.draft_id) || config.draftId || _generateDraftId());
   _taskAttachments = _cloneTaskAttachments((draft && draft.attachments) || config.attachments || []);
   _taskOriginalAttachments = _cloneTaskAttachments(config.originalAttachments || config.attachments || []);
-  _taskArtifacts = ((draft && draft.artifacts) || config.artifacts || []).map(function(item, idx) {
-    return _artifactNormalizeClient(item, idx);
-  });
-  _taskOriginalArtifacts = (config.originalArtifacts || config.artifacts || []).map(function(item, idx) {
-    return _artifactNormalizeClient(item, idx);
-  });
+  _taskArtifacts = _normalizeClientArtifacts(
+    (draft && draft.artifacts) || config.artifacts || []
+  );
+  _taskOriginalArtifacts = _normalizeClientArtifacts(
+    config.originalArtifacts || config.artifacts || []
+  );
   _taskSelectedAction = draft && draft.action_name !== undefined ? draft.action_name : (config.actionName || '');
   _taskSelectedTemplate = draft && draft.agent_template !== undefined ? draft.agent_template : (config.agentTemplate || '');
   _taskActionVars = [];

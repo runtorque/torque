@@ -78,6 +78,43 @@ function _artifactNormalizeClient(artifact, index) {
   };
 }
 
+function _nextTaskArtifactId(artifacts) {
+  var used = {};
+  var greatest = 0;
+  artifacts = artifacts || [];
+  for (var i = 0; i < artifacts.length; i++) {
+    var id = String((artifacts[i] || {}).id || '').trim();
+    if (!id) continue;
+    used[id] = true;
+    var match = /^artifact-(\d+)$/.exec(id);
+    if (match) greatest = Math.max(greatest, Number(match[1]));
+  }
+  var next = greatest + 1;
+  while (used['artifact-' + next]) next++;
+  return 'artifact-' + next;
+}
+
+function _normalizeClientArtifacts(artifacts) {
+  artifacts = Array.isArray(artifacts) ? artifacts : [];
+  // Reserve explicit IDs first. Missing legacy IDs are then allocated after
+  // the greatest suffix, without rewriting explicit historical collisions.
+  var assigned = [];
+  for (var i = 0; i < artifacts.length; i++) {
+    var source = artifacts[i] || {};
+    var explicitId = String(source.id || '').trim();
+    if (explicitId) assigned.push({ id: explicitId });
+  }
+  return artifacts.map(function(artifact, index) {
+    var source = artifact || {};
+    var normalized = _artifactNormalizeClient(source, index);
+    if (!String(source.id || '').trim()) {
+      normalized.id = _nextTaskArtifactId(assigned);
+      assigned.push({ id: normalized.id });
+    }
+    return normalized;
+  });
+}
+
 function _artifactFromAttachment(attachment, taskId, taskLabel, index) {
   var a = attachment || {};
   return _artifactNormalizeClient({
@@ -114,9 +151,9 @@ function _taskArtifactsCombined(task) {
       i,
     ));
   }
-  var artifacts = task.artifacts || [];
+  var artifacts = _normalizeClientArtifacts(task.artifacts || []);
   for (var j = 0; j < artifacts.length; j++) {
-    var item = _artifactNormalizeClient(artifacts[j], combined.length + j);
+    var item = artifacts[j];
     item.taskId = item.taskId || task.id || '';
     item.taskLabel = item.taskLabel || task.task || '';
     combined.push(item);
@@ -442,7 +479,7 @@ function _renderArtifactCollection(artifacts, opts) {
 function _artifactDraftForType(type) {
   var resolvedType = type || 'snippet';
   var storageKind = resolvedType === 'file_ref' ? 'file_ref' : 'inline';
-  return _artifactNormalizeClient({
+  var draft = _artifactNormalizeClient({
     type: resolvedType,
     title: '',
     summary: '',
@@ -460,6 +497,10 @@ function _artifactDraftForType(type) {
       line_end: null,
     },
   }, _taskArtifacts.length);
+  // New drafts must receive their ID at save time, after examining the
+  // current collection. This avoids reusing a gapped or high suffix.
+  delete draft.id;
+  return draft;
 }
 
 function _taskArtifactUploadId() {
@@ -467,7 +508,10 @@ function _taskArtifactUploadId() {
 }
 
 function _artifactClone(artifact) {
-  return JSON.parse(JSON.stringify(_artifactNormalizeClient(artifact, 0)));
+  var source = artifact || {};
+  var cloned = _artifactNormalizeClient(source, 0);
+  if (!String(source.id || '').trim()) delete cloned.id;
+  return JSON.parse(JSON.stringify(cloned));
 }
 /* -- Task modal: artifact helpers ---------------------------------------- */
 
@@ -511,9 +555,10 @@ function _artifactSummaryFromFile(file, type) {
   return parts.join(' | ');
 }
 
-function _artifactFromUploadedFile(entry, file, content) {
+function _artifactFromUploadedFile(entry, file, content, existingArtifacts) {
   var type = _inferArtifactTypeFromFile(entry.filename || file.name || '', entry.mime_type || file.type || '');
   var normalized = _artifactNormalizeClient({
+    id: _nextTaskArtifactId(existingArtifacts),
     type: type,
     title: entry.filename || file.name || 'artifact',
     filename: entry.filename || file.name || '',
@@ -541,11 +586,9 @@ function _artifactFromUploadedFile(entry, file, content) {
 function _renderTaskArtifacts() {
   var container = document.getElementById('task-artifacts-list');
   if (!container) return;
-  var artifacts = [];
-  for (var i = 0; i < _taskArtifacts.length; i++) {
-    var item = _artifactNormalizeClient(_taskArtifacts[i], i);
-    item.taskId = item.taskId || _taskArtifactUploadId();
-    artifacts.push(item);
+  var artifacts = _normalizeClientArtifacts(_taskArtifacts);
+  for (var i = 0; i < artifacts.length; i++) {
+    artifacts[i].taskId = artifacts[i].taskId || _taskArtifactUploadId();
   }
   if (!artifacts.length) {
     container.innerHTML = '<div class="artifact-empty ui-state ui-state--empty ui-state--compact">No logs, reports, diffs, or references yet.</div>';
@@ -640,7 +683,9 @@ async function _taskUploadArtifactFiles(files) {
       var previewText = parts[1];
       if (response.ok && response.data && response.data.length) {
         for (var j = 0; j < response.data.length; j++) {
-          _taskArtifacts.push(_artifactFromUploadedFile(response.data[j], file, previewText));
+          _taskArtifacts.push(_artifactFromUploadedFile(
+            response.data[j], file, previewText, _taskArtifacts
+          ));
         }
       }
     } catch (err) {
@@ -708,7 +753,11 @@ function taskArtifactSave() {
   if (!_taskArtifactDraft) return;
   _taskArtifactDraft.storage = _taskArtifactDraft.storage || {};
   _taskArtifactDraft.storage.kind = _artifactStorageKind(_taskArtifactDraft);
-  var artifact = _artifactNormalizeClient(_taskArtifactDraft, _taskArtifactEditIndex);
+  var source = _artifactClone(_taskArtifactDraft);
+  if (_taskArtifactEditIndex >= _taskArtifacts.length || !source.id) {
+    source.id = _nextTaskArtifactId(_taskArtifacts);
+  }
+  var artifact = _artifactNormalizeClient(source, _taskArtifactEditIndex);
   artifact.taskId = _taskArtifactUploadId();
   if (!artifact.title) {
     artifact.title = artifact.filename || (artifact.path ? artifact.path.split(/[\\/]/).pop() : _artifactTypeLabel(artifact.type));
@@ -792,7 +841,8 @@ function _findTaskArtifact(taskId, artifactId, filename, artifactPath) {
   var targetId = String(artifactId || '').trim();
   var targetFilename = String(filename || '').trim();
   var targetPath = String(artifactPath || '').trim();
-  var idMatch = null;
+  if (!targetId && !targetFilename && !targetPath) return null;
+  var candidates = [];
   for (var i = 0; i < artifacts.length; i++) {
     var artifact = artifacts[i];
     var artifactIdValue = String((artifact && artifact.id) || '').trim();
@@ -802,11 +852,12 @@ function _findTaskArtifact(taskId, artifactId, filename, artifactPath) {
       || (((artifact || {}).storage || {}).path)
       || ''
     ).trim();
-    if (targetPath && artifactPathValue === targetPath) return artifact;
-    if (targetFilename && artifactFilename === targetFilename) return artifact;
-    if (!idMatch && targetId && artifactIdValue === targetId) idMatch = artifact;
+    if (targetId && artifactIdValue !== targetId) continue;
+    if (targetFilename && artifactFilename !== targetFilename) continue;
+    if (targetPath && artifactPathValue !== targetPath) continue;
+    candidates.push(artifact);
   }
-  return idMatch;
+  return candidates.length === 1 ? candidates[0] : null;
 }
 
 function openTaskArtifactById(taskId, artifactId, filename, artifactPath) {

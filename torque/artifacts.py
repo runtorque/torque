@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+import re
 
 ARTIFACT_IMAGE = "image"
 ARTIFACT_FILE_REF = "file_ref"
@@ -68,6 +69,8 @@ _DEFAULT_PROMPT_MODES = {
     ARTIFACT_TEST_REPORT: PROMPT_MODE_SUMMARY,
     ARTIFACT_GENERATED_DOC: PROMPT_MODE_SUMMARY,
 }
+
+_ARTIFACT_ID_SEQUENCE_RE = re.compile(r"^artifact-(\d+)$")
 
 
 def _safe_text(value) -> str:
@@ -250,6 +253,47 @@ def normalize_artifact(artifact: dict, index: int = 0) -> dict:
     }
 
 
+def artifact_id_collisions(artifacts) -> dict[str, int]:
+    """Return explicitly stored artifact ids that occur more than once.
+
+    Historical duplicate ids are deliberately reported rather than rewritten:
+    existing evidence may already refer to their original records.
+    """
+    if not isinstance(artifacts, list):
+        return {}
+    counts: dict[str, int] = {}
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            continue
+        artifact_id = _safe_text(artifact.get("id"))
+        if artifact_id:
+            counts[artifact_id] = counts.get(artifact_id, 0) + 1
+    return {artifact_id: count for artifact_id, count in counts.items()
+            if count > 1}
+
+
+def next_task_artifact_id(existing_artifacts) -> str:
+    """Allocate a readable, task-local artifact id without reusing a gap."""
+    used_ids: set[str] = set()
+    if isinstance(existing_artifacts, list):
+        for artifact in existing_artifacts:
+            if isinstance(artifact, dict):
+                artifact_id = _safe_text(artifact.get("id"))
+                if artifact_id:
+                    used_ids.add(artifact_id)
+
+    greatest_sequence = 0
+    for artifact_id in used_ids:
+        match = _ARTIFACT_ID_SEQUENCE_RE.fullmatch(artifact_id)
+        if match:
+            greatest_sequence = max(greatest_sequence, int(match.group(1)))
+
+    next_sequence = greatest_sequence + 1
+    while f"artifact-{next_sequence}" in used_ids:
+        next_sequence += 1
+    return f"artifact-{next_sequence}"
+
+
 def normalize_attachments(attachments) -> list[dict]:
     if not isinstance(attachments, list):
         return []
@@ -264,10 +308,21 @@ def normalize_attachments(attachments) -> list[dict]:
 def normalize_artifacts(artifacts) -> list[dict]:
     if not isinstance(artifacts, list):
         return []
+    # Reserve explicit ids up front so a missing id never collides with a
+    # later artifact in the same submitted list. Explicit historical
+    # collisions intentionally remain unchanged for record fidelity.
+    assigned_ids = [
+        {"id": _safe_text(artifact.get("id"))}
+        for artifact in artifacts
+        if isinstance(artifact, dict) and _safe_text(artifact.get("id"))
+    ]
     out = []
     for index, artifact in enumerate(artifacts):
         normalized = normalize_artifact(artifact, index=index)
         if normalized:
+            if not isinstance(artifact, dict) or not _safe_text(artifact.get("id")):
+                normalized["id"] = next_task_artifact_id(assigned_ids)
+                assigned_ids.append({"id": normalized["id"]})
             out.append(normalized)
     return out
 

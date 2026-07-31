@@ -1,8 +1,10 @@
 import unittest
 
 from torque.artifacts import (
+    artifact_id_collisions,
     artifact_prompt_block,
     legacy_image_prompt_block,
+    next_task_artifact_id,
     normalize_artifact,
     task_artifacts,
     upstream_artifact_prompt_block,
@@ -10,6 +12,29 @@ from torque.artifacts import (
 
 
 class TaskArtifactTests(unittest.TestCase):
+    def test_artifact_ids_allocate_after_highest_sequence_and_report_collisions(self):
+        artifacts = [
+            {"id": "artifact-1"},
+            {"id": "artifact-3"},
+            {"id": "external-evidence"},
+            {"id": "artifact-1"},
+        ]
+
+        self.assertEqual(next_task_artifact_id(artifacts), "artifact-4")
+        self.assertEqual(artifact_id_collisions(artifacts), {"artifact-1": 2})
+
+    def test_normalize_artifacts_assigns_missing_ids_without_rewriting_collisions(self):
+        artifacts = task_artifacts([], [
+            {"id": "artifact-1", "type": "log"},
+            {"type": "log"},
+            {"id": "artifact-1", "type": "log"},
+        ])
+
+        self.assertEqual(
+            [artifact["id"] for artifact in artifacts],
+            ["artifact-1", "artifact-2", "artifact-1"],
+        )
+
     def test_normalize_artifact_preserves_metadata_and_lifecycle(self):
         artifact = normalize_artifact({
             "type": "file_ref",

@@ -324,6 +324,35 @@ class TorqueDoctorTests(unittest.TestCase):
         self.assertIn("missing_canonical:             1", rendered)
         self.assertIn("TORQUE:51->bcf3a475", rendered)
 
+    def test_build_doctor_report_detects_historical_task_artifact_id_collisions(self):
+        self.db.save_board_task(
+            BoardTask(
+                id="TORQUE:91",
+                task="Historical artifact collision",
+                slug="historical-artifact-collision",
+                group="torque",
+                artifacts=[
+                    {"id": "artifact-1", "type": "log"},
+                    {"id": "artifact-1", "type": "diff"},
+                ],
+            )
+        )
+
+        report = build_doctor_report_for_db(self.db_path)
+        rendered = format_doctor_report(report)
+
+        artifact_ids = report["task_artifact_ids"]
+        self.assertEqual(artifact_ids["tasks_scanned"], 1)
+        self.assertEqual(artifact_ids["collision_task_count"], 1)
+        self.assertEqual(artifact_ids["duplicate_id_count"], 1)
+        self.assertEqual(artifact_ids["collisions"][0]["ids"], {"artifact-1": 2})
+        self.assertIn(
+            "task_artifact_id_collisions",
+            [warning["name"] for warning in report["warnings"]],
+        )
+        self.assertIn("collision_tasks:     1", rendered)
+        self.assertIn("TORQUE:91 (artifact-1)", rendered)
+
     def test_build_doctor_report_warns_when_no_engineer_exists(self):
         home = self._home_dir()
         self.db.save_board_task(
