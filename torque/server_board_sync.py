@@ -16,6 +16,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 import json
+import re
 from typing import Awaitable, Callable, Iterable
 
 from .board_sync import get_provider, normalize_provider_name, title_validation_error
@@ -72,6 +73,10 @@ _BOARD_SYNC_ERROR_METADATA_KEYS = (
     "last_error_reasons",
     "last_error_current",
 )
+_PROVIDER_CHARACTER_CAP_RE = re.compile(
+    r"\b(?:maximum|at\s+most)\s+(?:is|of)?\s*(?P<cap>\d+)\s+characters?\b",
+    re.IGNORECASE,
+)
 
 
 def _now_iso() -> str:
@@ -92,6 +97,74 @@ def _safe_int(value, default: int = 0) -> int:
 def _task_title(task: BoardTask | None) -> str:
     title = str(getattr(task, "task", "") or "").strip()
     return title[:80] if title else str(getattr(task, "id", "") or "task")
+
+
+def _task_notice_reference(task: BoardTask | None) -> str:
+    """Return a readable task fragment paired with its untruncated ID."""
+    task_id = str(getattr(task, "id", "") or "").strip() or "task"
+    return f"'{_task_title(task)}' ({task_id})"
+
+
+def _provider_character_cap(error: str) -> int | None:
+    """Extract a provider-declared character cap from an error message."""
+    match = _PROVIDER_CHARACTER_CAP_RE.search(str(error or ""))
+    if not match:
+        return None
+    try:
+        cap = int(match.group("cap"))
+    except (TypeError, ValueError):
+        return None
+    return cap if cap > 0 else None
+
+
+def _over_cap_field_details(task: BoardTask | None, sync: dict, error: str) -> tuple[str, str] | None:
+    """Describe a rejected outbound title or label when the provider names a cap.
+
+    The provider's error supplies the cap; Torque only identifies which sent
+    value exceeds it.  If either signal is absent, retain the provider error
+    verbatim instead of guessing at a field or limit.
+    """
+    cap = _provider_character_cap(error)
+    if not task or cap is None:
+        return None
+    error_lower = str(error or "").lower()
+    phase = str((sync or {}).get("phase", "") or "").strip().lower()
+    title = str(getattr(task, "task", "") or "")
+    if "title" in error_lower and len(title) > cap:
+        return (
+            f"title is {len(title)}, cap {cap}",
+            f"shorten the title to {cap} characters or fewer, then sync again",
+        )
+    if phase not in {"label", "labels"} and "label" not in error_lower:
+        return None
+    for raw_label in getattr(task, "labels", []) or []:
+        label = str(raw_label or "").strip()
+        # GitHub sync excludes Torque-internal labels from its outbound payload.
+        if not label or label.casefold().startswith("torque:") or len(label) <= cap:
+            continue
+        quoted_label = label.replace('"', '\\"')
+        return (
+            f'label "{quoted_label}" is {len(label)}, cap {cap}',
+            f"shorten the label to {cap} characters or fewer, then sync again",
+        )
+    return None
+
+
+def _board_sync_failure_message(task: BoardTask | None, sync: dict) -> str:
+    error = str((sync or {}).get("last_error") or "unknown error").strip()
+    message = f"Board sync failed for {_task_notice_reference(task)}: {error}"
+    details = _over_cap_field_details(task, sync, error)
+    if details:
+        field, remedy = details
+        message += f" Offending field: {field}. Remedy: {remedy}."
+    return message
+
+
+def _board_sync_success_message(task: BoardTask | None, sync: dict) -> str:
+    message = f"Board sync completed for {_task_notice_reference(task)}"
+    if str((sync or {}).get("last_cleared_error", "") or "").strip():
+        message += " RESOLVED: the prior board-sync failure is no longer live."
+    return message
 
 
 def _maybe_bool(value) -> bool:
@@ -1268,20 +1341,20 @@ class BoardSyncManager:
             await self._notify_failure(
                 "board_sync_failed",
                 refreshed.group,
-                f"Board sync failed for '{_task_title(refreshed)}': "
-                f"{sync.get('last_error') or 'unknown error'}",
+                _board_sync_failure_message(refreshed, sync),
                 task_id=task_id,
             )
         else:
+            success_message = _board_sync_success_message(refreshed, sync)
             self._emit_panel(
                 "board_sync_succeeded",
                 refreshed.group,
-                f"Board sync completed for '{_task_title(refreshed)}'",
+                success_message,
                 task_id=task_id,
             )
             if item.explicit:
                 await self._emit_toast(
-                    f"Board sync completed for '{_task_title(refreshed)}'",
+                    success_message,
                     "success",
                 )
 
