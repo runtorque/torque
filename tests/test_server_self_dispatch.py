@@ -1306,6 +1306,31 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertIn("active/fresh agent", reason)
         self.assertIn("attached session", reason)
 
+    def test_worktree_removal_names_queued_followup_refusal(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        worker = self.state_mod.AgentCell(
+            id="worker-queued",
+            name="Queued Worker",
+            group="g",
+            cell_type="agent",
+            status="idle",
+            worktree_path="/repo/.torque/worktrees/worker-queued",
+        )
+        state.agents[worker.id] = worker
+        state.groups["g"].append(worker.id)
+        state.board_add_task(
+            "Queued follow-up", "g", id="TORQUE:1298", lane="To Do",
+            agent_id=worker.id,
+        )
+
+        reason = self.server_mod._worktree_removal_refusal_reason(
+            state, worker, now=1_779_000_000,
+        )
+
+        self.assertIn("declined because a queued follow-up exists", reason)
+        self.assertIn("TORQUE:1298", reason)
+
     def test_worktree_entry_matches_active_agent_after_tracking_was_cleared(self):
         worker = self.state_mod.AgentCell(
             id="20d95b63",
@@ -2853,6 +2878,35 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("override_reason", cleanup)
         self.assertNotIn("queued_followup_count", cleanup)
 
+    async def test_worktree_merge_refuses_ambiguous_task_attribution(self):
+        """Shared branch tasks require merge_task_id before any merge path."""
+        state, worker, queued = self._make_followup_override_state()
+        other = state.board_add_task(
+            "Active sibling task", "g", lane="In Progress",
+            id="TORQUE:1290", agent_id=worker.id,
+        )
+        self.assertIsNotNone(other)
+
+        async def nested_dispatch(_payload):
+            self.fail("ambiguous merge must not dispatch follow-up work")
+
+        result, cleanup_calls = await self._run_followup_override_merge(
+            state,
+            worker,
+            command_extra={},
+            reset_ok=True,
+            nested_dispatch=nested_dispatch,
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertIn("Merge task attribution is ambiguous", result["error"])
+        self.assertIn("2 live task candidates", result["error"])
+        self.assertIn(queued.id, result["error"])
+        self.assertIn(other.id, result["error"])
+        self.assertIn("merge_task_id", result["error"])
+        self.assertEqual(cleanup_calls, [])
+        self.assertFalse(worker.worktree_merged)
+
     async def test_worktree_merge_skips_followup_dispatch_when_reset_fails(self):
         # Part B (TORQUE:381 / :423): if the post-merge reset_to_base fails
         # while queued follow-ups exist, the auto-resume + pump-drain must be
@@ -2939,12 +2993,13 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
     def _mark_boundaries_for_state(self, state):
         from torque.worktree_boundaries import mark_branch_boundaries_merged
 
-        def _mark(cell, merge_sha):
+        def _mark(cell, merge_sha, merged_task_id=""):
             for branch_task in mark_branch_boundaries_merged(
                 state.board_tasks.values(),
                 repo_root=cell.worktree_repo_root or cell.git_root or "",
                 branch=cell.worktree_branch or "",
                 merge_sha=merge_sha,
+                task_ids=[merged_task_id],
             ):
                 state._emit(
                     "task_upsert",
@@ -4679,6 +4734,14 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_worktree_merge_pr_records_completion_evidence(self):
         state, worker, task = self._make_pr_merge_state()
+        paused_task = state.board_add_task(
+            "Paused discriminator", "g", lane="In Progress",
+            id="TORQUE:1298", agent_id=worker.id,
+            worktree_boundary={
+                **task.worktree_boundary,
+                "commit_sha": "paused-marker",
+            },
+        )
         worktree_mgr = self._FakePrWorktreeManager(
             {
                 "ok": True,
@@ -4737,6 +4800,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             result = await handle_command({
                 "cmd": "worktree_merge",
                 "id": worker.id,
+                "merge_task_id": task.id,
                 "close_agent_on_merge": True,
                 "remove_worktree_on_merge": True,
             })
@@ -4745,7 +4809,9 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(result["ok"], result.get("error"))
         self.assertTrue(result["origin_verification"]["verified"])
-        self.assertEqual(task.lane, "Done")
+        # A second live task prevents unrelated auto-done cleanup, but does
+        # not change which task receives this merge's durable evidence.
+        self.assertEqual(task.lane, "In Progress")
         evidence = task.completion_evidence
         self.assertEqual(evidence["status"], "verified")
         self.assertEqual(evidence["sources"], ["merge"])
@@ -4754,6 +4820,50 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             evidence["merge"]["origin_summary"],
             "origin/main == squash789",
         )
+        self.assertEqual(
+            task.worktree_boundary["pr"]["state"],
+            "merged",
+        )
+        self.assertEqual(
+            task.worktree_boundary["pr"]["url"],
+            "https://github.com/acme/repo/pull/7",
+        )
+        self.assertEqual(paused_task.worktree_boundary["status"], "open")
+        self.assertNotIn("pr", paused_task.worktree_boundary)
+        self.assertEqual(paused_task.completion_evidence, {})
+        self.assertNotIn("merged", paused_task.labels)
+
+    async def test_pr_merge_refuses_ambiguous_attribution_before_manager_calls(self):
+        state, worker, task = self._make_pr_merge_state()
+        paused_task = state.board_add_task(
+            "Paused sibling", "g", lane="In Progress",
+            id="TORQUE:1298", agent_id=worker.id,
+        )
+        self.assertIsNotNone(paused_task)
+        worktree_mgr = self._FakePrWorktreeManager({"ok": True})
+
+        async def fake_cleanup_after_merge(*_args, **_kwargs):
+            self.fail("ambiguous PR merge must not reach cleanup")
+
+        handle_command, restore = self._pr_handle_command(
+            state, worker, worktree_mgr, fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge", "id": worker.id,
+            })
+        finally:
+            restore()
+
+        self.assertFalse(result["ok"])
+        self.assertIn("Merge task attribution is ambiguous", result["error"])
+        self.assertIn(task.id, result["error"])
+        self.assertIn(paused_task.id, result["error"])
+        self.assertEqual(worktree_mgr.calls, [])
+        self.assertEqual(task.worktree_boundary["status"], "open")
+        self.assertEqual(paused_task.worktree_boundary, {})
+        self.assertEqual(task.completion_evidence, {})
+        self.assertEqual(paused_task.completion_evidence, {})
 
     async def test_worktree_merge_pr_deletes_verified_remote_head_and_records_evidence(self):
         state, worker, task = self._make_pr_merge_state()
@@ -5865,6 +5975,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             result = await handle_command({
                 "cmd": "worktree_merge",
                 "id": worker.id,
+                "merge_task_id": task.id,
                 "close_agent_on_merge": True,
                 "remove_worktree_on_merge": True,
             })

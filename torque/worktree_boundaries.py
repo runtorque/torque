@@ -794,19 +794,24 @@ def mark_branch_boundaries_merged(tasks: Iterable, *,
                                   repo_root: str,
                                   branch: str,
                                   merge_sha: str,
+                                  task_ids: Iterable[str],
                                   merged_at: str | None = None,
                                   pr_metadata: dict | None = None,
                                   requested_cleanup: dict | None = None,
                                   ) -> list:
-    """Mark merged branch-boundary tasks and apply the `merged` label.
+    """Mark the explicitly attributed task boundaries as merged.
 
-    Scope is limited to boundary tasks for the merged branch whose boundary
-    state was still active (`open`) or superseded by later work on that same
-    branch. The pipeline root for any affected derived task is also updated so
-    board labels and task-facing boundary state stay in sync. Queued or
-    unrelated tasks are left untouched.
+    A worktree branch can be shared by a worker's paused and active tasks, so
+    branch identity is only a consistency check, never merge attribution.
+    The pipeline root for an attributed derived task is projected as before;
+    queued and otherwise branch-matching tasks are left untouched.
     """
-    if not repo_root or not branch:
+    target_ids = {
+        _clean_text(task_id)
+        for task_id in task_ids
+        if _clean_text(task_id)
+    }
+    if not repo_root or not branch or not target_ids:
         return []
 
     tasks = list(tasks)
@@ -878,6 +883,8 @@ def mark_branch_boundaries_merged(tasks: Iterable, *,
             repo_root=repo_root,
             branch=branch,
             statuses={"open", "superseded"}):
+        if _clean_text(getattr(task, "id", "")) not in target_ids:
+            continue
         _mark_task_boundary_merged(task)
         updated.append(task)
         task_id = str(getattr(task, "id", "") or "").strip()

@@ -98,6 +98,13 @@ async def _preflight_worktree_merge_gates(
             "result": _worktree_merge_error(aid, "Agent has no worktree."),
         }
 
+    attribution_error = _merge_task_attribution_error(state, cell, aid, data)
+    if attribution_error:
+        return {
+            "ok": False,
+            "result": attribution_error,
+        }
+
     worktree_submodules = _configured_worktree_submodules_for_cell(state, cell)
     boundary_state = await latest_boundary_state_for_cell(cell)
     dirty = (
@@ -391,6 +398,74 @@ async def _capture_worktree_merge_preserve_diff(
                 worktree_mgr,
             )
     return preserve_merge_diff, boundary_task_for_diff, merge_diff_snapshot
+
+
+def _merge_attribution_task_id(state, cell, data: dict) -> str:
+    """Return the task explicitly selected (or currently active) for a merge.
+
+    A branch can legitimately represent more than one task.  Do not fall
+    back to the latest branch boundary: that is precisely the ambiguous
+    lookup that can turn a paused task into false merge evidence.
+    """
+    if not state or not cell:
+        return ""
+    explicit_task_id = str((data or {}).get("merge_task_id") or "").strip()
+    if explicit_task_id:
+        candidates = [explicit_task_id]
+    else:
+        # No caller-supplied task is safe only when there is exactly one live
+        # task candidate.  ``current_task_id`` is intentionally ephemeral and
+        # cannot disambiguate a worker intentionally holding paused work.
+        candidates = [
+            str(getattr(task, "id", "") or "").strip()
+            for task in state.agent_active_tasks(getattr(cell, "id", ""))
+        ]
+        if len(candidates) != 1:
+            return ""
+    for task_id in candidates:
+        if not task_id:
+            continue
+        task = state.board_tasks.get(task_id)
+        if task and (
+                getattr(cell, "driverless", False)
+                or str(getattr(task, "agent_id", "") or "") == str(
+                    getattr(cell, "id", "") or "")):
+            return task_id
+    return ""
+
+
+def _merge_task_attribution_error(
+        state,
+        cell,
+        aid: str,
+        data: dict,
+) -> dict | None:
+    """Fail closed before merge side effects when task attribution is unclear."""
+    if not state or not cell:
+        return None
+    explicit_task_id = str((data or {}).get("merge_task_id") or "").strip()
+    resolved_task_id = _merge_attribution_task_id(state, cell, data)
+    if explicit_task_id:
+        if resolved_task_id:
+            return None
+        return _worktree_merge_error(
+            aid,
+            "Selected merge_task_id does not identify a task assigned to "
+            "this worker; select the task whose boundary is being merged.",
+        )
+
+    candidates = state.agent_active_tasks(getattr(cell, "id", ""))
+    if len(candidates) <= 1:
+        return None
+    candidate_ids = ", ".join(
+        str(getattr(task, "id", "") or "") for task in candidates
+    )
+    return _worktree_merge_error(
+        aid,
+        "Merge task attribution is ambiguous: "
+        f"{len(candidates)} live task candidates on this worker "
+        f"({candidate_ids}). Retry with explicit merge_task_id.",
+    )
 
 
 def _capture_worktree_merge_resume_targets(

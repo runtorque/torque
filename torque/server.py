@@ -1282,6 +1282,23 @@ def _worktree_removal_refusal_reason(
     """Return a hard-refusal reason for active/fresh worktree removal."""
     if not state or not cell or not getattr(cell, "worktree_path", ""):
         return ""
+    queued_followups = [
+        task for task in state.board_tasks.values()
+        if getattr(task, "agent_id", "") == getattr(cell, "id", "")
+        and getattr(task, "lane", "") in {"Backlog", "To Do"}
+    ]
+    if queued_followups:
+        task_ids = ", ".join(
+            str(getattr(task, "id", "") or "")
+            for task in queued_followups[:3]
+        )
+        verb = "exists" if len(queued_followups) == 1 else "exist"
+        extra = "" if len(queued_followups) <= 3 else ", …"
+        return (
+            "skipped: worktree release declined because a queued follow-up "
+            f"{verb} on worker '{getattr(cell, 'name', '') or cell.id}' "
+            f"({task_ids}{extra})"
+        )
     if state.agent_is_tombstoned(cell):
         return ""
 
@@ -5124,15 +5141,17 @@ async def main(connection=None):
 
         return dict(task.worktree_boundary)
 
-    def _mark_branch_boundaries_merged(cell, merge_sha: str) -> None:
-        if not cell:
+    def _mark_branch_boundaries_merged(cell, merge_sha: str,
+                                       merged_task_id: str = "") -> None:
+        if not cell or not merged_task_id:
             return
         repo_root = cell.worktree_repo_root or cell.git_root or ""
         for branch_task in mark_branch_boundaries_merged(
                 state.board_tasks.values(),
                 repo_root=repo_root,
                 branch=cell.worktree_branch or "",
-                merge_sha=merge_sha):
+                merge_sha=merge_sha,
+                task_ids=[merged_task_id]):
             _save_task_record(branch_task)
 
     # -- Postscript builder -------------------------------------------------

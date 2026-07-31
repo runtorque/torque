@@ -67,6 +67,7 @@ class CodeBoundaryDoneGateTests(unittest.TestCase):
         return evidence._record_merge_completion_evidence(
             self.state,
             result={"ok": True, "sha": "merge123", "mode": "direct"},
+            task_ids=["root"],
             repo_root="/repo",
             branch="topic",
             base_branch="main",
@@ -233,9 +234,45 @@ class CodeBoundaryDoneGateTests(unittest.TestCase):
         )
         boundaries = importlib.import_module("torque.worktree_boundaries")
         boundaries.mark_branch_boundaries_merged(
-            self.state.board_tasks.values(), repo_root="/repo", branch="topic", merge_sha="merge")
+            self.state.board_tasks.values(), repo_root="/repo", branch="topic",
+            merge_sha="merge", task_ids=[child.id])
         self.assertEqual(root.worktree_boundary["code_delta"]["state"], "present")
         self.assertEqual(root.worktree_boundary["merge_commit_sha"], "merge")
+
+    def test_merge_evidence_does_not_contaminate_paused_shared_branch_task(self):
+        """Merge evidence follows the selected task, never a shared branch."""
+        merged_task = self.state.board_add_task(
+            "Merged task", "g", id="TORQUE:1290", lane="In Progress",
+            worktree_boundary={
+                "repo_root": "/repo", "branch": "topic", "status": "open",
+                "commit_sha": "candidate-1290",
+            },
+        )
+        paused_task = self.state.board_add_task(
+            "Paused discriminator", "g", id="TORQUE:1298", lane="In Progress",
+            worktree_boundary={
+                "repo_root": "/repo", "branch": "topic", "status": "open",
+                "commit_sha": "candidate-1298",
+            },
+        )
+        boundaries = importlib.import_module("torque.worktree_boundaries")
+        boundaries.mark_branch_boundaries_merged(
+            self.state.board_tasks.values(), repo_root="/repo", branch="topic",
+            merge_sha="merge123", task_ids=[merged_task.id],
+        )
+        evidence = importlib.import_module("torque.server_evidence")
+        evidence._record_merge_completion_evidence(
+            self.state,
+            result={"ok": True, "sha": "merge123", "mode": "direct"},
+            task_ids=[merged_task.id],
+            repo_root="/repo", branch="topic", base_branch="main",
+            origin_verification={"verified": True},
+        )
+
+        self.assertEqual(merged_task.worktree_boundary["status"], "merged")
+        self.assertIn("merge", merged_task.completion_evidence)
+        self.assertEqual(paused_task.worktree_boundary["status"], "open")
+        self.assertEqual(paused_task.completion_evidence, {})
 
     def test_classifier_records_present_and_absent_from_real_checkpointed_git(self):
         boundaries = importlib.import_module("torque.worktree_boundaries")

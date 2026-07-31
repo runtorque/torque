@@ -13,8 +13,10 @@ from .config import log
 from .board_sync.github import issue_ref_for_closing, parse_github_issue_ref
 from .state import task_counts_as_done
 from .worktree_boundaries import (
+    attach_pr_metadata_to_boundary,
     attach_pr_metadata_to_latest_open_boundary,
     branch_boundary_tasks,
+    task_boundary,
 )
 
 
@@ -771,6 +773,44 @@ def _record_pr_metadata_on_latest_boundary(state, cell,
     state._emit("task_upsert", **asdict(latest))
     state._db_save_task(latest)
     return latest.worktree_boundary
+
+
+def _record_pr_metadata_on_task_boundary(
+        state,
+        cell,
+        task_id: str,
+        pr_metadata: dict,
+        requested_cleanup: dict | None = None,
+        ) -> dict | None:
+    """Attach PR state to the merge-attributed task boundary only.
+
+    A worker branch may have several open task boundaries.  PR metadata is
+    durable merge evidence, so selecting the newest boundary by branch would
+    contaminate a paused task.  Validate the selected task still describes the
+    worker's branch before recording anything.
+    """
+    if not state or not cell or not task_id or not pr_metadata:
+        return None
+    task = state.board_tasks.get(str(task_id))
+    if not task:
+        return None
+    boundary = task_boundary(task)
+    repo_root = str(cell.worktree_repo_root or cell.git_root or "").strip()
+    branch = str(cell.worktree_branch or "").strip()
+    if (
+            not boundary
+            or str(boundary.get("repo_root") or "").strip() != repo_root
+            or str(boundary.get("branch") or "").strip() != branch):
+        return None
+    task.worktree_boundary = attach_pr_metadata_to_boundary(
+        boundary,
+        pr_metadata,
+        requested_cleanup=requested_cleanup,
+    )
+    task.updated_at = datetime.now(timezone.utc).isoformat()
+    state._emit("task_upsert", **asdict(task))
+    state._db_save_task(task)
+    return task.worktree_boundary
 
 
 def _pr_merge_failure_allows_auto(merge_result: dict) -> bool:
