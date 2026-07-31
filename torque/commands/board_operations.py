@@ -1121,13 +1121,14 @@ async def handle_board_operation_command(
                                 "blocked again (dependency "
                                 "moved out of Done)",
                                 task_id=_dt.id)
-                await _maybe_auto_resume_targets(
-                    state,
-                    handle_command,
-                    _panel_event,
-                    targets=_mv_resume_targets,
-                    group=_mv_task_after.group if _mv_task_after else "",
-                )
+                if result.get("type") == "task_moved":
+                    await _maybe_auto_resume_targets(
+                        state,
+                        handle_command,
+                        _panel_event,
+                        targets=_mv_resume_targets,
+                        group=_mv_task_after.group if _mv_task_after else "",
+                    )
 
     elif cmd == "board_reorder_task":
         state.board_reorder_task(
