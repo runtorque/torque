@@ -301,7 +301,7 @@ does not guess a reply target from historical conversation rows.
 
 | Tool | Purpose |
 | --- | --- |
-| `agent_list` / `agent_get` | List or inspect visible agents. |
+| `agent_list` / `agent_get` | List or inspect visible agents. Architect roster rows expose derived `is_busy` occupancy separately from `session_status`; `current_task_id` / `current_task` identify the resolved visible task. |
 | `agent_rename` | Suggest a better Worker name. |
 | `agent_close` / `agent_relaunch` | Control eligible Worker sessions. |
 | `agent_launch_settings` | Inspect or update eligible launch settings. |

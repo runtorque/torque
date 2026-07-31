@@ -310,6 +310,7 @@ async def dispatch_inventory(ctx: ScopedDispatchContext):
         for cell, relation in _architect_visible_engineers(
             real_state, caller_id, include_tombstoned=include_tombstoned
         ).values():
+            is_busy = real_state.agent_is_busy(cell.id)
             current_task = real_state.agent_current_task(cell.id)
             if current_task and current_task.id not in visible_task_ids:
                 current_task = None
@@ -320,7 +321,11 @@ async def dispatch_inventory(ctx: ScopedDispatchContext):
                 "id": cell.id,
                 "name": cell.name,
                 "slug": cell.slug,
-                "status": cell.status,
+                # Session turn-taking and task occupancy are intentionally
+                # separate signals.  In particular, an idle Engineer session
+                # can still own staged or live work.
+                "session_status": cell.status,
+                "is_busy": is_busy,
                 "dismissed_at": _agent_dismissed_at(cell),
                 "deleted_at": float(getattr(cell, "deleted_at", 0) or 0),
                 "permanent_delete_after": float(

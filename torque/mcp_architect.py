@@ -1003,7 +1003,10 @@ _ARCHITECT_TOOL_SPECS = [
         "name": "architect_engineer_list", "authority": {"requirements": [{"capability": "engineer.roster.read","minimum_scope": "children","result_kind": "agent","result_paths": ["engineers"]}]},
         "description": (
             "List engineers visible to this architect, marking each as hired "
-            "or visible and including dismissed_at for paused engineers."
+            "or visible and including dismissed_at for paused engineers. "
+            "session_status is only the Engineer session's turn-taking state; "
+            "use is_busy and current_task_id/current_task for derived task "
+            "occupancy."
         ),
         "inputSchema": {
             "type": "object",

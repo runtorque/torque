@@ -1074,6 +1074,8 @@ class AgentCell:
     template: str = ""  # template used to create this agent
     window_id: str = ""  # terminal/UI window this session lives in
     parent_id: str = ""  # for child terminals: the owning agent's ID
+    # Runtime session turn-taking only; task occupancy is derived separately
+    # by MatrixState.agent_is_busy().
     status: str = "stopped"  # idle | running | error | stopped
     # Runtime provenance is intentionally ephemeral. It identifies the
     # Torque daemon revision that supplied this live agent session, rather

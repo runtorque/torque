@@ -163,6 +163,21 @@ Trying to assign tasks to one fails until it is rehired.
 Use `engineer_lifecycle(operation="restore")` to recover an Engineer within the
 7-day soft-delete window.
 
+### Roster occupancy
+
+`agent_list` keeps session activity and task occupancy explicit:
+
+- `session_status` is the Engineer session's own turn-taking state
+  (`running`, `idle`, `error`, or `stopped`). It is not an availability signal.
+- `is_busy` is derived by the existing `agent_is_busy` query and covers both
+  live work and a task merely staged in To Do.
+- `current_task_id` and `current_task` identify the visible task that the
+  occupancy query resolves.
+
+These are read-only projections. Reading the roster does not populate the
+Engineer's in-memory `current_task_id`, block another dispatch, or reserve the
+Engineer.
+
 ## Decisions vs. journal
 
 This is the most-confused distinction for new Architects, so it's worth dwelling on:

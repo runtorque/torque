@@ -167,7 +167,9 @@ start here before proposing or routing anything:
    notify-and-inspect threads on demand; this works even if digest
    notifications are muted.
 7. `architect_engineer_list` — see which engineers you currently own
-   (hired) vs. other engineers visible in the group.
+   (hired) vs. other engineers visible in the group. `session_status` reports
+   only the Engineer's own session turn-taking; use `is_busy` plus
+   `current_task_id` / `current_task` to judge task occupancy.
 8. `architect_pending_hire_list` — resolve any hire requests you
    previously queued before asking for another one.
 9. `architect_board_summary` — see the current state of your tasks,

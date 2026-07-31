@@ -21,6 +21,10 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.db_mod = importlib.reload(self.db_mod)
         self.server_mod = importlib.import_module("torque.server")
         self.server_mod = importlib.reload(self.server_mod)
+        self.server_dispatch_mod = importlib.import_module(
+            "torque.server_dispatch"
+        )
+        self.server_dispatch_mod = importlib.reload(self.server_dispatch_mod)
         self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
         self.shared_mod = importlib.import_module("torque.mcp_tools_shared")
@@ -420,6 +424,211 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(engineers[alice.id]["dismissed_at"], 42)
         self.assertEqual(engineers[user_engineer.id]["current_task_id"], hidden_task.id)
         self.assertEqual(engineers[user_engineer.id]["current_task"], hidden_task.task)
+
+    async def test_architect_engineer_list_exposes_live_worker_occupancy(self):
+        architect = self._add_architect("arch-1", "Architect")
+        engineer = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        engineer.status = "idle"
+        worker = self._add_worker("worker-a", "Alice Worker", engineer.id)
+        parent = self._add_task(
+            "task-parent",
+            "Engineer-owned implementation",
+            lane="In Progress",
+            agent_id=engineer.id,
+            assigned_engineer_id=engineer.id,
+            created_by_architect_id=architect.id,
+            dispatch_state="live",
+        )
+        worker_task = self._add_task(
+            "task-worker",
+            "Live worker implementation",
+            lane="In Progress",
+            agent_id=worker.id,
+            assigned_engineer_id=engineer.id,
+            dispatch_state="live",
+        )
+        worker.status = "running"
+        worker.current_task_id = worker_task.id
+        self.assertEqual(engineer.current_task_id, "")
+
+        text, is_error = await self._call(
+            "architect_engineer_list",
+            {},
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        row = next(
+            item for item in json.loads(text)["engineers"]
+            if item["id"] == engineer.id
+        )
+        self.assertNotIn("status", row)
+        self.assertEqual(row["session_status"], "idle")
+        self.assertTrue(row["is_busy"])
+        self.assertEqual(row["current_task_id"], parent.id)
+        self.assertEqual(row["current_task"], parent.task)
+        self.assertEqual(engineer.current_task_id, "")
+
+    async def test_architect_engineer_list_exposes_staged_occupancy_without_changing_promotion(self):
+        architect = self._add_architect("arch-1", "Architect")
+        engineer = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        engineer.status = "idle"
+        staged = self._add_task(
+            "task-staged",
+            "Staged implementation",
+            lane="To Do",
+            agent_id=engineer.id,
+            assigned_engineer_id=engineer.id,
+            created_by_architect_id=architect.id,
+            dispatch_state="queued",
+        )
+        self.state.auto_dispatch_queue_add(
+            "torque",
+            staged.id,
+            target_agent_id=engineer.id,
+            max_concurrent=1,
+        )
+
+        def promotion_signature():
+            active = self.server_dispatch_mod._agent_active_current_task(
+                self.state, engineer.id
+            )
+            blocking = self.server_dispatch_mod._agent_blocking_active_task(
+                self.state,
+                engineer.id,
+                ignore_task_id=staged.id,
+            )
+            return {
+                "current_task_id": engineer.current_task_id,
+                "active_task_id": active.id if active else "",
+                "blocking_task_id": blocking.id if blocking else "",
+                "queue": [
+                    {
+                        "task_id": entry.task_id,
+                        "target_agent_id": entry.target_agent_id,
+                        "max_concurrent": entry.max_concurrent,
+                    }
+                    for entry in self.state.auto_dispatch_queues["torque"]
+                ],
+            }
+
+        before = promotion_signature()
+        text, is_error = await self._call(
+            "architect_engineer_list",
+            {},
+            architect.id,
+        )
+        after = promotion_signature()
+
+        self.assertFalse(is_error, text)
+        row = next(
+            item for item in json.loads(text)["engineers"]
+            if item["id"] == engineer.id
+        )
+        self.assertEqual(row["session_status"], "idle")
+        self.assertTrue(row["is_busy"])
+        self.assertEqual(row["current_task_id"], staged.id)
+        self.assertEqual(row["current_task"], staged.task)
+        self.assertEqual(before, after)
+        self.assertEqual(engineer.current_task_id, "")
+
+        dispatch_calls = []
+
+        async def handle_dispatch(payload):
+            dispatch_calls.append(dict(payload))
+            self.state.board_update_task(
+                staged.id,
+                lane="In Progress",
+                dispatch_state="live",
+            )
+            return {
+                "type": "ok",
+                "task_id": staged.id,
+                "agent_id": engineer.id,
+            }
+
+        promoted = await self.server_mod._pump_auto_dispatch_queue(
+            self.state,
+            handle_dispatch,
+            lambda *args, **kwargs: None,
+            group="torque",
+        )
+
+        self.assertEqual(dispatch_calls, [{
+            "cmd": "dispatch_task",
+            "id": staged.id,
+            "agent_id": engineer.id,
+        }])
+        self.assertEqual(promoted, [{
+            "group": "torque",
+            "task_id": staged.id,
+            "agent_id": engineer.id,
+        }])
+
+    async def test_architect_engineer_list_occupancy_does_not_block_second_dispatch(self):
+        architect = self._add_architect("arch-1", "Architect")
+        engineer = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        engineer.status = "idle"
+        tasks = [
+            self._add_task(
+                f"task-{index}",
+                f"Staged implementation {index}",
+                lane="To Do",
+                agent_id=engineer.id,
+                assigned_engineer_id=engineer.id,
+                created_by_architect_id=architect.id,
+                action_name="feature/implement",
+                dispatch_state="queued",
+            )
+            for index in (1, 2)
+        ]
+
+        first_text, first_error = await self._call(
+            "architect_engineer_message",
+            {
+                "engineer_id": engineer.id,
+                "task": tasks[0].id,
+                "message": "Start the first task.",
+            },
+            architect.id,
+        )
+        self.assertFalse(first_error, first_text)
+
+        roster_text, roster_error = await self._call(
+            "architect_engineer_list",
+            {},
+            architect.id,
+        )
+        self.assertFalse(roster_error, roster_text)
+        row = next(
+            item for item in json.loads(roster_text)["engineers"]
+            if item["id"] == engineer.id
+        )
+        self.assertTrue(row["is_busy"])
+        self.assertEqual(engineer.current_task_id, "")
+
+        second_text, second_error = await self._call(
+            "architect_engineer_message",
+            {
+                "engineer_id": engineer.id,
+                "task": tasks[1].id,
+                "message": "Start the second task too.",
+            },
+            architect.id,
+        )
+
+        self.assertFalse(second_error, second_text)
+        self.assertEqual(
+            [task.dispatch_state for task in tasks],
+            ["live", "live"],
+        )
+        self.assertEqual(engineer.current_task_id, "")
 
     async def test_architect_events_recent_scopes_to_group_hires_and_created_tasks(self):
         architect = self._add_architect("arch-1", "Architect")
