@@ -171,6 +171,37 @@ class TorqueDoctorTests(unittest.TestCase):
         self.assertIn("connected:                      false", text)
         self.assertIn("time_since_last_successful_op:  12.5", text)
 
+    def test_doctor_warns_for_removed_frozen_agent_class_public_tool(self):
+        self._save_architect(
+            effective_agent_class_id="retired-tool-class",
+            effective_agent_class_version="9",
+            effective_agent_class_snapshot={
+                "id": "retired-tool-class",
+                "version": "9",
+                "frozen_public_tools": ["task_get", "retired_tool"],
+            },
+        )
+
+        report = build_doctor_report_for_db(self.db_path)
+        rendered = format_doctor_report(report)
+
+        warning = next(
+            item for item in report["warnings"]
+            if item["name"] == "frozen_agent_class_missing_tools"
+        )
+        self.assertEqual(warning["details"]["references"], [{
+            "agent_id": "arch-1",
+            "agent_name": "productmind",
+            "class_id": "retired-tool-class",
+            "class_version": "9",
+            "tool": "retired_tool",
+        }])
+        self.assertIn(
+            "frozen Agent Class retired-tool-class@9 references removed public "
+            "tool retired_tool; it is skipped",
+            rendered,
+        )
+
     def test_build_doctor_report_warns_for_ai_enabled_missing_optional_deps(self):
         home = self._home_dir()
         self.db.save_global_settings(GlobalSettings(ai_enabled=True))
