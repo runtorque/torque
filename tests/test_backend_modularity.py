@@ -14,8 +14,11 @@ import unittest
 from tests.helpers import install_aiohttp_stub
 from torque.backend_invariants import (
     BACKEND_LINE_LIMITS,
+    COMPATIBILITY_FACADE_METHOD_LIMITS,
     DEFAULT_BACKEND_LINE_LIMIT,
+    backend_modularity_headroom,
     check_backend_modularity_crossings,
+    format_backend_modularity_headroom,
 )
 from torque.worktree import WorktreeManager
 from torque.worktree_manager.changes import ChangesMixin
@@ -94,6 +97,19 @@ class BackendSizeGuardrailTests(unittest.TestCase):
                     f"{relative_path} grew to {line_count} lines; move domain "
                     "behavior behind its existing composition boundary",
                 )
+
+    def test_green_guard_reports_current_headroom(self):
+        report = format_backend_modularity_headroom(
+            backend_modularity_headroom(REPO_ROOT)
+        )
+
+        self.assertIn("method torque/state.py:MatrixState 103/103 (headroom 0)", report)
+        self.assertIn("method torque/db.py:TorqueDB 50/50 (headroom 0)", report)
+        self.assertIn(
+            "method torque/worktree.py:WorktreeManager 1/1 (headroom 0)",
+            report,
+        )
+        self.assertIn("line torque/mcp.py 2594/2600 (headroom 6)", report)
 
     def test_no_unreviewed_backend_file_exceeds_2500_lines(self):
         violations = []
