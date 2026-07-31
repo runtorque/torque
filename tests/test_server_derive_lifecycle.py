@@ -863,7 +863,7 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(reviews[0].parent_task_id, boundary.id)
         self.assertEqual(calls[0]["inherit_worktree_from"], implementer.id)
 
-    async def test_feature_review_derive_reuses_live_prior_reviewer_in_chain(self):
+    async def test_feature_review_derive_surfaces_live_prior_reviewer_reuse(self):
         state = self._make_state()
         implementer, reviewer, _root, _fix = (
             self._add_second_review_cycle_chain(state)
@@ -888,6 +888,24 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[0]["agent_id"], reviewer.id)
         self.assertEqual(calls[0]["inherit_worktree_from"], implementer.id)
         self.assertNotIn("create_agent", calls[0])
+        reuse = result["reviewer_reuse"]
+        self.assertEqual(reuse["kind"], "prior_reviewer_reuse")
+        self.assertEqual(reuse["reviewer_id"], reviewer.id)
+        self.assertEqual(reuse["prior_review_task_ids"], ["task-review"])
+
+        review_task = state.board_tasks[result["task_id"]]
+        self.assertEqual(
+            review_task.completion_evidence["reviewer_assignment"],
+            reuse,
+        )
+        self.assertIn("torque:reviewer-reused", review_task.labels)
+        reuse_messages = [
+            entry for entry in review_task.messages
+            if entry.get("action") == "reviewer_reused"
+        ]
+        self.assertEqual(len(reuse_messages), 1)
+        self.assertIn(reviewer.id, reuse_messages[0]["message"])
+        self.assertIn("task-review", reuse_messages[0]["message"])
 
     async def test_reused_reviewer_records_boundary_at_fix_worktree_head(self):
         """A re-review boundary must name the SHA the reviewer was handed."""
