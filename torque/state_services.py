@@ -255,20 +255,15 @@ class StateServicesMixin:
     def _emit_scratchpad_note(self, note: dict | None) -> None:
         return self._thinking_service._emit_scratchpad_note(note)
 
-    def _emit_mind_map(self, mind_map: dict | None) -> None:
-        return self._thinking_service._emit_mind_map(mind_map)
-
-    def _emit_mind_map_node(self, node: dict | None) -> None:
-        return self._thinking_service._emit_mind_map_node(node)
-
-    def _emit_mind_map_link(self, link: dict | None) -> None:
-        return self._thinking_service._emit_mind_map_link(link)
-
     def resolve_scratchpad_note_id(self, identifier: str, *, group: str='') -> str:
         return self._thinking_service.resolve_scratchpad_note_id(identifier, group=group)
 
-    def list_scratchpad_notes(self, *, group: str='', include_archived: bool=False, include_deleted: bool=False, limit: int=200) -> list[dict]:
-        return self._thinking_service.list_scratchpad_notes(group=group, include_archived=include_archived, include_deleted=include_deleted, limit=limit)
+    def list_scratchpad_notes(self, *, group: str='', include_archived: bool=False,
+                              include_deleted: bool=False, limit: int=200) -> list[dict]:
+        return self._thinking_service.list_scratchpad_notes(
+            group=group, include_archived=include_archived,
+            include_deleted=include_deleted, limit=limit,
+        )
 
     def load_scratchpad_note(self, note_id: str) -> dict | None:
         return self._thinking_service.load_scratchpad_note(note_id)
@@ -284,60 +279,6 @@ class StateServicesMixin:
 
     async def delete_scratchpad_note_async(self, note_id: str, **kwargs) -> dict | None:
         return await self._thinking_service.delete_scratchpad_note_async(note_id, **kwargs)
-
-    def resolve_mind_map_id(self, identifier: str, *, group: str='') -> str:
-        return self._thinking_service.resolve_mind_map_id(identifier, group=group)
-
-    def list_mind_maps(self, *, group: str='', include_archived: bool=False, include_deleted: bool=False, include_counts: bool=True, limit: int=200) -> list[dict]:
-        return self._thinking_service.list_mind_maps(group=group, include_archived=include_archived, include_deleted=include_deleted, include_counts=include_counts, limit=limit)
-
-    def load_mind_map(self, map_id: str, *, include_counts: bool=False) -> dict | None:
-        return self._thinking_service.load_mind_map(map_id, include_counts=include_counts)
-
-    def mind_map_payload(self, map_id: str, *, include_archived: bool=False, include_deleted: bool=False) -> dict | None:
-        return self._thinking_service.mind_map_payload(map_id, include_archived=include_archived, include_deleted=include_deleted)
-
-    def load_mind_map_node(self, node_id: str) -> dict | None:
-        return self._thinking_service.load_mind_map_node(node_id)
-
-    def load_mind_map_link(self, link_id: str) -> dict | None:
-        return self._thinking_service.load_mind_map_link(link_id)
-
-    async def create_mind_map_async(self, row_dict: dict) -> dict | None:
-        return await self._thinking_service.create_mind_map_async(row_dict)
-
-    async def update_mind_map_async(self, map_id: str, patch: dict) -> dict | None:
-        return await self._thinking_service.update_mind_map_async(map_id, patch)
-
-    async def archive_mind_map_async(self, map_id: str, **kwargs) -> dict | None:
-        return await self._thinking_service.archive_mind_map_async(map_id, **kwargs)
-
-    async def delete_mind_map_async(self, map_id: str, **kwargs) -> dict | None:
-        return await self._thinking_service.delete_mind_map_async(map_id, **kwargs)
-
-    async def create_mind_map_node_async(self, map_id: str, row_dict: dict) -> dict | None:
-        return await self._thinking_service.create_mind_map_node_async(map_id, row_dict)
-
-    async def update_mind_map_node_async(self, node_id: str, patch: dict) -> dict | None:
-        return await self._thinking_service.update_mind_map_node_async(node_id, patch)
-
-    async def delete_mind_map_node_async(self, node_id: str, **kwargs) -> dict | None:
-        return await self._thinking_service.delete_mind_map_node_async(node_id, **kwargs)
-
-    async def reorder_mind_map_nodes_async(self, map_id: str, node_order: list, **kwargs) -> list[dict]:
-        return await self._thinking_service.reorder_mind_map_nodes_async(map_id, node_order, **kwargs)
-
-    async def create_mind_map_link_async(self, map_id: str, row_dict: dict) -> dict | None:
-        return await self._thinking_service.create_mind_map_link_async(map_id, row_dict)
-
-    async def update_mind_map_link_async(self, link_id: str, patch: dict) -> dict | None:
-        return await self._thinking_service.update_mind_map_link_async(link_id, patch)
-
-    async def delete_mind_map_link_async(self, link_id: str, **kwargs) -> dict | None:
-        return await self._thinking_service.delete_mind_map_link_async(link_id, **kwargs)
-
-    async def reorder_mind_map_links_async(self, map_id: str, link_order: list, **kwargs) -> list[dict]:
-        return await self._thinking_service.reorder_mind_map_links_async(map_id, link_order, **kwargs)
 
     def idea_brief_snapshot(self, *, group: str='', include_archived: bool=False) -> dict:
         return self._idea_brief_service.idea_brief_snapshot(group=group, include_archived=include_archived)

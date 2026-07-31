@@ -153,20 +153,9 @@ _SUFFIX_TO_CANONICAL = {
     "idea_brief_archive": "idea_brief_transition",
     "idea_brief_propose": "idea_brief_transition",
     "thinking_scratchpad_list": "thinking_list",
-    "thinking_mind_map_list": "thinking_list",
     "thinking_scratchpad_show": "thinking_get",
-    "thinking_mind_map_show": "thinking_get",
     "thinking_scratchpad_create": "scratchpad_update",
     "thinking_scratchpad_update": "scratchpad_update",
-    "thinking_mind_map_create": "mind_map_update",
-    "thinking_mind_map_update": "mind_map_update",
-    "thinking_mind_map_node_create": "mind_map_node_update",
-    "thinking_mind_map_node_update": "mind_map_node_update",
-    "thinking_mind_map_node_position": "mind_map_node_update",
-    "thinking_mind_map_node_delete": "mind_map_node_update",
-    "thinking_mind_map_link_create": "mind_map_link_update",
-    "thinking_mind_map_link_update": "mind_map_link_update",
-    "thinking_mind_map_link_delete": "mind_map_link_update",
     "thinking_archive": "thinking_archive",
     # Dynamic behavior.
     "behavior_overlay_read": "behavior_overlay_get",
@@ -270,9 +259,6 @@ CANONICAL_DESCRIPTIONS = {
     "thinking_list": "List visible Thinking artifacts of the requested type.",
     "thinking_get": "Read one visible Thinking artifact.",
     "scratchpad_update": "Create or update a caller-owned Scratchpad note.",
-    "mind_map_update": "Create or update a caller-owned Mind Map.",
-    "mind_map_node_update": "Create, update, move, or delete a node in a caller-owned Mind Map.",
-    "mind_map_link_update": "Create, update, or delete a link in a caller-owned Mind Map.",
     "thinking_archive": "Archive a caller-owned Thinking artifact.",
 }
 
@@ -743,12 +729,12 @@ def _canonical_schema(name: str, schema: dict, *, caller_kind: str) -> dict:
             },
         ]
     elif name == "thinking_list":
-        add("artifact_type", {"type": "string", "enum": ["scratchpad", "mind_map"]})
+        add("artifact_type", {"type": "string", "enum": ["scratchpad"]})
         required = ["artifact_type"]
     elif name == "thinking_get":
-        for legacy in ("note", "note_id", "id", "mind_map", "map_id"):
+        for legacy in ("note", "note_id", "id"):
             props.pop(legacy, None)
-        add("artifact_type", {"type": "string", "enum": ["scratchpad", "mind_map"]})
+        add("artifact_type", {"type": "string", "enum": ["scratchpad"]})
         add("artifact", {"type": "string"})
         required = ["artifact_type", "artifact"]
     elif name == "scratchpad_update":
@@ -768,56 +754,8 @@ def _canonical_schema(name: str, schema: dict, *, caller_kind: str) -> dict:
                 "required": ["scratchpad"],
             },
         ]
-    elif name == "mind_map_update":
-        for legacy in ("map_id", "id"):
-            props.pop(legacy, None)
-        add("operation", {"type": "string", "enum": ["create", "update"]})
-        required = ["operation"]
-        one_of = [
-            {
-                "properties": {"operation": {"const": "create"}},
-                "required": ["title"],
-                "not": {"required": ["mind_map"]},
-            },
-            {
-                "properties": {"operation": {"const": "update"}},
-                "required": ["mind_map"],
-            },
-        ]
-    elif name == "mind_map_node_update":
-        for legacy in ("map_id", "node_id", "id"):
-            props.pop(legacy, None)
-        add("operation", {"type": "string", "enum": ["create", "update", "move", "delete"]})
-        required = ["mind_map", "operation"]
-        one_of = [
-            {
-                "properties": {"operation": {"const": "create"}},
-                "required": ["label"],
-                "not": {"required": ["node"]},
-            },
-            {
-                "properties": {"operation": {"enum": ["update", "move", "delete"]}},
-                "required": ["node"],
-            },
-        ]
-    elif name == "mind_map_link_update":
-        for legacy in ("map_id", "link_id", "id", "source_node_id", "target_node_id"):
-            props.pop(legacy, None)
-        add("operation", {"type": "string", "enum": ["create", "update", "delete"]})
-        required = ["mind_map", "operation"]
-        one_of = [
-            {
-                "properties": {"operation": {"const": "create"}},
-                "required": ["source", "target"],
-                "not": {"required": ["link"]},
-            },
-            {
-                "properties": {"operation": {"enum": ["update", "delete"]}},
-                "required": ["link"],
-            },
-        ]
     elif name == "thinking_archive":
-        add("artifact_type", {"type": "string", "enum": ["scratchpad", "mind_map"]})
+        add("artifact_type", {"type": "string", "enum": ["scratchpad"]})
         add("artifact", {"type": "string"})
         required = ["artifact_type", "artifact"]
 
@@ -1061,45 +999,13 @@ def select_legacy_tool(
             else "idea_brief_update"
         )
     elif canonical_name == "thinking_list":
-        suffix = (
-            "thinking_mind_map_list"
-            if args.get("artifact_type") == "mind_map"
-            else "thinking_scratchpad_list"
-        )
-    elif canonical_name == "thinking_get":
-        suffix = (
-            "thinking_mind_map_show"
-            if args.get("artifact_type") == "mind_map"
-            else "thinking_scratchpad_show"
-        )
+        translated.pop("artifact_type", None)
     elif canonical_name == "scratchpad_update":
         suffix = (
             "thinking_scratchpad_create"
             if operation == "create" or not any(args.get(k) for k in ("scratchpad", "note_id", "id"))
             else "thinking_scratchpad_update"
         )
-    elif canonical_name == "mind_map_update":
-        suffix = (
-            "thinking_mind_map_create"
-            if operation == "create" or not any(args.get(k) for k in ("mind_map", "map_id", "id"))
-            else "thinking_mind_map_update"
-        )
-    elif canonical_name == "mind_map_node_update":
-        if operation == "delete":
-            suffix = "thinking_mind_map_node_delete"
-        elif operation == "move":
-            suffix = "thinking_mind_map_node_position"
-        elif operation == "create" or not any(args.get(k) for k in ("node", "node_id")):
-            suffix = "thinking_mind_map_node_create"
-        else:
-            suffix = "thinking_mind_map_node_update"
-    elif canonical_name == "mind_map_link_update":
-        if operation == "delete":
-            suffix = "thinking_mind_map_link_delete"
-        elif operation == "create" or not any(args.get(k) for k in ("link", "link_id")):
-            suffix = "thinking_mind_map_link_create"
-        else:
-            suffix = "thinking_mind_map_link_update"
 
     if suffix:
         selected = _candidate_with_suffix(
@@ -1153,9 +1059,6 @@ def translate_canonical_arguments(
         "event_delivery_update",
         "engineer_lifecycle",
         "scratchpad_update",
-        "mind_map_update",
-        "mind_map_node_update",
-        "mind_map_link_update",
     }:
         translated.pop("operation", None)
     if canonical_name == "idea_brief_update":
@@ -1235,10 +1138,7 @@ def translate_canonical_arguments(
     elif canonical_name == "thinking_get":
         artifact = translated.pop("artifact", "")
         translated.pop("artifact_type", None)
-        if legacy_name.endswith("mind_map_show"):
-            translated["mind_map"] = artifact
-        else:
-            translated["note"] = artifact
+        translated["note"] = artifact
     elif canonical_name == "thinking_list":
         translated.pop("artifact_type", None)
     elif canonical_name == "scratchpad_update":
@@ -1247,11 +1147,8 @@ def translate_canonical_arguments(
             translated["note"] = scratchpad
     elif canonical_name == "thinking_archive":
         artifact = translated.pop("artifact", "")
-        artifact_type = translated.pop("artifact_type", "")
-        if artifact_type == "mind_map":
-            translated["mind_map"] = artifact
-        else:
-            translated["note"] = artifact
+        translated.pop("artifact_type", None)
+        translated["note"] = artifact
     elif canonical_name == "behavior_overlay_propose":
         target = translated.pop("target", "")
         if target_kind == "agent":

@@ -193,7 +193,7 @@ function sampleCapabilityCatalog() {
     capability('planning.area.read', 'Read Areas', 'Read Planning Areas and linked context.', ['architect', 'engineer', 'worker'], ['group'], { architect: 'group', engineer: 'group', worker: 'group' }),
     capability('board.read', 'Read board summaries', 'Read board-level summaries and orchestration rollups.', ['architect', 'engineer'], ['group'], { architect: 'group', engineer: 'group' }),
     capability('event.read', 'Read recent events', 'Read recent activity and event streams.', ['architect', 'engineer'], ['group'], { architect: 'group', engineer: 'group' }),
-    capability('thinking.read', 'Read Thinking artifacts', 'Read visible Scratchpad notes and Mind Maps.', ['architect'], ['self', 'group'], { architect: 'group' }),
+    capability('thinking.read', 'Read Thinking artifacts', 'Read visible Scratchpad notes.', ['architect'], ['self', 'group'], { architect: 'group' }),
     capability('thinking.write', 'Write Thinking artifacts', 'Create and update caller-owned Thinking artifacts.', ['architect'], ['self'], { architect: 'self' }),
     capability('message.user', 'Message the user', 'Ask or message the owning user.', ['architect', 'engineer', 'worker'], ['self'], { architect: 'self', engineer: 'self', worker: 'self' }),
     capability('journal.private', 'Use private journal', 'Use the caller private recovery journal.', ['architect', 'engineer', 'worker'], ['self'], { architect: 'self', engineer: 'self', worker: 'self' }),

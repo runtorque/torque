@@ -576,7 +576,7 @@ class ArchitectPromptTests(unittest.TestCase):
 
         self.assertIn("Creative", prompt)
         self.assertIn("Thinking", prompt)
-        self.assertIn("Scratchpad notes and Mind Maps", prompt)
+        self.assertIn("Scratchpad notes", prompt)
         self.assertIn("Idea Brief", prompt)
         self.assertIn("Propose queued tasks (`task.propose`)", prompt)
         self.assertIn("Propose decisions (`decision.propose`)", prompt)

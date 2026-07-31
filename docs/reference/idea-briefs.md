@@ -40,9 +40,6 @@ Supported types:
 
 ```json
 {"type":"scratchpad_note","id":"TORQUE-S:1","title":"...","slug":"...","group":"Torque","archived":false,"summary":"optional caller metadata"}
-{"type":"mind_map","id":"TORQUE-M:1","title":"...","slug":"...","group":"Torque","node_count":2,"link_count":1}
-{"type":"mind_map_node","id":"TORQUE-M:1:N1","map_id":"TORQUE-M:1","map_title":"...","label":"...","node_type":"..."}
-{"type":"mind_map_link","id":"TORQUE-M:1:L1","map_id":"TORQUE-M:1","source_node_id":"...","target_node_id":"...","label":"...","link_type":"..."}
 ```
 
 Caller-supplied metadata keys preserved when present: `context`, `source_context`, `summary`, `reason`, `quote`, `selection`, `note`, `confidence`.
@@ -127,7 +124,7 @@ Product peer/user context wrappers also accept `context_idea_brief_ids` and stor
 
 1. Load initial state and confirm `state.idea_briefs` exists in both full and compact snapshots.
 2. Send `idea_brief_list` for active group and render draft/proposed/parked rows; archived rows appear only with `include_archived:true`.
-3. Create a brief with all plain fields and at least one Scratchpad or Mind Map link; verify `idea_brief_upsert` updates `state.idea_briefs`.
+3. Create a brief with all plain fields and at least one Scratchpad link; verify `idea_brief_upsert` updates `state.idea_briefs`.
 4. Show a brief by id and slug; cross-group show returns `code:"out_of_scope"` or `not_found` in scoped wrappers.
 5. Refine updates fields and appends `refinement_log` without losing Thinking links.
 6. Park changes status to `parked`; archive hides it from default list.

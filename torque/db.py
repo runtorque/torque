@@ -105,14 +105,8 @@ from torque.persistence.areas import (
     _normalize_area_relation,
 )
 from torque.persistence.thinking import (
-    THINKING_MIND_MAP_COLUMNS,
-    THINKING_MIND_MAP_LINK_COLUMNS,
-    THINKING_MIND_MAP_NODE_COLUMNS,
     THINKING_SCRATCHPAD_NOTE_COLUMNS,
     ThinkingPersistenceMixin,
-    _decode_mind_map_link_row,
-    _decode_mind_map_node_row,
-    _decode_mind_map_row,
     _decode_scratchpad_note_row,
 )
 from torque.persistence.idea_briefs import (
@@ -211,7 +205,6 @@ from torque.task_ids import (
     format_area_id,
     format_idea_brief_id,
     format_initiative_id,
-    format_mind_map_id,
     format_root_task_id,
     format_scratchpad_note_id,
     is_canonical_task_id,

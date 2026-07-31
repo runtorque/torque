@@ -359,20 +359,6 @@ function _handleWsMessage(e) {
       if (typeof thinkingReceiveScratchpadList === 'function') thinkingReceiveScratchpadList(msg);
     } else if (msg.type === 'scratchpad_note_created' || msg.type === 'scratchpad_note_updated' || msg.type === 'scratchpad_note_archived' || msg.type === 'scratchpad_note_deleted') {
       if (typeof thinkingReceiveScratchpadMutation === 'function') thinkingReceiveScratchpadMutation(msg);
-    } else if (msg.type === 'mind_map_list') {
-      if (typeof thinkingReceiveMindMapList === 'function') thinkingReceiveMindMapList(msg);
-    } else if (msg.type === 'mind_map') {
-      if (typeof thinkingReceiveMindMapDetail === 'function') thinkingReceiveMindMapDetail(msg);
-    } else if (msg.type === 'mind_map_created' || msg.type === 'mind_map_updated' || msg.type === 'mind_map_archived' || msg.type === 'mind_map_deleted') {
-      if (typeof thinkingReceiveMindMapMutation === 'function') thinkingReceiveMindMapMutation(msg);
-    } else if (msg.type === 'mind_map_node_created' || msg.type === 'mind_map_node_updated' || msg.type === 'mind_map_node_positioned' || msg.type === 'mind_map_node_deleted') {
-      if (typeof thinkingReceiveMindMapNodeMutation === 'function') thinkingReceiveMindMapNodeMutation(msg);
-    } else if (msg.type === 'mind_map_node_reordered') {
-      if (typeof thinkingReceiveMindMapNodeReordered === 'function') thinkingReceiveMindMapNodeReordered(msg);
-    } else if (msg.type === 'mind_map_link_created' || msg.type === 'mind_map_link_updated' || msg.type === 'mind_map_link_deleted') {
-      if (typeof thinkingReceiveMindMapLinkMutation === 'function') thinkingReceiveMindMapLinkMutation(msg);
-    } else if (msg.type === 'mind_map_link_reordered') {
-      if (typeof thinkingReceiveMindMapLinkReordered === 'function') thinkingReceiveMindMapLinkReordered(msg);
     } else if (msg.type === 'idea_brief_list') {
       if (!state.idea_briefs) state.idea_briefs = {};
       (msg.idea_briefs || []).forEach(function(brief) {

@@ -526,9 +526,6 @@ def _resolve_scoped_resource(state, caller_cell, resource_kind: str, reference):
     if resource_kind == "scratchpad_note":
         note_id = state.resolve_scratchpad_note_id(reference, group=group)
         return state.load_scratchpad_note(note_id) if note_id else None
-    if resource_kind == "mind_map":
-        map_id = state.resolve_mind_map_id(reference, group=group)
-        return state.load_mind_map(map_id, include_counts=True) if map_id else None
     if resource_kind == "idea_brief":
         brief_id = state.resolve_idea_brief_id(reference, group=group)
         return state.load_idea_brief(brief_id) if brief_id else None

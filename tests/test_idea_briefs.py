@@ -30,7 +30,6 @@ class IdeaBriefPersistenceTests(unittest.TestCase):
         self.assertEqual(self.task_ids.format_idea_brief_id("Torque", 2), "TORQUE-IB:2")
         self.assertIsNone(self.task_ids.parse_task_id("TORQUE-IB:1"))
         self.assertIsNone(self.task_ids.parse_scratchpad_note_id("TORQUE-IB:1"))
-        self.assertIsNone(self.task_ids.parse_mind_map_id("TORQUE-IB:1"))
 
     def test_schema_persists_idea_brief_fields_and_review_proposal(self):
         note = self.db.create_scratchpad_note({
@@ -153,13 +152,6 @@ class IdeaBriefStateAndServerTests(unittest.IsolatedAsyncioTestCase):
             "title": "Opportunity notes",
             "body": "A brief should cite this.",
         })
-        mind_map = await handle_command({"cmd": "mind_map_create", "group": "Torque", "title": "Map"})
-        node = await handle_command({
-            "cmd": "mind_map_node_create",
-            "group": "Torque",
-            "mind_map_id": mind_map["mind_map"]["id"],
-            "label": "Smallest useful version",
-        })
         before_tasks = set(self.state.board_tasks)
 
         implicit_create_propose = await handle_command({
@@ -185,7 +177,6 @@ class IdeaBriefStateAndServerTests(unittest.IsolatedAsyncioTestCase):
             "open_questions": "What should Panelsmith show first?",
             "thinking_links": [
                 {"type": "scratchpad_note", "id": note["note"]["id"], "summary": "source note"},
-                {"type": "mind_map_node", "id": node["node"]["id"], "reason": "small slice"},
             ],
             "source_context": {"decision": "decision-12acf9ee0894"},
             "actor_kind": "architect",
@@ -194,7 +185,7 @@ class IdeaBriefStateAndServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(created["type"], "idea_brief_created")
         brief = created["idea_brief"]
         self.assertEqual(brief["id"], "TORQUE-IB:1")
-        self.assertEqual(brief["thinking_links"][1]["type"], "mind_map_node")
+        self.assertEqual(brief["thinking_links"][0]["type"], "scratchpad_note")
         self.assertEqual(emitted[-1]["op"], "idea_brief_upsert")
         for title in ("Second brief", "Third brief"):
             self.db.create_idea_brief({

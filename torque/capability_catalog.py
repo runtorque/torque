@@ -477,14 +477,14 @@ CAPABILITY_CATALOG: dict[str, CapabilityDefinition] = {
         _scoped(
             "thinking.read",
             "Read Thinking artifacts",
-            "Read Scratchpad notes and Mind Maps visible to the caller.",
+            "Read Scratchpad notes visible to the caller.",
             scopes=("self", "group"),
             ceilings={"architect": "group"},
         ),
         _scoped(
             "thinking.write",
             "Write Thinking artifacts",
-            "Create and update caller-owned Scratchpad notes and Mind Maps.",
+            "Create and update caller-owned Scratchpad notes.",
             scopes=("self",),
             ceilings={"architect": "self"},
         ),

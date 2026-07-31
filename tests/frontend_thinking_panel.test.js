@@ -162,7 +162,7 @@ function createHarness(options = {}) {
     Math,
     state: {
       active_group: 'Torque',
-      thinking: { scratchpad_notes: {}, mind_maps: {} },
+      thinking: { scratchpad_notes: {} },
       idea_briefs: {},
     },
     _activePanelApp: 'thinking',
@@ -184,7 +184,7 @@ function createHarness(options = {}) {
     run(sandbox, `
       state = {
         agents: {}, groups: {}, children: {}, active_group: 'Torque',
-        thinking: { scratchpad_notes: {}, mind_maps: {} }, idea_briefs: {}
+        thinking: { scratchpad_notes: {} }, idea_briefs: {}
       };
     `);
   }
@@ -244,20 +244,14 @@ test('Thinking panel is registered as a first-class panel with responsive CSS', 
   assert.match(css, /@container \(max-width:\s*720px\)\s*\{[\s\S]*?\.thinking-workspace\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/s);
 });
 
-test('Thinking panel initial load requests scratchpad and map lists and renders tabs', () => {
+
+test('Thinking panel no longer exposes a Mind Map tab or map loader', () => {
+  const source = fs.readFileSync(path.join(repoRoot, 'static/js/thinking.js'), 'utf8');
+  assert.doesNotMatch(source, /mind_map|mind-map|Mind Map/);
   const { sandbox, document, sendCalls } = createHarness();
   run(sandbox, `thinkingEnsureLoaded({ includeInactive: true }); renderThinkingPanel();`);
-
-  assert.deepEqual(sendCalls.map((call) => call.cmd), ['scratchpad_note_list', 'mind_map_list']);
-  assert.equal(sendCalls[0].group, 'Torque');
-  assert.equal(sendCalls[1].group, 'Torque');
-  const html = document.getElementById('panel-thinking').innerHTML;
-  assert.match(html, /Thinking/);
-  assert.match(html, /thinking-header-icon[\s\S]*thinking-connected-nodes-icon/);
-  assert.match(html, /Scratchpad/);
-  assert.match(html, /Mind Map/);
-  assert.match(html, /Idea Briefs/);
-  assert.match(html, /stay separate from Planning/);
+  assert.deepEqual(sendCalls.map((call) => call.cmd), ['scratchpad_note_list']);
+  assert.doesNotMatch(document.getElementById('panel-thinking').innerHTML, /Mind Map/);
 });
 
 test('Scratchpad preserves draft, caret, selection, and scroll across Thinking rerenders', () => {
@@ -307,85 +301,6 @@ test('Scratchpad create/update/archive/delete send trusted backend commands', as
   assert.equal(sendCalls.at(-1).cmd, 'scratchpad_note_archive');
   await run(sandbox, `thinkingScratchDelete('TORQUE-S:2'); Promise.resolve();`);
   assert.equal(sendCalls.at(-1).cmd, 'scratchpad_note_delete');
-});
-
-test('Mind Map renders nodes/links and sends node/link CRUD plus position persistence commands', () => {
-  const { sandbox, document, sendCalls } = createHarness();
-  sandbox.state.thinking.mind_maps['TORQUE-M:1'] = {
-    id: 'TORQUE-M:1', group: 'Torque', group_name: 'Torque', title: 'Launch ideas', description: 'Explore flows', node_count: 2, link_count: 1
-  };
-  run(sandbox, `thinkingSetTab('mind-map'); thinkingReceiveMindMapDetail({ type: 'mind_map', id: 'TORQUE-M:1', group: 'Torque', group_name: 'Torque', title: 'Launch ideas', description: 'Explore flows', nodes: [
-    { id: 'TORQUE-M:1:N:1', map_id: 'TORQUE-M:1', label: 'Problem', notes: 'User pain', x: 20, y: 30, position: { x: 20, y: 30 }, sort_order: 1 },
-    { id: 'TORQUE-M:1:N:2', map_id: 'TORQUE-M:1', label: 'Solution', notes: 'Sketch', x: 70, y: 60, position: { x: 70, y: 60 }, sort_order: 2 }
-  ], links: [
-    { id: 'TORQUE-M:1:L:1', map_id: 'TORQUE-M:1', source_node_id: 'TORQUE-M:1:N:1', target_node_id: 'TORQUE-M:1:N:2', label: 'inspires', sort_order: 1 }
-  ] }); renderThinkingPanel();`);
-
-  let html = document.getElementById('panel-thinking').innerHTML;
-  assert.match(html, /thinking-map-node/);
-  assert.match(html, /thinking-map-link-line/);
-  assert.match(html, /Problem/);
-  assert.match(html, /inspires/);
-
-  run(sandbox, `thinkingMindSelectNode('TORQUE-M:1:N:1');`);
-  document.getElementById('thinking-node-edit-label').value = 'Problem updated';
-  document.getElementById('thinking-node-edit-notes').value = 'Sharper note';
-  run(sandbox, `thinkingMindSaveNode();`);
-  assert.equal(sendCalls.at(-1).cmd, 'mind_map_node_update');
-  assert.equal(sendCalls.at(-1).node_id, 'TORQUE-M:1:N:1');
-  assert.equal(sendCalls.at(-1).label, 'Problem updated');
-
-  run(sandbox, `thinkingMindMoveNode('TORQUE-M:1:N:1', 5, -5);`);
-  assert.equal(sendCalls.at(-1).cmd, 'mind_map_node_position');
-  assert.equal(sendCalls.at(-1).x, 25);
-  assert.equal(sendCalls.at(-1).y, 25);
-  assert.equal(JSON.stringify(sendCalls.at(-1).position), JSON.stringify({ x: 25, y: 25 }));
-
-  document.getElementById('thinking-node-new-label').value = 'Evidence';
-  run(sandbox, `thinkingMindAddNode();`);
-  assert.equal(sendCalls.at(-1).cmd, 'mind_map_node_create');
-  assert.equal(sendCalls.at(-1).label, 'Evidence');
-  assert.equal(sendCalls.at(-1).mind_map_id, 'TORQUE-M:1');
-
-  document.getElementById('thinking-link-new-source').value = 'TORQUE-M:1:N:1';
-  document.getElementById('thinking-link-new-target').value = 'TORQUE-M:1:N:2';
-  document.getElementById('thinking-link-new-label').value = 'supports';
-  run(sandbox, `thinkingMindAddLink();`);
-  assert.equal(sendCalls.at(-1).cmd, 'mind_map_link_create');
-  assert.equal(sendCalls.at(-1).source_node_id, 'TORQUE-M:1:N:1');
-  assert.equal(sendCalls.at(-1).target_node_id, 'TORQUE-M:1:N:2');
-  assert.equal(sendCalls.at(-1).label, 'supports');
-
-  run(sandbox, `thinkingMindSelectLink('TORQUE-M:1:L:1');`);
-  document.getElementById('thinking-link-edit-label').value = 'blocks';
-  run(sandbox, `thinkingMindSaveLink();`);
-  assert.equal(sendCalls.at(-1).cmd, 'mind_map_link_update');
-  assert.equal(sendCalls.at(-1).link_id, 'TORQUE-M:1:L:1');
-  assert.equal(sendCalls.at(-1).label, 'blocks');
-});
-
-test('Mind Map tab and websocket deltas preserve focused link editor state', () => {
-  const { sandbox, document } = createHarness();
-  sandbox.state.thinking.mind_maps['TORQUE-M:1'] = {
-    id: 'TORQUE-M:1', group: 'Torque', group_name: 'Torque', title: 'Map', node_count: 2, link_count: 1
-  };
-  run(sandbox, `thinkingSetTab('mind-map'); thinkingReceiveMindMapDetail({ type: 'mind_map', id: 'TORQUE-M:1', group: 'Torque', group_name: 'Torque', title: 'Map', nodes: [
-    { id: 'n1', map_id: 'TORQUE-M:1', label: 'A', x: 20, y: 20, position: { x: 20, y: 20 } },
-    { id: 'n2', map_id: 'TORQUE-M:1', label: 'B', x: 80, y: 80, position: { x: 80, y: 80 } }
-  ], links: [{ id: 'l1', map_id: 'TORQUE-M:1', source_node_id: 'n1', target_node_id: 'n2', label: 'old' }] }); thinkingMindSelectLink('l1');`);
-  const label = document.getElementById('thinking-link-edit-label');
-  label.value = 'local link draft';
-  label.selectionStart = 5;
-  label.selectionEnd = 9;
-  label.focus();
-
-  run(sandbox, `thinkingReceiveMindMapLinkDelta({ id: 'l1', map_id: 'TORQUE-M:1', source_node_id: 'n1', target_node_id: 'n2', label: 'server link' }); renderThinkingPanel();`);
-
-  const restored = document.getElementById('thinking-link-edit-label');
-  assert.equal(restored.value, 'local link draft');
-  assert.equal(document.activeElement, restored);
-  assert.equal(restored.selectionStart, 5);
-  assert.equal(restored.selectionEnd, 9);
 });
 
 test('Idea Brief tab renders list/detail and creates briefs with linked Thinking', () => {

@@ -31,7 +31,7 @@ prompt:
     merge, deploy, change admin/profile settings, or message Engineers/Workers directly.'
   tool_guidance:
   - when_capability: thinking.write
-    text: Use visible Thinking tools for caller-owned Scratchpad notes and Mind Maps.
+    text: Use visible Thinking tools for caller-owned Scratchpad notes.
   - when_capability: idea_brief.write
     text: Use Idea Brief tools for structured, durable proposal artifacts with problem/opportunity,
       why it matters, proposed shape, smallest useful version, risks/tradeoffs, open questions,

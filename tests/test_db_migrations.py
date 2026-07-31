@@ -227,7 +227,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
 
         self.assertTrue(set(BOARD_TASK_ROUTING_COLUMNS) <= columns)
         self.assertIn((3, "board_task_routing_contract"), ledger)
-        self.assertEqual(ledger[-1], (26, "shared_memory_ttl_contract"))
+        self.assertEqual(ledger[-1], (27, "remove_mind_maps"))
         self.assertFalse(set(BOARD_TASK_ROUTING_COLUMNS) & backup_columns)
         self.assertEqual(backup_version, (2,))
         self.assertEqual(rerun_backup_mtime, backup_mtime)
@@ -322,7 +322,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
         self.assertTrue(set(AGENT_CLASS_AUDIT_COLUMNS) <= audit_columns)
         self.assertTrue(set(DECISION_COLUMNS) <= decision_columns)
         self.assertIn((4, "agent_lifecycle_contract"), ledger)
-        self.assertEqual(ledger[-1], (26, "shared_memory_ttl_contract"))
+        self.assertEqual(ledger[-1], (27, "remove_mind_maps"))
         self.assertFalse(set(AGENT_LIFECYCLE_COLUMNS) & backup_agent_columns)
         self.assertNotIn("agent_class_audit", backup_tables)
         self.assertNotIn("decisions", backup_tables)
@@ -358,7 +358,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
 
         self.assertTrue(set(AGENT_KIND_COLUMNS) <= columns)
         self.assertIn((7, "agent_kind_schema"), ledger)
-        self.assertEqual(ledger[-1], (26, "shared_memory_ttl_contract"))
+        self.assertEqual(ledger[-1], (27, "remove_mind_maps"))
 
     def test_version_twenty_five_owns_finalization_policy_columns(self):
         finalization_columns = (
@@ -396,7 +396,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
             ).fetchall()
 
         self.assertTrue(set(finalization_columns) <= columns)
-        self.assertEqual(ledger[-1], (26, "shared_memory_ttl_contract"))
+        self.assertEqual(ledger[-1], (27, "remove_mind_maps"))
 
     def test_version_twenty_six_owns_group_context_ttl_column(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -428,7 +428,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
             ).fetchall()
 
         self.assertTrue(set(GROUP_CONTEXT_TTL_COLUMNS) <= columns)
-        self.assertEqual(ledger[-1], (26, "shared_memory_ttl_contract"))
+        self.assertEqual(ledger[-1], (27, "remove_mind_maps"))
 
     def test_post_init_phase_waits_for_kinds_stage_four(self):
         conn = sqlite3.connect(":memory:")
@@ -464,7 +464,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
         self.assertEqual(before_meta, ("7",))
         self.assertFalse(skipped)
         self.assertTrue(finalized)
-        self.assertEqual(after[-1], (26, "shared_memory_ttl_contract"))
+        self.assertEqual(after[-1], (27, "remove_mind_maps"))
         self.assertEqual(after_meta, (SCHEMA_VERSION,))
 
     def test_post_init_runner_is_retryable_and_skipped_after_ledger(self):
