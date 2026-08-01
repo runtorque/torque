@@ -17,6 +17,12 @@ TEST_EE_COMMAND ?= $(TEST_PYTHON) -m unittest -v \
 	tests.test_ee_python_package \
 	tests.test_relay_probe \
 	tests.test_frontend_remote
+TEST_RESULT_DIR ?= $(CURDIR)/.torque/test-results
+TEST_RESULT_FOOTER := scripts/test_result_footer.py
+
+# The finalizer reads the literal command from this exported make variable;
+# the command itself is still expanded directly by the current recipe shell.
+export TEST_PYTHON TEST_COMMAND TEST_EE_COMMAND
 
 PERF_MATRIX    ?= 10,20,30
 PERF_DURATION  ?= 15
@@ -347,16 +353,7 @@ assert-community-package:
 
 ## test: Run the automated regression suite
 test: lint
-	@test_user_base=$$($(TEST_PYTHON) -c 'import site; print(site.USER_BASE)'); \
-	scratch_root=$$(mktemp -d "$${TMPDIR:-/tmp}/torque-test.XXXXXX"); \
-	trap 'rm -rf "$$scratch_root"' EXIT HUP INT TERM; \
-	mkdir -p "$$scratch_root/home" "$$scratch_root/profile"; \
-	$(SANITIZE_TORQUE_TEST_ENV) \
-		PYTHONUSERBASE="$$test_user_base" \
-		HOME="$$scratch_root/home" \
-		TORQUE_DATA_DIR="$$scratch_root/profile" \
-		TORQUE_PROFILE="test" \
-		$(TEST_COMMAND)
+	@$(call RUN_TEST_TARGET,test,TEST_COMMAND,)
 
 ## test-ee: Run enterprise-only regression tests (requires ee/ checkout)
 test-ee: lint
@@ -370,17 +367,36 @@ test-ee: lint
 		ee/relay/README.md; do \
 		[ -e "$$path" ] || { echo "Error: $$path is required for make test-ee"; exit 1; }; \
 	done
-	@test_user_base=$$($(TEST_PYTHON) -c 'import site; print(site.USER_BASE)'); \
-	scratch_root=$$(mktemp -d "$${TMPDIR:-/tmp}/torque-test.XXXXXX"); \
-	trap 'rm -rf "$$scratch_root"' EXIT HUP INT TERM; \
-	mkdir -p "$$scratch_root/home" "$$scratch_root/profile"; \
-	$(SANITIZE_TORQUE_TEST_ENV) \
-		PYTHONUSERBASE="$$test_user_base" \
-		HOME="$$scratch_root/home" \
-		TORQUE_DATA_DIR="$$scratch_root/profile" \
-		TORQUE_PROFILE="test" \
-		TORQUE_WITH_EE=1 \
-		$(TEST_EE_COMMAND)
+	@$(call RUN_TEST_TARGET,test-ee,TEST_EE_COMMAND,TORQUE_WITH_EE=1)
+
+# Keep the suite command in Make's current /bin/sh: wrapping it in a Python
+# subprocess changes its TTY/process boundary. The immediate rc is the only
+# authoritative verdict. A footer-write failure may fail green, never red.
+define RUN_TEST_TARGET
+test_user_base=$$($(TEST_PYTHON) -c 'import site; print(site.USER_BASE)'); \
+scratch_root=$$(mktemp -d "$${TMPDIR:-/tmp}/torque-test.XXXXXX"); \
+trap 'rm -rf "$$scratch_root"' EXIT HUP INT TERM; \
+mkdir -p "$$scratch_root/home" "$$scratch_root/profile"; \
+invocation="$$scratch_root/test-result-invocation.json"; \
+$(TEST_PYTHON) $(TEST_RESULT_FOOTER) prepare \
+	--target "$(1)" --command-env "$(2)" \
+	--result-dir "$(TEST_RESULT_DIR)" --invocation "$$invocation"; \
+prepare_rc=$$?; \
+if [ "$$prepare_rc" -ne 0 ]; then exit "$$prepare_rc"; fi; \
+$(SANITIZE_TORQUE_TEST_ENV) \
+	PYTHONUSERBASE="$$test_user_base" \
+	HOME="$$scratch_root/home" \
+	TORQUE_DATA_DIR="$$scratch_root/profile" \
+	TORQUE_PROFILE="test" \
+	$(3) \
+	$($(2)); \
+suite_rc=$$?; \
+$(TEST_PYTHON) $(TEST_RESULT_FOOTER) finalize \
+	--invocation "$$invocation" --exit-code "$$suite_rc"; \
+footer_rc=$$?; \
+if [ "$$suite_rc" -ne 0 ]; then exit "$$suite_rc"; fi; \
+exit "$$footer_rc"
+endef
 
 ## perf-deps: Prepare the cached Python environment used by perf harness targets
 perf-deps:
