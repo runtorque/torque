@@ -49,6 +49,61 @@ class TorqueDBTests(unittest.TestCase):
             4321,
         )
 
+    def test_state_load_dehydrates_archived_artifact_content_without_erasing_db(self):
+        body = "archived evidence\n" * 2048
+        self.db.save_board_task(BoardTask(
+            id="archived-1", task="Archived", group="g", lane="Archived",
+            artifacts=[{
+                "id": "artifact-1", "type": "log", "title": "Evidence",
+                "summary": "synthetic fixture", "content": body,
+                "storage": {"kind": "inline", "content": body},
+            }],
+        ))
+
+        state = MatrixState(self.db)
+        state.load()
+        loaded = state.board_tasks["archived-1"]
+
+        self.assertEqual(loaded.artifacts[0]["content"], "")
+        self.assertEqual(loaded.artifacts[0]["storage"]["content"], "")
+        self.assertEqual(loaded.artifacts[0]["summary"], "synthetic fixture")
+        self.assertTrue(getattr(loaded, "_artifact_content_dehydrated", False))
+
+        # An unrelated archived-task mutation must retain the original stored
+        # artifact JSON rather than writing the metadata-only in-memory copy.
+        state.board_update_task("archived-1", description="metadata update")
+        persisted = self.db.load_all()["board_tasks"]["archived-1"]
+        self.assertEqual(persisted["description"], "metadata update")
+        self.assertEqual(persisted["artifacts"][0]["content"], body)
+        self.assertEqual(persisted["artifacts"][0]["storage"]["content"], body)
+
+    def test_live_task_detail_and_unarchive_restore_artifact_content(self):
+        body = "dispatch evidence\n" * 1024
+        self.db.save_board_task(BoardTask(
+            id="live-1", task="Live", group="g", lane="To Do",
+            artifacts=[{
+                "id": "artifact-1", "type": "snippet", "title": "Prompt",
+                "content": body, "storage": {"kind": "inline", "content": body},
+            }],
+        ))
+        self.db.save_board_task(BoardTask(
+            id="archived-2", task="Archived", group="g", lane="Archived",
+            artifacts=[{
+                "id": "artifact-2", "type": "snippet", "title": "Restore",
+                "content": body, "storage": {"kind": "inline", "content": body},
+            }],
+        ))
+
+        state = MatrixState(self.db)
+        state.load()
+
+        self.assertEqual(state.get_task_detail("live-1")["artifacts"][0]["content"], body)
+        state.board_unarchive_task("archived-2", lane="To Do")
+        restored = state.board_tasks["archived-2"]
+        self.assertEqual(restored.lane, "To Do")
+        self.assertEqual(restored.artifacts[0]["content"], body)
+        self.assertFalse(getattr(restored, "_artifact_content_dehydrated", False))
+
     def test_global_settings_round_trips_relay_fields(self):
         self.db.save_global_settings(GlobalSettings(
             relay_enabled=True,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .artifacts import dehydrate_artifact_content
 from .state import (
     ARCHIVED_LANE, AgentCell, AgentDigestSettings, AgentMessageLoop,
     AutoDispatchQueueEntry, BoardTask, EngineerSettings, GlobalSettings,
@@ -154,8 +155,6 @@ class StateLoadingMixin:
                     raw["group"] = first_group
                 raw["attachments"] = normalize_attachments(
                     raw.get("attachments", []))
-                raw["artifacts"] = normalize_artifacts(
-                    raw.get("artifacts", []))
                 labels = list(raw.get("labels", []) or [])
                 if "torque:archived" in labels and raw.get("lane") != ARCHIVED_LANE:
                     prior_lane = raw.get("lane") or ""
@@ -167,6 +166,16 @@ class StateLoadingMixin:
                     labels = [label for label in labels
                               if label != "torque:archived"]
                 raw["labels"] = labels
+                # Archived tasks are excluded from the live board snapshot
+                # and never participate in prompt/dispatch assembly. Keep
+                # their small artifact metadata in memory, but not inline
+                # bodies. The private marker lets persistence retain the
+                # stored JSON if an unrelated archived-task save occurs.
+                dehydrated_artifacts = raw.get("lane") == ARCHIVED_LANE
+                artifact_source = raw.get("artifacts", [])
+                if dehydrated_artifacts:
+                    artifact_source = dehydrate_artifact_content(artifact_source)
+                raw["artifacts"] = normalize_artifacts(artifact_source)
                 raw["messages_thread"] = _normalize_messages_thread(
                     raw.get("messages_thread", [])
                 )
@@ -194,7 +203,12 @@ class StateLoadingMixin:
                     resume_after = str(resume_after)
                 raw["resume_after_boundary_task_id"] = resume_after.strip()
                 filtered = {k: v for k, v in raw.items() if k in bt_fields}
-                self.board_tasks[tid] = BoardTask(**filtered)
+                task = BoardTask(**filtered)
+                if dehydrated_artifacts:
+                    # Private/ephemeral: it must not become a board-task
+                    # schema field or a browser payload field.
+                    task._artifact_content_dehydrated = True
+                self.board_tasks[tid] = task
             self.task_id_aliases = {
                 str(old_id or ""): str(new_id or "")
                 for old_id, new_id in (data.get("task_id_aliases", {}) or {}).items()

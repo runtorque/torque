@@ -327,6 +327,28 @@ def normalize_artifacts(artifacts) -> list[dict]:
     return out
 
 
+def dehydrate_artifact_content(artifacts) -> list[dict]:
+    """Return artifact metadata without inline bodies.
+
+    Archived board tasks are not a live prompt or dispatch surface. Keeping
+    their artifact records (ids, provenance, paths, summaries, and lifecycle)
+    is useful, but retaining legacy inline content is not.
+    """
+    if not isinstance(artifacts, list):
+        return []
+    dehydrated = []
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            continue
+        item = deepcopy(artifact)
+        item["content"] = ""
+        storage = item.get("storage")
+        if isinstance(storage, dict):
+            storage["content"] = ""
+        dehydrated.append(item)
+    return dehydrated
+
+
 def task_artifacts(attachments, artifacts) -> list[dict]:
     """Return the combined artifact view for prompts and torque context."""
     combined = []
