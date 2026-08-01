@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from .artifacts import dehydrate_artifact_content
 from .state import (
     ARCHIVED_LANE, AgentCell, AgentDigestSettings, AgentMessageLoop,
     AutoDispatchQueueEntry, BoardTask, EngineerSettings, GlobalSettings,
@@ -175,10 +174,7 @@ class StateLoadingMixin:
                 # bodies. The private marker lets persistence retain the
                 # stored JSON if an unrelated archived-task save occurs.
                 dehydrated_artifacts = raw.get("lane") == ARCHIVED_LANE
-                artifact_source = raw.get("artifacts", [])
-                if dehydrated_artifacts:
-                    artifact_source = dehydrate_artifact_content(artifact_source)
-                raw["artifacts"] = normalize_artifacts(artifact_source)
+                raw["artifacts"] = normalize_artifacts(raw.get("artifacts", []))
                 raw["messages_thread"] = _normalize_messages_thread(
                     raw.get("messages_thread", [])
                 )

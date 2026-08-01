@@ -3,7 +3,6 @@ import unittest
 from torque.artifacts import (
     artifact_id_collisions,
     artifact_prompt_block,
-    dehydrate_artifact_content,
     legacy_image_prompt_block,
     next_task_artifact_id,
     normalize_artifact,
@@ -13,23 +12,6 @@ from torque.artifacts import (
 
 
 class TaskArtifactTests(unittest.TestCase):
-    def test_dehydrate_artifact_content_keeps_metadata_and_removes_body_copies(self):
-        artifacts = dehydrate_artifact_content([{
-            "id": "artifact-7",
-            "type": "log",
-            "title": "test output",
-            "summary": "42 tests passed",
-            "content": "x" * 4096,
-            "storage": {"kind": "inline", "content": "x" * 4096},
-            "provenance": {"source": "worker"},
-        }])
-
-        self.assertEqual(artifacts[0]["id"], "artifact-7")
-        self.assertEqual(artifacts[0]["summary"], "42 tests passed")
-        self.assertEqual(artifacts[0]["provenance"], {"source": "worker"})
-        self.assertEqual(artifacts[0]["content"], "")
-        self.assertEqual(artifacts[0]["storage"]["content"], "")
-
     def test_artifact_ids_allocate_after_highest_sequence_and_report_collisions(self):
         artifacts = [
             {"id": "artifact-1"},

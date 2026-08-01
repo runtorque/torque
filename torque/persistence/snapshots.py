@@ -419,7 +419,9 @@ class SnapshotPersistenceMixin:
             for column in _BOARD_TASK_COLUMNS:
                 if column == "artifacts":
                     projected_columns.append("""
-                        CASE WHEN lane = 'Archived' THEN COALESCE(
+                        CASE WHEN lane = 'Archived'
+                              OR instr(labels, '"torque:archived"') > 0
+                        THEN COALESCE(
                             (SELECT json_group_array(json_remove(
                                 value, '$.content', '$.storage.content'
                             )) FROM json_each(CASE

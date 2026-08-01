@@ -1405,14 +1405,6 @@ class BoardMutationMixin:
         task = self.board_tasks.get(tid)
         if not task or task.lane != ARCHIVED_LANE:
             return
-        # get_task_detail is intentionally in-memory only. Rehydrate solely
-        # for this state transition, before the task can be dispatched or
-        # rendered as live, rather than adding a general DB detail path.
-        if not self._rehydrate_archived_task_artifacts(task):
-            return {
-                "type": "error",
-                "message": "Unable to restore archived task artifacts",
-            }
         target_lane = lane or task.archived_from_lane or "Done"
         if target_lane == ARCHIVED_LANE or target_lane not in self.board_lanes:
             target_lane = "Done" if "Done" in self.board_lanes else self.board_lanes[0]
@@ -1422,6 +1414,15 @@ class BoardMutationMixin:
             )
             if not allowed:
                 return result
+        # get_task_detail is intentionally in-memory only. Rehydrate only
+        # after every rejection-capable target/finalization check has passed,
+        # immediately before a task can return to a live surface. A denied
+        # unarchive therefore remains fully dehydrated in memory.
+        if not self._rehydrate_archived_task_artifacts(task):
+            return {
+                "type": "error",
+                "message": "Unable to restore archived task artifacts",
+            }
         self._board_apply_archive_state(
             task,
             lane=target_lane,
