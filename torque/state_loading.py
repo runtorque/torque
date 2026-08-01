@@ -34,7 +34,10 @@ class StateLoadingMixin:
         if not self.db.has_data() and STATE_FILE.exists():
             self.db.migrate_from_json(STATE_FILE)
 
-        data = self.db.load_all()
+        # Archived artifact bodies are intentionally projected away in SQLite
+        # before Python decodes board-task JSON. The standard load_all() path
+        # remains full for direct/offline callers.
+        data = self.db.load_all(dehydrate_archived_artifacts=True)
 
         try:
             fields = set(AgentCell.__dataclass_fields__)

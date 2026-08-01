@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 import json
 import sqlite3
+from dataclasses import asdict
 from unittest import mock
 
 try:
@@ -68,6 +69,16 @@ class TorqueDBTests(unittest.TestCase):
         self.assertEqual(loaded.artifacts[0]["storage"]["content"], "")
         self.assertEqual(loaded.artifacts[0]["summary"], "synthetic fixture")
         self.assertTrue(getattr(loaded, "_artifact_content_dehydrated", False))
+        self.assertNotIn("_artifact_content_dehydrated", asdict(loaded))
+
+        # The state-loading query must project body fields before Python's
+        # board-task decoder sees the archived JSON, while normal reads stay
+        # full for direct/offline consumers.
+        projected = self.db.load_all(dehydrate_archived_artifacts=True)
+        self.assertNotIn(
+            "content", projected["board_tasks"]["archived-1"]["artifacts"][0]
+        )
+        self.assertEqual(self.db.load_all()["board_tasks"]["archived-1"]["artifacts"][0]["content"], body)
 
         # An unrelated archived-task mutation must retain the original stored
         # artifact JSON rather than writing the metadata-only in-memory copy.
@@ -76,6 +87,25 @@ class TorqueDBTests(unittest.TestCase):
         self.assertEqual(persisted["description"], "metadata update")
         self.assertEqual(persisted["artifacts"][0]["content"], body)
         self.assertEqual(persisted["artifacts"][0]["storage"]["content"], body)
+
+    def test_explicit_archived_artifact_replacement_clears_content_guard(self):
+        self.db.save_board_task(BoardTask(
+            id="archived-replace", task="Archived", group="g", lane="Archived",
+            artifacts=[{"id": "artifact-1", "type": "log", "content": "old"}],
+        ))
+        state = MatrixState(self.db)
+        state.load()
+
+        state.board_update_task("archived-replace", artifacts=[{
+            "id": "artifact-1", "type": "log", "content": "replacement",
+        }])
+
+        task = state.board_tasks["archived-replace"]
+        self.assertFalse(getattr(task, "_artifact_content_dehydrated", False))
+        self.assertEqual(
+            self.db.load_all()["board_tasks"]["archived-replace"]["artifacts"][0]["content"],
+            "replacement",
+        )
 
     def test_live_task_detail_and_unarchive_restore_artifact_content(self):
         body = "dispatch evidence\n" * 1024
@@ -93,16 +123,38 @@ class TorqueDBTests(unittest.TestCase):
                 "content": body, "storage": {"kind": "inline", "content": body},
             }],
         ))
+        self.db.save_board_task(BoardTask(
+            id="done-1", task="Done but live", group="g", lane="Done",
+            artifacts=[{"id": "artifact-3", "type": "snippet", "content": body}],
+        ))
 
         state = MatrixState(self.db)
         state.load()
 
         self.assertEqual(state.get_task_detail("live-1")["artifacts"][0]["content"], body)
+        self.assertEqual(state.get_task_detail("done-1")["artifacts"][0]["content"], body)
         state.board_unarchive_task("archived-2", lane="To Do")
         restored = state.board_tasks["archived-2"]
         self.assertEqual(restored.lane, "To Do")
         self.assertEqual(restored.artifacts[0]["content"], body)
         self.assertFalse(getattr(restored, "_artifact_content_dehydrated", False))
+
+    def test_unarchive_does_not_move_when_artifact_restore_fails(self):
+        self.db.save_board_task(BoardTask(
+            id="archived-restore-fail", task="Archived", group="g", lane="Archived",
+            artifacts=[{"id": "artifact-1", "type": "log", "content": "stored"}],
+        ))
+        state = MatrixState(self.db)
+        state.load()
+        task = state.board_tasks["archived-restore-fail"]
+
+        with mock.patch.object(self.db, "load_board_task_artifacts", return_value=None):
+            result = state.board_unarchive_task(task.id, lane="To Do")
+
+        self.assertEqual(result["type"], "error")
+        self.assertEqual(task.lane, "Archived")
+        self.assertEqual(task.artifacts[0]["content"], "")
+        self.assertTrue(getattr(task, "_artifact_content_dehydrated", False))
 
     def test_global_settings_round_trips_relay_fields(self):
         self.db.save_global_settings(GlobalSettings(

@@ -5,6 +5,7 @@ import time
 from dataclasses import asdict
 
 from torque.db_board import (
+    _BOARD_TASK_COLUMNS,
     decode_auto_dispatch_queue_rows,
     decode_board_task_row,
 )
@@ -288,7 +289,7 @@ class SnapshotPersistenceMixin:
 
     # -- Read methods (daemon startup + CLI) --------------------------------
 
-    def load_all(self) -> dict:
+    def load_all(self, *, dehydrate_archived_artifacts: bool = False) -> dict:
         """Load full state from SQLite. Returns dict matching state.json
         structure for easy consumption by MatrixState.load()."""
         c = self._conn.cursor()
@@ -409,7 +410,31 @@ class SnapshotPersistenceMixin:
 
         # Board tasks
         board_tasks = {}
-        rows = c.execute("SELECT * FROM board_tasks").fetchall()
+        if dehydrate_archived_artifacts:
+            # Do this projection in SQLite, before Python decodes the task
+            # row. json_remove handles both legacy body copies; json_each and
+            # json_group_array preserve the artifact list and its metadata.
+            # The default full read remains available to offline/CLI callers.
+            projected_columns = []
+            for column in _BOARD_TASK_COLUMNS:
+                if column == "artifacts":
+                    projected_columns.append("""
+                        CASE WHEN lane = 'Archived' THEN COALESCE(
+                            (SELECT json_group_array(json_remove(
+                                value, '$.content', '$.storage.content'
+                            )) FROM json_each(CASE
+                                WHEN json_valid(board_tasks.artifacts)
+                                THEN board_tasks.artifacts ELSE '[]' END)),
+                            '[]'
+                        ) ELSE artifacts END AS artifacts
+                    """)
+                else:
+                    projected_columns.append(column)
+            rows = c.execute(
+                "SELECT " + ", ".join(projected_columns) + " FROM board_tasks"
+            ).fetchall()
+        else:
+            rows = c.execute("SELECT * FROM board_tasks").fetchall()
         if rows:
             cols = [d[0] for d in c.description]
             for row in rows:
