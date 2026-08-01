@@ -1,6 +1,8 @@
 import base64
+import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -13,6 +15,25 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class MakefileInstallTests(unittest.TestCase):
+    def _footer_command(self, source):
+        return f"{shlex.quote(sys.executable)} -c {shlex.quote(source)}"
+
+    def _run_footer_target(self, target, result_dir, source, *, env=None, python=None, **variables):
+        command_key = "TEST_EE_COMMAND" if target == "test-ee" else "TEST_COMMAND"
+        arguments = [
+            "make", "-s", target,
+            f"TEST_PYTHON={python or sys.executable}",
+            f"TEST_RESULT_DIR={result_dir}",
+            f"{command_key}={self._footer_command(source)}",
+            *[f"{key}={value}" for key, value in variables.items()],
+        ]
+        return subprocess.run(
+            arguments, cwd=ROOT, text=True, capture_output=True, env=env,
+        )
+
+    def _footer_records(self, result_dir):
+        return sorted(result_dir.glob("*.json"))
+
     def _run_make_dry(self, target, *extra_args):
         if not shutil.which("make"):
             self.skipTest("make is not available")
@@ -255,6 +276,10 @@ print(config.LOG_FILE)
                 self.assertIn("test_user_base=$(python3 -c 'import site; print(site.USER_BASE)')", proc.stdout)
                 self.assertIn('PYTHONUSERBASE="$test_user_base"', proc.stdout)
                 self.assertIn('trap \'rm -rf \"$scratch_root\"\' EXIT HUP INT TERM', proc.stdout)
+                self.assertIn("scripts/test_result_footer.py prepare", proc.stdout)
+                self.assertIn("scripts/test_result_footer.py finalize", proc.stdout)
+                self.assertIn('suite_rc=$?', proc.stdout)
+                self.assertIn('TEST_RESULT_DIR ?= $(CURDIR)/.torque/test-results', (ROOT / "Makefile").read_text(encoding="utf-8"))
 
     def test_test_ee_target_runs_explicit_enterprise_suite(self):
         text = (ROOT / "Makefile").read_text(encoding="utf-8")
@@ -270,6 +295,170 @@ print(config.LOG_FILE)
         ):
             with self.subTest(module=module):
                 self.assertIn(module, text)
+
+    def test_test_footers_preserve_streams_and_suite_exit_status_for_both_targets(self):
+        for target in ("test", "test-ee"):
+            with self.subTest(target=target):
+                with tempfile.TemporaryDirectory() as td:
+                    result_dir = Path(td) / "results"
+                    passing_source = "import sys; print(\"suite stdout, quoted 'value'\"); print('suite stderr', file=sys.stderr)"
+                    passing_command = self._footer_command(passing_source)
+                    passing = self._run_footer_target(
+                        target, result_dir, passing_source,
+                    )
+                    self.assertEqual(passing.returncode, 0, passing.stderr)
+                    self.assertIn("suite stdout, quoted 'value'", passing.stdout)
+                    self.assertIn("suite stderr", passing.stderr)
+                    records = self._footer_records(result_dir)
+                    self.assertEqual(len(records), 1)
+                    record = json.loads(records[0].read_text(encoding="utf-8"))
+                    self.assertEqual(record["target"], target)
+                    self.assertEqual(record["exit_code"], 0)
+                    self.assertEqual(record["command"], passing_command)
+                    self.assertIsNone(record["totals"])
+                    self.assertEqual(record["totals_source"], "stdout")
+                    self.assertIn("change process, TTY, and stream semantics", record["totals_parse_reason"])
+
+                    failing = self._run_footer_target(
+                        target, result_dir,
+                        "import sys; print('intentional unique failure'); sys.exit(37)",
+                    )
+                    # GNU make maps a failed recipe to its own non-zero exit,
+                    # while the immutable footer preserves the suite's 37.
+                    self.assertNotEqual(failing.returncode, 0, failing.stderr)
+                    records = self._footer_records(result_dir)
+                    self.assertEqual(len(records), 2)
+                    self.assertEqual(
+                        json.loads(records[-1].read_text(encoding="utf-8"))["exit_code"], 37,
+                    )
+
+    def test_footer_survives_discarded_output_and_torque_sanitizer(self):
+        with tempfile.TemporaryDirectory() as td:
+            result_dir = Path(td) / "selected-by-non-torque-make-variable"
+            env = os.environ.copy()
+            env["TORQUE_CALLER_SENTINEL"] = "must-not-reach-suite"
+            command = self._footer_command(
+                "import os; assert os.getenv('TORQUE_CALLER_SENTINEL') is None"
+            )
+            proc = subprocess.run(
+                [
+                    "make", "-s", "test", f"TEST_PYTHON={sys.executable}",
+                    f"TEST_RESULT_DIR={result_dir}", f"TEST_COMMAND={command}",
+                ],
+                cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            self.assertEqual(proc.returncode, 0)
+            records = self._footer_records(result_dir)
+            self.assertEqual(len(records), 1)
+            self.assertEqual(
+                json.loads(records[0].read_text(encoding="utf-8"))["output_truncated"], "unknown",
+            )
+
+    def test_footer_records_are_immutable_and_lint_failure_creates_no_stale_verdict(self):
+        with tempfile.TemporaryDirectory() as td:
+            result_dir = Path(td) / "records"
+            passing = self._run_footer_target(result_dir=result_dir, target="test", source="pass")
+            self.assertEqual(passing.returncode, 0, passing.stderr)
+            first = self._footer_records(result_dir)
+            self.assertEqual(len(first), 1)
+            first_bytes = first[0].read_bytes()
+
+            second = self._run_footer_target(result_dir=result_dir, target="test", source="pass")
+            self.assertEqual(second.returncode, 0, second.stderr)
+            records = self._footer_records(result_dir)
+            self.assertEqual(len(records), 2)
+            self.assertEqual(first[0].read_bytes(), first_bytes)
+            self.assertFalse(any(path.name in {"latest.json", "current.json"} for path in result_dir.iterdir()))
+
+            lint_env = os.environ.copy()
+            lint_env["PATH"] = ""
+            lint = subprocess.run(
+                [
+                    shutil.which("make") or "make", "-s", "test",
+                    f"TEST_PYTHON={sys.executable}", f"TEST_RESULT_DIR={result_dir}",
+                ],
+                cwd=ROOT, text=True, capture_output=True, env=lint_env,
+            )
+            self.assertNotEqual(lint.returncode, 0)
+            self.assertEqual(self._footer_records(result_dir), records)
+            self.assertEqual(first[0].read_bytes(), first_bytes)
+
+    def test_footer_provenance_distinguishes_clean_and_dirty_worktrees(self):
+        helper = ROOT / "scripts" / "test_result_footer.py"
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td) / "repo"
+            repo.mkdir()
+            (repo / "scripts").mkdir()
+            copied_helper = repo / "scripts" / helper.name
+            copied_helper.write_text(helper.read_text(encoding="utf-8"), encoding="utf-8")
+            (repo / "tracked.txt").write_text("clean\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "fixture"],
+                cwd=repo, check=True,
+            )
+            result_dir = repo / "results"
+
+            def prepare_and_finalize(name):
+                invocation = repo / f"{name}.invocation"
+                env = os.environ | {"COMMAND": "synthetic command"}
+                subprocess.run(
+                    [sys.executable, str(copied_helper), "prepare", "--target", "test",
+                     "--command-env", "COMMAND",
+                     "--result-dir", str(result_dir), "--invocation", str(invocation)],
+                    cwd=repo, env=env, check=True,
+                )
+                subprocess.run(
+                    [sys.executable, str(copied_helper), "finalize", "--invocation", str(invocation), "--exit-code", "0"],
+                    cwd=repo, check=True,
+                )
+
+            prepare_and_finalize("clean")
+            (repo / "tracked.txt").write_text("dirty\n", encoding="utf-8")
+            prepare_and_finalize("dirty")
+            records = [json.loads(path.read_text(encoding="utf-8")) for path in self._footer_records(result_dir)]
+            self.assertEqual({record["dirty"] for record in records}, {False, True})
+            expected_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+            self.assertEqual({record["sha"] for record in records}, {expected_sha})
+            self.assertTrue(all(record["interpreter"]["path"] for record in records))
+
+    def test_footer_records_distinct_real_interpreters(self):
+        older_python = shutil.which("python3", path="/usr/bin")
+        if not older_python or os.path.realpath(older_python) == os.path.realpath(sys.executable):
+            self.skipTest("two distinct real Python interpreters are unavailable")
+        helper = ROOT / "scripts" / "test_result_footer.py"
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td) / "repo"
+            repo.mkdir()
+            (repo / "scripts").mkdir()
+            copied_helper = repo / "scripts" / helper.name
+            copied_helper.write_text(helper.read_text(encoding="utf-8"), encoding="utf-8")
+            (repo / "tracked.txt").write_text("fixture\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "fixture"],
+                cwd=repo, check=True,
+            )
+            result_dir = repo / "results"
+            for index, interpreter in enumerate((sys.executable, older_python)):
+                invocation = repo / f"interpreter-{index}.invocation"
+                env = os.environ | {"COMMAND": "synthetic command", "TEST_PYTHON": interpreter}
+                subprocess.run(
+                    [interpreter, str(copied_helper), "prepare", "--target", "test",
+                     "--command-env", "COMMAND", "--result-dir", str(result_dir),
+                     "--invocation", str(invocation)],
+                    cwd=repo, env=env, check=True,
+                )
+                subprocess.run(
+                    [interpreter, str(copied_helper), "finalize", "--invocation", str(invocation), "--exit-code", "0"],
+                    cwd=repo, check=True,
+                )
+            records = [json.loads(path.read_text(encoding="utf-8")) for path in self._footer_records(result_dir)]
+            self.assertEqual(len(records), 2)
+            self.assertEqual(len({record["interpreter"]["path"] for record in records}), 2)
+            self.assertEqual(len({record["interpreter"]["version"] for record in records}), 2)
 
 
 if __name__ == "__main__":
