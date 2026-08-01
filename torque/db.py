@@ -909,6 +909,24 @@ class TorqueDB(
             self._insert_board_task_row(self._conn, task)
             self._conn.commit()
 
+    def load_board_task_artifacts(self, task_id: str) -> list | None:
+        """Read one task's persisted artifacts for an archived-task restore.
+
+        This intentionally is not a task-detail lazy-loading API. It is used
+        only when an archived, content-dehydrated task becomes live again, so
+        worker prompts keep their existing full-content contract.
+        """
+        row = self._conn.execute(
+            "SELECT artifacts FROM board_tasks WHERE id=?", (str(task_id or ""),)
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            artifacts = json.loads(row[0] or "[]")
+        except (TypeError, json.JSONDecodeError):
+            return []
+        return artifacts if isinstance(artifacts, list) else []
+
     def save_board_tasks(self, tasks):
         """Upsert multiple board tasks in one SQLite transaction."""
         task_rows = list(tasks or [])

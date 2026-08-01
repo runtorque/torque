@@ -179,7 +179,20 @@ def _serialize_board_task(task):
 
 
 def insert_board_task(executor, task):
-    values = _serialize_board_task(task)
+    values = list(_serialize_board_task(task))
+    # State hydration intentionally removes archived inline bodies. A later
+    # lane reorder, health projection, or unrelated save must not turn that
+    # memory optimization into accidental stored-content deletion. Keep the
+    # original JSON verbatim until an explicit artifact update clears this
+    # private state marker.
+    if (task.get("_artifact_content_dehydrated") if isinstance(task, dict)
+            else getattr(task, "_artifact_content_dehydrated", False)):
+        task_id = values[_BOARD_TASK_COLUMNS.index("id")]
+        existing = executor.execute(
+            "SELECT artifacts FROM board_tasks WHERE id=?", (task_id,)
+        ).fetchone()
+        if existing is not None:
+            values[_BOARD_TASK_COLUMNS.index("artifacts")] = existing[0]
     executor.execute(
         _BOARD_TASK_INSERT_SQL.format(
             columns=", ".join(_BOARD_TASK_COLUMNS),

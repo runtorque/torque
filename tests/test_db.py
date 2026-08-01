@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 import json
 import sqlite3
+from dataclasses import asdict
 from unittest import mock
 
 try:
@@ -48,6 +49,166 @@ class TorqueDBTests(unittest.TestCase):
             ).fetchone()[0],
             4321,
         )
+
+    def test_state_load_dehydrates_archived_artifact_content_without_erasing_db(self):
+        body = "archived evidence\n" * 2048
+        self.db.save_board_task(BoardTask(
+            id="archived-1", task="Archived", group="g", lane="Archived",
+            artifacts=[{
+                "id": "artifact-1", "type": "log", "title": "Evidence",
+                "summary": "synthetic fixture", "content": body,
+                "storage": {"kind": "inline", "content": body},
+            }],
+        ))
+
+        # Capture the exact cell handed to the JSON decoder. This proves the
+        # projection happens in SQLite rather than after Python materializes
+        # the archived body.
+        from torque.persistence import snapshots as snapshots_module
+        original_decode = snapshots_module.decode_board_task_row
+        decoder_artifact_json = []
+
+        def capture_decode(row, columns):
+            decoder_artifact_json.append(row[columns.index("artifacts")])
+            return original_decode(row, columns)
+
+        with mock.patch.object(
+                snapshots_module, "decode_board_task_row",
+                side_effect=capture_decode):
+            state = MatrixState(self.db)
+            state.load()
+        loaded = state.board_tasks["archived-1"]
+
+        self.assertNotIn(body, decoder_artifact_json[0])
+        self.assertNotIn('"content"', decoder_artifact_json[0])
+        self.assertEqual(loaded.artifacts[0]["content"], "")
+        self.assertEqual(loaded.artifacts[0]["storage"]["content"], "")
+        self.assertEqual(loaded.artifacts[0]["summary"], "synthetic fixture")
+        self.assertTrue(getattr(loaded, "_artifact_content_dehydrated", False))
+        self.assertNotIn("_artifact_content_dehydrated", asdict(loaded))
+
+        # The state-loading query must project body fields before Python's
+        # board-task decoder sees the archived JSON, while normal reads stay
+        # full for direct/offline consumers.
+        projected = self.db.load_all(dehydrate_archived_artifacts=True)
+        self.assertNotIn(
+            "content", projected["board_tasks"]["archived-1"]["artifacts"][0]
+        )
+        self.assertEqual(self.db.load_all()["board_tasks"]["archived-1"]["artifacts"][0]["content"], body)
+
+        # An unrelated archived-task mutation must retain the original stored
+        # artifact JSON rather than writing the metadata-only in-memory copy.
+        state.board_update_task("archived-1", description="metadata update")
+        persisted = self.db.load_all()["board_tasks"]["archived-1"]
+        self.assertEqual(persisted["description"], "metadata update")
+        self.assertEqual(persisted["artifacts"][0]["content"], body)
+        self.assertEqual(persisted["artifacts"][0]["storage"]["content"], body)
+
+    def test_archived_projection_covers_legacy_archive_label(self):
+        body = "legacy evidence" * 512
+        self.db.save_board_task(BoardTask(
+            id="legacy-archived", task="Legacy", group="g", lane="Done",
+            labels=["torque:archived"],
+            artifacts=[{"id": "artifact-1", "type": "log", "content": body}],
+        ))
+
+        projected = self.db.load_all(dehydrate_archived_artifacts=True)
+
+        self.assertNotIn(
+            "content", projected["board_tasks"]["legacy-archived"]["artifacts"][0]
+        )
+        self.assertEqual(
+            self.db.load_all()["board_tasks"]["legacy-archived"]["artifacts"][0]["content"],
+            body,
+        )
+
+    def test_explicit_archived_artifact_replacement_clears_content_guard(self):
+        self.db.save_board_task(BoardTask(
+            id="archived-replace", task="Archived", group="g", lane="Archived",
+            artifacts=[{"id": "artifact-1", "type": "log", "content": "old"}],
+        ))
+        state = MatrixState(self.db)
+        state.load()
+
+        state.board_update_task("archived-replace", artifacts=[{
+            "id": "artifact-1", "type": "log", "content": "replacement",
+        }])
+
+        task = state.board_tasks["archived-replace"]
+        self.assertFalse(getattr(task, "_artifact_content_dehydrated", False))
+        self.assertEqual(
+            self.db.load_all()["board_tasks"]["archived-replace"]["artifacts"][0]["content"],
+            "replacement",
+        )
+
+    def test_live_task_detail_and_unarchive_restore_artifact_content(self):
+        body = "dispatch evidence\n" * 1024
+        self.db.save_board_task(BoardTask(
+            id="live-1", task="Live", group="g", lane="To Do",
+            artifacts=[{
+                "id": "artifact-1", "type": "snippet", "title": "Prompt",
+                "content": body, "storage": {"kind": "inline", "content": body},
+            }],
+        ))
+        self.db.save_board_task(BoardTask(
+            id="archived-2", task="Archived", group="g", lane="Archived",
+            artifacts=[{
+                "id": "artifact-2", "type": "snippet", "title": "Restore",
+                "content": body, "storage": {"kind": "inline", "content": body},
+            }],
+        ))
+        self.db.save_board_task(BoardTask(
+            id="done-1", task="Done but live", group="g", lane="Done",
+            artifacts=[{"id": "artifact-3", "type": "snippet", "content": body}],
+        ))
+
+        state = MatrixState(self.db)
+        state.load()
+
+        self.assertEqual(state.get_task_detail("live-1")["artifacts"][0]["content"], body)
+        self.assertEqual(state.get_task_detail("done-1")["artifacts"][0]["content"], body)
+        state.board_unarchive_task("archived-2", lane="To Do")
+        restored = state.board_tasks["archived-2"]
+        self.assertEqual(restored.lane, "To Do")
+        self.assertEqual(restored.artifacts[0]["content"], body)
+        self.assertFalse(getattr(restored, "_artifact_content_dehydrated", False))
+
+    def test_unarchive_does_not_move_when_artifact_restore_fails(self):
+        self.db.save_board_task(BoardTask(
+            id="archived-restore-fail", task="Archived", group="g", lane="Archived",
+            artifacts=[{"id": "artifact-1", "type": "log", "content": "stored"}],
+        ))
+        state = MatrixState(self.db)
+        state.load()
+        task = state.board_tasks["archived-restore-fail"]
+
+        with mock.patch.object(self.db, "load_board_task_artifacts", return_value=None):
+            result = state.board_unarchive_task(task.id, lane="To Do")
+
+        self.assertEqual(result["type"], "error")
+        self.assertEqual(task.lane, "Archived")
+        self.assertEqual(task.artifacts[0]["content"], "")
+        self.assertTrue(getattr(task, "_artifact_content_dehydrated", False))
+
+    def test_unarchive_finalization_rejection_keeps_task_dehydrated(self):
+        self.db.save_board_task(BoardTask(
+            id="archived-finalization-block", task="Archived", group="g",
+            lane="Archived",
+            artifacts=[{"id": "artifact-1", "type": "log", "content": "stored"}],
+        ))
+        state = MatrixState(self.db)
+        state.load()
+        task = state.board_tasks["archived-finalization-block"]
+        blocked = {"type": "finalization_blocked", "missing_gates": ["review"]}
+
+        with mock.patch.object(
+                state, "_finalization_done_allowed", return_value=(False, blocked)):
+            result = state.board_unarchive_task(task.id, lane="Done")
+
+        self.assertEqual(result, blocked)
+        self.assertEqual(task.lane, "Archived")
+        self.assertEqual(task.artifacts[0]["content"], "")
+        self.assertTrue(getattr(task, "_artifact_content_dehydrated", False))
 
     def test_global_settings_round_trips_relay_fields(self):
         self.db.save_global_settings(GlobalSettings(
@@ -5454,6 +5615,22 @@ class TorqueDBAsyncWriteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(loaded["last_progress_at"], 99.0)
         self.assertEqual(len(batches), 1)
         self.assertEqual(len(batches[0]), 1)
+
+    async def test_deferred_archived_metadata_save_preserves_stored_content(self):
+        body = "async archived evidence" * 512
+        self.db.save_board_task(BoardTask(
+            id="archived-async", task="Archived", group="g", lane="Archived",
+            artifacts=[{"id": "artifact-1", "type": "log", "content": body}],
+        ))
+        state = MatrixState(self.db)
+        state.load()
+
+        state.board_update_task("archived-async", description="async update")
+        await asyncio.wait_for(self.db.flush_async_writes(), timeout=5.0)
+
+        persisted = self.db.load_all()["board_tasks"]["archived-async"]
+        self.assertEqual(persisted["description"], "async update")
+        self.assertEqual(persisted["artifacts"][0]["content"], body)
 
     async def test_deferred_agent_save_returns_before_sync_write_runs(self):
         cell = AgentCell(id="agent-1", name="Agent", group="g")

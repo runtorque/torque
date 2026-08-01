@@ -35,6 +35,22 @@ from .state import (
 
 
 class BoardMutationMixin:
+    def _rehydrate_archived_task_artifacts(self, task: BoardTask) -> bool:
+        """Restore a task's bodies before it returns to a live surface."""
+        if not getattr(task, "_artifact_content_dehydrated", False):
+            return True
+        if not self.db:
+            return False
+        try:
+            artifacts = self.db.load_board_task_artifacts(task.id)
+        except Exception:
+            return False
+        if artifacts is None:
+            return False
+        task.artifacts = normalize_artifacts(artifacts)
+        task._artifact_content_dehydrated = False
+        return True
+
     def board_add_task(self, task: str, group: str, lane: str = "",
                        **kwargs) -> Optional[BoardTask]:
         if not task:
@@ -917,6 +933,11 @@ class BoardMutationMixin:
                     tid, lane=new_lane, position=archive_position
                 )
             return
+        # An explicit artifact replacement is the one write that may alter
+        # artifact JSON. Clear the safeguard only after every validation and
+        # archive-transition early return above has been passed.
+        if "artifacts" in fields:
+            task._artifact_content_dehydrated = False
         for key, value in fields.items():
             if key in valid:
                 setattr(task, key, value)
@@ -1393,6 +1414,15 @@ class BoardMutationMixin:
             )
             if not allowed:
                 return result
+        # get_task_detail is intentionally in-memory only. Rehydrate only
+        # after every rejection-capable target/finalization check has passed,
+        # immediately before a task can return to a live surface. A denied
+        # unarchive therefore remains fully dehydrated in memory.
+        if not self._rehydrate_archived_task_artifacts(task):
+            return {
+                "type": "error",
+                "message": "Unable to restore archived task artifacts",
+            }
         self._board_apply_archive_state(
             task,
             lane=target_lane,
