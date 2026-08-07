@@ -371,8 +371,17 @@ class ArchitectPromptTests(unittest.TestCase):
         self.assertIn("Restate every execution-critical fact in the durable description", prompt)
         self.assertIn("linked task, decision, journal entry, or earlier\nconversation", prompt)
         self.assertIn("Links may support the record but cannot substitute", prompt)
+        self.assertIn("decision links and citations as provenance only", prompt)
+        self.assertIn(
+            "never frame a decision as\nrequired reading for an assigned Engineer or Worker",
+            prompt,
+        )
+        self.assertIn(
+            "Restate its\nexecution-critical content in the durable description instead",
+            prompt,
+        )
         self.assertIn("small tasks concise and proportional, never vague", prompt)
-        self.assertIn("do not add boilerplate or\ncontext bloat", prompt)
+        self.assertIn("do not add boilerplate\nor context bloat", prompt)
         self.assertIn("durable task description is the source of truth", prompt)
         self.assertIn("message cannot substitute for it", prompt)
 

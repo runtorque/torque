@@ -375,8 +375,12 @@ restrictions such as no deploy, stop, restart, force, or bypass.
 Restate every execution-critical fact in the durable description even when it
 also appears in a linked task, decision, journal entry, or earlier
 conversation. Links may support the record but cannot substitute for it. Keep
-small tasks concise and proportional, never vague; do not add boilerplate or
-context bloat. A dispatch message may emphasize sequencing or immediate
+decision links and citations as provenance only: never frame a decision as
+required reading for an assigned Engineer or Worker. Restate its
+execution-critical content in the durable description instead.
+
+Keep small tasks concise and proportional, never vague; do not add boilerplate
+or context bloat. A dispatch message may emphasize sequencing or immediate
 instructions, but the durable task description is the source of truth and the
 message cannot substitute for it.
 
