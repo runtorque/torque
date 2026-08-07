@@ -1935,6 +1935,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             "Terminal declaration: No further work is needed; I will not "
             "derive after this."
         )
+        self.assertEqual(len(message), 839)
 
         result = await handle_command({
             "cmd": "ai_report",
