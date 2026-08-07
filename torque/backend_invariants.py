@@ -41,9 +41,16 @@ class BackendInvariantCheckError(RuntimeError):
 def backend_file_line_limit(relative_path: str) -> int | None:
     """Return the reviewed line limit for one backend Python path."""
     relative_path = str(relative_path or "").strip().replace("\\", "/")
-    if not relative_path.startswith("torque/") or not relative_path.endswith(".py"):
+    if not _is_backend_python_path(relative_path):
         return None
     return BACKEND_LINE_LIMITS.get(relative_path, DEFAULT_BACKEND_LINE_LIMIT)
+
+
+def _is_backend_python_path(relative_path: str) -> bool:
+    return (
+        relative_path.startswith("torque/")
+        and relative_path.endswith(".py")
+    )
 
 
 def backend_modularity_headroom(repo_root: str | Path) -> list[dict]:
@@ -136,6 +143,62 @@ def _revision_file_line_count(
     )
 
 
+def _revision_backend_line_policy(
+    repo_root: Path,
+    revision: str,
+) -> tuple[int, dict[str, int]]:
+    relative_path = "torque/backend_invariants.py"
+    proc = _git(repo_root, "show", f"{revision}:{relative_path}", check=False)
+    if proc.returncode != 0:
+        detail = proc.stderr.decode(errors="replace").strip()
+        raise BackendInvariantCheckError(
+            f"could not read backend line-limit policy at {revision}"
+            + (f": {detail}" if detail else "")
+        )
+    try:
+        source = proc.stdout.decode()
+        tree = ast.parse(source, filename=f"{revision}:{relative_path}")
+        values: dict[str, list[object]] = {
+            "DEFAULT_BACKEND_LINE_LIMIT": [],
+            "BACKEND_LINE_LIMITS": [],
+        }
+        for node in tree.body:
+            if not isinstance(node, ast.Assign):
+                continue
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id in values:
+                    values[target.id].append(ast.literal_eval(node.value))
+        if any(len(found) != 1 for found in values.values()):
+            raise ValueError("required policy assignments must appear exactly once")
+        default_limit = values["DEFAULT_BACKEND_LINE_LIMIT"][0]
+        path_limits = values["BACKEND_LINE_LIMITS"][0]
+        if (
+            isinstance(default_limit, bool)
+            or not isinstance(default_limit, int)
+            or default_limit <= 0
+            or not isinstance(path_limits, dict)
+        ):
+            raise ValueError("policy values have invalid types")
+        normalized_limits: dict[str, int] = {}
+        for raw_path, raw_limit in path_limits.items():
+            normalized_path = str(raw_path or "").strip().replace("\\", "/")
+            if (
+                not isinstance(raw_path, str)
+                or normalized_path != raw_path
+                or not _is_backend_python_path(normalized_path)
+                or isinstance(raw_limit, bool)
+                or not isinstance(raw_limit, int)
+                or raw_limit <= 0
+            ):
+                raise ValueError("per-path policy entry is invalid")
+            normalized_limits[normalized_path] = raw_limit
+    except (SyntaxError, UnicodeDecodeError, ValueError) as exc:
+        raise BackendInvariantCheckError(
+            f"invalid backend line-limit policy at {revision}: {exc}"
+        ) from exc
+    return default_limit, normalized_limits
+
+
 def check_backend_modularity_crossings(
     repo_root: str | Path,
     base_ref: str,
@@ -172,6 +235,7 @@ def check_backend_modularity_crossings(
             "warnings": [],
         }
 
+    default_limit, path_limits = _revision_backend_line_policy(root, base_ref)
     changed = _git(
         root,
         "diff",
@@ -185,13 +249,13 @@ def check_backend_modularity_crossings(
     checked_files = sorted({
         path.strip().replace("\\", "/")
         for path in changed
-        if backend_file_line_limit(path) is not None
+        if _is_backend_python_path(path.strip().replace("\\", "/"))
     })
     crossings = []
     headroom = []
     warnings = []
     for relative_path in checked_files:
-        limit = backend_file_line_limit(relative_path)
+        limit = path_limits.get(relative_path, default_limit)
         base_lines = _revision_file_line_count(root, base_ref, relative_path)
         candidate_lines = _revision_file_line_count(
             root,
@@ -241,8 +305,11 @@ def format_backend_modularity_crossings(result: dict) -> str:
     )
     return (
         "Backend modularity preflight blocked files that newly exceed their "
-        f"reviewed line limit: {details}. Split by responsibility or obtain "
-        "an explicit architecture review and budget before merging."
+        f"reviewed line limit: {details}. Split by responsibility, or first "
+        "merge an explicit architecture-reviewed budget without changing the "
+        "target file; then base or rebase the target-growing candidate on the "
+        "revision containing that budget before merging it. No daemon relaunch "
+        "is required because policy is read from the trusted base ref."
     )
 
 

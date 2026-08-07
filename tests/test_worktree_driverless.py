@@ -132,6 +132,10 @@ class BackendModularityMergeGateTests(unittest.IsolatedAsyncioTestCase):
         backend = self.repo / "torque" / "sample.py"
         backend.parent.mkdir()
         backend.write_text("x = 1\n" * 2500)
+        (self.repo / "torque" / "backend_invariants.py").write_text(
+            "DEFAULT_BACKEND_LINE_LIMIT = 2500\n"
+            "BACKEND_LINE_LIMITS = {}\n"
+        )
         self._git("add", ".")
         self._git("commit", "-qm", "baseline")
         self._git("switch", "-qc", "worker")

@@ -14,10 +14,12 @@ import unittest
 from tests.helpers import install_aiohttp_stub
 from torque.backend_invariants import (
     BACKEND_LINE_LIMITS,
+    BackendInvariantCheckError,
     COMPATIBILITY_FACADE_METHOD_LIMITS,
     DEFAULT_BACKEND_LINE_LIMIT,
     backend_modularity_headroom,
     check_backend_modularity_crossings,
+    format_backend_modularity_crossings,
     format_backend_modularity_headroom,
 )
 from torque.worktree import WorktreeManager
@@ -464,6 +466,7 @@ class BackendInvariantCrossingTests(unittest.TestCase):
         backend = self.repo / "torque" / "sample.py"
         backend.parent.mkdir()
         backend.write_text("x = 1\n" * DEFAULT_BACKEND_LINE_LIMIT)
+        self._write_policy()
         self._git("add", ".")
         self._git("commit", "-qm", "baseline")
         self.base = self._git("rev-parse", "HEAD").stdout.strip()
@@ -482,6 +485,40 @@ class BackendInvariantCrossingTests(unittest.TestCase):
         self._git("add", "torque/sample.py")
         self._git("commit", "-qm", message)
         return self._git("rev-parse", "HEAD").stdout.strip()
+
+    def _write_policy(
+        self,
+        *,
+        default: int = DEFAULT_BACKEND_LINE_LIMIT,
+        sample: int | None = None,
+    ) -> None:
+        limits = (
+            "{}"
+            if sample is None
+            else f'{{"torque/sample.py": {sample}}}'
+        )
+        (self.repo / "torque" / "backend_invariants.py").write_text(
+            f"DEFAULT_BACKEND_LINE_LIMIT = {default}\n"
+            f"BACKEND_LINE_LIMITS = {limits}\n"
+        )
+
+    def test_crossing_message_prescribes_budget_only_merge_first(self):
+        message = format_backend_modularity_crossings({
+            "crossings": [{
+                "path": "torque/sample.py",
+                "limit": DEFAULT_BACKEND_LINE_LIMIT,
+                "base_lines": DEFAULT_BACKEND_LINE_LIMIT,
+                "candidate_lines": DEFAULT_BACKEND_LINE_LIMIT + 1,
+            }],
+        })
+
+        self.assertIn(
+            "first merge an explicit architecture-reviewed budget without "
+            "changing the target file; then base or rebase the target-growing "
+            "candidate on the revision containing that budget",
+            message,
+        )
+        self.assertIn("No daemon relaunch is required", message)
 
     def test_reports_only_a_new_limit_crossing(self):
         crossing = self._commit_lines(
@@ -503,6 +540,115 @@ class BackendInvariantCrossingTests(unittest.TestCase):
                 "candidate_lines": DEFAULT_BACKEND_LINE_LIMIT + 1,
             }],
         )
+
+    def test_budget_merged_on_base_applies_without_process_reload(self):
+        self._write_policy(sample=DEFAULT_BACKEND_LINE_LIMIT + 100)
+        self._git("add", "torque/backend_invariants.py")
+        self._git("commit", "-qm", "merge reviewed sample budget")
+        budget_base = self._git("rev-parse", "HEAD").stdout.strip()
+        candidate = self._commit_lines(
+            DEFAULT_BACKEND_LINE_LIMIT + 1,
+            "grow target after budget merge",
+        )
+
+        result = check_backend_modularity_crossings(
+            self.repo,
+            budget_base,
+            candidate,
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["crossings"], [])
+        self.assertEqual(
+            result["headroom"][0]["limit"],
+            DEFAULT_BACKEND_LINE_LIMIT + 100,
+        )
+
+    def test_candidate_cannot_authorize_its_own_limit_raise(self):
+        self._write_policy(sample=DEFAULT_BACKEND_LINE_LIMIT + 100)
+        (self.repo / "torque" / "sample.py").write_text(
+            "x = 1\n" * (DEFAULT_BACKEND_LINE_LIMIT + 1)
+        )
+        self._git("add", "torque")
+        self._git("commit", "-qm", "raise budget and grow target together")
+        candidate = self._git("rev-parse", "HEAD").stdout.strip()
+
+        result = check_backend_modularity_crossings(
+            self.repo,
+            self.base,
+            candidate,
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(
+            result["crossings"][0]["limit"],
+            DEFAULT_BACKEND_LINE_LIMIT,
+        )
+
+    def test_default_limit_is_read_from_base_revision(self):
+        self._write_policy(default=DEFAULT_BACKEND_LINE_LIMIT + 1)
+        self._git("add", "torque/backend_invariants.py")
+        self._git("commit", "-qm", "merge reviewed default budget")
+        budget_base = self._git("rev-parse", "HEAD").stdout.strip()
+        candidate = self._commit_lines(
+            DEFAULT_BACKEND_LINE_LIMIT + 1,
+            "grow target to reviewed default",
+        )
+
+        result = check_backend_modularity_crossings(
+            self.repo,
+            budget_base,
+            candidate,
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(
+            result["headroom"][0]["limit"],
+            DEFAULT_BACKEND_LINE_LIMIT + 1,
+        )
+
+    def test_missing_base_policy_fails_closed(self):
+        (self.repo / "torque" / "backend_invariants.py").unlink()
+        self._git("add", "-A")
+        self._git("commit", "-qm", "remove policy")
+        missing_policy_base = self._git("rev-parse", "HEAD").stdout.strip()
+        candidate = self._commit_lines(
+            DEFAULT_BACKEND_LINE_LIMIT + 1,
+            "grow without readable policy",
+        )
+
+        with self.assertRaisesRegex(
+            BackendInvariantCheckError,
+            "could not read backend line-limit policy",
+        ):
+            check_backend_modularity_crossings(
+                self.repo,
+                missing_policy_base,
+                candidate,
+            )
+
+    def test_malformed_base_policy_fails_closed(self):
+        (self.repo / "torque" / "backend_invariants.py").write_text(
+            "DEFAULT_BACKEND_LINE_LIMIT = 2500\n"
+            "BACKEND_LINE_LIMITS = make_limits()\n"
+        )
+        self._git("add", "torque/backend_invariants.py")
+        self._git("commit", "-qm", "malformed policy")
+        malformed_policy_base = self._git("rev-parse", "HEAD").stdout.strip()
+        candidate = self._commit_lines(
+            DEFAULT_BACKEND_LINE_LIMIT + 1,
+            "grow with malformed policy",
+        )
+
+        with self.assertRaisesRegex(
+            BackendInvariantCheckError,
+            "invalid backend line-limit policy",
+        ):
+            check_backend_modularity_crossings(
+                self.repo,
+                malformed_policy_base,
+                candidate,
+            )
 
     def test_reports_nonblocking_headroom_warning_before_a_crossing(self):
         near_limit = self._commit_lines(
