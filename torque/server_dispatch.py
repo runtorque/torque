@@ -12,6 +12,8 @@ from .state import ARCHIVED_LANE, MatrixState, task_is_closed
 from .worktree_streams import (
     compute_worktree_stream,
     compute_worktree_stream_for_task,
+    compute_worktree_streams,
+    member_task_ids_for_stream,
 )
 
 _AUTO_DISPATCH_EMPTY_QUEUE_LOGGED: set[tuple[int, str]] = set()
@@ -330,22 +332,32 @@ async def _maybe_auto_resume_stream(state: MatrixState, handle_command,
         return _skip("missing_task_and_previous_stream")
 
     current_stream = None
-    if task:
-        current_stream = compute_worktree_stream_for_task(
-            state,
-            getattr(task, "id", "") or "",
-            group=group or getattr(task, "group", "") or "",
-        )
-    if not current_stream and previous_stream:
+    task_id = str(getattr(task, "id", "") or "").strip()
+    if previous_stream:
+        # Prefer recomputing just the stream we snapshotted before the
+        # mutation: a single-stream compute skips synthesizing every other
+        # stream in the group on this hot per-report path. Fall back to the
+        # membership scan only when the task moved streams in between.
         repo_root = str(previous_stream.get("repo_root", "") or "").strip()
         branch = str(previous_stream.get("branch", "") or "").strip()
         if repo_root and branch:
-            current_stream = compute_worktree_stream(
+            candidate = compute_worktree_stream(
                 state,
                 repo_root=repo_root,
                 branch=branch,
                 group=group or previous_stream.get("group", "") or "",
             )
+            if candidate and (
+                not task_id
+                or task_id in member_task_ids_for_stream(candidate)
+            ):
+                current_stream = candidate
+    if not current_stream and task:
+        current_stream = compute_worktree_stream_for_task(
+            state,
+            task_id,
+            group=group or getattr(task, "group", "") or "",
+        )
 
     if not current_stream:
         return _skip("no_current_stream")
@@ -445,15 +457,28 @@ def _capture_auto_resume_targets(state: MatrixState, *, task=None,
     """Snapshot affected streams before a mutation that may clear gates/deps."""
     targets = []
     seen_stream_ids: set[str] = set()
+    # One synthesis per group, shared across the task and its dependents.
+    # Per-candidate synthesis made every worker report O(dependents × group).
+    streams_by_group: dict[str, list[dict]] = {}
+
+    def _stream_for_candidate(candidate_id: str, candidate_group: str):
+        if not candidate_id:
+            return None
+        if candidate_group not in streams_by_group:
+            streams_by_group[candidate_group] = compute_worktree_streams(
+                state, group=candidate_group)
+        for stream in streams_by_group[candidate_group]:
+            if candidate_id in member_task_ids_for_stream(stream):
+                return stream
+        return None
 
     def _append_target(candidate):
         if not candidate or task_is_closed(candidate):
             return
         candidate_group = str(getattr(candidate, "group", "") or group).strip()
-        stream = compute_worktree_stream_for_task(
-            state,
+        stream = _stream_for_candidate(
             getattr(candidate, "id", "") or "",
-            group=candidate_group,
+            candidate_group,
         )
         if not stream:
             return

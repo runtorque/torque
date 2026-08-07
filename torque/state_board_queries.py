@@ -16,11 +16,30 @@ from .state import (
 
 
 class BoardQueryMixin:
+    def _ensure_task_indexes(self) -> None:
+        """Self-heal secondary indexes for hand-assembled states.
+
+        Tests (and snapshot states) may populate ``board_tasks`` directly
+        without going through board mutations, leaving the secondary indexes
+        empty or stale. A count mismatch is a cheap O(1) tell for that case.
+        """
+        if len(self._task_index_refs) != len(self.board_tasks):
+            self._rebuild_task_indexes()
+
+    def _tasks_for_ids(self, task_ids) -> list[BoardTask]:
+        tasks = [
+            self.board_tasks[tid]
+            for tid in task_ids
+            if tid in self.board_tasks
+        ]
+        tasks.sort(key=lambda t: (t.created_at, t.id))
+        return tasks
+
     def board_get_children(self, task_id: str) -> list[BoardTask]:
         """Return direct children of a task (derived tasks)."""
         task_id = self.resolve_task_alias(task_id)
-        return [t for t in self.board_tasks.values()
-                if t.parent_task_id == task_id]
+        self._ensure_task_indexes()
+        return self._tasks_for_ids(self._tasks_by_parent.get(task_id, ()))
 
     def _board_check_dep_cycle(self, source_id: str,
                                new_deps: list[str]) -> bool:
@@ -50,8 +69,9 @@ class BoardQueryMixin:
     def board_get_dependents(self, task_id: str) -> list[BoardTask]:
         """Tasks that have task_id in their depends_on."""
         task_id = self.resolve_task_alias(task_id)
-        return [t for t in self.board_tasks.values()
-                if task_id in t.depends_on]
+        self._ensure_task_indexes()
+        return self._tasks_for_ids(
+            self._task_dependents_by_dep.get(task_id, ()))
 
     def board_get_chain(self, task_id: str) -> list[BoardTask]:
         """Return all tasks in the same pipeline chain, ordered by depth."""
@@ -123,8 +143,17 @@ class BoardQueryMixin:
         review = self.board_tasks.get(review_id)
         if not self._is_review_handoff_source(review):
             return []
+        review_parent_id = str(
+            getattr(review, "parent_task_id", "") or ""
+        ).strip()
+        if not review_parent_id:
+            return []
+        self._ensure_task_indexes()
+        # A handoff follow-up must share the review's parent, so the review's
+        # siblings are the only possible candidates.
         followups = [
-            task for task in self.board_tasks.values()
+            task for task in self._tasks_for_ids(
+                self._tasks_by_parent.get(review_parent_id, ()))
             if self._is_review_handoff_followup(review, task)
         ]
         followups.sort(key=lambda t: (t.pipeline_depth, t.created_at, t.id))
@@ -134,8 +163,15 @@ class BoardQueryMixin:
             self, task: Optional[BoardTask]) -> list[BoardTask]:
         if not task:
             return []
+        task_parent_id = str(
+            getattr(task, "parent_task_id", "") or ""
+        ).strip()
+        if not task_parent_id:
+            return []
+        self._ensure_task_indexes()
         reviews = [
-            review for review in self.board_tasks.values()
+            review for review in self._tasks_for_ids(
+                self._tasks_by_parent.get(task_parent_id, ()))
             if self._is_review_handoff_followup(review, task)
         ]
         reviews.sort(key=lambda t: (t.pipeline_depth, t.created_at, t.id))
@@ -233,9 +269,20 @@ class BoardQueryMixin:
         return True
 
     def agent_active_tasks(self, agent_id: str) -> list[BoardTask]:
+        if agent_id:
+            self._ensure_task_indexes()
+            # task_occupies_execution_slot rejects tasks whose agent_id
+            # differs, so the agent index is the full candidate set.
+            candidates = (
+                self.board_tasks.get(tid)
+                for tid in self._tasks_by_agent.get(agent_id, ())
+            )
+        else:
+            candidates = self.board_tasks.values()
         tasks = [
-            t for t in self.board_tasks.values()
-            if self.task_occupies_execution_slot(t, agent_id=agent_id)
+            t for t in candidates
+            if t is not None
+            and self.task_occupies_execution_slot(t, agent_id=agent_id)
         ]
         tasks.sort(
             key=lambda t: (t.lane != "In Progress", t.position,
@@ -262,12 +309,8 @@ class BoardQueryMixin:
         return tasks
 
     def agent_is_busy(self, agent_id: str) -> bool:
-        cell = self.agents.get(agent_id)
-        if cell and cell.current_task_id:
-            task = self.board_tasks.get(cell.current_task_id)
-            if task and self.task_occupies_execution_slot(
-                    task, agent_id=agent_id):
-                return True
+        # agent_current_task already prefers cell.current_task_id when it
+        # occupies a slot, so the extra pre-check here only duplicated work.
         return self.agent_current_task(agent_id) is not None
 
     def extract_playbook_candidates(self, group: str = "") -> list[dict]:

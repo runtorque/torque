@@ -15,6 +15,11 @@ from .state import (
 # burst of terminal/event updates while keeping the panel perceptibly current.
 _ENGINEER_RECOMPUTE_DEBOUNCE_SECONDS = 0.35
 _ENGINEER_RECOMPUTE_HANDOFF_DELAY_SECONDS = 0.001
+# A persistently failing recompute must not spin at the debounce rate
+# forever: back off exponentially and eventually drop the batch (the next
+# trigger op re-queues its groups).
+_ENGINEER_RECOMPUTE_MAX_FAILURES = 5
+_ENGINEER_RECOMPUTE_MAX_BACKOFF_SECONDS = 30.0
 
 
 class StateRuntimeMixin:
@@ -336,6 +341,15 @@ class StateRuntimeMixin:
             stream for stream in streams
             if str(stream.get("state", "") or "").strip() != "merged"
         ]
+        # Side channel for the recompute worker: it stashes a list on the
+        # snapshot it hands the worker thread, and merge-readiness probes
+        # are driven from the streams collected here. An attribute (rather
+        # than a parameter) keeps this method's and its callers' signatures
+        # stable for tests that monkeypatch the compute pipeline.
+        collect_streams = getattr(
+            source, "_engineer_probe_stream_collector", None)
+        if collect_streams is not None:
+            collect_streams.extend(streams)
         return {
             "count": len(streams),
             "by_state": self._engineer_stream_counts(streams),
@@ -343,23 +357,37 @@ class StateRuntimeMixin:
             "truncated": len(streams) > _ENGINEER_STREAM_CARD_LIMIT,
         }
 
-    def _engineer_stream_compute_snapshot(self):
-        """Clone every mutable task/cell input used by stream synthesis.
+    def _engineer_stream_compute_snapshot(self, groups: set[str] | None = None):
+        """Clone the task/cell inputs used by stream synthesis.
 
         The threaded computation must not traverse live ``BoardTask`` or
         ``AgentCell`` instances. A fresh MatrixState retains the exact query
         helpers used by ``compute_worktree_streams`` while this projection
         replaces its mutable inputs with deep copies.
+
+        Stream synthesis never reads archived tasks, and per-group payload
+        computation only reads its own group's tasks — cloning the whole
+        board here used to block the event loop for the full board size on
+        every recompute cycle. ``groups`` narrows the clone to the pending
+        groups when provided.
         """
+        from .state import ARCHIVED_LANE
+
+        wanted = None
+        if groups is not None:
+            wanted = {str(group or "").strip() for group in groups} - {""}
         snapshot = type(self)()
-        snapshot.board_tasks = copy.deepcopy(self.board_tasks)
+        snapshot.board_tasks = {
+            tid: copy.deepcopy(task)
+            for tid, task in self.board_tasks.items()
+            if getattr(task, "lane", "") != ARCHIVED_LANE
+            and (wanted is None or getattr(task, "group", "") in wanted)
+        }
         snapshot.agents = copy.deepcopy(self.agents)
         snapshot.groups = copy.deepcopy(self.groups)
         snapshot.group_settings = copy.deepcopy(self.group_settings)
         snapshot.engineer_settings = copy.deepcopy(self.engineer_settings)
-        snapshot._tasks_by_group.clear()
-        for task in snapshot.board_tasks.values():
-            snapshot._tasks_by_group.setdefault(task.group, set()).add(task.id)
+        snapshot._rebuild_task_indexes()
         return snapshot
 
     def _compute_engineer_stream_payloads(
@@ -510,9 +538,13 @@ class StateRuntimeMixin:
     async def _engineer_recompute_worker(self) -> None:
         """Drain `_engineer_recompute_pending`: prefill branch existence,
         compute stream payloads, broadcast a follow-up delta."""
-        from .worktree_streams import prefill_branch_exists_for_state
+        from .worktree_streams import (
+            prefill_branch_exists_for_state,
+            prefill_merge_readiness_for_streams,
+        )
         worker = asyncio.current_task()
         pending: set[str] = set()
+        failures = 0
         try:
             # Let a burst of primary broadcasts accumulate before paying for
             # one complete group read-model rebuild. Subsequent iterations do
@@ -523,7 +555,13 @@ class StateRuntimeMixin:
                 pending = self._engineer_recompute_pending
                 self._engineer_recompute_pending = set()
                 try:
-                    await prefill_branch_exists_for_state(self)
+                    # Branch existence only — the merge-readiness variant
+                    # used to run a full synchronous stream synthesis on the
+                    # event loop just to enumerate probe targets. Probes are
+                    # driven from the threaded synthesis results below.
+                    await prefill_branch_exists_for_state(
+                        self, include_merge_readiness=False,
+                    )
                 except Exception:
                     log.exception("Branch-exists prefill failed")
                 # `compute_worktree_streams` is CPU-heavy and only reads the
@@ -531,25 +569,52 @@ class StateRuntimeMixin:
                 # loop after the thread returns so delta ordering remains
                 # single-threaded.
                 try:
-                    # Snapshot every mutable task/cell input on the event
-                    # loop. The thread below only observes this immutable
-                    # projection; unlike a generation-discard fence it cannot
-                    # starve under a sustained broadcast rate.
-                    snapshot = self._engineer_stream_compute_snapshot()
+                    # Snapshot the pending groups' task/cell inputs on the
+                    # event loop. The thread below only observes this
+                    # immutable projection; unlike a generation-discard fence
+                    # it cannot starve under a sustained broadcast rate.
+                    snapshot = self._engineer_stream_compute_snapshot(pending)
+                    probe_streams: list[dict] = []
+                    snapshot._engineer_probe_stream_collector = probe_streams
                     payloads = await asyncio.to_thread(
                         self._compute_engineer_stream_payloads,
                         pending,
                         source=snapshot,
                     )
+                    snapshot._engineer_probe_stream_collector = None
+                    if await prefill_merge_readiness_for_streams(
+                            self, probe_streams):
+                        # Cold merge probes ran: recompute so the payloads
+                        # observe fresh readiness instead of the degraded
+                        # cold-cache packets from the first pass.
+                        payloads = await asyncio.to_thread(
+                            self._compute_engineer_stream_payloads,
+                            pending,
+                            source=snapshot,
+                        )
                 except Exception:
                     # A threaded read can lose its coherent view if a state
                     # mutation races it. Preserve the dirty signal instead
                     # of making that transient failure the terminal stream
                     # result; back off before retrying a persistent failure.
                     log.exception("Engineer stream payload computation failed")
+                    failures += 1
+                    if failures >= _ENGINEER_RECOMPUTE_MAX_FAILURES:
+                        log.error(
+                            "Engineer stream recompute failed %d times; "
+                            "dropping batch for groups %s",
+                            failures, sorted(pending),
+                        )
+                        failures = 0
+                        pending = set()
+                        continue
                     self._engineer_recompute_pending |= pending
-                    await asyncio.sleep(_ENGINEER_RECOMPUTE_DEBOUNCE_SECONDS)
+                    await asyncio.sleep(min(
+                        _ENGINEER_RECOMPUTE_DEBOUNCE_SECONDS * (2 ** failures),
+                        _ENGINEER_RECOMPUTE_MAX_BACKOFF_SECONDS,
+                    ))
                     continue
+                failures = 0
                 if self._emit_engineer_stream_payloads(payloads):
                     # The follow-up broadcast's own _collect_engineer_*
                     # call returns empty (engineer_streams isn't a trigger
