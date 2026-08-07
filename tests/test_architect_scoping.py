@@ -4589,6 +4589,29 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(denied_error)
         self.assertEqual(denied_text, "Task was not created by this architect")
 
+        self.state.groups["other"] = []
+        self.state._db_save_groups()
+        foreign = self._add_task(
+            "other-amend-scope",
+            "Foreign group task",
+            group="other",
+            description="Foreign body.",
+            created_by_architect_id=creator.id,
+        )
+        foreign_text, foreign_error = await self._call(
+            "architect_task_amend",
+            {
+                "task": foreign.id,
+                "amendment": "Cross-group attempt.",
+                "expected_task_content_hash": foreign.task_content_hash,
+                "amendment_id": "cross-group-denied",
+            },
+            creator.id,
+        )
+        self.assertTrue(foreign_error)
+        self.assertEqual(foreign_text, "Task not found")
+        self.assertEqual(foreign.description, "Foreign body.")
+
         original = task.description
         original_hash = task.task_content_hash
         with mock.patch(
@@ -4612,6 +4635,42 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(oversized["limit"], 80)
         self.assertEqual(task.description, original)
         self.assertEqual(task.task_content_hash, original_hash)
+
+        unknown_limit_task = self._add_task(
+            "task-amend-unknown-limit",
+            "Unknown provider ceiling",
+            description="Tracked GitHub task.",
+            assigned_engineer_id=engineer.id,
+            provider="github",
+            external_id="owner/repo#2",
+            created_by_architect_id=creator.id,
+        )
+        unknown_text, unknown_error = await self._call(
+            "architect_task_amend",
+            {
+                "task": unknown_limit_task.id,
+                "amendment": "Correction under an unknown provider ceiling.",
+                "expected_task_content_hash": (
+                    unknown_limit_task.task_content_hash
+                ),
+                "amendment_id": "unknown-provider-limit",
+            },
+            creator.id,
+        )
+        self.assertFalse(unknown_error, unknown_text)
+        unknown_result = json.loads(unknown_text)
+        self.assertEqual(
+            unknown_result["provider_body_limit"],
+            {
+                "provider": "GitHub",
+                "verifiable": False,
+                "limit": None,
+                "message": (
+                    "No provider body limit was verifiable; Torque did not "
+                    "invent a limit or probe the provider."
+                ),
+            },
+        )
 
         grant_text, grant_error = await self._call(
             "architect_task_read_grant",

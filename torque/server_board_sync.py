@@ -435,29 +435,61 @@ def task_description_sync_validation_error(
     return description_validation_error(provider, description) if provider else ""
 
 
-def task_description_sync_constraint(
+def task_description_sync_limit_status(
     state,
     task: BoardTask | None,
-) -> dict | None:
-    """Return the active provider's declared positive description cap.
+) -> dict:
+    """Return locally verifiable description-cap status without provider I/O.
 
-    ``None`` means no deterministic local cap is declared. Callers must not
-    substitute a guessed provider limit.
+    A configured provider that declares no positive cap remains distinguishable
+    from a task with no active sync provider. Callers must not substitute a
+    guessed limit in either case.
     """
     provider = _task_sync_validation_provider(state, task)
-    constraints_getter = getattr(provider, "field_constraints", None)
-    if not provider or not callable(constraints_getter):
-        return None
-    constraints = constraints_getter()
-    limit = getattr(constraints, "description_max_length", None)
-    if not isinstance(limit, int) or limit <= 0:
-        return None
+    if not provider:
+        return {
+            "active": False,
+            "provider": "",
+            "verifiable": False,
+            "limit": None,
+        }
     provider_name = str(
         getattr(provider, "display_name", "")
         or getattr(provider, "name", "")
         or "board sync"
     ).strip()
-    return {"provider": provider_name, "limit": limit}
+    constraints_getter = getattr(provider, "field_constraints", None)
+    if not callable(constraints_getter):
+        return {
+            "active": True,
+            "provider": provider_name,
+            "verifiable": False,
+            "limit": None,
+        }
+    constraints = constraints_getter()
+    limit = getattr(constraints, "description_max_length", None)
+    if not isinstance(limit, int) or limit <= 0:
+        return {
+            "active": True,
+            "provider": provider_name,
+            "verifiable": False,
+            "limit": None,
+        }
+    return {
+        "active": True,
+        "provider": provider_name,
+        "verifiable": True,
+        "limit": limit,
+    }
+
+
+def task_description_sync_constraint(
+    state,
+    task: BoardTask | None,
+) -> dict | None:
+    """Return the active provider's declared positive description cap."""
+    status = task_description_sync_limit_status(state, task)
+    return status if status["verifiable"] else None
 
 
 def task_labels_sync_validation_error(

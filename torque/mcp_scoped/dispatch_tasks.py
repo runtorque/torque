@@ -16,6 +16,7 @@ from torque.mcp_scoped.dispatch_runtime import *  # noqa: F403
 from torque.task_dispatch_gate import active_dispatch_edit_error, task_has_active_dispatch
 from torque.server_board_sync import (
     task_description_sync_constraint,
+    task_description_sync_limit_status,
     task_description_sync_validation_error,
     task_labels_sync_validation_error,
     task_title_sync_validation_error,
@@ -525,6 +526,9 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         existing_amendment = find_task_amendment(
             task.description, amendment_id
         )
+        provider_limit_status = task_description_sync_limit_status(
+            real_state, task,
+        )
         if not existing_amendment:
             projected_description = (
                 task.description
@@ -570,6 +574,18 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         })
         if amend_result.get("type") == "error":
             return json.dumps(amend_result), True
+        if (
+                provider_limit_status["active"]
+                and not provider_limit_status["verifiable"]):
+            amend_result["provider_body_limit"] = {
+                "provider": provider_limit_status["provider"],
+                "verifiable": False,
+                "limit": None,
+                "message": (
+                    "No provider body limit was verifiable; Torque did not "
+                    "invent a limit or probe the provider."
+                ),
+            }
         if not amend_result.get("deduped"):
             executor = None
             executor_id = str(
