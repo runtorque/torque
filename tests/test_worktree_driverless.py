@@ -284,7 +284,8 @@ class BoundaryTipGateTests(unittest.IsolatedAsyncioTestCase):
             cell_type="agent",
         )
 
-    async def _preflight(self, *, boundary_state, data=None, mismatch=None):
+    async def _preflight(self, *, boundary_state, data=None, mismatch=None,
+                         completed_review=False, stale=False):
         from torque import server
         from torque.state import MatrixState
 
@@ -299,8 +300,30 @@ class BoundaryTipGateTests(unittest.IsolatedAsyncioTestCase):
             id="task-1",
             lane="In Progress",
             agent_id=cell.id,
+            action_name="feature/implement",
         )
         task.assigned_engineer_id = "eng-1"
+        if completed_review:
+            review = state.board_add_task(
+                "Review worker change",
+                "g",
+                id="review-task",
+                lane="Done",
+                agent_id="reviewer-1",
+                action_name="feature/review",
+                parent_task_id=task.id,
+                pipeline_root_id=task.id,
+            )
+            review.lane = "Done"
+            review.worktree_boundary = {
+                "version": "1",
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+                "base_branch": "main",
+                "commit_sha": "abcdef1234567890",
+                "status": "open",
+                "recorded_at": "2026-08-07T00:00:00+00:00",
+            }
 
         class FakeWorktreeManager:
             def __init__(self):
@@ -310,7 +333,7 @@ class BoundaryTipGateTests(unittest.IsolatedAsyncioTestCase):
                 return False
 
             async def stale_base_info(self, _cell, worktree_submodules=None):
-                return {"stale": False}
+                return {"stale": stale}
 
             async def check_merge_conflicts(self, _cell, worktree_submodules=None):
                 self.check_calls += 1
@@ -356,7 +379,7 @@ class BoundaryTipGateTests(unittest.IsolatedAsyncioTestCase):
                 cell=cell,
                 worktree_mgr=mgr,
                 aid=cell.id,
-                data=data or {},
+                data=data or {"merge_task_id": task.id},
                 latest_boundary_state_for_cell=latest_boundary,
                 boundary_reason_message=boundary_reason_message,
                 panel_event=panel_event,
@@ -390,6 +413,25 @@ class BoundaryTipGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("re-review the new commits", error)
         self.assertNotIn("no file details", error.lower())
         self.assertNotIn("conflict", error.lower())
+
+    async def test_composed_review_cycle_merge_refusal_names_safe_reroute(self):
+        boundary_state = self._mismatched_boundary_state()
+        result, mgr, _events = await self._preflight(
+            boundary_state=boundary_state,
+            mismatch={"classification": "ahead", "commit_count": 1},
+            completed_review=True,
+            stale=True,
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(mgr.check_calls, 0)
+        error = result["result"]["error"]
+        self.assertIn("No safe in-place transition", error)
+        self.assertIn("supported reroute", error)
+        self.assertIn("Do not record a reviewed boundary", error)
+        self.assertNotIn("worktree_rebase", error)
+        self.assertNotIn("re-review the new commits", error)
+        self.assertNotIn("record a reviewed boundary at the tip", error)
 
     async def test_boundary_tip_rewrite_refuses_with_diverged_message(self):
         result, mgr, _events = await self._preflight(

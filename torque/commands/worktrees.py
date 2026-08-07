@@ -690,6 +690,7 @@ async def handle_worktree_command(
                     boundary_reason,
                     boundary_state.get("latest"),
                     _boundary_reason_message,
+                    state=state,
                 )
                 boundary_allowed = bool(
                     boundary_reason == "branch_tip_moved"

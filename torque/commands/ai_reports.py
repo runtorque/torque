@@ -1123,6 +1123,7 @@ async def handle_ai_report_command(
                                 worktree_mgr,
                                 cell,
                                 act_name,
+                                state=state,
                             )
                         )
                     if max_d and new_depth > max_d:

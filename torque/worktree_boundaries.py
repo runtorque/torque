@@ -595,6 +595,7 @@ def boundary_summary(task, *, queued_followers: list | None = None,
         "task_id": getattr(task, "id", ""),
         "task_title": getattr(task, "task", ""),
         "task_slug": getattr(task, "slug", ""),
+        "action_name": getattr(task, "action_name", ""),
         "lane": getattr(task, "lane", ""),
         "boundary": dict(boundary),
         "queued_followers": [
