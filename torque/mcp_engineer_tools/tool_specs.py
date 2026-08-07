@@ -836,6 +836,13 @@ ENGINEER_TOOLS = [
                     "type": "string",
                     "description": "Tests run.",
                 },
+                "tested_sha": {
+                    "type": "string",
+                    "description": (
+                        "Optional commit SHA of the tree exercised by this "
+                        "verification report. Omit when unknown."
+                    ),
+                },
                 "human_validation_pending": {
                     "type": "string",
                     "description": "What still needs human validation.",

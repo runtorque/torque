@@ -1581,7 +1581,7 @@ def _normalize_board_lanes(lanes) -> list[str]:
     return current
 
 
-def _normalize_verification_summary(summary) -> dict:
+def _normalize_verification_snapshot_summary(summary) -> dict:
     if not isinstance(summary, dict):
         return {}
     out = {}
@@ -1589,6 +1589,7 @@ def _normalize_verification_summary(summary) -> dict:
         "tests_run",
         "human_validation_pending",
         "isolated_rerun_evidence",
+        "tested_sha",
     )
     for key in text_keys:
         value = summary.get(key, "")
@@ -1623,6 +1624,54 @@ def _normalize_verification_summary(summary) -> dict:
     ):
         if key in summary:
             out[key] = bool(summary.get(key))
+    return out
+
+
+def _normalize_verification_run(run) -> dict:
+    if not isinstance(run, dict):
+        return {}
+    report = run.get("report", {})
+    if not isinstance(report, dict):
+        report = {}
+    normalized_report = {}
+    mode = str(report.get("mode", "") or "").strip()
+    if mode in _VERIFICATION_MODES and mode:
+        normalized_report["mode"] = mode
+    state = str(report.get("state", "") or "").strip()
+    if state in _VERIFICATION_STATES and state:
+        normalized_report["state"] = state
+    notes = str(report.get("notes", "") or "").strip()
+    if notes:
+        normalized_report["notes"] = notes
+    summary = _normalize_verification_snapshot_summary(
+        report.get("summary", {})
+    )
+    if summary:
+        normalized_report["summary"] = summary
+
+    normalized = {}
+    recorded_at = str(run.get("recorded_at", "") or "").strip()
+    recorded_by = str(run.get("recorded_by", "") or "").strip()
+    if recorded_at:
+        normalized["recorded_at"] = recorded_at
+    if recorded_by:
+        normalized["recorded_by"] = recorded_by
+    if normalized_report:
+        normalized["report"] = normalized_report
+    return normalized if normalized_report else {}
+
+
+def _normalize_verification_summary(summary) -> dict:
+    out = _normalize_verification_snapshot_summary(summary)
+    if not isinstance(summary, dict):
+        return out
+    runs = []
+    for run in summary.get("runs", []) or []:
+        normalized = _normalize_verification_run(run)
+        if normalized:
+            runs.append(normalized)
+    if runs:
+        out["runs"] = runs
     return out
 
 

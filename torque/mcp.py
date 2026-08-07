@@ -369,6 +369,7 @@ TOOLS = [
                     "type": "string",
                     "description": "Short summary of tests that were run.",
                 },
+                "tested_sha": {"type": "string", "description": "Optional tested commit SHA; omit when unknown."},
                 "manual_smoke_done": {
                     "type": "boolean",
                     "description": "Whether manual smoke testing was completed.",
@@ -2000,6 +2001,7 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
             payload["finalization_review"] = args.get("finalization_review")
         for key in (
             "tests_run",
+            "tested_sha",
             "manual_smoke_done",
             "deploy_needed",
             "deploy_attempted",
