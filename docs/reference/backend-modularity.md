@@ -91,10 +91,17 @@ The shared direct/PR worktree preflight calls
 `check_backend_modularity_crossings()` before merge side effects. It checks
 backend Python files touched between the target base ref and candidate branch,
 then blocks files whose candidate line count newly exceeds the applicable
-reviewed limit. Applicability comes from Torque's backend-modularity test
-marker on the trusted target base, so a candidate cannot self-disable the gate
-by deleting or renaming that marker. Target bases without the marker are
-outside this repository-specific gate.
+reviewed limit. The trusted target base supplies both the default and per-path
+line-limit policy, so a candidate cannot authorize its own growth and the
+result does not depend on the running daemon's code revision. A reviewed budget
+change must therefore merge without the target growth first; the growing
+candidate must then be based on, or rebased onto, the revision containing that
+budget. No daemon relaunch is required. Applicability comes from Torque's
+backend-modularity test marker on the trusted target base, so a candidate
+cannot self-disable the gate by deleting or renaming that marker. Target bases
+without the marker are outside this repository-specific gate. Unreadable or
+malformed base policy blocks the check rather than falling back to in-process
+defaults.
 
 The same check remains author-runnable for diagnosis:
 
