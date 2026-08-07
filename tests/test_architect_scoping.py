@@ -280,6 +280,246 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             caller_id=caller_id,
         )
 
+    async def test_named_task_read_grant_is_hash_pinned_and_read_only(self):
+        author = self._add_architect("arch-author", "Author")
+        granter = self._add_architect("arch-granter", "Granter")
+        reader = self._add_engineer(
+            "eng-reader", "Reader", hired_by_architect_id=granter.id
+        )
+        assignee = self._add_engineer(
+            "eng-assignee", "Assignee", hired_by_architect_id=author.id
+        )
+        stranger = self._add_engineer(
+            "eng-stranger", "Stranger", hired_by_architect_id=granter.id
+        )
+        task = self._add_task(
+            "TORQUE:READ",
+            "Peer-assigned record",
+            description="Durable authored body",
+            assigned_engineer_id=assignee.id,
+            created_by_architect_id=author.id,
+        )
+        unassigned = self._add_task(
+            "TORQUE:OPEN",
+            "Existing unassigned record",
+        )
+        self.state.groups["other"] = []
+        self.state._db_save_groups()
+        foreign = self._add_task(
+            "OTHER:READ",
+            "Foreign record",
+            group="other",
+            assigned_engineer_id=assignee.id,
+        )
+
+        foreign_text, foreign_error = await self._call(
+            "architect_task_read_grant",
+            {
+                "engineer_id": reader.id,
+                "task": foreign.id,
+                "message": "cold read",
+            },
+            granter.id,
+        )
+        self.assertTrue(foreign_error)
+        self.assertEqual(foreign_text, "Task not found")
+
+        grant_text, grant_error = await self._call(
+            "architect_task_read_grant",
+            {
+                "engineer_id": reader.id,
+                "task": task.id,
+                "message": "Return a cold-read verdict.",
+            },
+            granter.id,
+        )
+        self.assertFalse(grant_error, grant_text)
+        grant = json.loads(grant_text)
+        self.assertEqual(grant["task_id"], task.id)
+        self.assertTrue(grant["task_content_hash"].startswith(
+            "task-content-v1:sha256:"
+        ))
+        persisted_grant = self.db.load_agent_peer_message(grant["grant_id"])
+        self.assertEqual(
+            persisted_grant["context_snapshot"]["task_read_grant"],
+            {
+                "marker": "torque.task-read-grant.v1",
+                "grant_id": grant["grant_id"],
+                "architect_id": granter.id,
+                "recipient_engineer_id": reader.id,
+                "group": "torque",
+                "task_id": task.id,
+                "task_content_hash": grant["task_content_hash"],
+            },
+        )
+        direct_text, direct_error = await self._call_engineer(
+            "engineer_task_show", {"task": task.id}, reader.id
+        )
+        self.assertTrue(direct_error)
+        self.assertEqual(direct_text, "task not found in scope")
+
+        inspect_text, inspect_error = await self._call_engineer(
+            "engineer_peer_inspect",
+            {"message_id": grant["grant_id"]},
+            reader.id,
+        )
+        self.assertFalse(inspect_error, inspect_text)
+        inspection = json.loads(inspect_text)
+        self.assertEqual(inspection["task"]["description"], "Durable authored body")
+        self.assertEqual(
+            inspection["task_content_hash"], grant["task_content_hash"]
+        )
+        wrong_text, wrong_error = await self._call_engineer(
+            "engineer_peer_inspect",
+            {"message_id": grant["grant_id"]},
+            stranger.id,
+        )
+        self.assertTrue(wrong_error)
+        self.assertEqual(wrong_text, "thread not found in scope")
+
+        list_text, list_error = await self._call_engineer(
+            "engineer_board_list", {}, reader.id
+        )
+        self.assertFalse(list_error, list_text)
+        listed_json = json.dumps(json.loads(list_text))
+        self.assertNotIn(task.id, listed_json)
+        self.assertIn(unassigned.id, listed_json)
+        update_text, update_error = await self._call_engineer(
+            "engineer_task_edit",
+            {"task": task.id, "description": "must not change"},
+            reader.id,
+        )
+        self.assertTrue(update_error)
+        self.assertIn("not found", update_text.lower())
+        self.assertEqual(self.state.board_tasks[task.id].description,
+                         "Durable authored body")
+        for tool_name, args in (
+            ("engineer_task_edit", {
+                "task": task.id, "action_name": "feature/implement",
+            }),
+            ("engineer_task_move", {"task": task.id, "lane": "To Do"}),
+            ("engineer_task_reassign", {
+                "task": task.id, "new_engineer_id": reader.id,
+            }),
+            ("engineer_task_dispatch", {"task": task.id}),
+        ):
+            denial_text, denial_error = await self._call_engineer(
+                tool_name, args, reader.id
+            )
+            self.assertTrue(denial_error, (tool_name, denial_text))
+        self.assertEqual(self.state.board_tasks[task.id].lane, "Backlog")
+        self.assertEqual(
+            self.state.board_tasks[task.id].assigned_engineer_id, assignee.id
+        )
+
+        missing_hash_text, missing_hash_error = await self._call_engineer(
+            "engineer_reply",
+            {"message_id": grant["grant_id"], "message": "READY"},
+            reader.id,
+        )
+        self.assertTrue(missing_hash_error)
+        self.assertEqual(
+            missing_hash_text,
+            "task_content_hash is required for a task_read_grant verdict",
+        )
+
+        reply_text, reply_error = await self._call_engineer(
+            "engineer_reply",
+            {
+                "message_id": grant["grant_id"],
+                "message": "READY",
+                "task_content_hash": grant["task_content_hash"],
+            },
+            reader.id,
+        )
+        self.assertFalse(reply_error, reply_text)
+        reply = json.loads(reply_text)
+        self.assertEqual(reply["task_content_hash"], grant["task_content_hash"])
+        persisted_reply = self.db.load_agent_peer_message(reply["message_id"])
+        self.assertEqual(
+            persisted_reply["context_snapshot"]["task_content_hash"],
+            grant["task_content_hash"],
+        )
+
+        task.group = "other"
+        cross_read_text, cross_read_error = await self._call_engineer(
+            "engineer_peer_inspect",
+            {"message_id": grant["grant_id"]},
+            reader.id,
+        )
+        self.assertTrue(cross_read_error)
+        self.assertEqual(cross_read_text, "thread not found in scope")
+        task.group = "torque"
+        self.state.board_update_task(task.id, description="Revised body")
+        repeat_text, repeat_error = await self._call_engineer(
+            "engineer_peer_inspect",
+            {"message_id": grant["grant_id"]},
+            reader.id,
+        )
+        self.assertTrue(repeat_error)
+        repeat = json.loads(repeat_text)
+        self.assertEqual(repeat["reason"], "task body changed under reader")
+        self.assertNotEqual(
+            repeat["current_task_content_hash"],
+            repeat["pinned_task_content_hash"],
+        )
+        authored_verdict = "  NOT-READY: body moved  \n"
+        rejected_text, rejected_error = await self._call_engineer(
+            "engineer_reply",
+            {
+                "message_id": grant["grant_id"],
+                "message": authored_verdict,
+                "task_content_hash": grant["task_content_hash"],
+            },
+            reader.id,
+        )
+        self.assertTrue(rejected_error)
+        rejected = json.loads(rejected_text)
+        self.assertEqual(rejected["authored_verdict"], authored_verdict)
+        self.assertEqual(set(rejected), {
+            "authored_verdict",
+            "pinned_task_content_hash",
+            "current_task_content_hash",
+            "reason",
+            "next_step",
+        })
+        self.assertEqual(
+            len(self.db.load_agent_peer_messages_for_thread(
+                grant["thread_id"], limit=100
+            )),
+            2,
+        )
+
+    async def test_ordinary_engineer_reply_ignores_optional_task_hash(self):
+        architect = self._add_architect("arch-normal", "Normal Architect")
+        engineer = self._add_engineer(
+            "eng-normal", "Normal Engineer",
+            hired_by_architect_id=architect.id,
+        )
+        message_text, message_error = await self._call(
+            "architect_engineer_message",
+            {"engineer_id": engineer.id, "message": "ordinary message"},
+            architect.id,
+        )
+        self.assertFalse(message_error, message_text)
+        message = json.loads(message_text)
+        reply_text, reply_error = await self._call_engineer(
+            "engineer_reply",
+            {
+                "message_id": message["message_id"],
+                "message": "ordinary reply",
+                "task_content_hash": "ignored-for-ordinary-thread",
+            },
+            engineer.id,
+        )
+        self.assertFalse(reply_error, reply_text)
+        reply = json.loads(reply_text)
+        self.assertEqual(set(reply), {"type", "message_id", "thread_id"})
+        self.assertEqual(reply["type"], "ok")
+        persisted = self.db.load_agent_peer_message(reply["message_id"])
+        self.assertEqual(persisted["message"], "ordinary reply")
+        self.assertEqual(persisted["context_snapshot"], {})
+
     @staticmethod
     def _make_cell(value):
         return (lambda x: lambda: x)(value).__closure__[0]

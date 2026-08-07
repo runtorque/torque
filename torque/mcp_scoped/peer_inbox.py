@@ -17,6 +17,8 @@ from torque.mcp_scoped.common import (
     authorize_caller,
 )
 from torque.mcp_scoped.peer_context import (
+    _task_content_hash,
+    _task_read_grant_from_row,
     _engineer_peer_hiring_architect_id,
     _resolve_architect_peer_filter,
     _resolve_engineer_peer,
@@ -30,6 +32,76 @@ from torque.server_artifacts import serialize_task_for_mcp
 
 _ARCHITECT_PEER_MESSAGE_LENGTH_LIMIT = 16 * 1024
 _ARCHITECT_PEER_PREVIEW_LIMIT = 1_200
+
+
+def _task_read_grant_invalidated_payload(grant: dict, current_hash: str) -> dict:
+    return {
+        "type": "task_read_grant_invalidated",
+        "task_id": str(grant.get("task_id", "") or ""),
+        "pinned_task_content_hash": str(
+            grant.get("task_content_hash", "") or ""
+        ),
+        "current_task_content_hash": str(current_hash or ""),
+        "reason": "task body changed under reader",
+        "next_step": "request a fresh task_read_grant from an eligible Architect",
+    }
+
+
+def _task_read_grant_inspect_json(
+        state, caller_id: str, args: dict
+) -> tuple[str, bool] | None:
+    """Inspect an explicit Architect→Engineer task grant, if selected."""
+    message_id = str(args.get("message_id", "") or "").strip()
+    if not message_id:
+        return None
+    db = getattr(state, "db", None)
+    row = db.load_agent_peer_message(message_id) if db else None
+    grant = _task_read_grant_from_row(row or {})
+    if not grant:
+        return None
+    caller_id = str(caller_id or "").strip()
+    group = str(grant.get("group", "") or "").strip()
+    architect_id = str(grant.get("architect_id", "") or "").strip()
+    if (
+        str(grant.get("grant_id", "") or "").strip() != message_id
+        or
+        str((row or {}).get("recipient_id", "") or "").strip() != caller_id
+        or str(grant.get("recipient_engineer_id", "") or "").strip() != caller_id
+        or str((row or {}).get("sender_id", "") or "").strip() != architect_id
+        or str((row or {}).get("group_name", "") or "").strip() != group
+    ):
+        return "thread not found in scope", True
+    engineer = state.agents.get(caller_id)
+    architect = state.agents.get(architect_id)
+    if (
+        not engineer
+        or str(getattr(engineer, "kind", "") or "").strip() != "engineer"
+        or str(getattr(engineer, "group", "") or "").strip() != group
+        or not architect
+        or str(getattr(architect, "kind", "") or "").strip() != "architect"
+        or str(getattr(architect, "group", "") or "").strip() != group
+    ):
+        return "thread not found in scope", True
+    task_id = str(grant.get("task_id", "") or "").strip()
+    task = state.board_tasks.get(task_id)
+    if not task or str(getattr(task, "group", "") or "").strip() != group:
+        return "thread not found in scope", True
+    pinned_hash = str(grant.get("task_content_hash", "") or "").strip()
+    current_hash = _task_content_hash(task)
+    if not pinned_hash or current_hash != pinned_hash:
+        return _compact_json(
+            _task_read_grant_invalidated_payload(grant, current_hash)
+        ), True
+    body = serialize_task_for_mcp(task, tasks_by_id=state.board_tasks)
+    body["title"] = str(getattr(task, "task", "") or "")
+    body["action"] = str(getattr(task, "action_name", "") or "")
+    return _compact_json({
+        "type": "task_read_grant",
+        "grant_id": message_id,
+        "task_id": task_id,
+        "task_content_hash": pinned_hash,
+        "task": body,
+    }), False
 
 
 def _architect_peer_thread_summary(thread: dict) -> dict:
@@ -541,6 +613,9 @@ def _engineer_peer_inspect_json(
         state,
         caller_id: str,
         args: dict) -> tuple[str, bool]:
+    grant_result = _task_read_grant_inspect_json(state, caller_id, args)
+    if grant_result is not None:
+        return grant_result
     include_live, live_error = _optional_bool_arg(args, "include_live", True)
     if live_error:
         return live_error, True

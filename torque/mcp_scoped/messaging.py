@@ -212,6 +212,7 @@ def _deliverable_awareness_for_referenced_tasks(state, message_text: str) -> str
 
 def _deliver_architect_engineer_message(state, sender, recipient, *,
                                         action: str, message: str,
+                                        message_id: str = "",
                                         reply_to_id: str = "",
                                         thread_id: str = "",
                                         ack_required: bool = False,
@@ -220,7 +221,10 @@ def _deliver_architect_engineer_message(state, sender, recipient, *,
     if not message_text:
         raise ValueError("message is required")
     timestamp = time.time()
-    message_id = "msg-" + uuid.uuid4().hex[:12]
+    message_id = (
+        str(message_id or "").strip()
+        or "msg-" + uuid.uuid4().hex[:12]
+    )
     conversation_id = str(thread_id or "").strip() or message_id
     reply_to = str(reply_to_id or "").strip()
     sender_kind = str(getattr(sender, "kind", "") or "").strip()
