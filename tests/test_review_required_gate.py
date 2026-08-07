@@ -18,6 +18,7 @@ Covers:
   error.
 """
 
+import asyncio
 import importlib
 import tempfile
 import types
@@ -904,6 +905,270 @@ class ReviewRequiredHandleCommandGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             state.board_tasks[implementation.id].lane,
             "Done",
+        )
+        await asyncio.sleep(0.1)
+
+    async def test_multi_round_review_chain_closes_through_merge_finalization(self):
+        from torque.services.worktrees.finalize import (
+            _finalize_successful_worktree_merge,
+        )
+        from torque.services.worktrees.preflight import (
+            _freeze_merge_attribution,
+        )
+        from torque.worktree_boundaries import (
+            branch_boundary_tasks,
+            mark_branch_boundaries_merged,
+        )
+
+        state, implementer, root = self._build_state(requires_review=True)
+        action_mgr = self.actions_mod.ActionManager()
+        repo_root = str(REPO_ROOT)
+        branch = "torque/test/multi-round-review"
+        for cell in (implementer,):
+            cell.worktree_path = repo_root
+            cell.worktree_repo_root = repo_root
+            cell.git_root = repo_root
+            cell.worktree_branch = branch
+            cell.worktree_base_branch = "main"
+
+        sequence = 0
+
+        async def record_task_boundary(task, cell, message=""):
+            nonlocal sequence
+            sequence += 1
+            for older in branch_boundary_tasks(
+                state.board_tasks.values(),
+                repo_root=repo_root,
+                branch=branch,
+                statuses={"open"},
+            ):
+                if older.id != task.id:
+                    older.worktree_boundary = {
+                        **older.worktree_boundary,
+                        "status": "superseded",
+                        "superseded_by_task_id": task.id,
+                    }
+            task.worktree_boundary = {
+                "version": "1",
+                "repo_root": repo_root,
+                "branch": branch,
+                "base_branch": "main",
+                "commit_sha": "multi-round-head",
+                "kind": "marker",
+                "status": "open",
+                "recorded_at": f"2026-08-07T13:00:0{sequence}+00:00",
+                "recorded_by_agent_id": cell.id,
+                "message": message,
+                "superseded_by_task_id": "",
+                "merged_at": "",
+                "merge_commit_sha": "",
+                "code_delta": {"state": "present"},
+            }
+
+        async def complete_review(review, reviewer, verdict):
+            command = self._extract_handle_command(
+                state,
+                action_mgr=action_mgr,
+                record_task_boundary=record_task_boundary,
+            )
+            result = await command({
+                "cmd": "ai_report",
+                "cell_id": reviewer.id,
+                "action": "done",
+                "message": f"Final review verdict: {verdict}",
+                "terminal_declaration": (
+                    "No further work is needed; I will not derive after this."
+                ),
+            })
+            self.assertNotEqual(
+                result.get("type") if isinstance(result, dict) else None,
+                "review_required",
+            )
+            self.assertEqual(review.lane, "Done")
+
+        implement_command = self._extract_handle_command(
+            state,
+            action_mgr=action_mgr,
+            record_task_boundary=record_task_boundary,
+        )
+        first_rejection = await implement_command({
+            "cmd": "ai_report",
+            "cell_id": implementer.id,
+            "action": "done",
+            "message": "Initial implementation complete",
+        })
+        self.assertEqual(first_rejection["type"], "review_required")
+
+        first_reviewer = self.state_mod.AgentCell(
+            id="reviewer-block",
+            name="Blocking Reviewer",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+            directory=repo_root,
+        )
+        for key, value in {
+            "worktree_path": repo_root,
+            "worktree_repo_root": repo_root,
+            "git_root": repo_root,
+            "worktree_branch": branch,
+            "worktree_base_branch": "main",
+        }.items():
+            setattr(first_reviewer, key, value)
+        state.agents[first_reviewer.id] = first_reviewer
+        state.groups["g"].append(first_reviewer.id)
+        first_review = state.board_add_task(
+            "First review",
+            "g",
+            lane="In Progress",
+            id="task-review-block",
+            action_name="feature/review",
+            agent_id=first_reviewer.id,
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+        )
+        first_reviewer.current_task_id = first_review.id
+
+        fix = state.board_add_task(
+            "Address blocking review",
+            "g",
+            lane="In Progress",
+            id="task-fix-1",
+            action_name="feature/implement",
+            agent_id=implementer.id,
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+            requires_review=True,
+        )
+        root.agent_id = ""
+        implementer.current_task_id = fix.id
+        await complete_review(first_review, first_reviewer, "Block")
+
+        fix_rejection = await implement_command({
+            "cmd": "ai_report",
+            "cell_id": implementer.id,
+            "action": "done",
+            "message": "Blocking fixes complete",
+        })
+        self.assertEqual(fix_rejection["type"], "review_required")
+
+        second_reviewer = self.state_mod.AgentCell(
+            id="reviewer-ship",
+            name="Shipping Reviewer",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+            directory=repo_root,
+        )
+        for key, value in {
+            "worktree_path": repo_root,
+            "worktree_repo_root": repo_root,
+            "git_root": repo_root,
+            "worktree_branch": branch,
+            "worktree_base_branch": "main",
+        }.items():
+            setattr(second_reviewer, key, value)
+        state.agents[second_reviewer.id] = second_reviewer
+        state.groups["g"].append(second_reviewer.id)
+        second_review = state.board_add_task(
+            "Second review",
+            "g",
+            lane="In Progress",
+            id="task-review-ship",
+            action_name="feature/review",
+            agent_id=second_reviewer.id,
+            parent_task_id=fix.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=2,
+        )
+        second_reviewer.current_task_id = second_review.id
+        await complete_review(second_review, second_reviewer, "Ship")
+
+        clean = {
+            "task_id": second_review.id,
+            "boundary": dict(second_review.worktree_boundary),
+            "head_sha": "multi-round-head",
+            "clean_mergeable": True,
+        }
+        frozen, attribution_error = _freeze_merge_attribution(
+            state,
+            implementer,
+            implementer.id,
+            {"merge_task_id": fix.id},
+            {"latest": clean, "clean": clean, "reason": ""},
+        )
+        self.assertIsNone(attribution_error)
+        self.assertEqual(
+            frozen.target_task_ids,
+            (fix.id, second_review.id),
+        )
+
+        def mark_boundaries(cell, merge_sha, merged_task_ids=()):
+            return mark_branch_boundaries_merged(
+                state.board_tasks.values(),
+                repo_root=cell.worktree_repo_root,
+                branch=cell.worktree_branch,
+                merge_sha=merge_sha,
+                task_ids=merged_task_ids,
+            )
+
+        class FinalizeWorktreeManager:
+            async def validate(self, _cell):
+                return True
+
+            async def reset_to_base(self, _cell):
+                return True
+
+            async def count_commits(self, _cell):
+                return 0
+
+        async def noop_async(*_args, **_kwargs):
+            return None
+
+        with mock.patch(
+            "torque.services.worktrees.finalize."
+            "_cleanup_shipped_reviewers_for_merged_cell",
+            new=mock.AsyncMock(return_value={"agents": [], "errors": []}),
+        ):
+            result = await _finalize_successful_worktree_merge(
+                state=state,
+                cell=implementer,
+                aid=implementer.id,
+                data={"merge_task_id": fix.id, "auto_move_to_done": True},
+                merge_sha="merged-multi-round-head",
+                merged_task_ids=frozen.target_task_ids,
+                stale_base=None,
+                preserve_merge_diff=False,
+                boundary_task_for_diff=second_review,
+                merge_diff_snapshot=None,
+                merge_resume_targets=[],
+                mark_branch_boundaries_merged=mark_boundaries,
+                cleanup_after_merge=lambda *_args, **_kwargs: None,
+                broadcast_toast=noop_async,
+                bridge=types.SimpleNamespace(send_text=noop_async),
+                worktree_mgr=FinalizeWorktreeManager(),
+                handle_command=noop_async,
+                panel_event=lambda *_args, **_kwargs: None,
+            )
+        self.assertTrue(result["ok"])
+        done_result = state.board_move_task(root.id, "Done")
+        self.assertEqual(
+            state.board_tasks[root.id].lane,
+            "Done",
+            {
+                "done_result": done_result,
+                "boundaries": {
+                    task.id: dict(task.worktree_boundary or {})
+                    for task in (
+                        root,
+                        first_review,
+                        fix,
+                        second_review,
+                    )
+                },
+            },
         )
 
     async def test_blocked_and_progress_not_gated_by_review_required(self):
