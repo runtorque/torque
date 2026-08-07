@@ -31,6 +31,12 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.shared_mod = importlib.reload(self.shared_mod)
         self.streams_mod = importlib.import_module("torque.worktree_streams")
         self.streams_mod = importlib.reload(self.streams_mod)
+        self.architect_reports_mod = importlib.import_module(
+            "torque.mcp_scoped.architect_reports"
+        )
+        self.architect_reports_mod = importlib.reload(
+            self.architect_reports_mod
+        )
         self.mcp_architect_mod = importlib.import_module("torque.mcp_architect")
         self.mcp_architect_mod = importlib.reload(self.mcp_architect_mod)
         self.mcp_engineer_mod = importlib.import_module("torque.mcp_engineer")
@@ -63,6 +69,33 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.state.groups["torque"] = []
         self.state._db_save_groups()
         self.handle_calls = []
+
+    def test_architect_attention_stream_item_retains_unverified_head(self):
+        head = {
+            "reviewed_boundary_sha": "reviewed123",
+            "current_branch_head_sha": "",
+            "current_branch_head_sha_source": "unknown",
+            "current_branch_head_sha_verified": False,
+            "branch_advanced": False,
+        }
+        item = self.architect_reports_mod._architect_attention_stream_item({
+            "stream_id": "stream:/repo::torque/worker",
+            "state": "merge_readiness_unknown",
+            "branch": "torque/worker",
+            "merge_readiness": {
+                "state": "merge_readiness_unknown",
+                "merge_state": "not_ready",
+                "head": head,
+                "recommended_next_action": "check_merge_readiness",
+            },
+        })
+
+        self.assertEqual(item["state"], "merge_readiness_unknown")
+        self.assertEqual(
+            item["recommended_next_action"],
+            "check_merge_readiness",
+        )
+        self.assertEqual(item["head"], head)
 
     def _add_architect(self, agent_id: str, name: str, *, group: str = "torque"):
         self.state.groups.setdefault(group, [])
