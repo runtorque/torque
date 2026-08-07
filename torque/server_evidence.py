@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Iterable
@@ -10,6 +11,7 @@ from .artifacts import normalize_artifacts
 from .config import log
 from .services.worktrees import _base_match_from_result, _sha_equal
 from .state import MatrixState, task_counts_as_done, task_is_closed
+from .verification import task_verification_evidence as _task_verification_evidence
 
 
 def _apply_verification_report(task, payload, actor_name, save_task,
@@ -20,7 +22,12 @@ def _apply_verification_report(task, payload, actor_name, save_task,
 
     from datetime import datetime, timezone
 
+    recorded_at = timestamp or datetime.now(timezone.utc).isoformat()
     summary = dict(task.verification_summary or {})
+    # Currentness is derived from immutable SHA facts at read time. Never
+    # carry a prior projection verdict back into the durable summary.
+    summary.pop("currentness", None)
+    summary.pop("is_current", None)
     if "tests_run" in payload:
         tests_run = str(payload.get("tests_run", "") or "").strip()
         if tests_run:
@@ -89,6 +96,12 @@ def _apply_verification_report(task, payload, actor_name, save_task,
     ):
         if key in payload:
             summary[key] = bool(payload.get(key))
+    if "tested_sha" in payload:
+        tested_sha = str(payload.get("tested_sha", "") or "").strip()
+        if tested_sha:
+            summary["tested_sha"] = tested_sha
+        else:
+            summary.pop("tested_sha", None)
 
     if "verification_mode" in payload:
         mode = str(payload.get("verification_mode", "") or "").strip()
@@ -135,11 +148,31 @@ def _apply_verification_report(task, payload, actor_name, save_task,
             payload.get("verification_notes", "") or ""
         ).strip()
 
+    run_summary = {
+        key: value
+        for key, value in summary.items()
+        if key != "runs"
+    }
+    report = {}
+    if task.verification_mode:
+        report["mode"] = task.verification_mode
+    if task.verification_state:
+        report["state"] = task.verification_state
+    if task.verification_notes:
+        report["notes"] = task.verification_notes
+    if run_summary:
+        report["summary"] = run_summary
+    runs = summary.get("runs", [])
+    runs = list(runs) if isinstance(runs, list) else []
+    runs.append({
+        "recorded_at": recorded_at,
+        "recorded_by": str(actor_name or "").strip() or "torque",
+        "report": report,
+    })
+    summary["runs"] = runs
+
     task.verification_summary = summary
-    task.verification_updated_at = (
-        timestamp
-        or datetime.now(timezone.utc).isoformat()
-    )
+    task.verification_updated_at = recorded_at
     task.verification_updated_by = actor_name
 
     parts = []
@@ -190,7 +223,28 @@ def _apply_verification_report(task, payload, actor_name, save_task,
         root_task.verification_notes = task.verification_notes
         root_task.verification_updated_at = task.verification_updated_at
         root_task.verification_updated_by = task.verification_updated_by
-        root_task.verification_summary = dict(summary)
+        root_summary = {
+            key: deepcopy(value)
+            for key, value in summary.items()
+            if key != "runs"
+        }
+        existing_root_summary = root_task.verification_summary or {}
+        existing_root_runs = (
+            existing_root_summary.get("runs", [])
+            if isinstance(existing_root_summary, dict)
+            else []
+        )
+        root_runs = (
+            list(existing_root_runs)
+            if isinstance(existing_root_runs, list)
+            else []
+        )
+        incoming_runs = summary.get("runs", [])
+        if isinstance(incoming_runs, list) and incoming_runs:
+            root_runs.append(deepcopy(incoming_runs[-1]))
+        if root_runs:
+            root_summary["runs"] = root_runs
+        root_task.verification_summary = root_summary
         save_task(root_task)
 
     return msg, root_task
@@ -241,59 +295,6 @@ def _merge_daemon_code_revision_stamp(state: MatrixState) -> dict:
             detail or "daemon boot code revision was unavailable"
         ),
     }
-
-
-def _task_verification_evidence(task) -> dict:
-    if not task:
-        return {}
-    summary = getattr(task, "verification_summary", {}) or {}
-    if not isinstance(summary, dict):
-        summary = {}
-    evidence = {}
-    state_value = _completion_evidence_text(
-        getattr(task, "verification_state", ""))
-    mode_value = _completion_evidence_text(
-        getattr(task, "verification_mode", ""))
-    notes_value = _completion_evidence_text(
-        getattr(task, "verification_notes", ""))
-    if state_value:
-        evidence["state"] = state_value
-    if mode_value:
-        evidence["mode"] = mode_value
-    normalized_summary = {}
-    for key in (
-        "tests_run",
-        "human_validation_pending",
-        "isolated_rerun_evidence",
-        "test_outcome",
-        "reviewer_acceptance",
-    ):
-        value = _completion_evidence_text(summary.get(key, ""))
-        if value:
-            normalized_summary[key] = value
-    for key in (
-        "manual_smoke_done",
-        "deploy_needed",
-        "deploy_attempted",
-        "full_suite_attempted",
-        "unrelated_flake_accepted",
-        "live_smoke_pending",
-    ):
-        if key in summary:
-            normalized_summary[key] = bool(summary.get(key))
-    if normalized_summary:
-        evidence["summary"] = normalized_summary
-    if notes_value:
-        evidence["notes"] = notes_value
-    updated_at = _completion_evidence_text(
-        getattr(task, "verification_updated_at", ""))
-    updated_by = _completion_evidence_text(
-        getattr(task, "verification_updated_by", ""))
-    if updated_at:
-        evidence["updated_at"] = updated_at
-    if updated_by:
-        evidence["updated_by"] = updated_by
-    return evidence
 
 
 def _task_artifact_evidence(task, *, limit: int = 12) -> dict:
@@ -947,7 +948,10 @@ def _record_task_completion_evidence_snapshot(
     if not state or not task:
         return False
 
-    verification = _task_verification_evidence(task)
+    verification = _task_verification_evidence(
+        task,
+        include_currentness=False,
+    )
     artifacts = _task_artifact_evidence(task)
     sources = []
     update = {

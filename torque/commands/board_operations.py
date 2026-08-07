@@ -686,6 +686,7 @@ async def handle_board_operation_command(
                 "verification_state",
                 "verification_notes",
                 "tests_run",
+                "tested_sha",
                 "manual_smoke_done",
                 "deploy_needed",
                 "deploy_attempted",

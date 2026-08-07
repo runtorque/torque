@@ -1318,6 +1318,8 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
             payload["verification_notes"] = args["notes"]
         if "tests_run" in args:
             payload["tests_run"] = args["tests_run"]
+        if "tested_sha" in args:
+            payload["tested_sha"] = args["tested_sha"]
         if "human_validation_pending" in args:
             payload["human_validation_pending"] = args["human_validation_pending"]
         for key in (

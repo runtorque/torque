@@ -19,6 +19,7 @@ from .artifacts import (
     normalize_attachments,
 )
 from .config import ATTACHMENTS_DIR
+from .verification import task_verification_evidence
 
 INLINE_PREVIEW_LIMIT = 256 * 1024
 
@@ -382,6 +383,9 @@ def serialize_upstream_task_artifacts(task, tasks_by_id=None) -> list[dict]:
 
 def serialize_task_for_mcp(task, *, tasks_by_id=None) -> dict:
     data = asdict(task) if is_dataclass(task) else dict(task or {})
+    verification_evidence = task_verification_evidence(task)
+    if verification_evidence:
+        data["verification_evidence"] = verification_evidence
     attachments = normalize_attachments(data.get("attachments", []))
     raw_artifacts = normalize_artifacts(data.get("artifacts", []))
     data["attachments"] = attachments
