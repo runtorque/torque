@@ -2671,7 +2671,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.board_tasks[queued.id].lane, "In Progress")
         self.assertNotIn("g", state.auto_dispatch_queues)
 
-    def _make_followup_override_state(self):
+    def _make_followup_override_state(self, *, shipped_lane="Done"):
         """State with a worker carrying one queued follow-up task."""
         state = self.state_mod.MatrixState()
         state.add_group("g")
@@ -2693,7 +2693,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         state.board_add_task(
             "Shipped first task",
             "g",
-            lane="Done",
+            lane=shipped_lane,
             id="TORQUE:392",
             agent_id=worker.id,
         )
@@ -2852,6 +2852,40 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             ),
             logs.output,
         )
+
+    async def test_worktree_merge_auto_done_queued_followup_remains_candidate_blocker(self):
+        state, worker, _queued = self._make_followup_override_state(
+            shipped_lane="In Progress",
+        )
+        shipped = state.board_tasks["TORQUE:392"]
+
+        async def nested_dispatch(_payload):
+            return {"type": "ok"}
+
+        with self.assertLogs("torque", level="INFO") as logs:
+            result, cleanup_calls = await self._run_followup_override_merge(
+                state,
+                worker,
+                command_extra={
+                    "close_agent_on_merge": True,
+                    "remove_worktree_on_merge": True,
+                    "merge_task_id": shipped.id,
+                },
+                reset_ok=True,
+                nested_dispatch=nested_dispatch,
+            )
+
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(result["cleanup"]["cleanup_overridden"])
+        self.assertFalse(result["cleanup"]["close_agent"])
+        self.assertFalse(result["cleanup"]["remove_worktree"])
+        self.assertEqual(cleanup_calls, [])
+        self.assertTrue(any(
+            "Merge auto-Done skipped for 'Worker': 2 open linked tasks" in line
+            for line in logs.output
+        ), logs.output)
+        self.assertEqual(shipped.lane, "In Progress")
+        self.assertEqual(shipped.agent_id, worker.id)
 
     async def test_worktree_merge_no_override_field_without_cleanup_flags(self):
         # When no cleanup was requested there is nothing to override, so the
@@ -4915,8 +4949,8 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             "auto_move_to_done": True,
             "preserve_merge_diff": False,
         })
-        self.assertEqual(task.lane, "In Progress")
-        self.assertEqual(task.agent_id, worker.id)
+        self.assertEqual(task.lane, "Done")
+        self.assertEqual(task.agent_id, "")
 
     async def test_worktree_merge_pr_auto_sweep_setting_cleans_after_confirmed_merge(self):
         state, worker, task = self._make_pr_merge_state()

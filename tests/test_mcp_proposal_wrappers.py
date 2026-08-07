@@ -763,8 +763,8 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(error["reason"], "task_dispatched")
         self.assertEqual(error["dispatch_state"], "live")
         self.assertEqual(
-            "Task has active dispatched work. Stop the active execution "
-            "stream before editing it.",
+            "Task has active work in its assigned worker. Stop or complete "
+            "that worker before editing.",
             error["message"],
         )
         self.assertEqual(

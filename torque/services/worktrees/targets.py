@@ -101,15 +101,12 @@ def _maybe_auto_move_merged_task_to_done(
     cell,
     *,
     enabled: bool,
-    cleanup_requested: bool,
 ) -> dict:
     """Move a sole active linked task to Done after a successful merge."""
     decision = {"moved": False, "task_id": "", "reason": ""}
 
     if not enabled:
         decision["reason"] = "disabled by caller"
-    elif not cleanup_requested:
-        decision["reason"] = "merge cleanup not requested"
     else:
         task, reason = _worktree_merge_auto_done_candidate(state, cell)
         if not task:
