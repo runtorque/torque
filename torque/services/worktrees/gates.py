@@ -376,10 +376,10 @@ def _boundary_tip_mismatch_message(boundary: dict | None) -> str:
 
 _REVIEW_CYCLE_DEADLOCK_GUIDANCE = (
     "This branch is stale and has unreviewed commits past a completed open "
-    "feature/review boundary. No safe in-place transition is currently "
-    "available. Do not record a reviewed boundary at the unreviewed tip. "
-    "Use the supported reroute: reapply the exact delta from current main, "
-    "rerun evidence, and obtain a fresh review."
+    "feature/review boundary. Do not record a reviewed boundary at the "
+    "unreviewed tip. Use `review_cycle_continue` on the completed review, "
+    "then non-force rebase, rerun the relevant evidence, and obtain a fresh "
+    "feature/review."
 )
 
 

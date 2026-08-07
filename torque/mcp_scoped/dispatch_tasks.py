@@ -1,6 +1,8 @@
 """Domain dispatcher extracted from :mod:`torque.mcp_tools_shared`."""
 
 import copy
+import json
+import time
 from dataclasses import asdict
 from datetime import datetime, timezone
 
@@ -28,6 +30,7 @@ from torque.task_amendment import (
     validate_task_amendment,
 )
 from torque.task_content import compute_task_content_hash
+from torque.worktree_boundaries import task_boundary
 
 
 def _live_workers_linked_to_task(state, task) -> list:
@@ -62,6 +65,249 @@ def _orphaned_task_worker_count(state) -> int:
             if owner_engineer_id != assigned_engineer_id:
                 count += 1
     return count
+
+
+def _review_cycle_continue_verdict(review_task) -> tuple[dict, str]:
+    evidence = getattr(review_task, "completion_evidence", {}) or {}
+    if not isinstance(evidence, dict):
+        return {}, ""
+    review = evidence.get("review", {}) or {}
+    if not isinstance(review, dict):
+        return {}, ""
+    verdict = str(review.get("verdict", "") or "").strip().lower()
+    return copy.deepcopy(review), verdict
+
+
+async def _review_cycle_continue(ctx: ScopedDispatchContext):
+    """Create one audited continuation without changing the prior verdict."""
+    args = ctx.args
+    state = ctx.real_state
+    caller_id = str(ctx.caller_id or "").strip()
+    task_id = state.resolve_board_task_id(str(args.get("task", "") or ""))
+    review_task = state.board_tasks.get(task_id) if task_id else None
+    if not review_task:
+        return "Task not found", True
+    if str(getattr(review_task, "group", "") or "") != ctx.caller_group:
+        return "Task not found", True
+    if str(getattr(review_task, "action_name", "") or "").strip().lower() \
+            != "feature/review":
+        return "review_cycle_continue requires a feature/review task", True
+    if not board_task_is_closed(review_task):
+        return "review_cycle_continue requires a completed feature/review", True
+    if _effective_assigned_engineer_id(review_task) != caller_id:
+        return (
+            "Authorization denied: the review stream is not owned by this "
+            "Engineer.",
+            True,
+        )
+    reason = str(args.get("reason", "") or "").strip()
+    if not reason:
+        return "reason is required", True
+
+    predecessor_boundary = copy.deepcopy(task_boundary(review_task))
+    if str(predecessor_boundary.get("status", "") or "").lower() != "open":
+        return "The completed review does not have an open boundary", True
+    reviewed_sha = str(predecessor_boundary.get("commit_sha", "") or "").strip()
+    repo_root = str(predecessor_boundary.get("repo_root", "") or "").strip()
+    branch = str(predecessor_boundary.get("branch", "") or "").strip()
+    if not reviewed_sha or not repo_root or not branch:
+        return "The completed review boundary is incomplete", True
+
+    parent_id = str(getattr(review_task, "parent_task_id", "") or "").strip()
+    implementation = state.board_tasks.get(parent_id) if parent_id else None
+    if not implementation or str(
+            getattr(implementation, "action_name", "") or ""
+    ).strip().lower() != "feature/implement":
+        return (
+            "The completed review has no direct implementation parent",
+            True,
+        )
+    root_id = str(
+        getattr(review_task, "pipeline_root_id", "")
+        or getattr(implementation, "pipeline_root_id", "")
+        or implementation.id
+    ).strip()
+    implementation_root = str(
+        getattr(implementation, "pipeline_root_id", "") or implementation.id
+    ).strip()
+    if not root_id or root_id != implementation_root:
+        return "The review and implementation do not share one root", True
+
+    implementer_id = str(getattr(implementation, "agent_id", "") or "").strip()
+    implementer = state.agents.get(implementer_id) if implementer_id else None
+    if not implementer:
+        return "The original implementer is unavailable", True
+    if str(getattr(implementer, "owner_engineer_id", "") or "").strip() \
+            != caller_id:
+        return (
+            "Authorization denied: the original implementer is not owned by "
+            "this Engineer.",
+            True,
+        )
+    implementer_repo = str(
+        getattr(implementer, "worktree_repo_root", "")
+        or getattr(implementer, "git_root", "")
+        or ""
+    ).strip()
+    if (
+            implementer_repo != repo_root
+            or str(getattr(implementer, "worktree_branch", "") or "").strip()
+            != branch
+    ):
+        return (
+            "The original implementer no longer owns the reviewed branch",
+            True,
+        )
+
+    review_record, original_verdict = _review_cycle_continue_verdict(review_task)
+    if not review_record or not original_verdict:
+        return "The completed review has no structured verdict evidence", True
+    prior_continuations = (
+        getattr(review_task, "completion_evidence", {}) or {}
+    ).get("review_cycle_continuations", [])
+    if prior_continuations:
+        return "This review already has an audited continuation", True
+
+    # Read-only preflight against the real branch. The merge check supplies
+    # the classified boundary/head mismatch; the summary supplies staleness.
+    merge_check = await ctx.handle_command({
+        "cmd": "worktree_check_merge",
+        "id": implementer_id,
+        "merge_task_id": implementation.id,
+        "allow_stale_base": True,
+    })
+    boundary_summary = (
+        merge_check.get("boundary", {})
+        if isinstance(merge_check, dict) else {}
+    )
+    mismatch = (
+        boundary_summary.get("boundary_tip_mismatch", {})
+        if isinstance(boundary_summary, dict) else {}
+    )
+    observed_head = str(
+        boundary_summary.get("head_sha", "")
+        if isinstance(boundary_summary, dict) else ""
+    ).strip()
+    if (
+            str(boundary_summary.get("task_id", "") or "").strip()
+            != review_task.id
+            or str(mismatch.get("classification", "") or "").lower() != "ahead"
+            or not observed_head
+            or observed_head == reviewed_sha
+    ):
+        return (
+            "review_cycle_continue requires the branch tip to be verified "
+            "ahead of this completed review boundary",
+            True,
+        )
+    diff_summary = await ctx.handle_command({
+        "cmd": "worktree_diff",
+        "id": implementer_id,
+        "summary_only": True,
+    })
+    stale_base = (
+        diff_summary.get("stale_base", {})
+        if isinstance(diff_summary, dict) else {}
+    )
+    if not stale_base.get("stale"):
+        return (
+            "review_cycle_continue is reserved for the composed stale-base "
+            "review-cycle state; derive a fresh review directly instead",
+            True,
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        continuation_id = state._allocate_derived_task_id(
+            review_task.group, root_id
+        )
+    except ValueError:
+        return "Failed to allocate the review-cycle continuation", True
+    audit = {
+        "operation": "review_cycle_continue",
+        "actor_id": caller_id,
+        "actor_name": str(
+            getattr(ctx.caller_cell, "name", "") or "Engineer"
+        ).strip(),
+        "continued_at": now,
+        "reason": reason,
+        "original_review_task_id": review_task.id,
+        "original_verdict": original_verdict,
+        "reviewed_sha": reviewed_sha,
+        "observed_branch_head": observed_head,
+        "continuation_task_id": continuation_id,
+        "pipeline_root_id": root_id,
+        "repo_root": repo_root,
+        "branch": branch,
+    }
+    continuation = state.board_add_task(
+        task=f"Continue review cycle for {implementation.task}",
+        group=review_task.group,
+        lane="Backlog",
+        id=continuation_id,
+        action_name="feature/implement",
+        parent_task_id=implementation.id,
+        pipeline_root_id=root_id,
+        pipeline_depth=max(
+            int(getattr(review_task, "pipeline_depth", 0) or 0) + 1,
+            int(getattr(implementation, "pipeline_depth", 0) or 0) + 1,
+        ),
+        agent_id=implementer_id,
+        assigned_engineer_id=caller_id,
+        dispatch_state="queued",
+        labels=["torque:derived", "torque:review-cycle-continuation"],
+        completion_evidence={
+            "review_cycle_continue": copy.deepcopy(audit),
+        },
+        description=(
+            "Audited continuation of completed review "
+            f"{review_task.id}. Non-force rebase, rerun evidence, then derive "
+            "a fresh feature/review."
+        ),
+    )
+    if not continuation:
+        return "Failed to create the review-cycle continuation", True
+
+    predecessor_boundary["status"] = "superseded"
+    predecessor_boundary["superseded_by_task_id"] = continuation.id
+    predecessor_boundary["superseded_at"] = now
+    predecessor_boundary["superseded_by_operation"] = "review_cycle_continue"
+    predecessor_boundary["review_cycle_continuation_task_id"] = continuation.id
+    predecessor_boundary.pop("reason", None)
+    review_evidence = copy.deepcopy(
+        getattr(review_task, "completion_evidence", {}) or {}
+    )
+    review_evidence["review_cycle_continuations"] = [copy.deepcopy(audit)]
+    review_messages = list(getattr(review_task, "messages", []) or [])
+    review_messages.append({
+        "timestamp": time.time(),
+        "action": "review_cycle_continue",
+        "message": (
+            f"Review cycle continued as {continuation.id}; original verdict "
+            f"{original_verdict} at {reviewed_sha[:12]} remains immutable."
+        ),
+        "agent_name": audit["actor_name"],
+    })
+    state.board_update_task(
+        review_task.id,
+        completion_evidence=review_evidence,
+        worktree_boundary=predecessor_boundary,
+        messages=review_messages,
+    )
+    return json.dumps({
+        "type": "review_cycle_continued",
+        "review_task_id": review_task.id,
+        "continuation_task_id": continuation.id,
+        "implementer_id": implementer_id,
+        "audit": audit,
+        "original_review": review_record,
+        "boundary": predecessor_boundary,
+        "next_steps": [
+            f"worktree_rebase id={implementer_id}",
+            "rerun the relevant evidence",
+            "derive a fresh feature/review",
+        ],
+    }), False
 
 
 def _required_review_gates_arg(args: dict) -> tuple[list | None, str]:
@@ -114,6 +360,11 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
             or str(getattr(task, "created_by_architect_id", "") or "").strip()
             == str(caller_id or "").strip()
         )
+
+    if tool_name == "review_cycle_continue":
+        if caller_kind != "engineer":
+            return "review_cycle_continue is available only to Engineers", True
+        return await _review_cycle_continue(ctx)
 
     if tool_name == "task_create":
         required_review_gates, gates_error = _required_review_gates_arg(args)

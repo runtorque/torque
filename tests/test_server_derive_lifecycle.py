@@ -1075,8 +1075,21 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
             self._add_second_review_cycle_chain(state)
         )
         implementer.worktree_path = "/repo/.torque/worktrees/impl"
+        implementer.worktree_repo_root = "/repo"
+        implementer.git_root = "/repo"
         implementer.worktree_branch = "torque/impl"
         implementer.worktree_base_branch = "main"
+        review = state.board_tasks["task-review"]
+        review.lane = "Done"
+        review.worktree_boundary = {
+            "version": "1",
+            "repo_root": "/repo",
+            "branch": "torque/impl",
+            "base_branch": "main",
+            "commit_sha": "3333333333333333333333333333333333333333",
+            "status": "open",
+            "recorded_at": "2026-08-07T00:00:00+00:00",
+        }
         calls, dispatch = self._recording_dispatch(state)
         handle_command = self._extract_handle_command(
             state,
@@ -1113,7 +1126,7 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, [])
         self.assertEqual(fix.status, "")
 
-    async def test_feature_review_derive_composed_state_names_safe_reroute(self):
+    async def test_feature_review_derive_composed_state_names_safe_continuation(self):
         state = self._make_state()
         implementer, _reviewer, _root, fix = (
             self._add_second_review_cycle_chain(state)
@@ -1158,8 +1171,22 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["type"], "error")
         self.assertEqual(result["code"], "review_cycle_deadlock")
-        self.assertIn("No safe in-place transition", result["message"])
-        self.assertIn("supported reroute", result["message"])
+        expected_guidance = (
+            "This branch is stale and has unreviewed commits past a completed "
+            "open feature/review boundary. Do not record a reviewed boundary "
+            "at the unreviewed tip. Use `review_cycle_continue` on the "
+            "completed review, then non-force rebase, rerun the relevant "
+            "evidence, and obtain a fresh feature/review."
+        )
+        self.assertEqual(
+            result["message"],
+            "Cannot derive feature/review from this composed review-cycle "
+            f"state.\n\n{expected_guidance}",
+        )
+        self.assertIn("review_cycle_continue", result["message"])
+        self.assertIn("non-force rebase", result["message"])
+        self.assertIn("rerun the relevant evidence", result["message"])
+        self.assertIn("fresh feature/review", result["message"])
         self.assertNotIn("worktree_rebase", result["message"])
         self.assertNotIn("re-review the new commits", result["message"])
         self.assertNotIn(

@@ -621,6 +621,41 @@ ENGINEER_TOOLS = [
         },
     },
     {
+        "name": "engineer_review_cycle_continue",
+        "authority": {"requirements": [{
+            "capability": "task.update",
+            "minimum_scope": "self",
+            "target_argument": "task",
+            "target_kind": "task",
+        }]},
+        "description": (
+            "Continue an owned review cycle past a completed feature/review "
+            "whose open reviewed boundary is behind the current branch tip. "
+            "This append-only operation keeps the completed verdict immutable, "
+            "records attributable supersession evidence, supersedes only that "
+            "review boundary, and creates a queued feature/implement "
+            "continuation for the original implementer. Then non-force rebase, "
+            "rerun evidence, and obtain a fresh review."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "Completed feature/review task ID or alias.",
+                },
+                "reason": {
+                    "type": "string",
+                    "description": (
+                        "Why work continued past the reviewed boundary and "
+                        "the prior boundary must be superseded."
+                    ),
+                },
+            },
+            "required": ["task", "reason"],
+        },
+    },
+    {
         "name": "engineer_task_upload_artifact", "authority": {"requirements": [{"capability": "task.artifact.write","minimum_scope": "self","target_argument": "task","target_kind": "task"},{"capability": "task.artifact.write","minimum_scope": "self","target_argument": "task_id","target_kind": "task"}]},
         "description": (
             "Upload and attach an image or other artifact to a specific board "

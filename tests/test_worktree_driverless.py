@@ -414,7 +414,7 @@ class BoundaryTipGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("no file details", error.lower())
         self.assertNotIn("conflict", error.lower())
 
-    async def test_composed_review_cycle_merge_refusal_names_safe_reroute(self):
+    async def test_composed_review_cycle_merge_refusal_names_safe_continuation(self):
         boundary_state = self._mismatched_boundary_state()
         result, mgr, _events = await self._preflight(
             boundary_state=boundary_state,
@@ -426,8 +426,18 @@ class BoundaryTipGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["ok"])
         self.assertEqual(mgr.check_calls, 0)
         error = result["result"]["error"]
-        self.assertIn("No safe in-place transition", error)
-        self.assertIn("supported reroute", error)
+        expected = (
+            "This branch is stale and has unreviewed commits past a completed "
+            "open feature/review boundary. Do not record a reviewed boundary "
+            "at the unreviewed tip. Use `review_cycle_continue` on the "
+            "completed review, then non-force rebase, rerun the relevant "
+            "evidence, and obtain a fresh feature/review."
+        )
+        self.assertEqual(error, expected)
+        self.assertIn("review_cycle_continue", error)
+        self.assertIn("non-force rebase", error)
+        self.assertIn("rerun the relevant evidence", error)
+        self.assertIn("fresh feature/review", error)
         self.assertIn("Do not record a reviewed boundary", error)
         self.assertNotIn("worktree_rebase", error)
         self.assertNotIn("re-review the new commits", error)

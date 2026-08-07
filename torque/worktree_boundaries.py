@@ -911,6 +911,85 @@ def mark_branch_boundaries_merged(tasks: Iterable, *,
             parent_id = next_parent_id
         return ""
 
+    # An audited review-cycle continuation is the one narrow exception to
+    # forward-only attribution: when the selected continuation and its new
+    # qualifying direct review are both explicit merge targets, stamp the
+    # predecessor boundary named by that continuation. Branch/root identity
+    # may reject the link but can never create it. Reroutes and siblings have
+    # no reciprocal linkage and therefore remain untouched.
+    linked_predecessor_ids: set[str] = set()
+    for continuation_id in tuple(target_ids):
+        continuation = tasks_by_id.get(continuation_id)
+        if not continuation or _clean_text(
+                getattr(continuation, "action_name", "")).lower() \
+                != "feature/implement":
+            continue
+        evidence = getattr(continuation, "completion_evidence", {}) or {}
+        link = (
+            evidence.get("review_cycle_continue", {})
+            if isinstance(evidence, dict) else {}
+        )
+        if not isinstance(link, dict):
+            continue
+        predecessor_id = _clean_text(link.get("original_review_task_id", ""))
+        if not predecessor_id:
+            continue
+        predecessor = tasks_by_id.get(predecessor_id)
+        predecessor_boundary = task_boundary(predecessor)
+        predecessor_evidence = (
+            getattr(predecessor, "completion_evidence", {}) or {}
+            if predecessor else {}
+        )
+        predecessor_links = (
+            predecessor_evidence.get("review_cycle_continuations", [])
+            if isinstance(predecessor_evidence, dict) else []
+        )
+        reciprocal_link = next((
+            candidate for candidate in predecessor_links
+            if isinstance(candidate, dict)
+            and _clean_text(candidate.get("original_review_task_id", ""))
+            == predecessor_id
+            and _clean_text(candidate.get("continuation_task_id", ""))
+            == continuation_id
+            and _clean_text(candidate.get("pipeline_root_id", ""))
+            == _task_root_id(continuation)
+            and _clean_text(candidate.get("repo_root", ""))
+            == _clean_text(repo_root)
+            and _clean_text(candidate.get("branch", ""))
+            == _clean_text(branch)
+        ), None)
+        if (
+                not predecessor
+                or not reciprocal_link
+                or _clean_text(getattr(predecessor, "action_name", "")).lower()
+                != "feature/review"
+                or _clean_text(predecessor_boundary.get("status", "")).lower()
+                != "superseded"
+                or _clean_text(
+                    predecessor_boundary.get("superseded_by_task_id", "")
+                ) != continuation_id
+                or _clean_text(link.get("continuation_task_id", ""))
+                != continuation_id
+                or _task_root_id(predecessor) != _task_root_id(continuation)
+                or _clean_text(predecessor_boundary.get("repo_root", ""))
+                != _clean_text(repo_root)
+                or _clean_text(predecessor_boundary.get("branch", ""))
+                != _clean_text(branch)
+        ):
+            continue
+        has_targeted_direct_review = any(
+            _clean_text(getattr(candidate, "action_name", "")).lower()
+            == "feature/review"
+            and _clean_text(getattr(candidate, "parent_task_id", ""))
+            == continuation_id
+            and _clean_text(getattr(candidate, "id", "")) in target_ids
+            and _task_root_id(candidate) == _task_root_id(continuation)
+            for candidate in tasks
+        )
+        if has_targeted_direct_review:
+            linked_predecessor_ids.add(predecessor_id)
+    target_ids.update(linked_predecessor_ids)
+
     for task in branch_boundary_tasks(
             tasks,
             repo_root=repo_root,
