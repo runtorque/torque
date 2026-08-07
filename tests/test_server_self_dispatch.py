@@ -3504,7 +3504,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
 
         return _mark
 
-    async def test_multi_round_review_merge_closes_root_via_real_finalization(self):
+    async def test_plain_second_shipping_review_closes_root_via_real_finalization(self):
         from torque.services.worktrees.finalize import (
             _finalize_successful_worktree_merge,
         )
@@ -3535,10 +3535,13 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             base_sha = commit("base")
             git("checkout", "-b", "topic")
             (repo / "feature.txt").write_text("candidate\n")
-            first_sha = commit("first reviewed candidate")
+            first_sha = commit("candidate before blocked review")
             (repo / "fix.txt").write_text("blocked-review fix\n")
             fixed_sha = commit("fix after blocked review")
-            (repo / "final.txt").write_text("final additive correction\n")
+            # Model the supported post-review rebase by moving the first Ship
+            # boundary to the final head before a plain extra review is
+            # derived.  The extra review has no review_cycle_continue audit.
+            (repo / "final.txt").write_text("post-review rebase result\n")
             final_sha = commit("final reviewed candidate")
             git("checkout", "main")
             git("merge", "--squash", "topic")
@@ -3557,12 +3560,16 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                 worktree_branch="topic",
                 worktree_base_branch="main",
                 worktree_repo_root=str(repo),
-                current_task_id="TORQUE:1:4",
+                current_task_id="TORQUE:1:2",
             )
             state.agents[worker.id] = worker
             state.groups["g"].append(worker.id)
 
+            recorded = 0
+
             def boundary(commit_sha, *, status, superseded_by=""):
+                nonlocal recorded
+                recorded += 1
                 return {
                     "version": "1",
                     "repo_root": str(repo),
@@ -3570,6 +3577,9 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                     "base_branch": "main",
                     "commit_sha": commit_sha,
                     "status": status,
+                    "recorded_at": (
+                        f"2026-08-07T12:{recorded:02d}:00+00:00"
+                    ),
                     "superseded_by_task_id": superseded_by,
                     "code_delta": {
                         "state": "present",
@@ -3589,7 +3599,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                 worktree_boundary=boundary(
                     first_sha,
                     status="superseded",
-                    superseded_by="TORQUE:1:1",
+                    superseded_by="TORQUE:1:2",
                 ),
             )
             first_review = state.board_add_task(
@@ -3602,19 +3612,8 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                 pipeline_root_id=root.id,
                 completion_evidence={
                     "review": {"verdict": "block", "agent_id": "reviewer-1"},
-                    "review_cycle_continuations": [{
-                        "original_review_task_id": "TORQUE:1:1",
-                        "continuation_task_id": "TORQUE:1:2",
-                        "pipeline_root_id": root.id,
-                        "repo_root": str(repo),
-                        "branch": "topic",
-                    }],
                 },
-                worktree_boundary=boundary(
-                    first_sha,
-                    status="superseded",
-                    superseded_by="TORQUE:1:2",
-                ),
+                worktree_boundary={},
             )
             first_fix = state.board_add_task(
                 "Fix first review",
@@ -3624,18 +3623,14 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                 action_name="feature/implement",
                 parent_task_id=root.id,
                 pipeline_root_id=root.id,
-                completion_evidence={"review_cycle_continue": {
-                    "original_review_task_id": first_review.id,
-                    "continuation_task_id": "TORQUE:1:2",
-                }},
                 worktree_boundary=boundary(
                     fixed_sha,
                     status="superseded",
                     superseded_by="TORQUE:1:3",
                 ),
             )
-            second_review = state.board_add_task(
-                "Shipping second review",
+            first_shipping_review = state.board_add_task(
+                "First shipping review",
                 "g",
                 id="TORQUE:1:3",
                 lane="Done",
@@ -3644,50 +3639,34 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                 pipeline_root_id=root.id,
                 completion_evidence={
                     "review": {"verdict": "ship", "agent_id": "reviewer-2"},
-                    "review_cycle_continuations": [{
-                        "original_review_task_id": "TORQUE:1:3",
-                        "continuation_task_id": "TORQUE:1:4",
-                        "pipeline_root_id": root.id,
-                        "repo_root": str(repo),
-                        "branch": "topic",
-                    }],
                 },
                 worktree_boundary=boundary(
-                    fixed_sha,
+                    final_sha,
                     status="superseded",
                     superseded_by="TORQUE:1:4",
                 ),
             )
-            final_fix = state.board_add_task(
-                "Final correction",
+            final_review = state.board_add_task(
+                "Plain final shipping review",
                 "g",
                 id="TORQUE:1:4",
                 lane="Done",
-                action_name="feature/implement",
-                parent_task_id=root.id,
-                pipeline_root_id=root.id,
-                completion_evidence={"review_cycle_continue": {
-                    "original_review_task_id": second_review.id,
-                    "continuation_task_id": "TORQUE:1:4",
-                }},
-                worktree_boundary=boundary(
-                    final_sha,
-                    status="superseded",
-                    superseded_by="TORQUE:1:5",
-                ),
-            )
-            final_review = state.board_add_task(
-                "Final shipping review",
-                "g",
-                id="TORQUE:1:5",
-                lane="Done",
                 action_name="feature/review",
-                parent_task_id=final_fix.id,
+                parent_task_id=first_fix.id,
                 pipeline_root_id=root.id,
                 completion_evidence={
                     "review": {"verdict": "ship", "agent_id": "reviewer-3"},
                 },
                 worktree_boundary=boundary(final_sha, status="open"),
+            )
+
+            self.assertEqual(first_review.worktree_boundary, {})
+            self.assertNotIn(
+                "review_cycle_continue", first_fix.completion_evidence
+            )
+            self.assertNotIn(
+                "review_cycle_continuations",
+                first_shipping_review.completion_evidence,
             )
 
             state.board_cascade_done(final_review.id)
@@ -3716,7 +3695,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                     "remove_worktree_on_merge": False,
                 },
                 merge_sha=merge_sha,
-                merged_task_ids=(final_fix.id, final_review.id),
+                merged_task_ids=(first_fix.id, final_review.id),
                 stale_base=None,
                 preserve_merge_diff=False,
                 boundary_task_for_diff=None,
@@ -3739,9 +3718,9 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             gate = code_boundary_done_status(state.board_get_chain(root.id))
             self.assertTrue(gate["eligible"])
             self.assertEqual(gate["blocking"], [])
+            self.assertEqual(first_review.worktree_boundary, {})
             for task in (
-                    root, first_review, first_fix, second_review,
-                    final_fix, final_review):
+                    root, first_fix, first_shipping_review, final_review):
                 self.assertEqual(
                     task.worktree_boundary["merge_commit_sha"], merge_sha
                 )
