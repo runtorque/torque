@@ -1849,6 +1849,95 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(listed["board_sync"]["provider"], "github")
         self.assertNotIn("github", listed["board_sync"])
 
+    async def test_engineer_task_show_distinguishes_same_group_scope_refusal(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        bob = self._add_engineer(state, "eng-bob", "Bob")
+        peer_task = self._add_task(
+            state,
+            "task-peer",
+            "Peer durable body",
+            assigned_engineer_id=bob.id,
+        )
+        unassigned_task = self._add_task(
+            state,
+            "task-unassigned",
+            "Unassigned durable body",
+        )
+        state.groups["other"] = []
+        self._add_task(
+            state,
+            "task-other",
+            "Other group durable body",
+            group="other",
+            assigned_engineer_id=bob.id,
+        )
+
+        async def fake_handle_command(_payload):
+            self.fail("read tool should not call handle_command")
+
+        peer_text, peer_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_task_show",
+            {"task": peer_task.id},
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+        missing_text, missing_error = (
+            await self.mcp_engineer_mod._dispatch_engineer_tool(
+                "engineer_task_show",
+                {"task": "task-missing"},
+                fake_handle_command,
+                state,
+                caller_id=alice.id,
+            )
+        )
+        other_text, other_error = (
+            await self.mcp_engineer_mod._dispatch_engineer_tool(
+                "engineer_task_show",
+                {"task": "task-other"},
+                fake_handle_command,
+                state,
+                caller_id=alice.id,
+            )
+        )
+        unassigned_text, unassigned_error = (
+            await self.mcp_engineer_mod._dispatch_engineer_tool(
+                "engineer_task_show",
+                {"task": unassigned_task.id},
+                fake_handle_command,
+                state,
+                caller_id=alice.id,
+            )
+        )
+        list_text, list_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_board_list",
+            {},
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertTrue(peer_error)
+        self.assertEqual(peer_text, "task not found in scope")
+        self.assertTrue(missing_error)
+        self.assertEqual(missing_text, "Task not found")
+        self.assertTrue(other_error)
+        self.assertEqual(other_text, "Task not found")
+        self.assertFalse(unassigned_error, unassigned_text)
+        self.assertEqual(
+            json.loads(unassigned_text)["task"],
+            "Unassigned durable body",
+        )
+        self.assertFalse(list_error, list_text)
+        listed_ids = {
+            task["id"]
+            for tasks in json.loads(list_text)["lanes"].values()
+            for task in tasks
+        }
+        self.assertNotIn(peer_task.id, listed_ids)
+        self.assertIn(unassigned_task.id, listed_ids)
+
     async def test_engineer_task_show_refreshes_silence_secs_at_read_time(self):
         state = self._make_state()
         engineer, _worker, task, base_ts = self._attach_stale_health_fixture(state)

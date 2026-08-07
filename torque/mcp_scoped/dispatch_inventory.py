@@ -149,11 +149,20 @@ async def dispatch_inventory(ctx: ScopedDispatchContext):
         return json.dumps({"lanes": ordered}), False
 
     if tool_name == "task_show":
-        tid = _resolve_task(state, args.get("task", ""))
+        tid = _resolve_task(real_state, args.get("task", ""))
         if not tid:
             return "Task not found", True
+        real_task = real_state.board_tasks.get(tid)
+        if not real_task or real_task.group != _engineer_group:
+            return "Task not found", True
         task = state.board_tasks.get(tid)
-        if not task or task.group != _engineer_group:
+        if not task:
+            assigned_engineer_id = _effective_assigned_engineer_id(real_task)
+            if (
+                    caller_kind == "engineer"
+                    and assigned_engineer_id
+                    and assigned_engineer_id != caller_id):
+                return "task not found in scope", True
             return "Task not found", True
         d = serialize_task_for_mcp(task, tasks_by_id=state.board_tasks)
         d.update(_task_health_payload_for_response(state, task))
