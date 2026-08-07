@@ -74,6 +74,7 @@ _SUFFIX_TO_CANONICAL = {
     "task_propose": "task_create",
     "task_edit": "task_update",
     "task_update": "task_update",
+    "task_amend": "task_amend",
     "task_pickup": "task_claim",
     "task_move": "task_move",
     "task_reassign": "task_reassign",
@@ -282,7 +283,8 @@ _ARCHITECT_EAGER_BY_CATEGORY = {
     # dispatch-to-hired-Engineer flow; Architects do not dispatch Workers.
     "tasks": {
         "task_list", "task_get", "task_chain", "task_claim", "task_create",
-        "task_update", "task_block_reply", "task_reassign", "task_move", "task_mark_covered",
+        "task_update", "task_amend", "task_block_reply", "task_reassign",
+        "task_move", "task_mark_covered",
         "task_coverage_reconcile",
         "task_verify",
     },

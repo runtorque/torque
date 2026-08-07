@@ -763,6 +763,54 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_task_amend",
+        "authority": {
+            "requirements": [{
+                "capability": "task.update",
+                "minimum_scope": "self",
+                "target_argument": "task",
+                "target_kind": "task",
+                "handler_scoped": True,
+            }],
+        },
+        "description": (
+            "Append one immutable, attributed correction to a task description "
+            "without replacing existing authored bytes. Requires a compare-and-"
+            "swap against the current task_content_hash. The amendment changes "
+            "that hash and invalidates active hash-pinned read grants. A retry "
+            "with the same amendment_id and text is idempotent."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string", "description": "Task ID or alias."},
+                "amendment": {
+                    "type": "string",
+                    "description": "Correction text to append verbatim.",
+                },
+                "expected_task_content_hash": {
+                    "type": "string",
+                    "description": (
+                        "Current task_content_hash read from the durable task "
+                        "record."
+                    ),
+                },
+                "amendment_id": {
+                    "type": "string",
+                    "description": (
+                        "Caller-stable idempotency key for this amendment."
+                    ),
+                },
+            },
+            "required": [
+                "task",
+                "amendment",
+                "expected_task_content_hash",
+                "amendment_id",
+            ],
+        },
+    },
+    {
         "name": "architect_task_block_reply", "authority": {"requirements": [{"capability": "task.update","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
         "description": (
             "Answer the latest blocked worker question for this task. Torque persists "

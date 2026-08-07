@@ -15,10 +15,18 @@ from torque.mcp_scoped.dispatch_context import ScopedDispatchContext, UNHANDLED
 from torque.mcp_scoped.dispatch_runtime import *  # noqa: F403
 from torque.task_dispatch_gate import active_dispatch_edit_error, task_has_active_dispatch
 from torque.server_board_sync import (
+    task_description_sync_constraint,
     task_description_sync_validation_error,
     task_labels_sync_validation_error,
     task_title_sync_validation_error,
 )
+from torque.task_amendment import (
+    build_task_amendment_block,
+    find_task_amendment,
+    task_amendment_advisory,
+    validate_task_amendment,
+)
+from torque.task_content import compute_task_content_hash
 
 
 def _live_workers_linked_to_task(state, task) -> list:
@@ -468,6 +476,129 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
             "task_id": tid,
             "updated_fields": updated_fields,
         }), False
+
+    if tool_name == "task_amend" and caller_kind == "architect":
+        tid = _resolve_task(state, args.get("task", ""))
+        if not tid:
+            return "Task not found", True
+        task = state.board_tasks.get(tid)
+        if not task or not group_task_allowed(task):
+            return "Task not found", True
+        caller_id_str = str(caller_id or "").strip()
+        creator_class = _task_created_by_classifier(task)
+        if is_group_board_authority_mode:
+            pass
+        elif is_creator_proposal_mode:
+            if not creator_task_allowed(task):
+                return (
+                    "Authorization denied: task is outside Product Manager "
+                    "creator/self scope"
+                ), True
+        elif creator_class != "user" and not _architect_task_owned_by_caller(
+                task, caller_id_str):
+            handoff_refusal = _engineer_created_task_handoff_refusal(
+                task, caller_id_str,
+            )
+            return (
+                handoff_refusal or "Task was not created by this architect"
+            ), True
+
+        amendment = str(args.get("amendment", "") or "")
+        amendment_id = str(
+            args.get("amendment_id", "")
+            or idempotency_key
+            or ""
+        )
+        amendment_error = validate_task_amendment(amendment, amendment_id)
+        if amendment_error:
+            return amendment_error, True
+        expected_hash = str(
+            args.get("expected_task_content_hash", "") or ""
+        ).strip()
+        if not expected_hash:
+            return "expected_task_content_hash is required", True
+
+        # Use one timestamp and one pure formatter for both the provider-size
+        # projection and the atomic state append.
+        added_at = datetime.now(timezone.utc).isoformat()
+        current_hash = compute_task_content_hash(task)
+        existing_amendment = find_task_amendment(
+            task.description, amendment_id
+        )
+        if not existing_amendment:
+            projected_description = (
+                task.description
+                + build_task_amendment_block(
+                    amendment=amendment,
+                    amendment_id=amendment_id,
+                    actor_id=caller_id_str,
+                    prior_task_content_hash=current_hash,
+                    added_at=added_at,
+                )
+            )
+            description_error = task_description_sync_validation_error(
+                real_state, task, projected_description,
+            )
+            if description_error:
+                constraint = task_description_sync_constraint(
+                    real_state, task,
+                )
+                if not constraint:
+                    return (
+                        "Unable to determine the provider's task-description "
+                        "limit locally; task was not amended."
+                    ), True
+                return json.dumps({
+                    "type": "error",
+                    "reason": "provider_description_limit",
+                    "task_id": tid,
+                    "provider": constraint["provider"],
+                    "current_size": len(task.description),
+                    "projected_size": len(projected_description),
+                    "limit": constraint["limit"],
+                    "message": description_error,
+                }), True
+
+        amend_result = await handle_command({
+            "cmd": "board_amend_task",
+            "id": tid,
+            "amendment": amendment,
+            "amendment_id": amendment_id,
+            "actor_id": caller_id_str,
+            "expected_task_content_hash": expected_hash,
+            "added_at": added_at,
+        })
+        if amend_result.get("type") == "error":
+            return json.dumps(amend_result), True
+        if not amend_result.get("deduped"):
+            executor = None
+            for executor_id in (
+                str(getattr(task, "agent_id", "") or "").strip(),
+                str(
+                    getattr(task, "assigned_engineer_id", "") or ""
+                ).strip(),
+            ):
+                candidate = real_state.agents.get(executor_id)
+                if (
+                        candidate
+                        and str(
+                            getattr(candidate, "status", "") or ""
+                        ).strip().lower() == "running"):
+                    executor = candidate
+                    break
+            if executor:
+                # This system advisory is intentionally not a dispatch prompt
+                # rebuild and its constructor cannot accept authored text.
+                await handle_command({
+                    "cmd": "inject_mcp_message",
+                    "agent_id": executor.id,
+                    "message": task_amendment_advisory(
+                        tid, amend_result["task_content_hash"]
+                    ),
+                    "sender_name": "Torque",
+                    "sender_kind": "system",
+                })
+        return json.dumps(amend_result), False
 
     if tool_name == "task_block_reply" and caller_kind == "architect":
         tid = _resolve_task(state, args.get("task", ""))

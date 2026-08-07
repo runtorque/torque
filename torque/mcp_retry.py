@@ -63,6 +63,7 @@ _SCOPED_WRITE_SUFFIXES = {
     "task_create",
     "task_pickup",
     "task_update",
+    "task_amend",
     "task_reassign",
     "task_edit",
     "task_upload_artifact",

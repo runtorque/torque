@@ -2422,6 +2422,7 @@ _CRITICAL_BOARD_COMMANDS = {
     "blocked_task_reply",
     "architect_task_update",
     "board_add_task",
+    "board_amend_task",
     "board_update_task",
     "board_move_task",
     "board_archive_task",
