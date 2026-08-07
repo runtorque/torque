@@ -1864,6 +1864,12 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
             "task-unassigned",
             "Unassigned durable body",
         )
+        collision_task = self._add_task(
+            state,
+            "task-collision-a",
+            "Visible collision body",
+            assigned_engineer_id=alice.id,
+        )
         state.groups["other"] = []
         self._add_task(
             state,
@@ -1872,6 +1878,14 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
             group="other",
             assigned_engineer_id=bob.id,
         )
+        self._add_task(
+            state,
+            "task-collision-b",
+            "Foreign collision body",
+            group="other",
+            assigned_engineer_id=bob.id,
+        )
+        architect = self._add_architect(state, "arch-alex", "Alex")
 
         async def fake_handle_command(_payload):
             self.fail("read tool should not call handle_command")
@@ -1910,6 +1924,24 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
                 caller_id=alice.id,
             )
         )
+        collision_text, collision_error = (
+            await self.mcp_engineer_mod._dispatch_engineer_tool(
+                "engineer_task_show",
+                {"task": "task-collision"},
+                fake_handle_command,
+                state,
+                caller_id=alice.id,
+            )
+        )
+        architect_collision_text, architect_collision_error = (
+            await self.mcp_architect_mod._dispatch_architect_tool(
+                "architect_task_show",
+                {"task": "task-collision"},
+                fake_handle_command,
+                state,
+                caller_id=architect.id,
+            )
+        )
         list_text, list_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
             "engineer_board_list",
             {},
@@ -1928,6 +1960,13 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             json.loads(unassigned_text)["task"],
             "Unassigned durable body",
+        )
+        self.assertFalse(collision_error, collision_text)
+        self.assertEqual(json.loads(collision_text)["id"], collision_task.id)
+        self.assertFalse(architect_collision_error, architect_collision_text)
+        self.assertEqual(
+            json.loads(architect_collision_text)["id"],
+            collision_task.id,
         )
         self.assertFalse(list_error, list_text)
         listed_ids = {
