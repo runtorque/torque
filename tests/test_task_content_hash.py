@@ -31,6 +31,7 @@ def authored_task(**changes):
         "group": "Torque",
         "action_name": "feature/implement",
         "action_vars": {"mode": "strict"},
+        "agent_template": "careful",
         "suggested_action": "feature/review",
         "required_review_gates": [{
             "id": "review",
@@ -59,6 +60,14 @@ class TaskContentHashManifestTests(unittest.TestCase):
         self.assertNotEqual(
             compute_task_content_hash(task),
             compute_task_content_hash(changed),
+        )
+
+    def test_agent_template_change_changes_hash(self):
+        careful = authored_task(agent_template="careful")
+        fast = replace(careful, agent_template="fast")
+        self.assertNotEqual(
+            compute_task_content_hash(careful),
+            compute_task_content_hash(fast),
         )
 
     def test_lane_transition_leaves_hash_unchanged(self):
@@ -178,7 +187,28 @@ class TaskContentHashBoundaryTests(unittest.TestCase):
         self.assertIsNone(decoded["task_content_hash"])
         self.assertIsNone(serialize_task_for_mcp(task)["task_content_hash"])
 
-    def test_board_upsert_emits_current_hash_before_persistence(self):
+    def test_board_add_policy_projection_emits_only_current_hashes(self):
+        state = MatrixState()
+        state.groups["Torque"] = []
+        task = state.board_add_task(
+            "Original",
+            "Torque",
+            id="TORQUE:1",
+            description="Before",
+            finalization_mode="review_only",
+        )
+        upserts = [
+            op for op in state._delta_ops
+            if op.get("op") == "task_upsert" and op.get("id") == task.id
+        ]
+        self.assertGreaterEqual(len(upserts), 2)
+        expected = compute_task_content_hash(task)
+        self.assertTrue(all(
+            upsert.get("task_content_hash") == expected
+            for upsert in upserts
+        ))
+
+    def test_board_update_policy_projection_emits_only_current_hashes(self):
         state = MatrixState()
         state.groups["Torque"] = []
         task = state.board_add_task(
@@ -188,17 +218,23 @@ class TaskContentHashBoundaryTests(unittest.TestCase):
             description="Before",
         )
         old_hash = task.task_content_hash
-        state.board_update_task(task.id, description="After")
-        upsert = next(
-            op for op in reversed(state._delta_ops)
+        start = len(state._delta_ops)
+        state.board_update_task(
+            task.id,
+            description="After",
+            finalization_mode="review_only",
+        )
+        upserts = [
+            op for op in state._delta_ops[start:]
             if op.get("op") == "task_upsert" and op.get("id") == task.id
-        )
+        ]
+        self.assertGreaterEqual(len(upserts), 2)
         self.assertNotEqual(old_hash, task.task_content_hash)
-        self.assertEqual(upsert["task_content_hash"], task.task_content_hash)
-        self.assertEqual(
-            upsert["task_content_hash"],
-            compute_task_content_hash(task),
-        )
+        expected = compute_task_content_hash(task)
+        self.assertTrue(all(
+            upsert.get("task_content_hash") == expected
+            for upsert in upserts
+        ))
 
     def test_defensive_persist_refreshes_direct_mutation(self):
         state = MatrixState()
@@ -214,7 +250,7 @@ class TaskContentHashBoundaryTests(unittest.TestCase):
             conn.execute("""
                 CREATE TABLE board_tasks (
                     id TEXT PRIMARY KEY, task TEXT, description TEXT,
-                    action_name TEXT, action_vars TEXT,
+                    action_name TEXT, action_vars TEXT, agent_template TEXT,
                     suggested_action TEXT, required_review_gates TEXT,
                     depends_on TEXT, deliverable_required INTEGER,
                     deliverable_type TEXT, deliverable_format TEXT,
@@ -224,10 +260,10 @@ class TaskContentHashBoundaryTests(unittest.TestCase):
                 )
             """)
             conn.execute(
-                "INSERT INTO board_tasks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO board_tasks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     "TORQUE:1", "Title", "Body", "feature/implement",
-                    json.dumps({"mode": "strict"}), "feature/review",
+                    json.dumps({"mode": "strict"}), "careful", "feature/review",
                     json.dumps(["review"]), json.dumps(["TORQUE:3", "TORQUE:2"]),
                     1, "code", "git", "Artifact", 1, "review_only",
                     "instructions", "context", "criteria",
@@ -238,6 +274,26 @@ class TaskContentHashBoundaryTests(unittest.TestCase):
                 "SELECT task_content_hash FROM board_tasks WHERE id='TORQUE:1'"
             ).fetchone()[0]
         self.assertRegex(stored, r"^task-content-v1:sha256:[0-9a-f]{64}$")
+        expected = compute_task_content_hash({
+            "task": "Title",
+            "description": "Body",
+            "action_name": "feature/implement",
+            "action_vars": {"mode": "strict"},
+            "agent_template": "careful",
+            "suggested_action": "feature/review",
+            "required_review_gates": ["review"],
+            "depends_on": ["TORQUE:3", "TORQUE:2"],
+            "deliverable_required": True,
+            "deliverable_type": "code",
+            "deliverable_format": "git",
+            "deliverable_artifact_title": "Artifact",
+            "requires_review": True,
+            "finalization_mode": "review_only",
+            "instructions": "instructions",
+            "context": "context",
+            "criteria": "criteria",
+        })
+        self.assertEqual(stored, expected)
 
     def test_temporary_database_persists_hash(self):
         with tempfile.TemporaryDirectory() as tmp:

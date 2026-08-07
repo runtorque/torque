@@ -156,6 +156,9 @@ class BoardMutationMixin:
                 "created_at", "updated_at", "lane_entered_at")},
         )
         self.board_tasks[tid] = bt
+        # Establish authored identity before any finalization helper can emit
+        # or persist this newly visible task.
+        bt.task_content_hash = compute_task_content_hash(bt)
         # Creation is a Done attempt too. A root never enters Done until the
         # canonical admission guard accepts it; this includes opt-in legacy
         # review-cardinality declarations while empty legacy cards retain
@@ -172,7 +175,6 @@ class BoardMutationMixin:
                 bt.lane = "Done"
                 bt.position = self._board_next_lane_position("Done", exclude_id=tid)
         self._refresh_finalization_root_projection(bt)
-        bt.task_content_hash = compute_task_content_hash(bt)
         if alias_id and alias_id != tid:
             self.task_id_aliases[alias_id] = tid
             self._db_save_task_id_alias(alias_id)
@@ -959,6 +961,9 @@ class BoardMutationMixin:
                 task.finalization_audit = audit[-40:]
         if "task" in fields:
             task.slug = self._unique_task_slug(task.task, exclude_id=tid)
+        # All authored fields are now applied. Establish their identity before
+        # finalization projection can synchronously emit/persist this task.
+        task.task_content_hash = compute_task_content_hash(task)
         # Status projection is derived, compact data rather than advisory prose.
         self._refresh_finalization_root_projection(task)
         from datetime import datetime, timezone
@@ -970,7 +975,6 @@ class BoardMutationMixin:
                 task.position = self._board_next_lane_position(
                     new_lane, exclude_id=tid
                 )
-        task.task_content_hash = compute_task_content_hash(task)
         self._emit("task_upsert", **asdict(task))
         self._db_save_task(task)
         if lane_changed:

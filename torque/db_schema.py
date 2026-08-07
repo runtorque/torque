@@ -2862,6 +2862,7 @@ def _migration_0029_board_task_content_hash(
         "description",
         "action_name",
         "action_vars",
+        "agent_template",
         "suggested_action",
         "required_review_gates",
         "depends_on",
@@ -3305,7 +3306,7 @@ SCHEMA_MIGRATIONS = (
     SchemaMigration(
         29,
         "board_task_content_hash",
-        "board-task-authored-content-hash-v1",
+        "board-task-authored-content-hash-v1-agent-template",
         _migration_0029_board_task_content_hash,
         phase="post_init",
     ),

@@ -23,6 +23,7 @@ TASK_CONTENT_HASH_MANIFEST_V1 = {
         "description",
         "action_name",
         "action_vars",
+        "agent_template",
         "suggested_action",
         "required_review_gates",
         "depends_on",
@@ -60,7 +61,6 @@ TASK_CONTENT_HASH_EXCLUDED_FIELDS = frozenset({
     "id",
     "slug",
     "group",
-    "agent_template",
     "lane",
     "position",
     "agent_id",
@@ -133,6 +133,7 @@ def task_content_payload(task) -> dict:
             "description": _value(task, "description", ""),
             "action_name": _value(task, "action_name", ""),
             "action_vars": _value(task, "action_vars", {}),
+            "agent_template": _value(task, "agent_template", ""),
             "suggested_action": _value(task, "suggested_action", ""),
             "required_review_gates": _value(
                 task, "required_review_gates", []
