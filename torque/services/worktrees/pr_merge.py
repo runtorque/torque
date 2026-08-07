@@ -26,7 +26,6 @@ from ...server_worktrees import (
     _pr_merge_failure_allows_auto,
     _pr_result_metadata,
     _record_pr_metadata_on_task_boundary,
-    _record_pr_metadata_on_latest_boundary,
     _rewrite_pr_torque_task_refs_metadata,
     _split_merge_message_for_pr,
     _worktree_merge_diff_snapshot,
@@ -75,9 +74,8 @@ from .preflight import (
     _attach_auto_force_push_metadata,
     _capture_worktree_merge_preserve_diff,
     _capture_worktree_merge_resume_targets,
-    _merge_task_attribution_error,
-    _merge_attribution_task_id,
     _post_success_result_error,
+    _preflight_merge_attribution,
     _preflight_worktree_merge_gates,
     _worktree_merge_requested_cleanup,
 )
@@ -280,15 +278,22 @@ async def _run_pr_worktree_merge(
             return recovered
         return _worktree_merge_error(aid, "Agent has no worktree.")
 
-    attribution_error = _merge_task_attribution_error(
-        state,
-        cell,
-        aid,
-        data,
+    attribution_preflight = await _preflight_merge_attribution(
+        state=state,
+        cell=cell,
+        aid=aid,
+        data=data,
+        latest_boundary_state_for_cell=latest_boundary_state_for_cell,
     )
-    if attribution_error:
-        attribution_error["mode"] = "pull_request"
-        return attribution_error
+    if not attribution_preflight.get("ok"):
+        result = attribution_preflight.get("result") or _worktree_merge_error(
+            aid,
+            "Merge attribution preflight failed.",
+        )
+        result["mode"] = "pull_request"
+        return result
+    frozen_attribution = attribution_preflight["attribution"]
+    frozen_boundary_state = attribution_preflight["boundary_state"]
 
     wt = cell.worktree_path
     repo_root = cell.worktree_repo_root or cell.git_root or ""
@@ -392,6 +397,8 @@ async def _run_pr_worktree_merge(
         boundary_reason_message=boundary_reason_message,
         panel_event=panel_event,
         publish_nested_submodule_branches=False,
+        frozen_attribution=frozen_attribution,
+        frozen_boundary_state=frozen_boundary_state,
     )
     if not gates.get("ok"):
         result = gates.get("result") or _worktree_merge_error(
@@ -425,7 +432,7 @@ async def _run_pr_worktree_merge(
                 result["workflow_breach"] = gates["workflow_breach"]
         return result
 
-    merged_task_id = _merge_attribution_task_id(state, cell, data)
+    merged_task_ids = frozen_attribution.target_task_ids
 
     squash = True
     msg = str(data.get("message", "") or "").strip()
@@ -791,18 +798,11 @@ async def _run_pr_worktree_merge(
         branch=branch,
         status="merged" if already_merged_pr else "created",
     )
-    if merged_task_id:
+    for merged_task_id in merged_task_ids:
         _record_pr_metadata_on_task_boundary(
             state,
             cell,
             merged_task_id,
-            pr_metadata,
-            requested_cleanup=requested_cleanup,
-        )
-    else:
-        _record_pr_metadata_on_latest_boundary(
-            state,
-            cell,
             pr_metadata,
             requested_cleanup=requested_cleanup,
         )
@@ -901,18 +901,11 @@ async def _run_pr_worktree_merge(
             else "pending" if pending else "merge_failed"
         ),
     )
-    if merged_task_id:
+    for merged_task_id in merged_task_ids:
         _record_pr_metadata_on_task_boundary(
             state,
             cell,
             merged_task_id,
-            pr_metadata,
-            requested_cleanup=requested_cleanup,
-        )
-    else:
-        _record_pr_metadata_on_latest_boundary(
-            state,
-            cell,
             pr_metadata,
             requested_cleanup=requested_cleanup,
         )
@@ -1042,7 +1035,7 @@ async def _run_pr_worktree_merge(
                 aid=aid,
                 data=data,
                 merge_sha=merge_sha,
-                merged_task_id=merged_task_id,
+                merged_task_ids=merged_task_ids,
                 stale_base=gates.get("stale_base"),
                 preserve_merge_diff=preserve_merge_diff,
                 boundary_task_for_diff=boundary_task_for_diff,
@@ -1057,7 +1050,7 @@ async def _run_pr_worktree_merge(
                 aid=aid,
                 data=data,
                 merge_sha=merge_sha,
-                merged_task_id=merged_task_id,
+                merged_task_ids=merged_task_ids,
                 stale_base=gates.get("stale_base"),
                 preserve_merge_diff=preserve_merge_diff,
                 boundary_task_for_diff=boundary_task_for_diff,
@@ -1173,7 +1166,7 @@ async def _run_pr_worktree_merge(
     _record_merge_completion_evidence(
         state,
         result=result,
-        task_ids=[merged_task_id],
+        task_ids=merged_task_ids,
         cell=cell,
         repo_root=repo_root or wt,
         branch=branch,

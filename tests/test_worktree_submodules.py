@@ -994,6 +994,13 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
         state.update_group_settings("g", worktree_submodules=[self.sub_path])
         state.agents[cell.id] = cell
         state.groups["g"].append(cell.id)
+        merge_task = state.board_add_task(
+            "Merge conflicting worktree",
+            "g",
+            lane="In Progress",
+            id="TORQUE:submodule-preflight",
+            agent_id=cell.id,
+        )
 
         class RecordingWorktreeManager(WorktreeManager):
             def __init__(self):
@@ -1018,7 +1025,10 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
             cell=cell,
             worktree_mgr=fake_mgr,
             aid=cell.id,
-            data={"force_stale_base": True},
+            data={
+                "force_stale_base": True,
+                "merge_task_id": merge_task.id,
+            },
             latest_boundary_state_for_cell=latest_boundary_state,
             boundary_reason_message=lambda reason, latest: reason,
             panel_event=None,
@@ -1361,6 +1371,13 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
         state.update_group_settings("g", worktree_submodules=[self.sub_path])
         state.agents[cell.id] = cell
         state.groups["g"].append(cell.id)
+        merge_task = state.board_add_task(
+            "Merge nested submodule work",
+            "g",
+            lane="In Progress",
+            id="TORQUE:submodule-pr",
+            agent_id=cell.id,
+        )
         fake_mgr = FakePrWorktreeManager(self)
 
         async def latest_boundary_state(_cell):
@@ -1395,6 +1412,7 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
                 "close_agent_on_merge": True,
                 "remove_worktree_on_merge": True,
                 "force_stale_base": True,
+                "merge_task_id": merge_task.id,
             },
             worktree_mgr=fake_mgr,
             latest_boundary_state_for_cell=latest_boundary_state,
@@ -2477,13 +2495,15 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
                 "reason": "branch_tip_moved",
             }
 
-        def mark_boundaries(target_cell, merge_sha, merged_task_id=""):
+        def mark_boundaries(target_cell, merge_sha, merged_task_ids=()):
+            if isinstance(merged_task_ids, str):
+                merged_task_ids = (merged_task_ids,)
             boundaries_mod.mark_branch_boundaries_merged(
                 state.board_tasks.values(),
                 repo_root=target_cell.worktree_repo_root,
                 branch=target_cell.worktree_branch,
                 merge_sha=merge_sha,
-                task_ids=[merged_task_id],
+                task_ids=merged_task_ids,
                 merged_at="2026-05-26T02:00:00+00:00",
             )
 

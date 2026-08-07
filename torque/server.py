@@ -3271,6 +3271,7 @@ configure_worktree_orchestration(
         ),
         origin_verification_evidence=_origin_verification_evidence,
         record_merge_completion_evidence=_record_merge_completion_evidence,
+        review_task_has_ship_verdict=_review_task_has_ship_verdict,
         resolve_agent_id=_resolve_agent_id,
         worktree_entry_matches_agent=_worktree_entry_matches_agent,
         worktree_path_contains=_worktree_path_contains,
@@ -5152,8 +5153,8 @@ async def main(connection=None):
         return dict(task.worktree_boundary)
 
     def _mark_branch_boundaries_merged(cell, merge_sha: str,
-                                       merged_task_id: str = "") -> None:
-        if not cell or not merged_task_id:
+                                       merged_task_ids=()) -> None:
+        if not cell or not merged_task_ids:
             return
         repo_root = cell.worktree_repo_root or cell.git_root or ""
         for branch_task in mark_branch_boundaries_merged(
@@ -5161,7 +5162,7 @@ async def main(connection=None):
                 repo_root=repo_root,
                 branch=cell.worktree_branch or "",
                 merge_sha=merge_sha,
-                task_ids=[merged_task_id]):
+                task_ids=merged_task_ids):
             _save_task_record(branch_task)
 
     # -- Postscript builder -------------------------------------------------

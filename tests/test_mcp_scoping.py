@@ -2327,7 +2327,7 @@ class ServerPrClosingRefsTests(unittest.IsolatedAsyncioTestCase):
             worktree_branch="torque/worker",
             worktree_base_branch="main",
             worktree_repo_root="/repo",
-            current_task_id="TORQUE:1:1",
+            current_task_id="TORQUE:1",
         )
         state.agents[worker.id] = worker
         state.groups["g"].append(worker.id)
@@ -2335,8 +2335,11 @@ class ServerPrClosingRefsTests(unittest.IsolatedAsyncioTestCase):
         product = state.board_add_task(
             "Linked product task",
             "g",
-            lane="Done",
+            lane="In Progress",
             id="TORQUE:1",
+            agent_id=worker.id,
+            action_name="feature/implement",
+            requires_review=True,
             provider="github",
             external_id=external_id,
             external_url=(
@@ -2348,13 +2351,23 @@ class ServerPrClosingRefsTests(unittest.IsolatedAsyncioTestCase):
         review = state.board_add_task(
             "Review linked product task",
             "g",
-            lane="In Progress",
+            lane="Done",
             id="TORQUE:1:1",
             parent_task_id=product.id,
             pipeline_root_id=product.id,
-            agent_id=worker.id,
             action_name="feature/review",
         )
+        review.completion_evidence = {
+            "sources": ["review"],
+            "review": {
+                "verdict": "ship",
+                "follow_up_classification": "none",
+                "source_action": "done",
+                "agent_id": "reviewer",
+                "agent_name": "Reviewer",
+                "recorded_at": "2026-08-07T12:00:00+00:00",
+            },
+        }
         review.worktree_boundary = {
             "version": "1",
             "branch": worker.worktree_branch,
@@ -2377,8 +2390,20 @@ class ServerPrClosingRefsTests(unittest.IsolatedAsyncioTestCase):
             progress=None):
         async def latest_boundary_state(_cell):
             return {
-                "latest": {"task_id": "TORQUE:1:1"},
-                "clean": {"task_id": "TORQUE:1:1"},
+                "latest": {
+                    "task_id": "TORQUE:1:1",
+                    "boundary": dict(
+                        state.board_tasks["TORQUE:1:1"].worktree_boundary
+                    ),
+                    "head_sha": "head123",
+                },
+                "clean": {
+                    "task_id": "TORQUE:1:1",
+                    "boundary": dict(
+                        state.board_tasks["TORQUE:1:1"].worktree_boundary
+                    ),
+                    "head_sha": "head123",
+                },
                 "reason": "",
             }
 

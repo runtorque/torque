@@ -2907,6 +2907,207 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cleanup_calls, [])
         self.assertFalse(worker.worktree_merged)
 
+    async def test_review_completion_then_direct_merge_attributes_review_boundary(self):
+        """The reviewed boundary is frozen with its direct implementation parent."""
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        state.update_group_settings("g", engineer_merge_mode="direct")
+        state.board_lanes = ["Backlog", "To Do", "In Progress", "Done"]
+        worker = self.state_mod.AgentCell(
+            id="worker-merge",
+            name="Implementer",
+            group="g",
+            cell_type="agent",
+            status="running",
+            worktree_path="/tmp/worker-merge",
+            worktree_branch="torque/worker-merge",
+            worktree_base_branch="main",
+            worktree_repo_root="/repo",
+            current_task_id="TORQUE:implementation",
+        )
+        reviewer = self.state_mod.AgentCell(
+            id="worker-review",
+            name="Reviewer",
+            group="g",
+            cell_type="agent",
+            status="running",
+            worktree_path="/tmp/reviewer",
+            worktree_branch="torque/reviewer",
+            worktree_base_branch="main",
+            worktree_repo_root="/repo",
+            current_task_id="TORQUE:review",
+        )
+        state.agents.update({worker.id: worker, reviewer.id: reviewer})
+        state.groups["g"].extend([worker.id, reviewer.id])
+        implementation = state.board_add_task(
+            "Implement reviewed change",
+            "g",
+            lane="In Progress",
+            id="TORQUE:implementation",
+            action_name="feature/implement",
+            agent_id=worker.id,
+            requires_review=True,
+        )
+        review = state.board_add_task(
+            "Review implementation",
+            "g",
+            lane="In Progress",
+            id="TORQUE:review",
+            action_name="feature/review",
+            agent_id=reviewer.id,
+            parent_task_id=implementation.id,
+            pipeline_root_id=implementation.id,
+            pipeline_depth=1,
+        )
+
+        async def record_review_boundary(task, _cell, _message):
+            task.worktree_boundary = {
+                "version": "1",
+                "repo_root": worker.worktree_repo_root,
+                "branch": worker.worktree_branch,
+                "base_branch": worker.worktree_base_branch,
+                "commit_sha": "reviewed-head",
+                "kind": "marker",
+                "status": "open",
+                "recorded_at": "2026-08-07T12:00:00+00:00",
+                "recorded_by_agent_id": reviewer.id,
+                "message": "Final review verdict: Ship",
+                "superseded_by_task_id": "",
+                "merged_at": "",
+                "merge_commit_sha": "",
+                "code_delta": {"state": "present"},
+            }
+            return dict(task.worktree_boundary)
+
+        action_mgr = types.SimpleNamespace(
+            list_actions=lambda _base_dir: [],
+            get_transitions=lambda _action, _base_dir="": [],
+            load_action=lambda _action, _base_dir="": {},
+            get_auto_close_on_done=lambda _action, **_kwargs: False,
+        )
+        review_handler = self._extract_handle_command(
+            state,
+            action_mgr=action_mgr,
+            _record_task_boundary=record_review_boundary,
+            _resolve_base_dir=lambda group="": asyncio.sleep(0, result=""),
+        )
+        review_result = await review_handler({
+            "cmd": "ai_report",
+            "cell_id": reviewer.id,
+            "task_id": review.id,
+            "action": "done",
+            "message": (
+                "Blocking issues: None\n"
+                "Follow-up classification: none\n"
+                "Final review verdict: Ship"
+            ),
+        })
+        self.assertTrue(
+            review_result is None or review_result.get("type") == "ok"
+        )
+        self.assertEqual(review.lane, "Done")
+        self.assertEqual(review.agent_id, "")
+        self.assertEqual(
+            review.completion_evidence["review"]["verdict"],
+            "ship",
+        )
+
+        class FakeWorktreeManager:
+            async def has_uncommitted_changes(self, _cell):
+                return False
+
+            async def stale_base_info(self, _cell):
+                return {"stale": False}
+
+            async def check_merge_conflicts(self, _cell):
+                return {"clean": True, "tree_sha": "tree-sha"}
+
+            async def merge_untracked_overwrite_paths(
+                    self, _repo_root, _base_branch, _tree_sha):
+                return []
+
+            async def server_merge(self, _cell, _msg, squash=True):
+                return {"ok": True, "sha": "landed-head"}
+
+            async def validate(self, _cell):
+                return True
+
+            async def reset_to_base(self, _cell):
+                return True
+
+            async def count_commits(self, _cell):
+                return 0
+
+        async def latest_boundary_state(_cell):
+            summary = {
+                "task_id": review.id,
+                "task_title": review.task,
+                "boundary": dict(review.worktree_boundary),
+                "clean_mergeable": True,
+                "head_sha": "reviewed-head",
+            }
+            return {"latest": summary, "clean": summary, "reason": ""}
+
+        async def broadcast_toast(*_args, **_kwargs):
+            return None
+
+        async def reviewer_cleanup(*_args, **_kwargs):
+            return {
+                "agents": [],
+                "agent_closed": 0,
+                "worktree_removed": 0,
+                "errors": [],
+            }
+
+        async def sibling_gate(*_args, **_kwargs):
+            return None
+
+        old_reviewer_cleanup = (
+            self.server_mod._cleanup_shipped_reviewers_for_merged_cell
+        )
+        old_sibling_gate = (
+            self.server_mod._sibling_branch_divergence_gate_for_merge
+        )
+        self.server_mod._cleanup_shipped_reviewers_for_merged_cell = (
+            reviewer_cleanup
+        )
+        self.server_mod._sibling_branch_divergence_gate_for_merge = sibling_gate
+        try:
+            merge_handler = self._extract_handle_command(
+                state,
+                action_mgr=action_mgr,
+                _broadcast_toast=broadcast_toast,
+                _latest_boundary_state_for_cell=latest_boundary_state,
+                _mark_branch_boundaries_merged=(
+                    self._mark_boundaries_for_state(state)
+                ),
+                worktree_mgr=FakeWorktreeManager(),
+            )
+            merge_result = await merge_handler({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+                "force_direct": True,
+                "message": "Merge reviewed implementation",
+            })
+        finally:
+            self.server_mod._cleanup_shipped_reviewers_for_merged_cell = (
+                old_reviewer_cleanup
+            )
+            self.server_mod._sibling_branch_divergence_gate_for_merge = (
+                old_sibling_gate
+            )
+
+        self.assertTrue(merge_result["ok"], merge_result)
+        self.assertEqual(review.worktree_boundary["status"], "merged")
+        self.assertEqual(
+            review.worktree_boundary["merge_commit_sha"],
+            "landed-head",
+        )
+        self.assertIsNone(
+            state.board_move_task(implementation.id, "Done"),
+        )
+        self.assertEqual(implementation.lane, "Done")
+
     async def test_worktree_merge_skips_followup_dispatch_when_reset_fails(self):
         # Part B (TORQUE:381 / :423): if the post-merge reset_to_base fails
         # while queued follow-ups exist, the auto-resume + pump-drain must be
@@ -2990,16 +3191,181 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         }
         return state, worker, task
 
+    def _add_done_ship_review_boundary(
+            self, state, worker, *, parent_task_id, root_task_id,
+            task_id="TORQUE:review-boundary"):
+        review = state.board_add_task(
+            "Review merge boundary",
+            "g",
+            lane="Done",
+            id=task_id,
+            action_name="feature/review",
+            parent_task_id=parent_task_id,
+            pipeline_root_id=root_task_id,
+            pipeline_depth=1,
+        )
+        review.completion_evidence = {
+            "sources": ["review"],
+            "review": {
+                "verdict": "ship",
+                "follow_up_classification": "none",
+                "source_action": "done",
+                "agent_id": "reviewer",
+                "agent_name": "Reviewer",
+                "recorded_at": "2026-08-07T12:00:00+00:00",
+            },
+        }
+        review.worktree_boundary = {
+            "version": "1",
+            "branch": worker.worktree_branch,
+            "repo_root": worker.worktree_repo_root,
+            "base_branch": worker.worktree_base_branch,
+            "commit_sha": "head123",
+            "kind": "marker",
+            "status": "open",
+            "recorded_at": "2026-08-07T12:00:00+00:00",
+            "recorded_by_agent_id": "reviewer",
+            "message": "Final review verdict: Ship",
+            "superseded_by_task_id": "",
+            "merged_at": "",
+            "merge_commit_sha": "",
+            "code_delta": {"state": "present"},
+        }
+        return review
+
+    def test_review_merge_attribution_requires_full_typed_qualification(self):
+        from torque.services.worktrees.preflight import (
+            _freeze_merge_attribution,
+        )
+
+        def fixture():
+            state, worker, implementation = self._make_pr_merge_state()
+            implementation.action_name = "feature/implement"
+            implementation.worktree_boundary = {}
+            review = self._add_done_ship_review_boundary(
+                state,
+                worker,
+                parent_task_id=implementation.id,
+                root_task_id=implementation.id,
+            )
+            return state, worker, implementation, review
+
+        def boundary_state(review):
+            summary = {
+                "task_id": review.id,
+                "boundary": dict(review.worktree_boundary),
+                "head_sha": "head123",
+                "clean_mergeable": True,
+            }
+            return {"latest": summary, "clean": summary, "reason": ""}
+
+        state, worker, implementation, review = fixture()
+        frozen, error = _freeze_merge_attribution(
+            state,
+            worker,
+            worker.id,
+            {"merge_task_id": implementation.id},
+            boundary_state(review),
+        )
+        self.assertIsNone(error)
+        self.assertEqual(
+            frozen.target_task_ids,
+            (implementation.id, review.id),
+        )
+        self.assertEqual(frozen.review_task_id, review.id)
+        self.assertEqual(frozen.anchor_commit_sha, "head123")
+
+        cases = (
+            (
+                "same root",
+                lambda _state, _worker, _implementation, candidate: setattr(
+                    candidate, "pipeline_root_id", "TORQUE:other-root"
+                ),
+                "do not share one root",
+            ),
+            (
+                "durably Done",
+                lambda _state, _worker, _implementation, candidate: setattr(
+                    candidate, "lane", "In Progress"
+                ),
+                "not durably Done",
+            ),
+            (
+                "effective Ship",
+                lambda _state, _worker, _implementation, candidate: (
+                    candidate.completion_evidence["review"].update(
+                        {"verdict": "block"}
+                    )
+                ),
+                "no effective Ship verdict",
+            ),
+            (
+                "anchor equality",
+                lambda _state, _worker, _implementation, candidate: (
+                    candidate.worktree_boundary.update(
+                        {"commit_sha": "different-head"}
+                    )
+                ),
+                "does not equal the clean preflight anchor",
+            ),
+            (
+                "repository reject",
+                lambda _state, _worker, _implementation, candidate: (
+                    candidate.worktree_boundary.update(
+                        {"repo_root": "/different-repo"}
+                    )
+                ),
+                "repo_root does not match",
+            ),
+            (
+                "branch reject",
+                lambda _state, _worker, _implementation, candidate: (
+                    candidate.worktree_boundary.update(
+                        {"branch": "torque/different"}
+                    )
+                ),
+                "branch does not match",
+            ),
+            (
+                "base reject",
+                lambda _state, _worker, _implementation, candidate: (
+                    candidate.worktree_boundary.update(
+                        {"base_branch": "release"}
+                    )
+                ),
+                "base_branch does not match",
+            ),
+        )
+        for label, mutate, expected in cases:
+            with self.subTest(label=label):
+                state, worker, implementation, review = fixture()
+                mutate(state, worker, implementation, review)
+                frozen, error = _freeze_merge_attribution(
+                    state,
+                    worker,
+                    worker.id,
+                    {"merge_task_id": implementation.id},
+                    boundary_state(review),
+                )
+                self.assertIsNone(frozen)
+                self.assertEqual(
+                    error["code"],
+                    "review_merge_attribution_refused",
+                )
+                self.assertIn(expected, error["error"])
+
     def _mark_boundaries_for_state(self, state):
         from torque.worktree_boundaries import mark_branch_boundaries_merged
 
-        def _mark(cell, merge_sha, merged_task_id=""):
+        def _mark(cell, merge_sha, merged_task_ids=()):
+            if isinstance(merged_task_ids, str):
+                merged_task_ids = (merged_task_ids,)
             for branch_task in mark_branch_boundaries_merged(
                 state.board_tasks.values(),
                 repo_root=cell.worktree_repo_root or cell.git_root or "",
                 branch=cell.worktree_branch or "",
                 merge_sha=merge_sha,
-                task_ids=[merged_task_id],
+                task_ids=merged_task_ids,
             ):
                 state._emit(
                     "task_upsert",
@@ -3010,12 +3376,13 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         return _mark
 
     def _pr_handle_command(self, state, worker, worktree_mgr,
-                           cleanup_after_merge, *, nested_dispatch=None):
+                           cleanup_after_merge, *, nested_dispatch=None,
+                           boundary_task_id="TORQUE:490"):
         async def fake_broadcast_toast(*_args, **_kwargs):
             return None
 
         async def fake_latest_boundary_state(_cell):
-            task = state.board_tasks["TORQUE:490"]
+            task = state.board_tasks[boundary_task_id]
             summary = {
                 "task_id": task.id,
                 "task_title": task.task,
@@ -4039,6 +4406,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             result = await handle_command({
                 "cmd": "worktree_merge",
                 "id": worker.id,
+                "merge_task_id": task.id,
                 "close_agent_on_merge": True,
             })
         finally:
@@ -4864,6 +5232,135 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(paused_task.worktree_boundary, {})
         self.assertEqual(task.completion_evidence, {})
         self.assertEqual(paused_task.completion_evidence, {})
+
+    async def test_pr_merge_attributes_qualifying_review_boundary(self):
+        state, worker, implementation = self._make_pr_merge_state()
+        implementation.action_name = "feature/implement"
+        implementation.requires_review = True
+        implementation.worktree_boundary = {}
+        review = self._add_done_ship_review_boundary(
+            state,
+            worker,
+            parent_task_id=implementation.id,
+            root_task_id=implementation.id,
+        )
+        worktree_mgr = self._FakePrWorktreeManager({
+            "ok": True,
+            "phase": "pr_merge",
+            "url": "https://github.com/acme/repo/pull/7",
+            "number": 7,
+            "head_sha": "head123",
+            "merge_commit_sha": "squash789",
+            "merge_state": "CLEAN",
+            "pending": False,
+            "pr_status": {"ok": True, "state": "MERGED"},
+        })
+
+        async def cleanup_after_merge(*_args, **_kwargs):
+            return {"errors": []}
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            cleanup_after_merge,
+            boundary_task_id=review.id,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+            })
+        finally:
+            restore()
+
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(review.worktree_boundary["status"], "merged")
+        self.assertEqual(
+            review.worktree_boundary["merge_commit_sha"],
+            "squash789",
+        )
+        self.assertEqual(
+            review.worktree_boundary["pr"]["state"],
+            "merged",
+        )
+        self.assertEqual(
+            implementation.worktree_boundary["status"],
+            "merged",
+        )
+
+    async def test_pr_merge_refuses_rerouted_review_before_manager_calls(self):
+        state, worker, reroute = self._make_pr_merge_state()
+        reroute.action_name = "feature/implement"
+        reroute.worktree_boundary = {}
+        original = state.board_add_task(
+            "Original implementation",
+            "g",
+            lane="Done",
+            id="TORQUE:original",
+            action_name="feature/implement",
+        )
+        review = self._add_done_ship_review_boundary(
+            state,
+            worker,
+            parent_task_id=original.id,
+            root_task_id=original.id,
+        )
+        worktree_mgr = self._FakePrWorktreeManager({"ok": True})
+
+        async def cleanup_after_merge(*_args, **_kwargs):
+            self.fail("rerouted review must be refused before cleanup")
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            cleanup_after_merge,
+            boundary_task_id=review.id,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+            })
+        finally:
+            restore()
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["phase"], "review_merge_attribution")
+        self.assertIn(f"R={review.id}", result["error"])
+        self.assertIn(f"P={original.id}", result["error"])
+        self.assertIn(f"I={reroute.id}", result["error"])
+        self.assertIn(f"task={original.id}", result["error"])
+        self.assertEqual(worktree_mgr.calls, [])
+        self.assertEqual(review.worktree_boundary["status"], "open")
+        self.assertEqual(reroute.worktree_boundary, {})
+
+    async def test_pr_merge_refuses_zero_attribution_before_manager_calls(self):
+        state, worker, task = self._make_pr_merge_state()
+        task.lane = "Done"
+        task.agent_id = ""
+        worktree_mgr = self._FakePrWorktreeManager({"ok": True})
+
+        async def cleanup_after_merge(*_args, **_kwargs):
+            self.fail("zero-attribution PR merge must not reach cleanup")
+
+        handle_command, restore = self._pr_handle_command(
+            state, worker, worktree_mgr, cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+            })
+        finally:
+            restore()
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["code"], "merge_task_attribution_missing")
+        self.assertIn("zero live task candidates", result["error"])
+        self.assertEqual(worktree_mgr.calls, [])
+        self.assertEqual(task.worktree_boundary["status"], "open")
 
     async def test_worktree_merge_pr_deletes_verified_remote_head_and_records_evidence(self):
         state, worker, task = self._make_pr_merge_state()
