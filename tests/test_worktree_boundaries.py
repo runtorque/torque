@@ -20,11 +20,13 @@ from torque.worktree_boundaries import (
     latest_boundary_task,
     mark_branch_boundaries_merged,
     queued_successor_tasks,
+    review_cycle_containment_candidates,
     refresh_latest_boundary_after_rebase,
     retarget_queued_successor_tasks,
     started_successor_tasks,
     task_branch_keys,
     advance_latest_boundary_after_mechanical_commit,
+    verified_review_cycle_containment_task_ids,
 )
 
 
@@ -907,12 +909,20 @@ class WorktreeBoundaryTests(unittest.TestCase):
             },
         )
 
+        linked = review_cycle_containment_candidates(
+            [root, predecessor, continuation, fresh_review],
+            repo_root="/repo",
+            branch="torque/worker",
+            task_ids=[continuation.id, fresh_review.id],
+        )
+        self.assertEqual([task.id for task in linked], [predecessor.id])
+
         updated = mark_branch_boundaries_merged(
             [root, predecessor, continuation, fresh_review],
             repo_root="/repo",
             branch="torque/worker",
             merge_sha="landed",
-            task_ids=[continuation.id, fresh_review.id],
+            task_ids=[continuation.id, fresh_review.id, predecessor.id],
         )
 
         self.assertEqual(
@@ -1052,6 +1062,516 @@ class WorktreeBoundaryTests(unittest.TestCase):
         self.assertEqual(reroute.worktree_boundary["status"], "superseded")
         self.assertNotIn("merge_commit_sha", sibling.worktree_boundary)
         self.assertNotIn("merge_commit_sha", reroute.worktree_boundary)
+
+    def test_review_cycle_containment_candidates_exclude_sibling_and_reroute(self):
+        root = _task("TORQUE:1", lane="In Progress")
+        predecessor = _task(
+            "TORQUE:1:1",
+            action_name="feature/review",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            completion_evidence={"review_cycle_continuations": [{
+                "original_review_task_id": "TORQUE:1:1",
+                "continuation_task_id": "TORQUE:1:2",
+                "pipeline_root_id": root.id,
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+            }]},
+            boundary={
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+                "status": "superseded",
+                "superseded_by_task_id": "TORQUE:1:2",
+            },
+        )
+        continuation = _task(
+            "TORQUE:1:2",
+            action_name="feature/implement",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            completion_evidence={"review_cycle_continue": {
+                "original_review_task_id": predecessor.id,
+                "continuation_task_id": "TORQUE:1:2",
+            }},
+        )
+        fresh_review = _task(
+            "TORQUE:1:3",
+            action_name="feature/review",
+            parent_task_id=continuation.id,
+            pipeline_root_id=root.id,
+        )
+        sibling = _task(
+            "TORQUE:1:4",
+            action_name="feature/review",
+            pipeline_root_id=root.id,
+            boundary={
+                "repo_root": "/repo",
+                "branch": "torque/sibling",
+                "status": "superseded",
+            },
+        )
+        reroute = _task(
+            "TORQUE:2",
+            action_name="feature/review",
+            boundary={
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+                "status": "superseded",
+            },
+        )
+
+        candidates = review_cycle_containment_candidates(
+            [root, predecessor, continuation, fresh_review, sibling, reroute],
+            repo_root="/repo",
+            branch="torque/worker",
+            task_ids=[continuation.id, fresh_review.id],
+        )
+
+        self.assertEqual([task.id for task in candidates], [predecessor.id])
+
+    def test_verified_review_cycle_containment_uses_base_aware_noop_merge(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+
+            def git(*args, input_text=None):
+                result = subprocess.run(
+                    ["git", "-C", str(repo), *args],
+                    check=True,
+                    input=input_text,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                return result.stdout.strip()
+
+            def commit(message):
+                git("add", "-A")
+                git("commit", "-m", message)
+                return git("rev-parse", "HEAD")
+
+            def linked_tasks(prefix, base_sha, boundary_sha):
+                root = _task(
+                    f"{prefix}:root",
+                    lane="In Progress",
+                    action_name="feature/implement",
+                )
+                predecessor = _task(
+                    f"{prefix}:review-1",
+                    action_name="feature/review",
+                    parent_task_id=root.id,
+                    pipeline_root_id=root.id,
+                    completion_evidence={"review_cycle_continuations": [{
+                        "original_review_task_id": f"{prefix}:review-1",
+                        "continuation_task_id": f"{prefix}:fix",
+                        "pipeline_root_id": root.id,
+                        "repo_root": str(repo),
+                        "branch": "topic",
+                    }]},
+                    boundary={
+                        "repo_root": str(repo),
+                        "branch": "topic",
+                        "commit_sha": boundary_sha,
+                        "status": "superseded",
+                        "superseded_by_task_id": f"{prefix}:fix",
+                        "code_delta": {
+                            "state": "present",
+                            "base_sha": base_sha,
+                            "commit_sha": boundary_sha,
+                        },
+                    },
+                )
+                continuation = _task(
+                    f"{prefix}:fix",
+                    action_name="feature/implement",
+                    parent_task_id=root.id,
+                    pipeline_root_id=root.id,
+                    completion_evidence={"review_cycle_continue": {
+                        "original_review_task_id": predecessor.id,
+                        "continuation_task_id": f"{prefix}:fix",
+                    }},
+                )
+                review = _task(
+                    f"{prefix}:review-2",
+                    action_name="feature/review",
+                    parent_task_id=continuation.id,
+                    pipeline_root_id=root.id,
+                )
+                return [root, predecessor, continuation, review]
+
+            def verify(tasks, merge_sha):
+                return asyncio.run(
+                    verified_review_cycle_containment_task_ids(
+                        tasks,
+                        repo_root=str(repo),
+                        branch="topic",
+                        merge_sha=merge_sha,
+                        task_ids=[tasks[-2].id, tasks[-1].id],
+                    )
+                )
+
+            git("init", "-b", "main")
+            git("config", "user.email", "test@example.invalid")
+            git("config", "user.name", "Torque Test")
+            (repo / "base.txt").write_text("base\n")
+            base_0 = commit("base")
+
+            # Rebased boundary: its stored base is the advanced base, and the
+            # squash landing exactly contains that rebased commit.
+            git("checkout", "-b", "rebased")
+            (repo / "feature.txt").write_text("candidate\n")
+            commit("candidate before rebase")
+            git("checkout", "main")
+            (repo / "base.txt").write_text("advanced\n")
+            rebased_base = commit("advance base")
+            git("checkout", "rebased")
+            git("rebase", "main")
+            rebased_boundary = git("rev-parse", "HEAD")
+            git("checkout", "main")
+            git("merge", "--squash", "rebased")
+            rebased_merge = commit("squash rebased candidate")
+            rebased_tasks = linked_tasks(
+                "rebased", rebased_base, rebased_boundary
+            )
+            self.assertEqual(
+                verify(rebased_tasks, rebased_merge),
+                (rebased_tasks[1].id,),
+            )
+
+            # An additive fix after the earlier boundary changes the final
+            # tree, but merging the earlier candidate into it remains a no-op.
+            additive_base = rebased_merge
+            git("checkout", "-b", "additive")
+            (repo / "second.txt").write_text("boundary\n")
+            additive_boundary = commit("earlier boundary")
+            (repo / "fix.txt").write_text("later additive fix\n")
+            commit("additive fix")
+            git("checkout", "main")
+            git("merge", "--squash", "additive")
+            additive_merge = commit("squash with additive fix")
+            additive_tasks = linked_tasks(
+                "additive", additive_base, additive_boundary
+            )
+            self.assertEqual(
+                verify(additive_tasks, additive_merge),
+                (additive_tasks[1].id,),
+            )
+
+            # Reapplying the candidate after the base changed the same path is
+            # rejected even though merge-tree alone would report a no-op.
+            overlap_base = additive_merge
+            git("checkout", "-b", "overlap-candidate")
+            (repo / "shared.txt").write_text("candidate\n")
+            overlap_boundary = commit("overlap candidate")
+            git("checkout", "main")
+            (repo / "shared.txt").write_text("base movement\n")
+            commit("overlapping base movement")
+            git("checkout", "-b", "overlap-replay")
+            (repo / "shared.txt").write_text("candidate\n")
+            commit("reapply after overlap")
+            git("checkout", "main")
+            git("merge", "--squash", "overlap-replay")
+            overlap_merge = commit("squash overlap replay")
+            overlap_tasks = linked_tasks(
+                "overlap", overlap_base, overlap_boundary
+            )
+            self.assertEqual(verify(overlap_tasks, overlap_merge), ())
+            mark_branch_boundaries_merged(
+                overlap_tasks,
+                repo_root=str(repo),
+                branch="topic",
+                merge_sha=overlap_merge,
+                task_ids=[overlap_tasks[-2].id, overlap_tasks[-1].id],
+            )
+            self.assertEqual(
+                overlap_tasks[1].worktree_boundary["status"], "superseded"
+            )
+            self.assertNotIn(
+                "merge_commit_sha", overlap_tasks[1].worktree_boundary
+            )
+            self.assertFalse(
+                code_boundary_done_status(overlap_tasks)["eligible"]
+            )
+
+            # The same replay is safe when base movement is path-disjoint.
+            disjoint_base = overlap_merge
+            git("checkout", "-b", "disjoint-candidate")
+            (repo / "delta.txt").write_text("candidate\n")
+            disjoint_boundary = commit("disjoint candidate")
+            git("checkout", "main")
+            (repo / "unrelated.txt").write_text("base movement\n")
+            commit("disjoint base movement")
+            git("checkout", "-b", "disjoint-replay")
+            (repo / "delta.txt").write_text("candidate\n")
+            commit("reapply after disjoint movement")
+            git("checkout", "main")
+            git("merge", "--squash", "disjoint-replay")
+            disjoint_merge = commit("squash disjoint replay")
+            disjoint_tasks = linked_tasks(
+                "disjoint", disjoint_base, disjoint_boundary
+            )
+            self.assertEqual(
+                verify(disjoint_tasks, disjoint_merge),
+                (disjoint_tasks[1].id,),
+            )
+
+            single_root = _task(
+                "single:root",
+                lane="In Progress",
+                action_name="feature/implement",
+                boundary={
+                    "repo_root": str(repo),
+                    "branch": "topic",
+                    "commit_sha": disjoint_merge,
+                    "status": "open",
+                    "code_delta": {
+                        "state": "present",
+                        "base_sha": disjoint_base,
+                        "commit_sha": disjoint_merge,
+                    },
+                },
+            )
+            single_review = _task(
+                "single:review",
+                action_name="feature/review",
+                parent_task_id=single_root.id,
+                pipeline_root_id=single_root.id,
+                boundary={
+                    "repo_root": str(repo),
+                    "branch": "topic",
+                    "commit_sha": disjoint_merge,
+                    "status": "open",
+                    "code_delta": {
+                        "state": "present",
+                        "base_sha": disjoint_base,
+                        "commit_sha": disjoint_merge,
+                    },
+                },
+            )
+            single_candidates = review_cycle_containment_candidates(
+                [single_root, single_review],
+                repo_root=str(repo),
+                branch="topic",
+                task_ids=[single_root.id, single_review.id],
+            )
+            self.assertEqual(single_candidates, [])
+            single_verified = asyncio.run(
+                verified_review_cycle_containment_task_ids(
+                    [single_root, single_review],
+                    repo_root=str(repo),
+                    branch="topic",
+                    merge_sha=disjoint_merge,
+                    task_ids=[single_root.id, single_review.id],
+                )
+            )
+            self.assertEqual(single_verified, ())
+            single_updated = mark_branch_boundaries_merged(
+                [single_root, single_review],
+                repo_root=str(repo),
+                branch="topic",
+                merge_sha=disjoint_merge,
+                task_ids=[single_root.id, single_review.id],
+            )
+            self.assertEqual(
+                {task.id for task in single_updated},
+                {single_root.id, single_review.id},
+            )
+
+            self.assertTrue(base_0)
+
+    def test_plain_review_containment_requires_exact_structure_per_hop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+
+            def git(*args):
+                result = subprocess.run(
+                    ["git", "-C", str(repo), *args],
+                    check=True,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                return result.stdout.strip()
+
+            def commit(message):
+                git("add", "-A")
+                git("commit", "-m", message)
+                return git("rev-parse", "HEAD")
+
+            git("init", "-b", "main")
+            git("config", "user.email", "test@example.invalid")
+            git("config", "user.name", "Torque Test")
+            (repo / "base.txt").write_text("base\n")
+            base_sha = commit("base")
+            git("checkout", "-b", "topic")
+            (repo / "feature.txt").write_text("contained\n")
+            contained_sha = commit("contained review boundary")
+            git("checkout", "main")
+            git("merge", "--squash", "topic")
+            merge_sha = commit("squash contained boundary")
+            git("checkout", "-b", "uncontained", base_sha)
+            (repo / "uncontained.txt").write_text("not landed\n")
+            uncontained_sha = commit("uncontained boundary")
+            git("checkout", "main")
+
+            root = _task(
+                "root",
+                lane="In Progress",
+                action_name="feature/implement",
+            )
+            implementation = _task(
+                "root:implementation",
+                action_name="feature/implement",
+                parent_task_id=root.id,
+                pipeline_root_id=root.id,
+            )
+
+            def boundary(commit_sha, *, branch="topic", superseded_by,
+                         recorded_at):
+                return {
+                    "repo_root": str(repo),
+                    "branch": branch,
+                    "commit_sha": commit_sha,
+                    "status": "superseded",
+                    "superseded_by_task_id": superseded_by,
+                    "recorded_at": recorded_at,
+                    "code_delta": {
+                        "state": "present",
+                        "base_sha": base_sha,
+                        "commit_sha": commit_sha,
+                    },
+                }
+
+            selected_review = _task(
+                "root:review-final",
+                action_name="feature/review",
+                parent_task_id=implementation.id,
+                pipeline_root_id=root.id,
+                boundary={
+                    "repo_root": str(repo),
+                    "branch": "topic",
+                    "commit_sha": contained_sha,
+                    "status": "open",
+                    "recorded_at": "2026-08-07T15:00:00+00:00",
+                    "code_delta": {
+                        "state": "present",
+                        "base_sha": base_sha,
+                        "commit_sha": contained_sha,
+                    },
+                },
+            )
+            valid = _task(
+                "root:review-valid",
+                action_name="feature/review",
+                parent_task_id=implementation.id,
+                pipeline_root_id=root.id,
+                completion_evidence={
+                    # Verdict is deliberately irrelevant to admission.
+                    "review": {"verdict": "block"},
+                },
+                boundary=boundary(
+                    contained_sha,
+                    superseded_by=selected_review.id,
+                    recorded_at="2026-08-07T14:55:00+00:00",
+                ),
+            )
+            other_root_exact_edge = _task(
+                "other-root:review",
+                action_name="feature/review",
+                pipeline_root_id="other-root",
+                boundary=boundary(
+                    contained_sha,
+                    superseded_by=selected_review.id,
+                    recorded_at="2026-08-07T14:54:00+00:00",
+                ),
+            )
+            wrong_edge = _task(
+                "root:review-wrong-edge",
+                action_name="feature/review",
+                pipeline_root_id=root.id,
+                boundary=boundary(
+                    contained_sha,
+                    superseded_by="root:review-different",
+                    recorded_at="2026-08-07T14:53:00+00:00",
+                ),
+            )
+            sibling = _task(
+                "root:review-sibling",
+                action_name="feature/review",
+                pipeline_root_id=root.id,
+                boundary=boundary(
+                    contained_sha,
+                    branch="topic-sibling",
+                    superseded_by=selected_review.id,
+                    recorded_at="2026-08-07T14:52:00+00:00",
+                ),
+            )
+            reroute = _task(
+                "reroute-root:review-victim",
+                action_name="feature/review",
+                pipeline_root_id="reroute-root",
+                boundary=boundary(
+                    contained_sha,
+                    superseded_by=selected_review.id,
+                    recorded_at="2026-08-07T14:51:00+00:00",
+                ),
+            )
+            uncontained_near = _task(
+                "root:review-uncontained",
+                action_name="feature/review",
+                pipeline_root_id=root.id,
+                boundary=boundary(
+                    uncontained_sha,
+                    superseded_by=selected_review.id,
+                    recorded_at="2026-08-07T14:50:00+00:00",
+                ),
+            )
+            contained_far = _task(
+                "root:review-contained-far",
+                action_name="feature/review",
+                pipeline_root_id=root.id,
+                boundary=boundary(
+                    contained_sha,
+                    superseded_by=uncontained_near.id,
+                    recorded_at="2026-08-07T14:49:00+00:00",
+                ),
+            )
+            tasks = [
+                root, implementation, selected_review, valid,
+                other_root_exact_edge, wrong_edge, sibling, reroute,
+                uncontained_near, contained_far,
+            ]
+            target_ids = [implementation.id, selected_review.id]
+
+            candidates = review_cycle_containment_candidates(
+                tasks,
+                repo_root=str(repo),
+                branch="topic",
+                task_ids=target_ids,
+            )
+            candidate_ids = {task.id for task in candidates}
+            self.assertEqual(
+                candidate_ids,
+                {valid.id, uncontained_near.id, contained_far.id},
+            )
+            self.assertNotIn(other_root_exact_edge.id, candidate_ids)
+            self.assertNotIn(wrong_edge.id, candidate_ids)
+            self.assertNotIn(sibling.id, candidate_ids)
+            self.assertNotIn(reroute.id, candidate_ids)
+
+            verified = asyncio.run(
+                verified_review_cycle_containment_task_ids(
+                    tasks,
+                    repo_root=str(repo),
+                    branch="topic",
+                    merge_sha=merge_sha,
+                    task_ids=target_ids,
+                )
+            )
+            self.assertEqual(verified, (valid.id,))
+            self.assertNotIn(uncontained_near.id, verified)
+            # This commit is contained, but its immediate successor failed
+            # containment.  No transitive trust may skip that failed hop.
+            self.assertNotIn(contained_far.id, verified)
 
     def test_mark_branch_boundaries_merged_marks_pipeline_root_without_boundary(self):
         root = _task("task-root", lane="In Progress", labels=["ready"])

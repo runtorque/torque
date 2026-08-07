@@ -823,6 +823,479 @@ def _normalize_boundary_task_ids(task_ids: Iterable[str] | str) -> tuple[str, ..
     return tuple(task_ids or ())
 
 
+def _task_root_id(task, tasks_by_id: dict[str, object]) -> str:
+    root_id = _clean_text(getattr(task, "pipeline_root_id", ""))
+    if root_id:
+        return root_id
+    parent_id = _clean_text(getattr(task, "parent_task_id", ""))
+    if not parent_id:
+        return _clean_text(getattr(task, "id", ""))
+
+    seen: set[str] = set()
+    while parent_id and parent_id not in seen:
+        seen.add(parent_id)
+        parent = tasks_by_id.get(parent_id)
+        if not parent:
+            return parent_id
+        next_parent_id = _clean_text(getattr(parent, "parent_task_id", ""))
+        if not next_parent_id:
+            return _clean_text(getattr(parent, "id", "")) or parent_id
+        parent_id = next_parent_id
+    return ""
+
+
+def _review_cycle_containment_candidate_hops(tasks: Iterable, *,
+                                             repo_root: str,
+                                             branch: str,
+                                             task_ids: Iterable[str] | str,
+                                             ) -> list[tuple[object, str]]:
+    """Return only structurally linked earlier review-cycle boundaries.
+
+    Repository and branch identity may reject an audited reciprocal link, but
+    can never create one.  Walking backward starts at the explicitly selected
+    implementation plus its direct shipping review, so branch siblings and
+    reroute victims never become containment candidates.
+    """
+    tasks = list(tasks)
+    tasks_by_id = {
+        _clean_text(getattr(task, "id", "")): task
+        for task in tasks
+        if _clean_text(getattr(task, "id", ""))
+    }
+    target_ids = {
+        _clean_text(task_id)
+        for task_id in _normalize_boundary_task_ids(task_ids)
+        if _clean_text(task_id)
+    }
+    repo_root = _clean_text(repo_root)
+    branch = _clean_text(branch)
+    if not repo_root or not branch or not target_ids:
+        return []
+
+    pairs: list[tuple[str, str]] = []
+    plain_review_ids: list[str] = []
+    for continuation_id in target_ids:
+        continuation = tasks_by_id.get(continuation_id)
+        if not continuation or _clean_text(
+                getattr(continuation, "action_name", "")).lower() \
+                != "feature/implement":
+            continue
+        continuation_root = _task_root_id(continuation, tasks_by_id)
+        for candidate in tasks:
+            candidate_id = _clean_text(getattr(candidate, "id", ""))
+            if (
+                    candidate_id in target_ids
+                    and _clean_text(
+                        getattr(candidate, "action_name", "")
+                    ).lower() == "feature/review"
+                    and _clean_text(
+                        getattr(candidate, "parent_task_id", "")
+                    ) == continuation_id
+                    and _task_root_id(candidate, tasks_by_id)
+                    == continuation_root
+            ):
+                pairs.append((continuation_id, candidate_id))
+                plain_review_ids.append(candidate_id)
+
+    hops: list[tuple[object, str]] = []
+    hop_keys: set[tuple[str, str]] = set()
+    visited_pairs: set[tuple[str, str]] = set()
+    visited_plain_reviews: set[str] = set()
+
+    def add_hop(candidate, successor_id: str) -> None:
+        candidate_id = _clean_text(getattr(candidate, "id", ""))
+        successor_id = _clean_text(successor_id)
+        key = (candidate_id, successor_id)
+        if not candidate_id or not successor_id or key in hop_keys:
+            return
+        hops.append((candidate, successor_id))
+        hop_keys.add(key)
+
+    while pairs or plain_review_ids:
+        if plain_review_ids:
+            review_id = plain_review_ids.pop()
+            if review_id not in visited_plain_reviews:
+                visited_plain_reviews.add(review_id)
+                review = tasks_by_id.get(review_id)
+                review_boundary = task_boundary(review)
+                review_root = _task_root_id(review, tasks_by_id)
+                review_recorded_at = _clean_text(
+                    review_boundary.get("recorded_at", "")
+                )
+                if (
+                        review
+                        and _clean_text(
+                            getattr(review, "action_name", "")
+                        ).lower() == "feature/review"
+                        and review_root
+                        and review_recorded_at
+                        and _clean_text(review_boundary.get("repo_root", ""))
+                        == repo_root
+                        and _clean_text(review_boundary.get("branch", ""))
+                        == branch
+                ):
+                    for candidate in tasks:
+                        candidate_id = _clean_text(
+                            getattr(candidate, "id", "")
+                        )
+                        boundary = task_boundary(candidate)
+                        fact = boundary.get("code_delta")
+                        candidate_recorded_at = _clean_text(
+                            boundary.get("recorded_at", "")
+                        )
+                        if (
+                                not candidate_id
+                                or candidate_id in target_ids
+                                or candidate_id == review_id
+                                or _clean_text(
+                                    boundary.get("status", "")
+                                ).lower() != "superseded"
+                                or _clean_text(
+                                    boundary.get(
+                                        "superseded_by_task_id", ""
+                                    )
+                                ) != review_id
+                                or _task_root_id(candidate, tasks_by_id)
+                                != review_root
+                                or _clean_text(
+                                    boundary.get("repo_root", "")
+                                ) != repo_root
+                                or _clean_text(boundary.get("branch", ""))
+                                != branch
+                                or not candidate_recorded_at
+                                or candidate_recorded_at >= review_recorded_at
+                                or boundary_code_delta_state(boundary)
+                                != CODE_DELTA_PRESENT
+                                or not isinstance(fact, dict)
+                                or not _clean_text(
+                                    boundary.get("commit_sha", "")
+                                )
+                                or not _clean_text(fact.get("base_sha", ""))
+                                or _clean_text(fact.get("commit_sha", ""))
+                                != _clean_text(
+                                    boundary.get("commit_sha", "")
+                                )
+                        ):
+                            continue
+                        add_hop(candidate, review_id)
+                        if _clean_text(
+                                getattr(candidate, "action_name", "")
+                        ).lower() == "feature/review":
+                            plain_review_ids.append(candidate_id)
+
+        if not pairs:
+            continue
+        continuation_id, direct_review_id = pairs.pop()
+        pair = (continuation_id, direct_review_id)
+        if pair in visited_pairs:
+            continue
+        visited_pairs.add(pair)
+
+        continuation = tasks_by_id.get(continuation_id)
+        direct_review = tasks_by_id.get(direct_review_id)
+        if (
+                not continuation
+                or not direct_review
+                or _clean_text(
+                    getattr(continuation, "action_name", "")
+                ).lower() != "feature/implement"
+                or _clean_text(
+                    getattr(direct_review, "action_name", "")
+                ).lower() != "feature/review"
+                or _clean_text(
+                    getattr(direct_review, "parent_task_id", "")
+                ) != continuation_id
+                or _task_root_id(direct_review, tasks_by_id)
+                != _task_root_id(continuation, tasks_by_id)
+        ):
+            continue
+
+        evidence = getattr(continuation, "completion_evidence", {}) or {}
+        link = (
+            evidence.get("review_cycle_continue", {})
+            if isinstance(evidence, dict) else {}
+        )
+        if not isinstance(link, dict):
+            continue
+        predecessor_id = _clean_text(link.get("original_review_task_id", ""))
+        predecessor = tasks_by_id.get(predecessor_id)
+        predecessor_boundary = task_boundary(predecessor)
+        predecessor_evidence = (
+            getattr(predecessor, "completion_evidence", {}) or {}
+            if predecessor else {}
+        )
+        predecessor_links = (
+            predecessor_evidence.get("review_cycle_continuations", [])
+            if isinstance(predecessor_evidence, dict) else []
+        )
+        root_id = _task_root_id(continuation, tasks_by_id)
+        reciprocal_link = next((
+            item for item in predecessor_links
+            if isinstance(item, dict)
+            and _clean_text(item.get("original_review_task_id", ""))
+            == predecessor_id
+            and _clean_text(item.get("continuation_task_id", ""))
+            == continuation_id
+            and _clean_text(item.get("pipeline_root_id", "")) == root_id
+            and _clean_text(item.get("repo_root", "")) == repo_root
+            and _clean_text(item.get("branch", "")) == branch
+        ), None)
+        if (
+                not predecessor
+                or not reciprocal_link
+                or _clean_text(
+                    getattr(predecessor, "action_name", "")
+                ).lower() != "feature/review"
+                or _clean_text(
+                    predecessor_boundary.get("status", "")
+                ).lower() != "superseded"
+                or _clean_text(
+                    predecessor_boundary.get("superseded_by_task_id", "")
+                ) != continuation_id
+                or _clean_text(link.get("continuation_task_id", ""))
+                != continuation_id
+                or _task_root_id(predecessor, tasks_by_id) != root_id
+                or _clean_text(predecessor_boundary.get("repo_root", ""))
+                != repo_root
+                or _clean_text(predecessor_boundary.get("branch", ""))
+                != branch
+        ):
+            continue
+
+        add_hop(predecessor, continuation_id)
+
+        prior_implementation_id = _clean_text(
+            getattr(predecessor, "parent_task_id", "")
+        )
+        prior_implementation = tasks_by_id.get(prior_implementation_id)
+        prior_boundary = task_boundary(prior_implementation)
+        if (
+                prior_implementation
+                and _clean_text(
+                    getattr(prior_implementation, "action_name", "")
+                ).lower() == "feature/implement"
+                and _task_root_id(prior_implementation, tasks_by_id) == root_id
+                and _clean_text(prior_boundary.get("status", "")).lower()
+                == "superseded"
+                and _clean_text(
+                    prior_boundary.get("superseded_by_task_id", "")
+                ) == predecessor_id
+                and _clean_text(prior_boundary.get("repo_root", ""))
+                == repo_root
+                and _clean_text(prior_boundary.get("branch", "")) == branch
+        ):
+            add_hop(prior_implementation, predecessor_id)
+            pairs.append((prior_implementation_id, predecessor_id))
+    return hops
+
+
+def review_cycle_containment_candidates(tasks: Iterable, *,
+                                        repo_root: str,
+                                        branch: str,
+                                        task_ids: Iterable[str] | str,
+                                        ) -> list:
+    """Return structurally linked earlier boundary candidates.
+
+    Audited review-cycle links remain authoritative.  Plain extra reviews add
+    only the exact earlier-boundary supersession edge rooted at the selected
+    direct review; repository, branch, root, ordering, and present-delta facts
+    may reject that edge but can never create one.
+    """
+    candidates: list = []
+    candidate_ids: set[str] = set()
+    for candidate, _successor_id in _review_cycle_containment_candidate_hops(
+            tasks,
+            repo_root=repo_root,
+            branch=branch,
+            task_ids=task_ids):
+        candidate_id = _clean_text(getattr(candidate, "id", ""))
+        if candidate_id and candidate_id not in candidate_ids:
+            candidates.append(candidate)
+            candidate_ids.add(candidate_id)
+    return candidates
+
+
+async def verified_review_cycle_containment_task_ids(
+        tasks: Iterable, *,
+        repo_root: str,
+        branch: str,
+        merge_sha: str,
+        task_ids: Iterable[str] | str) -> tuple[str, ...]:
+    """Verify which linked earlier boundaries are contained by a merge.
+
+    Ancestry is conclusive.  Squash/rebase-style landings additionally require
+    one parent, the exact stored fork, disjoint base movement, and a no-op
+    three-way merge of the candidate into the actual landed tree.  Every Git
+    or evidence error fails closed for that candidate.
+    """
+    tasks = list(tasks)
+    hops = _review_cycle_containment_candidate_hops(
+        tasks,
+        repo_root=repo_root,
+        branch=branch,
+        task_ids=task_ids,
+    )
+    repo_root = _clean_text(repo_root)
+    merge_sha = _clean_text(merge_sha)
+    if not hops or not repo_root or not merge_sha:
+        return ()
+
+    async def git(*args: str) -> tuple[int, bytes]:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", repo_root, *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            return proc.returncode, stdout
+        except Exception:
+            return 1, b""
+
+    async def resolve_commit(ref: str) -> str:
+        if not ref:
+            return ""
+        code, out = await git("rev-parse", "--verify", f"{ref}^{{commit}}")
+        if code:
+            return ""
+        lines = out.decode("ascii", errors="ignore").splitlines()
+        return lines[0].strip() if len(lines) == 1 else ""
+
+    merged_commit = await resolve_commit(merge_sha)
+    if not merged_commit:
+        return ()
+    code, parent_out = await git(
+        "rev-list", "--parents", "-n", "1", merged_commit
+    )
+    parent_fields = parent_out.decode("ascii", errors="ignore").split()
+    landing_parent = (
+        parent_fields[1]
+        if code == 0 and len(parent_fields) == 2
+        else ""
+    )
+    code, merged_tree_out = await git(
+        "rev-parse", "--verify", f"{merged_commit}^{{tree}}"
+    )
+    merged_tree_lines = merged_tree_out.decode(
+        "ascii", errors="ignore"
+    ).splitlines()
+    merged_tree = (
+        merged_tree_lines[0].strip()
+        if code == 0 and len(merged_tree_lines) == 1
+        else ""
+    )
+
+    async def candidate_is_contained(task) -> bool:
+        boundary = task_boundary(task)
+        fact = boundary.get("code_delta")
+        if (
+                boundary_code_delta_state(boundary) != CODE_DELTA_PRESENT
+                or not isinstance(fact, dict)
+        ):
+            return False
+        base_ref = _clean_text(fact.get("base_sha", ""))
+        boundary_ref = _clean_text(boundary.get("commit_sha", ""))
+        classified_ref = _clean_text(fact.get("commit_sha", ""))
+        if (
+                not base_ref
+                or not boundary_ref
+                or not classified_ref
+                or classified_ref != boundary_ref
+        ):
+            return False
+        base_commit = await resolve_commit(base_ref)
+        boundary_commit = await resolve_commit(boundary_ref)
+        if not base_commit or not boundary_commit:
+            return False
+
+        code, _ = await git(
+            "merge-base", "--is-ancestor", base_commit, boundary_commit
+        )
+        if code:
+            return False
+        code, _ = await git(
+            "merge-base", "--is-ancestor", boundary_commit, merged_commit
+        )
+        contained = code == 0
+        if not contained:
+            if not landing_parent or not merged_tree:
+                return False
+            code, _ = await git(
+                "merge-base", "--is-ancestor", base_commit, landing_parent
+            )
+            if code:
+                return False
+            code, fork_out = await git(
+                "merge-base", boundary_commit, landing_parent
+            )
+            fork_lines = fork_out.decode("ascii", errors="ignore").splitlines()
+            if (
+                    code
+                    or len(fork_lines) != 1
+                    or fork_lines[0].strip() != base_commit
+            ):
+                return False
+            code, candidate_out = await git(
+                "diff", "--name-only", "-z", "--no-renames",
+                base_commit, boundary_commit,
+            )
+            if code:
+                return False
+            candidate_paths = {
+                path for path in candidate_out.split(b"\0") if path
+            }
+            if not candidate_paths:
+                return False
+            code, base_out = await git(
+                "diff", "--name-only", "-z", "--no-renames",
+                base_commit, landing_parent,
+            )
+            if code:
+                return False
+            base_paths = {path for path in base_out.split(b"\0") if path}
+            if candidate_paths & base_paths:
+                return False
+            code, merge_tree_out = await git(
+                "merge-tree", "--write-tree", merged_commit, boundary_commit
+            )
+            merge_tree_lines = merge_tree_out.decode(
+                "ascii", errors="ignore"
+            ).splitlines()
+            contained = (
+                code == 0
+                and len(merge_tree_lines) == 1
+                and merge_tree_lines[0].strip() == merged_tree
+            )
+        return contained
+
+    admitted_ids = {
+        _clean_text(task_id)
+        for task_id in _normalize_boundary_task_ids(task_ids)
+        if _clean_text(task_id)
+    }
+    verified: list[str] = []
+    pending = list(hops)
+    while pending:
+        deferred: list[tuple[object, str]] = []
+        made_progress = False
+        for task, successor_id in pending:
+            task_id = _clean_text(getattr(task, "id", ""))
+            if not task_id or task_id in admitted_ids:
+                continue
+            if successor_id not in admitted_ids:
+                deferred.append((task, successor_id))
+                continue
+            if not await candidate_is_contained(task):
+                continue
+            admitted_ids.add(task_id)
+            verified.append(task_id)
+            made_progress = True
+        if not made_progress:
+            break
+        pending = deferred
+    return tuple(verified)
+
+
 def mark_branch_boundaries_merged(tasks: Iterable, *,
                                   repo_root: str,
                                   branch: str,
@@ -889,107 +1362,6 @@ def mark_branch_boundaries_merged(tasks: Iterable, *,
         task.worktree_boundary = boundary
         _append_merged_label(task)
 
-    def _task_root_id(task) -> str:
-        root_id = str(getattr(task, "pipeline_root_id", "") or "").strip()
-        if root_id:
-            return root_id
-        parent_id = str(getattr(task, "parent_task_id", "") or "").strip()
-        if not parent_id:
-            return str(getattr(task, "id", "") or "").strip()
-
-        seen: set[str] = set()
-        while parent_id and parent_id not in seen:
-            seen.add(parent_id)
-            parent = tasks_by_id.get(parent_id)
-            if not parent:
-                return parent_id
-            next_parent_id = str(
-                getattr(parent, "parent_task_id", "") or ""
-            ).strip()
-            if not next_parent_id:
-                return str(getattr(parent, "id", "") or parent_id).strip()
-            parent_id = next_parent_id
-        return ""
-
-    # An audited review-cycle continuation is the one narrow exception to
-    # forward-only attribution: when the selected continuation and its new
-    # qualifying direct review are both explicit merge targets, stamp the
-    # predecessor boundary named by that continuation. Branch/root identity
-    # may reject the link but can never create it. Reroutes and siblings have
-    # no reciprocal linkage and therefore remain untouched.
-    linked_predecessor_ids: set[str] = set()
-    for continuation_id in tuple(target_ids):
-        continuation = tasks_by_id.get(continuation_id)
-        if not continuation or _clean_text(
-                getattr(continuation, "action_name", "")).lower() \
-                != "feature/implement":
-            continue
-        evidence = getattr(continuation, "completion_evidence", {}) or {}
-        link = (
-            evidence.get("review_cycle_continue", {})
-            if isinstance(evidence, dict) else {}
-        )
-        if not isinstance(link, dict):
-            continue
-        predecessor_id = _clean_text(link.get("original_review_task_id", ""))
-        if not predecessor_id:
-            continue
-        predecessor = tasks_by_id.get(predecessor_id)
-        predecessor_boundary = task_boundary(predecessor)
-        predecessor_evidence = (
-            getattr(predecessor, "completion_evidence", {}) or {}
-            if predecessor else {}
-        )
-        predecessor_links = (
-            predecessor_evidence.get("review_cycle_continuations", [])
-            if isinstance(predecessor_evidence, dict) else []
-        )
-        reciprocal_link = next((
-            candidate for candidate in predecessor_links
-            if isinstance(candidate, dict)
-            and _clean_text(candidate.get("original_review_task_id", ""))
-            == predecessor_id
-            and _clean_text(candidate.get("continuation_task_id", ""))
-            == continuation_id
-            and _clean_text(candidate.get("pipeline_root_id", ""))
-            == _task_root_id(continuation)
-            and _clean_text(candidate.get("repo_root", ""))
-            == _clean_text(repo_root)
-            and _clean_text(candidate.get("branch", ""))
-            == _clean_text(branch)
-        ), None)
-        if (
-                not predecessor
-                or not reciprocal_link
-                or _clean_text(getattr(predecessor, "action_name", "")).lower()
-                != "feature/review"
-                or _clean_text(predecessor_boundary.get("status", "")).lower()
-                != "superseded"
-                or _clean_text(
-                    predecessor_boundary.get("superseded_by_task_id", "")
-                ) != continuation_id
-                or _clean_text(link.get("continuation_task_id", ""))
-                != continuation_id
-                or _task_root_id(predecessor) != _task_root_id(continuation)
-                or _clean_text(predecessor_boundary.get("repo_root", ""))
-                != _clean_text(repo_root)
-                or _clean_text(predecessor_boundary.get("branch", ""))
-                != _clean_text(branch)
-        ):
-            continue
-        has_targeted_direct_review = any(
-            _clean_text(getattr(candidate, "action_name", "")).lower()
-            == "feature/review"
-            and _clean_text(getattr(candidate, "parent_task_id", ""))
-            == continuation_id
-            and _clean_text(getattr(candidate, "id", "")) in target_ids
-            and _task_root_id(candidate) == _task_root_id(continuation)
-            for candidate in tasks
-        )
-        if has_targeted_direct_review:
-            linked_predecessor_ids.add(predecessor_id)
-    target_ids.update(linked_predecessor_ids)
-
     for task in branch_boundary_tasks(
             tasks,
             repo_root=repo_root,
@@ -1003,7 +1375,7 @@ def mark_branch_boundaries_merged(tasks: Iterable, *,
         if task_id:
             updated_ids.add(task_id)
 
-        root_id = _task_root_id(task)
+        root_id = _task_root_id(task, tasks_by_id)
         if not root_id or root_id == task_id:
             continue
         current_source = boundary_sources_by_root.get(root_id)
