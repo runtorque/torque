@@ -2910,6 +2910,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
     async def test_review_completion_then_direct_merge_attributes_review_boundary(self):
         """The reviewed boundary is frozen with its direct implementation parent."""
         state = self.state_mod.MatrixState()
+        state.boot_head_commit = "direct-daemon-sha"
         state.add_group("g")
         state.update_group_settings("g", engineer_merge_mode="direct")
         state.board_lanes = ["Backlog", "To Do", "In Progress", "Done"]
@@ -3102,6 +3103,10 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             review.worktree_boundary["merge_commit_sha"],
             "landed-head",
+        )
+        self.assertEqual(
+            review.completion_evidence["merge"]["daemon_code_revision"],
+            "direct-daemon-sha",
         )
         self.assertIsNone(
             state.board_move_task(implementation.id, "Done"),
@@ -5102,6 +5107,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_worktree_merge_pr_records_completion_evidence(self):
         state, worker, task = self._make_pr_merge_state()
+        state.boot_head_commit = "pr-daemon-sha"
         paused_task = state.board_add_task(
             "Paused discriminator", "g", lane="In Progress",
             id="TORQUE:1298", agent_id=worker.id,
@@ -5184,6 +5190,10 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(evidence["status"], "verified")
         self.assertEqual(evidence["sources"], ["merge"])
         self.assertEqual(evidence["merge"]["sha"], "squash789")
+        self.assertEqual(
+            evidence["merge"]["daemon_code_revision"],
+            "pr-daemon-sha",
+        )
         self.assertEqual(
             evidence["merge"]["origin_summary"],
             "origin/main == squash789",
