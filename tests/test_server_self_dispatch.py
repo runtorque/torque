@@ -3233,6 +3233,127 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         }
         return review
 
+    def test_review_merge_attribution_requires_full_typed_qualification(self):
+        from torque.services.worktrees.preflight import (
+            _freeze_merge_attribution,
+        )
+
+        def fixture():
+            state, worker, implementation = self._make_pr_merge_state()
+            implementation.action_name = "feature/implement"
+            implementation.worktree_boundary = {}
+            review = self._add_done_ship_review_boundary(
+                state,
+                worker,
+                parent_task_id=implementation.id,
+                root_task_id=implementation.id,
+            )
+            return state, worker, implementation, review
+
+        def boundary_state(review):
+            summary = {
+                "task_id": review.id,
+                "boundary": dict(review.worktree_boundary),
+                "head_sha": "head123",
+                "clean_mergeable": True,
+            }
+            return {"latest": summary, "clean": summary, "reason": ""}
+
+        state, worker, implementation, review = fixture()
+        frozen, error = _freeze_merge_attribution(
+            state,
+            worker,
+            worker.id,
+            {"merge_task_id": implementation.id},
+            boundary_state(review),
+        )
+        self.assertIsNone(error)
+        self.assertEqual(
+            frozen.target_task_ids,
+            (implementation.id, review.id),
+        )
+        self.assertEqual(frozen.review_task_id, review.id)
+        self.assertEqual(frozen.anchor_commit_sha, "head123")
+
+        cases = (
+            (
+                "same root",
+                lambda _state, _worker, _implementation, candidate: setattr(
+                    candidate, "pipeline_root_id", "TORQUE:other-root"
+                ),
+                "do not share one root",
+            ),
+            (
+                "durably Done",
+                lambda _state, _worker, _implementation, candidate: setattr(
+                    candidate, "lane", "In Progress"
+                ),
+                "not durably Done",
+            ),
+            (
+                "effective Ship",
+                lambda _state, _worker, _implementation, candidate: (
+                    candidate.completion_evidence["review"].update(
+                        {"verdict": "block"}
+                    )
+                ),
+                "no effective Ship verdict",
+            ),
+            (
+                "anchor equality",
+                lambda _state, _worker, _implementation, candidate: (
+                    candidate.worktree_boundary.update(
+                        {"commit_sha": "different-head"}
+                    )
+                ),
+                "does not equal the clean preflight anchor",
+            ),
+            (
+                "repository reject",
+                lambda _state, _worker, _implementation, candidate: (
+                    candidate.worktree_boundary.update(
+                        {"repo_root": "/different-repo"}
+                    )
+                ),
+                "repo_root does not match",
+            ),
+            (
+                "branch reject",
+                lambda _state, _worker, _implementation, candidate: (
+                    candidate.worktree_boundary.update(
+                        {"branch": "torque/different"}
+                    )
+                ),
+                "branch does not match",
+            ),
+            (
+                "base reject",
+                lambda _state, _worker, _implementation, candidate: (
+                    candidate.worktree_boundary.update(
+                        {"base_branch": "release"}
+                    )
+                ),
+                "base_branch does not match",
+            ),
+        )
+        for label, mutate, expected in cases:
+            with self.subTest(label=label):
+                state, worker, implementation, review = fixture()
+                mutate(state, worker, implementation, review)
+                frozen, error = _freeze_merge_attribution(
+                    state,
+                    worker,
+                    worker.id,
+                    {"merge_task_id": implementation.id},
+                    boundary_state(review),
+                )
+                self.assertIsNone(frozen)
+                self.assertEqual(
+                    error["code"],
+                    "review_merge_attribution_refused",
+                )
+                self.assertIn(expected, error["error"])
+
     def _mark_boundaries_for_state(self, state):
         from torque.worktree_boundaries import mark_branch_boundaries_merged
 
@@ -4285,6 +4406,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             result = await handle_command({
                 "cmd": "worktree_merge",
                 "id": worker.id,
+                "merge_task_id": task.id,
                 "close_agent_on_merge": True,
             })
         finally:

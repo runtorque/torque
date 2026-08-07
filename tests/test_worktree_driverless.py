@@ -21,11 +21,12 @@ class DriverlessWorktreeGateParityTests(unittest.IsolatedAsyncioTestCase):
 
         state = MatrixState()
         state.groups["g"] = []
-        state.board_add_task(
+        boundary_task = state.board_add_task(
             "Boundary",
             "g",
             id="task-boundary",
             lane="Done",
+            agent_id="agent-1",
             worktree_boundary={
                 "version": "1",
                 "repo_root": "/repo",
@@ -84,7 +85,7 @@ class DriverlessWorktreeGateParityTests(unittest.IsolatedAsyncioTestCase):
         kwargs = dict(
             state=state,
             worktree_mgr=FakeWorktreeManager(),
-            data={},
+            data={"merge_task_id": boundary_task.id},
             latest_boundary_state_for_cell=latest_boundary,
             boundary_reason_message=lambda reason, boundary=None: reason,
         )
@@ -177,6 +178,13 @@ class BackendModularityMergeGateTests(unittest.IsolatedAsyncioTestCase):
             worktree_merge_squash=True,
             current_task_id="",
         )
+        merge_task = state.board_add_task(
+            "Merge backend change",
+            "g",
+            id="task-merge",
+            lane="In Progress",
+            agent_id=cell.id,
+        )
 
         class FakeWorktreeManager:
             def __init__(self):
@@ -205,7 +213,7 @@ class BackendModularityMergeGateTests(unittest.IsolatedAsyncioTestCase):
             cell=cell,
             worktree_mgr=mgr,
             aid=cell.id,
-            data={},
+            data={"merge_task_id": merge_task.id},
             latest_boundary_state_for_cell=latest_boundary,
             boundary_reason_message=lambda reason, boundary=None: reason,
         )

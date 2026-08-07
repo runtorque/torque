@@ -207,8 +207,8 @@ def _freeze_merge_attribution(
     if not isinstance(clean_boundary, dict):
         clean_boundary = {}
     anchor_commit_sha = str(
-        clean_boundary.get("commit_sha")
-        or clean.get("head_sha")
+        clean.get("head_sha")
+        or clean_boundary.get("commit_sha")
         or ""
     ).strip()
     review_commit_sha = str(

@@ -5154,13 +5154,8 @@ async def main(connection=None):
 
     def _mark_branch_boundaries_merged(cell, merge_sha: str,
                                        merged_task_ids=()) -> None:
-        if isinstance(merged_task_ids, str):
-            merged_task_ids = (merged_task_ids,)
-        target_ids = tuple(
-            str(task_id or "").strip()
-            for task_id in (merged_task_ids or ())
-            if str(task_id or "").strip()
-        )
+        target_ids = ((merged_task_ids,) if isinstance(merged_task_ids, str)
+                      else merged_task_ids)
         if not cell or not target_ids:
             return
         repo_root = cell.worktree_repo_root or cell.git_root or ""
