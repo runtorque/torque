@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 
 from ...artifacts import normalize_artifacts
@@ -74,10 +74,214 @@ from .gates import (
 from .submodules import (
     _latest_open_boundary_task_for_cell,
 )
+from .runtime import _review_task_has_ship_verdict
 from .targets import (
     _worktree_merge_error,
     _worktree_merge_preserve_diff_enabled,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class FrozenMergeAttribution:
+    """Task identities proven before any merge side effect begins."""
+
+    selected_task_id: str
+    target_task_ids: tuple[str, ...]
+    review_task_id: str = ""
+    anchor_commit_sha: str = ""
+
+
+def _task_pipeline_root_id(state, task) -> str:
+    """Return the task's structural root without consulting branch identity."""
+    if not task:
+        return ""
+    root_id = str(getattr(task, "pipeline_root_id", "") or "").strip()
+    if root_id:
+        return root_id
+    current = task
+    seen: set[str] = set()
+    while current:
+        current_id = str(getattr(current, "id", "") or "").strip()
+        if not current_id or current_id in seen:
+            return ""
+        seen.add(current_id)
+        parent_id = str(
+            getattr(current, "parent_task_id", "") or ""
+        ).strip()
+        if not parent_id:
+            return current_id
+        parent = state.board_tasks.get(parent_id)
+        if not parent:
+            return parent_id
+        current = parent
+    return ""
+
+
+def _review_attribution_error(
+    aid: str,
+    *,
+    review_task_id: str,
+    parent_task_id: str,
+    selected_task_id: str,
+    reason: str,
+) -> dict:
+    parent_label = parent_task_id or "<missing>"
+    return _worktree_merge_error(
+        aid,
+        "Clean review boundary cannot be attributed to this merge: "
+        f"review R={review_task_id}, parent P={parent_label}, "
+        f"selected implementation I={selected_task_id}; {reason}. "
+        f"Retry from the reviewed implementation with task={parent_label}.",
+        phase="review_merge_attribution",
+        code="review_merge_attribution_refused",
+        review_task_id=review_task_id,
+        review_parent_task_id=parent_task_id,
+        selected_task_id=selected_task_id,
+    )
+
+
+def _freeze_merge_attribution(
+    state,
+    cell,
+    aid: str,
+    data: dict,
+    boundary_state: dict,
+) -> tuple[FrozenMergeAttribution | None, dict | None]:
+    """Freeze exact merge targets, including a qualifying review boundary.
+
+    The review target is conferred only by its typed direct-child relationship
+    to the selected implementation. Repository/branch/base fields can reject
+    that relationship but can never create it.
+    """
+    selected_task_id = _merge_attribution_task_id(state, cell, data)
+    if not selected_task_id:
+        return None, _merge_task_attribution_error(state, cell, aid, data)
+    selected = state.board_tasks.get(selected_task_id)
+    if not selected:
+        return None, _worktree_merge_error(
+            aid,
+            "Merge task attribution resolved to a missing task.",
+            phase="merge_attribution",
+            code="merge_task_missing",
+        )
+
+    clean = (
+        boundary_state.get("clean")
+        if isinstance(boundary_state, dict)
+        else None
+    )
+    if not isinstance(clean, dict):
+        return FrozenMergeAttribution(
+            selected_task_id=selected_task_id,
+            target_task_ids=(selected_task_id,),
+        ), None
+
+    review_task_id = str(clean.get("task_id") or "").strip()
+    review = state.board_tasks.get(review_task_id) if review_task_id else None
+    if not review or str(
+            getattr(review, "action_name", "") or ""
+    ).strip().lower() != "feature/review":
+        return FrozenMergeAttribution(
+            selected_task_id=selected_task_id,
+            target_task_ids=(selected_task_id,),
+        ), None
+
+    parent_task_id = str(
+        getattr(review, "parent_task_id", "") or ""
+    ).strip()
+    reasons: list[str] = []
+    if parent_task_id != selected_task_id:
+        reasons.append("the review is not a direct child of the selected task")
+    selected_root = _task_pipeline_root_id(state, selected)
+    review_root = _task_pipeline_root_id(state, review)
+    if not selected_root or review_root != selected_root:
+        reasons.append("the review and selected task do not share one root")
+    if not task_counts_as_done(review):
+        reasons.append("the review is not durably Done")
+
+    if not _review_task_has_ship_verdict(review):
+        reasons.append("the review has no effective Ship verdict")
+
+    review_boundary = task_boundary(review)
+    clean_boundary = clean.get("boundary")
+    if not isinstance(clean_boundary, dict):
+        clean_boundary = {}
+    anchor_commit_sha = str(
+        clean_boundary.get("commit_sha")
+        or clean.get("head_sha")
+        or ""
+    ).strip()
+    review_commit_sha = str(
+        review_boundary.get("commit_sha") or ""
+    ).strip()
+    if not anchor_commit_sha or review_commit_sha != anchor_commit_sha:
+        reasons.append("the review commit does not equal the clean preflight anchor")
+
+    expected_identity = {
+        "repo_root": str(
+            getattr(cell, "worktree_repo_root", "")
+            or getattr(cell, "git_root", "")
+            or ""
+        ).strip(),
+        "branch": str(getattr(cell, "worktree_branch", "") or "").strip(),
+        "base_branch": str(
+            getattr(cell, "worktree_base_branch", "") or ""
+        ).strip(),
+    }
+    for key, expected in expected_identity.items():
+        actual = str(review_boundary.get(key) or "").strip()
+        if not actual or not expected or actual != expected:
+            reasons.append(f"the review boundary {key} does not match the merge target")
+
+    if reasons:
+        return None, _review_attribution_error(
+            aid,
+            review_task_id=review_task_id,
+            parent_task_id=parent_task_id,
+            selected_task_id=selected_task_id,
+            reason="; ".join(reasons),
+        )
+
+    return FrozenMergeAttribution(
+        selected_task_id=selected_task_id,
+        target_task_ids=(selected_task_id, review_task_id),
+        review_task_id=review_task_id,
+        anchor_commit_sha=anchor_commit_sha,
+    ), None
+
+
+async def _preflight_merge_attribution(
+    *,
+    state,
+    cell,
+    aid: str,
+    data: dict,
+    latest_boundary_state_for_cell,
+) -> dict:
+    """Resolve and freeze attribution before merge/push/publish operations."""
+    attribution_error = _merge_task_attribution_error(state, cell, aid, data)
+    if attribution_error:
+        return {"ok": False, "result": attribution_error}
+    boundary_state = await latest_boundary_state_for_cell(cell)
+    attribution, attribution_error = _freeze_merge_attribution(
+        state,
+        cell,
+        aid,
+        data,
+        boundary_state,
+    )
+    if attribution_error:
+        return {
+            "ok": False,
+            "boundary_state": boundary_state,
+            "result": attribution_error,
+        }
+    return {
+        "ok": True,
+        "boundary_state": boundary_state,
+        "attribution": attribution,
+    }
+
 
 async def _preflight_worktree_merge_gates(
     *,
@@ -90,6 +294,8 @@ async def _preflight_worktree_merge_gates(
     boundary_reason_message,
     panel_event=None,
     publish_nested_submodule_branches: bool = False,
+    frozen_attribution: FrozenMergeAttribution | None = None,
+    frozen_boundary_state: dict | None = None,
 ) -> dict:
     """Run shared local merge gates before either direct or PR merge paths."""
     if not (cell and cell.worktree_path and cell.worktree_branch):
@@ -98,15 +304,22 @@ async def _preflight_worktree_merge_gates(
             "result": _worktree_merge_error(aid, "Agent has no worktree."),
         }
 
-    attribution_error = _merge_task_attribution_error(state, cell, aid, data)
-    if attribution_error:
-        return {
-            "ok": False,
-            "result": attribution_error,
-        }
+    if frozen_attribution is None:
+        attribution_preflight = await _preflight_merge_attribution(
+            state=state,
+            cell=cell,
+            aid=aid,
+            data=data,
+            latest_boundary_state_for_cell=latest_boundary_state_for_cell,
+        )
+        if not attribution_preflight.get("ok"):
+            return attribution_preflight
+        frozen_attribution = attribution_preflight["attribution"]
+        boundary_state = attribution_preflight["boundary_state"]
+    else:
+        boundary_state = frozen_boundary_state or {}
 
     worktree_submodules = _configured_worktree_submodules_for_cell(state, cell)
-    boundary_state = await latest_boundary_state_for_cell(cell)
     dirty = (
         await worktree_mgr.has_uncommitted_changes(
             cell,
@@ -363,6 +576,7 @@ async def _preflight_worktree_merge_gates(
 
     return {
         "ok": True,
+        "attribution": frozen_attribution,
         "boundary_state": boundary_state,
         "stale_base": stale_base,
         "precheck": precheck,
@@ -455,8 +669,17 @@ def _merge_task_attribution_error(
         )
 
     candidates = state.agent_active_tasks(getattr(cell, "id", ""))
-    if len(candidates) <= 1:
+    if len(candidates) == 1 and resolved_task_id:
         return None
+    if not candidates:
+        return _worktree_merge_error(
+            aid,
+            "Merge task attribution found zero live task candidates on this "
+            "worker. Retry with explicit merge_task_id for the implementation "
+            "whose boundary is being merged.",
+            phase="merge_attribution",
+            code="merge_task_attribution_missing",
+        )
     candidate_ids = ", ".join(
         str(getattr(task, "id", "") or "") for task in candidates
     )

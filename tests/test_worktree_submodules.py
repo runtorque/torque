@@ -2477,13 +2477,15 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
                 "reason": "branch_tip_moved",
             }
 
-        def mark_boundaries(target_cell, merge_sha, merged_task_id=""):
+        def mark_boundaries(target_cell, merge_sha, merged_task_ids=()):
+            if isinstance(merged_task_ids, str):
+                merged_task_ids = (merged_task_ids,)
             boundaries_mod.mark_branch_boundaries_merged(
                 state.board_tasks.values(),
                 repo_root=target_cell.worktree_repo_root,
                 branch=target_cell.worktree_branch,
                 merge_sha=merge_sha,
-                task_ids=[merged_task_id],
+                task_ids=merged_task_ids,
                 merged_at="2026-05-26T02:00:00+00:00",
             )
 

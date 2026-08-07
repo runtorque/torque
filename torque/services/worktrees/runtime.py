@@ -11,6 +11,7 @@ class WorktreeOrchestrationDependencies:
     cleanup_shipped_reviewers_for_merged_cell: Any
     origin_verification_evidence: Any
     record_merge_completion_evidence: Any
+    review_task_has_ship_verdict: Any
     resolve_agent_id: Any
     worktree_entry_matches_agent: Any
     worktree_path_contains: Any
@@ -44,6 +45,10 @@ def _origin_verification_evidence(*args, **kwargs):
 
 def _record_merge_completion_evidence(*args, **kwargs):
     return _dependency("record_merge_completion_evidence")(*args, **kwargs)
+
+
+def _review_task_has_ship_verdict(*args, **kwargs):
+    return _dependency("review_task_has_ship_verdict")(*args, **kwargs)
 
 
 def _resolve_agent_id(*args, **kwargs):
