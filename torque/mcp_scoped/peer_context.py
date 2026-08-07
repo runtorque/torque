@@ -20,6 +20,25 @@ from torque.mcp_scoped.common import (
     _resolve_architect_engineer,
     _summary_task_title,
 )
+from torque.task_content import compute_task_content_hash
+
+TASK_READ_GRANT_MARKER = "torque.task-read-grant.v1"
+
+
+def _task_content_hash(task) -> str:
+    """Return the authored-content identity, recomputed from live content."""
+    return compute_task_content_hash(task)
+
+
+def _task_read_grant_from_row(row: dict) -> dict:
+    snapshot = dict((row or {}).get("context_snapshot", {}) or {})
+    grant = snapshot.get("task_read_grant", {})
+    if not isinstance(grant, dict):
+        return {}
+    grant = dict(grant)
+    if grant.get("marker") != TASK_READ_GRANT_MARKER:
+        return {}
+    return grant
 from torque.mcp_scoped.health import _engineer_streams, _resolve_stream_payload
 from torque.state import board_task_is_closed
 from torque.worktree_streams import member_task_ids_for_stream

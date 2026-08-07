@@ -458,6 +458,33 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_task_read_grant",
+        "authority": {"requirements": [{"capability": "message.engineer","minimum_scope": "children","target_argument": "engineer_id","target_kind": "agent"}]},
+        "description": (
+            "Grant one dispatch-eligible Engineer read-only access to the "
+            "current authored revision of one same-group task. The grant is "
+            "record-bound and becomes void when authored task content changes."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "engineer_id": {
+                    "type": "string",
+                    "description": "Dispatch-eligible Engineer id/slug/name.",
+                },
+                "task": {
+                    "type": "string",
+                    "description": "Same-group task id or alias.",
+                },
+                "message": {
+                    "type": "string",
+                    "description": "Cold-read request or other read instructions.",
+                },
+            },
+            "required": ["engineer_id", "task", "message"],
+        },
+    },
+    {
         "name": "architect_task_list", "authority": {"requirements": [{"capability": "task.read","minimum_scope": "self","result_kind": "task","result_paths": ["tasks"]}]},
         "description": (
             "List tasks in this architect's group with optional backlog "

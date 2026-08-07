@@ -17,6 +17,72 @@ async def dispatch_communications(ctx: ScopedDispatchContext):
     _engineer_group = ctx.caller_group
     tool_name = normalize_tool_name(name, tool_prefix)
 
+    if tool_name == "task_read_grant" and caller_kind == "architect":
+        engineer_ident = str(args.get("engineer_id", "") or "").strip()
+        if not engineer_ident:
+            return "agent is required", True
+        engineer_id, engineer_error = _resolve_architect_hired_engineer(
+            real_state, caller_id, engineer_ident
+        )
+        if not engineer_id:
+            return engineer_error, True
+        task_ident = str(args.get("task", "") or "").strip()
+        task_id = _resolve_task(state, task_ident)
+        task = state.board_tasks.get(task_id)
+        if not task:
+            return "Task not found", True
+        message = str(args.get("message", "") or "").strip()
+        if not message:
+            return "message is required", True
+        architect = real_state.agents.get(str(caller_id or "").strip())
+        engineer = real_state.agents.get(engineer_id)
+        group = str(getattr(architect, "group", "") or "").strip()
+        task_hash = _task_content_hash(task)
+        context = {
+            "context_task_ids": [task.id],
+            "context_engineer_ids": [engineer_id],
+            "context_snapshot": {
+                "task_read_grant": {
+                    "marker": TASK_READ_GRANT_MARKER,
+                    "architect_id": str(caller_id or "").strip(),
+                    "recipient_engineer_id": engineer_id,
+                    "group": group,
+                    "task_id": task.id,
+                    "task_content_hash": task_hash,
+                },
+            },
+        }
+        delivered = _deliver_architect_engineer_message(
+            real_state,
+            architect,
+            engineer,
+            action="architect_task_read_grant",
+            message=message,
+            context=context,
+        )
+        await _inject_mcp_message(
+            handle_command,
+            real_state,
+            architect,
+            engineer,
+            delivered,
+            (
+                f"{message}\n\n"
+                "Inspect the pinned task revision with "
+                f'peer_context(message_id="{delivered["id"]}"). '
+                "Reply with agent_reply and the returned task_content_hash."
+            ),
+        )
+        return json.dumps({
+            "type": "ok",
+            "grant_id": delivered["id"],
+            "message_id": delivered["id"],
+            "thread_id": delivered["thread_id"],
+            "engineer_id": engineer_id,
+            "task_id": task.id,
+            "task_content_hash": task_hash,
+        }), False
+
     if tool_name == "message_user" and caller_kind in {"architect", "engineer"}:
         sender = real_state.agents.get(str(caller_id or "").strip())
         message = str(args.get("message", "") or "").strip()
@@ -355,8 +421,102 @@ async def dispatch_communications(ctx: ScopedDispatchContext):
         entry, message_error = _load_message_entry(
             caller, args.get("message_id", "")
         )
+        if not entry and caller_kind == "engineer":
+            db = getattr(real_state, "db", None)
+            durable_row = (
+                db.load_agent_peer_message(
+                    str(args.get("message_id", "") or "").strip()
+                )
+                if db else None
+            )
+            if (
+                _task_read_grant_from_row(durable_row or {})
+                and str((durable_row or {}).get("recipient_id", "") or "").strip()
+                == str(caller_id or "").strip()
+            ):
+                entry = {
+                    "id": str(durable_row.get("id", "") or ""),
+                    "thread_id": str(durable_row.get("thread_id", "") or ""),
+                    "peer_id": str(durable_row.get("sender_id", "") or ""),
+                    "peer_kind": str(durable_row.get("sender_kind", "") or ""),
+                }
         if not entry:
             return message_error, True
+        grant_row = None
+        grant = {}
+        if caller_kind == "engineer":
+            db = getattr(real_state, "db", None)
+            grant_row = (
+                db.load_agent_peer_message(
+                    str(entry.get("id", "") or "").strip()
+                )
+                if db else None
+            )
+            grant = _task_read_grant_from_row(grant_row or {})
+        grant_hash = ""
+        grant_context = None
+        if grant:
+            caller_id_text = str(caller_id or "").strip()
+            architect_id = str(grant.get("architect_id", "") or "").strip()
+            group = str(grant.get("group", "") or "").strip()
+            task_id = str(grant.get("task_id", "") or "").strip()
+            task = real_state.board_tasks.get(task_id)
+            architect = real_state.agents.get(architect_id)
+            caller_engineer = real_state.agents.get(caller_id_text)
+            if (
+                str((grant_row or {}).get("recipient_id", "") or "").strip()
+                != caller_id_text
+                or str(grant.get("recipient_engineer_id", "") or "").strip()
+                != caller_id_text
+                or str((grant_row or {}).get("sender_id", "") or "").strip()
+                != architect_id
+                or str((grant_row or {}).get("group_name", "") or "").strip()
+                != group
+                or not architect
+                or str(getattr(architect, "kind", "") or "").strip()
+                != "architect"
+                or str(getattr(architect, "group", "") or "").strip() != group
+                or not caller_engineer
+                or str(getattr(caller_engineer, "group", "") or "").strip()
+                != group
+                or not task
+                or str(getattr(task, "group", "") or "").strip() != group
+            ):
+                return "Message thread not found in scope", True
+            pinned_hash = str(
+                grant.get("task_content_hash", "") or ""
+            ).strip()
+            current_hash = _task_content_hash(task)
+            supplied_hash = str(
+                args.get("task_content_hash", "") or ""
+            ).strip()
+            if current_hash != pinned_hash:
+                return json.dumps({
+                    "authored_verdict": str(args.get("message", "") or ""),
+                    "pinned_task_content_hash": pinned_hash,
+                    "current_task_content_hash": current_hash,
+                    "reason": "task body changed under reader",
+                    "next_step": (
+                        "request a fresh task_read_grant from an eligible "
+                        "Architect"
+                    ),
+                }), True
+            if not supplied_hash:
+                return (
+                    "task_content_hash is required for a task_read_grant verdict",
+                    True,
+                )
+            if supplied_hash != pinned_hash:
+                return "task_content_hash does not match the pinned grant", True
+            grant_hash = pinned_hash
+            grant_context = {
+                "context_task_ids": [task_id],
+                "context_engineer_ids": [caller_id_text],
+                "context_snapshot": {
+                    "task_read_grant": grant,
+                    "task_content_hash": pinned_hash,
+                },
+            }
         peer_id = str(entry.get("peer_id", "") or "").strip()
         peer = real_state.agents.get(peer_id)
         if caller_kind == "architect":
@@ -446,15 +606,19 @@ async def dispatch_communications(ctx: ScopedDispatchContext):
             reply_to_id=str(entry.get("id", "") or "").strip(),
             thread_id=str(entry.get("thread_id", "") or "").strip(),
             ack_required=ack_required,
+            context=grant_context,
         )
         await _inject_mcp_message(
             handle_command, real_state, caller, peer, delivered, message
         )
-        return json.dumps({
+        response = {
             "type": "ok",
             "message_id": delivered["id"],
             "thread_id": delivered["thread_id"],
-        }), False
+        }
+        if grant_hash:
+            response["task_content_hash"] = grant_hash
+        return json.dumps(response), False
 
     if tool_name == "agent_message":
         agent_ident = args.get("agent", "")

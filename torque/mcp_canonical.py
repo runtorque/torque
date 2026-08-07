@@ -68,6 +68,7 @@ _SUFFIX_TO_CANONICAL = {
     "task_proposal_list": "task_list",
     "task_show": "task_get",
     "task_proposal_show": "task_get",
+    "task_read_grant": "task_read_grant",
     "task_chain": "task_chain",
     "task_create": "task_create",
     "task_propose": "task_create",
@@ -281,6 +282,7 @@ _ARCHITECT_EAGER_BY_CATEGORY = {
     # dispatch-to-hired-Engineer flow; Architects do not dispatch Workers.
     "tasks": {
         "task_list", "task_get", "task_chain", "task_claim", "task_create",
+        "task_read_grant",
         "task_update", "task_block_reply", "task_reassign", "task_move", "task_mark_covered",
         "task_coverage_reconcile",
         "task_verify",
@@ -487,6 +489,13 @@ def _canonical_schema(name: str, schema: dict, *, caller_kind: str) -> dict:
         props.pop("engineer_id", None)
         add("agent", {"type": "string", "description": "Eligible subordinate agent id, slug, or name."})
         required = ["agent", "message"]
+    elif name == "task_read_grant":
+        props.pop("engineer_id", None)
+        add("agent", {
+            "type": "string",
+            "description": "Dispatch-eligible Engineer id, slug, or name.",
+        })
+        required = ["agent", "task", "message"]
     elif (
         caller_kind == "architect"
         and name in {
@@ -1088,7 +1097,10 @@ def translate_canonical_arguments(
                 if caller_kind == "architect"
                 else "peer_engineer_id"
             ] = peer
-    elif canonical_name == "agent_message" and caller_kind == "architect":
+    elif (
+        caller_kind == "architect"
+        and canonical_name in {"agent_message", "task_read_grant"}
+    ):
         translated["engineer_id"] = translated.pop("agent", "")
     elif (
         caller_kind == "architect"

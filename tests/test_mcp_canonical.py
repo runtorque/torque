@@ -247,6 +247,34 @@ class CanonicalMCPContractTests(unittest.TestCase):
         self.assertIn("when omitted, the message marks no task live", task_description)
         self.assertIn("mentions task IDs or slugs", task_description)
 
+    def test_task_read_grant_is_architect_only_and_uses_agent_argument(self):
+        architect_tools = {
+            tool["name"]: tool
+            for tool in _canonical_tools_for_caller(_State("architect"), "caller")
+        }
+        engineer_tools = {
+            tool["name"]: tool
+            for tool in _canonical_tools_for_caller(_State("engineer"), "caller")
+        }
+        self.assertIn("task_read_grant", architect_tools)
+        self.assertNotIn("task_read_grant", engineer_tools)
+        schema = architect_tools["task_read_grant"]["inputSchema"]
+        self.assertEqual(set(schema["required"]), {"agent", "message", "task"})
+        self.assertNotIn("engineer_id", schema["properties"])
+        handler, translated = _resolve_public_tool_call(
+            _State("architect"),
+            "caller",
+            "task_read_grant",
+            {
+                "agent": "eng-reader",
+                "task": "TORQUE:READ",
+                "message": "cold read",
+            },
+        )
+        self.assertEqual(handler, "architect_task_read_grant")
+        self.assertEqual(translated["engineer_id"], "eng-reader")
+        self.assertNotIn("agent", translated)
+
     def test_coverage_reconcile_discovery_and_selection_are_truthful(self):
         """Discovery presents the provisional route before a planner calls it."""
         docs = Path("docs/reference/mcp-tools.md").read_text(encoding="utf-8")
