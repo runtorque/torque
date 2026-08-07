@@ -640,6 +640,16 @@ async def handle_ai_report_command(
                     if gate_result:
                         result = gate_result
 
+        if (
+            result
+            and result.get("type") == "review_required"
+            and action == "done"
+            and task
+        ):
+            await _record_task_boundary(
+                task, cell, _completion_message("Done")
+            )
+
         if result and result.get("type") in (
                 "error", "deliverable_missing",
                 "review_required"):
