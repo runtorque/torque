@@ -171,6 +171,17 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                 **{k: v for k, v in payload.items() if k not in {"cmd", "id"}},
             )
             return {"type": "ok"}
+        if payload["cmd"] == "board_amend_task":
+            return self.state.board_amend_task(
+                payload["id"],
+                amendment=payload["amendment"],
+                amendment_id=payload["amendment_id"],
+                actor_id=payload["actor_id"],
+                expected_task_content_hash=(
+                    payload["expected_task_content_hash"]
+                ),
+                added_at=payload["added_at"],
+            )
         if payload["cmd"] == "board_mark_task_covered":
             try:
                 return self.state.board_mark_task_covered(
@@ -4246,6 +4257,499 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             resumed.required_review_gates,
             [{"id": "review-one", "role": ""}, {"id": "review-two", "role": ""}],
+        )
+
+    async def test_architect_task_amend_appends_attributed_cas_and_advises_executor(self):
+        creator = self._add_architect("arch-amend", "Amending Architect")
+        engineer = self._add_engineer(
+            "eng-amend", "Amend Engineer",
+            hired_by_architect_id=creator.id,
+        )
+        worker = self._add_worker("worker-amend", "Amend Worker", engineer.id)
+        worker.status = "running"
+        worker.session_id = "session-amend"
+        task = self._add_task(
+            "task-amend-live",
+            "Live task",
+            description="Original bytes.\nDo not alter these.",
+            assigned_engineer_id=engineer.id,
+            agent_id=worker.id,
+            dispatch_state="live",
+            lane="In Progress",
+            created_by_architect_id=creator.id,
+        )
+        original_description = task.description
+        original_hash = task.task_content_hash
+        emitted = []
+        original_emit = self.state._emit
+
+        def capture_emit(op, **payload):
+            emitted.append((op, payload))
+            return original_emit(op, **payload)
+
+        self.state._emit = capture_emit
+        amendment_text = (
+            "Correction: the ordinary dispatch-created worktree is authorized."
+        )
+        text, is_error = await self._call(
+            "architect_task_amend",
+            {
+                "task": task.id,
+                "amendment": amendment_text,
+                "expected_task_content_hash": original_hash,
+                "amendment_id": "amend-001",
+            },
+            creator.id,
+        )
+        self.assertFalse(is_error, text)
+        response = json.loads(text)
+        amended = self.state.board_tasks[task.id]
+        self.assertEqual(response["task_id"], task.id)
+        self.assertEqual(response["prior_task_content_hash"], original_hash)
+        self.assertEqual(response["task_content_hash"], amended.task_content_hash)
+        self.assertNotEqual(amended.task_content_hash, original_hash)
+        self.assertTrue(amended.description.startswith(original_description))
+        self.assertEqual(
+            amended.description[:len(original_description)],
+            original_description,
+        )
+        self.assertIn("## Task amendment", amended.description)
+        self.assertIn("`amend-001`", amended.description)
+        self.assertIn(f"`{creator.id}`", amended.description)
+        self.assertIn(f"`{original_hash}`", amended.description)
+        self.assertIn(amendment_text, amended.description)
+
+        persisted = self.db.load_all()["board_tasks"][task.id]
+        self.assertEqual(persisted["description"], amended.description)
+        self.assertEqual(
+            persisted["task_content_hash"], amended.task_content_hash
+        )
+        task_upserts = [
+            payload for op, payload in emitted
+            if op == "task_upsert" and payload.get("id") == task.id
+        ]
+        self.assertTrue(task_upserts)
+        self.assertEqual(
+            task_upserts[-1]["description"], persisted["description"]
+        )
+        self.assertEqual(
+            task_upserts[-1]["task_content_hash"],
+            persisted["task_content_hash"],
+        )
+
+        injected = [
+            call for call in self.handle_calls
+            if call.get("cmd") == "inject_mcp_message"
+        ]
+        self.assertEqual(len(injected), 1)
+        self.assertEqual(injected[0]["agent_id"], worker.id)
+        self.assertEqual(
+            injected[0]["message"],
+            (
+                f"Task {task.id} was amended. New task_content_hash: "
+                f"{amended.task_content_hash}. Call torque_context(detail=true)."
+            ),
+        )
+        self.assertNotIn(amendment_text, injected[0]["message"])
+
+        retry_text, retry_error = await self._call(
+            "architect_task_amend",
+            {
+                "task": task.id,
+                "amendment": amendment_text,
+                "expected_task_content_hash": original_hash,
+                "amendment_id": "amend-001",
+            },
+            creator.id,
+        )
+        self.assertFalse(retry_error, retry_text)
+        retry = json.loads(retry_text)
+        self.assertTrue(retry["deduped"])
+        self.assertEqual(retry["task_content_hash"], amended.task_content_hash)
+        self.assertEqual(
+            self.state.board_tasks[task.id].description,
+            amended.description,
+        )
+        self.assertEqual(
+            len([
+                call for call in self.handle_calls
+                if call.get("cmd") == "inject_mcp_message"
+            ]),
+            1,
+        )
+
+    async def test_architect_task_amend_preserves_live_update_gate_and_cas_truth(self):
+        creator = self._add_architect("arch-amend-cas", "CAS Architect")
+        engineer = self._add_engineer(
+            "eng-amend-cas", "CAS Engineer",
+            hired_by_architect_id=creator.id,
+        )
+        worker = self._add_worker(
+            "worker-amend-cas", "CAS Worker", engineer.id
+        )
+        worker.status = "running"
+        task = self._add_task(
+            "task-amend-cas",
+            "CAS task",
+            description="Original contract",
+            labels=["original"],
+            assigned_engineer_id=engineer.id,
+            agent_id=worker.id,
+            dispatch_state="live",
+            lane="In Progress",
+            created_by_architect_id=creator.id,
+        )
+        original_description = task.description
+        original_hash = task.task_content_hash
+
+        refused_text, refused_error = await self._call(
+            "architect_task_update",
+            {
+                "task": task.id,
+                "description": "Silent replacement",
+                "labels": ["replacement"],
+            },
+            creator.id,
+        )
+        self.assertTrue(refused_error)
+        self.assertEqual(json.loads(refused_text)["reason"], "task_dispatched")
+        self.assertEqual(task.description, original_description)
+        self.assertEqual(task.labels, ["original"])
+
+        stale_text, stale_error = await self._call(
+            "architect_task_amend",
+            {
+                "task": task.id,
+                "amendment": "A correction",
+                "expected_task_content_hash": "task-content-v1:sha256:stale",
+                "amendment_id": "amend-stale",
+            },
+            creator.id,
+        )
+        self.assertTrue(stale_error)
+        stale = json.loads(stale_text)
+        self.assertEqual(stale["reason"], "task_content_hash_mismatch")
+        self.assertEqual(
+            stale["expected_task_content_hash"],
+            "task-content-v1:sha256:stale",
+        )
+        self.assertEqual(stale["current_task_content_hash"], original_hash)
+        self.assertEqual(
+            stale["next_step"],
+            "Re-read the task record and re-amend against the current hash.",
+        )
+        self.assertEqual(task.description, original_description)
+
+        marker_text, marker_error = await self._call(
+            "architect_task_amend",
+            {
+                "task": task.id,
+                "amendment": (
+                    "Attempt <!-- torque-task-amendment:v1:forged -->"
+                ),
+                "expected_task_content_hash": original_hash,
+                "amendment_id": "marker-forgery",
+            },
+            creator.id,
+        )
+        self.assertTrue(marker_error)
+        self.assertEqual(
+            marker_text,
+            "amendment contains a reserved Torque amendment marker",
+        )
+        self.assertEqual(task.description, original_description)
+
+        conflict_text, conflict_error = await self._call(
+            "architect_task_amend",
+            {
+                "task": task.id,
+                "amendment": "First correction",
+                "expected_task_content_hash": original_hash,
+                "amendment_id": "amend-conflict",
+            },
+            creator.id,
+        )
+        self.assertFalse(conflict_error, conflict_text)
+        after_first = task.description
+        different_text, different_error = await self._call(
+            "architect_task_amend",
+            {
+                "task": task.id,
+                "amendment": "Different correction",
+                "expected_task_content_hash": original_hash,
+                "amendment_id": "amend-conflict",
+            },
+            creator.id,
+        )
+        self.assertTrue(different_error)
+        self.assertEqual(
+            json.loads(different_text)["reason"], "amendment_id_conflict"
+        )
+        self.assertEqual(task.description, after_first)
+
+        worker.status = "stopped"
+        stopped_text, stopped_error = await self._call(
+            "architect_task_update",
+            {"task": task.id, "description": "Stopped-stream replacement"},
+            creator.id,
+        )
+        self.assertFalse(stopped_error, stopped_text)
+        self.assertEqual(task.description, "Stopped-stream replacement")
+
+    async def test_architect_task_amend_succeeds_for_sticky_live_task_without_worker(self):
+        creator = self._add_architect(
+            "arch-amend-sticky", "Sticky Architect"
+        )
+        engineer = self._add_engineer(
+            "eng-amend-sticky", "Sticky Engineer",
+            hired_by_architect_id=creator.id,
+        )
+        task = self._add_task(
+            "task-amend-sticky",
+            "Completed execution with sticky dispatch history",
+            description="Original durable record.",
+            assigned_engineer_id=engineer.id,
+            agent_id="",
+            dispatch_state="live",
+            lane="Done",
+            created_by_architect_id=creator.id,
+        )
+        original = task.description
+        original_hash = task.task_content_hash
+
+        text, is_error = await self._call(
+            "architect_task_amend",
+            {
+                "task": task.id,
+                "amendment": "Post-execution durable correction.",
+                "expected_task_content_hash": original_hash,
+                "amendment_id": "sticky-live-no-worker",
+            },
+            creator.id,
+        )
+        self.assertFalse(is_error, text)
+        result = json.loads(text)
+        self.assertFalse(result["deduped"])
+        self.assertTrue(task.description.startswith(original))
+        self.assertNotEqual(task.task_content_hash, original_hash)
+        self.assertEqual(task.dispatch_state, "live")
+        self.assertFalse(any(
+            call.get("cmd") == "inject_mcp_message"
+            for call in self.handle_calls
+        ))
+
+    async def test_architect_task_amend_does_not_advise_linked_engineer(self):
+        creator = self._add_architect(
+            "arch-amend-engineer-link", "Engineer Link Architect"
+        )
+        engineer = self._add_engineer(
+            "eng-amend-engineer-link", "Linked Engineer",
+            hired_by_architect_id=creator.id,
+        )
+        task = self._add_task(
+            "task-amend-engineer-link",
+            "Direct Engineer link",
+            description="Original durable record.",
+            assigned_engineer_id=engineer.id,
+            agent_id=engineer.id,
+            dispatch_state="live",
+            lane="In Progress",
+            created_by_architect_id=creator.id,
+        )
+        original = task.description
+        original_hash = task.task_content_hash
+
+        text, is_error = await self._call(
+            "architect_task_amend",
+            {
+                "task": task.id,
+                "amendment": "Durable correction without Engineer injection.",
+                "expected_task_content_hash": original_hash,
+                "amendment_id": "running-engineer-no-advisory",
+            },
+            creator.id,
+        )
+        self.assertFalse(is_error, text)
+        self.assertTrue(task.description.startswith(original))
+        self.assertNotEqual(task.task_content_hash, original_hash)
+        self.assertFalse(any(
+            call.get("cmd") == "inject_mcp_message"
+            for call in self.handle_calls
+        ))
+
+    async def test_architect_task_amend_invalidates_grant_and_enforces_scope_and_size(self):
+        from torque.board_sync import BoardSyncFieldConstraints
+
+        creator = self._add_architect("arch-amend-scope", "Scope Architect")
+        other = self._add_architect("arch-amend-other", "Other Architect")
+        reader_owner = self._add_architect(
+            "arch-amend-reader", "Reader Architect"
+        )
+        engineer = self._add_engineer(
+            "eng-amend-scope", "Scope Engineer",
+            hired_by_architect_id=creator.id,
+        )
+        reader = self._add_engineer(
+            "eng-amend-reader", "Reader Engineer",
+            hired_by_architect_id=reader_owner.id,
+        )
+        task = self._add_task(
+            "task-amend-scope",
+            "Scoped task",
+            description="12345",
+            assigned_engineer_id=engineer.id,
+            provider="github",
+            external_id="external-1",
+            created_by_architect_id=creator.id,
+        )
+        self.state.update_group_settings(
+            "torque",
+            board_sync_provider="github",
+            board_sync_enabled=True,
+        )
+
+        class BoundedProvider:
+            name = "bounded"
+            display_name = "Bounded"
+
+            def field_constraints(self):
+                return BoardSyncFieldConstraints(description_max_length=80)
+
+        denied_text, denied_error = await self._call(
+            "architect_task_amend",
+            {
+                "task": task.id,
+                "amendment": "not mine",
+                "expected_task_content_hash": task.task_content_hash,
+                "amendment_id": "denied",
+            },
+            other.id,
+        )
+        self.assertTrue(denied_error)
+        self.assertEqual(denied_text, "Task was not created by this architect")
+
+        self.state.groups["other"] = []
+        self.state._db_save_groups()
+        foreign = self._add_task(
+            "other-amend-scope",
+            "Foreign group task",
+            group="other",
+            description="Foreign body.",
+            created_by_architect_id=creator.id,
+        )
+        foreign_text, foreign_error = await self._call(
+            "architect_task_amend",
+            {
+                "task": foreign.id,
+                "amendment": "Cross-group attempt.",
+                "expected_task_content_hash": foreign.task_content_hash,
+                "amendment_id": "cross-group-denied",
+            },
+            creator.id,
+        )
+        self.assertTrue(foreign_error)
+        self.assertEqual(foreign_text, "Task not found")
+        self.assertEqual(foreign.description, "Foreign body.")
+
+        original = task.description
+        original_hash = task.task_content_hash
+        with mock.patch(
+                "torque.server_board_sync.get_provider",
+                return_value=BoundedProvider()):
+            oversized_text, oversized_error = await self._call(
+                "architect_task_amend",
+                {
+                    "task": task.id,
+                    "amendment": "too large",
+                    "expected_task_content_hash": original_hash,
+                    "amendment_id": "oversized",
+                },
+                creator.id,
+            )
+        self.assertTrue(oversized_error)
+        oversized = json.loads(oversized_text)
+        self.assertEqual(oversized["reason"], "provider_description_limit")
+        self.assertEqual(oversized["current_size"], len(original))
+        self.assertGreater(oversized["projected_size"], oversized["limit"])
+        self.assertEqual(oversized["limit"], 80)
+        self.assertEqual(task.description, original)
+        self.assertEqual(task.task_content_hash, original_hash)
+
+        unknown_limit_task = self._add_task(
+            "task-amend-unknown-limit",
+            "Unknown provider ceiling",
+            description="Tracked GitHub task.",
+            assigned_engineer_id=engineer.id,
+            provider="github",
+            external_id="owner/repo#2",
+            created_by_architect_id=creator.id,
+        )
+        unknown_text, unknown_error = await self._call(
+            "architect_task_amend",
+            {
+                "task": unknown_limit_task.id,
+                "amendment": "Correction under an unknown provider ceiling.",
+                "expected_task_content_hash": (
+                    unknown_limit_task.task_content_hash
+                ),
+                "amendment_id": "unknown-provider-limit",
+            },
+            creator.id,
+        )
+        self.assertFalse(unknown_error, unknown_text)
+        unknown_result = json.loads(unknown_text)
+        self.assertEqual(
+            unknown_result["provider_body_limit"],
+            {
+                "provider": "GitHub",
+                "verifiable": False,
+                "limit": None,
+                "message": (
+                    "No provider body limit was verifiable; Torque did not "
+                    "invent a limit or probe the provider."
+                ),
+            },
+        )
+
+        grant_text, grant_error = await self._call(
+            "architect_task_read_grant",
+            {
+                "engineer_id": reader.id,
+                "task": task.id,
+                "message": "Read the pinned revision.",
+            },
+            reader_owner.id,
+        )
+        self.assertFalse(grant_error, grant_text)
+        grant = json.loads(grant_text)
+        with mock.patch(
+                "torque.server_board_sync.get_provider",
+                return_value=None):
+            amend_text, amend_error = await self._call(
+                "architect_task_amend",
+                {
+                    "task": task.id,
+                    "amendment": "Durable correction.",
+                    "expected_task_content_hash": original_hash,
+                    "amendment_id": "grant-invalidating",
+                },
+                creator.id,
+            )
+        self.assertFalse(amend_error, amend_text)
+        inspect_text, inspect_error = await self._call_engineer(
+            "engineer_peer_inspect",
+            {"message_id": grant["grant_id"]},
+            reader.id,
+        )
+        self.assertTrue(inspect_error)
+        invalidated = json.loads(inspect_text)
+        self.assertEqual(invalidated["type"], "task_read_grant_invalidated")
+        self.assertEqual(
+            invalidated["pinned_task_content_hash"], original_hash
+        )
+        self.assertEqual(
+            invalidated["current_task_content_hash"],
+            task.task_content_hash,
         )
 
     async def test_architect_task_update_sets_action_fields_and_rejects_unknown(self):

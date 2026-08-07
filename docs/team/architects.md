@@ -41,6 +41,15 @@ proportional, never vague; this is not an invitation to add boilerplate. A
 dispatch message may highlight sequencing or immediate instructions, but the
 durable description remains the source of truth.
 
+If an execution-critical correction is discovered after dispatch, use
+`task_amend` with the current `task_content_hash`. It appends a visible,
+attributed amendment without replacing any existing description bytes.
+Ordinary `task_update` remains unavailable while an execution stream is
+active. Labels are not covered by `task_content_hash` and therefore must never
+be the only home of an execution-critical correction. The executor advisory
+only announces the new hash and instructs the executor to reread the durable
+record; it is not itself authoritative correction text.
+
 Before creating or dispatching, the Architect rereads the proposed record from
 the perspective of a cold-start assignee. It must inspect relevant context or
 clarify uncertainty before proceeding if any safe-execution requirement,

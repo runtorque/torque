@@ -227,6 +227,7 @@ EXPECTED_BOARD_OPERATION_COMMANDS = {
     "board_archive_tasks",
     "board_unarchive_task",
     "board_update_task",
+    "board_amend_task",
     "board_mark_task_covered",
     "board_pickup_architect_task",
     "architect_proposal_root_backlog_hygiene",

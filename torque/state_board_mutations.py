@@ -11,6 +11,12 @@ from typing import Optional
 from .artifacts import normalize_artifacts, normalize_attachments
 from .task_ids import format_root_task_id, is_canonical_task_id, parse_task_id
 from .task_content import compute_task_content_hash
+from .task_amendment import (
+    build_task_amendment_block,
+    find_task_amendment,
+    task_amendment_text_hash,
+    validate_task_amendment,
+)
 from .finalization import audit_entry, evaluate_finalization, normalize_mode, status_projection
 from .worktree_boundaries import code_boundary_done_status
 from .state import (
@@ -832,6 +838,104 @@ class BoardMutationMixin:
         self._emit("task_upsert", **asdict(task))
         self._db_save_task(task)
         return False, result
+
+    def board_amend_task(
+        self,
+        tid: str,
+        *,
+        amendment: str,
+        amendment_id: str,
+        actor_id: str,
+        expected_task_content_hash: str,
+        added_at: str,
+    ) -> dict:
+        """Atomically compare-and-append one immutable attributed amendment."""
+        tid = self.resolve_task_alias(tid)
+        task = self.board_tasks.get(tid)
+        if not task:
+            return {"type": "error", "reason": "task_not_found"}
+        validation_error = validate_task_amendment(
+            amendment, amendment_id
+        )
+        if validation_error:
+            return {
+                "type": "error",
+                "reason": "invalid_task_amendment",
+                "message": validation_error,
+            }
+        if not str(actor_id or "").strip():
+            return {
+                "type": "error",
+                "reason": "invalid_task_amendment",
+                "message": "actor_id is required",
+            }
+        if not str(added_at or "").strip():
+            return {
+                "type": "error",
+                "reason": "invalid_task_amendment",
+                "message": "added_at is required",
+            }
+        self.ensure_board_task_persisted(tid)
+        current_hash = compute_task_content_hash(task)
+        # Normalize stale loaded values before evaluating either retry or CAS.
+        task.task_content_hash = current_hash
+        existing = find_task_amendment(task.description, amendment_id)
+        if existing:
+            if existing.get("amendment_sha256") != task_amendment_text_hash(
+                    amendment):
+                return {
+                    "type": "error",
+                    "reason": "amendment_id_conflict",
+                    "task_id": tid,
+                    "amendment_id": amendment_id,
+                    "message": (
+                        "amendment_id is already attached to this task with "
+                        "different amendment text"
+                    ),
+                }
+            return {
+                "type": "ok",
+                "task_id": tid,
+                "amendment_id": amendment_id,
+                "task_content_hash": current_hash,
+                "deduped": True,
+            }
+        if expected_task_content_hash != current_hash:
+            return {
+                "type": "error",
+                "reason": "task_content_hash_mismatch",
+                "task_id": tid,
+                "expected_task_content_hash": expected_task_content_hash,
+                "current_task_content_hash": current_hash,
+                "next_step": (
+                    "Re-read the task record and re-amend against the current "
+                    "hash."
+                ),
+            }
+        block = build_task_amendment_block(
+            amendment=amendment,
+            amendment_id=amendment_id,
+            actor_id=actor_id,
+            prior_task_content_hash=current_hash,
+            added_at=added_at,
+        )
+        original_description = task.description
+        task.description = original_description + block
+        # The authored hash changes normally, invalidating active grants while
+        # preserving completed verdict evidence against its prior pinned hash.
+        task.task_content_hash = compute_task_content_hash(task)
+        task.updated_at = added_at
+        self._emit("task_upsert", **asdict(task))
+        self._db_save_task(task)
+        self.recompute_task_health()
+        return {
+            "type": "ok",
+            "task_id": tid,
+            "amendment_id": amendment_id,
+            "prior_task_content_hash": current_hash,
+            "task_content_hash": task.task_content_hash,
+            "deduped": False,
+        }
 
     def board_update_task(self, tid: str, **fields):
         tid = self.resolve_task_alias(tid)

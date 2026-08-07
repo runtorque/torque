@@ -160,7 +160,8 @@ Architects do not receive Worker dispatch authority.
 Intentionally lazy exceptions are unrelated administration and lifecycle
 operations, behavior overlays, telemetry/settings/deploy inspection, broad
 event-delivery configuration, deep planning mutations, Idea Brief/Thinking
-editing, Engineer feedback/thread inspection, and backlog reconciliation.
+editing, Engineer feedback/thread inspection, backlog reconciliation, and the
+exceptional append-only `task_amend` correction path.
 They remain discoverable when authorized. External connectors are separate
 from this Torque projection and remain lazy/provider-managed.
 
@@ -272,6 +273,7 @@ does not guess a reply target from historical conversation rows.
 | `task_chain` | Walk a task's derivation chain. |
 | `task_create` | Create an executable task or proposal according to authority. |
 | `task_update` | Patch writable task fields. |
+| `task_amend` | Architect-only: append an immutable attributed correction using an atomic expected-`task_content_hash` comparison. Existing description bytes remain the exact prefix; the new hash invalidates active hash-pinned grants. A live executor receives only a hash/re-read advisory, never correction text in place of the durable record. Projected length is refused before persistence when the active provider declares a positive body cap. When it declares none, Torque does not invent or remotely probe a cap; success explicitly discloses that no provider body limit was verifiable. |
 | `task_block_reply` | Reply to a task's pending blocking request. |
 | `task_claim` | Claim an eligible routed task. |
 | `task_reassign` | Change task ownership within the caller's ceiling. |

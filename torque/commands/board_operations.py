@@ -19,7 +19,7 @@ BOARD_OPERATION_COMMAND_NAMES = frozenset({
     "board_sync_group", "board_pull_preview", "board_pull_apply",
     "board_import_preview", "board_pull_import_preview", "board_add_task",
     "board_archive_task", "board_archive_tasks", "board_unarchive_task",
-    "board_update_task", "board_mark_task_covered",
+    "board_update_task", "board_amend_task", "board_mark_task_covered",
     "board_pickup_architect_task",
     "architect_proposal_root_backlog_hygiene", "board_verify_task",
     "workflow_breach", "external_import_task", "external_link_task",
@@ -365,6 +365,28 @@ async def handle_board_operation_command(
                     data.get("id", ""),
                     reason="task_unarchive",
                 )
+
+    elif cmd == "board_amend_task":
+        tid = _resolve_task_id(state, data.get("id", ""))
+        result = state.board_amend_task(
+            tid,
+            amendment=str(data.get("amendment", "") or ""),
+            amendment_id=str(data.get("amendment_id", "") or ""),
+            actor_id=str(data.get("actor_id", "") or ""),
+            expected_task_content_hash=str(
+                data.get("expected_task_content_hash", "") or ""
+            ),
+            added_at=str(data.get("added_at", "") or ""),
+        )
+        if (
+                result.get("type") != "error"
+                and not result.get("deduped")
+                and board_sync_manager):
+            board_sync_manager.enqueue_for_local_change(
+                tid,
+                reason="task_amend",
+                fields=("description",),
+            )
 
     elif cmd == "board_update_task":
         tid = _resolve_task_id(state, data.get("id", ""))

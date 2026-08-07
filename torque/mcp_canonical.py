@@ -74,6 +74,7 @@ _SUFFIX_TO_CANONICAL = {
     "task_propose": "task_create",
     "task_edit": "task_update",
     "task_update": "task_update",
+    "task_amend": "task_amend",
     "task_pickup": "task_claim",
     "task_move": "task_move",
     "task_reassign": "task_reassign",
@@ -247,6 +248,10 @@ CANONICAL_DESCRIPTIONS = {
     "supervisor_message": "Send a direct message to the caller's supervising agent.",
     "agent_reply": "Reply within an existing supervisor/subordinate message thread.",
     "task_dispatch": "Dispatch one task or a batch of tasks to eligible workers.",
+    "task_amend": (
+        "Append an immutable attributed correction to an authored task "
+        "description using a task_content_hash compare-and-swap."
+    ),
     "area_link": "Add or remove a typed link between an Area and another planning resource.",
     "initiative_link": "Add or remove a typed link between an Initiative and a task or decision.",
     "area_note": "Create, update, or archive a typed Area note.",
@@ -282,7 +287,8 @@ _ARCHITECT_EAGER_BY_CATEGORY = {
     # dispatch-to-hired-Engineer flow; Architects do not dispatch Workers.
     "tasks": {
         "task_list", "task_get", "task_chain", "task_claim", "task_create",
-        "task_update", "task_block_reply", "task_reassign", "task_move", "task_mark_covered",
+        "task_update", "task_block_reply", "task_reassign", "task_move",
+        "task_mark_covered",
         "task_coverage_reconcile",
         "task_verify",
     },

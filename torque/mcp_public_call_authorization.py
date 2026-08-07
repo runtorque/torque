@@ -672,7 +672,11 @@ def _handler_scoped_target_scope(
     # still requires an explicit claim by the Engineer's hiring Architect;
     # this branch never grants a general same-group ownership right.
     if (
-            tool_name in {"architect_task_pickup", "architect_task_update"}
+            tool_name in {
+                "architect_task_pickup",
+                "architect_task_update",
+                "architect_task_amend",
+            }
             and requirement.target_kind == "task"
             and str(getattr(target, "created_by_engineer_id", "") or "").strip()
             and str(getattr(target, "group", "") or "").strip()
