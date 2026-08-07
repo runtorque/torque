@@ -15,7 +15,9 @@ import json
 import sqlite3
 from typing import Callable, Iterable
 
-SCHEMA_VERSION = "28"
+from .task_content import compute_task_content_hash
+
+SCHEMA_VERSION = "29"
 
 
 @dataclass(frozen=True)
@@ -1010,7 +1012,8 @@ CREATE TABLE IF NOT EXISTS board_tasks (
     required_review_gates TEXT NOT NULL DEFAULT '[]',
     finalization_boundary TEXT NOT NULL DEFAULT '{}',
     finalization_audit TEXT NOT NULL DEFAULT '[]',
-    finalization_status TEXT NOT NULL DEFAULT '{}'
+    finalization_status TEXT NOT NULL DEFAULT '{}',
+    task_content_hash TEXT
 );
 
 CREATE TABLE IF NOT EXISTS schedules (
@@ -2846,6 +2849,58 @@ def _migration_0028_legacy_memory_ttl_backfill(
     """Ledger the runner-owned legacy Shared Context TTL backfill."""
 
 
+def _migration_0029_board_task_content_hash(
+    conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Add and eagerly establish the v1 authored-content identity."""
+
+    _ensure_columns(conn, "board_tasks", {"task_content_hash": "TEXT"})
+    columns = (
+        "id",
+        "task",
+        "description",
+        "action_name",
+        "action_vars",
+        "agent_template",
+        "suggested_action",
+        "required_review_gates",
+        "depends_on",
+        "deliverable_required",
+        "deliverable_type",
+        "deliverable_format",
+        "deliverable_artifact_title",
+        "requires_review",
+        "finalization_mode",
+        "instructions",
+        "context",
+        "criteria",
+    )
+
+    def load_json(value, default):
+        try:
+            parsed = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return default
+        return parsed
+
+    for row in conn.execute(
+        f"SELECT {', '.join(columns)} FROM board_tasks"
+    ).fetchall():
+        task = dict(zip(columns, row))
+        task["action_vars"] = load_json(task["action_vars"], {})
+        task["required_review_gates"] = load_json(
+            task["required_review_gates"], []
+        )
+        task["depends_on"] = load_json(task["depends_on"], [])
+        task["deliverable_required"] = bool(task["deliverable_required"])
+        task["requires_review"] = bool(task["requires_review"])
+        conn.execute(
+            "UPDATE board_tasks SET task_content_hash=? WHERE id=?",
+            (compute_task_content_hash(task), task["id"]),
+        )
+
+
 def _migration_0025_finalization_policy_contract(
     conn: sqlite3.Connection,
     _backfill_agent_history,
@@ -3247,6 +3302,13 @@ SCHEMA_MIGRATIONS = (
         _migration_0028_legacy_memory_ttl_backfill,
         phase="post_init",
         requires_runner=True,
+    ),
+    SchemaMigration(
+        29,
+        "board_task_content_hash",
+        "board-task-authored-content-hash-v1-agent-template",
+        _migration_0029_board_task_content_hash,
+        phase="post_init",
     ),
 )
 

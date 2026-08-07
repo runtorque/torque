@@ -75,6 +75,7 @@ from .task_ids import (
     parse_initiative_id,
     parse_task_id,
 )
+from .task_content import compute_task_content_hash
 from .worktree_boundaries import clear_stale_successor_references
 from .services.areas import AreaService
 from .services.architect_governance import ArchitectGovernanceService
@@ -992,6 +993,8 @@ class BoardTask:
     finalization_boundary: dict = field(default_factory=dict)
     finalization_audit: list = field(default_factory=list)
     finalization_status: dict = field(default_factory=dict)
+    # Null/empty means UNVERSIONED: readable, but ineligible as pinned evidence.
+    task_content_hash: str | None = None
 
 
 @dataclass
@@ -4283,6 +4286,8 @@ class MatrixState(
                 log.exception("Failed to delete group %s", name)
 
     def _db_save_task(self, task: BoardTask):
+        # Defensive invariant for direct mutation paths that bypass board_update_task.
+        task.task_content_hash = compute_task_content_hash(task)
         if self.db:
             try:
                 if self._critical_write_capture_task(task):

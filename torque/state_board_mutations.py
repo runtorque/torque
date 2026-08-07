@@ -10,6 +10,7 @@ from typing import Optional
 
 from .artifacts import normalize_artifacts, normalize_attachments
 from .task_ids import format_root_task_id, is_canonical_task_id, parse_task_id
+from .task_content import compute_task_content_hash
 from .finalization import audit_entry, evaluate_finalization, normalize_mode, status_projection
 from .worktree_boundaries import code_boundary_done_status
 from .state import (
@@ -155,6 +156,9 @@ class BoardMutationMixin:
                 "created_at", "updated_at", "lane_entered_at")},
         )
         self.board_tasks[tid] = bt
+        # Establish authored identity before any finalization helper can emit
+        # or persist this newly visible task.
+        bt.task_content_hash = compute_task_content_hash(bt)
         # Creation is a Done attempt too. A root never enters Done until the
         # canonical admission guard accepts it; this includes opt-in legacy
         # review-cardinality declarations while empty legacy cards retain
@@ -957,6 +961,9 @@ class BoardMutationMixin:
                 task.finalization_audit = audit[-40:]
         if "task" in fields:
             task.slug = self._unique_task_slug(task.task, exclude_id=tid)
+        # All authored fields are now applied. Establish their identity before
+        # finalization projection can synchronously emit/persist this task.
+        task.task_content_hash = compute_task_content_hash(task)
         # Status projection is derived, compact data rather than advisory prose.
         self._refresh_finalization_root_projection(task)
         from datetime import datetime, timezone
