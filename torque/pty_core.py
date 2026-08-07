@@ -25,6 +25,12 @@ PROMPT_HOOK_LIMIT = 512
 # Tail window used when scanning the screen for agent input-readiness.
 READINESS_BUFFER_LIMIT = 20_000
 
+# Maximum pending (not yet replayed) output characters retained by
+# TerminalScreenBuffer between renders. The screen itself is only a few KB;
+# this window holds many full TUI repaints, so replaying just the tail after
+# an overflow still reconstructs the current screen.
+SCREEN_PENDING_LIMIT = 48_000
+
 # Matches OSC7 cwd reports emitted by our zsh/bash prompt hooks.
 OSC7_RE = re.compile("\x1b]7;file://[^/\x07\x1b]*(/.*?)(?:\x07|\x1b\\\\)")
 
@@ -53,13 +59,21 @@ class TerminalScreenBuffer:
         self._row = 0
         self._col = 0
         self._saved_cursor = (0, 0)
+        self._pending: list[str] = []
+        self._pending_chars = 0
+        self._pending_overflow = False
 
     def reset(self) -> None:
         self._lines = [[] for _ in range(self.rows)]
         self._row = 0
         self._col = 0
+        self._pending.clear()
+        self._pending_chars = 0
+        self._pending_overflow = False
 
     def resize(self, cols: int, rows: int) -> None:
+        # Replay under the geometry the pending output was produced for.
+        self._flush_pending()
         self.cols = max(1, int(cols or 1))
         new_rows = max(1, int(rows or 1))
         if new_rows > len(self._lines):
@@ -77,6 +91,48 @@ class TerminalScreenBuffer:
         )
 
     def feed(self, text: str) -> None:
+        """Queue output for lazy replay.
+
+        Feeding used to emulate the terminal per character on every PTY
+        chunk — hundreds of milliseconds of event-loop CPU per MB of agent
+        output. The current screen is only consulted at readiness-poll
+        cadence, so emulation is deferred to ``render()``. Beyond
+        ``SCREEN_PENDING_LIMIT`` the oldest pending output is dropped and
+        the screen rebuilt from the retained tail, which spans many full
+        TUI repaints.
+        """
+        if not text:
+            return
+        self._pending.append(text)
+        self._pending_chars += len(text)
+        while (self._pending_chars > SCREEN_PENDING_LIMIT
+                and len(self._pending) > 1):
+            dropped = self._pending.pop(0)
+            self._pending_chars -= len(dropped)
+            self._pending_overflow = True
+        if self._pending_chars > SCREEN_PENDING_LIMIT:
+            tail = self._pending[0][-SCREEN_PENDING_LIMIT:]
+            self._pending[0] = tail
+            self._pending_chars = len(tail)
+            self._pending_overflow = True
+
+    def _flush_pending(self) -> None:
+        if not self._pending:
+            return
+        chunks = self._pending
+        self._pending = []
+        self._pending_chars = 0
+        if self._pending_overflow:
+            self._pending_overflow = False
+            # Continuity with the old screen is broken; rebuild from the
+            # retained tail, which repaints it within a frame or two.
+            self._lines = [[] for _ in range(self.rows)]
+            self._row = 0
+            self._col = 0
+        for chunk in chunks:
+            self._feed_now(chunk)
+
+    def _feed_now(self, text: str) -> None:
         i = 0
         length = len(text)
         while i < length:
@@ -110,6 +166,7 @@ class TerminalScreenBuffer:
             i += 1
 
     def render(self) -> str:
+        self._flush_pending()
         lines = ["".join(line).rstrip() for line in self._lines]
         while lines and not lines[-1]:
             lines.pop()

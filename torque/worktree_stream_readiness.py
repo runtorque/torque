@@ -338,24 +338,18 @@ def _stream_base_branch(state, stream: dict) -> str:
     return str(getattr(owner, "worktree_base_branch", "") or "").strip()
 
 
-async def prefill_merge_readiness_for_state(state, *, group: str = "") -> None:
-    """Warm current-base merge probes before synchronous stream synthesis.
+async def prefill_merge_readiness_for_streams(state, streams) -> bool:
+    """Warm current-base merge probes for precomputed ``streams``.
 
-    Failure is intentionally cached as ``unknown`` and downstream synthesis
-    treats it as not-ready rather than falsely recommending a merge.
+    Returns True when at least one probe actually ran (i.e. the cache held
+    no fresh entry for some stream), so callers know a recompute would now
+    observe different readiness data. Failure is intentionally cached as
+    ``unknown`` and downstream synthesis treats it as not-ready rather than
+    falsely recommending a merge.
     """
-    # Deferred to avoid the import cycle: worktree_streams re-exports this
-    # module's readiness helpers.
-    from .worktree_streams import compute_worktree_streams
-
-    await prefill_branch_exists_for_state(
-        state, group=group, include_merge_readiness=False,
-    )
-    streams = compute_worktree_streams(
-        state, group=group, include_orphaned=False,
-    )
     probes = []
-    for stream in streams:
+    for stream in streams or []:
+        stream = stream or {}
         if str(stream.get("state", "") or "") == "merged":
             continue
         repo_root = str(stream.get("repo_root", "") or "").strip()
@@ -366,6 +360,7 @@ async def prefill_merge_readiness_for_state(state, *, group: str = "") -> None:
         if _merge_readiness_cache_get(repo_root, branch, base_branch):
             continue
         probes.append((repo_root, branch, base_branch))
+    probes = list(dict.fromkeys(probes))
 
     async def populate(repo_root: str, branch: str, base_branch: str) -> None:
         info = await _probe_merge_readiness(repo_root, branch, base_branch)
@@ -375,6 +370,22 @@ async def prefill_merge_readiness_for_state(state, *, group: str = "") -> None:
         await asyncio.gather(
             *(populate(*probe) for probe in probes), return_exceptions=True,
         )
+    return bool(probes)
+
+
+async def prefill_merge_readiness_for_state(state, *, group: str = "") -> None:
+    """Warm current-base merge probes before synchronous stream synthesis."""
+    # Deferred to avoid the import cycle: worktree_streams re-exports this
+    # module's readiness helpers.
+    from .worktree_streams import compute_worktree_streams
+
+    await prefill_branch_exists_for_state(
+        state, group=group, include_merge_readiness=False,
+    )
+    streams = compute_worktree_streams(
+        state, group=group, include_orphaned=False,
+    )
+    await prefill_merge_readiness_for_streams(state, streams)
 
 
 def _branch_exists_locally(repo_root: str, branch: str, *,
@@ -408,6 +419,27 @@ def _branch_exists_locally(repo_root: str, branch: str, *,
     cached = _branch_exists_ttl_cache.get(key)
     if cached is not None and cached[0] > now:
         exists = cached[1]
+        if cache is not None:
+            cache[key] = exists
+        return exists
+
+    try:
+        running_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        running_loop = None
+    if running_loop is not None:
+        # We are blocking the event loop; a synchronous `git show-ref` fork
+        # here used to stall the daemon for seconds when the cache was cold
+        # (one fork per stream). Serve the freshest stale answer instead and
+        # warm the cache in the background for the next synthesis. The stale
+        # answer is not written back to the TTL cache so the refresh wins.
+        running_loop.create_task(prefill_branch_exists_async([repo_root]))
+        if repo_entry is not None:
+            exists = branch in repo_entry[1]
+        elif cached is not None:
+            exists = cached[1]
+        else:
+            exists = False
         if cache is not None:
             cache[key] = exists
         return exists

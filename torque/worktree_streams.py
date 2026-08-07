@@ -23,6 +23,7 @@ from .worktree_stream_readiness import (
     prefill_branch_exists_async,
     prefill_branch_exists_for_state,
     prefill_merge_readiness_for_state,
+    prefill_merge_readiness_for_streams,
 )
 from .worktree_boundaries import (
     boundary_pr_metadata,
@@ -1574,7 +1575,9 @@ def _select_owner_agent(state, *, stream_tasks: list[Any], repo_root: str,
             0 if identity == (repo_root, branch) else 1,
             0 if current_id in stream_task_ids else 1,
             0 if getattr(cell, "status", "") == "running" else 1,
-            0 if state.agent_is_busy(cell.id) and current_mutable else 1,
+            # agent_is_busy(cell.id) ≡ current is not None, which
+            # current_mutable already implies — no need to rescan the board.
+            0 if current_mutable else 1,
             -float(
                 getattr(cell, "last_activity_at", 0.0)
                 or getattr(cell, "last_event_at", 0.0)
