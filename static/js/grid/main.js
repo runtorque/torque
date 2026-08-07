@@ -28,6 +28,13 @@ function _renderAgentGridHeaderControls(groupName, atAgentCap) {
   }
   return '<div class="agent-grid-header-controls" data-agent-grid-header-controls>'
     + viewToggle
+    + '<button type="button" class="agent-grid-actions-btn" draggable="false" data-agent-grid-actions-button'
+    + ' data-group="' + esc(group) + '"'
+    + ' aria-haspopup="menu" aria-expanded="false" title="Agent actions" aria-label="Agent actions for ' + esc(group) + '"'
+    + ' onclick="openAgentGridActionsMenu(event,' + groupArg + ')"'
+    + '><svg class="agent-grid-actions-icon" viewBox="0 0 12 12" aria-hidden="true">'
+    + '<circle cx="2" cy="6" r=".8"/><circle cx="6" cy="6" r=".8"/><circle cx="10" cy="6" r=".8"/>'
+    + '</svg></button>'
     + '<button type="button" class="agent-grid-new-btn" draggable="false" data-agent-grid-new-button'
     + ' data-group="' + esc(group) + '"'
     + (atAgentCap ? ' data-agent-cap="true"' : '')

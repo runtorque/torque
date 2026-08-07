@@ -1055,6 +1055,26 @@ main {
   color: var(--text-dim);
   transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
 }
+.agent-grid-actions-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
+}
+.agent-grid-actions-icon {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
 .agent-grid-new-icon {
   width: 12px;
   height: 12px;
@@ -1063,17 +1083,20 @@ main {
   stroke-width: 1.4;
   stroke-linecap: round;
 }
-.agent-grid-new-btn:hover:not(:disabled) {
+.agent-grid-new-btn:hover:not(:disabled),
+.agent-grid-actions-btn:hover:not(:disabled) {
   border-color: var(--border-strong);
   background: var(--bg-hover);
   color: var(--text);
 }
-.agent-grid-new-btn:focus-visible {
+.agent-grid-new-btn:focus-visible,
+.agent-grid-actions-btn:focus-visible {
   outline: none;
   border-color: var(--accent);
   box-shadow: var(--focus-ring);
 }
-.agent-grid-new-btn:disabled {
+.agent-grid-new-btn:disabled,
+.agent-grid-actions-btn:disabled {
   cursor: default;
   opacity: .45;
 }

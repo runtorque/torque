@@ -658,6 +658,7 @@ function toggleHint(btn) {
 }
 
 let _confirmResolve = null;
+let _confirmAlternateValue = 'alternate';
 let _inputDialogResolve = null;
 let _inputDialogFields = [];
 let _inputDialogFieldElements = {};
@@ -1068,11 +1069,21 @@ function showConfirm(message, opts) {
     const defaultLabel = /^\s*Delete\b/.test(String(message || '')) ? 'Delete' : 'OK';
     btn.textContent = (opts && opts.label) || defaultLabel;
     btn.className = 'btn-primary ' + ((opts && opts.variant) || 'btn-danger');
+    const alternate = document.getElementById('confirm-alternate-btn');
+    if (alternate) {
+      const alternateLabel = String((opts && opts.alternateLabel) || '').trim();
+      alternate.textContent = alternateLabel;
+      alternate.className = (opts && opts.alternateVariant) || 'btn-secondary';
+      alternate.classList.toggle('hidden', !alternateLabel);
+      _confirmAlternateValue = (opts && Object.prototype.hasOwnProperty.call(opts, 'alternateValue'))
+        ? opts.alternateValue
+        : 'alternate';
+    }
     openModalDialog('modal-confirm', {
       role: (opts && opts.role) || 'alertdialog',
       labelledBy: 'confirm-title',
       describedBy: 'confirm-message',
-      initialFocus: '#confirm-yes-btn',
+      initialFocus: (opts && opts.alternateLabel) ? '#confirm-alternate-btn' : '#confirm-yes-btn',
       cancelOnEscape: true,
       onCancel: confirmNo,
     });
@@ -1082,6 +1093,7 @@ function _confirmResult(accepted) {
   closeModalDialog('modal-confirm', { restoreFocus: true });
   if (!_confirmResolve) return;
   if (!accepted) { _confirmResolve(false); _confirmResolve = null; return; }
+  if (accepted !== true) { _confirmResolve(accepted); _confirmResolve = null; return; }
   const extras = document.getElementById('confirm-extras');
   const boxes = extras.querySelectorAll('input[type="checkbox"]');
   if (boxes.length === 0) { _confirmResolve(true); _confirmResolve = null; return; }
@@ -1091,6 +1103,7 @@ function _confirmResult(accepted) {
   _confirmResolve = null;
 }
 function confirmYes() { _confirmResult(true); }
+function confirmAlternate() { _confirmResult(_confirmAlternateValue); }
 function confirmNo() { _confirmResult(false); }
 
 /* -- Input dialog (replaces window.prompt for routine operator flows) --- */

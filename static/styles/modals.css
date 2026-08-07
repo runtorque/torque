@@ -1573,7 +1573,7 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 }
 
 #modal-confirm { z-index: 200; }
-#confirm-message { font-size: 12px; line-height: 1.5; }
+#confirm-message { font-size: 12px; line-height: 1.5; white-space: pre-line; }
 
 /* ------------------------------------------------------------------ */
 /* Worktree History modal                                              */
