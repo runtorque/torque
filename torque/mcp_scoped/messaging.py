@@ -378,7 +378,8 @@ def _architect_dispatch_message_for_task(task, message: str) -> str:
 
 
 def _resolve_architect_dispatch_task(state, caller_id: str, engineer_id: str,
-                                     group: str, task_ident: str
+                                     group: str, task_ident: str, *,
+                                     include_pickup_guidance: bool = False,
                                      ) -> tuple[object | None, str]:
     task_id = _resolve_task(state, task_ident)
     if not task_id:
@@ -397,6 +398,8 @@ def _resolve_architect_dispatch_task(state, caller_id: str, engineer_id: str,
         )
         if handoff_refusal:
             return None, handoff_refusal
+        if not include_pickup_guidance:
+            return None, "Task was not created by this architect"
         pickup_authorization, _pickup_error = (
             _routed_product_proposal_root_pickup_authorization(
                 state, caller_id_str, task,
@@ -506,6 +509,7 @@ async def _send_architect_engineer_message(real_state, handle_command,
             engineer_id,
             architect_group,
             task_ident,
+            include_pickup_guidance=True,
         )
         if not dispatch_task:
             return None, task_error

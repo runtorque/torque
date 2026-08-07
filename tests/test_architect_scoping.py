@@ -2955,6 +2955,45 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task.dispatch_state, "queued")
         self.assertEqual(engineer.mcp_messages, [])
 
+    async def test_architect_message_context_only_skips_routed_pickup_lookup(self):
+        creator = self._add_architect("arch-product", "Blueprint")
+        receiver = self._add_architect("arch-routing", "Torqly")
+        engineer = self._add_engineer(
+            "eng-routing", "Routing Engineer",
+            hired_by_architect_id=receiver.id,
+        )
+        task = self._add_task(
+            "TORQUE:1560",
+            "Context-only product proposal",
+            labels=["product-proposal", "proposal-only"],
+            action_name="feature/implement",
+            assigned_engineer_id=engineer.id,
+            created_by_architect_id=creator.id,
+            dispatch_state="queued",
+        )
+
+        with mock.patch.object(
+                self.db,
+                "load_agent_peer_messages_for_agent",
+                wraps=self.db.load_agent_peer_messages_for_agent,
+        ) as load_route_evidence:
+            text, is_error = await self._call(
+                "architect_engineer_message",
+                {
+                    "engineer_id": engineer.id,
+                    "message": f"Context only: {task.id}.",
+                },
+                receiver.id,
+            )
+
+        self.assertFalse(is_error, text)
+        payload = json.loads(text)
+        self.assertNotIn("task_id", payload)
+        self.assertNotIn("dispatch_advisory", payload)
+        load_route_evidence.assert_not_called()
+        self.assertEqual(task.dispatch_state, "queued")
+        self.assertEqual(len(engineer.mcp_messages), 1)
+
     async def test_architect_message_task_references_do_not_dispatch_without_task(self):
         architect = self._add_architect("arch-1", "Architect")
         alice = self._add_engineer(
