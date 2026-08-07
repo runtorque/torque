@@ -595,6 +595,208 @@ async function restartAgent(id) {
   }
 }
 
+const _AGENT_GRID_BULK_CHUNK_SIZE = 10;
+
+function _agentGridGroupAgentCells(group) {
+  const groupName = String(group || '').trim();
+  const ids = ((state && state.groups) || {})[groupName] || [];
+  const cells = [];
+  for (const id of ids) {
+    const cell = state && state.agents ? state.agents[id] : null;
+    if (!cell || cell.cell_type !== 'agent') continue;
+    if (typeof _isTombstonedAgent === 'function' && _isTombstonedAgent(cell)) continue;
+    cells.push(cell);
+  }
+  return cells;
+}
+
+function _bulkRestartCandidates(group, kind) {
+  const requestedKind = String(kind || 'all');
+  return _agentGridGroupAgentCells(group).filter(function(cell) {
+    if (requestedKind !== 'all' && String(cell.kind || '') !== requestedKind) return false;
+    if (typeof _isLifecycleDismissedCell === 'function' && _isLifecycleDismissedCell(cell)) {
+      return false;
+    }
+    return true;
+  });
+}
+
+function _bulkCloseWorkerRisk(cell) {
+  if (!cell || !cell.worktree_path) {
+    // No tracked path does not prove no worktree exists: relaunch validation can
+    // clear tracking while leaving an orphan on disk. Worktree removal is keyed
+    // by the same field, so the orphan cannot be removed and is safe for this operation.
+    return 'safe';
+  }
+  if (cell.worktree_dirty || Number(cell.worktree_checkpoints || 0) > 0) return 'risky';
+  // The clean-looking worktree fields are ephemeral and clear on daemon restart.
+  // Without a persistent refreshed marker this state must fail closed as unknown.
+  return 'unknown';
+}
+
+function _classifyBulkCloseWorkers(group) {
+  const candidates = _agentGridGroupAgentCells(group).filter(function(cell) {
+    return String(cell.kind || '') === 'worker' && String(cell.status || '') !== 'running';
+  });
+  const result = {
+    candidates: candidates,
+    safe: [],
+    risky: [],
+    unknown: [],
+    shared: [],
+    statusCounts: {},
+  };
+  for (const cell of candidates) {
+    const risk = _bulkCloseWorkerRisk(cell);
+    result[risk].push(cell);
+    const status = String(cell.status || 'unknown');
+    result.statusCounts[status] = Number(result.statusCounts[status] || 0) + 1;
+    if (cell.worktree_path && _worktreeSharedWith(cell)) result.shared.push(cell);
+  }
+  return result;
+}
+
+function _bulkCountLabel(count, singular, plural) {
+  return count + ' ' + (count === 1 ? singular : (plural || singular + 's'));
+}
+
+function _bulkCloseWorkerMessage(classified) {
+  const total = classified.candidates.length;
+  const statusOrder = ['idle', 'error', 'stopped', 'unknown'];
+  const seen = {};
+  const statusParts = [];
+  for (const status of statusOrder.concat(Object.keys(classified.statusCounts))) {
+    if (seen[status] || !classified.statusCounts[status]) continue;
+    seen[status] = true;
+    statusParts.push(classified.statusCounts[status] + ' ' + status);
+  }
+  const lines = [
+    'Close ' + _bulkCountLabel(total, 'worker') + ' that ' + (total === 1 ? 'is' : 'are') + ' not running?',
+    'Status breakdown: ' + statusParts.join(', ') + '.',
+    _bulkCountLabel(classified.safe.length, 'worker') + ' ha' + (classified.safe.length === 1 ? 's' : 've')
+      + ' no tracked worktree path and ' + (classified.safe.length === 1 ? 'is' : 'are') + ' safe for this operation.',
+    _bulkCountLabel(classified.risky.length, 'worker') + ' ha' + (classified.risky.length === 1 ? 's' : 've')
+      + ' uncommitted changes or unmerged commits.',
+    _bulkCountLabel(classified.unknown.length, 'worktree state') + ' '
+      + (classified.unknown.length === 1 ? 'is' : 'are')
+      + ' unknown (not known to be refreshed since the last daemon restart).',
+  ];
+  if (classified.shared.length) {
+    lines.push(_bulkCountLabel(classified.shared.length, 'worker')
+      + (classified.shared.length === 1
+        ? ' has a worktree shared with another agent'
+        : ' have worktrees shared with other agents')
+      + '; shared worktrees are kept.');
+  }
+  lines.push('Workers are scheduled for permanent deletion in 7 days and can be restored before then. Worktrees are preserved during the 7-day restore window; after that, unshared tracked worktrees are removed and their changes are lost if the workers are not restored.');
+  return lines.join('\n');
+}
+
+function _agentGridBatchCellStillInGroup(cell, group) {
+  if (!cell || cell.cell_type !== 'agent') return false;
+  if (typeof _isTombstonedAgent === 'function' && _isTombstonedAgent(cell)) return false;
+  const ids = ((state && state.groups) || {})[String(group || '').trim()] || [];
+  return ids.indexOf(cell.id) >= 0;
+}
+
+async function _dispatchAgentGridBatch(ids, payloadForCell, stillEligible, onQueued) {
+  const result = { queued: [], failed: [], skipped: [] };
+  for (let start = 0; start < ids.length; start += _AGENT_GRID_BULK_CHUNK_SIZE) {
+    const end = Math.min(ids.length, start + _AGENT_GRID_BULK_CHUNK_SIZE);
+    for (let index = start; index < end; index += 1) {
+      const id = ids[index];
+      const cell = state && state.agents ? state.agents[id] : null;
+      if (!cell || !stillEligible(cell)) {
+        result.skipped.push(id);
+        continue;
+      }
+      let accepted = false;
+      try {
+        accepted = send(payloadForCell(cell)) !== false;
+      } catch (_error) {
+        accepted = false;
+      }
+      if (accepted) {
+        result.queued.push(id);
+        if (onQueued) onQueued(cell);
+      } else {
+        result.failed.push(id);
+      }
+    }
+    await new Promise(function(resolve) { setTimeout(resolve, 0); });
+  }
+  return result;
+}
+
+function _reportAgentGridBatchDispatch(label, result) {
+  const parts = [];
+  if (result.queued.length) parts.push(_bulkCountLabel(result.queued.length, label + ' request') + ' queued');
+  if (result.failed.length) parts.push(_bulkCountLabel(result.failed.length, 'request') + ' could not be sent');
+  if (result.skipped.length) {
+    parts.push(_bulkCountLabel(result.skipped.length, 'agent') + ' skipped because '
+      + (result.skipped.length === 1 ? 'its' : 'their') + ' state changed');
+  }
+  if (!parts.length) return;
+  _showToast(parts.join('; ') + '.', result.failed.length ? 'error' : (result.skipped.length ? 'warning' : 'info'), {
+    title: 'Bulk agent action',
+  });
+}
+
+async function bulkRestartAgents(group, kind) {
+  const groupName = String(group || '').trim();
+  const requestedKind = String(kind || 'all');
+  const candidates = _bulkRestartCandidates(groupName, requestedKind);
+  if (!candidates.length) return;
+  const kindLabel = requestedKind === 'all' ? 'agent' : requestedKind;
+  const message = 'Restart ' + _bulkCountLabel(candidates.length, kindLabel) + '? '
+    + 'Current sessions will be closed and relaunched with their original startup and initial prompts. '
+    + 'Any in-progress conversations will be lost.';
+  if (!await showConfirm(message, { label: 'Restart ' + candidates.length })) return;
+  const ids = candidates.map(function(cell) { return cell.id; });
+  const result = await _dispatchAgentGridBatch(
+    ids,
+    function(cell) { return { cmd: 'restart_agent', id: cell.id }; },
+    function(cell) {
+      return _agentGridBatchCellStillInGroup(cell, groupName)
+        && (requestedKind === 'all' || String(cell.kind || '') === requestedKind)
+        && !(typeof _isLifecycleDismissedCell === 'function' && _isLifecycleDismissedCell(cell));
+    }
+  );
+  _reportAgentGridBatchDispatch('restart', result);
+}
+
+async function bulkCloseNonRunningWorkers(group) {
+  const groupName = String(group || '').trim();
+  const classified = _classifyBulkCloseWorkers(groupName);
+  if (!classified.candidates.length) return;
+  const hasRisk = classified.risky.length > 0 || classified.unknown.length > 0;
+  const choice = await showConfirm(_bulkCloseWorkerMessage(classified), {
+    title: 'Close workers',
+    label: 'Close all ' + classified.candidates.length,
+    variant: 'btn-danger',
+    alternateLabel: hasRisk && classified.safe.length ? 'Close clean only' : '',
+    alternateValue: 'clean',
+    alternateVariant: 'btn-secondary',
+  });
+  if (!choice) return;
+  const closeCleanOnly = choice === 'clean';
+  const ids = (closeCleanOnly ? classified.safe : classified.candidates).map(function(cell) { return cell.id; });
+  const result = await _dispatchAgentGridBatch(
+    ids,
+    function(cell) { return { cmd: 'remove_agent', id: cell.id }; },
+    function(cell) {
+      if (!_agentGridBatchCellStillInGroup(cell, groupName)) return false;
+      if (String(cell.kind || '') !== 'worker' || String(cell.status || '') === 'running') return false;
+      return !closeCleanOnly || _bulkCloseWorkerRisk(cell) === 'safe';
+    },
+    function(cell) {
+      if (typeof selectedAgentId !== 'undefined' && selectedAgentId === cell.id) selectedAgentId = null;
+      if (typeof selectedTerminalId !== 'undefined' && selectedTerminalId === cell.id) selectedTerminalId = null;
+    }
+  );
+  _reportAgentGridBatchDispatch('close', result);
+}
+
 async function clearAgentContext(id) {
   if (await showConfirm("Clear this agent's context? This resets the conversation and the agent will receive full instructions on its next task.")) {
     send({ cmd: 'clear_agent_context', id });
@@ -1429,6 +1631,51 @@ function openAgentGridNewMenu(e, group) {
   }
   const items = _agentGridNewMenuItems(group);
   if (!items.length) return;
+  let x = e && typeof e.clientX === 'number' ? e.clientX : 0;
+  let y = e && typeof e.clientY === 'number' ? e.clientY : 0;
+  const target = e && (e.currentTarget || e.target);
+  if (target && typeof target.getBoundingClientRect === 'function') {
+    const rect = target.getBoundingClientRect();
+    x = rect.left;
+    y = rect.bottom + 4;
+  }
+  showContextMenu(x, y, items, { invoker: target });
+}
+
+function _agentGridActionsMenuItems(group) {
+  const groupName = String(group || '').trim();
+  const restartKinds = [
+    ['architect', 'Restart all architects'],
+    ['engineer', 'Restart all engineers'],
+    ['worker', 'Restart all workers'],
+    ['all', 'Restart all agents'],
+  ];
+  const items = restartKinds.map(function(entry) {
+    const kind = entry[0];
+    const count = groupName ? _bulkRestartCandidates(groupName, kind).length : 0;
+    return {
+      label: entry[1],
+      disabled: count === 0,
+      action: 'bulkRestartAgents(' + JSON.stringify(groupName) + ', ' + JSON.stringify(kind) + ')',
+    };
+  });
+  items.push({ separator: true });
+  const closeCount = groupName ? _classifyBulkCloseWorkers(groupName).candidates.length : 0;
+  items.push({
+    label: 'Close all workers that are not running',
+    disabled: closeCount === 0,
+    danger: true,
+    action: 'bulkCloseNonRunningWorkers(' + JSON.stringify(groupName) + ')',
+  });
+  return items;
+}
+
+function openAgentGridActionsMenu(e, group) {
+  if (e) {
+    if (typeof e.preventDefault === 'function') e.preventDefault();
+    if (typeof e.stopPropagation === 'function') e.stopPropagation();
+  }
+  const items = _agentGridActionsMenuItems(group);
   let x = e && typeof e.clientX === 'number' ? e.clientX : 0;
   let y = e && typeof e.clientY === 'number' ? e.clientY : 0;
   const target = e && (e.currentTarget || e.target);

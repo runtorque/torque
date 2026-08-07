@@ -28237,6 +28237,8 @@ test('agent grid group tabs render standalone controls and switch active group',
   assert.match(tabsHtml, /&#9881;/);
   assert.doesNotMatch(tabsHtml, /Group actions|openAgentGroupTabActions|onGroupTabContextMenu|&#8943;/);
   assert.match(tabsHtml, /data-agent-grid-header-controls[\s\S]*aria-label="Create agent or group"/);
+  assert.match(tabsHtml, /data-agent-grid-header-controls[\s\S]*data-agent-grid-actions-button[\s\S]*data-agent-grid-new-button/);
+  assert.match(tabsHtml, /aria-label="Agent actions for alpha"/);
   assert.doesNotMatch(tabsHtml, /agent-group-tab-actions|<select|Delete group/);
 
   runInContext(context, `
@@ -28280,6 +28282,169 @@ test('agent grid group tabs render standalone controls and switch active group',
   tabsHtml = runInContext(context, `_renderAgentGroupTabsHtml()`);
   assert.equal(jsonValue(context, `state.active_group`), 'gamma');
   assert.match(tabsHtml, /class="agent-group-tab active"[\s\S]*title="gamma"[\s\S]*gamma/);
+});
+
+test('agent grid bulk actions are group scoped and fail closed on unknown worker worktrees', async () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/commands.js');
+
+  runInContext(context, `
+    state.groups = {
+      alpha: ['architect-a', 'engineer-a', 'worker-clean', 'worker-unknown', 'worker-dirty', 'worker-ahead', 'worker-running', 'deleted-worker'],
+      beta: ['worker-beta']
+    };
+    state.agents = {
+      'architect-a': { id: 'architect-a', cell_type: 'agent', kind: 'architect', group: 'alpha', status: 'idle' },
+      'engineer-a': { id: 'engineer-a', cell_type: 'agent', kind: 'engineer', group: 'alpha', status: 'stopped' },
+      'worker-clean': { id: 'worker-clean', cell_type: 'agent', kind: 'worker', group: 'alpha', status: 'idle', worktree_path: '' },
+      'worker-unknown': { id: 'worker-unknown', cell_type: 'agent', kind: 'worker', group: 'alpha', status: 'error', worktree_path: '/tmp/unknown', worktree_dirty: false, worktree_checkpoints: 0 },
+      'worker-dirty': { id: 'worker-dirty', cell_type: 'agent', kind: 'worker', group: 'alpha', status: 'stopped', worktree_path: '/tmp/dirty', worktree_dirty: true, worktree_checkpoints: 0 },
+      'worker-ahead': { id: 'worker-ahead', cell_type: 'agent', kind: 'worker', group: 'alpha', status: 'idle', worktree_path: '/tmp/ahead', worktree_dirty: false, worktree_checkpoints: 2 },
+      'worker-running': { id: 'worker-running', cell_type: 'agent', kind: 'worker', group: 'alpha', status: 'running', worktree_path: '' },
+      'deleted-worker': { id: 'deleted-worker', cell_type: 'agent', kind: 'worker', group: 'alpha', status: 'idle', deleted_at: 123 },
+      'worker-beta': { id: 'worker-beta', name: 'Beta worker', cell_type: 'agent', kind: 'worker', group: 'beta', status: 'idle', worktree_path: '/tmp/unknown' }
+    };
+    _isTombstonedAgent = function(cell) { return !!cell.deleted_at; };
+  `);
+
+  const menu = jsonValue(context, `_agentGridActionsMenuItems('alpha').map(function(item) {
+    return { label: item.label || '', disabled: !!item.disabled, separator: !!item.separator };
+  })`);
+  assert.deepEqual(menu, [
+    { label: 'Restart all architects', disabled: false, separator: false },
+    { label: 'Restart all engineers', disabled: false, separator: false },
+    { label: 'Restart all workers', disabled: false, separator: false },
+    { label: 'Restart all agents', disabled: false, separator: false },
+    { label: '', disabled: false, separator: true },
+    { label: 'Close all workers that are not running', disabled: false, separator: false },
+  ]);
+  assert.deepEqual(jsonValue(context, `_agentGridActionsMenuItems('missing').filter(function(item) {
+    return !item.separator;
+  }).map(function(item) { return !!item.disabled; })`), [true, true, true, true, true]);
+  assert.deepEqual(jsonValue(context, `({
+    architect: _bulkRestartCandidates('alpha', 'architect').map(function(cell) { return cell.id; }),
+    engineer: _bulkRestartCandidates('alpha', 'engineer').map(function(cell) { return cell.id; }),
+    worker: _bulkRestartCandidates('alpha', 'worker').map(function(cell) { return cell.id; }),
+    all: _bulkRestartCandidates('alpha', 'all').map(function(cell) { return cell.id; })
+  })`), {
+    architect: ['architect-a'],
+    engineer: ['engineer-a'],
+    worker: ['worker-clean', 'worker-unknown', 'worker-dirty', 'worker-ahead', 'worker-running'],
+    all: ['architect-a', 'engineer-a', 'worker-clean', 'worker-unknown', 'worker-dirty', 'worker-ahead', 'worker-running'],
+  });
+
+  const classified = jsonValue(context, `_classifyBulkCloseWorkers('alpha')`);
+  assert.deepEqual(classified.safe.map((cell) => cell.id), ['worker-clean']);
+  assert.deepEqual(classified.risky.map((cell) => cell.id), ['worker-dirty', 'worker-ahead']);
+  assert.deepEqual(classified.unknown.map((cell) => cell.id), ['worker-unknown']);
+  assert.deepEqual(classified.candidates.map((cell) => cell.id), [
+    'worker-clean', 'worker-unknown', 'worker-dirty', 'worker-ahead',
+  ]);
+  assert.equal(classified.statusCounts.idle, 2);
+  assert.equal(classified.statusCounts.error, 1);
+  assert.equal(classified.statusCounts.stopped, 1);
+
+  const confirmCalls = [];
+  sandbox.showConfirm = function(message, opts) {
+    confirmCalls.push({ message, opts });
+    return Promise.resolve('clean');
+  };
+  sandbox.send = function(message) {
+    sandbox.sendCalls.push(message);
+    return true;
+  };
+  await context.bulkCloseNonRunningWorkers('alpha');
+  assert.equal(confirmCalls.length, 1);
+  assert.match(confirmCalls[0].message, /2 idle, 1 error, 1 stopped/);
+  assert.match(confirmCalls[0].message, /1 worktree state is unknown/);
+  assert.match(confirmCalls[0].message, /1 worker has a worktree shared with another agent; shared worktrees are kept/);
+  assert.match(confirmCalls[0].message, /preserved during the 7-day restore window/);
+  assert.equal(confirmCalls[0].opts.alternateLabel, 'Close clean only');
+  assert.equal(confirmCalls[0].opts.alternateValue, 'clean');
+  assert.equal(confirmCalls[0].opts.label, 'Close all 4');
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [
+    { cmd: 'remove_agent', id: 'worker-clean' },
+  ]);
+});
+
+test('agent grid bulk restart and close revalidate membership, yield, and report transport failures', async () => {
+  let yieldCount = 0;
+  const toastCalls = [];
+  const confirmCalls = [];
+  const { sandbox } = createSandbox({
+    setTimeout(fn) { yieldCount += 1; fn(); return yieldCount; },
+  });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/commands.js');
+  sandbox._showToast = function(message, level, opts) {
+    toastCalls.push({ message, level, opts });
+  };
+  sandbox.showConfirm = function(message, opts) {
+    confirmCalls.push({ message, opts });
+    if (/Restart/.test(message)) return Promise.resolve(true);
+    sandbox.state.agents['worker-running-late'].status = 'running';
+    return Promise.resolve(true);
+  };
+  sandbox.send = function(message) {
+    sandbox.sendCalls.push(message);
+    return message.id !== 'worker-send-fails';
+  };
+  runInContext(context, `
+    state.groups = { alpha: ['architect-a', 'engineer-a', 'worker-running-late', 'worker-send-fails'], beta: ['architect-b'] };
+    state.agents = {
+      'architect-a': { id: 'architect-a', cell_type: 'agent', kind: 'architect', group: 'alpha', status: 'idle' },
+      'engineer-a': { id: 'engineer-a', cell_type: 'agent', kind: 'engineer', group: 'alpha', status: 'idle' },
+      'worker-running-late': { id: 'worker-running-late', cell_type: 'agent', kind: 'worker', group: 'alpha', status: 'idle', worktree_path: '' },
+      'worker-send-fails': { id: 'worker-send-fails', cell_type: 'agent', kind: 'worker', group: 'alpha', status: 'stopped', worktree_path: '/tmp/dirty', worktree_dirty: true },
+      'architect-b': { id: 'architect-b', cell_type: 'agent', kind: 'architect', group: 'beta', status: 'idle' }
+    };
+    _isTombstonedAgent = function() { return false; };
+  `);
+
+  await context.bulkRestartAgents('alpha', 'architect');
+  assert.match(confirmCalls[0].message, /Restart 1 architect/);
+  assert.match(confirmCalls[0].message, /Any in-progress conversations will be lost/);
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [
+    { cmd: 'restart_agent', id: 'architect-a' },
+  ]);
+
+  sandbox.sendCalls.length = 0;
+  await context.bulkRestartAgents('alpha', 'all');
+  assert.deepEqual(jsonValue(context, 'sendCalls.map(function(call) { return call.id; })'), [
+    'architect-a', 'engineer-a', 'worker-running-late', 'worker-send-fails',
+  ]);
+  assert.doesNotMatch(JSON.stringify(sandbox.sendCalls), /architect-b/);
+
+  sandbox.sendCalls.length = 0;
+  await context.bulkCloseNonRunningWorkers('alpha');
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [
+    { cmd: 'remove_agent', id: 'worker-send-fails' },
+  ]);
+  assert.ok(yieldCount >= 1, 'batch dispatch yields to the UI event loop');
+  assert.match(toastCalls.at(-1).message, /1 request could not be sent/);
+  assert.match(toastCalls.at(-1).message, /1 agent skipped because its state changed/);
+  assert.equal(toastCalls.at(-1).level, 'error');
+
+  sandbox.sendCalls.length = 0;
+  runInContext(context, `
+    state.groups.large = [];
+    for (var bulkIndex = 0; bulkIndex < 21; bulkIndex += 1) {
+      var bulkId = 'bulk-worker-' + bulkIndex;
+      state.groups.large.push(bulkId);
+      state.agents[bulkId] = {
+        id: bulkId,
+        cell_type: 'agent',
+        kind: 'worker',
+        group: 'large',
+        status: 'idle'
+      };
+    }
+  `);
+  const yieldsBeforeLargeBatch = yieldCount;
+  await context.bulkRestartAgents('large', 'worker');
+  assert.equal(sandbox.sendCalls.length, 21);
+  assert.equal(yieldCount - yieldsBeforeLargeBatch, 3, '21 sends are split into three yielding chunks');
 });
 
 test('compact group switcher arrows traverse visible options and the create action', () => {

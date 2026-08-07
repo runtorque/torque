@@ -166,6 +166,7 @@ function createSandbox() {
   const confirmMessage = append(confirmPanel, make('p', 'confirm-message'));
   const confirmExtras = append(confirmPanel, make('div', 'confirm-extras'));
   const confirmCancel = append(confirmPanel, make('button', 'confirm-cancel-btn'));
+  const confirmAlternate = append(confirmPanel, make('button', 'confirm-alternate-btn', ['hidden']));
   const confirmYes = append(confirmPanel, make('button', 'confirm-yes-btn'));
 
   const inputOverlay = make('div', 'modal-input-dialog', ['overlay']);
@@ -203,6 +204,7 @@ function createSandbox() {
     confirmTitle,
     confirmMessage,
     confirmExtras,
+    confirmAlternate,
     confirmYes,
     inputOverlay,
     inputPanel,
@@ -281,6 +283,28 @@ test('showConfirm applies alertdialog ARIA, Escape rejects, and restores focus',
 
   env.confirmYes.dispatchEvent(keyEvent('Escape'));
   assert.equal(await promise, false);
+  assert.equal(env.confirmOverlay.classList.contains('visible'), false);
+  assert.equal(env.sandbox.document.activeElement, env.trigger);
+});
+
+test('showConfirm exposes and resolves a distinct alternate action', async () => {
+  const env = createSandbox();
+  const context = vm.createContext(env.sandbox);
+  loadModals(context);
+
+  const promise = vm.runInContext(`showConfirm('Close workers?', {
+    label: 'Close all',
+    alternateLabel: 'Close clean only',
+    alternateValue: 'clean',
+    alternateVariant: 'btn-secondary'
+  })`, context);
+
+  assert.equal(env.confirmAlternate.textContent, 'Close clean only');
+  assert.equal(env.confirmAlternate.classList.contains('hidden'), false);
+  assert.equal(env.confirmAlternate.className, 'btn-secondary');
+  assert.equal(env.sandbox.document.activeElement, env.confirmAlternate);
+  vm.runInContext('confirmAlternate()', context);
+  assert.equal(await promise, 'clean');
   assert.equal(env.confirmOverlay.classList.contains('visible'), false);
   assert.equal(env.sandbox.document.activeElement, env.trigger);
 });
