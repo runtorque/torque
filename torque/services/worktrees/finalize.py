@@ -808,8 +808,8 @@ async def _finalize_successful_driverless_worktree_merge(
     """Apply branch/boundary side effects after a driverless merge succeeds."""
     contained_task_ids = await verified_review_cycle_containment_task_ids(
         state.board_tasks.values(),
-        repo_root=target.repo_root,
-        branch=target.branch,
+        repo_root=target.worktree_repo_root or target.git_root or "",
+        branch=target.worktree_branch,
         merge_sha=merge_sha,
         task_ids=merged_task_ids,
     )

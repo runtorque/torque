@@ -1088,8 +1088,12 @@ async def verified_review_cycle_containment_task_ids(
         base_ref = _clean_text(fact.get("base_sha", ""))
         boundary_ref = _clean_text(boundary.get("commit_sha", ""))
         classified_ref = _clean_text(fact.get("commit_sha", ""))
-        if not base_ref or not boundary_ref or (
-                classified_ref and classified_ref != boundary_ref):
+        if (
+                not base_ref
+                or not boundary_ref
+                or not classified_ref
+                or classified_ref != boundary_ref
+        ):
             continue
         base_commit = await resolve_commit(base_ref)
         boundary_commit = await resolve_commit(boundary_ref)
