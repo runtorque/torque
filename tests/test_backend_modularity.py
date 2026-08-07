@@ -18,6 +18,7 @@ from torque.backend_invariants import (
     DEFAULT_BACKEND_LINE_LIMIT,
     backend_modularity_headroom,
     check_backend_modularity_crossings,
+    format_backend_modularity_crossings,
     format_backend_modularity_headroom,
 )
 from torque.worktree import WorktreeManager
@@ -482,6 +483,24 @@ class BackendInvariantCrossingTests(unittest.TestCase):
         self._git("add", "torque/sample.py")
         self._git("commit", "-qm", message)
         return self._git("rev-parse", "HEAD").stdout.strip()
+
+    def test_crossing_message_prescribes_budget_only_merge_first(self):
+        message = format_backend_modularity_crossings({
+            "crossings": [{
+                "path": "torque/sample.py",
+                "limit": DEFAULT_BACKEND_LINE_LIMIT,
+                "base_lines": DEFAULT_BACKEND_LINE_LIMIT,
+                "candidate_lines": DEFAULT_BACKEND_LINE_LIMIT + 1,
+            }],
+        })
+
+        self.assertIn(
+            "first merge an explicit architecture-reviewed budget without "
+            "changing the target file; relaunch the running daemon so it "
+            "loads that policy; then base or rebase the target-growing "
+            "candidate on the revision containing that budget",
+            message,
+        )
 
     def test_reports_only_a_new_limit_crossing(self):
         crossing = self._commit_lines(

@@ -241,8 +241,11 @@ def format_backend_modularity_crossings(result: dict) -> str:
     )
     return (
         "Backend modularity preflight blocked files that newly exceed their "
-        f"reviewed line limit: {details}. Split by responsibility or obtain "
-        "an explicit architecture review and budget before merging."
+        f"reviewed line limit: {details}. Split by responsibility, or first "
+        "merge an explicit architecture-reviewed budget without changing the "
+        "target file; relaunch the running daemon so it loads that policy; "
+        "then base or rebase the target-growing candidate on the revision "
+        "containing that budget before merging it."
     )
 
 
