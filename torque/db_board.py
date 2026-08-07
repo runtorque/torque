@@ -70,6 +70,7 @@ _BOARD_TASK_COLUMNS = (
     "finalization_boundary",
     "finalization_audit",
     "finalization_status",
+    "task_content_hash",
 )
 
 _BOARD_TASK_INSERT_SQL = """
@@ -175,6 +176,7 @@ def _serialize_board_task(task):
         finalization_boundary,
         finalization_audit,
         finalization_status,
+        d.get("task_content_hash"),
     )
 
 

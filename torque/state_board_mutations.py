@@ -10,6 +10,7 @@ from typing import Optional
 
 from .artifacts import normalize_artifacts, normalize_attachments
 from .task_ids import format_root_task_id, is_canonical_task_id, parse_task_id
+from .task_content import compute_task_content_hash
 from .finalization import audit_entry, evaluate_finalization, normalize_mode, status_projection
 from .worktree_boundaries import code_boundary_done_status
 from .state import (
@@ -171,6 +172,7 @@ class BoardMutationMixin:
                 bt.lane = "Done"
                 bt.position = self._board_next_lane_position("Done", exclude_id=tid)
         self._refresh_finalization_root_projection(bt)
+        bt.task_content_hash = compute_task_content_hash(bt)
         if alias_id and alias_id != tid:
             self.task_id_aliases[alias_id] = tid
             self._db_save_task_id_alias(alias_id)
@@ -968,6 +970,7 @@ class BoardMutationMixin:
                 task.position = self._board_next_lane_position(
                     new_lane, exclude_id=tid
                 )
+        task.task_content_hash = compute_task_content_hash(task)
         self._emit("task_upsert", **asdict(task))
         self._db_save_task(task)
         if lane_changed:
