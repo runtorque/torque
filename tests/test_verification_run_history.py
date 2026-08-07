@@ -243,6 +243,128 @@ class VerificationRunHistoryTests(unittest.TestCase):
             "current",
         )
 
+    def test_pipeline_root_preserves_runs_from_distinct_sibling_tasks(self):
+        sha_a = "a" * 40
+        sha_b = "b" * 40
+        root = BoardTask(
+            id="root",
+            task="Merged pipeline root",
+            group="Torque",
+            lane="Done",
+            worktree_boundary={
+                "status": "merged",
+                "commit_sha": sha_b,
+                "merge_commit_sha": "c" * 40,
+            },
+        )
+        child_a = BoardTask(
+            id="root:1",
+            task="First implementation",
+            group="Torque",
+            lane="Done",
+            pipeline_root_id=root.id,
+        )
+        child_b = BoardTask(
+            id="root:2",
+            task="Review-cycle fix",
+            group="Torque",
+            lane="Done",
+            pipeline_root_id=root.id,
+        )
+        for task in (root, child_a, child_b):
+            self.state.board_tasks[task.id] = task
+            self.db.save_board_task(task)
+
+        self._verify_with_root(
+            child_a,
+            root,
+            sha_a,
+            "python -m unittest (100 tests)",
+            "worker-a",
+            "2026-08-07T10:00:00+00:00",
+        )
+        self.assertTrue(_record_task_completion_evidence_snapshot(
+            self.state,
+            root,
+            action="verify",
+            actor_name="worker-a",
+            timestamp="2026-08-07T10:00:00+00:00",
+        ))
+        self._verify_with_root(
+            child_b,
+            root,
+            sha_b,
+            "python -m unittest (108 tests)",
+            "worker-b",
+            "2026-08-07T11:00:00+00:00",
+        )
+        self.assertTrue(_record_task_completion_evidence_snapshot(
+            self.state,
+            root,
+            action="verify",
+            actor_name="worker-b",
+            timestamp="2026-08-07T11:00:00+00:00",
+        ))
+
+        durable_state = MatrixState(self.db)
+        durable_state.load()
+        durable_root = durable_state.board_tasks[root.id]
+        runs = durable_root.verification_summary["runs"]
+        self.assertEqual(len(runs), 2)
+        self.assertEqual(
+            [
+                (
+                    run["recorded_by"],
+                    run["recorded_at"],
+                    run["report"]["summary"]["tested_sha"],
+                )
+                for run in runs
+            ],
+            [
+                ("worker-a", "2026-08-07T10:00:00+00:00", sha_a),
+                ("worker-b", "2026-08-07T11:00:00+00:00", sha_b),
+            ],
+        )
+        self.assertEqual(
+            durable_root.verification_summary["tested_sha"],
+            sha_b,
+        )
+        completion = durable_root.completion_evidence["verification"]
+        self.assertEqual(len(completion["runs"]), 2)
+        self.assertEqual(completion["summary"]["tested_sha"], sha_b)
+        self.assertNotIn("currentness", str(completion))
+
+        reader = serialize_task_for_mcp(durable_root)
+        self.assertEqual(
+            [run["currentness"] for run in reader["verification_evidence"]["runs"]],
+            ["superseded", "current"],
+        )
+        self.assertNotIn("currentness", str(durable_root.verification_summary))
+
+    def _verify_with_root(
+        self,
+        task,
+        root,
+        sha,
+        tests_run,
+        actor,
+        timestamp,
+    ):
+        _apply_verification_report(
+            task,
+            {
+                "verification_state": "passed",
+                "tests_run": tests_run,
+                "test_outcome": "full_suite_passed",
+                "full_suite_attempted": True,
+                "tested_sha": sha,
+            },
+            actor,
+            self.db.save_board_task,
+            root_task=root,
+            timestamp=timestamp,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

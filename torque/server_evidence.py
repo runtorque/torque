@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Iterable
@@ -222,7 +223,28 @@ def _apply_verification_report(task, payload, actor_name, save_task,
         root_task.verification_notes = task.verification_notes
         root_task.verification_updated_at = task.verification_updated_at
         root_task.verification_updated_by = task.verification_updated_by
-        root_task.verification_summary = dict(summary)
+        root_summary = {
+            key: deepcopy(value)
+            for key, value in summary.items()
+            if key != "runs"
+        }
+        existing_root_summary = root_task.verification_summary or {}
+        existing_root_runs = (
+            existing_root_summary.get("runs", [])
+            if isinstance(existing_root_summary, dict)
+            else []
+        )
+        root_runs = (
+            list(existing_root_runs)
+            if isinstance(existing_root_runs, list)
+            else []
+        )
+        incoming_runs = summary.get("runs", [])
+        if isinstance(incoming_runs, list) and incoming_runs:
+            root_runs.append(deepcopy(incoming_runs[-1]))
+        if root_runs:
+            root_summary["runs"] = root_runs
+        root_task.verification_summary = root_summary
         save_task(root_task)
 
     return msg, root_task
