@@ -1,5 +1,7 @@
 import asyncio
 import importlib
+from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import time
@@ -3501,6 +3503,248 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                 state._db_save_task(branch_task)
 
         return _mark
+
+    async def test_multi_round_review_merge_closes_root_via_real_finalization(self):
+        from torque.services.worktrees.finalize import (
+            _finalize_successful_worktree_merge,
+        )
+        from torque.worktree_boundaries import code_boundary_done_status
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+
+            def git(*args):
+                result = subprocess.run(
+                    ["git", "-C", str(repo), *args],
+                    check=True,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                return result.stdout.strip()
+
+            def commit(message):
+                git("add", "-A")
+                git("commit", "-m", message)
+                return git("rev-parse", "HEAD")
+
+            git("init", "-b", "main")
+            git("config", "user.email", "test@example.invalid")
+            git("config", "user.name", "Torque Test")
+            (repo / "base.txt").write_text("base\n")
+            base_sha = commit("base")
+            git("checkout", "-b", "topic")
+            (repo / "feature.txt").write_text("candidate\n")
+            first_sha = commit("first reviewed candidate")
+            (repo / "fix.txt").write_text("blocked-review fix\n")
+            fixed_sha = commit("fix after blocked review")
+            (repo / "final.txt").write_text("final additive correction\n")
+            final_sha = commit("final reviewed candidate")
+            git("checkout", "main")
+            git("merge", "--squash", "topic")
+            merge_sha = commit("squash reviewed candidate")
+
+            state = self.state_mod.MatrixState()
+            state.add_group("g")
+            state.board_lanes = ["Backlog", "To Do", "In Progress", "Done"]
+            worker = self.state_mod.AgentCell(
+                id="worker-merge",
+                name="Implementer",
+                group="g",
+                cell_type="agent",
+                status="running",
+                worktree_path=str(repo),
+                worktree_branch="topic",
+                worktree_base_branch="main",
+                worktree_repo_root=str(repo),
+                current_task_id="TORQUE:1:4",
+            )
+            state.agents[worker.id] = worker
+            state.groups["g"].append(worker.id)
+
+            def boundary(commit_sha, *, status, superseded_by=""):
+                return {
+                    "version": "1",
+                    "repo_root": str(repo),
+                    "branch": "topic",
+                    "base_branch": "main",
+                    "commit_sha": commit_sha,
+                    "status": status,
+                    "superseded_by_task_id": superseded_by,
+                    "code_delta": {
+                        "state": "present",
+                        "base_sha": base_sha,
+                        "commit_sha": commit_sha,
+                    },
+                }
+
+            root = state.board_add_task(
+                "Implement feature",
+                "g",
+                id="TORQUE:1",
+                lane="In Progress",
+                action_name="feature/implement",
+                requires_review=True,
+                agent_id=worker.id,
+                worktree_boundary=boundary(
+                    first_sha,
+                    status="superseded",
+                    superseded_by="TORQUE:1:1",
+                ),
+            )
+            first_review = state.board_add_task(
+                "Blocked first review",
+                "g",
+                id="TORQUE:1:1",
+                lane="Done",
+                action_name="feature/review",
+                parent_task_id=root.id,
+                pipeline_root_id=root.id,
+                completion_evidence={
+                    "review": {"verdict": "block", "agent_id": "reviewer-1"},
+                    "review_cycle_continuations": [{
+                        "original_review_task_id": "TORQUE:1:1",
+                        "continuation_task_id": "TORQUE:1:2",
+                        "pipeline_root_id": root.id,
+                        "repo_root": str(repo),
+                        "branch": "topic",
+                    }],
+                },
+                worktree_boundary=boundary(
+                    first_sha,
+                    status="superseded",
+                    superseded_by="TORQUE:1:2",
+                ),
+            )
+            first_fix = state.board_add_task(
+                "Fix first review",
+                "g",
+                id="TORQUE:1:2",
+                lane="Done",
+                action_name="feature/implement",
+                parent_task_id=root.id,
+                pipeline_root_id=root.id,
+                completion_evidence={"review_cycle_continue": {
+                    "original_review_task_id": first_review.id,
+                    "continuation_task_id": "TORQUE:1:2",
+                }},
+                worktree_boundary=boundary(
+                    fixed_sha,
+                    status="superseded",
+                    superseded_by="TORQUE:1:3",
+                ),
+            )
+            second_review = state.board_add_task(
+                "Shipping second review",
+                "g",
+                id="TORQUE:1:3",
+                lane="Done",
+                action_name="feature/review",
+                parent_task_id=first_fix.id,
+                pipeline_root_id=root.id,
+                completion_evidence={
+                    "review": {"verdict": "ship", "agent_id": "reviewer-2"},
+                    "review_cycle_continuations": [{
+                        "original_review_task_id": "TORQUE:1:3",
+                        "continuation_task_id": "TORQUE:1:4",
+                        "pipeline_root_id": root.id,
+                        "repo_root": str(repo),
+                        "branch": "topic",
+                    }],
+                },
+                worktree_boundary=boundary(
+                    fixed_sha,
+                    status="superseded",
+                    superseded_by="TORQUE:1:4",
+                ),
+            )
+            final_fix = state.board_add_task(
+                "Final correction",
+                "g",
+                id="TORQUE:1:4",
+                lane="Done",
+                action_name="feature/implement",
+                parent_task_id=root.id,
+                pipeline_root_id=root.id,
+                completion_evidence={"review_cycle_continue": {
+                    "original_review_task_id": second_review.id,
+                    "continuation_task_id": "TORQUE:1:4",
+                }},
+                worktree_boundary=boundary(
+                    final_sha,
+                    status="superseded",
+                    superseded_by="TORQUE:1:5",
+                ),
+            )
+            final_review = state.board_add_task(
+                "Final shipping review",
+                "g",
+                id="TORQUE:1:5",
+                lane="Done",
+                action_name="feature/review",
+                parent_task_id=final_fix.id,
+                pipeline_root_id=root.id,
+                completion_evidence={
+                    "review": {"verdict": "ship", "agent_id": "reviewer-3"},
+                },
+                worktree_boundary=boundary(final_sha, status="open"),
+            )
+
+            state.board_cascade_done(final_review.id)
+            self.assertEqual(root.lane, "In Progress")
+            self.assertFalse(code_boundary_done_status(
+                state.board_get_chain(root.id)
+            )["eligible"])
+
+            async def no_toast(*_args, **_kwargs):
+                return None
+
+            async def no_cleanup(*_args, **_kwargs):
+                return {"errors": []}
+
+            class NoResetManager:
+                async def validate(self, _cell):
+                    return False
+
+            result = await _finalize_successful_worktree_merge(
+                state=state,
+                cell=worker,
+                aid=worker.id,
+                data={
+                    "auto_move_to_done": False,
+                    "close_agent_on_merge": False,
+                    "remove_worktree_on_merge": False,
+                },
+                merge_sha=merge_sha,
+                merged_task_ids=(final_fix.id, final_review.id),
+                stale_base=None,
+                preserve_merge_diff=False,
+                boundary_task_for_diff=None,
+                merge_diff_snapshot=None,
+                merge_resume_targets=None,
+                mark_branch_boundaries_merged=(
+                    self._mark_boundaries_for_state(state)
+                ),
+                cleanup_after_merge=no_cleanup,
+                broadcast_toast=no_toast,
+                bridge=types.SimpleNamespace(),
+                worktree_mgr=NoResetManager(),
+                handle_command=None,
+                panel_event=None,
+            )
+            self.assertTrue(result["ok"])
+
+            state.board_cascade_done(final_review.id)
+            self.assertEqual(root.lane, "Done")
+            gate = code_boundary_done_status(state.board_get_chain(root.id))
+            self.assertTrue(gate["eligible"])
+            self.assertEqual(gate["blocking"], [])
+            for task in (
+                    root, first_review, first_fix, second_review,
+                    final_fix, final_review):
+                self.assertEqual(
+                    task.worktree_boundary["merge_commit_sha"], merge_sha
+                )
 
     def _pr_handle_command(self, state, worker, worktree_mgr,
                            cleanup_after_merge, *, nested_dispatch=None,

@@ -52,6 +52,7 @@ from ...worktree_boundaries import (
     latest_boundary_base_branch,
     latest_boundary_task,
     task_boundary,
+    verified_review_cycle_containment_task_ids,
 )
 from ...worktree_streams import compute_worktree_stream
 
@@ -579,7 +580,21 @@ async def _finalize_successful_worktree_merge(
         getattr(cell, "worktree_base_branch", "") or ""
     ).strip()
     merge_agent_name = str(getattr(cell, "name", "") or "").strip()
-    mark_branch_boundaries_merged(cell, merge_sha, merged_task_ids)
+    contained_task_ids = await verified_review_cycle_containment_task_ids(
+        state.board_tasks.values(),
+        repo_root=(
+            getattr(cell, "worktree_repo_root", "")
+            or getattr(cell, "git_root", "")
+            or ""
+        ),
+        branch=getattr(cell, "worktree_branch", "") or "",
+        merge_sha=merge_sha,
+        task_ids=merged_task_ids,
+    )
+    boundary_task_ids = tuple(dict.fromkeys(
+        (*merged_task_ids, *contained_task_ids)
+    ))
+    mark_branch_boundaries_merged(cell, merge_sha, boundary_task_ids)
     state.cleanup_stale_boundary_successors()
     preserve_diff_warning = ""
     if preserve_merge_diff:
@@ -791,7 +806,17 @@ async def _finalize_successful_driverless_worktree_merge(
     worktree_mgr: WorktreeManager,
 ) -> dict:
     """Apply branch/boundary side effects after a driverless merge succeeds."""
-    mark_branch_boundaries_merged(target, merge_sha, merged_task_ids)
+    contained_task_ids = await verified_review_cycle_containment_task_ids(
+        state.board_tasks.values(),
+        repo_root=target.repo_root,
+        branch=target.branch,
+        merge_sha=merge_sha,
+        task_ids=merged_task_ids,
+    )
+    boundary_task_ids = tuple(dict.fromkeys(
+        (*merged_task_ids, *contained_task_ids)
+    ))
+    mark_branch_boundaries_merged(target, merge_sha, boundary_task_ids)
     state.cleanup_stale_boundary_successors()
     preserve_diff_warning = ""
     if preserve_merge_diff:
