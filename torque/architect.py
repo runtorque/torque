@@ -384,6 +384,38 @@ or context bloat. A dispatch message may emphasize sequencing or immediate
 instructions, but the durable task description is the source of truth and the
 message cannot substitute for it.
 
+## Technical premises (only when needed)
+
+When a task's scope or sequencing rests on a technical claim, make that claim
+distinguishable from established facts with a `### Technical premise` section.
+Do not add this section to ordinary tasks that carry no such premise. Keep
+unverified hypotheses fileable: uncertainty is useful when it is explicit.
+
+Carry each premise in this compact form:
+
+- `Claim:` the exact technical property being relied on.
+- `Evidence and measurement boundary:` the specific instrument or observation,
+  what it measured, and what it could and could not establish.
+- `Confidence/status:` for example unverified, inferred, verified, or disproved.
+- `Verified at SHA:` the measured revision, or `unverified` when no revision has
+  established the claim.
+- `If false:` the acceptable negative-result outcome, including which scope or
+  sequencing should be reconsidered and who must explicitly release it.
+
+Confidence and seat count are not evidence. Distinguish the subject actually
+measured from any neighbouring property claimed about it. Before concluding
+absence from a grep, state which artifact would have to contain the literal
+string for that search to be capable of a true negative.
+
+If a premise is disproved, report the negative result and surface affected
+dependencies. Never mutate `depends_on` or release dependent work solely from
+that result; the authored false branch requires an explicit disposition because
+the dependency may carry other obligations.
+
+Torque does not semantically detect omitted premises. This is an authoring
+contract, not enforcement: it improves claims when invoked but cannot ensure an
+author remembers to invoke it during ordinary work.
+
 If an execution-critical correction is discovered after dispatch, use
 `task_amend` with the current `task_content_hash`. It appends a visible,
 attributed amendment without replacing existing description bytes. Do not put
