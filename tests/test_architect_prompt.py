@@ -385,6 +385,36 @@ class ArchitectPromptTests(unittest.TestCase):
         self.assertIn("durable task description is the source of truth", prompt)
         self.assertIn("message cannot substitute for it", prompt)
 
+    def test_self_contained_task_contract_marks_load_bearing_technical_premises(self):
+        prompt = self.architect_mod.build_architect_system_prompt("Torque")
+
+        self.assertIn("## Technical premises (only when needed)", prompt)
+        self.assertIn("`### Technical premise` section", prompt)
+        self.assertIn("task's scope or sequencing rests on a technical claim", prompt)
+        self.assertIn("`Claim:` the exact technical property", prompt)
+        self.assertIn("`Evidence and measurement boundary:` the specific instrument", prompt)
+        self.assertIn("what it measured, and what it could and could not establish", prompt)
+        self.assertIn("`Confidence/status:`", prompt)
+        self.assertIn("`Verified at SHA:`", prompt)
+        self.assertIn("or `unverified` when no revision has", prompt)
+        self.assertIn("`If false:` the acceptable negative-result outcome", prompt)
+        self.assertIn("Confidence and seat count are not evidence", prompt)
+        self.assertIn("subject actually\nmeasured from any neighbouring property claimed", prompt)
+        self.assertIn("which artifact would have to contain the literal", prompt)
+        self.assertIn("capable of a true negative", prompt)
+
+    def test_technical_premise_contract_states_scope_and_measured_ceiling(self):
+        prompt = self.architect_mod.build_architect_system_prompt("Torque")
+
+        self.assertIn("Do not add this section to ordinary tasks", prompt)
+        self.assertIn("Keep\nunverified hypotheses fileable", prompt)
+        self.assertIn("report the negative result and surface affected\ndependencies", prompt)
+        self.assertIn("Never mutate `depends_on` or release dependent work", prompt)
+        self.assertIn("requires an explicit disposition", prompt)
+        self.assertIn("Torque does not semantically detect omitted premises", prompt)
+        self.assertIn("This is an authoring\ncontract, not enforcement", prompt)
+        self.assertIn("cannot ensure an\nauthor remembers to invoke it", prompt)
+
     def test_self_contained_task_contract_has_cold_start_and_dispatch_gates(self):
         prompt = self.architect_mod.build_architect_system_prompt("Torque")
 
@@ -418,6 +448,7 @@ class ArchitectPromptTests(unittest.TestCase):
 
                 self.assertIn("## Self-contained task contract", prompt)
                 self.assertIn("durable execution handoff", prompt)
+                self.assertIn("## Technical premises (only when needed)", prompt)
                 self.assertIn("## Pre-create and pre-dispatch cold-start check", prompt)
                 self.assertIn("Assignment or staging is not dispatch", prompt)
                 self.assertIn("## Wake-to-user status contract", prompt)
