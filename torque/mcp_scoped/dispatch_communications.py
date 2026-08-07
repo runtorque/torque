@@ -424,6 +424,39 @@ async def dispatch_communications(ctx: ScopedDispatchContext):
         entry, message_error = _load_message_entry(
             caller, args.get("message_id", "")
         )
+        if (
+                not entry
+                and caller_kind == "architect"
+                and tool_name == "peer_reply"):
+            message_id = str(args.get("message_id", "") or "").strip()
+            db = getattr(real_state, "db", None)
+            durable_row = db.load_agent_peer_message(message_id) if db else None
+            caller_id_text = str(caller_id or "").strip()
+            participants = {
+                str((durable_row or {}).get("sender_id", "") or "").strip(),
+                str((durable_row or {}).get("recipient_id", "") or "").strip(),
+            }
+            caller_group = str(getattr(caller, "group", "") or "").strip()
+            if (
+                    durable_row
+                    and caller_id_text in participants
+                    and len(participants) == 2
+                    and {
+                        str(durable_row.get("sender_kind", "") or "").strip(),
+                        str(durable_row.get("recipient_kind", "") or "").strip(),
+                    } == {"architect"}
+                    and str(
+                        durable_row.get("group_name", "") or ""
+                    ).strip() == caller_group
+                    and str(
+                        durable_row.get("message_type", "message") or "message"
+                    ).strip() == "message"
+                    and not bool(durable_row.get("blocking", False))
+                    and not float(durable_row.get("archived_at", 0) or 0)):
+                entry = _agent_peer_message_row_to_entry(
+                    durable_row,
+                    caller_id_text,
+                )
         if not entry and caller_kind == "engineer":
             db = getattr(real_state, "db", None)
             durable_row = (
