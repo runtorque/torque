@@ -348,6 +348,7 @@ async def _preflight_worktree_merge_gates(
             boundary_reason,
             boundary_latest,
             boundary_reason_message,
+            state=state,
         )
         if (
                 boundary_reason == "branch_tip_moved"

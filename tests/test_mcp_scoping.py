@@ -305,6 +305,180 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"summary"', text)
         self.assertEqual(calls[0]["summary_only"], True)
 
+    async def test_review_cycle_continue_is_audited_and_keeps_verdict_immutable(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        implementer = self._add_worker(
+            state, "worker-impl", "Implementer", alice.id
+        )
+        reviewer = self._add_worker(
+            state, "worker-review", "Reviewer", alice.id
+        )
+        implementer.worktree_path = "/tmp/shared"
+        implementer.worktree_repo_root = "/repo"
+        implementer.git_root = "/repo"
+        implementer.worktree_branch = "torque/alice/review-cycle"
+        implementer.worktree_base_branch = "main"
+        root = self._add_task(
+            state,
+            "TORQUE:1",
+            "Implement feature",
+            assigned_engineer_id=alice.id,
+            lane="In Progress",
+            action_name="feature/implement",
+            agent_id=implementer.id,
+        )
+        review_record = {
+            "verdict": "ship",
+            "summary": "Reviewed original boundary",
+            "agent_id": reviewer.id,
+            "agent_name": reviewer.name,
+            "recorded_at": "2026-08-07T10:00:00+00:00",
+        }
+        review = self._add_task(
+            state,
+            "TORQUE:1:1",
+            "Review feature",
+            assigned_engineer_id=alice.id,
+            lane="Done",
+            action_name="feature/review",
+            agent_id=reviewer.id,
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+            completion_evidence={
+                "sources": ["review"],
+                "review": json.loads(json.dumps(review_record)),
+            },
+            worktree_boundary={
+                "version": "1",
+                "repo_root": "/repo",
+                "branch": implementer.worktree_branch,
+                "base_branch": "main",
+                "commit_sha": "a" * 40,
+                "status": "open",
+                "recorded_at": "2026-08-07T10:00:00+00:00",
+                "code_delta": {"state": "present"},
+            },
+        )
+        state.pipeline_task_counters[root.id] = 2
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            if payload["cmd"] == "worktree_check_merge":
+                return {
+                    "type": "worktree_check_merge",
+                    "id": implementer.id,
+                    "clean": False,
+                    "error": "composed refusal",
+                    "boundary": {
+                        "task_id": review.id,
+                        "head_sha": "b" * 40,
+                        "boundary": {"commit_sha": "a" * 40},
+                        "boundary_tip_mismatch": {
+                            "classification": "ahead",
+                            "commit_count": 1,
+                        },
+                    },
+                }
+            if payload["cmd"] == "worktree_diff":
+                return {
+                    "type": "ok",
+                    "summary": {},
+                    "stale_base": {"stale": True},
+                }
+            self.fail(f"unexpected command: {payload}")
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_review_cycle_continue",
+            {
+                "task": review.id,
+                "reason": "One housekeeping commit followed review.",
+            },
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertFalse(is_error, text)
+        payload = json.loads(text)
+        continuation = state.board_tasks[payload["continuation_task_id"]]
+        self.assertEqual(payload["type"], "review_cycle_continued")
+        self.assertEqual(review.lane, "Done")
+        self.assertEqual(
+            review.completion_evidence["review"], review_record
+        )
+        audit = review.completion_evidence[
+            "review_cycle_continuations"
+        ][0]
+        self.assertEqual(audit["actor_id"], alice.id)
+        self.assertEqual(audit["original_review_task_id"], review.id)
+        self.assertEqual(audit["original_verdict"], "ship")
+        self.assertEqual(audit["reviewed_sha"], "a" * 40)
+        self.assertEqual(audit["observed_branch_head"], "b" * 40)
+        self.assertEqual(audit["continuation_task_id"], continuation.id)
+        self.assertEqual(review.worktree_boundary["status"], "superseded")
+        self.assertEqual(
+            review.worktree_boundary["superseded_by_task_id"],
+            continuation.id,
+        )
+        self.assertEqual(review.worktree_boundary["commit_sha"], "a" * 40)
+        self.assertNotEqual(
+            review.worktree_boundary["commit_sha"],
+            audit["observed_branch_head"],
+        )
+        self.assertEqual(continuation.action_name, "feature/implement")
+        self.assertEqual(continuation.parent_task_id, root.id)
+        self.assertEqual(continuation.pipeline_root_id, root.id)
+        self.assertEqual(continuation.agent_id, implementer.id)
+        self.assertEqual(continuation.dispatch_state, "queued")
+        self.assertEqual(continuation.lane, "Backlog")
+        self.assertEqual(
+            continuation.completion_evidence[
+                "review_cycle_continue"
+            ]["original_review_task_id"],
+            review.id,
+        )
+        from torque.worktree_boundaries import latest_boundary_task
+        self.assertIsNone(latest_boundary_task(
+            state.board_tasks.values(),
+            repo_root="/repo",
+            branch=implementer.worktree_branch,
+            statuses={"open"},
+        ))
+        self.assertEqual(
+            [call["cmd"] for call in calls],
+            ["worktree_check_merge", "worktree_diff"],
+        )
+
+    async def test_review_cycle_continue_rejects_foreign_engineer(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        bob = self._add_engineer(state, "eng-bob", "Bob")
+        review = self._add_task(
+            state,
+            "TORQUE:1:1",
+            "Review feature",
+            assigned_engineer_id=alice.id,
+            lane="Done",
+            action_name="feature/review",
+        )
+
+        async def fake_handle_command(_payload):
+            self.fail("authorization must fail before branch inspection")
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_review_cycle_continue",
+            {"task": review.id, "reason": "No"},
+            fake_handle_command,
+            state,
+            caller_id=bob.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertIn("not owned", text.lower())
+
     async def test_engineer_worktree_checkpoint_allows_reviewer_shared_snapshot(self):
         state = self._make_state()
         alice = self._add_engineer(state, "eng-alice", "Alice")

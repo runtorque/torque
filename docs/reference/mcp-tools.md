@@ -285,6 +285,7 @@ does not guess a reply target from historical conversation rows.
 | `task_artifact_upload` | Attach an artifact to a visible task. |
 | `task_verify` | Record tests, deploy, restart, and smoke evidence. |
 | `review_verdict_amend` | The original reviewer may append one attributable correction to an otherwise immutable recorded `unknown` final verdict; completed/merged review tasks remain reachable through the recorded reviewer identity. |
+| `review_cycle_continue` | Engineer-only audited continuation for an owned stale stream whose tip advanced past a completed review's open boundary. It preserves the completed verdict, supersedes only that boundary without fabricating a tip boundary, queues a same-root/same-branch implementation continuation for the original implementer, and records the explicit predecessor linkage consumed only when that continuation and its new direct review merge. |
 | `task_progress` | Report current Worker activity. |
 | `task_complete` | Complete a Worker's linked task. |
 | `task_blocked` | Mark a Worker's task blocked. |

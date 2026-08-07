@@ -647,6 +647,33 @@ class CanonicalMCPContractTests(unittest.TestCase):
                 legacy_name,
             )
 
+    def test_review_cycle_continue_is_canonical_engineer_only_and_searchable(self):
+        tools = {
+            tool["name"]: tool
+            for tool in _canonical_tools_for_caller(
+                _State("engineer"),
+                "caller",
+            )
+        }
+        self.assertIn("review_cycle_continue", tools)
+        self.assertTrue(tools["review_cycle_continue"].get("deferred"))
+        handler, arguments = _resolve_public_tool_call(
+            _State("engineer"),
+            "caller",
+            "review_cycle_continue",
+            {"task": "TORQUE:1:1", "reason": "tip advanced"},
+        )
+        self.assertEqual(handler, "engineer_review_cycle_continue")
+        self.assertEqual(arguments["task"], "TORQUE:1:1")
+        architect_tools = {
+            tool["name"]
+            for tool in _canonical_tools_for_caller(
+                _State("architect"),
+                "caller",
+            )
+        }
+        self.assertNotIn("review_cycle_continue", architect_tools)
+
     def test_restricted_engineer_denies_eager_tools_and_exact_search(self):
         worktree_authority = {
             "schema_version": 1,

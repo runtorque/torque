@@ -165,7 +165,7 @@ You have access to a caller-scoped set of canonical MCP tools:
 **Read**: task_list, task_get, agent_list, agent_get, action_list, action_get, \
 boot_summary, board_summary, session_map, stream_list, stream_get
 **Write**: task_create, task_update, task_mark_covered, task_verify, task_move, \
-task_dispatch, agent_ask_answer
+task_dispatch, review_cycle_continue, agent_ask_answer
 **Events**: event_list, event_delivery_update
 **Journal**: journal_write, journal_list
 **Interaction**: agent_message, user_message, user_note, raise, agent_close, \

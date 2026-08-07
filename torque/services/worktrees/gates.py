@@ -48,6 +48,7 @@ from ...worktree import (
 )
 from ...worktree_boundaries import (
     boundary_pr_metadata,
+    boundary_summary,
     branch_boundary_tasks,
     latest_boundary_base_branch,
     latest_boundary_task,
@@ -373,14 +374,82 @@ def _boundary_tip_mismatch_message(boundary: dict | None) -> str:
     )
 
 
+_REVIEW_CYCLE_DEADLOCK_GUIDANCE = (
+    "This branch is stale and has unreviewed commits past a completed open "
+    "feature/review boundary. Do not record a reviewed boundary at the "
+    "unreviewed tip. Use `review_cycle_continue` on the completed review, "
+    "then non-force rebase, rerun the relevant evidence, and obtain a fresh "
+    "feature/review."
+)
+
+
+def _completed_open_review_boundary(state: MatrixState,
+                                    boundary: dict | None):
+    if not state or not isinstance(boundary, dict):
+        return None
+    task_id = str(boundary.get("task_id", "") or "").strip()
+    task = state.board_tasks.get(task_id) if task_id else None
+    if not task:
+        return None
+    if str(getattr(task, "action_name", "") or "").strip().lower() \
+            != "feature/review":
+        return None
+    if not task_is_closed(task):
+        return None
+    stored_boundary = task_boundary(task)
+    if str(stored_boundary.get("status", "") or "").strip().lower() != "open":
+        return None
+    return task
+
+
+async def _review_cycle_deadlock_composed(
+        state: MatrixState,
+        worktree_mgr,
+        cell,
+        *,
+        stale_base: dict | None = None,
+        boundary: dict | None = None) -> bool:
+    """True only for stale + advanced-tip + completed-open-review state."""
+    if not _completed_open_review_boundary(state, boundary):
+        return False
+    info = boundary.get("boundary_tip_mismatch")
+    if not isinstance(info, dict) or not info:
+        info = await _ensure_boundary_tip_mismatch_info(
+            worktree_mgr, cell, boundary
+        )
+    if str((info or {}).get("classification", "")).strip().lower() != "ahead":
+        return False
+    if stale_base is None:
+        stale_info = getattr(worktree_mgr, "stale_base_info", None)
+        if not callable(stale_info):
+            return False
+        try:
+            stale_base = await stale_info(cell)
+        except Exception:
+            log.exception(
+                "stale-base preflight failed while composing review-cycle "
+                "guidance for '%s'",
+                getattr(cell, "name", "") or getattr(cell, "id", ""),
+            )
+            return False
+    return bool((stale_base or {}).get("stale"))
+
+
 async def _boundary_gate_message(
         worktree_mgr,
         cell,
         reason: str,
         boundary: dict | None,
-        boundary_reason_message) -> str:
+        boundary_reason_message,
+        *,
+        state: MatrixState | None = None,
+        stale_base: dict | None = None) -> str:
     if reason == "branch_tip_moved":
         await _ensure_boundary_tip_mismatch_info(worktree_mgr, cell, boundary)
+        if await _review_cycle_deadlock_composed(
+                state, worktree_mgr, cell,
+                stale_base=stale_base, boundary=boundary):
+            return _REVIEW_CYCLE_DEADLOCK_GUIDANCE
     return boundary_reason_message(reason, boundary)
 
 
@@ -388,6 +457,8 @@ async def _maybe_reject_stale_base_review_derive(
     worktree_mgr,
     cell,
     action_name: str,
+    *,
+    state: MatrixState | None = None,
 ) -> dict | None:
     if str(action_name or "").strip().lower() != "feature/review":
         return None
@@ -406,6 +477,43 @@ async def _maybe_reject_stale_base_review_derive(
         return None
     if not (stale_base or {}).get("stale"):
         return None
+    repo_root = str(
+        getattr(cell, "worktree_repo_root", "")
+        or getattr(cell, "git_root", "")
+        or ""
+    ).strip()
+    branch = str(getattr(cell, "worktree_branch", "") or "").strip()
+    latest = latest_boundary_task(
+        state.board_tasks.values(),
+        repo_root=repo_root,
+        branch=branch,
+        statuses={"open"},
+    ) if state and repo_root and branch else None
+    if latest:
+        boundary = boundary_summary(latest)
+        boundary["head_sha"] = str(
+            (stale_base or {}).get("branch_head", "") or ""
+        ).strip()
+        if not boundary["head_sha"]:
+            current_head = getattr(worktree_mgr, "current_head", None)
+            if callable(current_head):
+                boundary["head_sha"] = await current_head(cell) or ""
+        if boundary["head_sha"] != _boundary_recorded_sha(boundary):
+            if await _review_cycle_deadlock_composed(
+                    state, worktree_mgr, cell,
+                    stale_base=stale_base, boundary=boundary):
+                return {
+                    "type": "error",
+                    "code": "review_cycle_deadlock",
+                    "message": (
+                        "Cannot derive feature/review from this composed "
+                        "review-cycle state.\n\n"
+                        f"{_REVIEW_CYCLE_DEADLOCK_GUIDANCE}"
+                    ),
+                    "stale_base": stale_base,
+                    "stale_base_warning": _stale_base_warning(stale_base),
+                    "boundary": boundary,
+                }
     return _stale_base_review_derive_result(
         getattr(cell, "id", "") or "",
         stale_base,

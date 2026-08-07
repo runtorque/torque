@@ -467,6 +467,15 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
                 "warning": "⚠ STALE BASE: torque/impl forked behind main",
             }
 
+        async def boundary_tip_mismatch_info(
+                self, _cell, boundary_sha, tip_sha):
+            return {
+                "classification": "ahead",
+                "commit_count": 1,
+                "boundary_sha": boundary_sha,
+                "tip_sha": tip_sha,
+            }
+
     class _ReviewBackstopWorktreeManager:
         def __init__(self, *, ahead=1, head="reviewed-head"):
             self.ahead = ahead
@@ -1066,8 +1075,21 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
             self._add_second_review_cycle_chain(state)
         )
         implementer.worktree_path = "/repo/.torque/worktrees/impl"
+        implementer.worktree_repo_root = "/repo"
+        implementer.git_root = "/repo"
         implementer.worktree_branch = "torque/impl"
         implementer.worktree_base_branch = "main"
+        review = state.board_tasks["task-review"]
+        review.lane = "Done"
+        review.worktree_boundary = {
+            "version": "1",
+            "repo_root": "/repo",
+            "branch": "torque/impl",
+            "base_branch": "main",
+            "commit_sha": "3333333333333333333333333333333333333333",
+            "status": "open",
+            "recorded_at": "2026-08-07T00:00:00+00:00",
+        }
         calls, dispatch = self._recording_dispatch(state)
         handle_command = self._extract_handle_command(
             state,
@@ -1101,6 +1123,75 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(evidence["base_branch"], "main")
         self.assertIn("rerun_tests", evidence)
+        self.assertEqual(calls, [])
+        self.assertEqual(fix.status, "")
+
+    async def test_feature_review_derive_composed_state_names_safe_continuation(self):
+        state = self._make_state()
+        implementer, _reviewer, _root, fix = (
+            self._add_second_review_cycle_chain(state)
+        )
+        implementer.worktree_path = "/repo/.torque/worktrees/impl"
+        implementer.worktree_repo_root = "/repo"
+        implementer.git_root = "/repo"
+        implementer.worktree_branch = "torque/impl"
+        implementer.worktree_base_branch = "main"
+        review = state.board_tasks["task-review"]
+        review.lane = "Done"
+        review.completion_evidence = {
+            "review": {
+                "verdict": "ship",
+                "agent_id": "review-1",
+                "recorded_at": "2026-08-07T00:00:00+00:00",
+            },
+        }
+        review.worktree_boundary = {
+            "version": "1",
+            "repo_root": "/repo",
+            "branch": "torque/impl",
+            "base_branch": "main",
+            "commit_sha": "2222222222222222222222222222222222222222",
+            "status": "open",
+            "recorded_at": "2026-08-07T00:00:00+00:00",
+        }
+        calls, dispatch = self._recording_dispatch(state)
+        handle_command = self._extract_handle_command(
+            state,
+            dispatch,
+            worktree_mgr=self._StaleWorktreeManager(),
+        )
+
+        result = await handle_command({
+            "cmd": "ai_report",
+            "cell_id": implementer.id,
+            "action": "derive",
+            "action_name": "feature/review",
+            "message": "Review the unreviewed commit",
+        })
+
+        self.assertEqual(result["type"], "error")
+        self.assertEqual(result["code"], "review_cycle_deadlock")
+        expected_guidance = (
+            "This branch is stale and has unreviewed commits past a completed "
+            "open feature/review boundary. Do not record a reviewed boundary "
+            "at the unreviewed tip. Use `review_cycle_continue` on the "
+            "completed review, then non-force rebase, rerun the relevant "
+            "evidence, and obtain a fresh feature/review."
+        )
+        self.assertEqual(
+            result["message"],
+            "Cannot derive feature/review from this composed review-cycle "
+            f"state.\n\n{expected_guidance}",
+        )
+        self.assertIn("review_cycle_continue", result["message"])
+        self.assertIn("non-force rebase", result["message"])
+        self.assertIn("rerun the relevant evidence", result["message"])
+        self.assertIn("fresh feature/review", result["message"])
+        self.assertNotIn("worktree_rebase", result["message"])
+        self.assertNotIn("re-review the new commits", result["message"])
+        self.assertNotIn(
+            "record a reviewed boundary at the tip", result["message"]
+        )
         self.assertEqual(calls, [])
         self.assertEqual(fix.status, "")
 

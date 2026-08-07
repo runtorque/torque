@@ -30,7 +30,8 @@ from torque.worktree_boundaries import (
 
 def _task(task_id, lane="Done", *, boundary=None,
           resume_after="", created_at="", updated_at="", labels=None,
-          agent_id="agent-1", parent_task_id="", pipeline_root_id=""):
+          agent_id="agent-1", parent_task_id="", pipeline_root_id="",
+          action_name="", completion_evidence=None):
     return SimpleNamespace(
         id=task_id,
         task=f"Task {task_id}",
@@ -44,6 +45,8 @@ def _task(task_id, lane="Done", *, boundary=None,
         resume_after_boundary_task_id=resume_after,
         parent_task_id=parent_task_id,
         pipeline_root_id=pipeline_root_id,
+        action_name=action_name,
+        completion_evidence=completion_evidence or {},
     )
 
 
@@ -851,6 +854,204 @@ class WorktreeBoundaryTests(unittest.TestCase):
         self.assertEqual(paused_task.worktree_boundary["status"], "open")
         self.assertNotIn("merge_commit_sha", paused_task.worktree_boundary)
         self.assertEqual(paused_task.labels, ["paused"])
+
+    def test_mark_merge_consumes_only_explicit_review_cycle_predecessor(self):
+        root = _task("TORQUE:1", lane="In Progress")
+        predecessor = _task(
+            "TORQUE:1:1",
+            action_name="feature/review",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            completion_evidence={"review_cycle_continuations": [{
+                "original_review_task_id": "TORQUE:1:1",
+                "continuation_task_id": "TORQUE:1:2",
+                "pipeline_root_id": root.id,
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+            }]},
+            boundary={
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+                "status": "superseded",
+                "superseded_by_task_id": "TORQUE:1:2",
+                "recorded_at": "2026-08-07T10:00:00+00:00",
+                "code_delta": {"state": "present"},
+            },
+        )
+        continuation = _task(
+            "TORQUE:1:2",
+            action_name="feature/implement",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            completion_evidence={"review_cycle_continue": {
+                "original_review_task_id": predecessor.id,
+                "continuation_task_id": "TORQUE:1:2",
+            }},
+            boundary={
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+                "status": "superseded",
+                "recorded_at": "2026-08-07T11:00:00+00:00",
+            },
+        )
+        fresh_review = _task(
+            "TORQUE:1:3",
+            action_name="feature/review",
+            parent_task_id=continuation.id,
+            pipeline_root_id=root.id,
+            boundary={
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+                "status": "open",
+                "recorded_at": "2026-08-07T12:00:00+00:00",
+            },
+        )
+
+        updated = mark_branch_boundaries_merged(
+            [root, predecessor, continuation, fresh_review],
+            repo_root="/repo",
+            branch="torque/worker",
+            merge_sha="landed",
+            task_ids=[continuation.id, fresh_review.id],
+        )
+
+        self.assertEqual(
+            {task.id for task in updated},
+            {root.id, predecessor.id, continuation.id, fresh_review.id},
+        )
+        self.assertEqual(
+            predecessor.worktree_boundary["merge_commit_sha"], "landed"
+        )
+        self.assertEqual(root.worktree_boundary["merge_commit_sha"], "landed")
+        self.assertTrue(code_boundary_done_status(
+            [root, predecessor, continuation, fresh_review]
+        )["eligible"])
+
+    def test_mark_merge_does_not_stamp_linked_predecessor_without_fresh_review(self):
+        predecessor = _task(
+            "TORQUE:1:1",
+            action_name="feature/review",
+            pipeline_root_id="TORQUE:1",
+            completion_evidence={"review_cycle_continuations": [{
+                "original_review_task_id": "TORQUE:1:1",
+                "continuation_task_id": "TORQUE:1:2",
+                "pipeline_root_id": "TORQUE:1",
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+            }]},
+            boundary={
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+                "status": "superseded",
+                "superseded_by_task_id": "TORQUE:1:2",
+            },
+        )
+        continuation = _task(
+            "TORQUE:1:2",
+            action_name="feature/implement",
+            pipeline_root_id="TORQUE:1",
+            completion_evidence={"review_cycle_continue": {
+                "original_review_task_id": predecessor.id,
+                "continuation_task_id": "TORQUE:1:2",
+            }},
+            boundary={
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+                "status": "open",
+            },
+        )
+
+        mark_branch_boundaries_merged(
+            [predecessor, continuation],
+            repo_root="/repo",
+            branch="torque/worker",
+            merge_sha="landed",
+            task_ids=[continuation.id],
+        )
+
+        self.assertEqual(
+            predecessor.worktree_boundary["status"], "superseded"
+        )
+        self.assertNotIn(
+            "merge_commit_sha", predecessor.worktree_boundary
+        )
+
+    def test_mark_merge_does_not_stamp_sibling_or_reroute_boundary(self):
+        predecessor = _task(
+            "TORQUE:1:1",
+            action_name="feature/review",
+            pipeline_root_id="TORQUE:1",
+            completion_evidence={"review_cycle_continuations": [{
+                "original_review_task_id": "TORQUE:1:1",
+                "continuation_task_id": "TORQUE:1:2",
+                "pipeline_root_id": "TORQUE:1",
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+            }]},
+            boundary={
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+                "status": "superseded",
+                "superseded_by_task_id": "TORQUE:1:2",
+            },
+        )
+        continuation = _task(
+            "TORQUE:1:2",
+            action_name="feature/implement",
+            pipeline_root_id="TORQUE:1",
+            completion_evidence={"review_cycle_continue": {
+                "original_review_task_id": predecessor.id,
+                "continuation_task_id": "TORQUE:1:2",
+            }},
+            boundary={
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+                "status": "open",
+            },
+        )
+        fresh_review = _task(
+            "TORQUE:1:3",
+            action_name="feature/review",
+            parent_task_id=continuation.id,
+            pipeline_root_id="TORQUE:1",
+            boundary={
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+                "status": "open",
+            },
+        )
+        sibling = _task(
+            "TORQUE:1:4",
+            action_name="feature/review",
+            pipeline_root_id="TORQUE:1",
+            boundary={
+                "repo_root": "/repo",
+                "branch": "torque/sibling",
+                "status": "superseded",
+            },
+        )
+        reroute = _task(
+            "TORQUE:2",
+            action_name="feature/review",
+            boundary={
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+                "status": "superseded",
+            },
+        )
+
+        mark_branch_boundaries_merged(
+            [predecessor, continuation, fresh_review, sibling, reroute],
+            repo_root="/repo",
+            branch="torque/worker",
+            merge_sha="landed",
+            task_ids=[continuation.id, fresh_review.id],
+        )
+
+        self.assertEqual(sibling.worktree_boundary["status"], "superseded")
+        self.assertEqual(reroute.worktree_boundary["status"], "superseded")
+        self.assertNotIn("merge_commit_sha", sibling.worktree_boundary)
+        self.assertNotIn("merge_commit_sha", reroute.worktree_boundary)
 
     def test_mark_branch_boundaries_merged_marks_pipeline_root_without_boundary(self):
         root = _task("task-root", lane="In Progress", labels=["ready"])
