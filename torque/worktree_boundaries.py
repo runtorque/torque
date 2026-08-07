@@ -844,11 +844,11 @@ def _task_root_id(task, tasks_by_id: dict[str, object]) -> str:
     return ""
 
 
-def review_cycle_containment_candidates(tasks: Iterable, *,
-                                        repo_root: str,
-                                        branch: str,
-                                        task_ids: Iterable[str] | str,
-                                        ) -> list:
+def _review_cycle_containment_candidate_hops(tasks: Iterable, *,
+                                             repo_root: str,
+                                             branch: str,
+                                             task_ids: Iterable[str] | str,
+                                             ) -> list[tuple[object, str]]:
     """Return only structurally linked earlier review-cycle boundaries.
 
     Repository and branch identity may reject an audited reciprocal link, but
@@ -873,6 +873,7 @@ def review_cycle_containment_candidates(tasks: Iterable, *,
         return []
 
     pairs: list[tuple[str, str]] = []
+    plain_review_ids: list[str] = []
     for continuation_id in target_ids:
         continuation = tasks_by_id.get(continuation_id)
         if not continuation or _clean_text(
@@ -894,11 +895,96 @@ def review_cycle_containment_candidates(tasks: Iterable, *,
                     == continuation_root
             ):
                 pairs.append((continuation_id, candidate_id))
+                plain_review_ids.append(candidate_id)
 
-    candidates: list = []
-    candidate_ids: set[str] = set()
+    hops: list[tuple[object, str]] = []
+    hop_keys: set[tuple[str, str]] = set()
     visited_pairs: set[tuple[str, str]] = set()
-    while pairs:
+    visited_plain_reviews: set[str] = set()
+
+    def add_hop(candidate, successor_id: str) -> None:
+        candidate_id = _clean_text(getattr(candidate, "id", ""))
+        successor_id = _clean_text(successor_id)
+        key = (candidate_id, successor_id)
+        if not candidate_id or not successor_id or key in hop_keys:
+            return
+        hops.append((candidate, successor_id))
+        hop_keys.add(key)
+
+    while pairs or plain_review_ids:
+        if plain_review_ids:
+            review_id = plain_review_ids.pop()
+            if review_id not in visited_plain_reviews:
+                visited_plain_reviews.add(review_id)
+                review = tasks_by_id.get(review_id)
+                review_boundary = task_boundary(review)
+                review_root = _task_root_id(review, tasks_by_id)
+                review_recorded_at = _clean_text(
+                    review_boundary.get("recorded_at", "")
+                )
+                if (
+                        review
+                        and _clean_text(
+                            getattr(review, "action_name", "")
+                        ).lower() == "feature/review"
+                        and review_root
+                        and review_recorded_at
+                        and _clean_text(review_boundary.get("repo_root", ""))
+                        == repo_root
+                        and _clean_text(review_boundary.get("branch", ""))
+                        == branch
+                ):
+                    for candidate in tasks:
+                        candidate_id = _clean_text(
+                            getattr(candidate, "id", "")
+                        )
+                        boundary = task_boundary(candidate)
+                        fact = boundary.get("code_delta")
+                        candidate_recorded_at = _clean_text(
+                            boundary.get("recorded_at", "")
+                        )
+                        if (
+                                not candidate_id
+                                or candidate_id in target_ids
+                                or candidate_id == review_id
+                                or _clean_text(
+                                    boundary.get("status", "")
+                                ).lower() != "superseded"
+                                or _clean_text(
+                                    boundary.get(
+                                        "superseded_by_task_id", ""
+                                    )
+                                ) != review_id
+                                or _task_root_id(candidate, tasks_by_id)
+                                != review_root
+                                or _clean_text(
+                                    boundary.get("repo_root", "")
+                                ) != repo_root
+                                or _clean_text(boundary.get("branch", ""))
+                                != branch
+                                or not candidate_recorded_at
+                                or candidate_recorded_at >= review_recorded_at
+                                or boundary_code_delta_state(boundary)
+                                != CODE_DELTA_PRESENT
+                                or not isinstance(fact, dict)
+                                or not _clean_text(
+                                    boundary.get("commit_sha", "")
+                                )
+                                or not _clean_text(fact.get("base_sha", ""))
+                                or _clean_text(fact.get("commit_sha", ""))
+                                != _clean_text(
+                                    boundary.get("commit_sha", "")
+                                )
+                        ):
+                            continue
+                        add_hop(candidate, review_id)
+                        if _clean_text(
+                                getattr(candidate, "action_name", "")
+                        ).lower() == "feature/review":
+                            plain_review_ids.append(candidate_id)
+
+        if not pairs:
+            continue
         continuation_id, direct_review_id = pairs.pop()
         pair = (continuation_id, direct_review_id)
         if pair in visited_pairs:
@@ -976,9 +1062,7 @@ def review_cycle_containment_candidates(tasks: Iterable, *,
         ):
             continue
 
-        if predecessor_id not in candidate_ids:
-            candidates.append(predecessor)
-            candidate_ids.add(predecessor_id)
+        add_hop(predecessor, continuation_id)
 
         prior_implementation_id = _clean_text(
             getattr(predecessor, "parent_task_id", "")
@@ -1000,10 +1084,34 @@ def review_cycle_containment_candidates(tasks: Iterable, *,
                 == repo_root
                 and _clean_text(prior_boundary.get("branch", "")) == branch
         ):
-            if prior_implementation_id not in candidate_ids:
-                candidates.append(prior_implementation)
-                candidate_ids.add(prior_implementation_id)
+            add_hop(prior_implementation, predecessor_id)
             pairs.append((prior_implementation_id, predecessor_id))
+    return hops
+
+
+def review_cycle_containment_candidates(tasks: Iterable, *,
+                                        repo_root: str,
+                                        branch: str,
+                                        task_ids: Iterable[str] | str,
+                                        ) -> list:
+    """Return structurally linked earlier boundary candidates.
+
+    Audited review-cycle links remain authoritative.  Plain extra reviews add
+    only the exact earlier-boundary supersession edge rooted at the selected
+    direct review; repository, branch, root, ordering, and present-delta facts
+    may reject that edge but can never create one.
+    """
+    candidates: list = []
+    candidate_ids: set[str] = set()
+    for candidate, _successor_id in _review_cycle_containment_candidate_hops(
+            tasks,
+            repo_root=repo_root,
+            branch=branch,
+            task_ids=task_ids):
+        candidate_id = _clean_text(getattr(candidate, "id", ""))
+        if candidate_id and candidate_id not in candidate_ids:
+            candidates.append(candidate)
+            candidate_ids.add(candidate_id)
     return candidates
 
 
@@ -1020,7 +1128,8 @@ async def verified_review_cycle_containment_task_ids(
     three-way merge of the candidate into the actual landed tree.  Every Git
     or evidence error fails closed for that candidate.
     """
-    candidates = review_cycle_containment_candidates(
+    tasks = list(tasks)
+    hops = _review_cycle_containment_candidate_hops(
         tasks,
         repo_root=repo_root,
         branch=branch,
@@ -1028,7 +1137,7 @@ async def verified_review_cycle_containment_task_ids(
     )
     repo_root = _clean_text(repo_root)
     merge_sha = _clean_text(merge_sha)
-    if not candidates or not repo_root or not merge_sha:
+    if not hops or not repo_root or not merge_sha:
         return ()
 
     async def git(*args: str) -> tuple[int, bytes]:
@@ -1076,15 +1185,14 @@ async def verified_review_cycle_containment_task_ids(
         else ""
     )
 
-    verified: list[str] = []
-    for task in candidates:
+    async def candidate_is_contained(task) -> bool:
         boundary = task_boundary(task)
         fact = boundary.get("code_delta")
         if (
                 boundary_code_delta_state(boundary) != CODE_DELTA_PRESENT
                 or not isinstance(fact, dict)
         ):
-            continue
+            return False
         base_ref = _clean_text(fact.get("base_sha", ""))
         boundary_ref = _clean_text(boundary.get("commit_sha", ""))
         classified_ref = _clean_text(fact.get("commit_sha", ""))
@@ -1094,29 +1202,29 @@ async def verified_review_cycle_containment_task_ids(
                 or not classified_ref
                 or classified_ref != boundary_ref
         ):
-            continue
+            return False
         base_commit = await resolve_commit(base_ref)
         boundary_commit = await resolve_commit(boundary_ref)
         if not base_commit or not boundary_commit:
-            continue
+            return False
 
         code, _ = await git(
             "merge-base", "--is-ancestor", base_commit, boundary_commit
         )
         if code:
-            continue
+            return False
         code, _ = await git(
             "merge-base", "--is-ancestor", boundary_commit, merged_commit
         )
         contained = code == 0
         if not contained:
             if not landing_parent or not merged_tree:
-                continue
+                return False
             code, _ = await git(
                 "merge-base", "--is-ancestor", base_commit, landing_parent
             )
             if code:
-                continue
+                return False
             code, fork_out = await git(
                 "merge-base", boundary_commit, landing_parent
             )
@@ -1126,27 +1234,27 @@ async def verified_review_cycle_containment_task_ids(
                     or len(fork_lines) != 1
                     or fork_lines[0].strip() != base_commit
             ):
-                continue
+                return False
             code, candidate_out = await git(
                 "diff", "--name-only", "-z", "--no-renames",
                 base_commit, boundary_commit,
             )
             if code:
-                continue
+                return False
             candidate_paths = {
                 path for path in candidate_out.split(b"\0") if path
             }
             if not candidate_paths:
-                continue
+                return False
             code, base_out = await git(
                 "diff", "--name-only", "-z", "--no-renames",
                 base_commit, landing_parent,
             )
             if code:
-                continue
+                return False
             base_paths = {path for path in base_out.split(b"\0") if path}
             if candidate_paths & base_paths:
-                continue
+                return False
             code, merge_tree_out = await git(
                 "merge-tree", "--write-tree", merged_commit, boundary_commit
             )
@@ -1158,10 +1266,33 @@ async def verified_review_cycle_containment_task_ids(
                 and len(merge_tree_lines) == 1
                 and merge_tree_lines[0].strip() == merged_tree
             )
-        if contained:
+        return contained
+
+    admitted_ids = {
+        _clean_text(task_id)
+        for task_id in _normalize_boundary_task_ids(task_ids)
+        if _clean_text(task_id)
+    }
+    verified: list[str] = []
+    pending = list(hops)
+    while pending:
+        deferred: list[tuple[object, str]] = []
+        made_progress = False
+        for task, successor_id in pending:
             task_id = _clean_text(getattr(task, "id", ""))
-            if task_id:
-                verified.append(task_id)
+            if not task_id or task_id in admitted_ids:
+                continue
+            if successor_id not in admitted_ids:
+                deferred.append((task, successor_id))
+                continue
+            if not await candidate_is_contained(task):
+                continue
+            admitted_ids.add(task_id)
+            verified.append(task_id)
+            made_progress = True
+        if not made_progress:
+            break
+        pending = deferred
     return tuple(verified)
 
 
