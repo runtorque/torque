@@ -616,19 +616,25 @@ def boundary_summary(task, *, queued_followers: list | None = None,
     }
 
 
-def refresh_latest_boundary_after_rebase(tasks: Iterable, *,
-                                         repo_root: str,
-                                         branch: str,
-                                         previous_head_sha: str,
-                                         rebased_head_sha: str,
-                                         previous_submodules: list[dict] | None = None,
-                                         rebased_submodules: list[dict] | None = None):
+async def refresh_latest_boundary_after_rebase(
+    tasks: Iterable,
+    *,
+    repo_root: str,
+    branch: str,
+    worktree_path: str,
+    previous_head_sha: str,
+    rebased_head_sha: str,
+    previous_submodules: list[dict] | None = None,
+    rebased_submodules: list[dict] | None = None,
+):
     """Re-anchor the latest open boundary after a Torque-managed rebase.
 
     This only updates boundaries that still pointed at the exact pre-rebase
     branch tip and have no started successor tasks. That preserves the normal
     safety model for stale or already-continued histories while letting Torque's
-    own clean rebases keep the merge boundary current.
+    own clean rebases keep the merge boundary current. The code-delta fact is
+    recomputed against the rebased head and replaced as one classifier result,
+    including an honest ``unknown`` result when Git classification fails.
     """
     previous_head_sha = str(previous_head_sha or "").strip()
     rebased_head_sha = str(rebased_head_sha or "").strip()
@@ -648,15 +654,15 @@ def refresh_latest_boundary_after_rebase(tasks: Iterable, *,
     if not latest:
         return None
 
-    boundary = dict(task_boundary(latest))
-    if not boundary:
+    source_boundary = dict(task_boundary(latest))
+    if not source_boundary:
         return None
-    if boundary.get("commit_sha", "") != previous_head_sha:
+    if source_boundary.get("commit_sha", "") != previous_head_sha:
         return None
     if started_successor_tasks(tasks, getattr(latest, "id", "")):
         return None
 
-    boundary["commit_sha"] = rebased_head_sha
+    boundary = dict(source_boundary)
     if previous_submodules is not None or rebased_submodules is not None:
         previous_by_path = {
             _clean_text(item.get("path", "")): item
@@ -690,6 +696,26 @@ def refresh_latest_boundary_after_rebase(tasks: Iterable, *,
                 updated_submodules.append(existing)
         if updated_submodules:
             boundary["submodules"] = updated_submodules
+    code_delta = await classify_boundary_code_delta(
+        worktree_path=worktree_path,
+        base_branch=boundary.get("base_branch", ""),
+        commit_sha=rebased_head_sha,
+    )
+    # Classification yields to Git. Recheck the selection before assigning so
+    # a concurrent supersession or successor start cannot be overwritten.
+    if latest_boundary_task(
+        tasks,
+        repo_root=repo_root,
+        branch=branch,
+        statuses={"open"},
+    ) is not latest:
+        return None
+    if dict(task_boundary(latest)) != source_boundary:
+        return None
+    if started_successor_tasks(tasks, getattr(latest, "id", "")):
+        return None
+    boundary["commit_sha"] = rebased_head_sha
+    boundary["code_delta"] = code_delta
     boundary.pop("reason", None)
     latest.worktree_boundary = boundary
     return latest
