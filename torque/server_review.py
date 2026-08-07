@@ -436,7 +436,11 @@ _INLINE_FINAL_REVIEW_VERDICT_RE = re.compile(
     r"(?:[:—–-])\s*(?P<verdict>"
     r"ship(?:\s+it|\s+with\s+fixes)?|needs\s+(?:rework|changes)|"
     r"blocker|revert)"
-    r"(?:\.?$|(?=\s*[;,:—–-]\s*\S))",
+    r"(?:\.?$|\s*[;,:—–-]\s*"
+    r"(?:no\s+blocking\s+issues"
+    r"(?:\s*(?:[;,]|\band\b)\s*(?:work\s+is\s+)?"
+    r"ready\s+to\s+merge)?|(?:work\s+is\s+)?ready\s+to\s+merge)"
+    r"\.?$)",
     re.IGNORECASE,
 )
 
@@ -447,8 +451,9 @@ def _inline_final_review_verdict_text(line: str) -> str:
     A bare ``Final review verdict`` label may appear after a completed prose
     sentence in a reviewer report. Deliberately require that sentence
     boundary, the complete label, and either a terminal instructed verdict or
-    a punctuation-delimited detail clause rather than searching arbitrary
-    prose: quoted labels and narrative examples remain non-authoritative.
+    a bounded authoritative detail phrase rather than searching arbitrary
+    punctuation-delimited prose: quoted labels and narrative examples remain
+    non-authoritative.
     """
     raw_line = str(line or "")
     # A Markdown blockquote is illustrative/quoted material even when its

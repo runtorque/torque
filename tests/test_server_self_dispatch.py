@@ -7225,6 +7225,18 @@ class ServerReviewMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
             self.server_mod._review_verdict_from_message(inline_message),
             "ship",
         )
+        for detailed_message in (
+                "Merge risk: low. Final review verdict: Ship — no blocking "
+                "issues; ready to merge.",
+                "Merge risk: low. Final review verdict: Ship; no blocking "
+                "issues and ready to merge.",
+        ):
+            with self.subTest(authoritative_detail=detailed_message):
+                self.assertEqual(
+                    self.server_mod._review_verdict_from_message(
+                        detailed_message),
+                    "ship",
+                )
         review_task = self.state_mod.BoardTask(
             id="TORQUE:inline-ship",
             task="Review worker change",
@@ -7255,6 +7267,14 @@ class ServerReviewMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
                 # narrative example because the label/value is not terminal.
                 "The review guide gives an example. "
                 "Final review verdict: Revert is a blocking form.",
+                "The review guide gives an example. Final review verdict: "
+                "Revert, for example, is a blocking form.",
+                "The docs show this syntax. Final review verdict: Ship: "
+                "this is only an example.",
+                "Do not write this. Final review verdict: Ship; that would "
+                "incorrectly approve it.",
+                "The template ends with a sample. Final review verdict: "
+                "Ship — example only; do not use.",
                 "This prose mentions the verdict word ship, but has no label.",
         ):
             with self.subTest(message=message):
