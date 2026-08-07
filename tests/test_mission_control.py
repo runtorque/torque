@@ -96,6 +96,43 @@ class MissionControlSummaryTests(unittest.TestCase):
         self.assertEqual(actions["mc:stream:stream:repo:feature:ready_to_merge"], "merge_ready_stream")
         self.assertEqual(actions["mc:deploy:Torque:pending"], "record_deploy_or_relaunch")
 
+    def test_unverified_head_state_requires_readiness_check(self):
+        stream = {
+            "stream_id": "stream:repo:feature",
+            "group": "Torque",
+            "branch": "feature",
+            "state": "merge_readiness_unknown",
+            "merge_state": "not_ready",
+            "gate_reason": (
+                "The current branch head is unverified; do not merge until "
+                "the head check succeeds."
+            ),
+            "merge_readiness": {
+                "head": {
+                    "reviewed_boundary_sha": "reviewed123",
+                    "current_branch_head_sha": "",
+                    "current_branch_head_sha_source": "unknown",
+                    "current_branch_head_sha_verified": False,
+                },
+            },
+        }
+
+        summary = self.summary(streams=[stream])
+
+        self.assertEqual(self.cards(summary, "needs_operator_now"), [])
+        card = next(
+            item for item in self.cards(summary, "at_risk_watchlist")
+            if item["id"] == (
+                "mc:stream:stream:repo:feature:merge_readiness_unknown"
+            )
+        )
+        self.assertEqual(card["gate"], "merge_readiness_unknown")
+        self.assertEqual(
+            card["recommended_next_action"],
+            "check_merge_readiness",
+        )
+        self.assertIn("head is unverified", card["reason"])
+
     def test_verification_failed_and_live_smoke_manual_validation(self):
         failed = self.add_task(
             "Failed verification",

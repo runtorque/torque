@@ -97,6 +97,61 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(item["head"], head)
 
+    def test_architect_attention_digest_surfaces_unverified_head_as_blocked(self):
+        architect = self._add_architect("arch-1", "Architect")
+        engineer = self._add_engineer(
+            "eng-1",
+            "Engineer",
+            hired_by_architect_id=architect.id,
+        )
+        worker = self._add_worker("worker-1", "Worker", engineer.id)
+        head = {
+            "reviewed_boundary_sha": "reviewed123",
+            "current_branch_head_sha": "",
+            "current_branch_head_sha_source": "unknown",
+            "current_branch_head_sha_verified": False,
+            "branch_advanced": False,
+        }
+        stream = {
+            "stream_id": "stream:/repo::torque/worker",
+            "state": "merge_readiness_unknown",
+            "branch": "torque/worker",
+            "repo_root": "/repo",
+            "agent_id": worker.id,
+            "merge_readiness": {
+                "state": "merge_readiness_unknown",
+                "merge_state": "not_ready",
+                "head": head,
+                "recommended_next_action": "check_merge_readiness",
+            },
+        }
+
+        with mock.patch.object(
+            self.architect_reports_mod,
+            "compute_worktree_streams",
+            return_value=[stream],
+        ):
+            text, is_error = (
+                self.architect_reports_mod._architect_attention_digest_json(
+                    self.state,
+                    architect.id,
+                    architect.group,
+                    {},
+                )
+            )
+
+        self.assertFalse(is_error, text)
+        sections = json.loads(text)["sections"]
+        self.assertEqual(sections["ready_to_merge_streams"]["count"], 0)
+        blocked = sections["blocker_or_stale_streams"]["items"]
+        self.assertEqual(len(blocked), 1)
+        self.assertEqual(blocked[0]["state"], "merge_readiness_unknown")
+        self.assertEqual(
+            blocked[0]["recommended_next_action"],
+            "check_merge_readiness",
+        )
+        self.assertEqual(blocked[0]["head"], head)
+
     def _add_architect(self, agent_id: str, name: str, *, group: str = "torque"):
         self.state.groups.setdefault(group, [])
         cell = self.state_mod.AgentCell(
@@ -2226,6 +2281,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "/repo", "torque/hired-ready", "main", {
                 "state": "fresh", "stale": False,
                 "source": "merge_readiness_check", "merge_clean": True,
+                "branch_head": "abc123",
             },
         )
 
@@ -2262,6 +2318,13 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         ready_stream = next(
             item for item in sections["ready_to_merge_streams"]["items"]
             if ready_product.id in item["product_task_ids"]
+        )
+        self.assertEqual(
+            ready_stream["head"]["current_branch_head_sha"],
+            "abc123",
+        )
+        self.assertTrue(
+            ready_stream["head"]["current_branch_head_sha_verified"],
         )
         self.assertEqual(ready_stream["completion_deviations"], [{
             "task_id": ready_product.id,

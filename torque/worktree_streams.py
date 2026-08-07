@@ -324,17 +324,27 @@ def _stale_base_packet(boundary: dict, pr: dict) -> dict:
 
 
 def _current_head_packet(*, reviewed_sha: str, branch_advanced: bool,
-                         boundary: dict, pr: dict) -> dict:
+                         boundary: dict, pr: dict,
+                         readiness: dict) -> dict:
+    readiness_branch_head = ""
+    if str((readiness or {}).get("source", "") or "").strip() == (
+            "merge_readiness_check"):
+        readiness_branch_head = str(
+            (readiness or {}).get("branch_head", "") or ""
+        ).strip()
     pr_head_sha = str((pr or {}).get("head_sha", "") or "").strip()
     current = str(
-        (boundary or {}).get("head_sha", "")
+        readiness_branch_head
+        or (boundary or {}).get("head_sha", "")
         or (boundary or {}).get("current_head_sha", "")
         or pr_head_sha
         or ""
     ).strip()
     source = ""
     if current:
-        if current == str((boundary or {}).get("head_sha", "") or "").strip():
+        if current == readiness_branch_head:
+            source = "merge_readiness_check"
+        elif current == str((boundary or {}).get("head_sha", "") or "").strip():
             source = "merge_check"
         elif current == str(
             (boundary or {}).get("current_head_sha", "") or ""
@@ -342,15 +352,13 @@ def _current_head_packet(*, reviewed_sha: str, branch_advanced: bool,
             source = "boundary_current_head"
         else:
             source = "pull_request"
-    elif reviewed_sha and not branch_advanced:
-        current = reviewed_sha
-        source = "review_boundary_assumed_current"
     else:
         source = "unknown"
     return {
         "reviewed_boundary_sha": reviewed_sha,
         "current_branch_head_sha": current,
         "current_branch_head_sha_source": source,
+        "current_branch_head_sha_verified": bool(current),
         "branch_advanced": branch_advanced,
     }
 
@@ -431,6 +439,8 @@ def _merge_readiness_next_action(*, stream_state: str, stale_base: dict,
                                  recommended_next_action: str) -> str:
     if stream_state == "merged":
         return "none"
+    if stream_state == "merge_readiness_unknown":
+        return "check_merge_readiness"
     if bool((stale_base or {}).get("stale")):
         return "rebase"
     if recommended_next_action in {
@@ -468,6 +478,7 @@ def _merge_readiness_packet(*, stream_id_value: str, repo_root: str,
                             latest_reviewed_commit_sha: str,
                             latest_merged_commit_sha: str,
                             latest_boundary_pr: dict,
+                            head: dict,
                             branch_has_advanced: bool,
                             partial_review_safe: bool,
                             validation_state: str,
@@ -520,12 +531,7 @@ def _merge_readiness_packet(*, stream_id_value: str, repo_root: str,
             ),
             "reviewed_sha": latest_reviewed_commit_sha,
         },
-        "head": _current_head_packet(
-            reviewed_sha=latest_reviewed_commit_sha,
-            branch_advanced=branch_has_advanced,
-            boundary=latest_boundary_info,
-            pr=latest_boundary_pr,
-        ),
+        "head": dict(head or {}),
         "stale_base": stale_base,
         "review_final": _review_packet(latest_review_boundary, latest_review),
         "verification": _verification_packet(
@@ -973,14 +979,47 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
         readiness_boundary_info, latest_boundary_pr
     )
     readiness_conflict = bool(readiness_stale_base.get("merge_conflict"))
-    readiness_unknown = (
+    base_readiness_unknown = (
         readiness_stale_base.get("state") == "unknown"
         or readiness_stale_base.get("stale") is None
     )
     validation_state, validation_record = _compute_validation_state(stream_tasks)
     pending_validation = validation_state == "pending_human_validation"
-    branch_has_advanced = bool(latest_review_boundary and started_followers)
-    partial_review_safe = bool(latest_review_boundary and not started_followers)
+    latest_reviewed_commit_sha = ""
+    if latest_review_boundary:
+        latest_reviewed_commit_sha = (
+            task_boundary(latest_review_boundary).get("commit_sha", "") or ""
+        )
+    head = _current_head_packet(
+        reviewed_sha=latest_reviewed_commit_sha,
+        branch_advanced=False,
+        boundary=readiness_boundary_info,
+        pr=latest_boundary_pr,
+        readiness=readiness_stale_base,
+    )
+    current_branch_head_sha = str(
+        head.get("current_branch_head_sha", "") or ""
+    ).strip()
+    head_unverified = bool(
+        latest_review_boundary
+        and not head.get("current_branch_head_sha_verified", False)
+    )
+    branch_has_advanced = bool(
+        latest_review_boundary
+        and (
+            started_followers
+            or (
+                current_branch_head_sha
+                and current_branch_head_sha != latest_reviewed_commit_sha
+            )
+        )
+    )
+    head["branch_advanced"] = branch_has_advanced
+    partial_review_safe = bool(
+        latest_review_boundary
+        and not branch_has_advanced
+        and not head_unverified
+    )
     merge_conflict = any(_is_merge_conflict_task(task) for task in blocker_tasks)
 
     if merged:
@@ -991,7 +1030,7 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
         code_state = "review_blocked"
     elif (
         latest_review_boundary
-        and partial_review_safe
+        and not branch_has_advanced
         and not review_tasks
         and not blocker_tasks
     ):
@@ -1017,14 +1056,18 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
         and not open_product_tasks
         and not queued_tasks
     ):
-        stream_state = "ready_to_merge"
+        stream_state = (
+            "merge_readiness_unknown"
+            if head_unverified
+            else "ready_to_merge"
+        )
     else:
         stream_state = "implementing"
 
     # A clean review alone is not a merge-readiness proof.  We must have a
     # current-base probe before asserting ready; a failed probe is surfaced as
     # an actionable unknown rather than a confident false merge suggestion.
-    if stream_state == "ready_to_merge" and readiness_unknown:
+    if stream_state == "ready_to_merge" and base_readiness_unknown:
         stream_state = "merge_readiness_unknown"
 
     if merged:
@@ -1085,6 +1128,11 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
             "The base branch advanced and now conflicts with this stream; "
             "rebase before merge."
         )
+    elif stream_state == "merge_readiness_unknown" and head_unverified:
+        gate_reason = (
+            "The current branch head is unverified; do not merge until "
+            "the head check succeeds."
+        )
     elif stream_state == "merge_readiness_unknown":
         gate_reason = (
             "Current-base merge readiness could not be determined; "
@@ -1133,12 +1181,6 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
         has_open_product_tasks=bool(open_product_tasks or queued_tasks),
     )
 
-    latest_reviewed_commit_sha = ""
-    if latest_review_boundary:
-        latest_reviewed_commit_sha = (
-            task_boundary(latest_review_boundary).get("commit_sha", "") or ""
-        )
-
     last_activity_at = _latest_activity_iso(
         stream_tasks,
         [
@@ -1182,6 +1224,7 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
         latest_reviewed_commit_sha=latest_reviewed_commit_sha,
         latest_merged_commit_sha=latest_merged_commit_sha,
         latest_boundary_pr=latest_boundary_pr,
+        head=head,
         branch_has_advanced=branch_has_advanced,
         partial_review_safe=partial_review_safe,
         validation_state=validation_state,
@@ -1258,7 +1301,9 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
             getattr(blocker_parent_review_task, "task", "") or ""
         ),
         "expected_next_transition": (
-            "re-review" if stream_state == "fixing_blockers" else ""
+            "re-review"
+            if stream_state == "fixing_blockers" or branch_has_advanced
+            else ""
         ),
         "state": stream_state,
         "code_state": code_state,

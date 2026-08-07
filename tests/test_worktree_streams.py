@@ -248,6 +248,13 @@ class WorktreeStreamTests(unittest.TestCase):
             packet["head"]["current_branch_head_sha"],
             "abc123",
         )
+        self.assertTrue(
+            packet["head"]["current_branch_head_sha_verified"],
+        )
+        self.assertEqual(
+            packet["head"]["current_branch_head_sha_source"],
+            "merge_readiness_check",
+        )
         self.assertEqual(packet["review_final"]["verdict"], "ship")
         self.assertEqual(packet["verification"]["state"], "validated")
         self.assertEqual(
@@ -264,6 +271,9 @@ class WorktreeStreamTests(unittest.TestCase):
             "Add Events tab",
             agent_id=worker.id,
             verification_state="passed",
+            completion_evidence={
+                "completion": {"message": "Implementation complete."},
+            },
         )
         review = self._task(
             "TORQUE:1:1",
@@ -293,7 +303,10 @@ class WorktreeStreamTests(unittest.TestCase):
         )
         state.board_tasks[product.id] = product
         state.board_tasks[review.id] = review
-        review_evidence_before = copy.deepcopy(review.completion_evidence)
+        evidence_before = {
+            product.id: copy.deepcopy(product.completion_evidence),
+            review.id: copy.deepcopy(review.completion_evidence),
+        }
         self.streams_mod._merge_readiness_cache_put(
             "/repo", "torque/worker", "main", {
                 "state": "fresh",
@@ -325,12 +338,15 @@ class WorktreeStreamTests(unittest.TestCase):
         )
         self.assertTrue(stream["branch_advanced"])
         self.assertFalse(stream["partial_review_safe"])
+        self.assertEqual(packet["followups"]["started_count"], 0)
         self.assertNotEqual(stream["state"], "ready_to_merge")
         self.assertEqual(stream["merge_state"], "not_ready")
         self.assertEqual(stream["recommended_next_action"], "re-review")
+        self.assertEqual(stream["expected_next_transition"], "re-review")
         self.assertIn("advanced beyond", stream["gate_reason"])
         self.assertEqual(packet["review_final"]["verdict"], "ship")
-        self.assertEqual(review.completion_evidence, review_evidence_before)
+        self.assertEqual(product.completion_evidence, evidence_before[product.id])
+        self.assertEqual(review.completion_evidence, evidence_before[review.id])
 
     def test_unverified_reviewed_stream_fails_closed_without_assuming_head(self):
         state = self._make_state()
@@ -340,6 +356,9 @@ class WorktreeStreamTests(unittest.TestCase):
             "Add Events tab",
             agent_id=worker.id,
             verification_state="passed",
+            completion_evidence={
+                "completion": {"message": "Implementation complete."},
+            },
         )
         review = self._task(
             "TORQUE:1:1",
@@ -369,11 +388,14 @@ class WorktreeStreamTests(unittest.TestCase):
         )
         state.board_tasks[product.id] = product
         state.board_tasks[review.id] = review
-        review_evidence_before = copy.deepcopy(review.completion_evidence)
+        evidence_before = {
+            product.id: copy.deepcopy(product.completion_evidence),
+            review.id: copy.deepcopy(review.completion_evidence),
+        }
         self.streams_mod._merge_readiness_cache_put(
             "/repo", "torque/worker", "main", {
-                "state": "fresh",
-                "stale": False,
+                "state": "stale",
+                "stale": True,
                 "source": "merge_readiness_check",
                 "merge_clean": True,
             },
@@ -402,9 +424,15 @@ class WorktreeStreamTests(unittest.TestCase):
             stream["recommended_next_action"],
             "check_merge_readiness",
         )
+        self.assertEqual(packet["state"], "merge_readiness_unknown")
+        self.assertEqual(
+            packet["recommended_next_action"],
+            "check_merge_readiness",
+        )
         self.assertIn("head", stream["gate_reason"].lower())
         self.assertEqual(packet["review_final"]["verdict"], "ship")
-        self.assertEqual(review.completion_evidence, review_evidence_before)
+        self.assertEqual(product.completion_evidence, evidence_before[product.id])
+        self.assertEqual(review.completion_evidence, evidence_before[review.id])
 
     def test_merge_readiness_exposes_worker_attested_completion_deviation(self):
         state = self._make_state()

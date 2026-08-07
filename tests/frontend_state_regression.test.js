@@ -23728,10 +23728,10 @@ test('renderAgentPanel labels an unknown current branch head as unverified', () 
 
   context.renderAgentPanel();
 
-  assert.match(panel.innerHTML, /Reviewed<\/span><span[^>]*>abcdef1/);
-  assert.match(panel.innerHTML, /Head<\/span><span[^>]*>Unverified/);
-  assert.doesNotMatch(panel.innerHTML, /Head<\/span><span[^>]*>abcdef1/);
-  assert.match(panel.innerHTML, /Check merge readiness/);
+  assert.match(panel.innerHTML, /merge-readiness-label">Reviewed<\/div><div[^>]*>abcdef1/);
+  assert.match(panel.innerHTML, /merge-readiness-label">Head<\/div><div[^>]*>Unverified/);
+  assert.doesNotMatch(panel.innerHTML, /merge-readiness-label">Head<\/div><div[^>]*>abcdef1/);
+  assert.match(panel.innerHTML, /Check Merge Readiness/);
   assert.match(panel.innerHTML, /Ship · TORQUE:2/);
 });
 

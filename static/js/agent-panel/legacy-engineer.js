@@ -2353,6 +2353,11 @@ function _engineerMergeReadinessFields(stream, packet) {
       headValue += ' · ' + _engineerHumanizeToken(headSource);
     }
     fields.push({ label: 'Head', value: headValue });
+  } else if (
+    head.current_branch_head_sha_verified === false
+    || String(head.current_branch_head_sha_source || '').trim() === 'unknown'
+  ) {
+    fields.push({ label: 'Head', value: 'Unverified' });
   }
 
   var baseState = _engineerMergeReadinessBaseState(stream, packet);
