@@ -927,10 +927,14 @@ def mark_branch_boundaries_merged(tasks: Iterable, *,
                 "commit_sha": source_boundary.get("commit_sha", "") or "",
                 "kind": source_boundary.get("kind", "") or "",
                 "status": "",
-                "recorded_at": "",
+                "recorded_at": _clean_text(
+                    source_boundary.get("recorded_at", "")
+                ),
                 "recorded_by_agent_id": (
                     source_boundary.get("recorded_by_agent_id", "") or ""
                 ),
+                # Actor/time are projected provenance; contextual completion
+                # or review prose is intentionally not projected.
                 "message": "",
                 "superseded_by_task_id": "",
                 "merged_at": "",
