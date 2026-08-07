@@ -333,13 +333,6 @@ ENGINEER_TOOLS.extend([
                     ),
                     "default": False,
                 },
-                "task_content_hash": {
-                    "type": "string",
-                    "description": (
-                        "Pinned authored-content hash. Required only when "
-                        "replying with a verdict on a task_read_grant thread."
-                    ),
-                },
             },
             "required": ["architect_id", "message"],
         },
@@ -366,6 +359,13 @@ ENGINEER_TOOLS.extend([
                         "updates."
                     ),
                     "default": False,
+                },
+                "task_content_hash": {
+                    "type": "string",
+                    "description": (
+                        "Pinned authored-content hash. Required only when "
+                        "replying with a verdict on a task_read_grant thread."
+                    ),
                 },
             },
             "required": ["message_id", "message"],

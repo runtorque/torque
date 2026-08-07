@@ -38,12 +38,14 @@ async def dispatch_communications(ctx: ScopedDispatchContext):
         engineer = real_state.agents.get(engineer_id)
         group = str(getattr(architect, "group", "") or "").strip()
         task_hash = _task_content_hash(task)
+        grant_id = "msg-" + uuid.uuid4().hex[:12]
         context = {
             "context_task_ids": [task.id],
             "context_engineer_ids": [engineer_id],
             "context_snapshot": {
                 "task_read_grant": {
                     "marker": TASK_READ_GRANT_MARKER,
+                    "grant_id": grant_id,
                     "architect_id": str(caller_id or "").strip(),
                     "recipient_engineer_id": engineer_id,
                     "group": group,
@@ -58,6 +60,7 @@ async def dispatch_communications(ctx: ScopedDispatchContext):
             engineer,
             action="architect_task_read_grant",
             message=message,
+            message_id=grant_id,
             context=context,
         )
         await _inject_mcp_message(
@@ -464,6 +467,9 @@ async def dispatch_communications(ctx: ScopedDispatchContext):
             architect = real_state.agents.get(architect_id)
             caller_engineer = real_state.agents.get(caller_id_text)
             if (
+                str(grant.get("grant_id", "") or "").strip()
+                != str((grant_row or {}).get("id", "") or "").strip()
+                or
                 str((grant_row or {}).get("recipient_id", "") or "").strip()
                 != caller_id_text
                 or str(grant.get("recipient_engineer_id", "") or "").strip()

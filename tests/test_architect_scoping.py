@@ -344,6 +344,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             persisted_grant["context_snapshot"]["task_read_grant"],
             {
                 "marker": "torque.task-read-grant.v1",
+                "grant_id": grant["grant_id"],
                 "architect_id": granter.id,
                 "recipient_engineer_id": reader.id,
                 "group": "torque",
@@ -351,6 +352,11 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                 "task_content_hash": grant["task_content_hash"],
             },
         )
+        direct_text, direct_error = await self._call_engineer(
+            "engineer_task_show", {"task": task.id}, reader.id
+        )
+        self.assertTrue(direct_error)
+        self.assertEqual(direct_text, "task not found in scope")
 
         inspect_text, inspect_error = await self._call_engineer(
             "engineer_peer_inspect",

@@ -268,6 +268,7 @@ does not guess a reply target from historical conversation rows.
 | `board_summary` | Read a compact board/orchestration summary. |
 | `task_list` | List visible tasks. |
 | `task_get` | Read one visible task. |
+| `task_read_grant` | Architect-only: grant one dispatch-eligible Engineer read-only access to one named task at a pinned authored-content hash. The grant is inspected through `peer_context` and becomes void when authored content changes; it never changes list or write scope. |
 | `task_chain` | Walk a task's derivation chain. |
 | `task_create` | Create an executable task or proposal according to authority. |
 | `task_update` | Patch writable task fields. |

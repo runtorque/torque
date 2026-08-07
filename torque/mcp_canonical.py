@@ -282,7 +282,6 @@ _ARCHITECT_EAGER_BY_CATEGORY = {
     # dispatch-to-hired-Engineer flow; Architects do not dispatch Workers.
     "tasks": {
         "task_list", "task_get", "task_chain", "task_claim", "task_create",
-        "task_read_grant",
         "task_update", "task_block_reply", "task_reassign", "task_move", "task_mark_covered",
         "task_coverage_reconcile",
         "task_verify",

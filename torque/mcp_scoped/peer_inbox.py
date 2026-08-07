@@ -63,6 +63,8 @@ def _task_read_grant_inspect_json(
     group = str(grant.get("group", "") or "").strip()
     architect_id = str(grant.get("architect_id", "") or "").strip()
     if (
+        str(grant.get("grant_id", "") or "").strip() != message_id
+        or
         str((row or {}).get("recipient_id", "") or "").strip() != caller_id
         or str(grant.get("recipient_engineer_id", "") or "").strip() != caller_id
         or str((row or {}).get("sender_id", "") or "").strip() != architect_id
