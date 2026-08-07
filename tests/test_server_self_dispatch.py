@@ -1879,6 +1879,94 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(task.lane, "Done")
 
+    async def test_feature_review_done_records_inline_ship_with_trailing_details(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        cell = self.state_mod.AgentCell(
+            id="reviewer-inline-ship",
+            name="Reviewer",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+            current_task_id="TORQUE:inline-ship-details",
+            directory="/repo",
+        )
+        state.agents[cell.id] = cell
+        state.board_add_task(
+            "Review worker change",
+            "g",
+            id="TORQUE:inline-ship-details",
+            lane="In Progress",
+            action_name="feature/review",
+            agent_id=cell.id,
+        )
+        panel_events = []
+        handle_command = self._extract_handle_command(
+            state,
+            _panel_event=lambda *args, **kwargs: panel_events.append(
+                (args, kwargs)
+            ),
+            action_mgr=types.SimpleNamespace(
+                list_actions=lambda _base_dir: [],
+                get_transitions=lambda _action, _base_dir="": [],
+                load_action=lambda _action, _base_dir="": {},
+                get_auto_close_on_done=lambda _action, **_kwargs: False,
+            ),
+            _record_task_boundary=(
+                lambda *args, **kwargs: asyncio.sleep(0)
+            ),
+            _resolve_base_dir=lambda group="": asyncio.sleep(0, result=""),
+        )
+        message = (
+            "Reviewed frozen SHA "
+            "280a6b3eb816eff1f44b78452b6efb2bb6876755 against base "
+            "9e8b4a68. Blocking issues: None. The combined seven-file diff "
+            "correctly decouples auto-Done from cleanup while retaining "
+            "candidate, descendant, already-Done, enablement, and "
+            "finalization gates; the candidate helper is byte-identical to "
+            "base. The dispatch edit gate now depends on a linked present "
+            "running worker and no longer infers activity from assigned "
+            "Engineer liveness; refusal wording is truthful. Focused suites "
+            "passed: 192 + 129 + 2 tests; git diff --check passed. No "
+            "deploy/restart was attempted; operator live smoke remains "
+            "pending. Follow-up suggestions: None. Follow-up classification: "
+            "none. Merge risk: low. Final review verdict: Ship — no blocking "
+            "issues; ready to merge.\n\n"
+            "Terminal declaration: No further work is needed; I will not "
+            "derive after this."
+        )
+        self.assertEqual(len(message), 839)
+
+        result = await handle_command({
+            "cmd": "ai_report",
+            "cell_id": cell.id,
+            "task_id": "TORQUE:inline-ship-details",
+            "action": "done",
+            "message": message,
+        })
+
+        self.assertTrue(result is None or result.get("type") == "ok")
+        task = state.board_tasks["TORQUE:inline-ship-details"]
+        review = task.completion_evidence["review"]
+        self.assertEqual(review["verdict"], "ship")
+        self.assertEqual(review["parsed_verdict"], "ship")
+        self.assertEqual(review["source_action"], "done")
+        self.assertEqual(review["summary"], message)
+        self.assertEqual(task.messages[-2]["message"], message)
+        self.assertEqual(
+            task.messages[-1]["message"],
+            "Final review verdict: ship; follow-ups=none",
+        )
+        self.assertEqual(
+            [entry["action"] for entry in task.messages[-2:]],
+            ["done", "review_verdict"],
+        )
+        self.assertIn(
+            "review_verdict",
+            [args[0] for args, _kwargs in panel_events],
+        )
+        self.assertEqual(task.lane, "Done")
+
     def test_synthetic_ship_misparse_can_be_amended_without_overwriting_record(self):
         state = self.state_mod.MatrixState()
         state.add_group("g")
@@ -7137,6 +7225,18 @@ class ServerReviewMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
             self.server_mod._review_verdict_from_message(inline_message),
             "ship",
         )
+        for detailed_message in (
+                "Merge risk: low. Final review verdict: Ship — no blocking "
+                "issues; ready to merge.",
+                "Merge risk: low. Final review verdict: Ship; no blocking "
+                "issues and ready to merge.",
+        ):
+            with self.subTest(authoritative_detail=detailed_message):
+                self.assertEqual(
+                    self.server_mod._review_verdict_from_message(
+                        detailed_message),
+                    "ship",
+                )
         review_task = self.state_mod.BoardTask(
             id="TORQUE:inline-ship",
             task="Review worker change",
@@ -7167,6 +7267,14 @@ class ServerReviewMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
                 # narrative example because the label/value is not terminal.
                 "The review guide gives an example. "
                 "Final review verdict: Revert is a blocking form.",
+                "The review guide gives an example. Final review verdict: "
+                "Revert, for example, is a blocking form.",
+                "The docs show this syntax. Final review verdict: Ship: "
+                "this is only an example.",
+                "Do not write this. Final review verdict: Ship; that would "
+                "incorrectly approve it.",
+                "The template ends with a sample. Final review verdict: "
+                "Ship — example only; do not use.",
                 "This prose mentions the verdict word ship, but has no label.",
         ):
             with self.subTest(message=message):
