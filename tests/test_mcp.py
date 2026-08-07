@@ -25,6 +25,58 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         if tasks:
             await asyncio.gather(*tasks)
 
+    async def test_canonical_task_get_reports_same_group_engineer_scope_refusal(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        alice = self.state_mod.AgentCell(
+            id="engineer-alice",
+            name="Alice",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+        )
+        bob = self.state_mod.AgentCell(
+            id="engineer-bob",
+            name="Bob",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+        )
+        for engineer in (alice, bob):
+            state.agents[engineer.id] = engineer
+            state.groups["g"].append(engineer.id)
+        task = self.state_mod.BoardTask(
+            id="task-peer",
+            task="Peer durable body",
+            group="g",
+            lane="Backlog",
+            assigned_engineer_id=bob.id,
+        )
+        state.board_tasks[task.id] = task
+
+        async def fake_handle_command(_payload):
+            self.fail("read tool should not call handle_command")
+
+        handler = self.mcp_mod.create_mcp_handler(fake_handle_command, state)
+        response = await handler(FakeRequest(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "task_get",
+                    "arguments": {"task": task.id},
+                },
+            },
+            headers={"X-Torque-Cell-Id": alice.id},
+        ))
+
+        self.assertTrue(response.payload["result"]["isError"])
+        self.assertEqual(
+            response.payload["result"]["content"][0]["text"],
+            "task not found in scope",
+        )
+
     async def test_dispatch_tool_maps_agent_reports_and_derive_returns_json(self):
         state = self.state_mod.MatrixState()
         cell = self.state_mod.AgentCell(
