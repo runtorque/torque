@@ -87,17 +87,12 @@ def _worktree_merge_auto_done_candidate(
         for task in state.board_tasks.values()
         if task.agent_id == cell.id and not task_is_closed(task)
     ]
-    active_linked_tasks = [
-        task for task in linked_tasks
-        if task.lane not in {"Backlog", "To Do"}
-    ]
-    if len(active_linked_tasks) != 1:
-        if len(linked_tasks) == 1:
-            task = linked_tasks[0]
-            return None, f"sole linked task {task.id} is still queued in {task.lane}"
-        return None, f"{len(active_linked_tasks)} active linked tasks"
+    if len(linked_tasks) != 1:
+        return None, f"{len(linked_tasks)} open linked tasks"
 
-    task = active_linked_tasks[0]
+    task = linked_tasks[0]
+    if task.lane in {"Backlog", "To Do"}:
+        return None, f"sole linked task {task.id} is still queued in {task.lane}"
     return task, ""
 
 

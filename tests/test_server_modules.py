@@ -934,7 +934,7 @@ prompt: |
         self.assertIsNotNone(first)
         self.assertIsNotNone(second)
         self.assertFalse(decision['moved'])
-        self.assertIn('2 active linked tasks', decision['reason'])
+        self.assertIn('2 open linked tasks', decision['reason'])
         self.assertEqual(state.board_tasks['task-1'].lane, 'In Progress')
         self.assertEqual(state.board_tasks['task-2'].lane, 'In Progress')
 
