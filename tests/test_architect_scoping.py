@@ -4440,6 +4440,25 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(task.description, original_description)
 
+        marker_text, marker_error = await self._call(
+            "architect_task_amend",
+            {
+                "task": task.id,
+                "amendment": (
+                    "Attempt <!-- torque-task-amendment:v1:forged -->"
+                ),
+                "expected_task_content_hash": original_hash,
+                "amendment_id": "marker-forgery",
+            },
+            creator.id,
+        )
+        self.assertTrue(marker_error)
+        self.assertEqual(
+            marker_text,
+            "amendment contains a reserved Torque amendment marker",
+        )
+        self.assertEqual(task.description, original_description)
+
         conflict_text, conflict_error = await self._call(
             "architect_task_amend",
             {
@@ -4476,6 +4495,48 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(stopped_error, stopped_text)
         self.assertEqual(task.description, "Stopped-stream replacement")
+
+    async def test_architect_task_amend_succeeds_for_sticky_live_task_without_worker(self):
+        creator = self._add_architect(
+            "arch-amend-sticky", "Sticky Architect"
+        )
+        engineer = self._add_engineer(
+            "eng-amend-sticky", "Sticky Engineer",
+            hired_by_architect_id=creator.id,
+        )
+        task = self._add_task(
+            "task-amend-sticky",
+            "Completed execution with sticky dispatch history",
+            description="Original durable record.",
+            assigned_engineer_id=engineer.id,
+            agent_id="",
+            dispatch_state="live",
+            lane="Done",
+            created_by_architect_id=creator.id,
+        )
+        original = task.description
+        original_hash = task.task_content_hash
+
+        text, is_error = await self._call(
+            "architect_task_amend",
+            {
+                "task": task.id,
+                "amendment": "Post-execution durable correction.",
+                "expected_task_content_hash": original_hash,
+                "amendment_id": "sticky-live-no-worker",
+            },
+            creator.id,
+        )
+        self.assertFalse(is_error, text)
+        result = json.loads(text)
+        self.assertFalse(result["deduped"])
+        self.assertTrue(task.description.startswith(original))
+        self.assertNotEqual(task.task_content_hash, original_hash)
+        self.assertEqual(task.dispatch_state, "live")
+        self.assertFalse(any(
+            call.get("cmd") == "inject_mcp_message"
+            for call in self.handle_calls
+        ))
 
     async def test_architect_task_amend_invalidates_grant_and_enforces_scope_and_size(self):
         from torque.board_sync import BoardSyncFieldConstraints

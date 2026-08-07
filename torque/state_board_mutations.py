@@ -15,6 +15,7 @@ from .task_amendment import (
     build_task_amendment_block,
     find_task_amendment,
     task_amendment_text_hash,
+    validate_task_amendment,
 )
 from .finalization import audit_entry, evaluate_finalization, normalize_mode, status_projection
 from .worktree_boundaries import code_boundary_done_status
@@ -853,6 +854,27 @@ class BoardMutationMixin:
         task = self.board_tasks.get(tid)
         if not task:
             return {"type": "error", "reason": "task_not_found"}
+        validation_error = validate_task_amendment(
+            amendment, amendment_id
+        )
+        if validation_error:
+            return {
+                "type": "error",
+                "reason": "invalid_task_amendment",
+                "message": validation_error,
+            }
+        if not str(actor_id or "").strip():
+            return {
+                "type": "error",
+                "reason": "invalid_task_amendment",
+                "message": "actor_id is required",
+            }
+        if not str(added_at or "").strip():
+            return {
+                "type": "error",
+                "reason": "invalid_task_amendment",
+                "message": "added_at is required",
+            }
         self.ensure_board_task_persisted(tid)
         current_hash = compute_task_content_hash(task)
         # Normalize stale loaded values before evaluating either retry or CAS.

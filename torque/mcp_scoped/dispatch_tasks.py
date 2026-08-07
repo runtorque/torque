@@ -572,20 +572,18 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
             return json.dumps(amend_result), True
         if not amend_result.get("deduped"):
             executor = None
-            for executor_id in (
-                str(getattr(task, "agent_id", "") or "").strip(),
-                str(
-                    getattr(task, "assigned_engineer_id", "") or ""
-                ).strip(),
-            ):
-                candidate = real_state.agents.get(executor_id)
-                if (
-                        candidate
-                        and str(
-                            getattr(candidate, "status", "") or ""
-                        ).strip().lower() == "running"):
-                    executor = candidate
-                    break
+            executor_id = str(
+                getattr(task, "agent_id", "") or ""
+            ).strip()
+            candidate = real_state.agents.get(executor_id)
+            if (
+                    candidate
+                    and str(
+                        getattr(candidate, "status", "") or ""
+                    ).strip().lower() == "running"
+                    and real_state.task_occupies_execution_slot(
+                        task, agent_id=executor_id)):
+                executor = candidate
             if executor:
                 # This system advisory is intentionally not a dispatch prompt
                 # rebuild and its constructor cannot accept authored text.

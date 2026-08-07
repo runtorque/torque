@@ -275,6 +275,46 @@ class CanonicalMCPContractTests(unittest.TestCase):
         self.assertEqual(translated["engineer_id"], "eng-reader")
         self.assertNotIn("agent", translated)
 
+    def test_task_amend_is_architect_only_with_explicit_cas_contract(self):
+        architect_tools = {
+            tool["name"]: tool
+            for tool in _canonical_tools_for_caller(
+                _State("architect"), "caller"
+            )
+        }
+        engineer_tools = {
+            tool["name"]: tool
+            for tool in _canonical_tools_for_caller(
+                _State("engineer"), "caller"
+            )
+        }
+        self.assertIn("task_amend", architect_tools)
+        self.assertTrue(architect_tools["task_amend"].get("deferred"))
+        self.assertNotIn("task_amend", engineer_tools)
+        schema = architect_tools["task_amend"]["inputSchema"]
+        self.assertEqual(
+            set(schema["required"]),
+            {
+                "task",
+                "amendment",
+                "expected_task_content_hash",
+                "amendment_id",
+            },
+        )
+        handler, translated = _resolve_public_tool_call(
+            _State("architect"),
+            "caller",
+            "task_amend",
+            {
+                "task": "TORQUE:AMEND",
+                "amendment": "Correction.",
+                "expected_task_content_hash": "task-content-v1:sha256:abc",
+                "amendment_id": "amend-1",
+            },
+        )
+        self.assertEqual(handler, "architect_task_amend")
+        self.assertEqual(translated["amendment_id"], "amend-1")
+
     def test_coverage_reconcile_discovery_and_selection_are_truthful(self):
         """Discovery presents the provisional route before a planner calls it."""
         docs = Path("docs/reference/mcp-tools.md").read_text(encoding="utf-8")

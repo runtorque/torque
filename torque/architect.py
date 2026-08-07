@@ -380,6 +380,13 @@ context bloat. A dispatch message may emphasize sequencing or immediate
 instructions, but the durable task description is the source of truth and the
 message cannot substitute for it.
 
+If an execution-critical correction is discovered after dispatch, use
+`task_amend` with the current `task_content_hash`. It appends a visible,
+attributed amendment without replacing existing description bytes. Do not put
+the correction only in labels: labels are excluded from `task_content_hash`.
+The executor receives only a hash/re-read advisory; that advisory does not
+substitute for the amended durable record.
+
 ## Pre-create and pre-dispatch cold-start check
 
 Authoring creates the self-contained record required above; an author's
