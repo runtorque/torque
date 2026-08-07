@@ -28294,6 +28294,12 @@ test('agent grid bulk actions are group scoped and fail closed on unknown worker
       alpha: ['architect-a', 'engineer-a', 'worker-clean', 'worker-unknown', 'worker-dirty', 'worker-ahead', 'worker-running', 'deleted-worker'],
       beta: ['worker-beta']
     };
+    state.children = {
+      'worker-clean': ['terminal-clean'],
+      'worker-dirty': ['terminal-dirty-a', 'terminal-dirty-b'],
+      'worker-running': ['terminal-running-not-included'],
+      'deleted-worker': ['terminal-deleted-not-included']
+    };
     state.agents = {
       'architect-a': { id: 'architect-a', cell_type: 'agent', kind: 'architect', group: 'alpha', status: 'idle' },
       'engineer-a': { id: 'engineer-a', cell_type: 'agent', kind: 'engineer', group: 'alpha', status: 'stopped' },
@@ -28359,6 +28365,8 @@ test('agent grid bulk actions are group scoped and fail closed on unknown worker
   assert.match(confirmCalls[0].message, /2 idle, 1 error, 1 stopped/);
   assert.match(confirmCalls[0].message, /1 worktree state is unknown/);
   assert.match(confirmCalls[0].message, /1 worker has a worktree shared with another agent; shared worktrees are kept/);
+  assert.match(confirmCalls[0].message, /"Close all" includes 3 child terminals; "Close clean only" includes 1 child terminal/);
+  assert.match(confirmCalls[0].message, /Child terminals are scheduled for permanent deletion with their workers and are included in the same 7-day restore window/);
   assert.match(confirmCalls[0].message, /preserved during the 7-day restore window/);
   assert.equal(confirmCalls[0].opts.alternateLabel, 'Close clean only');
   assert.equal(confirmCalls[0].opts.alternateValue, 'clean');

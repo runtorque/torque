@@ -660,6 +660,14 @@ function _bulkCountLabel(count, singular, plural) {
   return count + ' ' + (count === 1 ? singular : (plural || singular + 's'));
 }
 
+function _bulkChildTerminalCount(cells) {
+  let count = 0;
+  for (const cell of cells || []) {
+    count += (((state && state.children) || {})[cell.id] || []).length;
+  }
+  return count;
+}
+
 function _bulkCloseWorkerMessage(classified) {
   const total = classified.candidates.length;
   const statusOrder = ['idle', 'error', 'stopped', 'unknown'];
@@ -687,6 +695,27 @@ function _bulkCloseWorkerMessage(classified) {
         ? ' has a worktree shared with another agent'
         : ' have worktrees shared with other agents')
       + '; shared worktrees are kept.');
+  }
+  const allChildTerminals = _bulkChildTerminalCount(classified.candidates);
+  if (allChildTerminals) {
+    const hasCleanOnlyChoice = classified.safe.length > 0
+      && (classified.risky.length > 0 || classified.unknown.length > 0);
+    if (hasCleanOnlyChoice) {
+      const cleanChildTerminals = _bulkChildTerminalCount(classified.safe);
+      if (cleanChildTerminals === allChildTerminals) {
+        lines.push('Both close choices include '
+          + _bulkCountLabel(allChildTerminals, 'child terminal') + '.');
+      } else {
+        lines.push('"Close all" includes '
+          + _bulkCountLabel(allChildTerminals, 'child terminal')
+          + '; "Close clean only" includes '
+          + _bulkCountLabel(cleanChildTerminals, 'child terminal') + '.');
+      }
+    } else {
+      lines.push('Closing these workers also includes '
+        + _bulkCountLabel(allChildTerminals, 'child terminal') + '.');
+    }
+    lines.push('Child terminals are scheduled for permanent deletion with their workers and are included in the same 7-day restore window.');
   }
   lines.push('Workers are scheduled for permanent deletion in 7 days and can be restored before then. Worktrees are preserved during the 7-day restore window; after that, unshared tracked worktrees are removed and their changes are lost if the workers are not restored.');
   return lines.join('\n');
