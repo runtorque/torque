@@ -653,7 +653,6 @@ async def _finalize_successful_worktree_merge(
         state,
         cell,
         enabled=bool(data.get("auto_move_to_done", True)),
-        cleanup_requested=bool(close_flag or remove_flag),
     )
     if board_sync_manager and auto_done_decision.get("moved"):
         board_sync_manager.enqueue_task(

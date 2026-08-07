@@ -4206,8 +4206,8 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(error["dispatch_state"], "live")
                 self.assertEqual(
                     error["message"],
-                    "Task has active dispatched work. Stop the active execution "
-                    "stream before editing it.",
+                    "Task has active work in its assigned worker. Stop or "
+                    "complete that worker before editing.",
                 )
 
         # The refusal returned before validating or forwarding the patch, so
@@ -4258,6 +4258,37 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             resumed.required_review_gates,
             [{"id": "review-one", "role": ""}, {"id": "review-two", "role": ""}],
         )
+
+    async def test_architect_task_update_agentless_live_task_ignores_engineer_liveness(self):
+        creator = self._add_architect("arch-creator", "Creator")
+        engineer = self._add_engineer("eng-assigned", "Assigned Engineer")
+        task = self._add_task(
+            "task-agentless-live-update",
+            "Original title",
+            assigned_engineer_id=engineer.id,
+            lane="In Progress",
+            dispatch_state="live",
+            created_by_architect_id=creator.id,
+        )
+
+        running_text, running_error = await self._call(
+            "architect_task_update",
+            {"task": task.id, "title": "Updated while engineer runs"},
+            creator.id,
+        )
+        self.assertFalse(running_error, running_text)
+        self.assertEqual(task.task, "Updated while engineer runs")
+
+        engineer.status = "idle"
+        self.state._db_save_agent(engineer)
+        idle_text, idle_error = await self._call(
+            "architect_task_update",
+            {"task": task.id, "title": "Updated while engineer idles"},
+            creator.id,
+        )
+        self.assertFalse(idle_error, idle_text)
+        self.assertEqual(task.task, "Updated while engineer idles")
+        self.assertEqual(task.dispatch_state, "live")
 
     async def test_architect_task_amend_appends_attributed_cas_and_advises_executor(self):
         creator = self._add_architect("arch-amend", "Amending Architect")

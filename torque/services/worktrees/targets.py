@@ -87,12 +87,17 @@ def _worktree_merge_auto_done_candidate(
         for task in state.board_tasks.values()
         if task.agent_id == cell.id and not task_is_closed(task)
     ]
-    if len(linked_tasks) != 1:
-        return None, f"{len(linked_tasks)} open linked tasks"
+    active_linked_tasks = [
+        task for task in linked_tasks
+        if task.lane not in {"Backlog", "To Do"}
+    ]
+    if len(active_linked_tasks) != 1:
+        if len(linked_tasks) == 1:
+            task = linked_tasks[0]
+            return None, f"sole linked task {task.id} is still queued in {task.lane}"
+        return None, f"{len(active_linked_tasks)} active linked tasks"
 
-    task = linked_tasks[0]
-    if task.lane in {"Backlog", "To Do"}:
-        return None, f"sole linked task {task.id} is still queued in {task.lane}"
+    task = active_linked_tasks[0]
     return task, ""
 
 
@@ -101,15 +106,12 @@ def _maybe_auto_move_merged_task_to_done(
     cell,
     *,
     enabled: bool,
-    cleanup_requested: bool,
 ) -> dict:
     """Move a sole active linked task to Done after a successful merge."""
     decision = {"moved": False, "task_id": "", "reason": ""}
 
     if not enabled:
         decision["reason"] = "disabled by caller"
-    elif not cleanup_requested:
-        decision["reason"] = "merge cleanup not requested"
     else:
         task, reason = _worktree_merge_auto_done_candidate(state, cell)
         if not task:

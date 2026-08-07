@@ -929,15 +929,92 @@ prompt: |
             state,
             worker,
             enabled=True,
-            cleanup_requested=True,
         )
 
         self.assertIsNotNone(first)
         self.assertIsNotNone(second)
         self.assertFalse(decision['moved'])
-        self.assertIn('2 open linked tasks', decision['reason'])
+        self.assertIn('2 active linked tasks', decision['reason'])
         self.assertEqual(state.board_tasks['task-1'].lane, 'In Progress')
         self.assertEqual(state.board_tasks['task-2'].lane, 'In Progress')
+
+    def test_merge_auto_done_helper_holds_unresolved_descendants(self):
+        state = self.state_mod.MatrixState()
+        state.add_group('g')
+        worker = self.state_mod.AgentCell(
+            id='worker-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'].append(worker.id)
+        root = state.board_add_task(
+            'Root task',
+            'g',
+            lane='In Progress',
+            id='task-1',
+            agent_id=worker.id,
+        )
+        state.board_add_task(
+            'Open follow-up',
+            'g',
+            lane='In Progress',
+            id='task-1:1',
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+        )
+
+        decision = self.server_mod._maybe_auto_move_merged_task_to_done(
+            state,
+            worker,
+            enabled=True,
+        )
+
+        self.assertFalse(decision['moved'])
+        self.assertIn('unresolved descendants', decision['reason'])
+        self.assertEqual(root.lane, 'In Progress')
+
+    def test_merge_auto_done_helper_honors_finalization_gates(self):
+        state = self.state_mod.MatrixState()
+        state.add_group('g')
+        worker = self.state_mod.AgentCell(
+            id='worker-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'].append(worker.id)
+        root = state.board_add_task(
+            'Gated root',
+            'g',
+            lane='In Progress',
+            id='task-1',
+            agent_id=worker.id,
+            finalization_mode='review_only',
+            required_review_gates=[{
+                'id': 'audit',
+                'role': 'audit',
+                'review_task_id': 'task-1:1',
+            }],
+            finalization_boundary={
+                'artifact_digest': 'digest',
+                'artifact_version': 'v1',
+                'source_identity': 'artifact',
+                'immutable': True,
+            },
+        )
+
+        decision = self.server_mod._maybe_auto_move_merged_task_to_done(
+            state,
+            worker,
+            enabled=True,
+        )
+
+        self.assertFalse(decision['moved'])
+        self.assertIn('finalization gates block Done', decision['reason'])
+        self.assertEqual(root.lane, 'In Progress')
 
     def test_compact_snapshot_opt_in_from_query_or_payload(self):
         request = types.SimpleNamespace(query={'compact': '1'})
