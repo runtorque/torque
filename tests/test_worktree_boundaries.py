@@ -601,7 +601,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
                 "commit_sha": "abc123",
                 "kind": "checkpoint",
                 "status": "open",
-                "recorded_at": "2026-04-07T10:00:00+00:00",
+                "recorded_at": " 2026-04-07T10:00:00+00:00 ",
                 "recorded_by_agent_id": "agent-1",
                 "message": "Review complete",
                 "superseded_by_task_id": "",
@@ -632,12 +632,81 @@ class WorktreeBoundaryTests(unittest.TestCase):
             "2026-04-07T11:00:00+00:00",
         )
         self.assertEqual(root.worktree_boundary["commit_sha"], "abc123")
-        self.assertEqual(root.worktree_boundary["recorded_at"], "")
+        self.assertEqual(
+            root.worktree_boundary["recorded_at"],
+            "2026-04-07T10:00:00+00:00",
+        )
+        self.assertEqual(
+            root.worktree_boundary["recorded_by_agent_id"],
+            "agent-1",
+        )
+        self.assertEqual(root.worktree_boundary["message"], "")
 
         self.assertEqual(review.labels, ["reviewed", "merged"])
         self.assertEqual(review.worktree_boundary["status"], "merged")
         self.assertEqual(unrelated.labels, ["ready"])
         self.assertEqual(unrelated.worktree_boundary, {})
+
+    def test_mark_branch_boundaries_merged_preserves_existing_root_boundary(self):
+        root = _task(
+            "task-root",
+            lane="In Progress",
+            labels=["ready"],
+            boundary={
+                "version": "1",
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+                "base_branch": "main",
+                "commit_sha": "root-head",
+                "kind": "checkpoint",
+                "status": "open",
+                "recorded_at": "2026-04-07T09:00:00+00:00",
+                "recorded_by_agent_id": "root-agent",
+                "message": "Root checkpoint",
+                "superseded_by_task_id": "",
+            },
+        )
+        review = _task(
+            "task-review",
+            labels=["reviewed"],
+            parent_task_id="task-root",
+            pipeline_root_id="task-root",
+            boundary={
+                "version": "1",
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+                "base_branch": "main",
+                "commit_sha": "reviewed-head",
+                "kind": "review",
+                "status": "open",
+                "recorded_at": "2026-04-07T10:00:00+00:00",
+                "recorded_by_agent_id": "review-agent",
+                "message": "Review complete",
+                "superseded_by_task_id": "",
+            },
+        )
+
+        updated = mark_branch_boundaries_merged(
+            [root, review],
+            repo_root="/repo",
+            branch="torque/worker",
+            merge_sha="deadbeef",
+            task_ids=[review.id],
+            merged_at="2026-04-07T11:00:00+00:00",
+        )
+
+        self.assertEqual(
+            [task.id for task in updated],
+            ["task-review", "task-root"],
+        )
+        boundary = root.worktree_boundary
+        self.assertEqual(boundary["recorded_at"], "2026-04-07T09:00:00+00:00")
+        self.assertEqual(boundary["recorded_by_agent_id"], "root-agent")
+        self.assertEqual(boundary["message"], "Root checkpoint")
+        self.assertEqual(boundary["commit_sha"], "root-head")
+        self.assertEqual(boundary["status"], "merged")
+        self.assertEqual(boundary["merged_at"], "2026-04-07T11:00:00+00:00")
+        self.assertEqual(boundary["merge_commit_sha"], "deadbeef")
 
     def test_mark_branch_boundaries_merged_updates_existing_pr_metadata(self):
         review = _task(
