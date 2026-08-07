@@ -1,6 +1,7 @@
 """Board task, lane, and auto-dispatch persistence helpers."""
 
 import json
+import sqlite3
 from dataclasses import asdict
 
 
@@ -195,13 +196,36 @@ def insert_board_task(executor, task):
         ).fetchone()
         if existing is not None:
             values[_BOARD_TASK_COLUMNS.index("artifacts")] = existing[0]
-    executor.execute(
-        _BOARD_TASK_INSERT_SQL.format(
-            columns=", ".join(_BOARD_TASK_COLUMNS),
-            placeholders=",".join(["?"] * len(values)),
-        ),
-        values,
-    )
+    try:
+        executor.execute(
+            _BOARD_TASK_INSERT_SQL.format(
+                columns=", ".join(_BOARD_TASK_COLUMNS),
+                placeholders=",".join(["?"] * len(values)),
+            ),
+            values,
+        )
+    except sqlite3.OperationalError as exc:
+        # Migration 10 rewrites task IDs before later post-init migrations,
+        # including v29, can add their columns.  Keep that synthetic/legacy
+        # upgrade path able to write the pre-v29 row shape; migration 29 then
+        # adds and eagerly backfills the authoritative hash in the same boot.
+        if "no column named task_content_hash" not in str(exc):
+            raise
+        legacy_columns = tuple(
+            column for column in _BOARD_TASK_COLUMNS
+            if column != "task_content_hash"
+        )
+        legacy_values = [
+            value for column, value in zip(_BOARD_TASK_COLUMNS, values)
+            if column != "task_content_hash"
+        ]
+        executor.execute(
+            _BOARD_TASK_INSERT_SQL.format(
+                columns=", ".join(legacy_columns),
+                placeholders=",".join(["?"] * len(legacy_values)),
+            ),
+            legacy_values,
+        )
 
 
 def decode_board_task_row(row, cols):

@@ -1,6 +1,6 @@
 """Durable BoardTask authored-content hash regression coverage."""
 
-from dataclasses import asdict, fields, replace
+from dataclasses import fields, replace
 import json
 import sqlite3
 import tempfile
@@ -32,7 +32,11 @@ def authored_task(**changes):
         "action_name": "feature/implement",
         "action_vars": {"mode": "strict"},
         "suggested_action": "feature/review",
-        "required_review_gates": ["review"],
+        "required_review_gates": [{
+            "id": "review",
+            "role": "review",
+            "review_task_id": "TORQUE:1:1",
+        }],
         "depends_on": ["TORQUE:3", "TORQUE:2"],
         "deliverable_required": True,
         "deliverable_type": "code",

@@ -798,8 +798,8 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
 
     @staticmethod
     def _make_legacy_memory_ttl_migration_pending(db):
-        """Reset only synthetic version-28 state to exercise the runner."""
-        db._conn.execute("DELETE FROM schema_migrations WHERE version=28")
+        """Reset synthetic version-28+ state to exercise the v28 runner."""
+        db._conn.execute("DELETE FROM schema_migrations WHERE version>=28")
         db._conn.execute(
             "UPDATE meta SET value='27' WHERE key='schema_version'"
         )
