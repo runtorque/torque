@@ -726,13 +726,16 @@ test('shared menus define one floating surface and compact item state grammar', 
 test('group navigation and Board popovers use the appropriate direct and transient semantics', () => {
   const html = source('webview.html');
   const groups = source('static/js/grid/group-tabs.js');
+  const grid = source('static/js/grid/main.js');
   const commands = source('static/js/commands.js');
   const board = source('static/js/board/rendering.js');
   const filters = source('static/js/board/filters.js');
   const view = source('static/js/board/view-state.js');
 
   assert.match(html, /id="ctx-menu" class="ui-popover ui-menu" role="menu" aria-hidden="true"/);
-  assert.match(groups, /class="agent-group-tab-settings"[\s\S]*openGroupSettings\(/);
+  assert.doesNotMatch(groups, /class="agent-group-tab-settings"/);
+  assert.match(groups, /class="agent-group-compact-settings[\s\S]*openGroupSettings\(/);
+  assert.match(grid, /class="agent-grid-settings-btn"[\s\S]*openGroupSettings\(/);
   assert.doesNotMatch(groups, /Group actions|openAgentGroupTabActions|aria-haspopup="menu"/);
   assert.match(groups, /class="agent-group-quick-switcher ui-popover" role="dialog"/);
   assert.match(groups, /class="agent-group-quick-option ui-menu-item/);

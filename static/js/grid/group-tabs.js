@@ -40,11 +40,6 @@ function _renderAgentGroupTabsHtml() {
       + ' onkeydown="agentGroupTabKeydown(event,' + groupArg + ')">'
       + '<span class="agent-group-tab-name">' + esc(group) + '</span>'
       + '<span class="agent-group-tab-count ui-badge ui-badge--micro ui-badge--neutral ui-badge--count" aria-label="' + count + ' agents">' + count + '</span>'
-      + (selected
-        ? '<button type="button" class="agent-group-tab-settings" title="Group settings" aria-label="Open settings for ' + esc(group) + '"'
-          + ' onclick="event.preventDefault();event.stopPropagation();openGroupSettings(' + groupArg + ')">'
-          + '<span aria-hidden="true">&#9881;</span></button>'
-        : '')
       + '</div>';
   }
   html += '</div>';

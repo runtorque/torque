@@ -1040,6 +1040,7 @@ main {
   min-height: 22px;
   padding: 0 5px;
 }
+.agent-grid-settings-btn,
 .agent-grid-new-btn {
   display: inline-flex;
   align-items: center;
@@ -1054,6 +1055,10 @@ main {
   background: transparent;
   color: var(--text-dim);
   transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
+}
+.agent-grid-settings-icon {
+  font-size: 12px;
+  line-height: 1;
 }
 .agent-grid-actions-btn {
   display: inline-flex;
@@ -1084,18 +1089,21 @@ main {
   stroke-linecap: round;
 }
 .agent-grid-new-btn:hover:not(:disabled),
+.agent-grid-settings-btn:hover:not(:disabled),
 .agent-grid-actions-btn:hover:not(:disabled) {
   border-color: var(--border-strong);
   background: var(--bg-hover);
   color: var(--text);
 }
 .agent-grid-new-btn:focus-visible,
+.agent-grid-settings-btn:focus-visible,
 .agent-grid-actions-btn:focus-visible {
   outline: none;
   border-color: var(--accent);
   box-shadow: var(--focus-ring);
 }
 .agent-grid-new-btn:disabled,
+.agent-grid-settings-btn:disabled,
 .agent-grid-actions-btn:disabled {
   cursor: default;
   opacity: .45;
@@ -1192,25 +1200,6 @@ main {
 }
 .agent-group-tab-count {
   flex: 0 0 auto;
-}
-.agent-group-tab-settings {
-  display: inline-grid;
-  place-items: center;
-  flex: 0 0 16px;
-  width: 16px;
-  height: 16px;
-  margin-right: -3px;
-  padding: 0;
-  border-radius: 5px;
-  color: var(--text-faint);
-  line-height: 1;
-  opacity: .72;
-}
-.agent-group-tab:hover .agent-group-tab-settings,
-.agent-group-tab:focus-within .agent-group-tab-settings {
-  color: var(--text);
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
-  opacity: 1;
 }
 .agent-group-compact {
   display: none;

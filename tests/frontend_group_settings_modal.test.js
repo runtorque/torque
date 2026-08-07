@@ -1692,8 +1692,9 @@ test('group settings Advanced sub-tab owns Delete group action', () => {
   assert.doesNotMatch(commands, /function\s+onGroupContextMenu\b/);
   assert.doesNotMatch(render, /oncontextmenu="onGroupContextMenu/);
   assert.doesNotMatch(render, /title="Delete group"/);
-  assert.match(gridMain, /title="Group settings"[^`]*\\u2699/);
-  assert.match(groupTabs, /agent-group-tab-settings[\s\S]*openGroupSettings\([\s\S]*&#9881;/);
+  assert.match(gridMain, /class="agent-grid-settings-btn"[\s\S]*openGroupSettings\([\s\S]*&#9881;/);
+  assert.doesNotMatch(groupTabs, /agent-group-tab-settings/);
+  assert.match(groupTabs, /agent-group-compact-settings[\s\S]*openGroupSettings\([\s\S]*&#9881;/);
   assert.doesNotMatch(groupTabs, /openAgentGroupTabActions|agent-group-tab-menu|&#8943;/);
   assert.doesNotMatch(main, /openActiveGroupMenu|&#8942;|Delete group/);
 });
