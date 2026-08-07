@@ -197,6 +197,9 @@ def _apply_verification_report(task, payload, actor_name, save_task,
 
 
 _COMPLETION_EVIDENCE_VERSION = 1
+_MERGE_DAEMON_CODE_REVISION_UNAVAILABLE = "UNAVAILABLE"
+_MERGE_DAEMON_CODE_REVISION_UNVERSIONED = "UNVERSIONED"
+_MERGE_DAEMON_CODE_REVISION_DETAIL_LIMIT = 500
 
 
 def _completion_evidence_text(value, *, limit: int = 2000) -> str:
@@ -204,6 +207,40 @@ def _completion_evidence_text(value, *, limit: int = 2000) -> str:
     if limit > 0 and len(text) > limit:
         return text[: max(limit - 1, 0)].rstrip() + "…"
     return text
+
+
+def _merge_daemon_code_revision(merge) -> str:
+    """Read a merge writer revision without guessing legacy evidence."""
+    if not isinstance(merge, dict):
+        return _MERGE_DAEMON_CODE_REVISION_UNVERSIONED
+    revision = _completion_evidence_text(
+        merge.get("daemon_code_revision", ""),
+        limit=160,
+    )
+    return revision or _MERGE_DAEMON_CODE_REVISION_UNVERSIONED
+
+
+def _merge_daemon_code_revision_stamp(state: MatrixState) -> dict:
+    """Snapshot the immutable daemon-boot revision for durable merge evidence."""
+    revision = _completion_evidence_text(
+        getattr(state, "boot_head_commit", ""),
+        limit=160,
+    )
+    detail = _completion_evidence_text(
+        getattr(state, "boot_head_error", ""),
+        limit=_MERGE_DAEMON_CODE_REVISION_DETAIL_LIMIT,
+    )
+    if revision:
+        stamp = {"daemon_code_revision": revision}
+        if detail:
+            stamp["daemon_code_revision_caveat"] = detail
+        return stamp
+    return {
+        "daemon_code_revision": _MERGE_DAEMON_CODE_REVISION_UNAVAILABLE,
+        "daemon_code_revision_reason": (
+            detail or "daemon boot code revision was unavailable"
+        ),
+    }
 
 
 def _task_verification_evidence(task) -> dict:
@@ -1121,6 +1158,7 @@ def _record_merge_completion_evidence(
             result.get("pr_url") or result.get("url") or "", limit=500),
         "origin_verified": bool(origin.get("verified")),
     }
+    merge.update(_merge_daemon_code_revision_stamp(state))
     if origin:
         merge["origin"] = origin
         if origin.get("ref"):
