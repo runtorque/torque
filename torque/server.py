@@ -5154,9 +5154,7 @@ async def main(connection=None):
 
     def _mark_branch_boundaries_merged(cell, merge_sha: str,
                                        merged_task_ids=()) -> None:
-        target_ids = ((merged_task_ids,) if isinstance(merged_task_ids, str)
-                      else merged_task_ids)
-        if not cell or not target_ids:
+        if not cell or not merged_task_ids:
             return
         repo_root = cell.worktree_repo_root or cell.git_root or ""
         for branch_task in mark_branch_boundaries_merged(
@@ -5164,7 +5162,7 @@ async def main(connection=None):
                 repo_root=repo_root,
                 branch=cell.worktree_branch or "",
                 merge_sha=merge_sha,
-                task_ids=target_ids):
+                task_ids=merged_task_ids):
             _save_task_record(branch_task)
 
     # -- Postscript builder -------------------------------------------------

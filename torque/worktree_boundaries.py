@@ -790,11 +790,17 @@ def advance_latest_boundary_after_mechanical_commit(
         "paths": paths,
     }
 
+def _normalize_boundary_task_ids(task_ids: Iterable[str] | str) -> tuple[str, ...]:
+    if isinstance(task_ids, str):
+        return (task_ids,)
+    return tuple(task_ids or ())
+
+
 def mark_branch_boundaries_merged(tasks: Iterable, *,
                                   repo_root: str,
                                   branch: str,
                                   merge_sha: str,
-                                  task_ids: Iterable[str],
+                                  task_ids: Iterable[str] | str,
                                   merged_at: str | None = None,
                                   pr_metadata: dict | None = None,
                                   requested_cleanup: dict | None = None,
@@ -808,7 +814,7 @@ def mark_branch_boundaries_merged(tasks: Iterable, *,
     """
     target_ids = {
         _clean_text(task_id)
-        for task_id in task_ids
+        for task_id in _normalize_boundary_task_ids(task_ids)
         if _clean_text(task_id)
     }
     if not repo_root or not branch or not target_ids:
