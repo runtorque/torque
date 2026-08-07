@@ -6841,6 +6841,199 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(answered_error, answered_text)
         self.assertEqual(json.loads(answered_text)["threads"], [])
 
+    async def test_architect_peer_reply_uses_durable_inbox_message_id_on_cache_miss(self):
+        architect = self._add_architect("arch-1", "Architect")
+        peer = self._add_architect("arch-2", "Peer")
+        self.db.save_agent_peer_message({
+            "id": "msg-durable-inbox",
+            "thread_id": "thread-durable-inbox",
+            "group_name": architect.group,
+            "sender_id": architect.id,
+            "sender_kind": "architect",
+            "recipient_id": peer.id,
+            "recipient_kind": "architect",
+            "message": "Please acknowledge this durable request.",
+            "created_at": 10.0,
+            "ack_required": True,
+            "delivery_state": "buffered",
+        })
+        self.assertEqual(peer.mcp_messages, [])
+
+        inbox_text, inbox_error = await self._call(
+            "architect_peer_inbox",
+            {"requires_reply": True},
+            peer.id,
+        )
+        self.assertFalse(inbox_error, inbox_text)
+        thread = json.loads(inbox_text)["threads"][0]
+        self.assertEqual(thread["thread_id"], "thread-durable-inbox")
+        self.assertEqual(
+            thread["last_message"]["id"],
+            "msg-durable-inbox",
+        )
+
+        summary_text, summary_error = await self._call(
+            "architect_board_summary",
+            {},
+            peer.id,
+        )
+        self.assertFalse(summary_error, summary_text)
+        pending = json.loads(summary_text)["peer_messages"]
+        self.assertEqual(pending["ack_required_pending_count"], 1)
+        self.assertEqual(pending["requires_reply_count"], 1)
+
+        workaround_text, workaround_error = await self._call(
+            "architect_peer_message",
+            {
+                "architect_id": architect.id,
+                "message": "Substantive response on a new thread.",
+            },
+            peer.id,
+        )
+        self.assertFalse(workaround_error, workaround_text)
+        workaround = json.loads(workaround_text)
+        self.assertNotEqual(workaround["thread_id"], thread["thread_id"])
+        summary_text, summary_error = await self._call(
+            "architect_board_summary",
+            {},
+            peer.id,
+        )
+        self.assertFalse(summary_error, summary_text)
+        pending = json.loads(summary_text)["peer_messages"]
+        self.assertEqual(pending["ack_required_pending_count"], 1)
+        self.assertEqual(pending["requires_reply_count"], 1)
+
+        thread_reply_text, thread_reply_error = await self._call(
+            "architect_peer_reply",
+            {
+                "message_id": thread["thread_id"],
+                "message": "A thread id is not a message id.",
+            },
+            peer.id,
+        )
+        self.assertTrue(thread_reply_error)
+        self.assertEqual(thread_reply_text, "Message not found")
+
+        reply_text, reply_error = await self._call(
+            "architect_peer_reply",
+            {
+                "message_id": thread["last_message"]["id"],
+                "message": "Acknowledged on the original thread.",
+            },
+            peer.id,
+        )
+        self.assertFalse(reply_error, reply_text)
+        reply = json.loads(reply_text)
+        self.assertEqual(reply["thread_id"], thread["thread_id"])
+
+        answered_text, answered_error = await self._call(
+            "architect_peer_inbox",
+            {"requires_reply": True},
+            peer.id,
+        )
+        self.assertFalse(answered_error, answered_text)
+        self.assertEqual(json.loads(answered_text)["threads"], [])
+        summary_text, summary_error = await self._call(
+            "architect_board_summary",
+            {},
+            peer.id,
+        )
+        self.assertFalse(summary_error, summary_text)
+        pending = json.loads(summary_text)["peer_messages"]
+        self.assertEqual(pending["ack_required_pending_count"], 0)
+        self.assertEqual(pending["requires_reply_count"], 0)
+
+    async def test_architect_peer_reply_durable_fallback_preserves_scope(self):
+        architect = self._add_architect("arch-1", "Architect")
+        peer = self._add_architect("arch-2", "Peer")
+        foreign = self._add_architect("arch-3", "Foreign")
+        tombstoned = self._add_architect("arch-tomb", "Tombstoned")
+        engineer = self._add_engineer("eng-1", "Engineer")
+
+        rows = [
+            {
+                "id": "msg-foreign",
+                "thread_id": "thread-foreign",
+                "group_name": architect.group,
+                "sender_id": architect.id,
+                "sender_kind": "architect",
+                "recipient_id": peer.id,
+                "recipient_kind": "architect",
+                "caller_id": foreign.id,
+            },
+            {
+                "id": "msg-wrong-kind",
+                "thread_id": "thread-wrong-kind",
+                "group_name": architect.group,
+                "sender_id": architect.id,
+                "sender_kind": "architect",
+                "recipient_id": engineer.id,
+                "recipient_kind": "engineer",
+                "caller_id": architect.id,
+            },
+            {
+                "id": "msg-wrong-row-group",
+                "thread_id": "thread-wrong-row-group",
+                "group_name": "other",
+                "sender_id": architect.id,
+                "sender_kind": "architect",
+                "recipient_id": peer.id,
+                "recipient_kind": "architect",
+                "caller_id": peer.id,
+            },
+            {
+                "id": "msg-tombstoned-peer",
+                "thread_id": "thread-tombstoned-peer",
+                "group_name": architect.group,
+                "sender_id": tombstoned.id,
+                "sender_kind": "architect",
+                "recipient_id": peer.id,
+                "recipient_kind": "architect",
+                "caller_id": peer.id,
+            },
+            {
+                "id": "msg-cross-group-peer",
+                "thread_id": "thread-cross-group-peer",
+                "group_name": architect.group,
+                "sender_id": architect.id,
+                "sender_kind": "architect",
+                "recipient_id": peer.id,
+                "recipient_kind": "architect",
+                "caller_id": peer.id,
+            },
+        ]
+        for index, row in enumerate(rows, start=1):
+            self.db.save_agent_peer_message({
+                **{key: value for key, value in row.items() if key != "caller_id"},
+                "message": "Must remain outside durable fallback scope.",
+                "created_at": float(index),
+                "ack_required": True,
+                "delivery_state": "buffered",
+            })
+
+        tombstoned.deleted_at = 99.0
+        architect.group = "other"
+        for row in rows:
+            with self.subTest(message_id=row["id"]):
+                text, is_error = await self._call(
+                    "architect_peer_reply",
+                    {
+                        "message_id": row["id"],
+                        "message": "Unauthorized reply.",
+                    },
+                    row["caller_id"],
+                )
+                self.assertTrue(is_error, text)
+
+        reply_rows = [
+            row for row in self.db.load_agent_peer_messages_for_agent(
+                peer.id,
+                limit=100,
+            )
+            if row["reply_to_id"]
+        ]
+        self.assertEqual(reply_rows, [])
+
     async def test_architect_peer_scoping_rules_and_dismissed_buffering(self):
         architect = self._add_architect("arch-1", "Architect")
         peer = self._add_architect("arch-2", "Peer")
