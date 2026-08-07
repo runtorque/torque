@@ -1,14 +1,21 @@
+import asyncio
 from types import SimpleNamespace
 import json
+from pathlib import Path
+import subprocess
+import tempfile
 import unittest
 
 from torque.worktree_boundaries import (
     attach_pr_metadata_to_latest_open_boundary,
+    boundary_code_delta_state,
     boundary_pr_metadata,
     boundary_submodule_branches,
     boundary_summary,
     branch_boundary_tasks,
+    classify_boundary_code_delta,
     clear_stale_successor_references,
+    code_boundary_done_status,
     latest_boundary_base_branch,
     latest_boundary_task,
     mark_branch_boundaries_merged,
@@ -363,25 +370,275 @@ class WorktreeBoundaryTests(unittest.TestCase):
                 "recorded_at": "2026-04-07T10:00:00+00:00",
                 "commit_sha": "old-head",
                 "reason": "branch_tip_moved",
+                "code_delta": {
+                    "state": "present",
+                    "base_sha": "old-base",
+                    "commit_sha": "old-head",
+                    "comparison": "fork_point..boundary",
+                    "path_count": 1,
+                    "classified_at": "2026-04-07T10:00:00+00:00",
+                },
             },
         )
         queued = _task("task-b", lane="To Do", resume_after="task-a")
 
-        refreshed = refresh_latest_boundary_after_rebase(
+        refreshed = asyncio.run(refresh_latest_boundary_after_rebase(
             [boundary_task, queued],
             repo_root="/repo",
             branch="torque/worker",
+            worktree_path="",
             previous_head_sha="old-head",
             rebased_head_sha="new-head",
-        )
+        ))
 
         self.assertIs(refreshed, boundary_task)
         self.assertEqual(
             boundary_task.worktree_boundary["commit_sha"],
             "new-head",
         )
+        self.assertEqual(
+            boundary_task.worktree_boundary["code_delta"]["commit_sha"],
+            "new-head",
+        )
+        self.assertEqual(
+            boundary_task.worktree_boundary["code_delta"]["state"],
+            "unknown",
+        )
+        self.assertNotEqual(
+            boundary_task.worktree_boundary["code_delta"]["classified_at"],
+            "2026-04-07T10:00:00+00:00",
+        )
         self.assertEqual(boundary_task.worktree_boundary["status"], "open")
         self.assertNotIn("reason", boundary_task.worktree_boundary)
+
+    def test_refresh_latest_boundary_after_rebase_reclassifies_code_delta(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+
+            def git(*args):
+                return subprocess.run(
+                    ["git", "-C", str(repo), *args],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                ).stdout.strip()
+
+            git("init", "-b", "main")
+            git("config", "user.email", "test@example.invalid")
+            git("config", "user.name", "Torque Test")
+            (repo / "base.txt").write_text("base\n")
+            git("add", "base.txt")
+            git("commit", "-m", "base")
+            old_base = git("rev-parse", "HEAD")
+            git("checkout", "-b", "topic")
+            (repo / "code.py").write_text("VALUE = 1\n")
+            git("add", "code.py")
+            git("commit", "-m", "topic")
+            old_head = git("rev-parse", "HEAD")
+            old_fact = asyncio.run(classify_boundary_code_delta(
+                worktree_path=str(repo),
+                base_branch="main",
+                commit_sha=old_head,
+            ))
+            self.assertEqual(old_fact["state"], "present")
+            self.assertEqual(old_fact["base_sha"], old_base)
+            self.assertEqual(old_fact["commit_sha"], old_head)
+
+            boundary_task = _task(
+                "task-a",
+                boundary={
+                    "repo_root": str(repo),
+                    "branch": "topic",
+                    "base_branch": "main",
+                    "status": "open",
+                    "recorded_at": "2026-04-07T10:00:00+00:00",
+                    "commit_sha": old_head,
+                    "code_delta": old_fact,
+                },
+            )
+            self.assertEqual(
+                boundary_code_delta_state(boundary_task.worktree_boundary),
+                "present",
+            )
+
+            git("checkout", "main")
+            (repo / "base-advanced.txt").write_text("advanced\n")
+            git("add", "base-advanced.txt")
+            git("commit", "-m", "advance base")
+            new_base = git("rev-parse", "HEAD")
+            git("checkout", "topic")
+            git("rebase", "main")
+            rebased_head = git("rev-parse", "HEAD")
+            self.assertNotEqual(rebased_head, old_head)
+
+            refreshed = asyncio.run(refresh_latest_boundary_after_rebase(
+                [boundary_task],
+                repo_root=str(repo),
+                branch="topic",
+                worktree_path=str(repo),
+                previous_head_sha=old_head,
+                rebased_head_sha=rebased_head,
+            ))
+
+            self.assertIs(refreshed, boundary_task)
+            boundary = boundary_task.worktree_boundary
+            self.assertEqual(boundary["commit_sha"], rebased_head)
+            self.assertEqual(boundary["code_delta"]["commit_sha"], rebased_head)
+            self.assertEqual(boundary["code_delta"]["base_sha"], new_base)
+            self.assertEqual(
+                boundary["code_delta"]["comparison"],
+                "fork_point..boundary",
+            )
+            self.assertEqual(boundary["code_delta"]["state"], "present")
+            self.assertNotEqual(
+                boundary["code_delta"]["classified_at"],
+                old_fact["classified_at"],
+            )
+            self.assertEqual(
+                boundary_code_delta_state(boundary),
+                "present",
+            )
+            gate = code_boundary_done_status([boundary_task])
+            self.assertEqual(
+                [item["task_id"] for item in gate["present"]],
+                ["task-a"],
+            )
+            self.assertFalse(gate["eligible"])
+
+    def test_refresh_latest_boundary_after_rebase_allows_absorbed_patch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+
+            def git(*args):
+                return subprocess.run(
+                    ["git", "-C", str(repo), *args],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                ).stdout.strip()
+
+            git("init", "-b", "main")
+            git("config", "user.email", "test@example.invalid")
+            git("config", "user.name", "Torque Test")
+            (repo / "base.txt").write_text("base\n")
+            git("add", "base.txt")
+            git("commit", "-m", "base")
+            git("checkout", "-b", "topic")
+            (repo / "absorbed.txt").write_text("same patch\n")
+            git("add", "absorbed.txt")
+            git("commit", "-m", "topic patch")
+            old_head = git("rev-parse", "HEAD")
+            boundary_task = _task(
+                "task-a",
+                boundary={
+                    "repo_root": str(repo),
+                    "branch": "topic",
+                    "base_branch": "main",
+                    "status": "open",
+                    "recorded_at": "2026-04-07T10:00:00+00:00",
+                    "commit_sha": old_head,
+                    "code_delta": {
+                        "state": "present",
+                        "base_sha": git("rev-parse", "main"),
+                        "commit_sha": old_head,
+                        "comparison": "fork_point..boundary",
+                        "path_count": 1,
+                        "classified_at": "2026-04-07T10:00:00+00:00",
+                    },
+                },
+            )
+
+            git("checkout", "main")
+            (repo / "absorbed.txt").write_text("same patch\n")
+            git("add", "absorbed.txt")
+            git("commit", "-m", "absorb topic patch")
+            new_base = git("rev-parse", "HEAD")
+            git("checkout", "topic")
+            git("rebase", "main")
+            rebased_head = git("rev-parse", "HEAD")
+            self.assertEqual(rebased_head, new_base)
+
+            refreshed = asyncio.run(refresh_latest_boundary_after_rebase(
+                [boundary_task],
+                repo_root=str(repo),
+                branch="topic",
+                worktree_path=str(repo),
+                previous_head_sha=old_head,
+                rebased_head_sha=rebased_head,
+            ))
+
+            self.assertIs(refreshed, boundary_task)
+            boundary = boundary_task.worktree_boundary
+            self.assertEqual(boundary["commit_sha"], rebased_head)
+            self.assertEqual(boundary["code_delta"]["commit_sha"], rebased_head)
+            self.assertEqual(boundary["code_delta"]["base_sha"], new_base)
+            self.assertEqual(boundary["code_delta"]["state"], "absent")
+            self.assertEqual(boundary["code_delta"]["path_count"], 0)
+            gate = code_boundary_done_status([boundary_task])
+            self.assertTrue(gate["eligible"])
+            self.assertEqual(gate["present"], [])
+            self.assertEqual(gate["unknown"], [])
+            self.assertEqual(gate["blocking"], [])
+
+    def test_refresh_latest_boundary_after_rebase_failure_stays_blocking(self):
+        boundary_task = _task(
+            "task-a",
+            boundary={
+                "repo_root": "/repo",
+                "branch": "topic",
+                "base_branch": "main",
+                "status": "open",
+                "recorded_at": "2026-04-07T10:00:00+00:00",
+                "commit_sha": "old-head",
+                "code_delta": {
+                    "state": "present",
+                    "base_sha": "old-base",
+                    "commit_sha": "old-head",
+                    "comparison": "fork_point..boundary",
+                    "path_count": 1,
+                    "classified_at": "2026-04-07T10:00:00+00:00",
+                },
+            },
+        )
+
+        refreshed = asyncio.run(refresh_latest_boundary_after_rebase(
+            [boundary_task],
+            repo_root="/repo",
+            branch="topic",
+            worktree_path="/path/that/does/not/exist",
+            previous_head_sha="old-head",
+            rebased_head_sha="new-head",
+        ))
+
+        self.assertIs(refreshed, boundary_task)
+        boundary = boundary_task.worktree_boundary
+        self.assertEqual(boundary["commit_sha"], "new-head")
+        self.assertEqual(boundary["code_delta"]["commit_sha"], "new-head")
+        self.assertEqual(boundary["code_delta"]["state"], "unknown")
+        self.assertEqual(
+            boundary["code_delta"]["reason"],
+            "merge_base_failed",
+        )
+        self.assertNotIn("base_sha", boundary["code_delta"])
+        self.assertNotIn("comparison", boundary["code_delta"])
+        self.assertNotIn("path_count", boundary["code_delta"])
+        self.assertNotEqual(
+            boundary["code_delta"]["classified_at"],
+            "2026-04-07T10:00:00+00:00",
+        )
+        gate = code_boundary_done_status([boundary_task])
+        self.assertFalse(gate["eligible"])
+        self.assertEqual(gate["present"], [])
+        self.assertEqual(
+            [item["task_id"] for item in gate["unknown"]],
+            ["task-a"],
+        )
+        self.assertEqual(
+            [item["task_id"] for item in gate["blocking"]],
+            ["task-a"],
+        )
 
     def test_refresh_latest_boundary_after_rebase_updates_submodule_pair_tip(self):
         boundary_task = _task(
@@ -403,10 +660,11 @@ class WorktreeBoundaryTests(unittest.TestCase):
             },
         )
 
-        refreshed = refresh_latest_boundary_after_rebase(
+        refreshed = asyncio.run(refresh_latest_boundary_after_rebase(
             [boundary_task],
             repo_root="/repo",
             branch="torque/worker",
+            worktree_path="",
             previous_head_sha="old-head",
             rebased_head_sha="new-head",
             previous_submodules=[
@@ -420,9 +678,17 @@ class WorktreeBoundaryTests(unittest.TestCase):
                     "commit_sha": "new-sub-head",
                 }
             ],
-        )
+        ))
 
         self.assertIs(refreshed, boundary_task)
+        self.assertEqual(
+            boundary_task.worktree_boundary["commit_sha"],
+            "new-head",
+        )
+        self.assertEqual(
+            boundary_task.worktree_boundary["code_delta"]["commit_sha"],
+            "new-head",
+        )
         self.assertEqual(
             boundary_task.worktree_boundary["submodules"][0]["commit_sha"],
             "new-sub-head",
@@ -441,13 +707,14 @@ class WorktreeBoundaryTests(unittest.TestCase):
         )
         started = _task("task-b", lane="In Progress", resume_after="task-a")
 
-        refreshed = refresh_latest_boundary_after_rebase(
+        refreshed = asyncio.run(refresh_latest_boundary_after_rebase(
             [boundary_task, started],
             repo_root="/repo",
             branch="torque/worker",
+            worktree_path="",
             previous_head_sha="old-head",
             rebased_head_sha="new-head",
-        )
+        ))
 
         self.assertIsNone(refreshed)
         self.assertEqual(
@@ -467,19 +734,18 @@ class WorktreeBoundaryTests(unittest.TestCase):
             },
         )
 
-        refreshed = refresh_latest_boundary_after_rebase(
+        original_boundary = json.loads(json.dumps(boundary_task.worktree_boundary))
+        refreshed = asyncio.run(refresh_latest_boundary_after_rebase(
             [boundary_task],
             repo_root="/repo",
             branch="torque/worker",
+            worktree_path="",
             previous_head_sha="different-old-head",
             rebased_head_sha="new-head",
-        )
+        ))
 
         self.assertIsNone(refreshed)
-        self.assertEqual(
-            boundary_task.worktree_boundary["commit_sha"],
-            "recorded-tip",
-        )
+        self.assertEqual(boundary_task.worktree_boundary, original_boundary)
 
     def test_mark_branch_boundaries_merged_updates_all_branch_boundaries(self):
         open_task = _task(

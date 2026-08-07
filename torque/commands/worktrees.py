@@ -938,7 +938,7 @@ async def handle_worktree_command(
                     refreshed_boundary = None
                     if not dirty_after_rebase:
                         refreshed_boundary = (
-                            refresh_latest_boundary_after_rebase(
+                            await refresh_latest_boundary_after_rebase(
                                 state.board_tasks.values(),
                                 repo_root=(
                                     cell.worktree_repo_root
@@ -946,6 +946,7 @@ async def handle_worktree_command(
                                     or ""
                                 ),
                                 branch=cell.worktree_branch or "",
+                                worktree_path=cell.worktree_path or "",
                                 previous_head_sha=previous_head_sha,
                                 rebased_head_sha=rebased_head_sha,
                                 previous_submodules=previous_submodules,
