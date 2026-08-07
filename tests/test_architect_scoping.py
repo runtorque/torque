@@ -2874,6 +2874,87 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task.dispatch_state, "queued")
         self.assertEqual(alice.mcp_messages, [])
 
+    async def test_architect_message_routed_proposal_refusal_names_claim_route(self):
+        creator = self._add_architect("arch-product", "Blueprint")
+        receiver = self._add_architect("arch-routing", "Torqly")
+        engineer = self._add_engineer(
+            "eng-routing", "Routing Engineer",
+            hired_by_architect_id=receiver.id,
+        )
+        task = self._add_task(
+            "TORQUE:1558",
+            "Routed product proposal",
+            labels=["product-proposal", "proposal-only"],
+            action_name="feature/implement",
+            assigned_engineer_id=engineer.id,
+            created_by_architect_id=creator.id,
+            dispatch_state="queued",
+        )
+        self.db.save_agent_peer_message({
+            "id": "route-msg-1558",
+            "thread_id": "route-thread-1558",
+            "group_name": "torque",
+            "sender_id": creator.id,
+            "sender_kind": "architect",
+            "recipient_id": receiver.id,
+            "recipient_kind": "architect",
+            "message": "Please route this product proposal.",
+            "created_at": 1.0,
+            "context_task_ids": [task.id],
+            "context_summary": "Explicit route request for TORQUE:1558.",
+            "context_snapshot": {
+                "proposal_peer": {"marker": "torque.proposal_peer.v1"},
+            },
+        })
+
+        text, is_error = await self._call(
+            "architect_engineer_message",
+            {"engineer_id": engineer.id, "task": task.id, "message": "Start."},
+            receiver.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertEqual(
+            text,
+            'Task TORQUE:1558 was not created by this architect. Run '
+            'task_claim(task="TORQUE:1558") before dispatch.',
+        )
+        self.assertEqual(task.dispatch_state, "queued")
+        self.assertEqual(engineer.mcp_messages, [])
+
+    async def test_architect_message_unrouted_proposal_refusal_has_no_claim_suggestion(self):
+        creator = self._add_architect("arch-product", "Blueprint")
+        receiver = self._add_architect("arch-routing", "Torqly")
+        engineer = self._add_engineer(
+            "eng-routing", "Routing Engineer",
+            hired_by_architect_id=receiver.id,
+        )
+        task = self._add_task(
+            "TORQUE:1559",
+            "Unrouted product proposal",
+            labels=["product-proposal", "proposal-only"],
+            action_name="feature/implement",
+            assigned_engineer_id=engineer.id,
+            created_by_architect_id=creator.id,
+            dispatch_state="queued",
+        )
+
+        text, is_error = await self._call(
+            "architect_engineer_message",
+            {"engineer_id": engineer.id, "task": task.id, "message": "Start."},
+            receiver.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertEqual(
+            text,
+            "Task was not created by this architect. No routed pickup is "
+            "available to this architect.",
+        )
+        self.assertNotIn("task_claim", text)
+        self.assertEqual(task.dispatch_state, "queued")
+        self.assertEqual(engineer.mcp_messages, [])
+
     async def test_architect_message_task_references_do_not_dispatch_without_task(self):
         architect = self._add_architect("arch-1", "Architect")
         alice = self._add_engineer(
