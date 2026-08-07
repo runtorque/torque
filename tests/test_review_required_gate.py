@@ -407,6 +407,8 @@ class ReviewRequiredHandleCommandGateTests(unittest.IsolatedAsyncioTestCase):
         *,
         action_mgr,
         record_task_boundary=None,
+        dispatch_command=None,
+        closure_overrides=None,
     ):
         main_code = self.server_mod.main.__code__
         handle_code = next(
@@ -459,7 +461,7 @@ class ReviewRequiredHandleCommandGateTests(unittest.IsolatedAsyncioTestCase):
             "action_mgr": action_mgr,
             "bridge": DummyBridge(),
             "db": None,
-            "handle_command": None,
+            "handle_command": dispatch_command,
             "panel_log": types.SimpleNamespace(
                 replace_last=lambda *args, **kwargs: {}
             ),
@@ -470,6 +472,7 @@ class ReviewRequiredHandleCommandGateTests(unittest.IsolatedAsyncioTestCase):
             ),
             "worktree_mgr": DummyWorktreeManager(),
         })
+        closure_values.update(closure_overrides or {})
         closure = tuple(
             self._make_cell(closure_values[name])
             for name in handle_code.co_freevars
@@ -1169,6 +1172,322 @@ class ReviewRequiredHandleCommandGateTests(unittest.IsolatedAsyncioTestCase):
                     )
                 },
             },
+        )
+
+    async def test_canonical_block_review_chain_closes_through_finalization(self):
+        from torque.services.worktrees.finalize import (
+            _finalize_successful_worktree_merge,
+        )
+        from torque.services.worktrees.preflight import (
+            _freeze_merge_attribution,
+        )
+        from torque.worktree_boundaries import (
+            branch_boundary_tasks,
+            mark_branch_boundaries_merged,
+        )
+
+        state, implementer, root = self._build_state(requires_review=True)
+        action_mgr = self.actions_mod.ActionManager()
+        repo_root = str(REPO_ROOT)
+        branch = "torque/test/canonical-block-review"
+        for key, value in {
+            "worktree_path": repo_root,
+            "worktree_repo_root": repo_root,
+            "git_root": repo_root,
+            "worktree_branch": branch,
+            "worktree_base_branch": "main",
+        }.items():
+            setattr(implementer, key, value)
+
+        sequence = 0
+
+        async def record_task_boundary(task, cell, message=""):
+            nonlocal sequence
+            sequence += 1
+            for older in branch_boundary_tasks(
+                state.board_tasks.values(),
+                repo_root=repo_root,
+                branch=branch,
+                statuses={"open"},
+            ):
+                if older.id != task.id:
+                    older.worktree_boundary = {
+                        **older.worktree_boundary,
+                        "status": "superseded",
+                        "superseded_by_task_id": task.id,
+                    }
+            task.worktree_boundary = {
+                "version": "1",
+                "repo_root": repo_root,
+                "branch": branch,
+                "base_branch": "main",
+                "commit_sha": "canonical-reviewed-head",
+                "kind": "marker",
+                "status": "open",
+                "recorded_at": f"2026-08-07T14:00:0{sequence}+00:00",
+                "recorded_by_agent_id": cell.id,
+                "message": message,
+                "superseded_by_task_id": "",
+                "merged_at": "",
+                "merge_commit_sha": "",
+                "code_delta": {"state": "present"},
+            }
+
+        implement_command = self._extract_handle_command(
+            state,
+            action_mgr=action_mgr,
+            record_task_boundary=record_task_boundary,
+        )
+        rejected = await implement_command({
+            "cmd": "ai_report",
+            "cell_id": implementer.id,
+            "action": "done",
+            "message": "Initial implementation complete",
+        })
+        self.assertEqual(rejected["type"], "review_required")
+
+        blocker = self.state_mod.AgentCell(
+            id="canonical-block-reviewer",
+            name="Canonical Blocking Reviewer",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+            directory=repo_root,
+        )
+        for key, value in {
+            "worktree_path": repo_root,
+            "worktree_repo_root": repo_root,
+            "git_root": repo_root,
+            "worktree_branch": branch,
+            "worktree_base_branch": "main",
+        }.items():
+            setattr(blocker, key, value)
+        state.agents[blocker.id] = blocker
+        state.groups["g"].append(blocker.id)
+        block_review = state.board_add_task(
+            "Canonical blocking review",
+            "g",
+            lane="In Progress",
+            id="task-canonical-block-review",
+            action_name="feature/review",
+            agent_id=blocker.id,
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+        )
+        blocker.current_task_id = block_review.id
+
+        async def dispatch_fix(payload):
+            fix_task = state.board_tasks[payload["id"]]
+            fix_task.requires_review = True
+            fix_task.agent_id = implementer.id
+            fix_task.lane = "In Progress"
+            root.agent_id = ""
+            implementer.current_task_id = fix_task.id
+            return {
+                "type": "ok",
+                "task_id": fix_task.id,
+                "agent_id": implementer.id,
+            }
+
+        async def allow_review_derive(*_args, **_kwargs):
+            return None
+
+        block_command = self._extract_handle_command(
+            state,
+            action_mgr=action_mgr,
+            record_task_boundary=record_task_boundary,
+            dispatch_command=dispatch_fix,
+            closure_overrides={
+                "_ai_derive_parent_task": (
+                    self.server_mod._ai_derive_parent_task
+                ),
+                "_find_reusable_review_fix_task": (
+                    lambda *_args, **_kwargs: None
+                ),
+                "_inherit_assigned_engineer_for_derived_task": (
+                    self.server_mod
+                    ._inherit_assigned_engineer_for_derived_task
+                ),
+                "_maybe_reject_stale_base_review_derive": (
+                    allow_review_derive
+                ),
+                "_nearest_ancestor_agent_for_action_stage": (
+                    lambda *_args, **_kwargs: None
+                ),
+                "_ownership_engineer_id_for_dispatch_source": (
+                    lambda *_args, **_kwargs: ""
+                ),
+                "_prior_live_reviewer_agent_for_chain": (
+                    lambda *_args, **_kwargs: None
+                ),
+                "_record_derive_dispatch_shape_metric": (
+                    lambda *_args, **_kwargs: None
+                ),
+            },
+        )
+        derive_result = await block_command({
+            "cmd": "ai_report",
+            "cell_id": blocker.id,
+            "action": "derive",
+            "action_name": "feature/implement",
+            "message": "Fix the blocking issue",
+            "description": "Final review verdict: Revert",
+        })
+        self.assertEqual(derive_result["type"], "ok", derive_result)
+        self.assertEqual(block_review.worktree_boundary, {})
+        self.assertEqual(
+            block_review.completion_evidence["review"]["verdict"],
+            "block",
+        )
+        self.assertEqual(
+            block_review.completion_evidence["review"]["source_action"],
+            "derive",
+        )
+
+        fix = state.board_tasks[derive_result["task_id"]]
+        self.assertEqual(fix.parent_task_id, root.id)
+        self.assertTrue(fix.requires_review)
+        fix_command = self._extract_handle_command(
+            state,
+            action_mgr=action_mgr,
+            record_task_boundary=record_task_boundary,
+        )
+        fix_rejected = await fix_command({
+            "cmd": "ai_report",
+            "cell_id": implementer.id,
+            "action": "done",
+            "message": "Blocking fix complete",
+        })
+        self.assertEqual(fix_rejected["type"], "review_required")
+
+        ship_reviewer = self.state_mod.AgentCell(
+            id="canonical-ship-reviewer",
+            name="Canonical Shipping Reviewer",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+            directory=repo_root,
+        )
+        for key, value in {
+            "worktree_path": repo_root,
+            "worktree_repo_root": repo_root,
+            "git_root": repo_root,
+            "worktree_branch": branch,
+            "worktree_base_branch": "main",
+        }.items():
+            setattr(ship_reviewer, key, value)
+        state.agents[ship_reviewer.id] = ship_reviewer
+        state.groups["g"].append(ship_reviewer.id)
+        ship_review = state.board_add_task(
+            "Final shipping review",
+            "g",
+            lane="In Progress",
+            id="task-canonical-ship-review",
+            action_name="feature/review",
+            agent_id=ship_reviewer.id,
+            parent_task_id=fix.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=fix.pipeline_depth + 1,
+        )
+        ship_reviewer.current_task_id = ship_review.id
+        ship_command = self._extract_handle_command(
+            state,
+            action_mgr=action_mgr,
+            record_task_boundary=record_task_boundary,
+        )
+        ship_result = await ship_command({
+            "cmd": "ai_report",
+            "cell_id": ship_reviewer.id,
+            "action": "done",
+            "message": "Final review verdict: Ship",
+            "terminal_declaration": (
+                "No further work is needed; I will not derive after this."
+            ),
+        })
+        self.assertNotEqual(
+            ship_result.get("type")
+            if isinstance(ship_result, dict)
+            else None,
+            "review_required",
+        )
+
+        clean = {
+            "task_id": ship_review.id,
+            "boundary": dict(ship_review.worktree_boundary),
+            "head_sha": "canonical-reviewed-head",
+            "clean_mergeable": True,
+        }
+        frozen, attribution_error = _freeze_merge_attribution(
+            state,
+            implementer,
+            implementer.id,
+            {"merge_task_id": fix.id},
+            {"latest": clean, "clean": clean, "reason": ""},
+        )
+        self.assertIsNone(attribution_error)
+        self.assertEqual(frozen.review_task_id, ship_review.id)
+        self.assertEqual(frozen.target_task_ids, (fix.id, ship_review.id))
+
+        def mark_boundaries(cell, merge_sha, merged_task_ids=()):
+            return mark_branch_boundaries_merged(
+                state.board_tasks.values(),
+                repo_root=cell.worktree_repo_root,
+                branch=cell.worktree_branch,
+                merge_sha=merge_sha,
+                task_ids=merged_task_ids,
+            )
+
+        class FinalizeWorktreeManager:
+            async def validate(self, _cell):
+                return True
+
+            async def reset_to_base(self, _cell):
+                return True
+
+            async def count_commits(self, _cell):
+                return 0
+
+        async def noop_async(*_args, **_kwargs):
+            return None
+
+        with mock.patch(
+            "torque.services.worktrees.finalize."
+            "_cleanup_shipped_reviewers_for_merged_cell",
+            new=mock.AsyncMock(return_value={"agents": [], "errors": []}),
+        ):
+            merge_result = await _finalize_successful_worktree_merge(
+                state=state,
+                cell=implementer,
+                aid=implementer.id,
+                data={"merge_task_id": fix.id, "auto_move_to_done": True},
+                merge_sha="canonical-merged-head",
+                merged_task_ids=frozen.target_task_ids,
+                stale_base=None,
+                preserve_merge_diff=False,
+                boundary_task_for_diff=ship_review,
+                merge_diff_snapshot=None,
+                merge_resume_targets=[],
+                mark_branch_boundaries_merged=mark_boundaries,
+                cleanup_after_merge=noop_async,
+                broadcast_toast=noop_async,
+                bridge=types.SimpleNamespace(send_text=noop_async),
+                worktree_mgr=FinalizeWorktreeManager(),
+                handle_command=noop_async,
+                panel_event=lambda *_args, **_kwargs: None,
+            )
+
+        self.assertTrue(merge_result["ok"])
+        state.board_move_task(root.id, "Done")
+        self.assertEqual(state.board_tasks[root.id].lane, "Done")
+        self.assertEqual(block_review.lane, "Done")
+        self.assertEqual(block_review.worktree_boundary, {})
+        self.assertEqual(root.worktree_boundary["status"], "merged")
+        self.assertEqual(fix.worktree_boundary["status"], "merged")
+        self.assertEqual(ship_review.worktree_boundary["status"], "merged")
+        self.assertEqual(
+            ship_review.worktree_boundary["merge_commit_sha"],
+            "canonical-merged-head",
         )
 
     async def test_blocked_and_progress_not_gated_by_review_required(self):
