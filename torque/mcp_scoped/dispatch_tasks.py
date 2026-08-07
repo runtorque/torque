@@ -591,9 +591,13 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
             executor_id = str(
                 getattr(task, "agent_id", "") or ""
             ).strip()
-            candidate = real_state.agents.get(executor_id)
+            candidate = next(
+                iter(_live_workers_linked_to_task(real_state, task)),
+                None,
+            )
             if (
                     candidate
+                    and candidate.id == executor_id
                     and str(
                         getattr(candidate, "status", "") or ""
                     ).strip().lower() == "running"

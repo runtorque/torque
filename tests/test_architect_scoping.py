@@ -4538,6 +4538,45 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             for call in self.handle_calls
         ))
 
+    async def test_architect_task_amend_does_not_advise_linked_engineer(self):
+        creator = self._add_architect(
+            "arch-amend-engineer-link", "Engineer Link Architect"
+        )
+        engineer = self._add_engineer(
+            "eng-amend-engineer-link", "Linked Engineer",
+            hired_by_architect_id=creator.id,
+        )
+        task = self._add_task(
+            "task-amend-engineer-link",
+            "Direct Engineer link",
+            description="Original durable record.",
+            assigned_engineer_id=engineer.id,
+            agent_id=engineer.id,
+            dispatch_state="live",
+            lane="In Progress",
+            created_by_architect_id=creator.id,
+        )
+        original = task.description
+        original_hash = task.task_content_hash
+
+        text, is_error = await self._call(
+            "architect_task_amend",
+            {
+                "task": task.id,
+                "amendment": "Durable correction without Engineer injection.",
+                "expected_task_content_hash": original_hash,
+                "amendment_id": "running-engineer-no-advisory",
+            },
+            creator.id,
+        )
+        self.assertFalse(is_error, text)
+        self.assertTrue(task.description.startswith(original))
+        self.assertNotEqual(task.task_content_hash, original_hash)
+        self.assertFalse(any(
+            call.get("cmd") == "inject_mcp_message"
+            for call in self.handle_calls
+        ))
+
     async def test_architect_task_amend_invalidates_grant_and_enforces_scope_and_size(self):
         from torque.board_sync import BoardSyncFieldConstraints
 
