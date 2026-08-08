@@ -1901,3 +1901,83 @@ function _relativeTime(ts) {
   if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
   return Math.floor(diff / 86400) + 'd ago';
 }
+
+function _askReplyTargetForTask(task) {
+  if (!task || !state) return { id: '', agent: null };
+  var targetId = String(task.reply_agent_id || '').trim();
+  if (!targetId && task.labels && task.labels.indexOf('architect-ask') >= 0) {
+    targetId = String(task.created_by_architect_id || '').trim();
+  }
+  if (!targetId && task.parent_task_id && state.board_tasks) {
+    var parent = state.board_tasks[task.parent_task_id];
+    targetId = String((parent && parent.agent_id) || '').trim();
+  }
+  return {
+    id: targetId,
+    agent: targetId && state.agents ? (state.agents[targetId] || null) : null,
+  };
+}
+
+function _askTargetAvailability(task) {
+  var target = _askReplyTargetForTask(task);
+  var agent = target.agent;
+  var reason = '';
+  if (!target.id || !agent) reason = 'target_not_found';
+  else if (agent.cell_type !== 'agent') reason = 'target_not_agent';
+  else if ((typeof _isTombstonedAgent === 'function' && _isTombstonedAgent(agent))
+      || Number(agent.deleted_at || 0) > 0) reason = 'agent_tombstoned';
+  else if (Number(agent.dismissed_at || 0) > 0) reason = 'agent_dismissed';
+  else if (!String(agent.session_id || '').trim()) reason = 'no_session';
+  else if (['idle', 'running'].indexOf(String(agent.status || '').trim()) < 0) {
+    reason = 'session_not_active';
+  }
+  return {
+    answerable: !reason,
+    reason: reason,
+    target_id: target.id,
+    agent: agent,
+  };
+}
+
+var _askResolvePending = {};
+var _askResolveRequestSequence = 0;
+
+function _sendAskResolve(taskId, answer, source) {
+  for (var pendingId in _askResolvePending) {
+    if (_askResolvePending[pendingId].task_id === taskId) return false;
+  }
+  _askResolveRequestSequence += 1;
+  var requestId = 'ask-resolve-' + _askResolveRequestSequence;
+  _askResolvePending[requestId] = {
+    task_id: taskId,
+    answer: answer,
+    source: source,
+  };
+  if (send({
+    cmd: 'resolve_ask', id: taskId, answer: answer, request_id: requestId,
+  }) === false) {
+    delete _askResolvePending[requestId];
+    return false;
+  }
+  return true;
+}
+
+function handleAskResolveResponse(msg) {
+  if (!msg || msg.command !== 'resolve_ask' || !msg.request_id) return false;
+  var pending = _askResolvePending[msg.request_id];
+  if (!pending) return false;
+  delete _askResolvePending[msg.request_id];
+  if (msg.type === 'error') return false;
+  if (typeof _eventsResolveDrafts !== 'undefined') {
+    delete _eventsResolveDrafts[pending.task_id];
+  }
+  if (pending.source === 'modal') {
+    var modal = document.getElementById('modal-resolve');
+    if (modal && modal.dataset.taskId === pending.task_id
+        && typeof closeModals === 'function') closeModals();
+  } else {
+    var textarea = document.getElementById('events-resolve-' + pending.task_id);
+    if (textarea) textarea.value = '';
+  }
+  return true;
+}

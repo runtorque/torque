@@ -5806,7 +5806,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.board_tasks[second.id].lane, 'Backlog')
         self.assertTrue(worker.pending_engineer_message)
 
-    async def test_resolve_human_ask_buffers_answer_for_offline_reply_agent(self):
+    async def test_resolve_human_ask_refuses_offline_and_replays_existing_buffer(self):
         state = self._make_state()
         worker = self.state_mod.AgentCell(
             id='agent-1',
@@ -5849,28 +5849,28 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             panel_event=lambda *args, **kwargs: events.append((args, kwargs)),
         )
 
-        self.assertEqual(result['type'], 'ok')
-        self.assertEqual(result['delivery_state'], 'buffered')
-        self.assertEqual(result['delivery_reason'], 'no_session')
-        self.assertEqual(state.board_tasks[ask.id].lane, 'Done')
-        self.assertNotIn('torque:human', state.board_tasks[ask.id].labels)
-        self.assertIn('torque:ask-resolved', state.board_tasks[ask.id].labels)
-        # The answered ask is no longer a human-gated open descendant, so the
-        # ordinary Done cascade releases its otherwise-ready parent.
-        self.assertEqual(state.board_tasks[parent.id].lane, 'Done')
-        self.assertEqual(state.board_tasks[parent.id].status, '')
-        self.assertEqual(events[0][0][0], 'ask_resolved')
+        self.assertEqual(result['type'], 'error')
+        self.assertEqual(result['code'], 'ask_target_unavailable')
+        self.assertEqual(result['reason'], 'no_session')
+        self.assertEqual(state.board_tasks[ask.id].lane, 'Backlog')
+        self.assertIn('torque:human', state.board_tasks[ask.id].labels)
+        self.assertNotIn('torque:ask-resolved', state.board_tasks[ask.id].labels)
+        self.assertEqual(state.board_tasks[parent.id].lane, 'In Progress')
+        self.assertEqual(state.board_tasks[parent.id].status, 'Awaiting Input')
+        self.assertEqual(events, [])
         direct_rows = self.db.load_direct_messages_for_agent(worker.id)
         direct_by_type = {row['message_type']: row for row in direct_rows}
-        self.assertEqual(set(direct_by_type), {'ask', 'ask_reply'})
-        self.assertEqual(
-            direct_by_type['ask_reply']['delivery_state'],
-            'buffered',
+        self.assertEqual(direct_by_type, {})
+
+        # A reply buffered by an older daemon or a session-ending delivery
+        # race remains durable and replayable; the new refusal does not delete
+        # or expire that transport path.
+        reply_row = self.server_mod.save_direct_ask_reply_mirror(
+            state, worker, 'Use the minimal fallback.',
+            question=ask.task, source_task_id=ask.id,
+            delivery_state='buffered',
         )
-        self.assertEqual(
-            direct_by_type['ask_reply']['source_task_id'],
-            ask.id,
-        )
+        self.assertEqual(reply_row['delivery_state'], 'buffered')
 
         sent = []
 
@@ -6261,6 +6261,80 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             [entry['id'] for entry in state.direct_messages_by_agent[architect.id]],
             [direct_by_type['ask']['id'], direct_by_type['ask_reply']['id']],
         )
+
+    async def test_resolve_architect_ask_refuses_offline_target_without_closing(self):
+        state = self._make_state()
+        architect = self.state_mod.AgentCell(
+            id='arch-1', name='Architect', group='g', cell_type='agent',
+            kind='architect', session_id='', status='stopped',
+        )
+        state.agents[architect.id] = architect
+        state.groups['g'].append(architect.id)
+        ask = state.board_add_task(
+            'Should we defer reporting?', 'g', lane='Backlog', id='ask-offline',
+            labels=['torque:human', 'architect-ask'], status='Awaiting Input',
+            reply_agent_id=architect.id,
+            created_by_architect_id=architect.id,
+        )
+
+        result = await self.server_mod._resolve_architect_ask_task(
+            state, None, ask, 'Defer reporting.',
+        )
+
+        self.assertEqual(result['type'], 'error')
+        self.assertEqual(result['code'], 'ask_target_unavailable')
+        self.assertEqual(result['reason'], 'no_session')
+        self.assertEqual(ask.lane, 'Backlog')
+        self.assertEqual(ask.status, 'Awaiting Input')
+        self.assertEqual(ask.reply_agent_id, architect.id)
+        self.assertEqual(ask.messages, [])
+        self.assertEqual(architect.mcp_messages, [])
+        reply_rows = [
+            row for row in self.db.load_direct_messages_for_agent(architect.id)
+            if row['source_task_id'] == ask.id
+            and row['message_type'] == 'ask_reply'
+        ]
+        self.assertEqual(reply_rows, [])
+
+    async def test_resolve_architect_ask_session_end_during_send_keeps_ask_open(self):
+        state = self._make_state()
+        architect = self.state_mod.AgentCell(
+            id='arch-1', name='Architect', group='g', cell_type='agent',
+            kind='architect', session_id='session-arch', status='idle',
+        )
+        state.agents[architect.id] = architect
+        state.groups['g'].append(architect.id)
+        ask = state.board_add_task(
+            'Should we defer reporting?', 'g', lane='Backlog', id='ask-race',
+            labels=['torque:human', 'architect-ask'], status='Awaiting Input',
+            reply_agent_id=architect.id,
+            created_by_architect_id=architect.id,
+        )
+
+        class EndingBridge:
+            async def send_text(self, _session_id, _text):
+                architect.session_id = ''
+                architect.status = 'stopped'
+                raise RuntimeError('session ended')
+
+        result = await self.server_mod._resolve_architect_ask_task(
+            state, EndingBridge(), ask, 'Defer reporting.',
+        )
+
+        self.assertEqual(result['type'], 'error')
+        self.assertEqual(result['code'], 'ask_target_unavailable')
+        self.assertEqual(result['reason'], 'no_session')
+        self.assertEqual(ask.lane, 'Backlog')
+        self.assertEqual(ask.status, 'Awaiting Input')
+        self.assertEqual(ask.messages, [])
+        await state.flush_db_writes()
+        reply_rows = [
+            row for row in self.db.load_direct_messages_for_agent(architect.id)
+            if row['source_task_id'] == ask.id
+            and row['message_type'] == 'ask_reply'
+        ]
+        self.assertEqual(len(reply_rows), 1)
+        self.assertEqual(reply_rows[0]['delivery_state'], 'buffered')
 
 
 class ServerWorktreeMergeDiffTests(unittest.IsolatedAsyncioTestCase):

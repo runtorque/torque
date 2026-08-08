@@ -9819,12 +9819,143 @@ test('events attention items include active asks and blocked agents for the curr
   assert.equal(items[0].is_architect_ask, true);
   assert.equal(items[0].agent_name, 'Architect');
   assert.equal(items[0].parent_agent_id, 'arch-1');
+  assert.equal(items[0].answerable, false);
   assert.equal(items[1].parent_agent_id, 'agent-1');
   assert.equal(items[2].type, 'blocked');
-  assert.match(
-    runInContext(context, `_renderAttentionCard(_eventsGetAttentionItems()[0])`),
-    /Architect asks/,
+  const architectAskHtml = runInContext(
+    context, `_renderAttentionCard(_eventsGetAttentionItems()[0])`,
   );
+  assert.match(architectAskHtml, /Architect asks/);
+  assert.match(architectAskHtml, /Target session ended/);
+  assert.doesNotMatch(architectAskHtml, /events-resolve-textarea/);
+});
+
+test('offline ask target is surfaced as unavailable and cannot be resolved inline', () => {
+  const { context, document } = createEventsHarness({ stubRenderers: false });
+  context.state.board_tasks = {
+    parent: {
+      id: 'parent', group: 'alpha', task: 'Root task', agent_id: 'worker-1',
+    },
+    ask: {
+      id: 'ask', group: 'alpha', task: 'Release the gate?',
+      labels: ['torque:human'], parent_task_id: 'parent',
+      reply_agent_id: 'worker-1', lane: 'Backlog',
+    },
+  };
+  context.state.agents = {
+    'worker-1': {
+      id: 'worker-1', name: 'Worker', slug: 'worker', group: 'alpha',
+      cell_type: 'agent', status: 'stopped', session_id: '',
+    },
+  };
+  runInContext(context, `_eventsResolveDrafts.ask = 'Keep this draft';`);
+
+  const item = jsonValue(context, `_eventsGetAttentionItems()[0]`);
+  const html = runInContext(context, `_renderAttentionCard(_eventsGetAttentionItems()[0])`);
+  assert.equal(item.answerable, false);
+  assert.equal(item.availability_reason, 'no_session');
+  assert.match(html, /Target session ended/);
+  assert.doesNotMatch(html, /events-resolve-textarea/);
+  assert.doesNotMatch(html, />Resolve</);
+
+  const textarea = document.register('events-resolve-ask');
+  textarea.value = 'Keep this draft';
+  context.eventsResolveInline('ask');
+  assert.deepEqual(jsonValue(context, 'sendCalls'), []);
+  assert.equal(jsonValue(context, `_eventsResolveDrafts.ask`), 'Keep this draft');
+  assert.equal(textarea.value, 'Keep this draft');
+});
+
+test('backend offline refusal preserves an inline answer typed against stale live state', () => {
+  const { context, document } = createEventsHarness({ stubRenderers: false });
+  context.state.board_tasks = {
+    parent: { id: 'parent', agent_id: 'worker-1' },
+    ask: {
+      id: 'ask', group: 'alpha', task: 'Release the gate?', lane: 'Backlog',
+      labels: ['torque:human'], parent_task_id: 'parent',
+      reply_agent_id: 'worker-1',
+    },
+  };
+  context.state.agents = {
+    'worker-1': {
+      id: 'worker-1', cell_type: 'agent', status: 'idle',
+      session_id: 'session-1',
+    },
+  };
+  const textarea = document.register('events-resolve-ask');
+  textarea.value = 'Keep this answer';
+
+  context.eventsResolveInline('ask');
+  const request = jsonValue(context, 'sendCalls[0]');
+  assert.equal(request.cmd, 'resolve_ask');
+  assert.equal(textarea.value, 'Keep this answer');
+  assert.equal(jsonValue(context, `_eventsResolveDrafts.ask`), 'Keep this answer');
+
+  const handled = context.handleAskResolveResponse({
+    type: 'error',
+    code: 'ask_target_unavailable',
+    command: 'resolve_ask',
+    request_id: request.request_id,
+  });
+  assert.equal(handled, false, 'generic error routing remains available for its toast');
+  assert.equal(textarea.value, 'Keep this answer');
+  assert.equal(jsonValue(context, `_eventsResolveDrafts.ask`), 'Keep this answer');
+
+  context.eventsResolveInline('ask');
+  const retry = jsonValue(context, 'sendCalls[1]');
+  assert.equal(context.handleAskResolveResponse({
+    type: 'ok', command: 'resolve_ask', request_id: retry.request_id,
+  }), true);
+  assert.equal(textarea.value, '');
+  assert.equal(jsonValue(
+    context, `Object.prototype.hasOwnProperty.call(_eventsResolveDrafts, 'ask')`,
+  ), false);
+});
+
+test('offline ask card menu disables resolve while a live target remains answerable', () => {
+  const { context, document } = createBoardHarness({ stubCards: false });
+  const menu = document.register('ctx-menu');
+  context.state.board_lanes = ['Backlog', 'Done'];
+  context.state.board_tasks = {
+    parent: { id: 'parent', group: 'alpha', task: 'Root', lane: 'In Progress' },
+    ask: {
+      id: 'ask', group: 'alpha', task: 'Release the gate?', lane: 'Backlog',
+      labels: ['torque:human'], reply_agent_id: 'worker-1',
+      parent_task_id: 'parent', pipeline_depth: 1,
+    },
+  };
+  context.state.agents = {
+    'worker-1': {
+      id: 'worker-1', name: 'Worker', group: 'alpha', cell_type: 'agent',
+      status: 'stopped', session_id: '',
+    },
+  };
+
+  context._boardRenderCardMenu('ask', null);
+  assert.match(menu.innerHTML, /Target session ended/);
+  assert.doesNotMatch(menu.innerHTML, /boardOpenResolve/);
+  assert.match(
+    context._renderBoardCard(context.state.board_tasks.ask, {}, 1),
+    /target session ended/,
+  );
+  const modal = document.register('modal-resolve');
+  document.register('resolve-question');
+  const answer = document.register('resolve-answer');
+  context.boardOpenResolve('ask');
+  assert.equal(modal.classList.contains('visible'), false);
+
+  context.state.agents['worker-1'].status = 'idle';
+  context.state.agents['worker-1'].session_id = 'session-1';
+  context._boardRenderCardMenu('ask', null);
+  assert.match(menu.innerHTML, /boardOpenResolve/);
+  context.boardOpenResolve('ask');
+  assert.equal(modal.classList.contains('visible'), true);
+  answer.value = 'Keep this modal draft';
+  context.state.agents['worker-1'].status = 'stopped';
+  context.state.agents['worker-1'].session_id = '';
+  context.submitResolve();
+  assert.equal(answer.value, 'Keep this modal draft');
+  assert.deepEqual(jsonValue(context, 'sendCalls'), []);
 });
 
 test('events attention badge ignores owner-routed asks but lights for architect asks', () => {

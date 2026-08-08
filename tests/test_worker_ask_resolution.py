@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 import json
 import tempfile
@@ -36,7 +37,9 @@ class WorkerAskResolutionTests(unittest.IsolatedAsyncioTestCase):
         )
         self.worker = self._add_agent(
             "worker-1", "Worker", "worker", owner_engineer_id=self.engineer.id,
+            session_id="session-worker", status="idle",
         )
+        self.sent_prompts = []
         self.parent = self.state.board_add_task(
             "Implement release", "g", lane="In Progress", id="parent",
             agent_id=self.worker.id, assigned_engineer_id=self.engineer.id,
@@ -72,7 +75,10 @@ class WorkerAskResolutionTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def _send_prompt(self, *_args, **_kwargs):
-        self.fail("offline answer delivery must buffer rather than inject")
+        self.sent_prompts.append((_args, _kwargs))
+        async def delivered():
+            return None
+        return asyncio.create_task(delivered())
 
     async def _call(self, agent_id, name, arguments, request_id):
         handler = self.mcp_mod.create_mcp_handler(self._handle_command, self.state)
@@ -156,6 +162,76 @@ class WorkerAskResolutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(after_payload["question"], "")
         self.assertNotIn("ask_task_id", after_payload)
         self.assertEqual(after_payload["note"], "No pending question for engineer.")
+        self.assertEqual(len(self.sent_prompts), 1)
+
+    async def test_owned_engineer_cannot_close_ask_while_reply_worker_is_offline(self):
+        self.worker.session_id = ""
+        self.worker.status = "stopped"
+        self.state._db_save_agent(self.worker)
+        self._freeze_self_task_update(self.engineer)
+
+        refused = await self._call(
+            self.engineer.id, "agent_ask_answer",
+            {"task": self.ask.id, "answer": "Use the review gate."}, 20,
+        )
+        refused_result, refused_text = self._tool_text(refused)
+
+        self.assertTrue(refused_result["isError"])
+        self.assertIn("no live session", refused_text)
+        self.assertEqual(self.ask.lane, "Backlog")
+        self.assertIn("torque:human", self.ask.labels)
+        self.assertNotIn("torque:ask-resolved", self.ask.labels)
+        self.assertEqual(self.ask.reply_agent_id, self.worker.id)
+        self.assertEqual(self.parent.lane, "In Progress")
+        self.assertEqual(self.sent_prompts, [])
+        reply_rows = [
+            row for row in self.db.load_direct_messages_for_agent(self.worker.id)
+            if row["source_task_id"] == self.ask.id
+            and row["message_type"] == "ask_reply"
+        ]
+        self.assertEqual(reply_rows, [])
+
+        # Relaunching the same logical target makes the still-open ask
+        # answerable without rewriting its durable reply_agent_id.
+        self.worker.session_id = "session-worker-2"
+        self.worker.status = "idle"
+        self.state._db_save_agent(self.worker)
+        resolved = await self._call(
+            self.engineer.id, "agent_ask_answer",
+            {"task": self.ask.id, "answer": "Use the review gate."}, 21,
+        )
+        resolved_result, resolved_text = self._tool_text(resolved)
+        self.assertFalse(resolved_result["isError"], resolved_text)
+        self.assertEqual(self.ask.lane, "Done")
+        self.assertEqual(self.ask.reply_agent_id, self.worker.id)
+        self.assertEqual(len(self.sent_prompts), 1)
+
+    async def test_session_end_during_delivery_buffers_answer_without_closing_ask(self):
+        async def session_ends_before_delivery(*_args, **_kwargs):
+            self.worker.session_id = ""
+            self.worker.status = "stopped"
+            raise RuntimeError("session ended")
+
+        result = await self.communication_mod._resolve_human_ask_task(
+            self.state, self.ask, "Use the review gate.",
+            session_ends_before_delivery,
+        )
+
+        self.assertEqual(result["type"], "error")
+        self.assertEqual(result["code"], "ask_target_unavailable")
+        self.assertEqual(result["reason"], "no_session")
+        self.assertEqual(self.ask.lane, "Backlog")
+        self.assertIn("torque:human", self.ask.labels)
+        self.assertEqual(self.parent.lane, "In Progress")
+        await self.state.flush_db_writes()
+        rows = [
+            row for row in self.db.load_buffered_direct_messages(self.worker.id)
+            if row["source_task_id"] == self.ask.id
+            and row["message_type"] == "ask_reply"
+        ]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["delivery_state"], "buffered")
+        self.assertIn("session ended", rows[0]["delivery_reason"])
 
     async def test_legacy_worker_ask_refuses_other_engineer(self):
         other_engineer = self._add_agent("eng-2", "Other Engineer", "engineer")

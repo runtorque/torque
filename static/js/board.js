@@ -220,6 +220,7 @@ function boardOpenResolve(taskId) {
   var tasks = _boardTasks();
   var task = tasks[taskId];
   if (!task) return;
+  if (!_askTargetAvailability(task).answerable) return;
   var modal = document.getElementById('modal-resolve');
   document.getElementById('resolve-question').textContent = task.task || '';
   document.getElementById('resolve-answer').value = '';
@@ -233,10 +234,11 @@ function boardOpenResolve(taskId) {
 function submitResolve() {
   var modal = document.getElementById('modal-resolve');
   var taskId = modal.dataset.taskId;
+  var task = _boardTasks()[taskId];
+  if (!task || !_askTargetAvailability(task).answerable) return;
   var answer = document.getElementById('resolve-answer').value.trim();
   if (!answer) return;
-  send({ cmd: 'resolve_ask', id: taskId, answer: answer });
-  closeModals();
+  _sendAskResolve(taskId, answer, 'modal');
 }
 
 /* ---- Schedule helpers ------------------------------------------------ */

@@ -293,6 +293,7 @@ function connect() {
     _stopWsLivenessWatchdog();
     _resyncPending = false;
     _awaitingFullState = false;
+    if (typeof _askResolvePending !== 'undefined') _askResolvePending = {};
     if (typeof _engineerResetSessionMapMeta === 'function') {
       _engineerResetSessionMapMeta({ clearStale: false });
     }

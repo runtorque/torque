@@ -1860,6 +1860,35 @@ def _ask_reply_target_for_task(state: MatrixState, task) -> tuple[object | None,
     target = state.agents.get(target_id) if target_id else None
     return target, target_id
 
+
+def _ask_target_unavailable_result(
+        state: MatrixState, target, target_id: str, task_id: str) -> dict | None:
+    """Return an authoritative refusal when an ask target has no live PTY."""
+    reason = ""
+    if not target:
+        reason = "target_not_found"
+    elif str(getattr(target, "cell_type", "") or "") != "agent":
+        reason = "target_not_agent"
+    elif state.agent_is_tombstoned(target):
+        reason = "agent_tombstoned"
+    elif _agent_dismissed_at(target):
+        reason = "agent_dismissed"
+    elif not str(getattr(target, "session_id", "") or "").strip():
+        reason = "no_session"
+    elif str(getattr(target, "status", "") or "").strip() not in {
+            "idle", "running"}:
+        reason = "session_not_active"
+    if not reason:
+        return None
+    return {
+        "type": "error",
+        "code": "ask_target_unavailable",
+        "message": "Ask target agent has no live session",
+        "task_id": str(task_id or ""),
+        "target_agent_id": str(target_id or ""),
+        "reason": reason,
+    }
+
 async def _resolve_human_ask_task(
         state: MatrixState,
         task,
@@ -1888,6 +1917,11 @@ async def _resolve_human_ask_task(
                 + (f": {target_id}" if target_id else "")
             ),
         }
+    unavailable = _ask_target_unavailable_result(
+        state, agent, target_id, str(getattr(task, "id", "") or ""),
+    )
+    if unavailable:
+        return unavailable
 
     question = str(getattr(task, "task", "") or "")
     reply_row = save_direct_ask_reply_mirror(
@@ -1934,6 +1968,20 @@ async def _resolve_human_ask_task(
                 ),
             }
 
+    current = delivery or reply_row or {}
+    if reply_row and str(current.get("delivery_state", "") or "") != "delivered":
+        unavailable = _ask_target_unavailable_result(
+            state, agent, target_id, str(getattr(task, "id", "") or ""),
+        ) or {
+            "type": "error",
+            "code": "ask_delivery_unavailable",
+            "message": "Ask answer could not reach the target session",
+            "task_id": str(getattr(task, "id", "") or ""),
+            "target_agent_id": target_id,
+            "reason": str(current.get("delivery_reason", "") or "delivery_failed"),
+        }
+        return unavailable
+
     messages = list(getattr(task, "messages", []) or [])
     messages.append({
         "timestamp": time.time(),
@@ -1973,7 +2021,6 @@ async def _resolve_human_ask_task(
             "Resolved: " + (q or task.id),
             task_id=task.id,
         )
-    current = delivery or reply_row or {}
     return {
         "type": "ok",
         "task_id": task.id,
@@ -2269,6 +2316,11 @@ async def _resolve_architect_ask_task(
             "type": "error",
             "message": "Architect ask has no linked architect",
         }
+    unavailable = _ask_target_unavailable_result(
+        state, architect, architect_id, str(getattr(task, "id", "") or ""),
+    )
+    if unavailable:
+        return unavailable
 
     question = str(getattr(task, "task", "") or "").strip()
     message_text = (
@@ -2325,6 +2377,26 @@ async def _resolve_architect_ask_task(
         message_text,
         task_id=str(getattr(task, "id", "") or ""),
     )
+    save_direct_ask_reply_mirror(
+        state,
+        architect,
+        answer,
+        question=question,
+        source_task_id=str(getattr(task, "id", "") or ""),
+        delivery_state="delivered" if entry["delivered"] else "buffered",
+    )
+    if not entry["delivered"]:
+        return _ask_target_unavailable_result(
+            state, architect, architect_id,
+            str(getattr(task, "id", "") or ""),
+        ) or {
+            "type": "error",
+            "code": "ask_delivery_unavailable",
+            "message": "Ask answer could not reach the target session",
+            "task_id": str(getattr(task, "id", "") or ""),
+            "target_agent_id": architect_id,
+            "reason": str(entry.get("delivery_reason", "") or "delivery_failed"),
+        }
 
     messages = list(getattr(task, "messages", []) or [])
     messages.append({
@@ -2336,14 +2408,6 @@ async def _resolve_architect_ask_task(
     if not task_is_closed(task):
         state.board_move_task(task.id, "Done")
     state.board_update_task(task.id, status="", messages=messages)
-    save_direct_ask_reply_mirror(
-        state,
-        architect,
-        answer,
-        question=question,
-        source_task_id=str(getattr(task, "id", "") or ""),
-    )
-
     if panel_event:
         panel_event(
             "ask_resolved",
