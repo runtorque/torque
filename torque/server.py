@@ -4629,7 +4629,22 @@ async def main(connection=None):
                 branch=cell.worktree_branch,
                 statuses={"open"},
             )
-            if latest and latest.id != task.id:
+            boundary_root_id = ""
+            if latest:
+                boundary_root_id = str(
+                    getattr(latest, "pipeline_root_id", "")
+                    or getattr(latest, "parent_task_id", "")
+                    or latest.id
+                ).strip()
+            # Keep the persisted successor edge truthful at its write site.
+            # Re-dispatching the reviewed stream root is also the supported
+            # recovery for an edge written by older versions; the read-side
+            # started-successor gate remains strict for genuine follow-ups.
+            if (
+                latest
+                and latest.id != task.id
+                and task.id != boundary_root_id
+            ):
                 next_boundary_task_id = latest.id
         if task.resume_after_boundary_task_id != next_boundary_task_id:
             task.resume_after_boundary_task_id = next_boundary_task_id

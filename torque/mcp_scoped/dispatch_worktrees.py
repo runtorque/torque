@@ -133,12 +133,16 @@ async def dispatch_worktrees(ctx: ScopedDispatchContext):
             ).strip()
 
         merge_task_id = ""
-        if not driverless and str(args.get("task", "") or "").strip():
-            merge_task_id = _resolve_task(real_state, args.get("task", "")) or ""
+        if str(args.get("task", "") or "").strip():
+            task_state = state if driverless else real_state
+            merge_task_id = _resolve_task(task_state, args.get("task", "")) or ""
             merge_task = real_state.board_tasks.get(merge_task_id)
             if not merge_task:
                 return "Task not found", True
-            if str(getattr(merge_task, "agent_id", "") or "") != agent_id:
+            if (
+                not driverless
+                and str(getattr(merge_task, "agent_id", "") or "") != agent_id
+            ):
                 return (
                     "Merge task must be assigned to the selected worker; "
                     "branch identity cannot be used as task attribution.",
