@@ -2466,6 +2466,11 @@ test('progressive numeric search preserves lane order and reveals a newly exact 
   assert.equal(exactCard.scrollIntoViewOptions, undefined);
   assert.ok(panel.innerHTML.indexOf('data-lane="Backlog"') < panel.innerHTML.indexOf('data-lane="In Progress"'));
   assert.ok(panel.innerHTML.indexOf('data-lane="In Progress"') < panel.innerHTML.indexOf('data-lane="Done"'));
+
+  context.boardSelectLane('Backlog');
+  assert.equal(runInContext(context, '_boardSelectedLane'), 'Backlog');
+  assert.match(panel.innerHTML, /data-task-id="TORQUE:900"/);
+  assert.equal(exactCard.scrollIntoViewOptions, undefined);
 });
 
 test('wide numeric search keeps canonical columns and transiently reveals a collapsed exact lane', () => {
@@ -2478,7 +2483,7 @@ test('wide numeric search keeps canonical columns and transiently reveals a coll
   context.state.board_lanes = ['Backlog', 'To Do', 'Done'];
   context.state.board_tasks = {
     mention: {
-      id: 'TORQUE:700', group: 'alpha', task: 'Mentions 1559', lane: 'Backlog', position: 10,
+      id: 'TORQUE:700', group: 'alpha', task: 'Unrelated backlog task', lane: 'Backlog', position: 10,
     },
     competitor: {
       id: 'TORQUE:800', group: 'alpha', task: 'Also mentions 1559', lane: 'To Do', position: 10,
@@ -2497,6 +2502,7 @@ test('wide numeric search keeps canonical columns and transiently reveals a coll
   context.renderBoard();
 
   assert.equal(runInContext(context, '_boardSelectedLane'), 'Backlog');
+  assert.equal(runInContext(context, `_boardLaneCount('Backlog', _boardBuildRenderModel(['Backlog']))`), 0);
   const backlogColumn = panel.innerHTML.indexOf('data-lane="Backlog" data-board-lane-column="1"');
   const todoColumn = panel.innerHTML.indexOf('data-lane="To Do" data-board-lane-column="1"');
   const doneColumn = panel.innerHTML.indexOf('data-lane="Done" data-board-lane-column="1"');

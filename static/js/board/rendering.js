@@ -501,9 +501,12 @@ function renderBoard() {
   var wideLayout = _boardWideLayoutActive(panel);
   _boardNormalizeAddingTaskLane();
   var numericSearchModel = null;
+  var exactSearchIdentityChanged = false;
   if (_boardNumericSearchNumber()) {
     numericSearchModel = _boardBuildRenderModel(wideLayout ? lanes : [_boardSelectedLane]);
-    if (!wideLayout && numericSearchModel.exactNumericSearchLane) {
+    exactSearchIdentityChanged = numericSearchModel.exactNumericSearchTaskId
+      !== _boardLastRevealedExactSearchId;
+    if (!wideLayout && exactSearchIdentityChanged && numericSearchModel.exactNumericSearchLane) {
       _boardSelectedLane = numericSearchModel.exactNumericSearchLane;
       if (!numericSearchModel.rootTasksByLane[_boardSelectedLane]) {
         numericSearchModel = _boardBuildRenderModel([_boardSelectedLane]);
@@ -710,9 +713,10 @@ function renderBoard() {
   // When filters become active, save the current lane; auto-select first non-empty lane
   if (filtersActive) {
     if (!_boardPreFilterLane) _boardPreFilterLane = _boardSelectedLane;
-    // Check if current lane has matches; if not, jump to first that does
+    // Narrow view shows one lane, so jump when it empties. Wide view keeps the
+    // operator's selected lane while showing matches in their fixed columns.
     var curCount = _boardLaneCount(_boardSelectedLane, renderModel);
-    if (curCount === 0) {
+    if (!wideLayout && curCount === 0) {
       for (var fi = 0; fi < lanes.length; fi++) {
         if (_boardLaneCount(lanes[fi], renderModel) > 0) {
           _boardSelectedLane = lanes[fi];
