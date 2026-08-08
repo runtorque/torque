@@ -2496,6 +2496,7 @@ test('wide numeric search keeps canonical columns and transiently reveals a coll
 
   context.renderBoard();
 
+  assert.equal(runInContext(context, '_boardSelectedLane'), 'Backlog');
   const backlogColumn = panel.innerHTML.indexOf('data-lane="Backlog" data-board-lane-column="1"');
   const todoColumn = panel.innerHTML.indexOf('data-lane="To Do" data-board-lane-column="1"');
   const doneColumn = panel.innerHTML.indexOf('data-lane="Done" data-board-lane-column="1"');

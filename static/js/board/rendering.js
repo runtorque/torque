@@ -503,9 +503,9 @@ function renderBoard() {
   var numericSearchModel = null;
   if (_boardNumericSearchNumber()) {
     numericSearchModel = _boardBuildRenderModel(wideLayout ? lanes : [_boardSelectedLane]);
-    if (numericSearchModel.exactNumericSearchLane) {
+    if (!wideLayout && numericSearchModel.exactNumericSearchLane) {
       _boardSelectedLane = numericSearchModel.exactNumericSearchLane;
-      if (!wideLayout && !numericSearchModel.rootTasksByLane[_boardSelectedLane]) {
+      if (!numericSearchModel.rootTasksByLane[_boardSelectedLane]) {
         numericSearchModel = _boardBuildRenderModel([_boardSelectedLane]);
       }
     }
