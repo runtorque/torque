@@ -946,7 +946,7 @@ class StateSettingsMixin:
             parent.status = ""
             parent.updated_at = now_iso
             if emit:
-                self._emit("task_upsert", **asdict(parent))
+                self.emit_task_upsert(parent)
             self._db_save_task(parent)
 
         root_id = parent.pipeline_root_id or parent.id
@@ -957,7 +957,7 @@ class StateSettingsMixin:
             root.status = ""
             root.updated_at = now_iso
             if emit:
-                self._emit("task_upsert", **asdict(root))
+                self.emit_task_upsert(root)
             self._db_save_task(root)
 
     def _expire_orphaned_ask(self, task: BoardTask, reason: str,
@@ -1011,7 +1011,7 @@ class StateSettingsMixin:
             task.updated_at = now_iso
             self._refresh_finalization_root_projection(task)
             if emit:
-                self._emit("task_upsert", **asdict(task))
+                self.emit_task_upsert(task)
             self._db_save_task(task)
 
         self._clear_parent_awaiting_input(

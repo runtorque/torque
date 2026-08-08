@@ -145,7 +145,7 @@ def _record_nested_submodule_metadata_on_latest_boundary(
         }
     latest.worktree_boundary = boundary
     latest.updated_at = datetime.now(timezone.utc).isoformat()
-    state._emit("task_upsert", **asdict(latest))
+    state.emit_task_upsert(latest)
     state._db_save_task(latest)
     return boundary
 

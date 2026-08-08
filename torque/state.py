@@ -75,7 +75,11 @@ from .task_ids import (
     parse_initiative_id,
     parse_task_id,
 )
-from .task_content import compute_task_content_hash
+from .task_content import (
+    TASK_MESSAGES_LIMIT,
+    clamp_task_messages,
+    compute_task_content_hash,
+)
 from .worktree_boundaries import clear_stale_successor_references
 from .services.areas import AreaService
 from .services.architect_governance import ArchitectGovernanceService
@@ -391,6 +395,9 @@ COMPACT_BOARD_TASK_FIELDS = (
     "pre_approved_by",
     "finalization_mode",
     "finalization_status",
+    # Small drift-detection string; sync consumers compare it against the
+    # persisted row, so it must ride every task summary and delta.
+    "task_content_hash",
 )
 
 
@@ -2702,6 +2709,7 @@ class MatrixState(
         self._children: dict[str, list[str]] = {}  # agent_id → [child terminal ids]
         self._ws_clients: set[web.WebSocketResponse] = set()
         self._ws_client_ids: dict[web.WebSocketResponse, str] = {}
+        self._ws_client_compact: dict[web.WebSocketResponse, bool] = {}
         self._ws_clients_lock = asyncio.Lock()
         # Browser focus is intentionally connection/client-scoped. Multiple
         # Torque browser sessions can view different embedded terminals through
@@ -2841,11 +2849,16 @@ class MatrixState(
         self,
         ws: web.WebSocketResponse,
         client_id: str = "",
+        *,
+        compact: bool = True,
     ) -> None:
         """Register a ready UI websocket plus its optional browser client id.
 
         Caller must hold ``_ws_clients_lock``. Terminal websocket connections
         are not registered here; this set is only for the main UI state socket.
+
+        ``compact`` records the client's snapshot protocol: compact clients
+        receive board_task_compact task deltas, legacy clients full bodies.
         """
         self._ws_clients.add(ws)
         client_id = str(client_id or "").strip()
@@ -2853,6 +2866,22 @@ class MatrixState(
             self._ws_client_ids[ws] = client_id
         else:
             self._ws_client_ids.pop(ws, None)
+        self._ws_client_compact[ws] = bool(compact)
+        if not compact:
+            # Deltas emitted after this client's snapshot was built but
+            # before registration carry no full body. Backfill them so the
+            # legacy client's first frame is not compact-shaped.
+            for op in self._delta_ops:
+                if op.get("op") != "task_upsert" or "_full" in op:
+                    continue
+                task = self.board_tasks.get(str(op.get("id", "") or ""))
+                if task is not None:
+                    op["_full"] = asdict(task)
+
+    def _has_legacy_ws_clients(self) -> bool:
+        return any(
+            not compact for compact in self._ws_client_compact.values()
+        )
 
     def _discard_ws_clients_locked(
         self,
@@ -2867,6 +2896,7 @@ class MatrixState(
         self._ws_clients -= clients
         for ws in clients:
             self._ws_client_ids.pop(ws, None)
+            self._ws_client_compact.pop(ws, None)
 
     def client_focus_state(
         self,
@@ -3096,6 +3126,23 @@ class MatrixState(
                 observer(snapshot)
             except Exception:
                 log.exception("Task-upsert observer failed")
+
+    def emit_task_upsert(self, task: "BoardTask") -> None:
+        """Emit a task_upsert delta with the compact wire payload.
+
+        Live deltas used to broadcast ``asdict(task)`` — an unbounded
+        message log plus full artifact bodies, per report, per client —
+        while snapshots already used ``board_task_compact``. Compact
+        clients render from the summaries and lazy-load heavy fields via
+        ``task_detail``. While a legacy-snapshot client is connected the
+        op also carries the full body under ``_full``; ``broadcast()``
+        strips it from the compact frame and expands it for legacy
+        clients only.
+        """
+        payload = board_task_compact(task)
+        if self._has_legacy_ws_clients():
+            payload["_full"] = asdict(task)
+        self._emit("task_upsert", **payload)
 
     def _emit_agent(self, cell: AgentCell, *, coalesce_ephemeral: bool = False):
         """Emit an agent_upsert delta with the bounded client projection."""
@@ -4335,6 +4382,10 @@ class MatrixState(
                 log.exception("Failed to delete group %s", name)
 
     def _db_save_task(self, task: BoardTask):
+        # Single chokepoint for the rolling activity-log bound: every append
+        # site is followed by a save, so clamping here keeps the in-memory
+        # list, the persisted blob, and the content hash consistent.
+        clamp_task_messages(task)
         # Defensive invariant for direct mutation paths that bypass board_update_task.
         task.task_content_hash = compute_task_content_hash(task)
         if self.db:
@@ -4648,7 +4699,7 @@ class MatrixState(
         )
         for task in updated:
             if emit:
-                self._emit("task_upsert", **asdict(task))
+                self.emit_task_upsert(task)
             self._db_save_task(task)
         if updated and emit:
             self.recompute_task_health()

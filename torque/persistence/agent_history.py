@@ -446,12 +446,17 @@ class AgentHistoryPersistenceMixin:
         values = _agent_peer_message_insert_values(normalized)
         placeholders = ",".join(["?"] * len(_AGENT_PEER_MESSAGE_COLUMNS))
         columns = ", ".join(_AGENT_PEER_MESSAGE_COLUMNS)
-        self._conn.execute(
+        cursor = self._conn.execute(
             "INSERT OR IGNORE INTO agent_peer_messages "
             f"({columns}) VALUES ({placeholders})",
             values,
         )
         self._conn.commit()
+        if cursor.rowcount:
+            # Fresh insert: the stored row is exactly what we just encoded,
+            # so decode it in place of the read-back SELECT. Only the
+            # idempotent-replay case (rowcount 0) needs the stored row.
+            return _decode_agent_peer_message_row(values)
         return self.load_agent_peer_message(normalized["id"]) or {}
 
     def save_peer_message(self, record: dict) -> dict:

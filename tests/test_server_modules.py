@@ -6638,7 +6638,9 @@ class ServerWorktreeMergeDiffTests(unittest.IsolatedAsyncioTestCase):
             emitted[0][1]['artifacts'][0]['type'],
             'diff',
         )
-        self.assertEqual(emitted[1][1]['artifacts'], [])
+        # The rollback emit is a compact delta: artifacts stay off the
+        # wire (the restored empty list is asserted on the task above).
+        self.assertNotIn('artifacts', emitted[1][1])
         self.assertEqual(
             list(Path(attachments_dir).rglob('*.patch')),
             [],

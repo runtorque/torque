@@ -5,7 +5,7 @@ from __future__ import annotations
 from .state import (
     ARCHIVED_LANE, AgentCell, AgentDigestSettings, AgentMessageLoop,
     AutoDispatchQueueEntry, BoardTask, EngineerSettings, GlobalSettings,
-    GroupSettings, Schedule, TASK_DISPATCH_STATE_LIVE,
+    GroupSettings, Schedule, TASK_DISPATCH_STATE_LIVE, TASK_MESSAGES_LIMIT,
     TASK_DISPATCH_STATE_QUEUED, _DEFAULT_LANES, _ENGINEER_WORKLOG_LIMIT,
     _EPHEMERAL_FIELDS, _normalize_board_lanes, _normalize_board_sync,
     _normalize_board_sync_github_settings, _normalize_board_sync_provider,
@@ -175,6 +175,11 @@ class StateLoadingMixin:
                 # stored JSON if an unrelated archived-task save occurs.
                 dehydrated_artifacts = raw.get("lane") == ARCHIVED_LANE
                 raw["artifacts"] = normalize_artifacts(raw.get("artifacts", []))
+                # Pre-cap histories persisted before the rolling bound
+                # existed hydrate at the bound; the next save persists it.
+                raw["messages"] = list(
+                    raw.get("messages", []) or []
+                )[-TASK_MESSAGES_LIMIT:]
                 raw["messages_thread"] = _normalize_messages_thread(
                     raw.get("messages_thread", [])
                 )

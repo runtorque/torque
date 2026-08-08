@@ -7,6 +7,7 @@ transport code out of the server composition root.
 from __future__ import annotations
 
 import aiohttp
+import asyncio
 import contextlib
 import json
 import mimetypes
@@ -22,6 +23,7 @@ from aiohttp import web
 from . import profiling
 from .attachment_uploads import AttachmentUploadError, save_message_attachment_stream
 from .config import log
+from .state import hot_json_dumps_async
 from .event_ingest_db import redact_event_for_mcp_call_log
 from .events import build_event_ingest_envelope
 from .mcp import dispatch_mcp_rpc_body
@@ -414,7 +416,8 @@ def build_http_routes(
                 return state.overlay_client_focus_state(payload, ui_client_id)
 
             if not await _register_ready_ui_ws_client(
-                    state, ws, ws_state_payload, client_id=ui_client_id):
+                    state, ws, ws_state_payload, client_id=ui_client_id,
+                    compact=compact_snapshot):
                 return ws
             # Replay the current supervisor banner (if any) to the new client.
             banner = supervisor_banner_state.get("banner")
@@ -436,14 +439,16 @@ def build_http_routes(
                             if data.get("type") == "connect":
                                 sent = await _register_ready_ui_ws_client(
                                     state, ws, ws_state_payload,
-                                    client_id=ui_client_id)
+                                    client_id=ui_client_id,
+                                    compact=compact_snapshot)
                                 if not sent:
                                     break
                                 continue
                             if data.get("cmd") == "resync":
                                 sent = await _register_ready_ui_ws_client(
                                     state, ws, ws_state_payload,
-                                    client_id=ui_client_id)
+                                    client_id=ui_client_id,
+                                    compact=compact_snapshot)
                                 if not sent:
                                     break
                                 continue
@@ -452,7 +457,8 @@ def build_http_routes(
                             if result:
                                 if result.get("type") == "state":
                                     sent = await _register_ready_ui_ws_client(
-                                        state, ws, ws_state_payload)
+                                        state, ws, ws_state_payload,
+                                        compact=compact_snapshot)
                                 else:
                                     sent = await _send_ui_ws_json(ws, result)
                                 if not sent:
@@ -968,3 +974,79 @@ def build_http_routes(
         handle_serve_attachment=handle_serve_attachment,
         cleanup_orphan_attachments=_cleanup_orphan_attachments,
     )
+
+
+# Trailing-timer window for terminal-output coalescing. xterm.js paints at
+# animation-frame cadence anyway, so one WS frame per ~25 ms is invisible
+# to the operator while collapsing the per-4KB-read frame storm.
+_TERMINAL_OUTPUT_FLUSH_SECONDS = 0.025
+
+
+def make_terminal_output_broadcaster(terminal_clients):
+    """Build the coalescing terminal-output fan-out callback.
+
+    One WS frame used to go out per 4 KB PTY read, serialized with the
+    stdlib encoder and sent serially per client while iterating the live
+    subscriber set (which a connecting tab could mutate mid-await —
+    ``RuntimeError: Set changed size during iteration``). Chunks now
+    accumulate per (cell, session) and flush on a trailing timer as one
+    frame, serialized once via the orjson-backed encoder and sent
+    concurrently over a snapshot of the subscriber set.
+    """
+    pending: dict[tuple[str, str], list[str]] = {}
+    flusher: list = [None]
+
+    def _schedule() -> None:
+        task = flusher[0]
+        if task is not None and not task.done():
+            return
+        flusher[0] = asyncio.create_task(_flush())
+
+    async def _flush() -> None:
+        try:
+            while True:
+                await asyncio.sleep(_TERMINAL_OUTPUT_FLUSH_SECONDS)
+                batch = dict(pending)
+                pending.clear()
+                for (cell_id, session_id), chunks in batch.items():
+                    subscribers = list(terminal_clients.get(cell_id, ()))
+                    if not subscribers:
+                        continue
+                    payload = await hot_json_dumps_async({
+                        "type": "output",
+                        "cell_id": cell_id,
+                        "session_id": session_id,
+                        "data": "".join(chunks),
+                    })
+                    results = await asyncio.gather(
+                        *(ws.send_str(payload) for ws in subscribers),
+                        return_exceptions=True,
+                    )
+                    dead = {
+                        ws for ws, result in zip(subscribers, results)
+                        if isinstance(result, BaseException)
+                    }
+                    if dead:
+                        bucket = terminal_clients.get(cell_id)
+                        if bucket is not None:
+                            bucket.difference_update(dead)
+                if not pending:
+                    return
+        finally:
+            flusher[0] = None
+            if pending:
+                # Re-arm for chunks that raced the final drain; a closing
+                # loop (shutdown) drops them with the daemon.
+                with contextlib.suppress(RuntimeError):
+                    _schedule()
+
+    async def broadcast_terminal_output(
+            cell_id: str, session_id: str, text: str) -> None:
+        if not text:
+            return
+        pending.setdefault(
+            (str(cell_id), str(session_id)), []
+        ).append(text)
+        _schedule()
+
+    return broadcast_terminal_output

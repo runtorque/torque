@@ -770,7 +770,7 @@ def _record_pr_metadata_on_latest_boundary(state, cell,
         return None
 
     latest.updated_at = datetime.now(timezone.utc).isoformat()
-    state._emit("task_upsert", **asdict(latest))
+    state.emit_task_upsert(latest)
     state._db_save_task(latest)
     return latest.worktree_boundary
 
@@ -808,7 +808,7 @@ def _record_pr_metadata_on_task_boundary(
         requested_cleanup=requested_cleanup,
     )
     task.updated_at = datetime.now(timezone.utc).isoformat()
-    state._emit("task_upsert", **asdict(task))
+    state.emit_task_upsert(task)
     state._db_save_task(task)
     return task.worktree_boundary
 

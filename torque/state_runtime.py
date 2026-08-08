@@ -237,22 +237,49 @@ class StateRuntimeMixin:
             op_count = len(self._delta_ops)
             ops = self._delta_ops
             self._delta_ops = []
+            # Task ops may carry a "_full" body for legacy-snapshot clients.
+            # The shared compact frame (and every non-WS observer) must not
+            # see it; the legacy frame replaces the compact fields with it.
+            has_full = any("_full" in op for op in ops)
+            if has_full:
+                compact_ops = [
+                    {k: v for k, v in op.items() if k != "_full"}
+                    if "_full" in op else op
+                    for op in ops
+                ]
+            else:
+                compact_ops = ops
             try:
                 msg = await hot_json_dumps_async({
                     "type": "delta", "seq": self._seq,
-                    "ops": ops,
+                    "ops": compact_ops,
                 })
             except Exception:
                 self._seq -= 1
                 self._delta_ops = ops + self._delta_ops
                 raise
             client_entries = [
-                (ws, self._ws_client_ids.get(ws, ""))
+                (
+                    ws,
+                    self._ws_client_ids.get(ws, ""),
+                    self._ws_client_compact.get(ws, True),
+                )
                 for ws in self._ws_clients
             ]
+            legacy_ops = None
+            legacy_msg = ""
+            if any(not compact for _ws, _cid, compact in client_entries):
+                legacy_ops = [
+                    {"op": op["op"], **op["_full"]} if "_full" in op else op
+                    for op in ops
+                ]
+                legacy_msg = await hot_json_dumps_async({
+                    "type": "delta", "seq": self._seq,
+                    "ops": legacy_ops,
+                })
             client_focus_by_id: dict[str, dict[str, Optional[str]]] = {}
             if self._ops_include_focus_update(ops):
-                for _ws, client_id in client_entries:
+                for _ws, client_id, _compact in client_entries:
                     client_id = str(client_id or "").strip()
                     if not client_id or client_id in client_focus_by_id:
                         continue
@@ -274,21 +301,43 @@ class StateRuntimeMixin:
             profiling.recorder().observe("ws_delta_payload_bytes", payload_bytes)
             profiling.recorder().observe("ws_delta_ops_count", op_count)
             profiling.recorder().observe("ws_clients_per_broadcast", len(client_entries))
-        msg_by_client_id: dict[str, str] = {}
+        # Focus-overlay frames are built per (client, protocol) against that
+        # client's base ops so a legacy client keeps full task bodies and a
+        # compact client never sees "_full".
+        msg_by_focus_key: dict[tuple[str, bool], str] = {}
         for client_id, focus in client_focus_by_id.items():
-            patched_ops = self._ops_with_client_focus_overlay(ops, focus)
-            msg_by_client_id[client_id] = await hot_json_dumps_async({
-                "type": "delta", "seq": self._seq,
-                "ops": patched_ops,
-            })
+            for compact_flag in {
+                compact for _ws, cid, compact in client_entries
+                if cid == client_id
+            }:
+                base_ops = compact_ops if compact_flag else (
+                    legacy_ops if legacy_ops is not None else compact_ops
+                )
+                patched_ops = self._ops_with_client_focus_overlay(
+                    base_ops, focus)
+                msg_by_focus_key[(client_id, compact_flag)] = (
+                    await hot_json_dumps_async({
+                        "type": "delta", "seq": self._seq,
+                        "ops": patched_ops,
+                    })
+                )
+
+        def _frame_for(client_id: str, compact_flag: bool) -> str:
+            overlay = msg_by_focus_key.get((client_id, compact_flag))
+            if overlay is not None:
+                return overlay
+            if not compact_flag and legacy_msg:
+                return legacy_msg
+            return msg
+
         # Send to every client concurrently so a slow/stuck client
         # doesn't stall delivery to the others (the lock above already
         # guarantees ordering — only one broadcast is in flight at a time).
         with profiling.timer("ws_broadcast_ms"):
             results = await asyncio.gather(
                 *(
-                    ws.send_str(msg_by_client_id.get(client_id, msg))
-                    for ws, client_id in client_entries
+                    ws.send_str(_frame_for(client_id, compact))
+                    for ws, client_id, compact in client_entries
                 ),
                 return_exceptions=True,
             )
@@ -296,9 +345,11 @@ class StateRuntimeMixin:
         # batch that local WS clients received.  Notification is best-effort and
         # scheduled by cloud_hooks so connector projection/network work can never
         # block local WS delivery.
-        cloud_hooks.notify_state_delta_observers(ops, state=self)
+        cloud_hooks.notify_state_delta_observers(compact_ops, state=self)
         dead: set[web.WebSocketResponse] = {
-            ws for (ws, _client_id), result in zip(client_entries, results)
+            ws
+            for (ws, _client_id, _compact), result in zip(
+                client_entries, results)
             if isinstance(result, BaseException)
         }
         if dead:

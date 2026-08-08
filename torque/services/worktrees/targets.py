@@ -128,7 +128,7 @@ def _maybe_auto_move_merged_task_to_done(
                 if task.status:
                     task.status = ""
                     task.updated_at = datetime.now(timezone.utc).isoformat()
-                    state._emit("task_upsert", **asdict(task))
+                    state.emit_task_upsert(task)
                     state._db_save_task(task)
                 state.history_complete_task(cell.id, task.id, "done")
                 decision.update({

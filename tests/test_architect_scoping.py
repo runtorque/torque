@@ -4480,9 +4480,10 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             if op == "task_upsert" and payload.get("id") == task.id
         ]
         self.assertTrue(task_upserts)
-        self.assertEqual(
-            task_upserts[-1]["description"], persisted["description"]
-        )
+        # Compact deltas keep heavy fields off the wire; clients read the
+        # amended description via task_detail. The content hash still rides
+        # the delta so sync consumers detect the drift.
+        self.assertNotIn("description", task_upserts[-1])
         self.assertEqual(
             task_upserts[-1]["task_content_hash"],
             persisted["task_content_hash"],

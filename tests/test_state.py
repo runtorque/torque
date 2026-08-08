@@ -3677,6 +3677,91 @@ class MatrixStateDurableSettingsTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class MatrixStateCompactDeltaProtocolTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        _install_aiohttp_stub()
+        self.state_mod = importlib.import_module("torque.state")
+
+    def _make_task(self):
+        task = self.state_mod.BoardTask(
+            id="T1", task="Work", group="g", lane="In Progress",
+            description="heavy description",
+        )
+        task.messages = [{"message": f"m{i}"} for i in range(30)]
+        return task
+
+    async def test_compact_and_legacy_clients_get_protocol_shaped_deltas(self):
+        state = self.state_mod.MatrixState()
+        task = self._make_task()
+        state.board_tasks[task.id] = task
+
+        class FakeWS:
+            def __init__(self):
+                self.frames = []
+
+            async def send_str(self, msg):
+                self.frames.append(json.loads(msg))
+
+        compact_ws = FakeWS()
+        legacy_ws = FakeWS()
+        state._register_ws_client_locked(compact_ws, "c1", compact=True)
+        state._register_ws_client_locked(legacy_ws, "c2", compact=False)
+
+        state.emit_task_upsert(task)
+        await state.broadcast()
+
+        compact_op = next(
+            op for op in compact_ws.frames[0]["ops"]
+            if op["op"] == "task_upsert"
+        )
+        legacy_op = next(
+            op for op in legacy_ws.frames[0]["ops"]
+            if op["op"] == "task_upsert"
+        )
+        self.assertNotIn("description", compact_op)
+        self.assertNotIn("_full", compact_op)
+        self.assertEqual(compact_op["messages"][0]["count"], 30)
+        self.assertEqual(legacy_op["description"], "heavy description")
+        self.assertNotIn("_full", legacy_op)
+        self.assertEqual(len(legacy_op["messages"]), 30)
+
+    async def test_no_full_body_emitted_without_legacy_clients(self):
+        state = self.state_mod.MatrixState()
+        task = self._make_task()
+        state.board_tasks[task.id] = task
+        state.emit_task_upsert(task)
+        op = state._delta_ops[-1]
+        self.assertEqual(op["op"], "task_upsert")
+        self.assertNotIn("_full", op)
+        self.assertNotIn("description", op)
+
+    async def test_legacy_registration_backfills_pending_task_ops(self):
+        state = self.state_mod.MatrixState()
+        task = self._make_task()
+        state.board_tasks[task.id] = task
+        # Emitted while only compact clients existed: no full body.
+        state.emit_task_upsert(task)
+        self.assertNotIn("_full", state._delta_ops[-1])
+        # A legacy client registering before broadcast backfills it.
+        state._register_ws_client_locked(object(), "legacy", compact=False)
+        self.assertEqual(
+            state._delta_ops[-1]["_full"]["description"],
+            "heavy description",
+        )
+
+    async def test_task_messages_clamped_on_save(self):
+        state = self.state_mod.MatrixState()
+        task = self._make_task()
+        limit = self.state_mod.TASK_MESSAGES_LIMIT
+        task.messages = [{"message": f"m{i}"} for i in range(limit + 50)]
+        state.board_tasks[task.id] = task
+        state._db_save_task(task)
+        self.assertEqual(len(task.messages), limit)
+        # Oldest entries drop; the newest survive.
+        self.assertEqual(task.messages[-1]["message"], f"m{limit + 49}")
+        self.assertEqual(task.messages[0]["message"], "m50")
+
+
 class MatrixStatePauseBroadcastTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         _install_aiohttp_stub()
@@ -4232,12 +4317,15 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             if op.get("op") == "task_upsert" and op.get("id") == live.id
         ]
         self.assertTrue(task_ops)
-        full_delta = task_ops[0]
-        self.assertEqual(full_delta["description"], "Architect-written description")
-        self.assertEqual(full_delta["action_name"], "feature/implement")
-        self.assertEqual(full_delta["assigned_engineer_id"], "eng-1")
-        self.assertIn("created_at", full_delta)
-        self.assertIn("health_details", full_delta)
+        compact_delta = task_ops[0]
+        self.assertEqual(compact_delta["action_name"], "feature/implement")
+        self.assertEqual(compact_delta["assigned_engineer_id"], "eng-1")
+        self.assertIn("created_at", compact_delta)
+        self.assertIn("health_details", compact_delta)
+        # Heavy fields stay off the wire: compact clients lazy-load them
+        # through task_detail, which serves the persisted description
+        # asserted against the DB row above.
+        self.assertNotIn("description", compact_delta)
 
         reloaded = self.state_mod.MatrixState(db=db)
         reloaded.load()

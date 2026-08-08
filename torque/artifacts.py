@@ -239,10 +239,13 @@ def normalize_artifact(artifact: dict, index: int = 0) -> dict:
             "agent_name": _safe_text(provenance.get("agent_name")),
             "task_id": _safe_text(provenance.get("task_id")),
         },
+        # storage deliberately omits "content": the body already lives at
+        # the top level, and duplicating it doubled every artifact's JSON
+        # footprint in the DB column and on the wire. normalize_artifact
+        # still reads legacy records that only carried storage.content.
         "storage": {
             "kind": storage_kind,
             "path": path,
-            "content": content,
             "line_start": line_start,
             "line_end": line_end,
         },

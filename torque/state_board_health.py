@@ -316,7 +316,7 @@ class BoardHealthMixin:
             if emit:
                 self._suppress_task_health_dirty = True
                 try:
-                    self._emit("task_upsert", **asdict(task))
+                    self.emit_task_upsert(task)
                 finally:
                     self._suppress_task_health_dirty = False
             if persist and self.db:
@@ -405,7 +405,7 @@ class BoardHealthMixin:
         task.updated_at = now_iso
         if old_lane != lane:
             task.lane_entered_at = now_iso
-        self._emit("task_upsert", **asdict(task))
+        self.emit_task_upsert(task)
         self._db_save_task(task)
         # Task watches are event-driven; this central transition path also
         # covers direct moves, archive/unarchive, and done cascades.

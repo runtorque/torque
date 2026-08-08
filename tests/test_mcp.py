@@ -323,10 +323,9 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved[-1]["review"]["amendments"], [amendment])
         self.assertEqual(task.messages[-1]["action"], "review_verdict_amendment")
         self.assertEqual(state._delta_ops[-1]["op"], "task_upsert")
-        self.assertEqual(
-            state._delta_ops[-1]["completion_evidence"]["review"]["amendments"],
-            [amendment],
-        )
+        # Compact deltas keep completion_evidence off the wire; clients
+        # lazy-load it via task_detail (persistence asserted above).
+        self.assertNotIn("completion_evidence", state._delta_ops[-1])
 
         denied_text, denied = await self.mcp_mod._dispatch_tool(
             "torque_review_verdict_amend",

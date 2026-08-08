@@ -550,6 +550,9 @@ class _QueuedAsyncDBWriter:
         )
         db._conn.execute("PRAGMA foreign_keys=ON")
         db._conn.execute("PRAGMA busy_timeout=5000")
+        # Match the main connection's WAL durability pairing so the batched
+        # writer thread doesn't pay a full fsync per commit either.
+        db._conn.execute("PRAGMA synchronous=NORMAL")
         self._worker_db = db
         return db
 

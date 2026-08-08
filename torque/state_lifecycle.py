@@ -998,7 +998,7 @@ class StateLifecycleMixin:
         for t in self.board_tasks.values():
             if t.agent_id in removed_ids:
                 t.agent_id = ""
-                self._emit("task_upsert", **asdict(t))
+                self.emit_task_upsert(t)
                 self._db_save_task(t)
         # Clear engineer designation only when the row is permanently purged.
         gs = self.group_settings.get(cell.group)
@@ -1045,7 +1045,7 @@ class StateLifecycleMixin:
         for t in self.board_tasks.values():
             if t.agent_id in tombstoned_ids:
                 t.agent_id = ""
-                self._emit("task_upsert", **asdict(t))
+                self.emit_task_upsert(t)
                 self._db_save_task(t)
 
         self.cleanup_orphaned_attention(allow_persisted_agent_fallback=False)

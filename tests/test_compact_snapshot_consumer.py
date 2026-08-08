@@ -67,6 +67,9 @@ COMPACT_CARD_FIELDS = {
     # can render a truthful bounded finalization badge without task_detail.
     "finalization_mode",
     "finalization_status",
+    # Small drift-detection string; rides every summary and delta so sync
+    # consumers can compare against the persisted row.
+    "task_content_hash",
 }
 
 HEAVY_TASK_FIELDS = {

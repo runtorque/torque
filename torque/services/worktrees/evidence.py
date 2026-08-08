@@ -133,7 +133,7 @@ def _persist_preserved_merge_diff_warning_only(
         boundary_task_for_diff.artifacts = previous_artifacts
         boundary_task_for_diff.updated_at = previous_updated_at
         try:
-            state._emit("task_upsert", **asdict(boundary_task_for_diff))
+            state.emit_task_upsert(boundary_task_for_diff)
         except Exception:
             log.exception(
                 "Failed to re-emit boundary task after preserved merge diff "

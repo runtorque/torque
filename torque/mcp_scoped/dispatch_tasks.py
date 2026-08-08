@@ -996,7 +996,7 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
             real_state._emit_agent(worker)
         task.assigned_engineer_id = engineer_id
         task.updated_at = prospective_task.updated_at
-        real_state._emit("task_upsert", **asdict(task))
+        real_state.emit_task_upsert(task)
         real_state.recompute_task_health()
         worker_transfer = {
             "status": "transferred" if workers else "not_applicable",

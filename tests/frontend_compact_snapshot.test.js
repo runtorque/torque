@@ -763,3 +763,46 @@ test('archived_tasks merge layers over local compact summaries without loss', ()
   assert.equal(t.position, 9);
   assert.equal(t.lane, 'Archived');
 });
+
+test('task_upsert delta invalidates fully-loaded registry so heavy fields re-fetch', () => {
+  const { context, sandbox } = createCompactContext();
+  sandbox.state = {
+    snapshot_protocol: 'compact-v1',
+    board_tasks: {
+      't-live': { id: 't-live', task: 'work', lane: 'In Progress' },
+    },
+  };
+  // Minimal stubs for delta-apply globals not under test.
+  sandbox._deltaOperationSpec = function() { return null; };
+  sandbox._maybeTriggerAgentDoneFlourish = function() {};
+  sandbox._rebuildChildren = function() {};
+  sandbox._invalidateTaskLookupIndex = function() {};
+  const deltaApplySource = fs.readFileSync(
+    path.join(repoRoot, 'static/js/ws/delta-apply.js'), 'utf8');
+  vm.runInContext(deltaApplySource, context, { filename: 'delta-apply.js' });
+  run(context, `_compactInitDeferredMaps()`);
+
+  // Hydrate: task_detail response marks the task fully loaded.
+  run(context, `_compactHandleLazyResponse({
+    type: 'task_detail',
+    id: 't-live',
+    task: { id: 't-live', task: 'work', messages_thread: [{message: 'hi'}] }
+  })`);
+  sandbox.sendCalls.length = 0;
+  run(context, `ensureTaskDetail('t-live')`);
+  assertPlainEqual(sandbox.sendCalls, [],
+    'hydrated task must serve locally before any delta');
+
+  // A compact task_upsert delta refreshes summaries but not heavy fields:
+  // it must drop the task from the fully-loaded registry.
+  run(context, `_applyDelta([{
+    op: 'task_upsert', id: 't-live', task: 'work',
+    messages: { count: 3 },
+    messages_thread_summary: { count: 2 },
+  }])`);
+  run(context, `ensureTaskDetail('t-live')`);
+  assert.equal(sandbox.sendCalls.length, 1,
+    'post-delta read must re-fetch task_detail');
+  assert.equal(sandbox.sendCalls[0].cmd, 'task_detail');
+  assert.equal(sandbox.sendCalls[0].id, 't-live');
+});

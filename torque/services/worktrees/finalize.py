@@ -679,7 +679,7 @@ async def _finalize_successful_worktree_merge(
     for t in list(state.board_tasks.values()):
         if t.agent_id == cell.id and task_is_closed(t):
             t.agent_id = ""
-            state._emit("task_upsert", **asdict(t))
+            state.emit_task_upsert(t)
             state._db_save_task(t)
 
     clear_flag = bool(data.get("clear_context"))

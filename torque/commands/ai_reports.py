@@ -300,7 +300,7 @@ async def handle_ai_report_command(
             from datetime import datetime, timezone
             t.updated_at = datetime.now(
                 timezone.utc).isoformat()
-            state._emit("task_upsert", **asdict(t))
+            state.emit_task_upsert(t)
             state._db_save_task(t)
 
         def _cascade_done(task_id):
