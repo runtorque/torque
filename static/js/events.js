@@ -309,10 +309,8 @@ function _eventsGetAttentionItems() {
     var isArchitectAsk = t.labels.indexOf('architect-ask') >= 0;
     var isBehaviorApproval = typeof behaviorOverlayApprovalTask === 'function'
       && behaviorOverlayApprovalTask(t);
-    var architectId = t.reply_agent_id || t.created_by_architect_id || '';
-    var agent = isArchitectAsk && state && state.agents
-      ? (state.agents[architectId] || null)
-      : _eventsAskAgent(t);
+    var availability = _askTargetAvailability(t);
+    var agent = availability.agent;
     items.push({
       type: 'ask',
       id: t.id,
@@ -323,11 +321,13 @@ function _eventsGetAttentionItems() {
       message: t.task || '',
       description: t.description || '',
       behavior_overlay_approval: isBehaviorApproval,
+      answerable: isBehaviorApproval || availability.answerable,
+      availability_reason: isBehaviorApproval ? '' : availability.reason,
       behavior_overlay_proposal_id: (
         isBehaviorApproval && typeof behaviorOverlayProposalIdFromTask === 'function'
       ) ? behaviorOverlayProposalIdFromTask(t) : '',
       timestamp: t.created_at ? new Date(t.created_at).getTime() / 1000 : 0,
-      parent_agent_id: isArchitectAsk ? architectId : (parent ? (parent.agent_id || '') : ''),
+      parent_agent_id: availability.target_id,
       parent_task_title: parent ? (parent.task || '') : '',
       parent_task_description: parent ? (parent.description || '') : '',
     });
@@ -362,9 +362,7 @@ function _eventsAskParentTask(task) {
 }
 
 function _eventsAskAgent(task) {
-  var parent = _eventsAskParentTask(task);
-  if (!parent || !parent.agent_id || !state || !state.agents) return null;
-  return state.agents[parent.agent_id] || null;
+  return _askReplyTargetForTask(task).agent;
 }
 
 /* ---- Render --------------------------------------------------------- */
@@ -379,6 +377,7 @@ function _eventsAttentionSignature(items) {
       item.timestamp || 0,
       item.agent_name || '',
       item.is_architect_ask ? 'architect' : '',
+      item.answerable ? 'answerable' : (item.availability_reason || 'unavailable'),
       item.message || '',
       item.description || '',
       item.parent_task_title || '',
@@ -884,13 +883,21 @@ function _renderAttentionCard(item) {
       html += '<div class="events-attention-context-label">Additional details</div>';
       html += '<div class="events-attention-context">' + esc(item.description) + '</div>';
     }
-    html += '<textarea class="form-control-sm events-resolve-textarea" id="events-resolve-' + item.id + '"'
-      + ' placeholder="Type your answer..."'
-      + ' oninput="eventsResolveInput(\'' + item.id + '\', this)"'
-      + ' onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){event.preventDefault();eventsResolveInline(\'' + item.id + '\')}"'
-      + '>' + esc(draft) + '</textarea>';
+    if (!item.answerable) {
+      html += '<div class="events-attention-context ui-state ui-state--warning ui-state--compact" role="status">'
+        + '<strong>Target session ended.</strong> This question remains durable and will become answerable when the agent has a live session.'
+        + '</div>';
+    } else {
+      html += '<textarea class="form-control-sm events-resolve-textarea" id="events-resolve-' + item.id + '"'
+        + ' placeholder="Type your answer..."'
+        + ' oninput="eventsResolveInput(\'' + item.id + '\', this)"'
+        + ' onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){event.preventDefault();eventsResolveInline(\'' + item.id + '\')}"'
+        + '>' + esc(draft) + '</textarea>';
+    }
     html += '<div class="events-attention-actions">';
-    html += '<button class="btn-primary btn-sm" onclick="eventsResolveInline(\'' + item.id + '\')">Resolve</button>';
+    if (item.answerable) {
+      html += '<button class="btn-primary btn-sm" onclick="eventsResolveInline(\'' + item.id + '\')">Resolve</button>';
+    }
     if (item.parent_agent_id) {
       html += '<button class="btn-secondary btn-sm" onclick="eventsFocusAgent(\'' + item.parent_agent_id + '\')">Focus Agent</button>';
     }
@@ -958,13 +965,14 @@ function eventsResolveInput(taskId, textarea) {
 }
 
 function eventsResolveInline(taskId) {
+  var task = state && state.board_tasks ? state.board_tasks[taskId] : null;
+  if (!task || !_askTargetAvailability(task).answerable) return;
   var textarea = document.getElementById('events-resolve-' + taskId);
   if (!textarea) return;
   var answer = textarea.value.trim();
   if (!answer) { textarea.focus(); return; }
-  send({ cmd: 'resolve_ask', id: taskId, answer: answer });
-  delete _eventsResolveDrafts[taskId];
-  textarea.value = '';
+  _eventsResolveDrafts[taskId] = textarea.value;
+  _sendAskResolve(taskId, answer, 'events');
 }
 
 function eventsFocusAgent(cellId) {

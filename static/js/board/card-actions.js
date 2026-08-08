@@ -168,6 +168,8 @@ function _boardRenderCardMenu(taskId, invoker) {
     if (typeof behaviorOverlayApprovalTask === 'function'
         && behaviorOverlayApprovalTask(task)) {
       html += '<button onclick="event.stopPropagation();openBehaviorOverlayApprovalModal(\'' + taskId + '\')">Review behavior diff...</button>';
+    } else if (!_askTargetAvailability(task).answerable) {
+      html += '<button disabled title="The logical addressee has no live session">Target session ended</button>';
     } else {
       html += '<button onclick="event.stopPropagation();boardOpenResolve(\'' + taskId + '\')">Resolve...</button>';
     }

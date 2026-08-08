@@ -3,6 +3,9 @@
 function _handleWsMessage(e) {
     _noteWsInbound();
     const msg = JSON.parse(e.data);
+    var askResolveHandled = typeof handleAskResolveResponse === 'function'
+      && handleAskResolveResponse(msg);
+    if (askResolveHandled) return;
     if (typeof _compactHandleLazyResponse === 'function'
         && _compactHandleLazyResponse(msg)) {
       if (typeof renderActivePanel === 'function') renderActivePanel();

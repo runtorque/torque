@@ -1335,7 +1335,13 @@ function _renderBoardCard(t, childrenOf, depth, renderState) {
   // Pipeline chain indicator (only for subordinate cards)
   if (isSubordinate && t.parent_task_id) {
     var chainInfo = '↳ depth ' + (t.pipeline_depth || 0);
-    if (t.labels && t.labels.indexOf('torque:human') >= 0) chainInfo += ' · awaiting human';
+    if (t.labels && t.labels.indexOf('torque:human') >= 0) {
+      var isBehaviorApproval = typeof behaviorOverlayApprovalTask === 'function'
+        && behaviorOverlayApprovalTask(t);
+      chainInfo += (isBehaviorApproval || _askTargetAvailability(t).answerable)
+        ? ' · awaiting human'
+        : ' · target session ended';
+    }
     cardHtml += '<div class="board-card-chain">' + chainInfo + '</div>';
   }
   if (t.agent_id) {
