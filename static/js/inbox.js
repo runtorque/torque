@@ -359,20 +359,25 @@ function _inboxRenderNotice(notice) {
   html += '<div class="inbox-item-meta">' + meta.join('<span aria-hidden="true">·</span>') + '</div>';
   html += '<div class="inbox-item-actions">';
   if (actionLabel) {
-    html += '<button type="button" class="btn-primary btn-sm" onclick="inboxRunAction(\''
+    html += '<button type="button" class="btn-primary btn-sm" data-inbox-focus-key="'
+      + id + ':open" onclick="inboxRunAction(\''
       + id + '\')">' + esc(actionLabel) + '</button>';
   }
   if (unread) {
-    html += '<button type="button" class="btn-secondary btn-sm" onclick="inboxLifecycle(\''
+    html += '<button type="button" class="btn-secondary btn-sm" data-inbox-focus-key="'
+      + id + ':read" onclick="inboxLifecycle(\''
       + id + '\',\'read\')">Mark read</button>';
   }
   if (notice.notice_type === 'alert' && activeAlert) {
-    html += '<button type="button" class="btn-secondary btn-sm" onclick="inboxLifecycle(\''
+    html += '<button type="button" class="btn-secondary btn-sm" data-inbox-focus-key="'
+      + id + ':resolve" onclick="inboxLifecycle(\''
       + id + '\',\'resolve\')">Resolve</button>';
-    html += '<button type="button" class="btn-quiet btn-sm" onclick="inboxLifecycle(\''
+    html += '<button type="button" class="btn-quiet btn-sm" data-inbox-focus-key="'
+      + id + ':dismiss" onclick="inboxLifecycle(\''
       + id + '\',\'dismiss\')">Dismiss</button>';
   }
-  html += '<button type="button" class="btn-quiet btn-sm" onclick="inboxLifecycle(\''
+  html += '<button type="button" class="btn-quiet btn-sm" data-inbox-focus-key="'
+    + id + ':archive" onclick="inboxLifecycle(\''
     + id + '\',\'' + (archived ? 'restore' : 'archive') + '\')">'
     + (archived ? 'Restore' : 'Archive') + '</button>';
   html += '</div></div></article>';
@@ -407,24 +412,25 @@ function renderInbox() {
   html += '<div><h2>Inbox</h2><p>Durable alerts and activity that need your attention.</p></div>';
   html += '<div class="inbox-header-actions">';
   if (summary.unread_total > 0) {
-    html += '<button type="button" class="btn-secondary btn-sm" onclick="inboxMarkAllRead()">Mark all read</button>';
+    html += '<button type="button" class="btn-secondary btn-sm" data-inbox-focus-key="mark-all" '
+      + 'onclick="inboxMarkAllRead()">Mark all read</button>';
   }
-  html += '<button type="button" class="btn-quiet btn-sm inbox-close" '
+  html += '<button type="button" class="btn-quiet btn-sm inbox-close" data-inbox-focus-key="close" '
     + 'onclick="closeInboxPopover({restoreFocus:true})" aria-label="Close notifications">×</button>';
   html += '</div></div>';
   html += '<div class="inbox-toolbar">';
   html += '<div class="ui-segmented-control" role="tablist" aria-label="Inbox view">';
-  html += '<button type="button" role="tab" aria-selected="' + (_inboxView === 'alerts')
+  html += '<button type="button" role="tab" data-inbox-focus-key="view-alerts" aria-selected="' + (_inboxView === 'alerts')
     + '" class="' + (_inboxView === 'alerts' ? 'active' : '')
     + '" onclick="inboxSetView(\'alerts\')">Alerts'
     + (summary.open_alerts ? '<span class="inbox-tab-count">' + summary.open_alerts + '</span>' : '')
     + '</button>';
-  html += '<button type="button" role="tab" aria-selected="' + (_inboxView === 'notifications')
+  html += '<button type="button" role="tab" data-inbox-focus-key="view-notifications" aria-selected="' + (_inboxView === 'notifications')
     + '" class="' + (_inboxView === 'notifications' ? 'active' : '')
     + '" onclick="inboxSetView(\'notifications\')">Notifications'
     + (summary.unread_notifications ? '<span class="inbox-tab-count">' + summary.unread_notifications + '</span>' : '')
     + '</button></div>';
-  html += '<label class="inbox-archived-toggle"><input type="checkbox" '
+  html += '<label class="inbox-archived-toggle"><input type="checkbox" data-inbox-focus-key="archived-toggle" '
     + (_inboxShowArchived ? 'checked ' : '')
     + 'onchange="inboxToggleArchived(this.checked)"> Show archived</label>';
   html += '</div>';

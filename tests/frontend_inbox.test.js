@@ -314,7 +314,7 @@ test('notification bell opens and closes the anchored Inbox overlay', () => {
   assert.equal(context.openInboxPopover(event), true);
   assert.equal(panel.hidden, false);
   assert.equal(button.attributes['aria-expanded'], 'true');
-  assert.match(panel.innerHTML, /No alerts/);
+  assert.match(panel.innerHTML, /Loading older items/);
   assert.deepEqual(
     JSON.parse(JSON.stringify(sends.pop())),
     {

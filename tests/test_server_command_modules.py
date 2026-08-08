@@ -336,6 +336,44 @@ class PlanningCommandModuleTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.handled)
 
 
+class OperatorNoticeCommandModuleTests(unittest.IsolatedAsyncioTestCase):
+    @classmethod
+    def setUpClass(cls):
+        install_aiohttp_stub()
+        cls.commands = importlib.import_module("torque.commands.operator_notices")
+
+    async def test_list_response_echoes_result_set_identity_for_race_rejection(self):
+        class State:
+            def list_operator_notices(self, **kwargs):
+                self.list_kwargs = kwargs
+                return [{"id": "notice-1"}]
+
+            def operator_notice_summary(self):
+                return {"open_alerts": 1}
+
+        state = State()
+        result = await self.commands._handle_operator_notice_command(
+            {
+                "cmd": "operator_notices_list",
+                "notice_type": "notification",
+                "include_archived": False,
+                "limit": 20,
+                "offset": 40,
+            },
+            state,
+        )
+
+        self.assertEqual(result["notice_type"], "notification")
+        self.assertFalse(result["include_archived"])
+        self.assertEqual(result["offset"], 40)
+        self.assertEqual(state.list_kwargs, {
+            "notice_type": "notification",
+            "include_archived": False,
+            "limit": 21,
+            "offset": 40,
+        })
+
+
 class BehaviorOverlayCommandModuleTests(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def setUpClass(cls):
