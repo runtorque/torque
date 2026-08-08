@@ -6,7 +6,8 @@ import inspect
 from dataclasses import asdict
 
 from ..dispatch_registry import AsyncHandlerRegistry
-from ..state import AgentSettings, ArchitectSettings, MatrixState
+from ..state import ArchitectSettings, MatrixState
+from ..state_settings import AgentSettings
 
 
 SETTINGS_READ_COMMAND_NAMES = frozenset({

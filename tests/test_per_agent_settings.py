@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from dataclasses import asdict
 from pathlib import Path
 
 try:
@@ -152,6 +153,31 @@ class PerAgentSettingsTests(unittest.TestCase):
             self.state.resolve_agent_settings("eng-1")["restrict_to_created_agents"],
             {"value": False, "origin": "per-agent"},
         )
+
+    def test_agent_settings_keys_project_through_both_snapshot_sites(self):
+        self.state.update_agent_settings("eng-1", provider="gemini-cli")
+        self.state.update_agent_digest_settings("eng-1", push_interval=15)
+        expected_settings = self.state.agent_settings_snapshot()
+        self.assertEqual(
+            set(expected_settings),
+            {"agent_settings", "resolved_agent_settings"},
+        )
+
+        full = self.state.to_dict()
+        compact = self.state.to_dict_compact()
+
+        for snapshot in (full, compact):
+            self.assertEqual(snapshot["agent_settings"], expected_settings["agent_settings"])
+            self.assertEqual(
+                snapshot["resolved_agent_settings"],
+                expected_settings["resolved_agent_settings"],
+            )
+            self.assertEqual(
+                snapshot["agent_digest_settings"]["eng-1"],
+                asdict(self.state.agent_digest_settings["eng-1"]),
+            )
+            self.assertIn("engineer_settings", snapshot)
+            self.assertIn("architect_settings", snapshot)
 
 
 if __name__ == "__main__":

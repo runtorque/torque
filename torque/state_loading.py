@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .state import (
-    ARCHIVED_LANE, AgentCell, AgentDigestSettings, AgentSettings, AgentMessageLoop,
+    ARCHIVED_LANE, AgentCell, AgentDigestSettings, AgentMessageLoop,
     AutoDispatchQueueEntry, BoardTask, EngineerSettings, GlobalSettings,
     GroupSettings, Schedule, TASK_DISPATCH_STATE_LIVE, TASK_MESSAGES_LIMIT,
     TASK_DISPATCH_STATE_QUEUED, _DEFAULT_LANES, _ENGINEER_WORKLOG_LIMIT,
@@ -21,6 +21,7 @@ from .state import (
     normalize_engineer_wave_size_preference, normalize_group_prefix,
     normalize_guidance_hint_cadence, normalize_worktree_merge_cleanup,
 )
+from .state_settings import AgentSettings
 
 
 class StateLoadingMixin:

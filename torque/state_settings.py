@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from .memory import clamp_context_ttl_days
 
 from .state import (
-    AgentCell, AgentDigestSettings, AgentSettings, ArchitectSettings, BoardTask,
+    AgentCell, AgentDigestSettings, ArchitectSettings, BoardTask,
     EngineerSettings, GroupSettings, Optional,
     _ARCHITECT_DIGEST_DEFAULT_ENABLED_EVENTS,
     _ARCHITECT_DIGEST_LEGACY_DEFAULT_ENABLED_EVENTS,
@@ -38,7 +40,40 @@ from .state import (
 )
 
 
+@dataclass
+class AgentSettings:
+    """Nullable settings overrides for one Architect or Engineer."""
+    agent_id: str = ""
+    provider: Optional[str] = None
+    boot_command: Optional[str] = None
+    model: Optional[str] = None
+    reasoning_effort: Optional[str] = None
+    fast_mode: Optional[str] = None
+    autonomy_mode: Optional[str] = None
+    custom_instructions: Optional[str] = None
+    default_worker_concurrency: Optional[int] = None
+    wave_size_preference: Optional[str] = None
+    same_agent_follow_up_preference: Optional[str] = None
+    escalation_style: Optional[str] = None
+    engineer_can_override_worker_provider: Optional[bool] = None
+    restrict_to_created_agents: Optional[bool] = None
+
+
 class StateSettingsMixin:
+    def agent_settings_snapshot(self) -> dict:
+        """Project raw and resolved per-agent settings into state snapshots."""
+        return {
+            "agent_settings": {
+                agent_id: asdict(settings)
+                for agent_id, settings in self.agent_settings.items()
+            },
+            "resolved_agent_settings": {
+                agent_id: self.resolve_agent_settings(agent_id)
+                for agent_id, cell in self.agents.items()
+                if cell.kind in {"architect", "engineer"}
+            },
+        }
+
     def get_group_settings(self, name: str) -> GroupSettings:
         """Return group settings, creating defaults if group has none."""
         return self.group_settings.get(name, GroupSettings())
