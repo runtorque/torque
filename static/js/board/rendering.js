@@ -711,7 +711,7 @@ function renderBoard() {
       html += '</div>';
     }
   }
-  // The default single-lane layout otherwise leaves active filtering visible
+  // The default multi-lane/narrow layout otherwise leaves active filtering visible
   // only in the toolbar. Keep this notice outside the cached lane body so a
   // changing summary never becomes part of the lane render cache key.
   if (filtersActive && !wideLayout && !_boardShowSchedules) {
