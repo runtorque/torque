@@ -466,9 +466,10 @@ class AgentLaunchService:
     def resolve_engineer_launch_config(self, group: str, *,
                                      base_dir: str = "",
                                      explicit_template: str = "",
-                                     overrides: dict[str, Any] | None = None) -> dict:
-        """Resolve launch config for the designated engineer in a group."""
-        merged = dict(overrides or {})
+                                     overrides: dict[str, Any] | None = None,
+                                     agent_id: str = "") -> dict:
+        """Resolve launch config: launch > agent > kind-group > group > defaults."""
+        merged = {}
         ws = self.state.get_engineer_settings(group)
         if getattr(ws, "engineer_provider", ""):
             merged["provider"] = ws.engineer_provider
@@ -486,6 +487,21 @@ class AgentLaunchService:
             merged["shell"] = ws.engineer_shell
         if getattr(ws, "engineer_tab_color", ""):
             merged["tab_color"] = ws.engineer_tab_color
+        agent_settings = self.state.get_agent_settings(agent_id) if agent_id else None
+        for source, target in {
+            "provider": "provider", "boot_command": "command", "model": "model",
+            "reasoning_effort": "reasoning_effort", "fast_mode": "fast_mode",
+        }.items():
+            value = getattr(agent_settings, source, None)
+            if value is not None and str(value).strip() and not (
+                    source == "fast_mode" and str(value).strip().lower() == "inherit"):
+                merged[target] = value
+        for key, value in (overrides or {}).items():
+            if value is None or (isinstance(value, str) and not value.strip()):
+                continue
+            if key == "fast_mode" and str(value).strip().lower() == "inherit":
+                continue
+            merged[key] = value
         resolved = self.resolve_agent_launch_config(
             group,
             base_dir=base_dir,
@@ -539,9 +555,10 @@ class AgentLaunchService:
     def resolve_architect_launch_config(self, group: str, *,
                                       base_dir: str = "",
                                       explicit_template: str = "",
-                                      overrides: dict[str, Any] | None = None) -> dict:
-        """Resolve launch config for architect agents in a group."""
-        merged = dict(overrides or {})
+                                      overrides: dict[str, Any] | None = None,
+                                      agent_id: str = "") -> dict:
+        """Resolve launch config: launch > agent > kind-group > group > defaults."""
+        merged = {}
         settings_getter = getattr(self.state, "get_architect_settings", None)
         ws = settings_getter(group) if callable(settings_getter) else None
         if getattr(ws, "architect_provider", ""):
@@ -560,6 +577,21 @@ class AgentLaunchService:
             merged["shell"] = ws.architect_shell
         if getattr(ws, "architect_tab_color", ""):
             merged["tab_color"] = ws.architect_tab_color
+        agent_settings = self.state.get_agent_settings(agent_id) if agent_id else None
+        for source, target in {
+            "provider": "provider", "boot_command": "command", "model": "model",
+            "reasoning_effort": "reasoning_effort", "fast_mode": "fast_mode",
+        }.items():
+            value = getattr(agent_settings, source, None)
+            if value is not None and str(value).strip() and not (
+                    source == "fast_mode" and str(value).strip().lower() == "inherit"):
+                merged[target] = value
+        for key, value in (overrides or {}).items():
+            if value is None or (isinstance(value, str) and not value.strip()):
+                continue
+            if key == "fast_mode" and str(value).strip().lower() == "inherit":
+                continue
+            merged[key] = value
         resolved = self.resolve_agent_launch_config(
             group,
             base_dir=base_dir,

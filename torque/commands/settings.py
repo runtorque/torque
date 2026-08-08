@@ -7,6 +7,7 @@ from dataclasses import asdict
 
 from ..dispatch_registry import AsyncHandlerRegistry
 from ..state import ArchitectSettings, MatrixState
+from ..state_settings import AgentSettings
 
 
 SETTINGS_READ_COMMAND_NAMES = frozenset({
@@ -14,10 +15,12 @@ SETTINGS_READ_COMMAND_NAMES = frozenset({
     "get_architect_settings",
     "get_global_settings",
     "get_ai_settings",
+    "get_agent_settings",
 })
 SETTINGS_MUTATION_COMMAND_NAMES = frozenset({
     "update_group_settings",
     "update_architect_settings",
+    "update_agent_settings",
 })
 
 
@@ -77,6 +80,18 @@ async def _handle_settings_read_command(
             "settings": asdict(state.get_architect_settings(group)),
         }
 
+    if cmd == "get_agent_settings":
+        agent_id = str(data.get("agent_id", "") or "").strip()
+        try:
+            return {
+                "type": "agent_settings",
+                "agent_id": agent_id,
+                "settings": asdict(state.get_agent_settings(agent_id)),
+                "resolved": state.resolve_agent_settings(agent_id),
+            }
+        except ValueError as exc:
+            return {"type": "error", "message": str(exc)}
+
     if cmd == "get_global_settings":
         return {
             "type": "global_settings",
@@ -115,6 +130,22 @@ def _handle_settings_mutation_command(
             "type": "ok",
             "settings": asdict(state.get_architect_settings(group)),
         }
+
+    if cmd == "update_agent_settings":
+        agent_id = str(data.get("agent_id", "") or "").strip()
+        settings = dict(data.get("settings", {}) or {})
+        valid = set(AgentSettings.__dataclass_fields__) - {"agent_id"}
+        settings = {key: value for key, value in settings.items() if key in valid}
+        try:
+            state.update_agent_settings(agent_id, **settings)
+            return {
+                "type": "agent_settings",
+                "agent_id": agent_id,
+                "settings": asdict(state.get_agent_settings(agent_id)),
+                "resolved": state.resolve_agent_settings(agent_id),
+            }
+        except ValueError as exc:
+            return {"type": "error", "message": str(exc)}
 
     return None
 

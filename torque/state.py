@@ -2489,7 +2489,7 @@ class AgentDigestSettings:
     architect_digest: bool = False
     wake_on_digest: bool = False
     suppress_empty: bool = False
-
+    override_fields: list[str] = field(default_factory=list)  # explicit only
 
 # Mandatory events — always included in engineer digests regardless of enabled_events.
 ENGINEER_MANDATORY_EVENTS = frozenset({
@@ -2782,6 +2782,7 @@ class MatrixState(
         # Engineer settings (per-group)
         self.engineer_settings: dict[str, EngineerSettings] = {}
         self.agent_digest_settings: dict[str, AgentDigestSettings] = {}
+        self.agent_settings: dict[str, AgentSettings] = {}
         self.engineer_worklog: dict[str, list[dict]] = {}
         # In-memory only per-Engineer dispatch-shape ring buffer. This is an
         # advisory read model for live dispatch-affordance metrics; it is not
@@ -3760,7 +3761,7 @@ class MatrixState(
             "agent_digest_settings": {
                 agent_id: asdict(settings)
                 for agent_id, settings in self.agent_digest_settings.items()
-            },
+            }, **self.agent_settings_snapshot(),
             "agent_message_history": self.agent_message_history_snapshot(),
             "direct_messages_by_agent": self.direct_messages_snapshot(),
             "agent_peer_threads": self.agent_peer_threads_snapshot(),
@@ -4081,7 +4082,7 @@ class MatrixState(
             "agent_digest_settings": {
                 agent_id: asdict(settings)
                 for agent_id, settings in self.agent_digest_settings.items()
-            },
+            }, **self.agent_settings_snapshot(),
             "agent_message_history": self.agent_message_history_snapshot(),
             "direct_messages_by_agent": self.direct_messages_snapshot(),
             "agent_peer_threads": self.agent_peer_threads_snapshot(),

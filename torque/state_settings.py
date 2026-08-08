@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from .memory import clamp_context_ttl_days
 
 from .state import (
@@ -38,7 +40,40 @@ from .state import (
 )
 
 
+@dataclass
+class AgentSettings:
+    """Nullable settings overrides for one Architect or Engineer."""
+    agent_id: str = ""
+    provider: Optional[str] = None
+    boot_command: Optional[str] = None
+    model: Optional[str] = None
+    reasoning_effort: Optional[str] = None
+    fast_mode: Optional[str] = None
+    autonomy_mode: Optional[str] = None
+    custom_instructions: Optional[str] = None
+    default_worker_concurrency: Optional[int] = None
+    wave_size_preference: Optional[str] = None
+    same_agent_follow_up_preference: Optional[str] = None
+    escalation_style: Optional[str] = None
+    engineer_can_override_worker_provider: Optional[bool] = None
+    restrict_to_created_agents: Optional[bool] = None
+
+
 class StateSettingsMixin:
+    def agent_settings_snapshot(self) -> dict:
+        """Project raw and resolved per-agent settings into state snapshots."""
+        return {
+            "agent_settings": {
+                agent_id: asdict(settings)
+                for agent_id, settings in self.agent_settings.items()
+            },
+            "resolved_agent_settings": {
+                agent_id: self.resolve_agent_settings(agent_id)
+                for agent_id, cell in self.agents.items()
+                if cell.kind in {"architect", "engineer"}
+            },
+        }
+
     def get_group_settings(self, name: str) -> GroupSettings:
         """Return group settings, creating defaults if group has none."""
         return self.group_settings.get(name, GroupSettings())
@@ -295,6 +330,143 @@ class StateSettingsMixin:
         """Return engineer settings for a group, creating defaults if needed."""
         return self.engineer_settings.get(group, EngineerSettings(group=group))
 
+    def get_agent_settings(self, agent_id: str) -> AgentSettings:
+        """Return only explicitly stored nullable overrides for an agent."""
+        agent_id = str(agent_id or "").strip()
+        return self.agent_settings.get(agent_id, AgentSettings(agent_id=agent_id))
+
+    @staticmethod
+    def _agent_setting_inherits(key: str, value) -> bool:
+        """Return whether an override value represents field-level inherit."""
+        if value is None:
+            return True
+        if not isinstance(value, str):
+            return False
+        value = value.strip()
+        return not value or (key == "fast_mode" and value.lower() == "inherit")
+
+    def update_agent_settings(self, agent_id: str, **fields) -> AgentSettings:
+        """Set/clear per-agent overrides; ``None`` always means inherit."""
+        agent_id = str(agent_id or "").strip()
+        cell = self.agents.get(agent_id)
+        if not cell or cell.kind not in {"architect", "engineer"}:
+            raise ValueError("per-agent settings require an Architect or Engineer id")
+        current = self.agent_settings.get(agent_id, AgentSettings(agent_id=agent_id))
+        valid = set(AgentSettings.__dataclass_fields__) - {"agent_id"}
+        for key, value in fields.items():
+            if key not in valid:
+                continue
+            if self._agent_setting_inherits(key, value):
+                value = None
+            if value is not None:
+                if key in {"engineer_can_override_worker_provider", "restrict_to_created_agents"}:
+                    value = bool(value)
+                elif key == "default_worker_concurrency":
+                    value = normalize_default_worker_concurrency(value)
+                elif key == "autonomy_mode":
+                    value = (
+                        normalize_architect_autonomy_mode(value, strict=True)
+                        if cell.kind == "architect"
+                        else normalize_engineer_autonomy_mode(value)
+                    )
+                elif key == "wave_size_preference":
+                    value = normalize_engineer_wave_size_preference(value)
+                elif key == "same_agent_follow_up_preference":
+                    value = normalize_engineer_same_agent_follow_up_preference(value)
+                elif key == "escalation_style":
+                    value = normalize_engineer_escalation_style(value)
+                elif key == "fast_mode":
+                    value = normalize_codex_fast_mode(value, strict=True)
+                else:
+                    value = str(value).strip()
+            setattr(current, key, value)
+        self.agent_settings[agent_id] = current
+        payload = asdict(current)
+        self._emit("agent_settings_update", **payload)
+        if self.db:
+            self.db.save_agent_settings(agent_id, payload)
+        return current
+
+    def delete_agent_settings(self, agent_id: str) -> None:
+        agent_id = str(agent_id or "").strip()
+        self.agent_settings.pop(agent_id, None)
+        if self.db:
+            self.db.delete_agent_settings(agent_id)
+
+    def resolve_agent_settings(self, agent_id: str) -> dict:
+        """Return effective values with an explicit per-field origin layer."""
+        agent_id = str(agent_id or "").strip()
+        cell = self.agents.get(agent_id)
+        if not cell or cell.kind not in {"architect", "engineer"}:
+            raise ValueError("resolved settings require an Architect or Engineer id")
+        overrides = self.get_agent_settings(agent_id)
+        group_exists = cell.group in self.engineer_settings or cell.group in self.group_settings
+        if cell.kind == "architect":
+            group_settings = self.get_architect_settings(cell.group)
+            mapping = {
+                "provider": "architect_provider", "boot_command": "architect_boot_command",
+                "model": "architect_model", "reasoning_effort": "architect_reasoning_effort",
+                "fast_mode": "architect_fast_mode", "autonomy_mode": "architect_autonomy_mode",
+                "custom_instructions": "architect_custom_instructions",
+            }
+        else:
+            group_settings = self.get_engineer_settings(cell.group)
+            mapping = {
+                "provider": "engineer_provider", "boot_command": "engineer_boot_command",
+                "model": "engineer_model", "reasoning_effort": "engineer_reasoning_effort",
+                "fast_mode": "engineer_fast_mode", "autonomy_mode": "autonomy_mode",
+                "custom_instructions": "custom_instructions",
+                "default_worker_concurrency": "default_worker_concurrency",
+                "wave_size_preference": "wave_size_preference",
+                "same_agent_follow_up_preference": "same_agent_follow_up_preference",
+                "escalation_style": "escalation_style",
+                "engineer_can_override_worker_provider": "engineer_can_override_worker_provider",
+                "restrict_to_created_agents": "restrict_to_created_agents",
+            }
+        resolved = {}
+        generic = self.get_group_settings(cell.group)
+        generic_mapping = {
+            "provider": "agent_provider", "boot_command": "agent_boot_command",
+            "model": "agent_model", "reasoning_effort": "agent_reasoning_effort",
+            "fast_mode": "agent_fast_mode",
+        }
+        for name in set(AgentSettings.__dataclass_fields__) - {"agent_id"}:
+            value = getattr(overrides, name)
+            if not self._agent_setting_inherits(name, value):
+                origin = "per-agent"
+            else:
+                attr = mapping.get(name)
+                value = getattr(group_settings, attr, None) if attr else None
+                if value in {None, "", "inherit"} and name in generic_mapping:
+                    value = getattr(generic, generic_mapping[name], None)
+                origin = (
+                    "group"
+                    if group_exists and value not in {None, "", "inherit"}
+                    else "default"
+                )
+            resolved[name] = {"value": value, "origin": origin}
+        digest = self.get_agent_digest_settings(agent_id)
+        override_fields = set(
+            getattr(self.agent_digest_settings.get(agent_id), "override_fields", []) or []
+        )
+        for name in ("paused", "push_interval", "max_interval", "heartbeat_interval",
+                     "digest_verbosity", "enabled_events"):
+            resolved[name] = {
+                "value": getattr(digest, name),
+                "origin": "per-agent" if name in override_fields else (
+                    "group" if group_exists else "default"
+                ),
+            }
+        resolved["agent_class_id"] = {
+            "value": cell.agent_class_id,
+            "origin": "per-agent" if cell.agent_class_id else "default",
+        }
+        resolved["engineer_specializations"] = {
+            "value": list(cell.engineer_specializations),
+            "origin": "per-agent" if cell.engineer_specializations else "default",
+        }
+        return resolved
+
     def _default_agent_digest_settings(
         self,
         agent_id: str,
@@ -358,8 +530,7 @@ class StateSettingsMixin:
             return AgentDigestSettings(agent_id=agent_id)
         if str(getattr(cell, "kind", "") or "").strip() == "architect":
             return self._default_agent_digest_settings(agent_id, cell)
-        legacy_engineer = self.get_engineer_for_group(cell.group)
-        if not legacy_engineer or legacy_engineer.id != agent_id:
+        if str(getattr(cell, "kind", "") or "").strip() != "engineer":
             return self._default_agent_digest_settings(agent_id, cell)
         ws = self.get_engineer_settings(cell.group)
         push_interval = getattr(ws, "push_interval", 60)
@@ -390,10 +561,20 @@ class StateSettingsMixin:
         agent_id = str(agent_id or "").strip()
         if not agent_id:
             return AgentDigestSettings()
+        base = self._legacy_agent_digest_settings(agent_id)
         settings = self.agent_digest_settings.get(agent_id)
-        if settings is not None:
-            return settings
-        return self._legacy_agent_digest_settings(agent_id)
+        if settings is None:
+            return base
+        resolved = AgentDigestSettings(**asdict(base))
+        for key in set(settings.override_fields or []):
+            if key in {"paused", "push_interval", "max_interval", "heartbeat_interval",
+                       "digest_verbosity", "enabled_events"}:
+                setattr(resolved, key, getattr(settings, key))
+        resolved.architect_digest = settings.architect_digest
+        resolved.wake_on_digest = settings.wake_on_digest
+        resolved.suppress_empty = settings.suppress_empty
+        resolved.override_fields = list(settings.override_fields or [])
+        return resolved
 
     def _backfill_architect_digest_defaults(self) -> None:
         """One-time: quiet architect rows/groups with the old broad default."""
@@ -530,9 +711,16 @@ class StateSettingsMixin:
             )
             settings.agent_id = agent_id
             self.agent_digest_settings[agent_id] = settings
-        valid = set(AgentDigestSettings.__dataclass_fields__)
+        valid = set(AgentDigestSettings.__dataclass_fields__) - {"override_fields"}
+        delivery_fields = {"paused", "push_interval", "max_interval", "heartbeat_interval",
+                           "digest_verbosity", "enabled_events"}
         for key, value in fields.items():
             if key not in valid:
+                continue
+            if key in delivery_fields and value is None:
+                settings.override_fields = [
+                    name for name in settings.override_fields if name != key
+                ]
                 continue
             cell = self.agents.get(agent_id)
             is_architect = (
@@ -555,6 +743,8 @@ class StateSettingsMixin:
                          "suppress_empty"}:
                 value = bool(value)
             setattr(settings, key, value)
+            if key in delivery_fields and key not in settings.override_fields:
+                settings.override_fields.append(key)
         payload = asdict(settings)
         self._emit(
             "agent_digest_update",

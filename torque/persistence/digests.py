@@ -320,13 +320,22 @@ class DigestPersistenceMixin:
                 ],
             )
         )
+        override_fields = settings.get("override_fields")
+        if override_fields is None:
+            # Compatibility for direct/offline callers written before the
+            # per-field inheritance marker existed.
+            override_fields = [
+                "paused", "push_interval", "max_interval",
+                "heartbeat_interval", "digest_verbosity", "enabled_events",
+            ]
         self._conn.execute(
             """
             INSERT OR REPLACE INTO agent_digest_settings
                 (agent_id, paused, push_interval, max_interval,
                  heartbeat_interval, digest_verbosity, enabled_events,
-                 architect_digest, wake_on_digest, suppress_empty)
-            VALUES (?,?,?,?,?,?,?,?,?,?)
+                architect_digest, wake_on_digest, suppress_empty,
+                override_fields)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 agent_id,
@@ -342,6 +351,7 @@ class DigestPersistenceMixin:
                 1 if settings.get("architect_digest", False) else 0,
                 1 if settings.get("wake_on_digest", False) else 0,
                 1 if settings.get("suppress_empty", False) else 0,
+                json.dumps(sorted(set(override_fields or []))),
             ),
         )
         if commit:
@@ -423,7 +433,7 @@ class DigestPersistenceMixin:
         row = self._conn.execute(
             "SELECT agent_id, paused, push_interval, max_interval, "
             "heartbeat_interval, digest_verbosity, enabled_events, "
-            "architect_digest, wake_on_digest "
+            "architect_digest, wake_on_digest, suppress_empty, override_fields "
             "FROM agent_digest_settings WHERE agent_id=?",
             (agent_id,),
         ).fetchone()
@@ -452,6 +462,10 @@ class DigestPersistenceMixin:
             "enabled_events": enabled,
             "architect_digest": bool(row[7]) if len(row) > 7 else False,
             "wake_on_digest": bool(row[8]) if len(row) > 8 else False,
+            "suppress_empty": bool(row[9]) if len(row) > 9 else False,
+            "override_fields": (
+                json.loads(row[10] or "[]") if len(row) > 10 else []
+            ),
         }
 
     def delete_engineer_settings(self, group_name: str):
@@ -475,6 +489,57 @@ class DigestPersistenceMixin:
             "DELETE FROM agent_digest_settings WHERE agent_id=?",
             (agent_id,),
         )
+        self._conn.commit()
+
+    def save_agent_settings(self, agent_id: str, settings: dict) -> None:
+        """Upsert nullable settings overrides for one Architect/Engineer."""
+        fields = (
+            "provider", "boot_command", "model", "reasoning_effort",
+            "fast_mode", "autonomy_mode", "custom_instructions",
+            "default_worker_concurrency", "wave_size_preference",
+            "same_agent_follow_up_preference", "escalation_style",
+            "engineer_can_override_worker_provider",
+            "restrict_to_created_agents",
+        )
+        values = [settings.get(name) for name in fields]
+        for index in (11, 12):
+            if values[index] is not None:
+                values[index] = 1 if values[index] else 0
+        self._conn.execute(
+            f"INSERT OR REPLACE INTO agent_settings "
+            f"(agent_id,{','.join(fields)}) VALUES "
+            f"({','.join(['?'] * (len(fields) + 1))})",
+            (agent_id, *values),
+        )
+        self._conn.commit()
+
+    def load_all_agent_settings(self) -> dict[str, dict]:
+        fields = (
+            "provider", "boot_command", "model", "reasoning_effort",
+            "fast_mode", "autonomy_mode", "custom_instructions",
+            "default_worker_concurrency", "wave_size_preference",
+            "same_agent_follow_up_preference", "escalation_style",
+            "engineer_can_override_worker_provider",
+            "restrict_to_created_agents",
+        )
+        rows = self._conn.execute(
+            f"SELECT agent_id,{','.join(fields)} FROM agent_settings"
+        ).fetchall()
+        result = {}
+        for row in rows:
+            payload = {"agent_id": row[0]}
+            payload.update(zip(fields, row[1:]))
+            for name in fields[-2:]:
+                if payload[name] is not None:
+                    payload[name] = bool(payload[name])
+            result[row[0]] = payload
+        return result
+
+    def load_agent_settings(self, agent_id: str) -> dict | None:
+        return self.load_all_agent_settings().get(agent_id)
+
+    def delete_agent_settings(self, agent_id: str) -> None:
+        self._conn.execute("DELETE FROM agent_settings WHERE agent_id=?", (agent_id,))
         self._conn.commit()
 
     def load_all_engineer_settings(self) -> dict[str, dict]:
@@ -554,7 +619,7 @@ class DigestPersistenceMixin:
         rows = self._conn.execute(
             "SELECT agent_id, paused, push_interval, max_interval, "
             "heartbeat_interval, digest_verbosity, enabled_events, "
-            "architect_digest, wake_on_digest, suppress_empty "
+            "architect_digest, wake_on_digest, suppress_empty, override_fields "
             "FROM agent_digest_settings"
         ).fetchall()
         result = {}
@@ -583,6 +648,9 @@ class DigestPersistenceMixin:
                 "architect_digest": bool(row[7]) if len(row) > 7 else False,
                 "wake_on_digest": bool(row[8]) if len(row) > 8 else False,
                 "suppress_empty": bool(row[9]) if len(row) > 9 else False,
+                "override_fields": (
+                    json.loads(row[10] or "[]") if len(row) > 10 else []
+                ),
             }
         return result
 

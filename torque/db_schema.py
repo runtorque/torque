@@ -17,7 +17,7 @@ from typing import Callable, Iterable
 
 from .task_content import compute_task_content_hash
 
-SCHEMA_VERSION = "29"
+SCHEMA_VERSION = "30"
 
 
 @dataclass(frozen=True)
@@ -1331,7 +1331,25 @@ CREATE TABLE IF NOT EXISTS agent_digest_settings (
     enabled_events     TEXT NOT NULL DEFAULT '["agent_started","task_dispatched","task_derived","task_health_alert"]',
     architect_digest   INTEGER NOT NULL DEFAULT 0,
     wake_on_digest     INTEGER NOT NULL DEFAULT 0,
-    suppress_empty     INTEGER NOT NULL DEFAULT 0
+    suppress_empty     INTEGER NOT NULL DEFAULT 0,
+    override_fields    TEXT NOT NULL DEFAULT '[]'
+);
+
+CREATE TABLE IF NOT EXISTS agent_settings (
+    agent_id TEXT PRIMARY KEY,
+    provider TEXT,
+    boot_command TEXT,
+    model TEXT,
+    reasoning_effort TEXT,
+    fast_mode TEXT,
+    autonomy_mode TEXT,
+    custom_instructions TEXT,
+    default_worker_concurrency INTEGER,
+    wave_size_preference TEXT,
+    same_agent_follow_up_preference TEXT,
+    escalation_style TEXT,
+    engineer_can_override_worker_provider INTEGER,
+    restrict_to_created_agents INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS digest_queued_events (
@@ -3097,6 +3115,43 @@ def _migration_0024_one_shot_reminders(conn: sqlite3.Connection, _backfill_agent
         CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminders(status, due_at, id); CREATE INDEX IF NOT EXISTS idx_reminders_requester ON reminders(requester_id, status, due_at, id);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_reminders_request_key ON reminders(request_idempotency_key) WHERE request_idempotency_key != '';
     """)
+def _migration_0030_per_agent_settings(
+    conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Add nullable Architect/Engineer overrides without backfilling them."""
+    digest_override_fields_missing = not _column_exists(
+        conn, "agent_digest_settings", "override_fields"
+    )
+    _ensure_columns(
+        conn,
+        "agent_digest_settings",
+        {"override_fields": "TEXT NOT NULL DEFAULT '[]'"},
+    )
+    if digest_override_fields_missing:
+        # Pre-v30 rows were authoritative for all six delivery fields. Record
+        # that legacy fact once; future row presence alone has no meaning.
+        conn.execute(
+            "UPDATE agent_digest_settings SET override_fields=?",
+            (json.dumps([
+                "paused", "push_interval", "max_interval",
+                "heartbeat_interval", "digest_verbosity", "enabled_events",
+            ]),),
+        )
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS agent_settings (
+            agent_id TEXT PRIMARY KEY,
+            provider TEXT, boot_command TEXT, model TEXT,
+            reasoning_effort TEXT, fast_mode TEXT, autonomy_mode TEXT,
+            custom_instructions TEXT, default_worker_concurrency INTEGER,
+            wave_size_preference TEXT,
+            same_agent_follow_up_preference TEXT, escalation_style TEXT,
+            engineer_can_override_worker_provider INTEGER,
+            restrict_to_created_agents INTEGER
+        )
+    """)
+
+
 SCHEMA_MIGRATIONS = (
     SchemaMigration(
         1,
@@ -3312,6 +3367,13 @@ SCHEMA_MIGRATIONS = (
         "board_task_content_hash",
         "board-task-authored-content-hash-v1-agent-template",
         _migration_0029_board_task_content_hash,
+        phase="post_init",
+    ),
+    SchemaMigration(
+        30,
+        "per_agent_settings",
+        "architect-engineer-per-agent-settings-v1",
+        _migration_0030_per_agent_settings,
         phase="post_init",
     ),
 )

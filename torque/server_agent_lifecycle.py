@@ -19,6 +19,7 @@ from .server_agent import (
 from .server_agent_common import _should_show_guidance_hint
 from .server_agent_operations import (
     GUIDANCE_HINT_IDENTITY_LAUNCH,
+    _resolve_launch_for_existing_cell,
     _agent_dismissed_at,
     _architect_dismissed_error,
     _close_cell_session_preserving_state,
@@ -735,8 +736,8 @@ async def _handle_relaunch_agent_command(
         resolve_worker_launch_config=resolve_worker_launch_config,
         is_designated_engineer=is_designated_engineer,
     )
-    launch_cfg = resolver(
-        cell.group,
+    launch_cfg = _resolve_launch_for_existing_cell(
+        resolver, cell,
         base_dir=base_dir,
         explicit_template=cell.template,
         overrides={},
@@ -974,8 +975,8 @@ async def _handle_restart_agent_command(
         resolve_worker_launch_config=resolve_worker_launch_config,
         is_designated_engineer=is_designated_engineer,
     )
-    launch_cfg = resolver(
-        cell.group,
+    launch_cfg = _resolve_launch_for_existing_cell(
+        resolver, cell,
         base_dir=base_dir,
         explicit_template=cell.template,
         overrides={},

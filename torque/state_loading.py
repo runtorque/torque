@@ -21,6 +21,7 @@ from .state import (
     normalize_engineer_wave_size_preference, normalize_group_prefix,
     normalize_guidance_hint_cadence, normalize_worktree_merge_cleanup,
 )
+from .state_settings import AgentSettings
 
 
 class StateLoadingMixin:
@@ -441,6 +442,19 @@ class StateLoadingMixin:
                                 filtered["escalation_style"])
                         )
                     self.engineer_settings[gname] = EngineerSettings(**filtered)
+                agent_settings_fields = set(AgentSettings.__dataclass_fields__)
+                load_agent_settings = getattr(self.db, "load_all_agent_settings", None)
+                stored_agent_settings = (
+                    load_agent_settings() if callable(load_agent_settings) else {}
+                )
+                for agent_id, raw in stored_agent_settings.items():
+                    cell = self.agents.get(agent_id)
+                    if not cell or cell.kind not in {"architect", "engineer"}:
+                        continue
+                    filtered = {
+                        k: v for k, v in raw.items() if k in agent_settings_fields
+                    }
+                    self.agent_settings[agent_id] = AgentSettings(**filtered)
                 ads_fields = set(AgentDigestSettings.__dataclass_fields__)
                 for agent_id, raw in self.db.load_all_agent_digest_settings().items():
                     if agent_id not in self.agents:
