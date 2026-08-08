@@ -300,6 +300,16 @@ class StateSettingsMixin:
         agent_id = str(agent_id or "").strip()
         return self.agent_settings.get(agent_id, AgentSettings(agent_id=agent_id))
 
+    @staticmethod
+    def _agent_setting_inherits(key: str, value) -> bool:
+        """Return whether an override value represents field-level inherit."""
+        if value is None:
+            return True
+        if not isinstance(value, str):
+            return False
+        value = value.strip()
+        return not value or (key == "fast_mode" and value.lower() == "inherit")
+
     def update_agent_settings(self, agent_id: str, **fields) -> AgentSettings:
         """Set/clear per-agent overrides; ``None`` always means inherit."""
         agent_id = str(agent_id or "").strip()
@@ -311,6 +321,8 @@ class StateSettingsMixin:
         for key, value in fields.items():
             if key not in valid:
                 continue
+            if self._agent_setting_inherits(key, value):
+                value = None
             if value is not None:
                 if key in {"engineer_can_override_worker_provider", "restrict_to_created_agents"}:
                     value = bool(value)
@@ -385,7 +397,7 @@ class StateSettingsMixin:
         }
         for name in set(AgentSettings.__dataclass_fields__) - {"agent_id"}:
             value = getattr(overrides, name)
-            if value is not None:
+            if not self._agent_setting_inherits(name, value):
                 origin = "per-agent"
             else:
                 attr = mapping.get(name)

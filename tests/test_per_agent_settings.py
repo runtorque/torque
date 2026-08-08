@@ -83,6 +83,76 @@ class PerAgentSettingsTests(unittest.TestCase):
         self.state.delete_agent_settings("eng-1")
         self.assertIsNone(self.db.load_agent_settings("eng-1"))
 
+    def test_blank_and_inherit_inputs_clear_engineer_overrides_by_field(self):
+        self.state.engineer_settings["g"].engineer_boot_command = "codex"
+        self.state.engineer_settings["g"].engineer_model = "kind-model"
+        self.state.engineer_settings["g"].engineer_reasoning_effort = "high"
+        self.state.engineer_settings["g"].engineer_fast_mode = "off"
+        self.state.engineer_settings["g"].wave_size_preference = "large"
+        self.state.update_agent_settings(
+            "eng-1", provider="gemini-cli", boot_command="gemini",
+            model="agent-model", reasoning_effort="low", fast_mode="on",
+            wave_size_preference="small",
+        )
+
+        self.state.update_agent_settings(
+            "eng-1", provider=" ", boot_command="", model="  ",
+            reasoning_effort="", fast_mode="inherit",
+            wave_size_preference="",
+        )
+
+        stored = self.state.get_agent_settings("eng-1")
+        for name in ("provider", "boot_command", "model", "reasoning_effort",
+                     "fast_mode", "wave_size_preference"):
+            self.assertIsNone(getattr(stored, name), name)
+        resolved = self.state.resolve_agent_settings("eng-1")
+        self.assertEqual(resolved["provider"], {"value": "codex", "origin": "group"})
+        self.assertEqual(resolved["boot_command"], {"value": "codex", "origin": "group"})
+        self.assertEqual(resolved["model"], {"value": "kind-model", "origin": "group"})
+        self.assertEqual(resolved["reasoning_effort"], {"value": "high", "origin": "group"})
+        self.assertEqual(resolved["fast_mode"], {"value": "off", "origin": "group"})
+        self.assertEqual(resolved["wave_size_preference"], {"value": "large", "origin": "group"})
+
+    def test_blank_inputs_clear_architect_overrides_symmetrically(self):
+        architect = AgentCell(
+            id="arch-1", name="Architect", group="g", kind="architect",
+            persistent=True,
+        )
+        self.state.agents[architect.id] = architect
+        group = self.state.group_settings["g"]
+        group.architect_provider = "codex"
+        group.architect_fast_mode = "off"
+        group.architect_autonomy_mode = "ask_always"
+        self.state.update_agent_settings(
+            architect.id, provider="gemini-cli", fast_mode="on",
+            autonomy_mode="dispatch_freely",
+        )
+
+        self.state.update_agent_settings(
+            architect.id, provider="", fast_mode="inherit", autonomy_mode="",
+        )
+
+        stored = self.state.get_agent_settings(architect.id)
+        self.assertIsNone(stored.provider)
+        self.assertIsNone(stored.fast_mode)
+        self.assertIsNone(stored.autonomy_mode)
+        resolved = self.state.resolve_agent_settings(architect.id)
+        self.assertEqual(resolved["provider"], {"value": "codex", "origin": "group"})
+        self.assertEqual(resolved["fast_mode"], {"value": "off", "origin": "group"})
+        self.assertEqual(resolved["autonomy_mode"], {"value": "ask_always", "origin": "group"})
+
+    def test_explicit_false_boolean_remains_an_active_override(self):
+        self.state.engineer_settings["g"].restrict_to_created_agents = True
+
+        self.state.update_agent_settings(
+            "eng-1", restrict_to_created_agents=False,
+        )
+
+        self.assertEqual(
+            self.state.resolve_agent_settings("eng-1")["restrict_to_created_agents"],
+            {"value": False, "origin": "per-agent"},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -493,9 +493,15 @@ class AgentLaunchService:
             "reasoning_effort": "reasoning_effort", "fast_mode": "fast_mode",
         }.items():
             value = getattr(agent_settings, source, None)
-            if value is not None:
+            if value is not None and str(value).strip() and not (
+                    source == "fast_mode" and str(value).strip().lower() == "inherit"):
                 merged[target] = value
-        merged.update(overrides or {})
+        for key, value in (overrides or {}).items():
+            if value is None or (isinstance(value, str) and not value.strip()):
+                continue
+            if key == "fast_mode" and str(value).strip().lower() == "inherit":
+                continue
+            merged[key] = value
         resolved = self.resolve_agent_launch_config(
             group,
             base_dir=base_dir,
@@ -577,9 +583,15 @@ class AgentLaunchService:
             "reasoning_effort": "reasoning_effort", "fast_mode": "fast_mode",
         }.items():
             value = getattr(agent_settings, source, None)
-            if value is not None:
+            if value is not None and str(value).strip() and not (
+                    source == "fast_mode" and str(value).strip().lower() == "inherit"):
                 merged[target] = value
-        merged.update(overrides or {})
+        for key, value in (overrides or {}).items():
+            if value is None or (isinstance(value, str) and not value.strip()):
+                continue
+            if key == "fast_mode" and str(value).strip().lower() == "inherit":
+                continue
+            merged[key] = value
         resolved = self.resolve_agent_launch_config(
             group,
             base_dir=base_dir,

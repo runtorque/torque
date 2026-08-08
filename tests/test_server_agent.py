@@ -280,6 +280,77 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
             "codex",
         )
 
+    def test_blank_engineer_agent_values_inherit_immediate_kind_layer(self):
+        state = _FakeState(
+            agent_provider="claude-code", agent_model="generic-model",
+            agent_reasoning_effort="low", agent_fast_mode="on",
+            engineer_provider="codex", engineer_model="kind-model",
+            engineer_reasoning_effort="high", engineer_fast_mode="off",
+            agent_settings=types.SimpleNamespace(
+                provider="", boot_command="", model="",
+                reasoning_effort="", fast_mode="inherit",
+            ),
+        )
+        service = self._launch_service(state, _FakeBridge())
+
+        resolved = service.resolve_engineer_launch_config(
+            "backend", agent_id="eng-1"
+        )
+
+        self.assertEqual(resolved["provider"], "codex")
+        self.assertEqual(
+            resolved["command"],
+            "codex --model kind-model -c model_reasoning_effort=high",
+        )
+        self.assertEqual(resolved["fast_mode"], "off")
+
+    def test_blank_engineer_boot_command_inherits_kind_command(self):
+        state = _FakeState(
+            agent_boot_command="claude", engineer_provider="codex",
+            engineer_boot_command="codex --kind",
+            agent_settings=types.SimpleNamespace(
+                provider=None, boot_command=" ", model=None,
+                reasoning_effort=None, fast_mode=None,
+            ),
+        )
+        service = self._launch_service(state, _FakeBridge())
+
+        resolved = service.resolve_engineer_launch_config(
+            "backend", agent_id="eng-1"
+        )
+
+        self.assertEqual(resolved["command"], "codex --kind")
+
+    def test_blank_architect_agent_values_inherit_immediate_kind_layer(self):
+        state = _FakeState(
+            agent_provider="claude-code", agent_fast_mode="on",
+            architect_provider="codex", architect_fast_mode="off",
+            agent_settings=types.SimpleNamespace(
+                provider="", boot_command="", model="",
+                reasoning_effort="", fast_mode="inherit",
+            ),
+        )
+        service = self._launch_service(state, _FakeBridge())
+
+        resolved = service.resolve_architect_launch_config(
+            "backend", agent_id="arch-1"
+        )
+
+        self.assertEqual(resolved["provider"], "codex")
+        self.assertEqual(resolved["fast_mode"], "off")
+
+    def test_blank_per_launch_values_also_inherit_kind_layer(self):
+        state = _FakeState(
+            agent_provider="claude-code", engineer_provider="codex",
+        )
+        service = self._launch_service(state, _FakeBridge())
+
+        resolved = service.resolve_engineer_launch_config(
+            "backend", overrides={"provider": "", "fast_mode": "inherit"}
+        )
+
+        self.assertEqual(resolved["provider"], "codex")
+
     def test_resolve_engineer_launch_config_prefers_engineer_specific_overrides(self):
         service = self.server_agent_mod.AgentLaunchService(
             state=_FakeState(
