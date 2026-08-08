@@ -33,6 +33,7 @@ function createBadgeRenderContext() {
   sandbox.global = sandbox;
   sandbox.globalThis = sandbox;
   const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/board.js');
   loadScript(context, 'static/js/board/card-rendering.js');
   return context;
 }
@@ -118,6 +119,7 @@ function createDeltaPatchContext() {
   loadScript(context, 'static/js/ws/delta-registry.js');
   loadScript(context, 'static/js/ws/delta-apply.js');
   loadScript(context, 'static/js/ws/action-router.js');
+  loadScript(context, 'static/js/board.js');
   loadScript(context, 'static/js/board/card-rendering.js');
   return { context, badge, renderCalls, rafCalls: () => rafCalls };
 }
