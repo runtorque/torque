@@ -206,6 +206,55 @@ class WorkerAskResolutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.ask.reply_agent_id, self.worker.id)
         self.assertEqual(len(self.sent_prompts), 1)
 
+    async def test_missing_reply_worker_returns_structured_unavailable_without_writes(self):
+        asks = importlib.import_module("torque.commands.asks")
+        target_id = self.worker.id
+        before_direct = self.db.load_buffered_direct_messages(target_id)
+        before_history = self.db.load_agent_message_history(target_id)
+        del self.state.agents[target_id]
+
+        runtime = asks.AskCommandRuntime(
+            is_architect_ask_task=lambda _task: False,
+            panel_event=None,
+            resolve_architect_ask_task=None,
+            resolve_human_ask_task=self.communication_mod._resolve_human_ask_task,
+            send_agent_prompt=self._send_prompt,
+            bridge=None,
+            state=self.state,
+        )
+        result = await asks.handle_ask_command(
+            {
+                "cmd": "resolve_ask",
+                "id": self.ask.id,
+                "answer": "Use the review gate.",
+                "request_id": "missing-worker-request",
+            },
+            runtime,
+        )
+
+        self.assertEqual(result["type"], "error")
+        self.assertEqual(result["code"], "ask_target_unavailable")
+        self.assertEqual(result["reason"], "target_not_found")
+        self.assertEqual(result["task_id"], self.ask.id)
+        self.assertEqual(result["target_agent_id"], target_id)
+        self.assertEqual(result["command"], "resolve_ask")
+        self.assertEqual(result["request_id"], "missing-worker-request")
+        self.assertEqual(self.ask.lane, "Backlog")
+        self.assertEqual(self.ask.status, "")
+        self.assertIn("torque:human", self.ask.labels)
+        self.assertNotIn("torque:ask-resolved", self.ask.labels)
+        self.assertEqual(self.ask.reply_agent_id, target_id)
+        self.assertEqual(self.ask.messages, [])
+        self.assertEqual(self.parent.lane, "In Progress")
+        self.assertEqual(self.parent.messages, [])
+        self.assertEqual(self.sent_prompts, [])
+        self.assertEqual(
+            self.db.load_buffered_direct_messages(target_id), before_direct,
+        )
+        self.assertEqual(
+            self.db.load_agent_message_history(target_id), before_history,
+        )
+
     async def test_session_end_during_delivery_buffers_answer_without_closing_ask(self):
         async def session_ends_before_delivery(*_args, **_kwargs):
             self.worker.session_id = ""

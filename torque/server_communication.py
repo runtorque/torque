@@ -1909,14 +1909,6 @@ async def _resolve_human_ask_task(
         return {"type": "error", "message": "Parent task not found"}
 
     agent, target_id = _ask_reply_target_for_task(state, task)
-    if not agent or str(getattr(agent, "cell_type", "") or "") != "agent":
-        return {
-            "type": "error",
-            "message": (
-                "Ask target agent not found"
-                + (f": {target_id}" if target_id else "")
-            ),
-        }
     unavailable = _ask_target_unavailable_result(
         state, agent, target_id, str(getattr(task, "id", "") or ""),
     )
@@ -2308,19 +2300,16 @@ async def _resolve_architect_ask_task(
         getattr(task, "created_by_architect_id", "") or ""
     ).strip()
     architect = state.agents.get(architect_id) if architect_id else None
-    if (
-        not architect
-        or str(getattr(architect, "kind", "") or "").strip() != "architect"
-    ):
-        return {
-            "type": "error",
-            "message": "Architect ask has no linked architect",
-        }
     unavailable = _ask_target_unavailable_result(
         state, architect, architect_id, str(getattr(task, "id", "") or ""),
     )
     if unavailable:
         return unavailable
+    if str(getattr(architect, "kind", "") or "").strip() != "architect":
+        return {
+            "type": "error",
+            "message": "Architect ask has no linked architect",
+        }
 
     question = str(getattr(task, "task", "") or "").strip()
     message_text = (
