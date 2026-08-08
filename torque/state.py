@@ -2489,6 +2489,29 @@ class AgentDigestSettings:
     architect_digest: bool = False
     wake_on_digest: bool = False
     suppress_empty: bool = False
+    # Names of delivery fields explicitly overridden for this agent.  A row
+    # can exist for bookkeeping/defaults without turning every stored value
+    # into an override.
+    override_fields: list[str] = field(default_factory=list)
+
+
+@dataclass
+class AgentSettings:
+    """Nullable settings overrides for one Architect or Engineer."""
+    agent_id: str = ""
+    provider: Optional[str] = None
+    boot_command: Optional[str] = None
+    model: Optional[str] = None
+    reasoning_effort: Optional[str] = None
+    fast_mode: Optional[str] = None
+    autonomy_mode: Optional[str] = None
+    custom_instructions: Optional[str] = None
+    default_worker_concurrency: Optional[int] = None
+    wave_size_preference: Optional[str] = None
+    same_agent_follow_up_preference: Optional[str] = None
+    escalation_style: Optional[str] = None
+    engineer_can_override_worker_provider: Optional[bool] = None
+    restrict_to_created_agents: Optional[bool] = None
 
 
 # Mandatory events — always included in engineer digests regardless of enabled_events.
@@ -2782,6 +2805,7 @@ class MatrixState(
         # Engineer settings (per-group)
         self.engineer_settings: dict[str, EngineerSettings] = {}
         self.agent_digest_settings: dict[str, AgentDigestSettings] = {}
+        self.agent_settings: dict[str, AgentSettings] = {}
         self.engineer_worklog: dict[str, list[dict]] = {}
         # In-memory only per-Engineer dispatch-shape ring buffer. This is an
         # advisory read model for live dispatch-affordance metrics; it is not
@@ -3761,6 +3785,15 @@ class MatrixState(
                 agent_id: asdict(settings)
                 for agent_id, settings in self.agent_digest_settings.items()
             },
+            "agent_settings": {
+                agent_id: asdict(settings)
+                for agent_id, settings in self.agent_settings.items()
+            },
+            "resolved_agent_settings": {
+                agent_id: self.resolve_agent_settings(agent_id)
+                for agent_id, cell in self.agents.items()
+                if cell.kind in {"architect", "engineer"}
+            },
             "agent_message_history": self.agent_message_history_snapshot(),
             "direct_messages_by_agent": self.direct_messages_snapshot(),
             "agent_peer_threads": self.agent_peer_threads_snapshot(),
@@ -4081,6 +4114,15 @@ class MatrixState(
             "agent_digest_settings": {
                 agent_id: asdict(settings)
                 for agent_id, settings in self.agent_digest_settings.items()
+            },
+            "agent_settings": {
+                agent_id: asdict(settings)
+                for agent_id, settings in self.agent_settings.items()
+            },
+            "resolved_agent_settings": {
+                agent_id: self.resolve_agent_settings(agent_id)
+                for agent_id, cell in self.agents.items()
+                if cell.kind in {"architect", "engineer"}
             },
             "agent_message_history": self.agent_message_history_snapshot(),
             "direct_messages_by_agent": self.direct_messages_snapshot(),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import shlex
 import uuid
 from dataclasses import asdict
@@ -147,6 +148,22 @@ def _launch_resolver_for_cell(
         return resolve_engineer_launch_config
     return resolve_agent_launch_config
 
+
+def _resolve_launch_for_existing_cell(resolver, cell, **kwargs):
+    """Pass identity to kind resolvers while preserving injected legacy fakes."""
+    try:
+        parameters = inspect.signature(resolver).parameters.values()
+        accepts_agent_id = any(
+            parameter.name == "agent_id"
+            or parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters
+        )
+    except (TypeError, ValueError):
+        accepts_agent_id = False
+    if accepts_agent_id and cell.kind in {"architect", "engineer"}:
+        kwargs["agent_id"] = cell.id
+    return resolver(cell.group, **kwargs)
+
 async def _relaunch_agent_after_worktree_removal(
         cell, *,
         bridge,
@@ -188,8 +205,8 @@ async def _relaunch_agent_after_worktree_removal(
         resolve_worker_launch_config=resolve_worker_launch_config,
         is_designated_engineer=is_designated_engineer,
     )
-    launch_cfg = resolver(
-        cell.group,
+    launch_cfg = _resolve_launch_for_existing_cell(
+        resolver, cell,
         base_dir=base_dir,
         explicit_template=cell.template,
         overrides={},

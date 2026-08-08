@@ -484,6 +484,7 @@ class StateLifecycleMixin:
                 if r.cell_type == "agent":
                     self.history_remove_agent(r)
                 self.delete_agent_digest_settings(r.id)
+                self.delete_agent_settings(r.id)
             if self.db:
                 self.db.delete_engineer_settings(name)
             self._emit("group_remove", name=name)
@@ -1010,6 +1011,7 @@ class StateLifecycleMixin:
             if record_history and r.cell_type == "agent":
                 self.history_remove_agent(r)
             self.delete_agent_digest_settings(r.id)
+            self.delete_agent_settings(r.id)
             self._db_delete_agent(r.id)
         self.cleanup_orphaned_attention(allow_persisted_agent_fallback=False)
         self._db_save_groups()

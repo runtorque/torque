@@ -203,10 +203,12 @@ EXPECTED_SETTINGS_READ_COMMANDS = {
     "get_architect_settings",
     "get_global_settings",
     "get_ai_settings",
+    "get_agent_settings",
 }
 EXPECTED_SETTINGS_MUTATION_COMMANDS = {
     "update_group_settings",
     "update_architect_settings",
+    "update_agent_settings",
 }
 EXPECTED_BOARD_ARCHIVE_COMMANDS = {
     "board_archive_task",
