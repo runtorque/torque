@@ -371,6 +371,31 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
             closure,
         )
 
+    def _latest_boundary_state(self, state, worktree_mgr):
+        main_code = self.server_mod.main.__code__
+        boundary_code = next(
+            const
+            for const in main_code.co_consts
+            if isinstance(const, type(main_code))
+            and const.co_name == "_latest_boundary_state_for_cell"
+        )
+        closure_values = {
+            "_worktree_submodules_for_cell": lambda _cell: [],
+            "state": state,
+            "worktree_mgr": worktree_mgr,
+        }
+        closure = tuple(
+            self._make_cell(closure_values[name])
+            for name in boundary_code.co_freevars
+        )
+        return types.FunctionType(
+            boundary_code,
+            self.server_mod.__dict__,
+            "_latest_boundary_state_for_cell",
+            None,
+            closure,
+        )
+
     def test_dispatch_linker_keeps_lane_assignment_state_and_backlink_together(self):
         """The one-step re-dispatch contract must remain a single code path."""
         state = self._make_state()
@@ -393,6 +418,135 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task.agent_id, worker.id)
         self.assertEqual(task.dispatch_state, "live")
         self.assertEqual(worker.current_task_id, task.id)
+
+    async def test_dispatching_reviewed_pipeline_root_does_not_poison_merge_boundary(self):
+        state = self._make_state()
+        worker = self._make_agent("worker-1", status="idle")
+        worker.worktree_path = "/repo/.torque/worktrees/worker-1"
+        worker.worktree_repo_root = "/repo"
+        worker.worktree_branch = "torque/worker-1"
+        state.agents[worker.id] = worker
+        state.groups["g"].append(worker.id)
+        root = state.board_add_task(
+            "Implement feature",
+            "g",
+            lane="In Progress",
+            id="TASK-ROOT",
+            action_name="feature/implement",
+        )
+        superseded_review = state.board_add_task(
+            "Earlier review round",
+            "g",
+            lane="Done",
+            id="TASK-REVIEW-1",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            action_name="feature/review",
+        )
+        superseded_review.worktree_boundary = {
+            "repo_root": "/repo",
+            "branch": worker.worktree_branch,
+            "status": "superseded",
+            "recorded_at": "2026-08-08T09:00:00+00:00",
+            "commit_sha": "earlier-head",
+        }
+        review = state.board_add_task(
+            "Review feature",
+            "g",
+            lane="Done",
+            id="TASK-REVIEW",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            action_name="feature/review",
+        )
+        review.worktree_boundary = {
+            "repo_root": "/repo",
+            "branch": worker.worktree_branch,
+            "status": "open",
+            "recorded_at": "2026-08-08T10:00:00+00:00",
+            "commit_sha": "reviewed-head",
+        }
+
+        self._dispatch_linker(state)(worker, root, "In Progress")
+
+        class WorktreeManager:
+            async def current_head(self, _cell):
+                return "reviewed-head"
+
+        boundary_state = await self._latest_boundary_state(
+            state,
+            WorktreeManager(),
+        )(worker)
+        self.assertEqual(root.resume_after_boundary_task_id, "")
+        self.assertEqual(boundary_state["reason"], "")
+        self.assertEqual(boundary_state["clean"]["task_id"], review.id)
+
+    def test_dispatching_genuine_started_followup_still_blocks_with_existing_message(self):
+        state = self._make_state()
+        worker = self._make_agent("worker-1", status="idle")
+        worker.worktree_repo_root = "/repo"
+        worker.worktree_branch = "torque/worker-1"
+        state.agents[worker.id] = worker
+        state.groups["g"].append(worker.id)
+        root = state.board_add_task(
+            "Implement feature",
+            "g",
+            lane="Done",
+            id="TASK-ROOT",
+            action_name="feature/implement",
+        )
+        review = state.board_add_task(
+            "Review feature",
+            "g",
+            lane="Done",
+            id="TASK-REVIEW",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            action_name="feature/review",
+        )
+        review.worktree_boundary = {
+            "repo_root": "/repo",
+            "branch": worker.worktree_branch,
+            "status": "open",
+            "recorded_at": "2026-08-08T10:00:00+00:00",
+            "commit_sha": "reviewed-head",
+        }
+        followup = state.board_add_task(
+            "Implement genuine follow-up",
+            "g",
+            lane="To Do",
+            id="TASK-FOLLOWUP",
+            action_name="feature/implement",
+        )
+
+        self._dispatch_linker(state)(worker, followup, "In Progress")
+
+        started = self.server_mod.started_successor_tasks(
+            state.board_tasks.values(),
+            review.id,
+        )
+        self.assertEqual([task.id for task in started], [followup.id])
+        main_code = self.server_mod.main.__code__
+        message_code = next(
+            const
+            for const in main_code.co_consts
+            if isinstance(const, type(main_code))
+            and const.co_name == "_boundary_reason_message"
+        )
+        reason_message = types.FunctionType(
+            message_code,
+            self.server_mod.__dict__,
+            "_boundary_reason_message",
+        )
+        boundary = self.server_mod.boundary_summary(
+            review,
+            started_followers=started,
+        )
+        self.assertEqual(
+            reason_message("started_successor", boundary),
+            "Latest task boundary is no longer cleanly mergeable because "
+            'follow-up task "Implement genuine follow-up" has already started.',
+        )
 
     def _recording_dispatch(self, state):
         calls = []

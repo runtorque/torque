@@ -183,7 +183,12 @@ On shared same-agent branches (`target: self` chains, queue-of-tasks workflows),
 
 - Review and merge views show which completed task currently defines the merge boundary.
 - If a queued follow-up has already started, Torque blocks merge and reports that the older boundary is no longer cleanly mergeable.
+- Re-dispatching or adopting the implementation root while its own review boundary is open does not count as starting a follow-up. It also clears successor metadata written by older Torque versions, so retrying the supported dispatch/adoption flow repairs that false block without moving the task between lanes.
 - If queued follow-up tasks still remain after a successful merge, Torque keeps the agent and worktree alive, resets the branch to the updated base branch, and leaves the queued tasks attached for the next wave.
+
+For a driverless merge, pass the public `task` argument when Torque requests
+explicit implementation attribution. Torque forwards it as the internal merge
+task identity; callers do not need a separate `merge_task_id` parameter.
 
 Boundary commit fields intentionally distinguish the reviewed branch commit
 from the final base commit. `latest_reviewed_commit_sha` (and the boundary

@@ -868,6 +868,57 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("no file details", text.lower())
         self.assertEqual([call["cmd"] for call in calls], ["worktree_check_merge"])
 
+    async def test_engineer_merge_passes_task_attribution_to_driverless_merge(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        task = self._add_task(
+            state,
+            "TORQUE:driverless",
+            "Reviewed driverless implementation",
+            lane="In Progress",
+            assigned_engineer_id=alice.id,
+        )
+        calls = []
+
+        async def handle_command(payload):
+            calls.append(dict(payload))
+            if payload["cmd"] == "worktree_check_merge":
+                return {
+                    "type": "worktree_check_merge",
+                    "clean": True,
+                    "conflicts": [],
+                }
+            if payload["cmd"] == "worktree_merge":
+                self.assertEqual(payload["merge_task_id"], task.id)
+                return {
+                    "type": "worktree_merge",
+                    "ok": True,
+                    "sha": "reviewed-head",
+                    "cleanup": {"errors": []},
+                }
+            self.fail(f"Unexpected command: {payload}")
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_merge",
+            {
+                "worktree_path": "/tmp/worker-a",
+                "repo_root": "/repo",
+                "branch": "torque/alice/worker-a",
+                "base_branch": "main",
+                "task": task.id,
+            },
+            handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertFalse(is_error, text)
+        self.assertEqual(json.loads(text)["sha"], "reviewed-head")
+        self.assertEqual(
+            [call["cmd"] for call in calls],
+            ["worktree_check_merge", "worktree_merge"],
+        )
+
     async def test_engineer_merge_passes_boundary_mismatch_override_and_actor(self):
         state = self._make_state()
         alice = self._add_engineer(state, "eng-alice", "Alice")
