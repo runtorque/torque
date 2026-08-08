@@ -2468,6 +2468,46 @@ test('progressive numeric search preserves lane order and reveals a newly exact 
   assert.ok(panel.innerHTML.indexOf('data-lane="In Progress"') < panel.innerHTML.indexOf('data-lane="Done"'));
 });
 
+test('wide numeric search keeps canonical columns and transiently reveals a collapsed exact lane', () => {
+  const { context, document } = createBoardHarness({ stubCards: false });
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+  document.body.classList.add('runtime-embedded');
+  panel.clientWidth = 1200;
+
+  context.state.board_lanes = ['Backlog', 'To Do', 'Done'];
+  context.state.board_tasks = {
+    mention: {
+      id: 'TORQUE:700', group: 'alpha', task: 'Mentions 1559', lane: 'Backlog', position: 10,
+    },
+    competitor: {
+      id: 'TORQUE:800', group: 'alpha', task: 'Also mentions 1559', lane: 'To Do', position: 10,
+    },
+    exact: {
+      id: 'TORQUE:1559', group: 'alpha', task: 'Exact target', lane: 'To Do', position: 0,
+    },
+  };
+  runInContext(context, `
+    _boardSelectedLane = 'Backlog';
+    _boardSearchQuery = '1559';
+    _boardDefaultRenderLimit = 1;
+    _boardRenderLimit = 1;
+  `);
+
+  context.renderBoard();
+
+  const backlogColumn = panel.innerHTML.indexOf('data-lane="Backlog" data-board-lane-column="1"');
+  const todoColumn = panel.innerHTML.indexOf('data-lane="To Do" data-board-lane-column="1"');
+  const doneColumn = panel.innerHTML.indexOf('data-lane="Done" data-board-lane-column="1"');
+  assert.ok(backlogColumn >= 0 && backlogColumn < todoColumn && todoColumn < doneColumn);
+  assert.doesNotMatch(
+    panel.innerHTML.slice(todoColumn, doneColumn),
+    /board-wide-lane-collapsed/,
+  );
+  assert.match(panel.innerHTML, /board-card-search-exact[^>]*data-task-id="TORQUE:1559"/);
+  assert.doesNotMatch(panel.innerHTML, /data-task-id="TORQUE:800"/);
+});
+
 test('actions editor save payload preserves auto_close_on_done', () => {
   const { sandbox, document } = createSandbox({
     _showToast() {},
