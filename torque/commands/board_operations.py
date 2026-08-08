@@ -673,7 +673,7 @@ async def handle_board_operation_command(
                 current_task.updated_at = datetime.now(
                     timezone.utc
                 ).isoformat()
-                state._emit("task_upsert", **asdict(current_task))
+                state.emit_task_upsert(current_task)
                 state._db_save_task(current_task)
 
             root_task = None

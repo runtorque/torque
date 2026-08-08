@@ -385,7 +385,7 @@ def _merge_completion_evidence(existing, update: dict) -> dict:
 
 def _save_completion_evidence_task(state: MatrixState, task) -> None:
     task.updated_at = datetime.now(timezone.utc).isoformat()
-    state._emit("task_upsert", **asdict(task))
+    state.emit_task_upsert(task)
     state._db_save_task(task)
 
 

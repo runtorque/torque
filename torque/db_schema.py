@@ -2540,6 +2540,10 @@ def _reconcile_legacy_schema(conn: sqlite3.Connection, backfill_agent_history):
     ``_apply_schema_migrations``.
     """
     conn.execute("PRAGMA journal_mode=WAL")
+    # WAL's standard durability pairing: NORMAL only risks losing the last
+    # transactions on power loss, never corruption, and removes a full
+    # fsync from every commit (SQLite's default is FULL).
+    conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
     _migrate_legacy_engineer_schema_names(conn)
     _migrate_behavior_overlay_scope_schema(conn)
@@ -3549,6 +3553,7 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     """Configure SQLite and advance the database to ``SCHEMA_VERSION``."""
 
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
     _ensure_schema_migrations_table(conn)
     # Compatibility bridge: older releases and recovery tests can contain a

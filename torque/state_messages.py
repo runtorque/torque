@@ -957,7 +957,10 @@ class StateMessagesMixin:
         if not self.db:
             return
         try:
-            self.db.save_agent_message({
+            # Fire-and-forget insert on the per-report hot path: route it
+            # through the async writer so the event loop never blocks on
+            # the INSERT+commit. Falls back to a sync write off-loop.
+            self.db.defer_write("agent_history", "save_agent_message", {
                 "agent_id": cell_id,
                 "task_id": task_id,
                 "timestamp": ts,

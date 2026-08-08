@@ -141,7 +141,11 @@ from .attachment_uploads import (
     AttachmentUploadError,
     save_message_attachment_stream,
 )
-from .server_routes import build_event_routes, build_http_routes
+from .server_routes import (
+    build_event_routes,
+    build_http_routes,
+    make_terminal_output_broadcaster,
+)
 from .server_artifacts import (
     describe_task_artifact_for_digest,
     finalize_task_attachments,
@@ -1902,7 +1906,8 @@ def _ui_client_id_from_request(request) -> str:
 
 async def _register_ready_ui_ws_client(state: MatrixState, ws,
                                        payload_factory,
-                                       client_id: str = "") -> bool:
+                                       client_id: str = "",
+                                       compact: bool = True) -> bool:
     connect_started = time.perf_counter()
     async with state._ws_clients_lock:
         state._discard_ws_clients_locked({ws})
@@ -1917,7 +1922,8 @@ async def _register_ready_ui_ws_client(state: MatrixState, ws,
             return False
         async with state._ws_clients_lock:
             if state._seq == int(payload.get("seq", 0) or 0):
-                state._register_ws_client_locked(ws, client_id)
+                state._register_ws_client_locked(
+                    ws, client_id, compact=compact)
                 profiling.recorder().incr("ws_connects")
                 profiling.recorder().observe_ms(
                     "ws_connect_latency_ms",
@@ -3311,6 +3317,23 @@ def _release_profile_daemon_owner(owner: ProfileDaemonOwner) -> None:
     owner.release()
 
 
+async def _gather_ws_send(clients, payload: str) -> set:
+    """Send one frame to a snapshot of ``clients``; return the dead ones.
+
+    Callers must pass a snapshot (list), never the live registry set: a
+    client (de)registering while a send is suspended mutates the live set
+    mid-iteration.
+    """
+    results = await asyncio.gather(
+        *(ws_client.send_str(payload) for ws_client in clients),
+        return_exceptions=True,
+    )
+    return {
+        ws_client for ws_client, result in zip(clients, results)
+        if isinstance(result, BaseException)
+    }
+
+
 async def main(connection=None):
     """Run the main backend while holding authoritative profile ownership."""
     owner = _acquire_profile_daemon_owner()
@@ -3882,12 +3905,7 @@ async def main(connection=None):
             return
         msg = json.dumps({"type": "toast", "message": message,
                           "level": level})
-        dead = set()
-        for ws_client in state._ws_clients:
-            try:
-                await ws_client.send_str(msg)
-            except Exception:
-                dead.add(ws_client)
+        dead = await _gather_ws_send(list(state._ws_clients), msg)
         if dead:
             async with state._ws_clients_lock:
                 state._discard_ws_clients_locked(dead)
@@ -3914,12 +3932,7 @@ async def main(connection=None):
     async def _broadcast_system_banner(banner):
         supervisor_banner_state["banner"] = banner
         payload = json.dumps({"type": "system_banner", "banner": banner})
-        dead = set()
-        for ws_client in state._ws_clients:
-            try:
-                await ws_client.send_str(payload)
-            except Exception:
-                dead.add(ws_client)
+        dead = await _gather_ws_send(list(state._ws_clients), payload)
         if dead:
             async with state._ws_clients_lock:
                 state._discard_ws_clients_locked(dead)
@@ -4192,23 +4205,8 @@ async def main(connection=None):
 
         daemon_stop_task = asyncio.create_task(_trigger_stop_after_response_grace())
 
-    async def _broadcast_terminal_output(cell_id: str, session_id: str, text: str):
-        if not text:
-            return
-        payload = json.dumps({
-            "type": "output",
-            "cell_id": cell_id,
-            "session_id": session_id,
-            "data": text,
-        })
-        dead = set()
-        for ws_client in terminal_clients.get(cell_id, set()):
-            try:
-                await ws_client.send_str(payload)
-            except Exception:
-                dead.add(ws_client)
-        if dead:
-            terminal_clients.get(cell_id, set()).difference_update(dead)
+    _broadcast_terminal_output = make_terminal_output_broadcaster(
+        terminal_clients)
 
     bridge.on_terminal_output = _broadcast_terminal_output
 
@@ -4699,7 +4697,7 @@ async def main(connection=None):
         if not task:
             return
         task.updated_at = datetime.now(timezone.utc).isoformat()
-        state._emit("task_upsert", **asdict(task))
+        state.emit_task_upsert(task)
         state._db_save_task(task)
 
     def _boundary_base_branch_for_worktree(repo_root: str, branch: str) -> str:

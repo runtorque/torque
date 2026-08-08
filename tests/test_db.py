@@ -82,7 +82,8 @@ class TorqueDBTests(unittest.TestCase):
         self.assertNotIn(body, decoder_artifact_json[0])
         self.assertNotIn('"content"', decoder_artifact_json[0])
         self.assertEqual(loaded.artifacts[0]["content"], "")
-        self.assertEqual(loaded.artifacts[0]["storage"]["content"], "")
+        # storage no longer duplicates the body at all.
+        self.assertNotIn("content", loaded.artifacts[0]["storage"])
         self.assertEqual(loaded.artifacts[0]["summary"], "synthetic fixture")
         self.assertTrue(getattr(loaded, "_artifact_content_dehydrated", False))
         self.assertNotIn("_artifact_content_dehydrated", asdict(loaded))

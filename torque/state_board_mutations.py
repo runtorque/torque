@@ -202,7 +202,7 @@ class BoardMutationMixin:
                         parsed["child_number"] + 1,
                     )
                     self._db_save_pipeline_task_counter(root_id)
-        self._emit("task_upsert", **asdict(bt))
+        self.emit_task_upsert(bt)
         self._db_save_task(bt)
         self.recompute_task_health()
         return bt
@@ -604,8 +604,8 @@ class BoardMutationMixin:
         self._sync_finalization_projection(root)
         review.updated_at = datetime.now(timezone.utc).isoformat()
         root.updated_at = review.updated_at
-        self._emit("task_upsert", **asdict(review))
-        self._emit("task_upsert", **asdict(root))
+        self.emit_task_upsert(review)
+        self.emit_task_upsert(root)
         self._db_save_task(review)
         self._db_save_task(root)
         return self.evaluate_task_finalization(root.id)
@@ -635,7 +635,7 @@ class BoardMutationMixin:
         root.finalization_boundary = boundary
         result = self._sync_finalization_projection(root)
         root.updated_at = datetime.now(timezone.utc).isoformat()
-        self._emit("task_upsert", **asdict(root))
+        self.emit_task_upsert(root)
         self._db_save_task(root)
         return result
 
@@ -672,7 +672,7 @@ class BoardMutationMixin:
             if getattr(root, "finalization_status", {}):
                 root.finalization_status = {}
                 root.updated_at = datetime.now(timezone.utc).isoformat()
-                self._emit("task_upsert", **asdict(root))
+                self.emit_task_upsert(root)
                 self._db_save_task(root)
             return {"eligible": True, "mode": "legacy", "stage": "legacy",
                     "boundary": "", "missing_gates": [], "explanations": []}
@@ -680,7 +680,7 @@ class BoardMutationMixin:
         result = self._sync_finalization_projection(root)
         if root is not task or before != root.finalization_status:
             root.updated_at = datetime.now(timezone.utc).isoformat()
-            self._emit("task_upsert", **asdict(root))
+            self.emit_task_upsert(root)
             self._db_save_task(root)
         return result
 
@@ -766,7 +766,7 @@ class BoardMutationMixin:
             audit.append(entry)
             root.finalization_audit = audit[-40:]
         root.updated_at = datetime.now(timezone.utc).isoformat()
-        self._emit("task_upsert", **asdict(root))
+        self.emit_task_upsert(root)
         self._db_save_task(root)
         return bool(result.get("eligible")), result
 
@@ -835,7 +835,7 @@ class BoardMutationMixin:
             audit.append(entry)
             task.finalization_audit = audit[-40:]
         task.updated_at = datetime.now(timezone.utc).isoformat()
-        self._emit("task_upsert", **asdict(task))
+        self.emit_task_upsert(task)
         self._db_save_task(task)
         return False, result
 
@@ -925,7 +925,7 @@ class BoardMutationMixin:
         # preserving completed verdict evidence against its prior pinned hash.
         task.task_content_hash = compute_task_content_hash(task)
         task.updated_at = added_at
-        self._emit("task_upsert", **asdict(task))
+        self.emit_task_upsert(task)
         self._db_save_task(task)
         self.recompute_task_health()
         return {
@@ -1079,7 +1079,7 @@ class BoardMutationMixin:
                 task.position = self._board_next_lane_position(
                     new_lane, exclude_id=tid
                 )
-        self._emit("task_upsert", **asdict(task))
+        self.emit_task_upsert(task)
         self._db_save_task(task)
         if lane_changed:
             self.evaluate_task_watches_for_task(task.id)
@@ -1110,7 +1110,7 @@ class BoardMutationMixin:
             for t in self.board_tasks.values():
                 if tid in t.depends_on:
                     t.depends_on.remove(tid)
-                    self._emit("task_upsert", **asdict(t))
+                    self.emit_task_upsert(t)
                     self._db_save_task(t)
             if not self.cleanup_stale_boundary_successors():
                 self.recompute_task_health()
@@ -1237,7 +1237,7 @@ class BoardMutationMixin:
         if changed:
             task.updated_at = now.isoformat()
             if emit:
-                self._emit("task_upsert", **asdict(task))
+                self.emit_task_upsert(task)
             else:
                 self._index_task(task)
             self._db_save_task(task)
@@ -1558,7 +1558,7 @@ class BoardMutationMixin:
         lane_tasks.insert(min(position, len(lane_tasks)), task)
         for i, t in enumerate(lane_tasks):
             t.position = i
-            self._emit("task_upsert", **asdict(t))
+            self.emit_task_upsert(t)
         for t in lane_tasks:
             self._db_save_task(t)
 
@@ -1581,7 +1581,7 @@ class BoardMutationMixin:
         for t in self.board_tasks.values():
             if t.lane == old_name:
                 t.lane = new_name
-                self._emit("task_upsert", **asdict(t))
+                self.emit_task_upsert(t)
         self._emit("lanes_update", lanes=list(self.board_lanes))
         self._db_save_lanes()
         for t in self.board_tasks.values():
@@ -1654,7 +1654,7 @@ class BoardMutationMixin:
             task.updated_at = now_iso
             task.lane_entered_at = now_iso
             self._refresh_finalization_root_projection(task)
-            self._emit("task_upsert", **asdict(task))
+            self.emit_task_upsert(task)
             self._db_save_task(task)
         self._emit("lanes_update", lanes=list(self.board_lanes))
         self._db_save_lanes()

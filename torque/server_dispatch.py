@@ -943,7 +943,7 @@ async def _scheduler_loop(state: MatrixState, handle_command, panel_event):
             log.info("Scheduled task '%s' (%s) is due — dispatching",
                      task.task, task.id)
             task.scheduled_at = ""
-            state._emit("task_upsert", **asdict(task))
+            state.emit_task_upsert(task)
             state._db_save_task(task)
             task_changed = True
             try:

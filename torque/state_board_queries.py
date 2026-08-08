@@ -356,7 +356,7 @@ class BoardQueryMixin:
         for t in self.board_tasks.values():
             if t.agent_id == agent_id:
                 t.agent_id = ""
-                self._emit("task_upsert", **asdict(t))
+                self.emit_task_upsert(t)
                 self._db_save_task(t)
                 changed = True
         if changed:

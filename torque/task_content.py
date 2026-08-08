@@ -167,3 +167,16 @@ def compute_task_content_hash(task) -> str:
         allow_nan=False,
     ).encode("utf-8")
     return TASK_CONTENT_HASH_PREFIX + hashlib.sha256(encoded).hexdigest()
+
+
+# Rolling bound for BoardTask.messages. The activity log is an operational
+# trail, not an audit archive: unbounded growth re-serialized an ever-larger
+# JSON blob on every save (O(n^2) over a task's life) and inflated snapshots.
+TASK_MESSAGES_LIMIT = 200
+
+
+def clamp_task_messages(task) -> None:
+    """Drop oldest activity-log entries beyond TASK_MESSAGES_LIMIT."""
+    messages = getattr(task, "messages", None)
+    if isinstance(messages, list) and len(messages) > TASK_MESSAGES_LIMIT:
+        del messages[: len(messages) - TASK_MESSAGES_LIMIT]

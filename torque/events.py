@@ -1026,7 +1026,7 @@ class EventBus:
                 if task and "torque:blocked" in task.labels:
                     task.labels.remove("torque:blocked")
                     self._state._db_save_task(task)
-                    self._state._emit("task_upsert", **asdict(task))
+                    self._state.emit_task_upsert(task)
 
         elif et == "tool_start":
             cell.activity = "tool_call"

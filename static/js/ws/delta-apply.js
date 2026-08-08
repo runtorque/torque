@@ -291,6 +291,14 @@ function _applyDelta(ops) {
           state.board_tasks[id] = Object.assign({}, op);
         }
         delete state.board_tasks[id].op;
+        // Compact deltas refresh summaries but not heavy fields
+        // (messages_thread, artifacts, ...). Drop the task from the
+        // fully-loaded registry so the next heavy-field consumer
+        // re-fetches task_detail instead of reading stale hydration.
+        if (typeof _compactTasksFullyLoaded !== 'undefined'
+            && _compactTasksFullyLoaded[id]) {
+          delete _compactTasksFullyLoaded[id];
+        }
         if (typeof _invalidateTaskLookupIndex === 'function') _invalidateTaskLookupIndex();
         _maybeTriggerAgentDoneFlourish(previousTask, state.board_tasks[id]);
         break;
