@@ -32162,7 +32162,7 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
   );
   assert.match(
     html,
-    /<div id="workspace-shell">\s*<div id="standalone-sidebar-shell">\s*<div id="standalone-main-stack">[\s\S]*?<header>[\s\S]*?<\/header>\s*<div id="app-group-tabs-host" class="agent-group-tabs-host app-group-tabs-host" data-agent-group-tabs-host><\/div>\s*<main id="main"><\/main>\s*<\/div>\s*<div id="standalone-rail-resize-handle"[^>]*><\/div>\s*<aside id="standalone-right-rail"><\/aside>\s*<div id="standalone-bottom-resize-handle"[^>]*><\/div>\s*<section id="standalone-bottom-dock"><\/section>\s*<\/div>\s*<div id="workspace-resize-handle"[^>]*><\/div>\s*<section id="terminal-workspace"><\/section>\s*<\/div>\s*<div id="standalone-float-layer"/s,
+    /<div id="workspace-shell">\s*<div id="app-top-right"[\s\S]*?<\/button>\s*<\/div>\s*<div id="standalone-sidebar-shell">\s*<div id="standalone-main-stack">[\s\S]*?<header>[\s\S]*?<\/header>\s*<div id="app-group-tabs-host" class="agent-group-tabs-host app-group-tabs-host" data-agent-group-tabs-host><\/div>\s*<main id="main"><\/main>\s*<\/div>\s*<div id="standalone-rail-resize-handle"[^>]*><\/div>\s*<aside id="standalone-right-rail"><\/aside>\s*<div id="standalone-bottom-resize-handle"[^>]*><\/div>\s*<section id="standalone-bottom-dock"><\/section>\s*<\/div>\s*<div id="workspace-resize-handle"[^>]*><\/div>\s*<section id="terminal-workspace"><\/section>\s*<\/div>\s*<div id="standalone-float-layer"/s,
   );
   assert.equal(html.includes('<div id="taskbar">'), false);
   assert.match(
@@ -32253,6 +32253,36 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
   assert.match(css, /@container agent-group-nav \(max-width:\s*380px\)\s*\{[^}]*\.agent-group-tabs-list\s*\{\s*display:\s*none;/s);
   assert.match(css, /@container agent-group-nav \(max-width:\s*380px\)[\s\S]*?\.agent-group-compact\s*\{\s*display:\s*flex;/s);
   assert.doesNotMatch(css, /\.agent-group-tab-actions\s*\{/s);
+});
+
+test('Inbox bell has one app-wide top-right host outside column and status chrome', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const css = appStylesheetSource();
+  const header = html.match(/<header>[\s\S]*?<\/header>/)[0];
+  const statusbar = html.match(/<div id="statusbar-info"[\s\S]*?<\/div>\s*<\/div>\s*<div id="panel-nav-more-menu"/)[0];
+
+  assert.equal((html.match(/class="[^"]*\binbox-bell-button\b/g) || []).length, 1);
+  assert.match(
+    html,
+    /<div id="system-banner" hidden><\/div>\s*<div id="pending-hire-banner" hidden><\/div>\s*[\s\S]*?<div id="workspace-shell">\s*<div id="app-top-right" role="toolbar" aria-label="Application controls">\s*<button class="hdr-btn hdr-icon-btn inbox-bell-button inbox-bell-button--app"[\s\S]*?aria-label="Notifications"[\s\S]*?aria-haspopup="dialog"[\s\S]*?aria-expanded="false"[\s\S]*?<span class="inbox-bell-badge" hidden><\/span>/s,
+    'the in-flow banners precede the app-wide workspace and its first-child bell mount',
+  );
+  assert.doesNotMatch(header, /inbox-bell-button/,
+    'TORQUE:116 keeps the column-scoped header free of app-global attention chrome');
+  assert.doesNotMatch(statusbar, /inbox-bell-button/,
+    'desktop and browser share one bell instead of mode-specific statusbar markup');
+  assert.match(css, /#workspace-shell\s*\{[^}]*position:\s*relative;[^}]*display:\s*flex;/s);
+  assert.match(
+    css,
+    /#app-top-right\s*\{[^}]*position:\s*absolute;[^}]*top:\s*var\(--space-1\);[^}]*right:\s*var\(--space-2\);[^}]*z-index:\s*50;[^}]*pointer-events:\s*none;/s,
+  );
+  assert.match(css, /\.inbox-bell-button--app\s*\{[^}]*pointer-events:\s*auto;[^}]*background:\s*var\(--bg-surface\);/s);
+  assert.match(css, /body\.runtime-embedded #workspace-shell\s*\{[^}]*display:\s*grid;/s,
+    'the same app-wide host remains rendered in embedded browser and desktop modes');
+  assert.match(css, /body\.detached-window #workspace-shell,[\s\S]*?display:\s*none !important;/s,
+    'detached auxiliary panel windows preserve the prior no-bell contract');
+  assert.match(css, /body\.diff-view-open #workspace-shell,[\s\S]*?display:\s*none !important;/s,
+    'dedicated diff view preserves the prior no-bell contract');
 });
 
 test('bottom status bar uses dark segmented status-bar styling', () => {
@@ -34601,6 +34631,96 @@ test('collapsing the classic board does not refocus the embedded terminal worksp
 
   assert.equal(panel.classList.contains('collapsed'), true);
   assert.equal(context.focusEmbeddedTerminalWorkspaceCalls, 0);
+});
+
+test('Inbox badge and popover stay anchored to the single top-right bell', () => {
+  const windowListeners = {};
+  const { sandbox, document } = createSandbox({
+    window: {
+      innerWidth: 360,
+      innerHeight: 600,
+      open() {},
+      addEventListener(type, handler) { windowListeners[type] = handler; },
+    },
+  });
+  const popover = document.register('inbox-popover');
+  popover.hidden = true;
+  popover.offsetWidth = 344;
+  popover.offsetHeight = 548;
+  const bell = new FakeElement('app-inbox-bell');
+  bell.classList.add('inbox-bell-button', 'inbox-bell-button--app');
+  bell.setAttribute('aria-label', 'Notifications');
+  bell.setAttribute('aria-expanded', 'false');
+  bell.getBoundingClientRect = function() {
+    return { top: 4, bottom: 28, left: 328, right: 352, width: 24, height: 24 };
+  };
+  const badge = new FakeElement('inbox-badge');
+  badge.classList.add('inbox-bell-badge');
+  badge.hidden = true;
+  bell.setQuerySelector('.inbox-bell-badge', badge);
+  document.setSelectorAll('.inbox-bell-button', [bell]);
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/inbox.js');
+  context.inboxEnsureLoaded = function() {};
+  context.renderInbox = function() {};
+
+  runInContext(context, `
+    state.operator_notice_summary = {
+      open_alerts: 2,
+      unread_alerts: 2,
+      unread_notifications: 3,
+      unread_total: 5,
+      active_total: 5
+    };
+    inboxUpdateBadge();
+  `);
+  assert.equal(badge.hidden, false);
+  assert.equal(badge.textContent, '5');
+  assert.equal(bell.classList.contains('has-badge'), true);
+  assert.equal(bell.classList.contains('inbox-has-alerts'), true);
+  assert.equal(bell.getAttribute('aria-label'), 'Notifications, 5 items need attention');
+
+  context.openInboxPopover({
+    currentTarget: bell,
+    target: bell,
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  assert.equal(popover.hidden, false);
+  assert.equal(bell.getAttribute('aria-expanded'), 'true');
+  assert.equal(popover.style.left, '8px',
+    'a viewport-width popover is clamped to the narrow viewport margin');
+  assert.equal(popover.style.top, '34px',
+    'the popover opens below the top-right app control when vertical room permits');
+
+  sandbox.window.innerWidth = 1200;
+  bell.getBoundingClientRect = function() {
+    return { top: 36, bottom: 60, left: 1168, right: 1192, width: 24, height: 24 };
+  };
+  windowListeners.resize();
+  assert.equal(popover.style.left, '848px',
+    'resize keeps the popover right-aligned to the app control and on screen');
+  assert.equal(popover.style.top, '8px',
+    'a banner-shifted anchor falls back to the viewport-clamped vertical position');
+
+  document.listeners.keydown({
+    key: 'Escape',
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  assert.equal(popover.hidden, true);
+  assert.equal(bell.getAttribute('aria-expanded'), 'false');
+  assert.equal(bell.focused, true, 'Escape restores focus to the app-level bell');
+
+  bell.focused = false;
+  context.openInboxPopover({
+    currentTarget: bell,
+    target: bell,
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  document.listeners.click({ target: new FakeElement('outside') });
+  assert.equal(popover.hidden, true, 'outside click still closes the body-level popover');
 });
 
 test('Inbox pages 20 rows on scroll without cursor drift, duplicate cards, or viewport jumps', () => {

@@ -1646,19 +1646,19 @@ scope.
 - Date: 2026-07-17
 - Status: accepted
 - Decision: The durable Inbox opens from a notification bell in Torque's
-  application chrome. In the browser header, the bell is aligned to the far
-  right so global attention state remains visually distinct from workspace
-  commands. It uses an anchored overlay with the existing separate Alert and
-  Notification views. It is not a dockable, detachable, floatable, pinnable, or
-  Go To panel.
+  application chrome. A single app-level control is aligned to the window's
+  top-right, outside the column-scoped agent header and bottom status bar, so
+  global attention state remains visually distinct from workspace commands. It
+  uses an anchored overlay with the existing separate Alert and Notification
+  views. It is not a dockable, detachable, floatable, pinnable, or Go To panel.
 - Rationale: Alerts and notifications describe the whole application and must
   remain reachable regardless of the active workspace layout. Treating the
   Inbox as peer content beside Board, Agent, and Health made global state look
   like an optional project tool and consumed panel-navigation space.
-- Scope: Header and desktop-status bell controls, unread/open badge, anchored
-  Inbox overlay, toast actions, legacy panel-pin and workspace-layout cleanup,
-  and frontend regression coverage. This supersedes D-042 only where that
-  decision described the Inbox as a dockable panel with a taskbar badge.
+- Scope: App-level top-right bell control, unread/open badge, anchored Inbox
+  overlay, toast actions, legacy panel-pin and workspace-layout cleanup, and
+  frontend regression coverage. This supersedes D-042 only where that decision
+  described the Inbox as a dockable panel with a taskbar badge.
 - Constraints: The overlay preserves durable history, separate lifecycles,
   typed actions, pagination, archived-item access, keyboard dismissal, and
   click-away dismissal. Browser and desktop modes must both expose a bell.
@@ -1756,6 +1756,29 @@ scope.
   Canvas order, exact before/after/append payloads, wrapped target resolution,
   no-op and invalid-drop rejection, transient cleanup, displaced-card FLIP,
   and reduced-motion behavior; state coverage protects save/load ordering.
+
+### D-048 — App-global attention chrome uses the workspace top-right mount
+
+- Date: 2026-08-08
+- Status: accepted
+- Decision: Persistent app-global attention controls mount in
+  `#app-top-right`, the first child of the app-wide `#workspace-shell`. The
+  mount is positioned at the workspace's top-right and sits outside the
+  column-scoped agent header, terminal workspace, utility rail, panel bar, and
+  floating-panel layer.
+- Rationale: The agent header deliberately spans only its column (TORQUE:116),
+  while the floating-panel layer is runtime-conditional and owned by panel
+  lifecycle rendering. The app-wide workspace exists in browser and desktop
+  modes and follows in-flow system banners, giving global attention chrome a
+  stable window-relative edge without coupling it to either subsystem.
+- Scope: The Inbox bell and future persistent app-global attention controls.
+- Constraints: The mount must not widen or move the agent header, participate
+  in panel placement, or duplicate a control in mode-specific chrome. It is
+  hidden with the workspace in detached panel windows and dedicated diff view.
+  Anchored overlays remain body-level fixed surfaces with viewport clamping.
+- Verification: Frontend regressions protect the single-bell DOM contract,
+  mount and mode visibility, badge discovery, accessible expansion state, and
+  top-right popover anchoring at narrow and wide viewport widths.
 
 ## Decision entry template
 
