@@ -277,7 +277,42 @@ function _eventsKindClass(kind) {
 
 /* ---- Attention items (derived from live state) ---------------------- */
 
+/* The attention feed is read up to three times per rendered frame (status
+ * bar chip, taskbar badge, Events panel) and each build walks every task
+ * and agent. Memoize per state revision; every consumer shares one build
+ * until the next delta/snapshot/lazy-merge mutates state. */
+var _eventsAttentionMemo = {
+  rev: -1, group: '', dismissedCount: -1, items: null,
+};
+
+function _eventsInvalidateAttentionMemo() {
+  _eventsAttentionMemo.items = null;
+}
+
 function _eventsGetAttentionItems() {
+  var rev = (typeof _torqueStateRevision !== 'undefined')
+    ? _torqueStateRevision : -1;
+  var memoGroup = _eventsCurrentGroup();
+  var dismissedCount = Object.keys(
+    (state && state.events_dismissed_attention) || {}).length;
+  if (rev >= 0
+      && _eventsAttentionMemo.items
+      && _eventsAttentionMemo.rev === rev
+      && _eventsAttentionMemo.group === memoGroup
+      && _eventsAttentionMemo.dismissedCount === dismissedCount) {
+    return _eventsAttentionMemo.items;
+  }
+  var items = _eventsBuildAttentionItems();
+  if (rev >= 0) {
+    _eventsAttentionMemo = {
+      rev: rev, group: memoGroup,
+      dismissedCount: dismissedCount, items: items,
+    };
+  }
+  return items;
+}
+
+function _eventsBuildAttentionItems() {
   var items = [];
   var grp = _eventsCurrentGroup();
 

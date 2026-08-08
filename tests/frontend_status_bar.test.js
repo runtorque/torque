@@ -538,6 +538,12 @@ test('refreshStatusBar updates static nodes without wiping panel-button nodes or
   sandbox.state.agents = {
     a1: { id: 'a1', group: 'Torque', cell_type: 'agent', status: 'running' },
   };
+  // Hidden chips now skip their full agent/task scans (and their label
+  // writes) entirely; enable the workload chip so the text assertion
+  // below exercises the visible path.
+  sandbox.state.global_settings = {
+    status_bar_visibility: { workload: true },
+  };
 
   vm.runInContext('refreshStatusBar();', context);
   const beforeStatusChildren = statusInfo.children.slice();

@@ -694,9 +694,15 @@ function refreshStatusBar(opts) {
   var codexView = _statusBarCodexUsageView();
   var deployView = _statusBarDeployView(_statusBarDeployState);
   var metricsView = _statusBarMetricsView();
-  var agentsView = _statusBarAgentCounts(group);
-  var tasksView = _statusBarActiveTaskCount(group);
-  var attentionView = _statusBarAttentionCount(group);
+  // The workload/tasks/attention views walk every agent and task; skip
+  // the scans entirely when the chip is hidden.
+  var workloadVisible = statusBarVisibilityEnabled('workload');
+  var tasksVisible = statusBarVisibilityEnabled('tasks');
+  var attentionVisible = statusBarVisibilityEnabled('attention');
+  var agentsView = workloadVisible ? _statusBarAgentCounts(group) : null;
+  var tasksView = tasksVisible ? _statusBarActiveTaskCount(group) : null;
+  var attentionView = attentionVisible
+    ? _statusBarAttentionCount(group) : null;
 
   _statusBarSetElementVisible(
     _statusBarElement('daemon-status-indicator'),
@@ -715,24 +721,30 @@ function refreshStatusBar(opts) {
   _statusBarSetChip(_statusBarElement('statusbar-metrics'), Object.assign({}, metricsView, {
     visible: _statusBarViewVisible('health', metricsView.visible),
   }));
-  _statusBarSetChip(_statusBarElement('statusbar-workload'), {
-    visible: statusBarVisibilityEnabled('workload'),
-    level: agentsView.error ? 'danger' : (agentsView.running ? 'normal' : 'muted'),
-    label: agentsView.label,
-    title: agentsView.title,
-  });
-  _statusBarSetChip(_statusBarElement('statusbar-tasks'), {
-    visible: statusBarVisibilityEnabled('tasks'),
-    level: tasksView.count ? 'normal' : 'muted',
-    label: tasksView.label,
-    title: tasksView.title,
-  });
-  _statusBarSetChip(_statusBarElement('statusbar-attention'), {
-    visible: statusBarVisibilityEnabled('attention'),
-    level: attentionView.count ? 'warn' : 'muted',
-    label: attentionView.label,
-    title: attentionView.title,
-  });
+  _statusBarSetChip(_statusBarElement('statusbar-workload'), !workloadVisible
+    ? { visible: false }
+    : {
+      visible: true,
+      level: agentsView.error ? 'danger' : (agentsView.running ? 'normal' : 'muted'),
+      label: agentsView.label,
+      title: agentsView.title,
+    });
+  _statusBarSetChip(_statusBarElement('statusbar-tasks'), !tasksVisible
+    ? { visible: false }
+    : {
+      visible: true,
+      level: tasksView.count ? 'normal' : 'muted',
+      label: tasksView.label,
+      title: tasksView.title,
+    });
+  _statusBarSetChip(_statusBarElement('statusbar-attention'), !attentionVisible
+    ? { visible: false }
+    : {
+      visible: true,
+      level: attentionView.count ? 'warn' : 'muted',
+      label: attentionView.label,
+      title: attentionView.title,
+    });
   if (typeof refreshRelayStatusIndicator === 'function') {
     refreshRelayStatusIndicator();
   }

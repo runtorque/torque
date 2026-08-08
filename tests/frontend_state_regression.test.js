@@ -6284,6 +6284,7 @@ test('decision and pending-hire deltas invalidate the main surface', () => {
     health: false,
     thinking: false,
     terminal: false,
+    statusbar: false,
     focus: true,
   });
   assert.deepEqual(jsonValue(context, `state.pending_hires["hire-1"]`), {
@@ -6316,6 +6317,7 @@ test('decision and pending-hire deltas invalidate the main surface', () => {
     health: false,
     thinking: false,
     terminal: false,
+    statusbar: false,
     focus: true,
   });
   assert.equal(
@@ -19480,6 +19482,154 @@ test('mcp_call_append for non-focused agent does NOT invalidate engineer panel (
     'mcp_call_append for non-focused agent should not refresh engineer panel');
 });
 
+test('mcp_call_append never invalidates the Events panel; event_append does', () => {
+  // The Events panel renders panel_events + inline task threads only; MCP
+  // calls never appear there. Marking 'events' for mcp_call_append (the
+  // highest-frequency op) forced a full renderEvents() per worker tool
+  // call with no visible change.
+  const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['events']);
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'mcp_call_append',
+      group: 'alpha',
+      call: {
+        cell_id: 'agent-2',
+        tool_name: 'mcp__torque__torque_progress',
+        hook_event_name: 'PostToolUse',
+        cursor: 1,
+      },
+    }],
+  });
+  flushRaf();
+  assert.equal(sandbox.renderCalls.events, 0,
+    'mcp_call_append should not rerender the Events panel');
+  context._handleDelta({
+    seq: 2,
+    ops: [{
+      op: 'event_append', cell_id: 'agent-2', group: 'alpha',
+      id: 7, kind: 'agent_progress',
+    }],
+  });
+  flushRaf();
+  assert.equal(sandbox.renderCalls.events, 1,
+    'event_append must still rerender the Events panel');
+});
+
+test('status bar refresh coalesces through the rAF surface batch', () => {
+  // refreshStatusBar used to run synchronously inside _handleDelta on
+  // every qualifying WS message — full agent+task scans per socket frame
+  // under worker-firehose load, un-batched by the rAF queue.
+  const { context, flushRaf } = createStandaloneDeltaBatchHarness(['board']);
+  runInContext(context, `
+    refreshStatusBarCalls = 0;
+    refreshStatusBar = function() { refreshStatusBarCalls++; };
+  `);
+  context._handleDelta({
+    seq: 1,
+    ops: [{ op: 'agent_upsert', id: 'agent-9', group: 'alpha', name: 'A9' }],
+  });
+  context._handleDelta({
+    seq: 2,
+    ops: [{ op: 'task_upsert', id: 'T-9', group: 'alpha', task: 'x', lane: 'To Do' }],
+  });
+  assert.equal(runInContext(context, 'refreshStatusBarCalls'), 0,
+    'no synchronous status bar rebuild per WS message');
+  flushRaf();
+  assert.equal(runInContext(context, 'refreshStatusBarCalls'), 1,
+    'coalesced into one refresh per animation frame');
+});
+
+test('attention feed memoizes per state revision', () => {
+  const { context } = createEventsHarness();
+  runInContext(context, `
+    _torqueStateRevision = 7;
+    state = {
+      board_tasks: {
+        'ask-1': { id: 'ask-1', task: 'Need input', group: 'alpha',
+                   labels: ['torque:human'], lane: 'To Do',
+                   created_at: '2026-08-08T10:00:00Z' },
+      },
+      agents: {},
+      events_dismissed_attention: {},
+    };
+    _eventsFilterByGroup = false;
+  `);
+  assert.equal(
+    runInContext(context, `_eventsGetAttentionItems().length`), 1);
+  assert.equal(
+    runInContext(context,
+      `_eventsGetAttentionItems() === _eventsGetAttentionItems()`),
+    true,
+    'same revision returns the same array instance');
+  // Direct mutation without a revision bump stays memoized (all real
+  // mutation paths — deltas, snapshots, lazy merges — bump the revision).
+  runInContext(context, `
+    state.agents['w-1'] = { id: 'w-1', name: 'W', group: 'alpha',
+      needs_attention: true, cell_type: 'agent', last_event_at: 5 };
+  `);
+  assert.equal(
+    runInContext(context, `_eventsGetAttentionItems().length`), 1);
+  runInContext(context, `_torqueStateRevision += 1;`);
+  assert.equal(
+    runInContext(context, `_eventsGetAttentionItems().length`), 2,
+    'revision bump recomputes the feed');
+});
+
+test('grid card helpers derive from lookup indexes instead of full scans', () => {
+  const { context } = createEventsHarness();
+  loadScript(context, 'static/js/constants.js');
+  runInContext(context, `
+    _torqueStateRevision = 3;
+    state = {
+      agents: {
+        'eng-1': { id: 'eng-1', cell_type: 'agent', kind: 'engineer',
+                   group: 'g', hired_by_architect_id: 'arch-1' },
+        'w-2': { id: 'w-2', cell_type: 'agent', kind: 'worker',
+                 group: 'g', owner_engineer_id: 'eng-1' },
+        'w-1': { id: 'w-1', cell_type: 'agent', kind: 'worker',
+                 group: 'g', created_by_engineer_id: 'eng-1' },
+        'term-1': { id: 'term-1', cell_type: 'terminal', group: 'g' },
+      },
+      board_tasks: {
+        'T1': { id: 'T1', task: 'q1', lane: 'To Do',
+                assigned_engineer_id: 'eng-1', labels: [] },
+        'T2': { id: 'T2', task: 'q2', lane: 'Backlog',
+                assigned_engineer_id: 'eng-1', labels: [] },
+        'T3': { id: 'T3', task: 'running', lane: 'In Progress',
+                assigned_engineer_id: 'eng-1', labels: [] },
+        'ASK': { id: 'ASK', task: 'need input', lane: 'To Do',
+                 labels: ['torque:human'], reply_agent_id: 'arch-1',
+                 created_at: '2026-08-08T09:00:00Z' },
+      },
+    };
+  `);
+  assert.deepEqual(
+    jsonValue(context,
+      `_workersForEngineer('eng-1').map(function(w) { return w.id; })`),
+    ['w-1', 'w-2'],
+    'owned workers resolve via the agent index, sorted by id');
+  assert.equal(runInContext(context, `_engineerQueueDepth('eng-1')`), 2,
+    'queue depth counts Backlog + To Do assigned tasks only');
+  assert.deepEqual(
+    jsonValue(context,
+      `_architectEngineersForCard('arch-1', null).map(function(e) { return e.id; })`),
+    ['eng-1']);
+  assert.equal(
+    runInContext(context,
+      `_architectPendingAskTasks({ id: 'arch-1', group: 'g' }).length`),
+    1, 'architect asks resolve from the open human-ask pool');
+  // In-place agent mutation is picked up once the revision advances.
+  runInContext(context, `
+    delete state.agents['w-2'].owner_engineer_id;
+    _torqueStateRevision += 1;
+  `);
+  assert.deepEqual(
+    jsonValue(context,
+      `_workersForEngineer('eng-1').map(function(w) { return w.id; })`),
+    ['w-1']);
+});
+
 test('behavior overlay deltas invalidate only the focused Behavior tab target', () => {
   const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
   runInContext(context, `
@@ -25429,6 +25579,7 @@ test('engineer peer chat thread deltas do not broadly invalidate the engineer pa
     health: false,
     thinking: false,
     terminal: false,
+    statusbar: false,
     chat: true,
   });
 });

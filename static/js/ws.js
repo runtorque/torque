@@ -147,6 +147,12 @@ function _wsRoleList(msg) {
 
 var _firstStateReceived = false;
 var _expectedSeq = 0;
+/* Monotonic state revision: bumped whenever shared `state` is mutated by a
+ * delta batch, a full snapshot, or a compact lazy-load merge. Derived-view
+ * memos (e.g. the events attention feed) key on it instead of rebuilding
+ * from full state scans on every read. */
+var _torqueStateRevision = 0;
+function _torqueBumpStateRevision() { _torqueStateRevision++; }
 var _resyncPending = false;
 var _awaitingFullState = false;
 var _pendingDeltaSurfaceInvalidations = null;
@@ -332,9 +338,11 @@ function _handleDelta(msg) {
   _applyContextMeterDeltaUpdates(
     _collectContextMeterDeltaAgentIds(msg.ops, opGroupHints)
   );
-  if (typeof refreshStatusBar === 'function'
-      && _statusBarDeltaNeedsRefresh(msg.ops, opGroupHints)) {
-    refreshStatusBar({ delta: true });
+  if (_statusBarDeltaNeedsRefresh(msg.ops, opGroupHints)) {
+    // Routed through the rAF-coalesced surface batch below: the status
+    // bar used to rebuild synchronously on every WS message, paying full
+    // agent+task scans per socket frame under worker-firehose load.
+    invalidations.statusbar = true;
   }
   const selectedAgentGroupSynced = _selectedAgentGroupSyncedDuringDelta;
   _selectedAgentGroupSyncedDuringDelta = false;

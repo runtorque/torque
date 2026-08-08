@@ -138,6 +138,9 @@ function _blankSurfaceInvalidations() {
     health: false,
     thinking: false,
     terminal: false,
+    // Not a panel surface: routes the status-bar refresh through the same
+    // rAF batch so it stops rebuilding synchronously per WS message.
+    statusbar: false,
   };
 }
 
@@ -455,7 +458,12 @@ function _deltaSurfaceInvalidations(ops, hints) {
         break;
       case 'event_append':
       case 'mcp_call_append': {
-        _markSurface(flags, 'events');
+        // The Events panel renders panel_events plus inline task threads;
+        // MCP calls never appear there. Marking 'events' for
+        // mcp_call_append — the highest-frequency op in the system —
+        // forced a full renderEvents() per worker tool call with no
+        // visible change.
+        if (op.op === 'event_append') _markSurface(flags, 'events');
         // Engineer panel only needs a full re-render when the append
         // belongs to the focused agent *and* the focused panel is displaying
         // the affected sub-surface. Cross-agent traffic (e.g. another worker

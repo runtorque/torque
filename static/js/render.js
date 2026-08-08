@@ -1007,6 +1007,9 @@ function renderInvalidatedSurfaces(flags) {
     const surface = surfaces[i];
     if (surface && flags[surface]) _renderSurface(surface);
   }
+  if (flags.statusbar && typeof refreshStatusBar === 'function') {
+    refreshStatusBar({ delta: true });
+  }
   _updateEngineerTaskbarBadge();
   if (typeof updateEventsAttentionBadge === 'function') updateEventsAttentionBadge();
   if (typeof inboxUpdateBadge === 'function') inboxUpdateBadge();
@@ -1262,34 +1265,19 @@ function _workerBranchLabel(agent) {
 
 function _workersForEngineer(engineerId) {
   const id = String(engineerId || '').trim();
-  if (!id || !state || !state.agents) return [];
-  const workers = [];
-  for (const agentId in state.agents) {
-    const agent = state.agents[agentId];
-    if (!agent || agent.cell_type !== 'agent') continue;
-    if (_isTombstonedAgent(agent)) continue;
-    if (!_isWorkerLikeAgent(agent)) continue;
-    const owner = String(agent.owner_engineer_id || agent.created_by_engineer_id || '').trim();
-    if (owner === id) workers.push(agent);
-  }
-  return workers.sort(function(a, b) {
-    return String(a.id || '').localeCompare(String(b.id || ''));
-  });
+  if (!id) return [];
+  const index = _currentAgentGridIndex();
+  if (!index) return [];
+  // Read-only shared array; card renderers only iterate it.
+  return index.workersByEngineerId[id] || [];
 }
 
 function _engineerQueueDepth(engineerId) {
   const id = String(engineerId || '').trim();
-  if (!id || !state || !state.board_tasks) return 0;
-  let count = 0;
-  for (const taskId in state.board_tasks) {
-    const task = state.board_tasks[taskId];
-    if (!task) continue;
-    if (taskIsEngineerMessageFollowup(task)) continue;
-    if (String(task.assigned_engineer_id || '').trim() !== id) continue;
-    const lane = String(task.lane || '').trim();
-    if (lane === 'Backlog' || lane === 'To Do') count += 1;
-  }
-  return count;
+  if (!id) return 0;
+  const index = _currentTaskLookupIndex();
+  if (!index) return 0;
+  return index.queueDepthByEngineerId[id] || 0;
 }
 
 function _architectEngineersForCard(architectId, section) {
@@ -1297,29 +1285,25 @@ function _architectEngineersForCard(architectId, section) {
     return section.rows.map(function(row) { return row && row.engineer; }).filter(Boolean);
   }
   const id = String(architectId || '').trim();
-  if (!id || !state || !state.agents) return [];
-  const engineers = [];
-  for (const agentId in state.agents) {
-    const agent = state.agents[agentId];
-    if (!agent || agent.cell_type !== 'agent' || (agent.kind || '') !== 'engineer') continue;
-    if (_isTombstonedAgent(agent)) continue;
-    if (String(agent.hired_by_architect_id || '').trim() === id) engineers.push(agent);
-  }
-  return engineers;
+  if (!id) return [];
+  const index = _currentAgentGridIndex();
+  if (!index) return [];
+  return index.engineersByArchitectId[id] || [];
 }
 
 function _architectPendingAskTasks(architect) {
-  if (!architect || !state || !state.board_tasks) return [];
+  if (!architect) return [];
   const architectId = String(architect.id || '').trim();
   if (!architectId) return [];
+  const index = _currentTaskLookupIndex();
+  if (!index) return [];
   const group = String(architect.group || '').trim();
   const asks = [];
-  for (const taskId in state.board_tasks) {
-    const task = state.board_tasks[taskId];
+  const pool = index.pendingHumanTasks;
+  for (let i = 0; i < pool.length; i++) {
+    const task = pool[i];
     if (!task) continue;
     const labels = Array.isArray(task.labels) ? task.labels : [];
-    if (labels.indexOf('torque:human') < 0) continue;
-    if (String(task.lane || '') === 'Done') continue;
     const replyId = String(task.reply_agent_id || '').trim();
     const creatorId = String(task.created_by_architect_id || '').trim();
     const taskGroup = String(task.group || '').trim();
@@ -1618,6 +1602,9 @@ function _buildTaskLookupIndex(tasks) {
   const latestBoundaryByKey = {};
   const followersByBoundaryId = {};
 
+  const queueDepthByEngineerId = {};
+  const pendingHumanTasks = [];
+
   for (let i = 0; i < taskValues.length; i++) {
     const task = taskValues[i];
     if (!task) continue;
@@ -1632,6 +1619,22 @@ function _buildTaskLookupIndex(tasks) {
       if (task.lane === 'In Progress' && !entry.in_progress) entry.in_progress = task;
       if (task.lane !== 'Done' && !entry.open) entry.open = task;
       if (!entry.done) entry.done = task;
+    }
+
+    // Per-engineer queue depth and the (small) open human-ask pool used
+    // to be rebuilt by full board scans per card per frame.
+    const assignedEngineerId = String(task.assigned_engineer_id || '').trim();
+    if (assignedEngineerId
+        && (task.lane === 'Backlog' || task.lane === 'To Do')
+        && (typeof taskIsEngineerMessageFollowup !== 'function'
+            || !taskIsEngineerMessageFollowup(task))) {
+      queueDepthByEngineerId[assignedEngineerId] =
+        (queueDepthByEngineerId[assignedEngineerId] || 0) + 1;
+    }
+    const taskLabels = Array.isArray(task.labels) ? task.labels : [];
+    if (taskLabels.indexOf('torque:human') >= 0
+        && String(task.lane || '') !== 'Done') {
+      pendingHumanTasks.push(task);
     }
 
     const boundaryKey = _taskBoundaryBranchKey(task);
@@ -1682,8 +1685,73 @@ function _buildTaskLookupIndex(tasks) {
     source: taskMap,
     agentTaskById,
     branchBoundaryByKey,
+    queueDepthByEngineerId,
+    pendingHumanTasks,
     tasks: taskValues,
   };
+}
+
+/* Agent-derived grid lookups (workers per engineer, engineers per
+ * architect). Separate from the task index because it invalidates on
+ * agent deltas; keyed on the agents map identity plus the state revision
+ * since agent_upsert mutates the map in place. */
+var _agentGridIndex = null;
+var _agentGridIndexSource = null;
+var _agentGridIndexRev = -1;
+
+function _invalidateAgentGridIndex() {
+  _agentGridIndex = null;
+  _agentGridIndexSource = null;
+  _agentGridIndexRev = -1;
+}
+
+function _buildAgentGridIndex(agents) {
+  const workersByEngineerId = {};
+  const engineersByArchitectId = {};
+  for (const agentId in agents) {
+    const agent = agents[agentId];
+    if (!agent || agent.cell_type !== 'agent') continue;
+    if (_isTombstonedAgent(agent)) continue;
+    if ((agent.kind || '') === 'engineer') {
+      const architectId = String(agent.hired_by_architect_id || '').trim();
+      if (architectId) {
+        if (!engineersByArchitectId[architectId]) {
+          engineersByArchitectId[architectId] = [];
+        }
+        engineersByArchitectId[architectId].push(agent);
+      }
+    }
+    if (_isWorkerLikeAgent(agent)) {
+      const owner = String(
+        agent.owner_engineer_id || agent.created_by_engineer_id || ''
+      ).trim();
+      if (owner) {
+        if (!workersByEngineerId[owner]) workersByEngineerId[owner] = [];
+        workersByEngineerId[owner].push(agent);
+      }
+    }
+  }
+  for (const engineerId in workersByEngineerId) {
+    workersByEngineerId[engineerId].sort(function(a, b) {
+      return String(a.id || '').localeCompare(String(b.id || ''));
+    });
+  }
+  return { workersByEngineerId, engineersByArchitectId };
+}
+
+function _currentAgentGridIndex() {
+  if (!state || !state.agents) return null;
+  const rev = (typeof _torqueStateRevision !== 'undefined')
+    ? _torqueStateRevision : -1;
+  if (!_agentGridIndex
+      || _agentGridIndexSource !== state.agents
+      || _agentGridIndexRev !== rev
+      || rev < 0) {
+    _agentGridIndex = _buildAgentGridIndex(state.agents);
+    _agentGridIndexSource = state.agents;
+    _agentGridIndexRev = rev;
+  }
+  return _agentGridIndex;
 }
 
 function _currentTaskLookupIndex() {
