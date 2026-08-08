@@ -2325,6 +2325,196 @@ test('board search matches title, description, labels, action, and linked agent 
   assert.deepEqual(jsonValue(context, 'Object.keys(_boardVisibleTasks())'), ['agentTask']);
 });
 
+test('numeric board search ranks exact and prefix IDs without dropping realistic haystack matches', () => {
+  const { context } = createBoardHarness();
+  context.state.board_tasks = {
+    'TORQUE:900': {
+      id: 'TORQUE:900', group: 'alpha', task: 'Coordinate release',
+      description: 'Blocked on TORQUE:1559 and follow-up 1574', lane: 'Backlog', position: 9,
+    },
+    'TORQUE:901': {
+      id: 'TORQUE:901', group: 'alpha', task: 'Merged release', lane: 'Backlog', position: 8,
+      completion_evidence: { merge: { pr_url: 'https://github.com/runtorque/torque/pull/1559' } },
+    },
+    'TORQUE:902': {
+      id: 'TORQUE:902', group: 'alpha', task: 'Preserve merge evidence', lane: 'Backlog', position: 7,
+      completion_evidence: { merge: { sha: 'abc1559def' } },
+    },
+    'TORQUE:15590': {
+      id: 'TORQUE:15590', group: 'alpha', task: 'Future numbered task', lane: 'Backlog', position: 1,
+    },
+    'TORQUE:1559:2': {
+      id: 'TORQUE:1559:2', group: 'alpha', task: 'Review child', lane: 'Backlog', position: 2,
+      parent_task_id: 'TORQUE:1559', pipeline_depth: 1,
+    },
+    'TORQUE:1559': {
+      id: 'TORQUE:1559', group: 'alpha', task: 'Exact numbered task', lane: 'Backlog', position: 0,
+    },
+  };
+
+  runInContext(context, `_boardSearchQuery = '1559';`);
+  assert.deepEqual(Object.keys(jsonValue(context, '_boardVisibleTasks()')).sort(), [
+    'TORQUE:1559', 'TORQUE:15590', 'TORQUE:1559:2', 'TORQUE:900', 'TORQUE:901', 'TORQUE:902',
+  ]);
+  assert.deepEqual(
+    jsonValue(context, `_boardTasksInLaneFromMap('Backlog', _boardVisibleTasks()).map(function(t) { return t.id; })`),
+    ['TORQUE:1559', 'TORQUE:1559:2', 'TORQUE:15590', 'TORQUE:900', 'TORQUE:901', 'TORQUE:902'],
+  );
+
+  for (const query of ['TORQUE:1559', 'torque:1559']) {
+    runInContext(context, `_boardSearchQuery = ${JSON.stringify(query)};`);
+    assert.equal(
+      runInContext(context, `_boardTasksInLaneFromMap('Backlog', _boardVisibleTasks())[0].id`),
+      'TORQUE:1559',
+    );
+  }
+
+  runInContext(context, `_boardSearchQuery = '155';`);
+  assert.deepEqual(
+    jsonValue(context, `_boardTasksInLaneFromMap('Backlog', _boardVisibleTasks()).map(function(t) { return t.id; })`),
+    ['TORQUE:1559:2', 'TORQUE:15590', 'TORQUE:1559', 'TORQUE:900', 'TORQUE:901', 'TORQUE:902'],
+  );
+
+  runInContext(context, `_boardSearchQuery = 'release';`);
+  const nonnumericOrder = jsonValue(
+    context,
+    `_boardTasksInLaneFromMap('Backlog', _boardVisibleTasks()).map(function(t) { return t.id; })`,
+  );
+  assert.deepEqual(nonnumericOrder, ['TORQUE:900', 'TORQUE:901']);
+});
+
+test('numeric board search applies Quick View limit after matching and relevance', () => {
+  const { context } = createBoardHarness();
+  context.state.board_tasks = {
+    'TORQUE:1559': {
+      id: 'TORQUE:1559', group: 'alpha', task: 'Old exact task', lane: 'Done', position: 0,
+      created_at: '2000-01-01T00:00:00Z', updated_at: '2000-01-01T00:00:00Z',
+    },
+  };
+  for (let i = 0; i < 30; i++) {
+    const id = `TORQUE:${2000 + i}`;
+    context.state.board_tasks[id] = {
+      id, group: 'alpha', task: `Task mentioning 1559 (${i})`, lane: 'Done', position: i + 1,
+      created_at: `2026-08-08T12:${String(i).padStart(2, '0')}:00Z`,
+      updated_at: `2026-08-08T12:${String(i).padStart(2, '0')}:00Z`,
+    };
+  }
+
+  runInContext(context, `_boardQuickView = 'recent'; _boardSearchQuery = '1559';`);
+  assert.equal(runInContext(context, 'Object.keys(_boardVisibleTasks()).length'), 25);
+  assert.equal(runInContext(context, `!!_boardVisibleTasks()['TORQUE:1559']`), true);
+  assert.equal(
+    runInContext(context, `_boardTasksInLaneFromMap('Done', _boardVisibleTasks())[0].id`),
+    'TORQUE:1559',
+  );
+});
+
+test('progressive numeric search preserves lane order and reveals a newly exact card once', () => {
+  const { context, document } = createBoardHarness({ stubCards: false });
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+  document.register('board-lane-tabs');
+  const searchInput = document.register('board-search-input');
+  const exactCard = new FakeElement();
+  document.setSelector('.board-card[data-task-id="TORQUE:1559"]', exactCard);
+
+  context.state.board_lanes = ['Backlog', 'In Progress', 'Done'];
+  context.state.board_tasks = {
+    description: {
+      id: 'TORQUE:900', group: 'alpha', task: 'Mentions 1559', lane: 'Backlog', position: 100,
+    },
+    pr: {
+      id: 'TORQUE:901', group: 'alpha', task: 'PR evidence', lane: 'Done', position: 99,
+      completion_evidence: { merge: { pr_url: 'https://github.com/runtorque/torque/pull/1559' } },
+    },
+    exact: {
+      id: 'TORQUE:1559', group: 'alpha', task: 'Exact target', lane: 'Done', position: 0,
+    },
+    prefix: {
+      id: 'TORQUE:15590', group: 'alpha', task: 'Prefix target', lane: 'Done', position: 98,
+    },
+  };
+  runInContext(context, `
+    _boardSelectedLane = 'Backlog';
+    _boardDoneInitialRenderLimit = 1;
+    _boardDoneRenderLimit = 1;
+  `);
+
+  for (const query of ['1', '15', '155']) {
+    runInContext(context, `_boardSearchQuery = ${JSON.stringify(query)};`);
+    context.renderBoard();
+    assert.ok(panel.innerHTML.indexOf('data-lane="Backlog"') < panel.innerHTML.indexOf('data-lane="In Progress"'));
+    assert.ok(panel.innerHTML.indexOf('data-lane="In Progress"') < panel.innerHTML.indexOf('data-lane="Done"'));
+    assert.equal(exactCard.scrollIntoViewOptions, undefined);
+  }
+
+  searchInput.value = '1559';
+  context.boardUpdateSearch('1559');
+  assert.equal(runInContext(context, '_boardSelectedLane'), 'Done');
+  assert.match(panel.innerHTML, /board-card-search-exact[^>]*data-task-id="TORQUE:1559"/);
+  assert.match(panel.innerHTML, /data-task-id="TORQUE:1559"/);
+  assert.doesNotMatch(panel.innerHTML, /data-task-id="TORQUE:15590"/);
+  assert.deepEqual(JSON.parse(JSON.stringify(exactCard.scrollIntoViewOptions)), {
+    block: 'nearest', inline: 'nearest',
+  });
+  assert.equal(searchInput.focused, true);
+  assert.equal(searchInput.selectionStart, 4);
+  assert.equal(searchInput.selectionEnd, 4);
+
+  exactCard.scrollIntoViewOptions = undefined;
+  context.renderBoard();
+  assert.equal(exactCard.scrollIntoViewOptions, undefined);
+  assert.ok(panel.innerHTML.indexOf('data-lane="Backlog"') < panel.innerHTML.indexOf('data-lane="In Progress"'));
+  assert.ok(panel.innerHTML.indexOf('data-lane="In Progress"') < panel.innerHTML.indexOf('data-lane="Done"'));
+
+  context.boardSelectLane('Backlog');
+  assert.equal(runInContext(context, '_boardSelectedLane'), 'Backlog');
+  assert.match(panel.innerHTML, /data-task-id="TORQUE:900"/);
+  assert.equal(exactCard.scrollIntoViewOptions, undefined);
+});
+
+test('wide numeric search keeps canonical columns and transiently reveals a collapsed exact lane', () => {
+  const { context, document } = createBoardHarness({ stubCards: false });
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+  document.body.classList.add('runtime-embedded');
+  panel.clientWidth = 1200;
+
+  context.state.board_lanes = ['Backlog', 'To Do', 'Done'];
+  context.state.board_tasks = {
+    mention: {
+      id: 'TORQUE:700', group: 'alpha', task: 'Unrelated backlog task', lane: 'Backlog', position: 10,
+    },
+    competitor: {
+      id: 'TORQUE:800', group: 'alpha', task: 'Also mentions 1559', lane: 'To Do', position: 10,
+    },
+    exact: {
+      id: 'TORQUE:1559', group: 'alpha', task: 'Exact target', lane: 'To Do', position: 0,
+    },
+  };
+  runInContext(context, `
+    _boardSelectedLane = 'Backlog';
+    _boardSearchQuery = '1559';
+    _boardDefaultRenderLimit = 1;
+    _boardRenderLimit = 1;
+  `);
+
+  context.renderBoard();
+
+  assert.equal(runInContext(context, '_boardSelectedLane'), 'Backlog');
+  assert.equal(runInContext(context, `_boardLaneCount('Backlog', _boardBuildRenderModel(['Backlog']))`), 0);
+  const backlogColumn = panel.innerHTML.indexOf('data-lane="Backlog" data-board-lane-column="1"');
+  const todoColumn = panel.innerHTML.indexOf('data-lane="To Do" data-board-lane-column="1"');
+  const doneColumn = panel.innerHTML.indexOf('data-lane="Done" data-board-lane-column="1"');
+  assert.ok(backlogColumn >= 0 && backlogColumn < todoColumn && todoColumn < doneColumn);
+  assert.doesNotMatch(
+    panel.innerHTML.slice(todoColumn, doneColumn),
+    /board-wide-lane-collapsed/,
+  );
+  assert.match(panel.innerHTML, /board-card-search-exact[^>]*data-task-id="TORQUE:1559"/);
+  assert.doesNotMatch(panel.innerHTML, /data-task-id="TORQUE:800"/);
+});
+
 test('actions editor save payload preserves auto_close_on_done', () => {
   const { sandbox, document } = createSandbox({
     _showToast() {},

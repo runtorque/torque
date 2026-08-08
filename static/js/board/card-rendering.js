@@ -1117,12 +1117,13 @@ function _renderBoardCard(t, childrenOf, depth, renderState) {
   var quickOpen = _boardQuickEditTask === t.id ? ' board-card-quick-open' : '';
   var subClass = isSubordinate ? ' board-card-subordinate' : '';
   var doneClass = (isSubordinate && isDone) ? ' board-card-done' : '';
+  var exactSearchClass = t.id === _boardExactSearchMatchId ? ' board-card-search-exact' : '';
   var indentAttrs = isSubordinate
     ? ' data-depth="' + depth + '"'
       + ' data-indent-level="' + indentLevel + '"'
       + ' style="--board-card-indent-level:' + indentLevel + '"'
     : '';
-  var cardHtml = '<div class="board-card ui-card ui-card--interactive' + sharedState + focused + selected + hovered + quickOpen + subClass + doneClass + '"'
+  var cardHtml = '<div class="board-card ui-card ui-card--interactive' + sharedState + focused + selected + hovered + quickOpen + subClass + doneClass + exactSearchClass + '"'
     + ' data-task-id="' + t.id + '"'
     + indentAttrs
     + ' draggable="true"'
