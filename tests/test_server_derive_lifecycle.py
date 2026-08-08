@@ -801,12 +801,14 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
             "cmd": "worktree_check_merge",
             "id": implementer.id,
             "allow_stale_base": True,
+            "allow_boundary_mismatch": True,
         })
         self.assertEqual(
             generic_check["error"],
             "Latest task boundary is no longer cleanly mergeable because "
             'follow-up task "Independent review blocks" has already started.',
         )
+        self.assertNotIn("boundary_mismatch_override", generic_check)
         worktree_mgr.stale = True
 
         worktree_mgr.classification = "unknown"
