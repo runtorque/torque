@@ -608,6 +608,10 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
   padding: 6px 8px;
   min-height: 32px;
 }
+.board-card.board-card-search-exact {
+  border-color: color-mix(in srgb, var(--accent) 78%, var(--border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+}
 /* Brief highlight when a board task is opened externally via the
    clickable TORQUE:XXX label on a worker card. */
 .board-card.board-card--external-focus {

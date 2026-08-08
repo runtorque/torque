@@ -156,6 +156,14 @@ function _boardAfterRenderLayout() {
         focusedCard.scrollIntoView({ block: 'nearest' });
       }
     }
+    if (_boardPendingExactSearchRevealId) {
+      var revealId = _boardPendingExactSearchRevealId;
+      _boardPendingExactSearchRevealId = '';
+      var exactCard = document.querySelector(_boardTaskCardSelector(revealId));
+      if (exactCard && typeof exactCard.scrollIntoView === 'function') {
+        exactCard.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      }
+    }
   });
 }
 
@@ -355,7 +363,8 @@ function _boardRenderWideLaneColumn(lane, model, filtersActive) {
   var laneCount = _boardLaneCount(lane, model);
   var active = lane === _boardSelectedLane;
   var collapsed = typeof _boardIsWideLaneCollapsed === 'function'
-    && _boardIsWideLaneCollapsed(lane);
+    && _boardIsWideLaneCollapsed(lane)
+    && (!model || model.exactNumericSearchLane !== lane);
   var section = collapsed
     ? { html: '', bodyHtml: '', rootTasks: [], renderLimit: 0, renderedCards: 0, totalCards: 0 }
     : _boardRenderLaneSection(lane, model, filtersActive, true);
@@ -407,11 +416,12 @@ function _boardRenderWideLaneColumn(lane, model, filtersActive) {
   return section;
 }
 
-function _boardWideGridTemplate(lanes) {
+function _boardWideGridTemplate(lanes, model) {
   var cols = [];
   for (var i = 0; i < (lanes || []).length; i++) {
     cols.push((typeof _boardIsWideLaneCollapsed === 'function'
-      && _boardIsWideLaneCollapsed(lanes[i]))
+      && _boardIsWideLaneCollapsed(lanes[i])
+      && (!model || model.exactNumericSearchLane !== lanes[i]))
       ? '32px'
       : 'minmax(220px, 1fr)');
   }
@@ -490,8 +500,25 @@ function renderBoard() {
   var wideShell = _boardWideShellActive(panel);
   var wideLayout = _boardWideLayoutActive(panel);
   _boardNormalizeAddingTaskLane();
+  var numericSearchModel = null;
+  if (_boardNumericSearchNumber()) {
+    numericSearchModel = _boardBuildRenderModel(wideLayout ? lanes : [_boardSelectedLane]);
+    if (numericSearchModel.exactNumericSearchLane) {
+      _boardSelectedLane = numericSearchModel.exactNumericSearchLane;
+      if (!wideLayout && !numericSearchModel.rootTasksByLane[_boardSelectedLane]) {
+        numericSearchModel = _boardBuildRenderModel([_boardSelectedLane]);
+      }
+    }
+  }
+  _boardExactSearchMatchId = numericSearchModel
+    ? numericSearchModel.exactNumericSearchTaskId
+    : '';
+  if (_boardExactSearchMatchId !== _boardLastRevealedExactSearchId) {
+    _boardLastRevealedExactSearchId = _boardExactSearchMatchId;
+    _boardPendingExactSearchRevealId = _boardExactSearchMatchId;
+  }
   var shellKey = _boardRenderShellKey(lanes, wideShell, wideLayout);
-  if (_boardTryPatchTaskDeltas(
+  if (!numericSearchModel && _boardTryPatchTaskDeltas(
       panel,
       queuedTaskDeltaBatch,
       lanes,
@@ -504,7 +531,7 @@ function renderBoard() {
     return;
   }
   var renderLanes = wideLayout ? lanes : [_boardSelectedLane];
-  var renderModel = _boardBuildRenderModel(renderLanes);
+  var renderModel = numericSearchModel || _boardBuildRenderModel(renderLanes);
   _boardEnsureDispatchEligibilityRefs(_currentGroup(), renderModel);
 
   // Search & filter toolbar
@@ -748,7 +775,7 @@ function renderBoard() {
     html += _boardRenderWideAddTaskSection();
   }
   var wideGridStyle = wideLayout
-    ? ' style="grid-template-columns:' + _boardWideGridTemplate(lanes) + '"'
+    ? ' style="grid-template-columns:' + _boardWideGridTemplate(lanes, renderModel) + '"'
     : '';
   html += '<div class="board-cards board-density-' + _boardCardDensityMode()
     + (wideLayout ? ' board-wide-grid' : '') + '" id="board-cards"' + wideGridStyle + '>';

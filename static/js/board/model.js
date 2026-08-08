@@ -181,19 +181,64 @@ function _boardVisibleTasks() {
   return _boardVisibleTasksFromScoped(_boardScopedTasks(_boardShowArchived));
 }
 
+function _boardNumericSearchNumber() {
+  var match = String(_boardSearchQuery || '').match(/^(?:torque:)?(\d+)$/i);
+  return match ? match[1] : '';
+}
+
+function _boardTaskNumericSearchRank(task) {
+  var number = _boardNumericSearchNumber();
+  if (!number || !task) return 0;
+  var match = String(task.id || '').match(/^TORQUE:(\d+)(.*)$/i);
+  if (!match) return 2;
+  if (match[1] === number && !match[2]) return 0;
+  if (match[1].indexOf(number) === 0) return 1;
+  return 2;
+}
+
+function _boardSortTasksForNumericSearch(tasks) {
+  if (!_boardNumericSearchNumber()) return tasks;
+  return tasks.map(function(task, index) {
+    return { task: task, index: index, rank: _boardTaskNumericSearchRank(task) };
+  }).sort(function(a, b) {
+    return (a.rank - b.rank) || (a.index - b.index);
+  }).map(function(entry) { return entry.task; });
+}
+
+function _boardFindExactNumericSearchTask(visibleTasks) {
+  var number = _boardNumericSearchNumber();
+  if (!number) return null;
+  var expected = 'TORQUE:' + number;
+  for (var id in (visibleTasks || {})) {
+    if (String(visibleTasks[id].id || '').toUpperCase() === expected) return visibleTasks[id];
+  }
+  return null;
+}
+
+function _boardLimitQuickViewTasks(tasks, prioritizeNumericSearch) {
+  var ranked = [];
+  for (var id in tasks) ranked.push(tasks[id]);
+  ranked.sort(function(a, b) {
+    if (prioritizeNumericSearch) {
+      var relevance = _boardTaskNumericSearchRank(a) - _boardTaskNumericSearchRank(b);
+      if (relevance) return relevance;
+    }
+    return _boardQuickView === 'recent'
+      ? _boardNewestCompare(a, b)
+      : _boardRecentlyTouchedCompare(a, b);
+  });
+  var limited = {};
+  for (var i = 0; i < Math.min(ranked.length, 25); i++) {
+    limited[ranked[i].id] = ranked[i];
+  }
+  return limited;
+}
+
 function _boardVisibleTasksFromScoped(scopedTasks) {
   var out = _boardCopyTaskMap(scopedTasks);
-  if (_boardQuickView) {
-    var ranked = [];
-    for (var rid in out) ranked.push(out[rid]);
-    ranked.sort(_boardQuickView === 'recent'
-      ? _boardNewestCompare
-      : _boardRecentlyTouchedCompare);
-    var limited = {};
-    for (var li = 0; li < Math.min(ranked.length, 25); li++) {
-      limited[ranked[li].id] = ranked[li];
-    }
-    out = limited;
+  var quickViewAfterSearch = !!(_boardQuickView && _boardSearchQuery);
+  if (_boardQuickView && !quickViewAfterSearch) {
+    out = _boardLimitQuickViewTasks(out, false);
   }
   // Text search filter
   if (_boardSearchQuery) {
@@ -308,6 +353,12 @@ function _boardVisibleTasksFromScoped(scopedTasks) {
     }
     out = filtered;
   }
+  // A search must see the full otherwise-eligible set. Quick Views still cap
+  // the results at 25, but only after matching; numeric ID relevance wins the
+  // cap before the existing recency ordering breaks ties.
+  if (quickViewAfterSearch) {
+    out = _boardLimitQuickViewTasks(out, !!_boardNumericSearchNumber());
+  }
   return out;
 }
 
@@ -333,10 +384,10 @@ function _boardTasksInLaneFromMap(lane, tasks) {
       if (ak.valid !== bk.valid) return ak.valid ? -1 : 1;
       return _boardRecentlyTouchedCompare(a, b);
     });
-    return arr;
+    return _boardSortTasksForNumericSearch(arr);
   }
   arr.sort(function(a, b) { return _boardCompareLaneTasks(a, b, lane); });
-  return arr;
+  return _boardSortTasksForNumericSearch(arr);
 }
 
 function _boardTasksInLane(lane, model) {
@@ -1165,12 +1216,15 @@ function _boardBuildRenderModel(lanes) {
     : scopedWithoutArchived;
   var visibleTasks = _boardVisibleTasksFromScoped(scopedTasks);
   var childrenOf = _boardChildrenOfVisibleTasks(visibleTasks);
+  var exactNumericSearchTask = _boardFindExactNumericSearchTask(visibleTasks);
   var model = {
     scopedTasks: scopedTasks,
     scopedWithArchived: scopedWithArchived,
     scopedWithoutArchived: scopedWithoutArchived,
     visibleTasks: visibleTasks,
     childrenOf: childrenOf,
+    exactNumericSearchTaskId: exactNumericSearchTask ? exactNumericSearchTask.id : '',
+    exactNumericSearchLane: exactNumericSearchTask ? exactNumericSearchTask.lane : '',
     laneTasks: {},
     rootTasksByLane: {},
     laneCounts: {},
