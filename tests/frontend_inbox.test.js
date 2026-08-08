@@ -226,12 +226,15 @@ test('Inbox is global chrome opened from a notification bell, not a dockable pan
   const main = source('static/js/main.js');
   const render = source('static/js/render.js');
 
-  assert.match(html, /class="hdr-btn hdr-icon-btn inbox-bell-button inbox-bell-button--header"/);
-  assert.ok(
-    html.indexOf('aria-label="Go to"') < html.indexOf('inbox-bell-button--header'),
-    'the notification bell should be the rightmost header control',
+  assert.equal((html.match(/class="[^"]*\binbox-bell-button\b/g) || []).length, 1);
+  assert.match(
+    html,
+    /id="workspace-shell">\s*<div id="app-top-right"[\s\S]*?class="hdr-btn hdr-icon-btn inbox-bell-button inbox-bell-button--app"/,
   );
-  assert.match(source('static/styles/feature-panels.css'), /\.inbox-bell-button--header\s*\{\s*margin-left: auto;/);
+  assert.match(
+    source('static/styles/feature-panels.css'),
+    /#app-top-right\s*\{[^}]*position:\s*absolute;[^}]*right:\s*var\(--space-2\);/s,
+  );
   assert.match(html, /id="inbox-popover" class="inbox-popover ui-popover"/);
   assert.doesNotMatch(html, /id="panel-inbox"/);
   assert.doesNotMatch(html, /data-app="inbox"/);

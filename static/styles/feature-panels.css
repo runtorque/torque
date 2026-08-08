@@ -12,8 +12,17 @@
 .inbox-bell-button {
   position: relative;
 }
-.inbox-bell-button--header {
-  margin-left: auto;
+#app-top-right {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-2);
+  z-index: 50;
+  display: flex;
+  pointer-events: none;
+}
+.inbox-bell-button--app {
+  pointer-events: auto;
+  background: var(--bg-surface);
 }
 .inbox-bell-button[aria-expanded="true"] {
   color: var(--accent);
@@ -39,29 +48,6 @@
 .inbox-bell-button.inbox-has-alerts .inbox-bell-badge {
   color: #fff;
   background: var(--red);
-}
-.inbox-bell-button--statusbar {
-  display: none;
-  width: 28px;
-  min-width: 28px;
-  padding: 0;
-}
-.inbox-bell-button--statusbar svg {
-  width: 13px;
-  height: 13px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-body.tauri-mode .inbox-bell-button--statusbar {
-  display: inline-flex;
-}
-.inbox-bell-button--statusbar .inbox-bell-badge {
-  top: 0;
-  right: 0;
-  border-color: var(--statusbar-bg);
 }
 .inbox-popover {
   position: fixed;

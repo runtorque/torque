@@ -24,6 +24,21 @@
 
 <!-- Main area (rendered by JS) -->
 <div id="workspace-shell">
+  <div id="app-top-right" role="toolbar" aria-label="Application controls">
+    <button class="hdr-btn hdr-icon-btn inbox-bell-button inbox-bell-button--app"
+            type="button"
+            onclick="toggleInboxPopover(event)"
+            title="Notifications"
+            aria-label="Notifications"
+            aria-haspopup="dialog"
+            aria-expanded="false">
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M3.4 11.2h9.2l-1.1-1.5V6.8A3.5 3.5 0 0 0 8 3.2 3.5 3.5 0 0 0 4.5 6.8v2.9z"></path>
+        <path d="M6.5 12.8a1.7 1.7 0 0 0 3 0"></path>
+      </svg>
+      <span class="inbox-bell-badge" hidden></span>
+    </button>
+  </div>
   <div id="standalone-sidebar-shell">
     <div id="standalone-main-stack">
       <!-- Agent grid panel header. Lives inside the main stack so it
@@ -41,18 +56,6 @@
         <button class="hdr-btn hdr-icon-btn" onclick="openNavigationPalette('all')"
                 title="Go to (⌘K / Ctrl+K)" aria-label="Go to">
           <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4"></circle><path d="m10 10 3 3"></path></svg>
-        </button>
-        <button class="hdr-btn hdr-icon-btn inbox-bell-button inbox-bell-button--header"
-                onclick="toggleInboxPopover(event)"
-                title="Notifications"
-                aria-label="Notifications"
-                aria-haspopup="dialog"
-                aria-expanded="false">
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M3.4 11.2h9.2l-1.1-1.5V6.8A3.5 3.5 0 0 0 8 3.2 3.5 3.5 0 0 0 4.5 6.8v2.9z"></path>
-            <path d="M6.5 12.8a1.7 1.7 0 0 0 3 0"></path>
-          </svg>
-          <span class="inbox-bell-badge" hidden></span>
         </button>
       </header>
       <div id="app-group-tabs-host" class="agent-group-tabs-host app-group-tabs-host" data-agent-group-tabs-host></div>
@@ -2303,19 +2306,6 @@
           type="button"
           onclick="statusBarOpenAttention()"
           title="Attention items">Attention —</button>
-    <button class="statusbar-segment statusbar-segment--action inbox-bell-button inbox-bell-button--statusbar"
-            type="button"
-            onclick="toggleInboxPopover(event)"
-            title="Notifications"
-            aria-label="Notifications"
-            aria-haspopup="dialog"
-            aria-expanded="false">
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path d="M3.4 11.2h9.2l-1.1-1.5V6.8A3.5 3.5 0 0 0 8 3.2 3.5 3.5 0 0 0 4.5 6.8v2.9z"></path>
-        <path d="M6.5 12.8a1.7 1.7 0 0 0 3 0"></path>
-      </svg>
-      <span class="inbox-bell-badge" hidden></span>
-    </button>
   </div>
 </div>
 

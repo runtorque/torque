@@ -299,6 +299,7 @@ body.tauri-mode #taskbar-conn-dot {
 /* Main scroll area                                                    */
 /* ------------------------------------------------------------------ */
 #workspace-shell {
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
