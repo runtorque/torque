@@ -719,7 +719,7 @@ function renderBoard() {
     html += '<span class="board-filter-indicator-label">Filtering active</span>';
     html += '<span class="board-filter-indicator-summary">' + esc(_boardFilterSummaryText()) + '</span>';
     html += '<button type="button" class="board-filter-indicator-clear btn btn-secondary btn-xs"'
-      + ' onclick="boardClearFilters()">Clear filters</button>';
+      + ' onclick="boardClearFilters()">Clear Filters</button>';
     html += '</div>';
   }
   // When filters become active, save the current lane; auto-select first non-empty lane

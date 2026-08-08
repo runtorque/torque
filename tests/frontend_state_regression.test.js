@@ -35057,7 +35057,7 @@ test('default Board layout announces every active filter type and renders nothin
     assert.ok(panel.innerHTML.includes(scenario.summary), scenario.summary);
     assert.match(
       panel.innerHTML,
-      /board-filter-indicator-clear[^>]*onclick="boardClearFilters\(\)">Clear filters/,
+      /board-filter-indicator-clear[^>]*onclick="boardClearFilters\(\)">Clear Filters/,
     );
     assert.ok(
       panel.innerHTML.indexOf('board-filter-indicator') < panel.innerHTML.indexOf('board-lane-bar'),
