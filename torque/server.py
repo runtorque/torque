@@ -4868,6 +4868,16 @@ async def main(connection=None):
         if current_submodules:
             summary["submodules"] = current_submodules
         if started:
+            # Keep the successor gate strict, but do not hide the independent
+            # boundary-to-tip fact from audited review-cycle continuation.
+            # The continuation consumer still fails closed unless Git proves
+            # the recorded boundary is an ancestor of this observed head.
+            if head_sha and head_sha != commit_sha:
+                await _ensure_boundary_tip_mismatch_info(
+                    worktree_mgr,
+                    cell,
+                    summary,
+                )
             summary["reason"] = "started_successor"
             return {
                 "latest": summary,

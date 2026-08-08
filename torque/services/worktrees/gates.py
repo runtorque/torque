@@ -444,8 +444,11 @@ async def _boundary_gate_message(
         *,
         state: MatrixState | None = None,
         stale_base: dict | None = None) -> str:
-    if reason == "branch_tip_moved":
-        await _ensure_boundary_tip_mismatch_info(worktree_mgr, cell, boundary)
+    if reason in {"branch_tip_moved", "started_successor"}:
+        if reason == "branch_tip_moved":
+            await _ensure_boundary_tip_mismatch_info(
+                worktree_mgr, cell, boundary
+            )
         if await _review_cycle_deadlock_composed(
                 state, worktree_mgr, cell,
                 stale_base=stale_base, boundary=boundary):
