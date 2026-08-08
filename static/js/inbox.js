@@ -7,7 +7,9 @@ var _inboxShowArchived = false;
 var _inboxHistoryRequested = false;
 var _inboxHasMore = false;
 var _inboxHistoryOffset = 0;
+var _inboxHistoryLoading = false;
 var _inboxPopoverAnchor = null;
+var _inboxPageSize = 20;
 
 function _inboxNoticeMap() {
   if (!state.operator_notices || typeof state.operator_notices !== 'object') {
@@ -28,11 +30,30 @@ function _inboxSummary() {
   };
 }
 
-function inboxNormalizeState() {
-  _inboxNoticeMap();
-  _inboxHistoryRequested = false;
-  _inboxHistoryOffset = Object.keys(state.operator_notices).length;
-  _inboxHasMore = false;
+function inboxNormalizeState(previousNotices) {
+  var snapshotNotices = _inboxNoticeMap();
+  if (_inboxHistoryRequested && previousNotices
+      && typeof previousNotices === 'object') {
+    // A full-state resync includes the daemon's 200-row notice cache. Keep the
+    // exact client-owned page instead of replacing it (or deriving the cursor
+    // from either map's distinct-id count). Refresh loaded rows when the
+    // snapshot has a newer copy of the same notice.
+    var pagedNotices = {};
+    Object.keys(previousNotices).forEach(function(id) {
+      pagedNotices[id] = snapshotNotices[id] || previousNotices[id];
+    });
+    state.operator_notices = pagedNotices;
+    // A request outstanding before a resync may never receive its response.
+    // Leave the response-owned offset intact but allow scrolling to retry it.
+    _inboxHistoryLoading = false;
+  } else {
+    // Do not render the daemon's broad snapshot before the first 20-row page.
+    state.operator_notices = {};
+    _inboxHistoryRequested = false;
+    _inboxHistoryOffset = 0;
+    _inboxHistoryLoading = false;
+    _inboxHasMore = false;
+  }
   if (!state.operator_notice_summary
       || typeof state.operator_notice_summary !== 'object') {
     state.operator_notice_summary = _inboxSummary();
@@ -338,29 +359,50 @@ function _inboxRenderNotice(notice) {
   html += '<div class="inbox-item-meta">' + meta.join('<span aria-hidden="true">·</span>') + '</div>';
   html += '<div class="inbox-item-actions">';
   if (actionLabel) {
-    html += '<button type="button" class="btn-primary btn-sm" onclick="inboxRunAction(\''
+    html += '<button type="button" class="btn-primary btn-sm" data-inbox-focus-key="'
+      + id + ':open" onclick="inboxRunAction(\''
       + id + '\')">' + esc(actionLabel) + '</button>';
   }
   if (unread) {
-    html += '<button type="button" class="btn-secondary btn-sm" onclick="inboxLifecycle(\''
+    html += '<button type="button" class="btn-secondary btn-sm" data-inbox-focus-key="'
+      + id + ':read" onclick="inboxLifecycle(\''
       + id + '\',\'read\')">Mark read</button>';
   }
   if (notice.notice_type === 'alert' && activeAlert) {
-    html += '<button type="button" class="btn-secondary btn-sm" onclick="inboxLifecycle(\''
+    html += '<button type="button" class="btn-secondary btn-sm" data-inbox-focus-key="'
+      + id + ':resolve" onclick="inboxLifecycle(\''
       + id + '\',\'resolve\')">Resolve</button>';
-    html += '<button type="button" class="btn-quiet btn-sm" onclick="inboxLifecycle(\''
+    html += '<button type="button" class="btn-quiet btn-sm" data-inbox-focus-key="'
+      + id + ':dismiss" onclick="inboxLifecycle(\''
       + id + '\',\'dismiss\')">Dismiss</button>';
   }
-  html += '<button type="button" class="btn-quiet btn-sm" onclick="inboxLifecycle(\''
+  html += '<button type="button" class="btn-quiet btn-sm" data-inbox-focus-key="'
+    + id + ':archive" onclick="inboxLifecycle(\''
     + id + '\',\'' + (archived ? 'restore' : 'archive') + '\')">'
     + (archived ? 'Restore' : 'Archive') + '</button>';
   html += '</div></div></article>';
   return html;
 }
 
+function _inboxCaptureFocusKey(active) {
+  if (!active || typeof active.getAttribute !== 'function') return '';
+  var key = active.getAttribute('data-inbox-focus-key');
+  if (!key) return '';
+  var escaped = typeof CSS !== 'undefined' && CSS.escape
+    ? CSS.escape(key)
+    : String(key).replace(/["\\]/g, '\\$&');
+  return '[data-inbox-focus-key="' + escaped + '"]';
+}
+
 function renderInbox() {
   var root = document.getElementById('inbox-popover');
   if (!root) return;
+  var surfaceState = typeof _captureSurfaceState === 'function'
+    ? _captureSurfaceState(root, {
+      scrollSelectors: ['.inbox-list'],
+      captureFocusKey: _inboxCaptureFocusKey,
+    })
+    : null;
   var oldScroller = root.querySelector('.inbox-list');
   var scrollTop = oldScroller ? oldScroller.scrollTop : 0;
   var summary = _inboxSummary();
@@ -370,29 +412,30 @@ function renderInbox() {
   html += '<div><h2>Inbox</h2><p>Durable alerts and activity that need your attention.</p></div>';
   html += '<div class="inbox-header-actions">';
   if (summary.unread_total > 0) {
-    html += '<button type="button" class="btn-secondary btn-sm" onclick="inboxMarkAllRead()">Mark all read</button>';
+    html += '<button type="button" class="btn-secondary btn-sm" data-inbox-focus-key="mark-all" '
+      + 'onclick="inboxMarkAllRead()">Mark all read</button>';
   }
-  html += '<button type="button" class="btn-quiet btn-sm inbox-close" '
+  html += '<button type="button" class="btn-quiet btn-sm inbox-close" data-inbox-focus-key="close" '
     + 'onclick="closeInboxPopover({restoreFocus:true})" aria-label="Close notifications">×</button>';
   html += '</div></div>';
   html += '<div class="inbox-toolbar">';
   html += '<div class="ui-segmented-control" role="tablist" aria-label="Inbox view">';
-  html += '<button type="button" role="tab" aria-selected="' + (_inboxView === 'alerts')
+  html += '<button type="button" role="tab" data-inbox-focus-key="view-alerts" aria-selected="' + (_inboxView === 'alerts')
     + '" class="' + (_inboxView === 'alerts' ? 'active' : '')
     + '" onclick="inboxSetView(\'alerts\')">Alerts'
     + (summary.open_alerts ? '<span class="inbox-tab-count">' + summary.open_alerts + '</span>' : '')
     + '</button>';
-  html += '<button type="button" role="tab" aria-selected="' + (_inboxView === 'notifications')
+  html += '<button type="button" role="tab" data-inbox-focus-key="view-notifications" aria-selected="' + (_inboxView === 'notifications')
     + '" class="' + (_inboxView === 'notifications' ? 'active' : '')
     + '" onclick="inboxSetView(\'notifications\')">Notifications'
     + (summary.unread_notifications ? '<span class="inbox-tab-count">' + summary.unread_notifications + '</span>' : '')
     + '</button></div>';
-  html += '<label class="inbox-archived-toggle"><input type="checkbox" '
+  html += '<label class="inbox-archived-toggle"><input type="checkbox" data-inbox-focus-key="archived-toggle" '
     + (_inboxShowArchived ? 'checked ' : '')
     + 'onchange="inboxToggleArchived(this.checked)"> Show archived</label>';
   html += '</div>';
   html += '<div class="inbox-list" role="feed">';
-  if (!notices.length) {
+  if (!notices.length && !_inboxHistoryLoading) {
     html += '<div class="ui-state ui-state--empty inbox-empty"><strong>'
       + (_inboxView === 'alerts' ? 'No alerts' : 'No notifications')
       + '</strong><span>'
@@ -403,46 +446,86 @@ function renderInbox() {
   } else {
     html += notices.map(_inboxRenderNotice).join('');
   }
-  if (_inboxHasMore) {
-    html += '<div class="inbox-load-more"><button type="button" class="btn-secondary btn-sm" '
-      + 'onclick="inboxLoadOlder()">Load older</button></div>';
+  if (_inboxHistoryLoading) {
+    html += '<div class="inbox-history-status is-loading" role="status">Loading older items…</div>';
+  } else if (_inboxHistoryRequested && !_inboxHasMore) {
+    html += '<div class="inbox-history-status is-complete" role="status">End of history</div>';
   }
   html += '</div></section>';
   root.innerHTML = html;
   var scroller = root.querySelector('.inbox-list');
-  if (scroller) scroller.scrollTop = scrollTop;
+  if (surfaceState && typeof _restoreSurfaceState === 'function') {
+    _restoreSurfaceState(root, surfaceState);
+  } else if (scroller) {
+    scroller.scrollTop = scrollTop;
+  }
+  if (scroller && typeof scroller.addEventListener === 'function') {
+    scroller.addEventListener('scroll', inboxHandleScroll);
+  }
   inboxUpdateBadge();
+}
+
+function _inboxNoticeType() {
+  return _inboxView === 'notifications' ? 'notification' : 'alert';
+}
+
+function _inboxRequestPage(offset) {
+  if (_inboxHistoryLoading || typeof send !== 'function') return false;
+  _inboxHistoryLoading = true;
+  send({
+    cmd: 'operator_notices_list',
+    notice_type: _inboxNoticeType(),
+    include_archived: _inboxShowArchived,
+    limit: _inboxPageSize,
+    offset: offset,
+  });
+  return true;
 }
 
 function inboxEnsureLoaded() {
   if (_inboxHistoryRequested || typeof send !== 'function') return;
   _inboxHistoryRequested = true;
   _inboxHistoryOffset = 0;
-  send({
-    cmd: 'operator_notices_list',
-    include_archived: true,
-    limit: 200,
-    offset: 0,
-  });
+  _inboxHasMore = false;
+  _inboxRequestPage(0);
 }
 
 function inboxLoadOlder() {
-  if (!_inboxHasMore || typeof send !== 'function') return;
-  send({
-    cmd: 'operator_notices_list',
-    include_archived: true,
-    limit: 200,
-    offset: _inboxHistoryOffset,
-  });
+  if (!_inboxHasMore) return false;
+  return _inboxRequestPage(_inboxHistoryOffset);
+}
+
+function inboxHandleScroll(event) {
+  var scroller = event && (event.currentTarget || event.target);
+  if (!scroller || !_inboxHasMore || _inboxHistoryLoading) return;
+  var remaining = Number(scroller.scrollHeight || 0)
+    - Number(scroller.scrollTop || 0)
+    - Number(scroller.clientHeight || 0);
+  if (remaining <= 96) inboxLoadOlder();
+}
+
+function _inboxResetHistory() {
+  state.operator_notices = {};
+  _inboxHistoryRequested = false;
+  _inboxHistoryOffset = 0;
+  _inboxHistoryLoading = false;
+  _inboxHasMore = false;
+  if (_inboxPopoverVisible()) inboxEnsureLoaded();
 }
 
 function inboxSetView(view) {
-  _inboxView = view === 'notifications' ? 'notifications' : 'alerts';
+  var next = view === 'notifications' ? 'notifications' : 'alerts';
+  if (next === _inboxView) return;
+  _inboxView = next;
+  _inboxResetHistory();
   renderInbox();
 }
 
 function inboxToggleArchived(show) {
-  _inboxShowArchived = !!show;
+  var next = !!show;
+  if (next === _inboxShowArchived) return;
+  _inboxShowArchived = next;
+  _inboxResetHistory();
   renderInbox();
 }
 
@@ -541,6 +624,11 @@ function inboxReceiveCommandMessage(msg) {
   if (!msg) return false;
   if (msg.type === 'operator_notices') {
     var offset = Number(msg.offset || 0);
+    if ((msg.notice_type && msg.notice_type !== _inboxNoticeType())
+        || (typeof msg.include_archived === 'boolean'
+          && msg.include_archived !== _inboxShowArchived)) {
+      return true;
+    }
     var next = offset > 0 ? Object.assign({}, _inboxNoticeMap()) : {};
     (msg.notices || []).forEach(function(notice) {
       if (notice && notice.id) next[notice.id] = notice;
@@ -548,6 +636,7 @@ function inboxReceiveCommandMessage(msg) {
     state.operator_notices = next;
     _inboxHistoryRequested = true;
     _inboxHistoryOffset = offset + (msg.notices || []).length;
+    _inboxHistoryLoading = false;
     _inboxHasMore = !!msg.has_more;
     if (msg.summary) state.operator_notice_summary = msg.summary;
     inboxUpdateBadge();

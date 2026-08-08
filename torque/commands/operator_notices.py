@@ -32,6 +32,8 @@ async def _handle_operator_notice_command(
 ) -> dict:
     cmd = str(data.get("cmd", "") or "").strip()
     if cmd == "operator_notices_list":
+        notice_type = str(data.get("notice_type", "") or "").strip()
+        include_archived = bool(data.get("include_archived", True))
         try:
             limit = max(1, min(500, int(data.get("limit", 200))))
         except (TypeError, ValueError):
@@ -41,8 +43,8 @@ async def _handle_operator_notice_command(
         except (TypeError, ValueError):
             offset = 0
         notices = state.list_operator_notices(
-            notice_type=data.get("notice_type", ""),
-            include_archived=bool(data.get("include_archived", True)),
+            notice_type=notice_type,
+            include_archived=include_archived,
             limit=limit + 1,
             offset=offset,
         )
@@ -51,6 +53,8 @@ async def _handle_operator_notice_command(
             "notices": notices[:limit],
             "offset": offset,
             "has_more": len(notices) > limit,
+            "notice_type": notice_type,
+            "include_archived": include_archived,
             "summary": state.operator_notice_summary(),
         }
 

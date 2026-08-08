@@ -34602,3 +34602,150 @@ test('collapsing the classic board does not refocus the embedded terminal worksp
   assert.equal(panel.classList.contains('collapsed'), true);
   assert.equal(context.focusEmbeddedTerminalWorkspaceCalls, 0);
 });
+
+test('Inbox pages 20 rows on scroll without cursor drift, duplicate cards, or viewport jumps', () => {
+  const { sandbox, document } = createSandbox();
+  const popover = document.register('inbox-popover');
+  popover.hidden = false;
+  const scroller = new FakeElement('inbox-list');
+  scroller.classList.add('inbox-list');
+  scroller.scrollHeight = 1000;
+  scroller.clientHeight = 300;
+  popover.setQuerySelector('.inbox-list', scroller);
+  const bell = new FakeElement('inbox-bell');
+  const badge = new FakeElement('inbox-badge');
+  bell.setQuerySelector('.inbox-bell-badge', badge);
+  document.setSelectorAll('.inbox-bell-button', [bell]);
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/inbox.js');
+
+  runInContext(context, `
+    state.operator_notices = {};
+    state.operator_notice_summary = {
+      open_alerts: 77,
+      unread_alerts: 77,
+      unread_notifications: 0,
+      unread_total: 77,
+      active_total: 77
+    };
+    inboxEnsureLoaded();
+  `);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [{
+    cmd: 'operator_notices_list',
+    notice_type: 'alert',
+    include_archived: false,
+    limit: 20,
+    offset: 0,
+  }]);
+
+  const firstPage = Array.from({ length: 20 }, (_, index) => ({
+    id: `notice-${index}`,
+    notice_type: 'alert',
+    title: `Notice ${index}`,
+    created_at: 100 - index,
+    last_occurred_at: 100 - index,
+  }));
+  context.inboxReceiveCommandMessage({
+    type: 'operator_notices',
+    notices: firstPage,
+    offset: 0,
+    has_more: true,
+    notice_type: 'alert',
+    include_archived: false,
+    summary: sandbox.state.operator_notice_summary,
+  });
+  assert.equal(runInContext(context, `_inboxHistoryOffset`), 20);
+
+  context.inboxReceiveUpsert({
+    event: 'publish',
+    notice: {
+      id: 'notice-live',
+      notice_type: 'alert',
+      title: 'Arrived live',
+      created_at: 200,
+      last_occurred_at: 200,
+    },
+    summary: sandbox.state.operator_notice_summary,
+  });
+  assert.equal(runInContext(context, `_inboxHistoryOffset`), 20,
+    'a live map insertion must not alter the response-owned row cursor');
+
+  scroller.scrollTop = 650;
+  scroller.listeners.scroll({ currentTarget: scroller });
+  scroller.listeners.scroll({ currentTarget: scroller });
+  assert.equal(sandbox.sendCalls.length, 2,
+    'rapid near-bottom scroll events must coalesce while the page is in flight');
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls[1])), {
+    cmd: 'operator_notices_list',
+    notice_type: 'alert',
+    include_archived: false,
+    limit: 20,
+    offset: 20,
+  });
+
+  // A row inserted at the head between OFFSET requests can make the second
+  // response overlap the first. The keyed client merge renders it once while
+  // advancing by the actual 20 returned rows, never by the merged map size.
+  const secondPage = Array.from({ length: 20 }, (_, index) => ({
+    id: `notice-${index + 19}`,
+    notice_type: 'alert',
+    title: `Notice ${index + 19}`,
+    created_at: 81 - index,
+    last_occurred_at: 81 - index,
+  }));
+  const oldFocusedAction = new FakeElement();
+  oldFocusedAction.setAttribute('data-inbox-focus-key', 'notice-3:read');
+  const restoredAction = new FakeElement('restored-action');
+  restoredAction.setAttribute('data-inbox-focus-key', 'notice-3:read');
+  popover.appendChild(oldFocusedAction);
+  popover.setQuerySelector('[data-inbox-focus-key="notice-3:read"]', restoredAction);
+  document.activeElement = oldFocusedAction;
+  scroller.scrollTop = 321;
+  context.inboxReceiveCommandMessage({
+    type: 'operator_notices',
+    notices: secondPage,
+    offset: 20,
+    has_more: false,
+    notice_type: 'alert',
+    include_archived: false,
+    summary: sandbox.state.operator_notice_summary,
+  });
+
+  assert.equal(runInContext(context, `_inboxHistoryOffset`), 40);
+  assert.equal(scroller.scrollTop, 321, 'appending a page preserves the list viewport');
+  assert.equal(restoredAction.focused, true,
+    'the shared surface-state helper restores the focused notice action');
+  const renderedIds = Array.from(popover.innerHTML.matchAll(/data-notice-id="([^"]+)"/g),
+    (match) => match[1]);
+  assert.equal(renderedIds.length, new Set(renderedIds).size,
+    'overlapping consecutive pages never render a duplicate notice id');
+  assert.match(popover.innerHTML, /End of history/);
+  assert.equal(badge.textContent, '77',
+    'the badge remains sourced from the server summary, not the loaded page');
+
+  const pagedNotices = sandbox.state.operator_notices;
+  sandbox.state.operator_notices = Object.fromEntries(
+    Array.from({ length: 200 }, (_, index) => [
+      `snapshot-${index}`,
+      { id: `snapshot-${index}`, notice_type: 'alert' },
+    ]),
+  );
+  context.inboxNormalizeState(pagedNotices);
+  assert.equal(runInContext(context, `_inboxHistoryOffset`), 40,
+    'a full-state resync must not clobber the response-owned cursor with map size');
+  assert.deepEqual(
+    Object.keys(sandbox.state.operator_notices).sort(),
+    Object.keys(pagedNotices).sort(),
+    'a full-state resync keeps the client-owned loaded page instead of the 200-row snapshot',
+  );
+
+  context.inboxSetView('notifications');
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls.at(-1))), {
+    cmd: 'operator_notices_list',
+    notice_type: 'notification',
+    include_archived: false,
+    limit: 20,
+    offset: 0,
+  }, 'changing the server result set resets the cursor and requests a fresh page');
+});

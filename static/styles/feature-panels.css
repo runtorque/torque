@@ -269,10 +269,14 @@ body.tauri-mode .inbox-bell-button--statusbar {
   color: var(--text-dim);
   font-size: 10px;
 }
-.inbox-load-more {
-  display: flex;
-  justify-content: center;
-  padding: 6px 0 2px;
+.inbox-history-status {
+  padding: 8px 0 2px;
+  color: var(--text-dim);
+  text-align: center;
+  font-size: 9px;
+}
+.inbox-history-status.is-loading {
+  color: var(--text);
 }
 .health-panel {
   min-height: 100%;
