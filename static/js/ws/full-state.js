@@ -84,6 +84,7 @@ function _handleClientFocusUpdate(msg) {
 function _handleFullState(msg) {
   _cancelPendingDeltaSurfaceRender();
   const prevActive = state.active_session_id;
+  const prevOperatorNotices = state.operator_notices || {};
   const prevTasks = state.board_tasks || {};
   const prevGroup = (typeof _activeGroup === 'function') ? _activeGroup() : '';
   const prevStandaloneVisibleApps = (typeof _standaloneVisiblePanelApps === 'function'
@@ -98,7 +99,9 @@ function _handleFullState(msg) {
   _awaitingFullState = false;
   _clientScopedFocusActive = !!(msg && msg.client_scoped_focus);
   state = msg;
-  if (typeof inboxNormalizeState === 'function') inboxNormalizeState();
+  if (typeof inboxNormalizeState === 'function') {
+    inboxNormalizeState(prevOperatorNotices);
+  }
   if (typeof _compactInitDeferredMaps === 'function') _compactInitDeferredMaps();
   if (typeof _invalidateTaskLookupIndex === 'function') _invalidateTaskLookupIndex();
   if (typeof _agentPanelWorkerTaskIdCacheByAgent !== 'undefined') {

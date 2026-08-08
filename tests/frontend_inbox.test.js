@@ -319,8 +319,9 @@ test('notification bell opens and closes the anchored Inbox overlay', () => {
     JSON.parse(JSON.stringify(sends.pop())),
     {
       cmd: 'operator_notices_list',
-      include_archived: true,
-      limit: 200,
+      notice_type: 'alert',
+      include_archived: false,
+      limit: 20,
       offset: 0,
     },
   );
