@@ -311,7 +311,7 @@ function _boardLoadMoreHtml(lane, remaining) {
     + ' — click or scroll to load</div>';
 }
 
-function _boardRenderLaneSection(lane, model, filtersActive, skipAddTask) {
+function _boardRenderLaneSection(lane, model, filtersActive, skipAddTask, filterIndicatorVisible) {
   var html = '';
   var childrenOf = (model && model.childrenOf) || {};
   var rootTasks = _boardRootTasksForLane(lane, model ? model.visibleTasks : null, model);
@@ -337,6 +337,7 @@ function _boardRenderLaneSection(lane, model, filtersActive, skipAddTask) {
         _boardLanePoolTasks(lane, model),
         rootTasks,
         filtersActive,
+        filterIndicatorVisible,
       ),
       false,
     );
@@ -710,6 +711,17 @@ function renderBoard() {
       html += '</div>';
     }
   }
+  // The default single-lane layout otherwise leaves active filtering visible
+  // only in the toolbar. Keep this notice outside the cached lane body so a
+  // changing summary never becomes part of the lane render cache key.
+  if (filtersActive && !wideLayout && !_boardShowSchedules) {
+    html += '<div class="board-filter-indicator" role="status" aria-label="Board filtering is active">';
+    html += '<span class="board-filter-indicator-label">Filtering active</span>';
+    html += '<span class="board-filter-indicator-summary">' + esc(_boardFilterSummaryText()) + '</span>';
+    html += '<button type="button" class="board-filter-indicator-clear btn btn-secondary btn-xs"'
+      + ' onclick="boardClearFilters()">Clear filters</button>';
+    html += '</div>';
+  }
   // When filters become active, save the current lane; auto-select first non-empty lane
   if (filtersActive) {
     if (!_boardPreFilterLane) _boardPreFilterLane = _boardSelectedLane;
@@ -805,6 +817,8 @@ function renderBoard() {
     var laneSection = _boardRenderLaneSection(
       _boardSelectedLane,
       renderModel,
+      filtersActive,
+      false,
       filtersActive,
     );
     _boardRememberLaneRender(_boardSelectedLane, renderModel, filtersActive, false, false, laneSection);

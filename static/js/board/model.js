@@ -459,13 +459,15 @@ function _renderBoardMessageState(state, noteOnly) {
   return html;
 }
 
-function _boardEmptyStateForLane(lane, laneTasks, rootTasks, filtersActive) {
+function _boardEmptyStateForLane(lane, laneTasks, rootTasks, filtersActive, filterIndicatorVisible) {
   var escLane = esc(lane).replace(/'/g, "\\'");
   if (filtersActive) {
     return {
       title: 'No matching tasks',
       body: 'The current search or filters hide everything in ' + lane + '. Clear filters or broaden the query.',
-      actions: [{ label: 'Clear Filters', onclick: 'boardClearFilters()' }],
+      actions: filterIndicatorVisible
+        ? []
+        : [{ label: 'Clear Filters', onclick: 'boardClearFilters()' }],
     };
   }
   if (lane === 'Backlog') {
@@ -502,7 +504,7 @@ function _boardEmptyStateForLane(lane, laneTasks, rootTasks, filtersActive) {
     return {
       title: 'No standalone tasks to show',
       body: 'The matching tasks in ' + lane + ' are nested under work shown elsewhere. Open the parent chain or adjust filters.',
-      actions: filtersActive
+      actions: filtersActive && !filterIndicatorVisible
         ? [{ label: 'Clear Filters', onclick: 'boardClearFilters()' }]
         : [],
     };
@@ -1115,7 +1117,7 @@ function _boardPatchNarrowLaneBody(panel, lane, model, filtersActive) {
       renderLimit: cached.renderLimit || _boardRenderLimitValue(lane),
     };
   }
-  var section = _boardRenderLaneSection(lane, model, filtersActive, false);
+  var section = _boardRenderLaneSection(lane, model, filtersActive, false, filtersActive);
   cardsEl.innerHTML = section.html || '';
   cardsEl.scrollTop = _boardCardsScrollTop;
   _boardPatchLaneCountDom(panel, lane, _boardLaneCount(lane, model));

@@ -1553,6 +1553,37 @@ body.runtime-embedded .board-empty-action:focus-visible {
   border: 1px solid var(--amber);
   background: rgba(210,153,34,.12);
 }
+.board-filter-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin: 6px 8px 0;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 52%, var(--border));
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-cell));
+  color: var(--text);
+  box-shadow: 0 1px 5px rgba(0,0,0,.16);
+}
+.board-filter-indicator-label {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .02em;
+}
+.board-filter-indicator-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 10px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.board-filter-indicator-clear {
+  flex: 0 0 auto;
+}
 /* Lane tab grayed out when empty after filtering */
 .board-lane-tab.empty-filtered { opacity: .4; }
 .board-filter-clear {

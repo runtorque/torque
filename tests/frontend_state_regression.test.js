@@ -35020,3 +35020,132 @@ test('Inbox pages 20 rows on scroll without cursor drift, duplicate cards, or vi
     offset: 0,
   }, 'changing the server result set resets the cursor and requests a fresh page');
 });
+
+// Active Board filter indicator regressions. Keep this block additive because
+// it intentionally shares this broad frontend harness with concurrent work.
+test('default Board layout announces every active filter type and renders nothing when unfiltered', () => {
+  const scenarios = [
+    { setup: `_boardSearchQuery = 'deploy';`, summary: 'Search &quot;deploy&quot;' },
+    { setup: `_boardFilterLabels = ['bug'];`, summary: 'Labels bug' },
+    { setup: `_boardFilterActions = ['feature/review'];`, summary: 'Actions feature/review' },
+    { setup: `_boardFilterAgents = ['agent-1'];`, summary: 'Agents Alice Reviewer' },
+    { setup: `_boardFilterHealth = ['healthy'];`, summary: 'Health Healthy' },
+    { setup: `_boardQuickView = 'recent';`, summary: 'Recent tasks' },
+  ];
+
+  for (const scenario of scenarios) {
+    const { context, document } = createBoardHarness();
+    const panel = document.register('panel-board');
+    document.register('board-cards');
+    context.state.agents = {
+      'agent-1': { id: 'agent-1', name: 'Alice Reviewer', slug: 'alice-reviewer' },
+    };
+    context.state.board_lanes = ['Backlog', 'Done'];
+    context.state.board_tasks = {
+      root: {
+        id: 'root', group: 'alpha', task: 'Deploy fix', lane: 'Backlog', position: 1,
+        labels: ['bug'], action_name: 'feature/review', agent_id: 'agent-1', health_state: 'healthy',
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      },
+    };
+    runInContext(context, scenario.setup);
+
+    context.renderBoard();
+
+    assert.match(panel.innerHTML, /class="board-filter-indicator" role="status"/);
+    assert.match(panel.innerHTML, /board-filter-indicator-label">Filtering active/);
+    assert.ok(panel.innerHTML.includes(scenario.summary), scenario.summary);
+    assert.match(
+      panel.innerHTML,
+      /board-filter-indicator-clear[^>]*onclick="boardClearFilters\(\)">Clear filters/,
+    );
+    assert.ok(
+      panel.innerHTML.indexOf('board-filter-indicator') < panel.innerHTML.indexOf('board-lane-bar'),
+      'the indicator stays above the default lane navigation and cards',
+    );
+  }
+
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+  context.state.board_lanes = ['Backlog'];
+  context.state.board_tasks = {
+    root: { id: 'root', group: 'alpha', task: 'Deploy fix', lane: 'Backlog', position: 1 },
+  };
+  runInContext(context, `_boardFilterByGroup = true; _boardShowArchived = true;`);
+  context.renderBoard();
+  assert.doesNotMatch(panel.innerHTML, /board-filter-indicator/,
+    'group scope and archived visibility are view settings, not active task filters');
+
+  const styles = appStylesheetSource();
+  assert.match(styles, /\.board-filter-indicator\s*\{[\s\S]*?border-left:\s*3px solid var\(--accent\)/);
+  assert.match(styles, /\.board-filter-indicator\s*\{[\s\S]*?background:\s*color-mix/);
+});
+
+test('Board filter indicator clear action reuses the canonical reset and avoids an empty-state duplicate', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+  context.state.board_lanes = ['Backlog'];
+  context.state.board_tasks = {
+    root: { id: 'root', group: 'alpha', task: 'Ship docs', lane: 'Backlog', position: 1 },
+  };
+  runInContext(context, `
+    _boardSearchQuery = 'no match';
+    _boardQuickView = 'recent';
+    _boardFilterLabels = ['bug'];
+    _boardFilterActions = ['feature/review'];
+    _boardFilterAgents = ['agent-1'];
+    _boardFilterHealth = ['healthy'];
+  `);
+
+  context.renderBoard();
+
+  assert.match(panel.innerHTML, /board-filter-indicator-clear[^>]*onclick="boardClearFilters\(\)"/);
+  assert.match(panel.innerHTML, /No matching tasks/);
+  assert.doesNotMatch(panel.innerHTML, /board-empty-action[^>]*onclick="boardClearFilters\(\)"/,
+    'the persistent action replaces the redundant filtered-empty recovery button');
+
+  context.boardClearFilters();
+
+  assert.deepEqual(jsonValue(context, `({
+    search: _boardSearchQuery,
+    quick: _boardQuickView,
+    labels: _boardFilterLabels,
+    actions: _boardFilterActions,
+    agents: _boardFilterAgents,
+    health: _boardFilterHealth
+  })`), { search: '', quick: '', labels: [], actions: [], agents: [], health: [] });
+  assert.doesNotMatch(panel.innerHTML, /board-filter-indicator/);
+});
+
+test('Board filter indicator stays outside lane cache identity and preserves the wide-lane summary', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+  const searchInput = document.register('board-search-input');
+  context.state.board_lanes = ['Backlog', 'Done'];
+  context.state.board_tasks = {
+    root: { id: 'root', group: 'alpha', task: 'Deploy fix', lane: 'Backlog', position: 1 },
+  };
+  runInContext(context, `_boardSearchQuery = 'deploy';`);
+  context.renderBoard();
+  const laneKey = runInContext(context, `_boardLaneRenderCache['narrow:Backlog'].key`);
+
+  searchInput.value = 'deploy ';
+  context.boardUpdateSearch('deploy ');
+
+  assert.equal(runInContext(context, `_boardLaneRenderCache['narrow:Backlog'].key`), laneKey,
+    'a summary-only query change does not enter or invalidate the lane render cache key');
+  assert.equal(searchInput.focused, true);
+  assert.equal(searchInput.selectionStart, 7);
+  assert.match(panel.innerHTML, /Search &quot;deploy &quot;/);
+
+  document.body.classList.add('runtime-embedded');
+  panel.clientWidth = 1200;
+  context.renderBoard();
+  assert.match(panel.innerHTML, /board-wide-grid/);
+  assert.match(panel.innerHTML, /board-wide-lane-summary">Search &quot;deploy &quot;/);
+  assert.doesNotMatch(panel.innerHTML, /board-filter-indicator/,
+    'wide layout retains its existing selected-lane summary instead of duplicating the default-layout indicator');
+});
