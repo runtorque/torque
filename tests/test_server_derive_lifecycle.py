@@ -1,4 +1,5 @@
 import importlib
+import json
 import sys
 import tempfile
 import types
@@ -396,6 +397,20 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
             closure,
         )
 
+    def _boundary_reason_message(self):
+        main_code = self.server_mod.main.__code__
+        message_code = next(
+            const
+            for const in main_code.co_consts
+            if isinstance(const, type(main_code))
+            and const.co_name == "_boundary_reason_message"
+        )
+        return types.FunctionType(
+            message_code,
+            self.server_mod.__dict__,
+            "_boundary_reason_message",
+        )
+
     def test_dispatch_linker_keeps_lane_assignment_state_and_backlink_together(self):
         """The one-step re-dispatch contract must remain a single code path."""
         state = self._make_state()
@@ -546,6 +561,402 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
             reason_message("started_successor", boundary),
             "Latest task boundary is no longer cleanly mergeable because "
             'follow-up task "Implement genuine follow-up" has already started.',
+        )
+
+    async def test_block_fix_cycle_can_continue_then_rebase_without_weakening_successor_gate(self):
+        state = self._make_state()
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            slug="engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+            status="running",
+            persistent=True,
+        )
+        implementer = self._make_agent(
+            "impl-1",
+            status="running",
+            current_task_id="TASK:1:3",
+        )
+        implementer.kind = "worker"
+        implementer.owner_engineer_id = engineer.id
+        implementer.created_by_engineer_id = engineer.id
+        implementer.worktree_path = "/repo/.torque/worktrees/impl-1"
+        implementer.worktree_repo_root = "/repo"
+        implementer.git_root = "/repo"
+        implementer.worktree_branch = "torque/engineer/impl-1"
+        implementer.worktree_base_branch = "main"
+        first_reviewer = self._make_agent("review-1")
+        first_reviewer.kind = "worker"
+        first_reviewer.owner_engineer_id = engineer.id
+        second_reviewer = self._make_agent("review-2")
+        second_reviewer.kind = "worker"
+        second_reviewer.owner_engineer_id = engineer.id
+        state.agents = {
+            cell.id: cell
+            for cell in (
+                engineer, implementer, first_reviewer, second_reviewer
+            )
+        }
+        state.groups["g"] = list(state.agents)
+
+        root = state.board_add_task(
+            "Implement feature",
+            "g",
+            lane="In Progress",
+            id="TASK:1",
+            action_name="feature/implement",
+            agent_id=implementer.id,
+            assigned_engineer_id=engineer.id,
+        )
+        shipped_review = state.board_add_task(
+            "First review ships",
+            "g",
+            lane="Done",
+            id="TASK:1:1",
+            action_name="feature/review",
+            agent_id=first_reviewer.id,
+            assigned_engineer_id=engineer.id,
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+            completion_evidence={
+                "review": {
+                    "verdict": "ship",
+                    "agent_id": first_reviewer.id,
+                    "recorded_at": "2026-08-08T10:00:00+00:00",
+                },
+            },
+            worktree_boundary={
+                "version": "1",
+                "repo_root": "/repo",
+                "branch": implementer.worktree_branch,
+                "base_branch": "main",
+                "commit_sha": "a" * 40,
+                "status": "open",
+                "recorded_at": "2026-08-08T10:00:00+00:00",
+                "code_delta": {"state": "present"},
+            },
+        )
+        blocking_review = state.board_add_task(
+            "Independent review blocks",
+            "g",
+            lane="In Progress",
+            id="TASK:1:2",
+            action_name="feature/review",
+            agent_id=second_reviewer.id,
+            assigned_engineer_id=engineer.id,
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=2,
+            resume_after_boundary_task_id=shipped_review.id,
+            status="Fixing blockers",
+            completion_evidence={
+                "review": {
+                    "verdict": "block",
+                    "agent_id": second_reviewer.id,
+                },
+            },
+        )
+        fix = state.board_add_task(
+            "Fix blockers",
+            "g",
+            lane="In Progress",
+            id="TASK:1:3",
+            action_name="feature/implement",
+            agent_id=implementer.id,
+            assigned_engineer_id=engineer.id,
+            parent_task_id=blocking_review.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=3,
+        )
+        state.pipeline_task_counters[root.id] = 4
+
+        class WorktreeManager:
+            def __init__(self):
+                self.rebased = False
+                self.stale = True
+                self.classification = "ahead"
+
+            async def current_head(self, _cell):
+                return ("c" if self.rebased else "b") * 40
+
+            async def boundary_tip_mismatch_info(
+                    self, _cell, boundary_sha, tip_sha):
+                return {
+                    "classification": self.classification,
+                    "commit_count": 1,
+                    "boundary_sha": boundary_sha,
+                    "tip_sha": tip_sha,
+                }
+
+            async def has_uncommitted_changes(self, _cell, **_kwargs):
+                return False
+
+            async def stale_base_info(self, _cell, **_kwargs):
+                return {
+                    "stale": self.stale and not self.rebased,
+                    "branch_head": ("c" if self.rebased else "b") * 40,
+                    "base_head": "d" * 40,
+                }
+
+            async def check_merge_conflicts(self, _cell, **_kwargs):
+                return {"clean": True, "tree_sha": "", "conflicts": []}
+
+        worktree_mgr = WorktreeManager()
+        latest_boundary_state = self._latest_boundary_state(
+            state, worktree_mgr
+        )
+        dispatch_calls, dispatch = self._recording_dispatch(state)
+
+        async def record_task_boundary(task, cell, message=""):
+            for older in self.server_mod.branch_boundary_tasks(
+                state.board_tasks.values(),
+                repo_root=implementer.worktree_repo_root,
+                branch=implementer.worktree_branch,
+                statuses={"open"},
+            ):
+                if older.id == task.id:
+                    continue
+                older.worktree_boundary = {
+                    **older.worktree_boundary,
+                    "status": "superseded",
+                    "superseded_by_task_id": task.id,
+                }
+            task.worktree_boundary = {
+                "version": "1",
+                "repo_root": implementer.worktree_repo_root,
+                "branch": implementer.worktree_branch,
+                "base_branch": implementer.worktree_base_branch,
+                "commit_sha": await worktree_mgr.current_head(cell),
+                "status": "open",
+                "recorded_at": "2026-08-08T12:00:00+00:00",
+                "recorded_by_agent_id": cell.id,
+                "message": message,
+                "code_delta": {"state": "present"},
+            }
+            return dict(task.worktree_boundary)
+
+        handle_command = self._extract_handle_command(
+            state,
+            dispatch,
+            worktree_mgr=worktree_mgr,
+            closure_overrides={
+                "_boundary_reason_message": self._boundary_reason_message(),
+                "_latest_boundary_state_for_cell": latest_boundary_state,
+                "_record_task_boundary": record_task_boundary,
+                "_worktree_submodules_for_cell": lambda _cell: [],
+                "_broadcast_toast": lambda *_args, **_kwargs: None,
+            },
+        )
+        calls = []
+
+        async def tracing_handle(payload):
+            calls.append(dict(payload))
+            if payload["cmd"] == "worktree_diff":
+                return {"type": "ok", "summary": {},
+                        "stale_base": {"stale": True}}
+            if payload["cmd"] == "worktree_rebase":
+                worktree_mgr.rebased = True
+                return {"type": "worktree_rebase", "ok": True}
+            return await handle_command(payload)
+
+        mcp_engineer = importlib.reload(
+            importlib.import_module("torque.mcp_engineer")
+        )
+        rebase_text, rebase_error = await (
+            mcp_engineer._dispatch_engineer_tool(
+                "engineer_rebase",
+                {"agent": implementer.id},
+                tracing_handle,
+                state,
+                caller_id=engineer.id,
+            )
+        )
+
+        self.assertTrue(rebase_error)
+        self.assertIn("review_cycle_continue", rebase_text)
+        self.assertNotIn(
+            "worktree_rebase", [call["cmd"] for call in calls]
+        )
+        first_check = calls[0]
+        self.assertEqual(first_check["cmd"], "worktree_check_merge")
+        boundary_state = await latest_boundary_state(implementer)
+        self.assertEqual(boundary_state["reason"], "started_successor")
+        boundary = boundary_state["latest"]
+        self.assertEqual(boundary["task_id"], shipped_review.id)
+        self.assertEqual(boundary["head_sha"], "b" * 40)
+        self.assertEqual(
+            boundary["boundary_tip_mismatch"]["classification"], "ahead"
+        )
+        self.assertEqual(
+            [item["task_id"] for item in boundary["started_followers"]],
+            [blocking_review.id],
+        )
+
+        worktree_mgr.stale = False
+        generic_check = await tracing_handle({
+            "cmd": "worktree_check_merge",
+            "id": implementer.id,
+            "allow_stale_base": True,
+            "allow_boundary_mismatch": True,
+        })
+        self.assertEqual(
+            generic_check["error"],
+            "Latest task boundary is no longer cleanly mergeable because "
+            'follow-up task "Independent review blocks" has already started.',
+        )
+        self.assertNotIn("boundary_mismatch_override", generic_check)
+        worktree_mgr.stale = True
+
+        worktree_mgr.classification = "unknown"
+        refused_text, refused_error = await (
+            mcp_engineer._dispatch_engineer_tool(
+                "engineer_review_cycle_continue",
+                {
+                    "task": shipped_review.id,
+                    "reason": "Classification must fail closed.",
+                },
+                tracing_handle,
+                state,
+                caller_id=engineer.id,
+            )
+        )
+        self.assertTrue(refused_error)
+        self.assertIn("branch tip to be verified ahead", refused_text)
+        self.assertEqual(shipped_review.worktree_boundary["status"], "open")
+        self.assertNotIn(
+            "review_cycle_continuations",
+            shipped_review.completion_evidence,
+        )
+        worktree_mgr.classification = "ahead"
+
+        continued_text, continued_error = await (
+            mcp_engineer._dispatch_engineer_tool(
+                "engineer_review_cycle_continue",
+                {
+                    "task": shipped_review.id,
+                    "reason": "Continue the verified Block-fix cycle.",
+                },
+                tracing_handle,
+                state,
+                caller_id=engineer.id,
+            )
+        )
+        self.assertFalse(continued_error, continued_text)
+        continued = json.loads(continued_text)
+        self.assertEqual(continued["type"], "review_cycle_continued")
+        self.assertEqual(
+            shipped_review.worktree_boundary["status"], "superseded"
+        )
+        self.assertEqual(
+            shipped_review.worktree_boundary["commit_sha"], "a" * 40
+        )
+        continuation = state.board_tasks[
+            continued["continuation_task_id"]
+        ]
+        predecessor_link = shipped_review.completion_evidence[
+            "review_cycle_continuations"
+        ][0]
+        continuation_link = continuation.completion_evidence[
+            "review_cycle_continue"
+        ]
+        for key in (
+                "original_review_task_id", "continuation_task_id",
+                "pipeline_root_id", "repo_root", "branch"):
+            self.assertEqual(predecessor_link[key], continuation_link[key])
+        self.assertEqual(
+            shipped_review.worktree_boundary["superseded_by_task_id"],
+            continuation.id,
+        )
+
+        calls.clear()
+        post_text, post_error = await mcp_engineer._dispatch_engineer_tool(
+            "engineer_rebase",
+            {"agent": implementer.id},
+            tracing_handle,
+            state,
+            caller_id=engineer.id,
+        )
+        self.assertFalse(post_error, post_text)
+        self.assertEqual(
+            [call["cmd"] for call in calls],
+            ["worktree_check_merge", "worktree_rebase",
+             "worktree_check_merge"],
+        )
+
+        # Model the ordinary queue handoff after the already-started Block/fix
+        # stage finishes: the audited continuation becomes the implementer's
+        # active task, then derives the required fresh review.
+        state.board_move_task(blocking_review.id, "Done")
+        state.board_move_task(fix.id, "Done")
+        fix.agent_id = ""
+        implementer.current_task_id = ""
+        await dispatch({
+            "cmd": "dispatch_task",
+            "id": continuation.id,
+            "agent_id": implementer.id,
+        })
+        implementer.current_task_id = continuation.id
+        derive_result = await handle_command({
+            "cmd": "ai_report",
+            "cell_id": implementer.id,
+            "action": "derive",
+            "action_name": "feature/review",
+            "message": "Fresh review after audited continuation and rebase",
+        })
+        self.assertEqual(derive_result["type"], "ok", derive_result)
+        fresh_review = state.board_tasks[derive_result["task_id"]]
+        self.assertEqual(fresh_review.parent_task_id, continuation.id)
+        self.assertEqual(fresh_review.pipeline_root_id, root.id)
+        self.assertEqual(fresh_review.action_name, "feature/review")
+        self.assertTrue(dispatch_calls)
+        fresh_reviewer = state.agents[fresh_review.agent_id]
+        fresh_reviewer.worktree_path = implementer.worktree_path
+        fresh_reviewer.worktree_repo_root = implementer.worktree_repo_root
+        fresh_reviewer.git_root = implementer.git_root
+        fresh_reviewer.worktree_branch = implementer.worktree_branch
+        fresh_reviewer.worktree_base_branch = implementer.worktree_base_branch
+        fresh_reviewer.current_task_id = fresh_review.id
+        shipped = await handle_command({
+            "cmd": "ai_report",
+            "cell_id": fresh_reviewer.id,
+            "action": "done",
+            "message": (
+                "Blocking issues: None\n"
+                "Follow-up classification: none\n"
+                "Final review verdict: Ship"
+            ),
+            "terminal_declaration": (
+                "No further work is needed; I will not derive after this."
+            ),
+        })
+        self.assertTrue(shipped is None or shipped.get("type") == "ok", shipped)
+        self.assertEqual(fresh_review.lane, "Done")
+        merged = self.server_mod.mark_branch_boundaries_merged(
+            state.board_tasks.values(),
+            repo_root=implementer.worktree_repo_root,
+            branch=implementer.worktree_branch,
+            merge_sha="e" * 40,
+            task_ids=(
+                continuation.id,
+                fresh_review.id,
+                shipped_review.id,
+            ),
+        )
+        self.assertIn(shipped_review.id, {task.id for task in merged})
+        state.board_cascade_done(fresh_review.id)
+        self.assertEqual(
+            root.lane,
+            "Done",
+            [
+                (task.id, task.lane, task.action_name,
+                 task.worktree_boundary,
+                 task.completion_evidence)
+                for task in state.board_get_chain(root.id)
+            ],
         )
 
     def _recording_dispatch(self, state):
