@@ -303,6 +303,7 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
         state.agent_digest_settings[engineer.id] = self.state_mod.AgentDigestSettings(
             agent_id=engineer.id,
             paused=True,
+            override_fields=["paused"],
         )
         db = FakeDigestDB(
             queued={
