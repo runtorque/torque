@@ -4254,8 +4254,7 @@ async def main(connection=None):
     metrics_daemon.start()
     log.info("Startup checkpoint: metrics daemon scheduled")
 
-    async def _resolve_base_dir(group: str = "") -> str:
-        return await agent_launch.resolve_base_dir(group)
+    _resolve_base_dir = agent_launch.resolve_base_dir
 
     def _resolve_deliverable_for_create(
         action_name: str,
@@ -4287,106 +4286,19 @@ async def main(connection=None):
                     contract[key] = ev
         return contract
 
-    def _resolve_provider_command(
-        provider: str, boot_command: str, default_command: str,
-    ) -> tuple[str, str]:
-        return agent_launch.resolve_provider_command(
-            provider, boot_command, default_command
-        )
-
-    def _suggest_template_agent_name(group: str, template_name: str,
-                                     base_dir: str = "") -> str:
-        return agent_launch.suggest_template_agent_name(
-            group, template_name, base_dir
-        )
-
-    def _resolve_agent_launch_config(group: str, *,
-                                     base_dir: str = "",
-                                     explicit_template: str = "",
-                                     overrides: dict | None = None) -> dict:
-        return agent_launch.resolve_agent_launch_config(
-            group,
-            base_dir=base_dir,
-            explicit_template=explicit_template,
-            overrides=overrides,
-        )
-
-    def _resolve_engineer_launch_config(group: str, *,
-                                      base_dir: str = "",
-                                      explicit_template: str = "",
-                                      overrides: dict | None = None) -> dict:
-        return agent_launch.resolve_engineer_launch_config(
-            group,
-            base_dir=base_dir,
-            explicit_template=explicit_template,
-            overrides=overrides,
-        )
-
-    def _resolve_worker_launch_config(group: str, *,
-                                      base_dir: str = "",
-                                      explicit_template: str = "",
-                                      overrides: dict | None = None) -> dict:
-        return agent_launch.resolve_worker_launch_config(
-            group,
-            base_dir=base_dir,
-            explicit_template=explicit_template,
-            overrides=overrides,
-        )
-
-    def _resolve_architect_launch_config(group: str, *,
-                                      base_dir: str = "",
-                                      explicit_template: str = "",
-                                      overrides: dict | None = None) -> dict:
-        return agent_launch.resolve_architect_launch_config(
-            group,
-            base_dir=base_dir,
-            explicit_template=explicit_template,
-            overrides=overrides,
-        )
-
-    async def _create_child_terminals(group: str, parent_cell,
-                                      terminals: list[dict] | None = None,
-                                      count: int = 0):
-        return await agent_launch.create_child_terminals(
-            group, parent_cell, terminals=terminals, count=count
-        )
-
-    def _persistent_prompt_filename(cell) -> str:
-        return agent_launch.persistent_prompt_filename(cell)
-
-    def _apply_persistent_prompt(cell, launch_cfg: dict,
-                                 prompt_text: str = "") -> None:
-        agent_launch.apply_persistent_prompt(cell, launch_cfg, prompt_text)
-
-    async def _create_agent_with_config(group: str, name: str,
-                                        launch_cfg: dict, *,
-                                        explicit_template: str = "",
-                                        target_session_id: str = "",
-                                        target_window_id: str = "",
-                                        persistent_prompt_text: str = "",
-                                        created_by_engineer_id: str = "",
-                                        owner_engineer_id: str = "",
-                                        kind: str = "",
-                                        persistent: bool = False,
-                                        hired_by_architect_id: str = "",
-                                        inherited_worktree_from=None,
-                                        restore_focus_to_prev_tab: bool = False):
-        return await agent_launch.create_agent_with_config(
-            group,
-            name,
-            launch_cfg,
-            explicit_template=explicit_template,
-            target_session_id=target_session_id,
-            target_window_id=target_window_id,
-            persistent_prompt_text=persistent_prompt_text,
-            created_by_engineer_id=created_by_engineer_id,
-            owner_engineer_id=owner_engineer_id,
-            kind=kind,
-            persistent=persistent,
-            hired_by_architect_id=hired_by_architect_id,
-            inherited_worktree_from=inherited_worktree_from,
-            restore_focus_to_prev_tab=restore_focus_to_prev_tab,
-        )
+    # AgentLaunchService owns these launch semantics. Bind its callables
+    # directly instead of keeping a second layer of nested forwarding helpers
+    # inside the server composition root.
+    _resolve_provider_command = agent_launch.resolve_provider_command
+    _suggest_template_agent_name = agent_launch.suggest_template_agent_name
+    _resolve_agent_launch_config = agent_launch.resolve_agent_launch_config
+    _resolve_engineer_launch_config = agent_launch.resolve_engineer_launch_config
+    _resolve_worker_launch_config = agent_launch.resolve_worker_launch_config
+    _resolve_architect_launch_config = agent_launch.resolve_architect_launch_config
+    _create_child_terminals = agent_launch.create_child_terminals
+    _persistent_prompt_filename = agent_launch.persistent_prompt_filename
+    _apply_persistent_prompt = agent_launch.apply_persistent_prompt
+    _create_agent_with_config = agent_launch.create_agent_with_config
 
     async def _send_agent_prompt(cell, prompt: str, *,
                                  delay: float = 0,
