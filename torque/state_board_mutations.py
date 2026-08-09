@@ -1046,6 +1046,11 @@ class BoardMutationMixin:
         # archive-transition early return above has been passed.
         if "artifacts" in fields:
             task._artifact_content_dehydrated = False
+        if lane_changed and new_lane == "Done":
+            # Candidate/finalization/code-boundary admission has succeeded.
+            # Expire transient coordination descendants at the last safe
+            # point before the authored Done mutation becomes visible.
+            self.expire_engineer_message_descendants(tid)
         for key, value in fields.items():
             if key in valid:
                 setattr(task, key, value)
