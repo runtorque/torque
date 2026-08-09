@@ -33,12 +33,12 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
     async def test_create_incremental_fire_cancel_and_no_provider_prompt(self):
         created=await self._command('/watch G:1 G:2', 'create')
         self.assertEqual(created['type'],'ok'); watch=self.db.list_task_watches(requester_agent_id='agent',status='active')[0]
-        self.state.board_move_task('G:1','Done'); self.assertEqual(self.db.load_task_watch(watch['id'])['status'],'active')
+        self.state.board_move_task('G:1','Done', acknowledge_unmerged=True); self.assertEqual(self.db.load_task_watch(watch['id'])['status'],'active')
         listed=await self._command('/watches','list'); self.assertIn('1/2 Done',self.db.load_direct_message(listed['message_id'])['message'])
         cancelled=await self._command('/unwatch '+watch['id'],'cancel'); self.assertIn('Cancelled',self.db.load_direct_message(cancelled['message_id'])['message'])
-        self.state.board_move_task('G:2','Done'); self.assertEqual(self.db.load_task_watch(watch['id'])['status'],'cancelled')
+        self.state.board_move_task('G:2','Done', acknowledge_unmerged=True); self.assertEqual(self.db.load_task_watch(watch['id'])['status'],'cancelled')
     async def test_immediate_once_scope_and_bad_forms_are_local(self):
-        self.state.board_move_task('G:1','Done')
+        self.state.board_move_task('G:1','Done', acknowledge_unmerged=True)
         result=await self._command('/watch G:1','immediate')
         self.assertEqual(self.db.list_task_watches(requester_agent_id='agent')[0]['status'],'fired')
         self.assertIsNotNone(self.db.load_direct_message(
@@ -79,7 +79,7 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
             self.state.create_task_watch(target=self.agent, task_ids=['G:1'])
 
     async def test_outbox_failure_reconciles_once_without_rolling_back_fired(self):
-        self.state.board_move_task('G:1', 'Done')
+        self.state.board_move_task('G:1', 'Done', acknowledge_unmerged=True)
         original = self.state.save_direct_message
         def fail_once(row):
             if row.get('id', '').endswith(':complete'):
@@ -121,7 +121,7 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.db.load_task_watch(second['id'])['status'], 'active')
 
     async def test_thread_row_is_durable_before_optional_fanout_and_fanout_failure_is_terminal(self):
-        self.state.board_move_task('G:1', 'Done')
+        self.state.board_move_task('G:1', 'Done', acknowledge_unmerged=True)
         class BrokenNotifier:
             def __init__(self, state): self.state = state; self.rows = []
             def on_task_watch(self, watch):
@@ -140,7 +140,7 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
                               if row['id'] == watch['id'] + ':complete']), 1)
 
     async def test_watch_retry_after_audit_failure_reuses_durable_request_watch(self):
-        self.state.board_move_task('G:1', 'Done')
+        self.state.board_move_task('G:1', 'Done', acknowledge_unmerged=True)
         original = self.state.save_direct_message
 
         def fail_watch_audit(row):
@@ -164,7 +164,7 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(again['deduped'])
 
     async def test_watch_retry_after_audit_crash_is_recovered_without_duplicates(self):
-        self.state.board_move_task('G:1', 'Done')
+        self.state.board_move_task('G:1', 'Done', acknowledge_unmerged=True)
         original = self.state.save_direct_message
 
         def crash_watch_audit(row):
@@ -200,7 +200,7 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
     async def test_global_watch_scans_paginate_past_one_thousand_without_duplicates(self):
         for index in range(1001):
             self._save_paged_watch(f'page-fire-{index:04}', expires_at=time.time() + 3600)
-        self.state.board_move_task('G:1', 'Done')
+        self.state.board_move_task('G:1', 'Done', acknowledge_unmerged=True)
         self.assertEqual(self.db.load_task_watch('page-fire-1000')['status'], 'fired')
         self.assertIsNotNone(self.db.load_direct_message('page-fire-1000:complete'))
         self.assertEqual(self.db._conn.execute("SELECT COUNT(*) FROM agent_peer_messages WHERE id LIKE 'page-fire-%:complete'").fetchone()[0], 1001)
@@ -225,7 +225,7 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
         watch = self.state.create_task_watch(target=self.agent, task_ids=['G:1'])
         self.state.remove_agent(self.agent.id)
         self.assertEqual(self.db.load_task_watch(watch['id'])['status'], 'cancelled')
-        self.state.board_move_task('G:1', 'Done')
+        self.state.board_move_task('G:1', 'Done', acknowledge_unmerged=True)
         self.assertEqual(self.db.list_operator_notices(), [])
 
     async def test_hard_delete_move_and_rename_invalidate_requester_scope(self):
@@ -244,7 +244,7 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.db.load_task_watch(watch['id'])['status'], 'cancelled')
 
     async def test_lifecycle_invalidation_stops_fired_pending_outbox_delivery(self):
-        self.state.board_move_task('G:1', 'Done')
+        self.state.board_move_task('G:1', 'Done', acknowledge_unmerged=True)
         original = self.state.save_direct_message
         self.state.save_direct_message = lambda row: (_ for _ in ()).throw(RuntimeError('fail'))
         watch = self.state.create_task_watch(target=self.agent, task_ids=['G:1'])
@@ -268,7 +268,7 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_reconcile_retries_crashed_final_delivery_gate(self):
         """A crash after the final gate remains a durable, retryable outbox."""
-        self.state.board_move_task('G:1', 'Done')
+        self.state.board_move_task('G:1', 'Done', acknowledge_unmerged=True)
         original_gate = self.db.claim_task_watch_notice_delivery
 
         def crash_after_final_gate(watch_id, *, attempted_at):
@@ -288,7 +288,7 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_lifecycle_invalidation_winning_after_outbox_claim_never_notifies(self):
         """The final DB gate orders requester teardown before Inbox delivery."""
-        self.state.board_move_task('G:1', 'Done')
+        self.state.board_move_task('G:1', 'Done', acknowledge_unmerged=True)
         original_gate = self.db.claim_task_watch_notice_delivery
 
         def invalidate_before_notice_gate(watch_id, *, attempted_at):
@@ -307,7 +307,7 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_lifecycle_invalidation_after_final_claim_never_writes_thread_row(self):
         """The notifying state remains cancellable until the thread row exists."""
-        self.state.board_move_task('G:1', 'Done')
+        self.state.board_move_task('G:1', 'Done', acknowledge_unmerged=True)
         original_load = self.db.load_task_watch
         invalidated = False
 
@@ -328,7 +328,7 @@ class TaskWatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.db.load_direct_message(watch['id'] + ':complete'))
 
     async def test_task_scope_loss_after_final_claim_cancels_only_that_watch(self):
-        self.state.board_move_task('G:1', 'Done')
+        self.state.board_move_task('G:1', 'Done', acknowledge_unmerged=True)
         unaffected = self.state.create_task_watch(target=self.agent, task_ids=['G:2'])
         original_gate = self.db.claim_task_watch_notice_delivery
         original_reconcile = self.state.reconcile_task_watches

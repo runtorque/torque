@@ -236,6 +236,9 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                 lane,
                 payload.get("position"),
                 clear_status=clear_status,
+                acknowledge_unmerged=payload.get(
+                    "acknowledge_unmerged", False
+                ),
             )
             moved = self.state.board_tasks.get(task.id)
             return {
@@ -5569,7 +5572,12 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(self.state, "_emit", wraps=self.state._emit) as emit_mock:
             clear_text, clear_error = await self._call(
                 "architect_task_move",
-                {"task": task.id, "new_lane": "Done", "clear_status": True},
+                {
+                    "task": task.id,
+                    "new_lane": "Done",
+                    "clear_status": True,
+                    "acknowledge_unmerged": True,
+                },
                 architect.id,
             )
 
@@ -6130,7 +6138,9 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.state.board_tasks[root.id].completion_evidence, {})
         self.assertEqual(board_sync_manager.calls, [])
 
-        self.state.board_move_task(covering.id, "Done")
+        self.state.board_move_task(
+            covering.id, "Done", allow_done_advisory=False
+        )
         resolved = self.server_mod._auto_resolve_product_proposal_roots_and_enqueue(
             self.state,
             covering,

@@ -4958,7 +4958,9 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             state, parent, "task-reply", reply_agent_id=worker.id
         )
 
-        state.board_move_task(parent.id, "Done")
+        state.board_move_task(
+            parent.id, "Done", acknowledge_unmerged=True
+        )
 
         self._assert_engineer_followup_expired(state, follow_up.id)
         self.assertFalse(state.agents[worker.id].pending_engineer_message)
@@ -5027,7 +5029,9 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             }],
         )
 
-        state.board_move_task(parent.id, "Done")
+        state.board_move_task(
+            parent.id, "Done", acknowledge_unmerged=True
+        )
 
         answered = state.board_tasks[follow_up.id]
         self.assertEqual(answered.lane, "Done")
@@ -5061,7 +5065,9 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             state, normal_child, "task-nested-reply", depth=2
         )
 
-        state.board_move_task(parent.id, "Done")
+        state.board_move_task(
+            parent.id, "Done", acknowledge_unmerged=True
+        )
 
         self.assertEqual(state.board_tasks[normal_child.id].lane, "To Do")
         for task_id in (direct_follow_up.id, nested_follow_up.id):
@@ -5350,7 +5356,9 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         self.assertEqual(updated.lane_entered_at, task.created_at)
 
         updated.lane_entered_at = "2026-04-06T00:30:00+00:00"
-        state.board_move_task(task.id, "Done")
+        state.board_move_task(
+            task.id, "Done", acknowledge_unmerged=True
+        )
 
         finished = state.board_tasks[task.id]
         self.assertEqual(finished.lane, "Done")
@@ -5442,7 +5450,9 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
 
         self.assertEqual(state.board_tasks[task_c.id].depends_on, [])
 
-        state.board_move_task(task_b.id, "Done")
+        state.board_move_task(
+            task_b.id, "Done", acknowledge_unmerged=True
+        )
         self.assertTrue(state.board_deps_met(state.board_tasks[task_a.id]))
 
     def test_archive_and_restore_preserve_source_lane_and_done_dependencies(self):
@@ -5458,7 +5468,9 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         self.assertIsNotNone(dep)
         self.assertIsNotNone(task)
 
-        state.board_move_task(dep.id, "Done")
+        state.board_move_task(
+            dep.id, "Done", acknowledge_unmerged=True
+        )
         self.assertTrue(state.board_deps_met(state.board_tasks[task.id]))
 
         state.board_archive_task(dep.id)

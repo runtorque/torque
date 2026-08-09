@@ -1627,7 +1627,9 @@ asyncio.run(main())
 
         # Once the queue drains, both "idle" and "empty" must be observed for
         # the debounce window before a single event fires.
-        state.board_move_task("task-1", "Done")
+        state.board_move_task(
+            "task-1", "Done", acknowledge_unmerged=True
+        )
         self.assertFalse(
             self.events_mod.check_engineer_queue_empty(
                 state,
@@ -1709,7 +1711,9 @@ asyncio.run(main())
         self.assertIsNotNone(second_task)
         self.assertFalse(restarted_engineer.queue_empty_emitted)
         restarted_engineer.mark_progress(2_000.0)
-        restarted.board_move_task("task-2", "Done")
+        restarted.board_move_task(
+            "task-2", "Done", acknowledge_unmerged=True
+        )
 
         self.assertFalse(
             self.events_mod.check_engineer_queue_empty(

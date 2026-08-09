@@ -100,7 +100,13 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             return {"type": "ok", "task_id": task_id}
         if payload.get("cmd") == "board_move_task":
             task_id = payload.get("id", "")
-            self.state.board_move_task(task_id, payload.get("lane", ""))
+            self.state.board_move_task(
+                task_id,
+                payload.get("lane", ""),
+                acknowledge_unmerged=payload.get(
+                    "acknowledge_unmerged", False
+                ),
+            )
             return {"type": "ok", "task_id": task_id}
         if payload.get("cmd") == "inject_mcp_message":
             return {"type": "ok", "delivered": True}
@@ -621,7 +627,11 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(self.engineer.id, self._result_payload(reassigned)["assigned_engineer_id"])
         moved = await self._call(
-            "task_move", {"task": engineer_task.id, "new_lane": "Done"},
+            "task_move", {
+                "task": engineer_task.id,
+                "new_lane": "Done",
+                "acknowledge_unmerged": True,
+            },
             req_id=5,
         )
         self.assertEqual("task_moved", self._result_payload(moved)["type"])
