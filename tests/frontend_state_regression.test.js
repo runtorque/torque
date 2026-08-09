@@ -35307,6 +35307,10 @@ test('Engineer creation dialog no longer writes group defaults and both class cr
   assert.match(dialogSource, /cmd:\s*selectedClassId \? 'create_agent_from_class' : \(ctx\.kind === 'architect' \? 'add_architect' : 'add_engineer'\)/);
   assert.match(dialogSource, /agent_settings:\s*agentSettings/);
   assert.match(dialogSource, /agent_digest_settings:\s*digestSettings/);
+  assert.doesNotMatch(dialogSource, /Configure this agent before its first launch/);
+  assert.match(dialogSource, /current runtime does not yet consume these behavior and custom-instruction preferences/);
+  assert.match(dialogSource, /Digest delivery uses the existing per-agent digest store and takes effect immediately/);
+  assert.match(dialogSource, /Affects this agent’s first launch/);
   const redirect = launchSource.slice(launchSource.indexOf('function openEngineerLaunchDialog'), launchSource.indexOf('function submitEngineerLaunchDialog'));
   assert.match(redirect, /openAgentSettingsDialog\(\{[\s\S]*?relaunch: !!cell,[\s\S]*?\}\);\s*return;/,
     'operator-reachable create/relaunch returns into per-agent settings before legacy group mutation code');

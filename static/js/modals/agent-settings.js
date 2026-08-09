@@ -43,10 +43,15 @@ function _agentSettingsFields(kind) {
   var fields = _agentSettingsCommonFields.slice();
   var autonomy = fields.filter(function(field) { return field.key === 'autonomy_mode'; })[0];
   autonomy.options = kind === 'architect'
-    ? [['', 'Inherited'], ['advisory', 'Advisory'], ['guarded_auto', 'Guarded auto'], ['full_auto', 'Full auto']]
+    ? [['', 'Inherited'], ['dispatch_freely', 'Dispatch freely'], ['dispatch_after_confirm', 'Dispatch after confirm'], ['ask_always', 'Ask always']]
     : [['', 'Inherited'], ['suggest_only', 'Suggest only'], ['dispatch_when_clear', 'Dispatch when clear'], ['aggressive_auto_continue', 'Aggressive auto-continue']];
   if (kind === 'engineer') fields = fields.concat(_agentSettingsEngineerFields);
-  return fields.concat(_agentSettingsDigestFields);
+  fields = fields.concat(_agentSettingsDigestFields);
+  var verbosity = fields.filter(function(field) { return field.key === 'digest_verbosity'; })[0];
+  verbosity.options = kind === 'architect'
+    ? [['', 'Inherited'], ['terse', 'Terse'], ['balanced', 'Balanced'], ['verbose', 'Verbose']]
+    : [['', 'Inherited'], ['compact', 'Compact'], ['balanced', 'Balanced'], ['detailed', 'Detailed']];
+  return fields;
 }
 
 function _agentSettingsResolved(key) {
@@ -98,15 +103,32 @@ function _agentSettingsFieldHtml(field) {
     + '<span>' + _agentSettingsEsc(_agentSettingsOriginText(overridden ? 'per-agent' : (resolved.origin || 'default'))) + '</span>'
     + '<button type="button"' + (overridden ? '' : ' hidden') + ' onclick="agentSettingsUseInherited(\'' + _agentSettingsEsc(field.key) + '\')">Use inherited</button>'
     + '</div>';
-  if (field.section === 'Launch') html += '<div class="settings-field-help">Changes apply on the next fresh launch or relaunch.</div>';
+  if (field.section === 'Launch') {
+    html += '<div class="settings-field-help">'
+      + (_agentSettingsContext.mode === 'create'
+        ? 'Affects this agent’s first launch.'
+        : 'Applies on the next fresh launch or relaunch.')
+      + '</div>';
+  }
   html += '</div>';
   return html;
 }
 
 function _agentSettingsSectionHtml(title, fields) {
   if (!fields.length) return '';
+  var description = '';
+  if (title === 'Launch') {
+    description = _agentSettingsContext.mode === 'create'
+      ? 'Provider, command, model, reasoning, and Fast mode are resolved for this first launch.'
+      : 'These values apply when the agent next starts a fresh launch or relaunch.';
+  } else if (title === 'Behavior') {
+    description = 'Stored as per-agent overrides. The current runtime does not yet consume these behavior and custom-instruction preferences.';
+  } else if (title === 'Delivery') {
+    description = 'Digest delivery uses the existing per-agent digest store and takes effect immediately.';
+  }
   return '<section class="gs-settings-section" data-agent-settings-section="' + _agentSettingsEsc(title) + '">'
     + '<div class="gs-settings-section-title">' + _agentSettingsEsc(title) + '</div>'
+    + (description ? '<p class="settings-section-description">' + _agentSettingsEsc(description) + '</p>' : '')
     + '<div class="gs-settings-section-body settings-field-grid">'
     + fields.map(_agentSettingsFieldHtml).join('') + '</div></section>';
 }
@@ -160,7 +182,7 @@ function _agentSettingsRender() {
   });
   html += _agentSettingsSpecializationsHtml();
   html += _agentSettingsClassHtml();
-  html += '<p class="agent-settings-runtime-note">Digest delivery changes take effect immediately. Launch configuration and desired Agent Class apply on the next fresh launch or relaunch; Agent Class authority for a running session remains frozen.</p>';
+  html += '<p class="agent-settings-runtime-note">Launch fields affect this launch for a new agent and the next fresh launch or relaunch for an existing agent. Desired Agent Class follows the same launch boundary; authority for a running session remains frozen. Engineer specializations are included in a new Engineer’s first persistent prompt. Digest delivery takes effect immediately. Behavior and orchestration preferences are stored now but are not yet consumed by the current runtime.</p>';
   body.innerHTML = html;
   fields.forEach(function(field) {
     var id = 'agent-settings-' + field.key.replace(/_/g, '-');
@@ -367,7 +389,9 @@ function openAgentSettingsDialog(options) {
   var subtitle = document.getElementById('agent-settings-subtitle');
   var save = document.getElementById('agent-settings-save-btn');
   if (title) title.textContent = mode === 'create' ? 'Create ' + (kind === 'architect' ? 'Architect' : 'Engineer') : (agent.name || (kind === 'architect' ? 'Architect' : 'Engineer')) + ' Settings';
-  if (subtitle) subtitle.textContent = mode === 'create' ? 'Configure this agent before its first launch' : 'Per-agent overrides · ' + (_agentSettingsContext.group || 'No group');
+  if (subtitle) subtitle.textContent = mode === 'create'
+    ? 'Launch inputs and stored per-agent overrides'
+    : 'Per-agent overrides · ' + (_agentSettingsContext.group || 'No group');
   if (save) save.textContent = mode === 'create' ? 'Create ' + (kind === 'architect' ? 'Architect' : 'Engineer') : (_agentSettingsContext.relaunch ? 'Save & relaunch' : 'Save changes');
   _agentSettingsRender();
   if (agentId) send({ cmd: 'get_agent_settings', agent_id: agentId });
