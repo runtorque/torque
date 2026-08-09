@@ -663,6 +663,24 @@ test('toast variants share a translucent surface without fading their contents',
     'surface translucency must not be implemented as whole-toast opacity');
 });
 
+test('toast close aligns to the content top without moving the action button', () => {
+  const css = source('static/styles/modals.css');
+  const closeRules = Array.from(css.matchAll(/^\.toast-close\s*\{(?<body>[\s\S]*?)\}/gm));
+  const actionRules = Array.from(css.matchAll(/^\.toast-action\s*\{(?<body>[\s\S]*?)\}/gm));
+  const closeRule = closeRules.at(-1)?.groups?.body || '';
+  const actionRule = actionRules.at(-1)?.groups?.body || '';
+  const sharedRule = css.match(
+    /\.toast-action\s*,\s*\.toast-close\s*\{(?<body>[\s\S]*?)\}/,
+  )?.groups?.body || '';
+
+  assert.match(closeRule, /align-self:\s*start/,
+    'the close control should stay with the first line as the toast grows');
+  assert.doesNotMatch(actionRule, /align-self:/,
+    'the action button should retain its existing row alignment');
+  assert.doesNotMatch(sharedRule, /align-self:/,
+    'close alignment must not leak through the shared control rule');
+});
+
 test('View inbox is a compact text action on its own right-aligned toast row', () => {
   const css = source('static/styles/modals.css');
   const commands = source('static/js/commands.js');

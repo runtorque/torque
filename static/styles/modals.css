@@ -1861,6 +1861,7 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 .toast-close {
   grid-column: 2;
   grid-row: 1;
+  align-self: start;
   width: 24px;
   height: 24px;
   padding: 0;
