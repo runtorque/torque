@@ -72,3 +72,30 @@ test('cancelling Done acknowledgement leaves the task untouched', async () => {
   await Promise.resolve();
   assert.deepEqual(sent, []);
 });
+
+test('boundary-less card confirmation resends the acknowledged Done move', async () => {
+  const { context, confirmations, sent } = createContext({ accepted: true });
+  assert.equal(context.handleBoardMoveAcknowledgementResponse({
+    type: 'task_move_acknowledgement_required',
+    task_id: 'TORQUE:1608',
+    new_lane: 'Done',
+    message: 'Closing this task may leave unmerged code, but no branch or commit reference was recorded.',
+    acknowledgement: {
+      reason: 'missing_merge_sha',
+      branch: '',
+      commit_sha: '',
+      merge_commit_sha: '',
+    },
+  }), true);
+  await Promise.resolve();
+
+  assert.equal(confirmations.length, 1);
+  assert.match(confirmations[0].message, /no branch or commit reference/);
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [{
+    cmd: 'board_move_task',
+    id: 'TORQUE:1608',
+    lane: 'Done',
+    acknowledge_unmerged: true,
+    clear_status: false,
+  }]);
+});

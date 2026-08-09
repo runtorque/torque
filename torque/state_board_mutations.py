@@ -56,6 +56,7 @@ def explicit_done_mainline_status(
     )
     merge_sha = str(boundary.get("merge_commit_sha", "") or "").strip()
     branch = str(boundary.get("branch", "") or "").strip()
+    commit_sha = str(boundary.get("commit_sha", "") or "").strip()
     result = {
         "required": True,
         "verified_in_mainline": False,
@@ -63,6 +64,7 @@ def explicit_done_mainline_status(
         "mainline": mainline,
         "merge_commit_sha": merge_sha,
         "branch": branch,
+        "commit_sha": commit_sha,
         "reason": "missing_merge_sha",
         "error": "",
     }
@@ -1211,6 +1213,11 @@ class BoardMutationMixin:
             if not allowed:
                 if task.lane == ARCHIVED_LANE or not allow_done_advisory:
                     return result
+                # The finalization finding is advisory for an explicit move.
+                # Whether the actor must acknowledge unmerged work is a
+                # separate classification of the root's own merge evidence.
+                advisory = result
+            if allow_done_advisory and task.lane != ARCHIVED_LANE:
                 acknowledgement = explicit_done_mainline_status(
                     task,
                     mainline=str(
@@ -1218,8 +1225,9 @@ class BoardMutationMixin:
                     ).strip(),
                 )
                 if acknowledgement["required"] and not acknowledge_unmerged:
-                    blocking = result.get("code_boundary", {}).get(
-                        "blocking", []
+                    blocking = (
+                        advisory.get("code_boundary", {}).get("blocking", [])
+                        if isinstance(advisory, dict) else []
                     )
                     blocking_ids = [
                         str(item.get("task_id", "") or "").strip()
@@ -1252,23 +1260,27 @@ class BoardMutationMixin:
                         for item in boundary_refs
                         if item.get("branch") or item.get("commit_sha")
                     ), acknowledgement.get("branch")
+                       or acknowledgement.get("commit_sha")
                        or acknowledgement.get("merge_commit_sha")
-                       or task.id)
-                    return {
+                       or "")
+                    response = {
                         "type": "task_move_acknowledgement_required",
                         "task_id": task.id,
                         "message": (
                             "Closing this task will leave unmerged code at "
                             f"{ref}. Acknowledge that the code will not be "
                             "merged here or will be handled another way."
+                            if ref else
+                            "Closing this task may leave unmerged code, but "
+                            "no branch or commit reference was recorded. "
+                            "Acknowledge that the code will not be merged "
+                            "here or will be handled another way."
                         ),
                         "acknowledgement": acknowledgement,
-                        "advisory": result,
                     }
-                # Explicit operator intent wins over finalization bookkeeping.
-                # Keep evaluating/auditing the evidence, but return the finding
-                # as an advisory after the authored lane mutation succeeds.
-                advisory = result
+                    if advisory is not None:
+                        response["advisory"] = advisory
+                    return response
         if clear_status:
             task.status = ""
         if lane == ARCHIVED_LANE:
