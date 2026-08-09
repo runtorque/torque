@@ -658,6 +658,19 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(resolved["worktree"])
 
+    def test_resolve_worker_launch_config_provider_slug_model_reproduction(self):
+        """Failing-first checkpoint: a provider slug is consumed as a model."""
+        service = self._launch_service(
+            _FakeState(worker_provider="codex"),
+            _FakeBridge(),
+        )
+
+        resolved = service.resolve_worker_launch_config(
+            "backend", overrides={"model": "codex"}
+        )
+
+        self.assertEqual(resolved["command"], "codex --model codex")
+
     async def test_persisted_worker_model_launches_codex_worker_with_terra(self):
         """A persisted Worker default reaches the fresh Codex launch input."""
         from torque.db import TorqueDB
