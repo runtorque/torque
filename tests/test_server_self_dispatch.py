@@ -1613,6 +1613,10 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             cell_type="agent",
             kind="worker",
             status="stopped",
+            worktree_path="/repo/.torque/worktrees/original-target",
+            worktree_branch="torque/alice/original-target",
+            worktree_repo_root="/repo",
+            worktree_base_branch="main",
         )
         state.agents[worker.id] = worker
         state.groups["g"].append(worker.id)

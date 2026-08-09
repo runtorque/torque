@@ -315,7 +315,10 @@ async def handle_worktree_command(
             if not advance_result.get("ok"):
                 result["error"] = advance_result.get("reason", "advance_refused")
     elif cmd == "worktree_adopt":
-        cell = state.agents.get(str(data.get("id", "") or "").strip())
+        adopt_agent_id = str(
+            data.get("adopt_agent_id", "") or data.get("id", "") or ""
+        ).strip()
+        cell = state.agents.get(adopt_agent_id)
         if not cell:
             result = {"type": "error", "message": "Agent not found"}
         elif state.agent_is_tombstoned(cell):

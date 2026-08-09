@@ -565,7 +565,10 @@ async def dispatch_worktrees(ctx: ScopedDispatchContext):
             return agent_error, True
         payload = {
             "cmd": "worktree_adopt",
-            "id": agent_id,
+            # The agent receiving the orphan is not the worktree target.
+            # Keep its identity separate so the target resolver receives the
+            # same unambiguous path-only selector as task dispatch adoption.
+            "adopt_agent_id": agent_id,
             **_driverless_payload_from_args(
                 args,
                 caller_id=caller_id,
