@@ -1382,15 +1382,25 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         )
         if clear_status_error:
             return clear_status_error, True
+        acknowledge_unmerged, acknowledge_error = _optional_bool_arg(
+            args,
+            "acknowledge_unmerged",
+            False,
+        )
+        if acknowledge_error:
+            return acknowledge_error, True
         previous_lane = str(getattr(task, "lane", "") or "")
         result = await handle_command({
             "cmd": "board_move_task",
             "id": tid,
             "lane": target_lane,
             "clear_status": clear_status,
+            "acknowledge_unmerged": acknowledge_unmerged,
         })
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
+        if result and result.get("type") == "task_move_acknowledgement_required":
+            return json.dumps(result), False
         moved = real_state.board_tasks.get(tid)
         if not moved:
             return "Task not found", True

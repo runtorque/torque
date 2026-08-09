@@ -911,6 +911,13 @@ ENGINEER_TOOLS = [
                     "type": "string",
                     "description": "Target lane name.",
                 },
+                "acknowledge_unmerged": {
+                    "type": "boolean",
+                    "description": (
+                        "Acknowledge that unmerged code will be left behind "
+                        "or handled another way when moving to Done."
+                    ),
+                },
             },
             "required": ["task", "lane"],
         },

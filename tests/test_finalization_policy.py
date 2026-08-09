@@ -56,7 +56,9 @@ class FinalizationPolicyTests(unittest.TestCase):
         ready = self.state.evaluate_task_finalization(root.id)
         self.assertEqual(ready["stage"], "ready_to_merge")
         self.assertIn("merge_not_finalized", ready["missing_gates"])
-        advisory = self.state.board_move_task(root.id, "Done")
+        advisory = self.state.board_move_task(
+            root.id, "Done", acknowledge_unmerged=True
+        )
         self.assertEqual(root.lane, "Done")
         self.assertIn("merge_not_finalized", advisory["missing_gates"])
         self.assertEqual(root.finalization_audit[-1]["outcome"], "blocked")
@@ -179,7 +181,9 @@ class FinalizationDoneBypassRegressionTests(unittest.TestCase):
     def test_unknown_pipeline_root_update_cannot_bypass_subsequent_done_move(self):
         root = self._ineligible_root("TORQUE:915")
         self.state.board_update_task(root.id, pipeline_root_id="missing-root")
-        result = self.state.board_move_task(root.id, "Done")
+        result = self.state.board_move_task(
+            root.id, "Done", acknowledge_unmerged=True
+        )
         self.assertEqual(root.lane, "Done")
         self.assertFalse(result["eligible"])
         self.assertEqual(root.finalization_audit[-1]["caller"], "board_move_task")
@@ -463,7 +467,9 @@ class FinalizationProductionAdmissionTests(unittest.IsolatedAsyncioTestCase):
         root = state.board_tasks["TORQUE:940"]
         self.assertEqual(root.finalization_mode, "review_only")
         self.assertFalse(state.evaluate_task_finalization(root.id)["eligible"])
-        advisory = state.board_move_task(root.id, "Done")
+        advisory = state.board_move_task(
+            root.id, "Done", acknowledge_unmerged=True
+        )
         self.assertEqual(root.lane, "Done")
         self.assertFalse(advisory["eligible"])
         review_result = await handle_board_operation_command({

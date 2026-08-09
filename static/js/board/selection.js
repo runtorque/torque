@@ -1,5 +1,30 @@
 /* Board module: selection. */
 
+function handleBoardMoveAcknowledgementResponse(msg) {
+  if (!msg || msg.type !== 'task_move_acknowledgement_required') return false;
+  var taskId = String(msg.task_id || '').trim();
+  if (!taskId || typeof showConfirm !== 'function') return true;
+  showConfirm(String(msg.message || 'Closing will leave unmerged code behind.'), {
+    title: 'Acknowledge unmerged code',
+    label: 'Close anyway',
+    variant: 'btn-warning',
+  }).then(function(accepted) {
+    if (!accepted) return;
+    var command = {
+      cmd: 'board_move_task',
+      id: taskId,
+      lane: String(msg.new_lane || 'Done'),
+      acknowledge_unmerged: true,
+      clear_status: !!msg.clear_status,
+    };
+    if (msg.position !== undefined && msg.position !== null) {
+      command.position = msg.position;
+    }
+    send(command);
+  });
+  return true;
+}
+
 function _boardResetBatchEdit() {
   _boardBatchEditOpen = false;
   _boardBatchEditLabel = '';

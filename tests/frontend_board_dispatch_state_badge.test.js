@@ -300,4 +300,14 @@ test('Done card marks unmerged superseded code boundary as a non-blocking adviso
   assert.match(html, />Boundary advisory<\/span>/);
   assert.match(html, /metadata-badge--warning/);
   assert.match(html, /Unmerged code boundary: ROOT:2/);
+
+  const inFlightHtml = vm.runInContext(`_renderBoardCard({
+    id: 'IN-FLIGHT', task: 'Acknowledged close', lane: 'Done', labels: [],
+    worktree_boundary: {
+      status: 'open', branch: 'topic/in-flight', commit_sha: 'candidate',
+      code_delta: { state: 'present' }
+    }
+  }, {}, 0, {})`, context);
+  assert.match(inFlightHtml, />Boundary advisory<\/span>/);
+  assert.match(inFlightHtml, /Unmerged code boundary: IN-FLIGHT/);
 });

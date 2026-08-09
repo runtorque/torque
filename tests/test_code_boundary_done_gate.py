@@ -6,6 +6,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 def _aiohttp_stub():
@@ -74,6 +75,91 @@ class CodeBoundaryDoneGateTests(unittest.TestCase):
             origin_verification={"verified": True},
         )
 
+    def _ancestry_repo(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        repo = Path(tmp.name)
+
+        def git(*args):
+            return subprocess.run(
+                ["git", "-C", str(repo), *args], check=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True,
+            ).stdout.strip()
+
+        git("init", "-b", "main")
+        git("config", "user.email", "test@example.invalid")
+        git("config", "user.name", "Torque Test")
+        (repo / "base.txt").write_text("base\n")
+        git("add", "base.txt")
+        git("commit", "-m", "base")
+        main_sha = git("rev-parse", "main")
+        git("checkout", "-b", "topic")
+        (repo / "topic.txt").write_text("topic\n")
+        git("add", "topic.txt")
+        git("commit", "-m", "topic")
+        topic_sha = git("rev-parse", "topic")
+        return repo, main_sha, topic_sha
+
+    def test_explicit_done_ancestry_helper_has_positive_and_negative_controls(self):
+        repo, main_sha, topic_sha = self._ancestry_repo()
+        status = importlib.import_module(
+            "torque.state_board_mutations"
+        ).explicit_done_mainline_status
+
+        positive = status(SimpleNamespace(worktree_boundary={
+            "repo_root": str(repo), "base_branch": "main",
+            "merge_commit_sha": main_sha,
+        }))
+        negative = status(SimpleNamespace(worktree_boundary={
+            "repo_root": str(repo), "base_branch": "main",
+            "branch": "topic", "merge_commit_sha": topic_sha,
+        }))
+
+        self.assertFalse(positive["required"])
+        self.assertTrue(positive["verified_in_mainline"])
+        self.assertTrue(negative["required"])
+        self.assertEqual(negative["reason"], "merge_sha_not_in_mainline")
+
+    def test_explicit_done_ancestry_error_requires_acknowledgement(self):
+        status = importlib.import_module(
+            "torque.state_board_mutations"
+        ).explicit_done_mainline_status(SimpleNamespace(
+            worktree_boundary={
+                "repo_root": "/definitely/missing/repo",
+                "base_branch": "main", "merge_commit_sha": "candidate",
+            }
+        ))
+
+        self.assertTrue(status["required"])
+        self.assertEqual(status["reason"], "ancestry_check_error")
+
+    def test_explicit_done_ancestry_error_routes_through_acknowledgement(self):
+        root = self._root(boundary={
+            **_boundary("present", sha="candidate"),
+            "repo_root": "/definitely/missing/repo",
+            "base_branch": "main",
+            "branch": "topic/error",
+            "merge_commit_sha": "candidate",
+        })
+
+        required = self.state.board_move_task(root.id, "Done")
+
+        self.assertEqual(
+            required["type"], "task_move_acknowledgement_required"
+        )
+        self.assertEqual(
+            required["acknowledgement"]["reason"], "ancestry_check_error"
+        )
+        self.assertEqual(root.lane, "In Progress")
+
+        advisory = self.state.board_move_task(
+            root.id, "Done", acknowledge_unmerged=True
+        )
+
+        self.assertEqual(root.lane, "Done")
+        self.assertFalse(advisory["eligible"])
+
     def test_ship_code_present_unmerged_blocks_fresh_1315_shape(self):
         root = self._root()
         review = self._ship(root, boundary=_boundary("present"))
@@ -81,7 +167,12 @@ class CodeBoundaryDoneGateTests(unittest.TestCase):
         self.assertEqual(root.lane, "In Progress")
 
     def test_explicit_done_move_advises_on_superseded_code_sibling(self):
-        root = self._root()
+        repo, main_sha, _topic_sha = self._ancestry_repo()
+        root = self._root(boundary={
+            **_boundary("present", merged=True, sha=main_sha,
+                        merge_sha=main_sha),
+            "repo_root": str(repo), "base_branch": "main", "branch": "topic",
+        })
         shipped = self._ship(
             root, boundary=_boundary("present", merged=True, sha="candidate")
         )
@@ -109,10 +200,18 @@ class CodeBoundaryDoneGateTests(unittest.TestCase):
         )
 
     def test_explicit_done_move_advises_on_genuinely_unmerged_work(self):
-        root = self._root(boundary=_boundary("present", sha="in-flight"))
+        root = self._root(boundary={
+            **_boundary("present", sha="in-flight"), "branch": "topic",
+        })
 
         result = self.state.board_move_task(root.id, "Done")
 
+        self.assertEqual(root.lane, "In Progress")
+        self.assertEqual(result["type"], "task_move_acknowledgement_required")
+        self.assertIn("topic", result["message"])
+        result = self.state.board_move_task(
+            root.id, "Done", acknowledge_unmerged=True
+        )
         self.assertEqual(root.lane, "Done")
         self.assertFalse(result["eligible"])
         self.assertEqual(

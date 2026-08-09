@@ -125,7 +125,9 @@ class LegacyReviewCardinalityTests(unittest.TestCase):
         root = self._root(self._two_gates())
         self._review(root, "review-1", "reviewer-1", lane="Done")
 
-        result = self.state.board_move_task(root.id, "Done")
+        result = self.state.board_move_task(
+            root.id, "Done", acknowledge_unmerged=True
+        )
 
         self.assertEqual(root.lane, "Done")
         self.assertFalse(result["eligible"])

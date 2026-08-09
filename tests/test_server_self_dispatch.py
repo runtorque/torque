@@ -2564,6 +2564,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             parent_task_id=root.id, pipeline_root_id=root.id, pipeline_depth=1,
             worktree_boundary={
                 "status": "open", "commit_sha": "candidate",
+                "branch": "topic/unmerged",
                 "code_delta": {"state": "present"},
             },
         )
@@ -2574,6 +2575,18 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             "id": root.id,
             "lane": "Done",
             "clear_status": True,
+        })
+
+        self.assertEqual("task_move_acknowledgement_required", result["type"])
+        self.assertIn("topic/unmerged", result["message"])
+        self.assertEqual("In Progress", root.lane)
+
+        result = await handle_command({
+            "cmd": "board_move_task",
+            "id": root.id,
+            "lane": "Done",
+            "clear_status": True,
+            "acknowledge_unmerged": True,
         })
 
         self.assertEqual("task_moved", result["type"])
@@ -2620,6 +2633,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             handle_command = self._extract_handle_command(state)
             result = await handle_command({
                 "cmd": "board_move_task", "id": root.id, "lane": "Done",
+                "acknowledge_unmerged": True,
             })
 
         self.assertEqual("task_moved", result["type"])

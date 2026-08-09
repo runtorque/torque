@@ -654,7 +654,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Unknown tool", denied.payload["error"]["message"])
         self.assertEqual(before, (other_task.task, other_task.lane, list(other_task.messages)))
 
-    async def test_task_move_wrapper_propagates_command_refusal(self):
+    async def test_task_move_wrapper_propagates_independent_command_error(self):
         task = self.state.board_add_task(
             "Refused completion", "g", lane="In Progress",
             status="On Review",
@@ -666,8 +666,8 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(payload["clear_status"])
             return {
                 "type": "error",
-                "message": "Done requires durable merged evidence",
-                "reason": "code_boundary_not_durably_merged",
+                "message": "Task move could not be persisted",
+                "reason": "persistence_error",
             }
 
         self._handle_command = refused_move
@@ -676,7 +676,7 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             {"task": task.id, "new_lane": "Done", "clear_status": True},
         )
 
-        self.assertIn("durable merged evidence", self._error_text(response))
+        self.assertIn("could not be persisted", self._error_text(response))
         self.assertEqual("In Progress", task.lane)
         self.assertEqual("On Review", task.status)
 
@@ -693,7 +693,16 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
             advisory = self.state.board_move_task(
                 payload["id"], payload["lane"],
                 clear_status=payload.get("clear_status", False),
+                acknowledge_unmerged=payload.get(
+                    "acknowledge_unmerged", False
+                ),
             )
+            if (
+                    isinstance(advisory, dict)
+                    and advisory.get("type")
+                    == "task_move_acknowledgement_required"
+            ):
+                return advisory
             return {
                 "type": "task_moved",
                 "task_id": task.id,
@@ -706,6 +715,20 @@ class MCPProposalWrapperTests(unittest.IsolatedAsyncioTestCase):
         self._handle_command = advisory_move
         response = await self._call(
             "task_move", {"task": task.id, "new_lane": "Done"},
+        )
+        payload = self._result_payload(response)
+
+        self.assertEqual(
+            "task_move_acknowledgement_required", payload["type"]
+        )
+        self.assertEqual("In Progress", task.lane)
+
+        response = await self._call(
+            "task_move", {
+                "task": task.id,
+                "new_lane": "Done",
+                "acknowledge_unmerged": True,
+            },
         )
         payload = self._result_payload(response)
 
