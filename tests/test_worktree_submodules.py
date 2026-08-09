@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import shlex
 import sys
 import tempfile
 import types
@@ -321,6 +322,60 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn(str(sub_wt), module_worktrees)
         await self._assert_module_core_worktree_pinned()
+
+    async def test_agent_create_rejects_malformed_command_without_provisioning(self):
+        """A parse failure must precede and leave none of create's resources."""
+        install_aiohttp_stub()
+        server_agent = importlib.import_module("torque.server_agent")
+        state_mod = importlib.import_module("torque.state")
+        state = state_mod.MatrixState()
+        state.add_group("backend")
+
+        class ParsingBridge:
+            async def create_session(self, cell, **_kwargs):
+                shlex.split(cell.command)
+
+        service = server_agent.AgentLaunchService(
+            state=state,
+            connection=None,
+            bridge=ParsingBridge(),
+            worktree_mgr=self.mgr,
+            template_mgr=None,
+        )
+        malformed = "codex --message TORQUE:1559's preserved worktree"
+        base_dir = ".torque/test-create-rollback"
+        (self.repo_root / "shared.env").write_text("TOKEN=test\n")
+
+        with self.assertRaisesRegex(ValueError, "No closing quotation") as raised:
+            await service.create_agent_with_config(
+                "backend",
+                "Malformed Worker",
+                {
+                    "profile": "Default",
+                    "command": malformed,
+                    "directory": str(self.repo_root),
+                    "tab_color": "",
+                    "worktree": True,
+                    "worktree_base_dir": base_dir,
+                    "worktree_base_branch": "main",
+                    "worktree_symlinks": ["shared.env"],
+                    "worktree_submodules": [self.sub_path],
+                },
+                kind="worker",
+            )
+
+        self.assertEqual(state.agents, {})
+        worktree_dir = self.repo_root / base_dir
+        self.assertFalse(worktree_dir.exists(), list(worktree_dir.glob("*")))
+        worktrees = await self._git_out("worktree", "list", "--porcelain")
+        self.assertNotIn(str(worktree_dir), worktrees)
+        branches = await self._git_out("branch", "--format=%(refname:short)")
+        self.assertNotIn("malformed-worker", branches)
+        nested_worktrees = await self._git_out(
+            "worktree", "list", "--porcelain", cwd=self._module_dir()
+        )
+        self.assertNotIn(str(worktree_dir), nested_worktrees)
+        self.assertIn("command", str(raised.exception))
 
     async def test_checkpoint_commits_submodule_first_and_bumps_gitlink(self):
         cell, wt = await self._create_nested()
