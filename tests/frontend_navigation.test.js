@@ -22,7 +22,8 @@ test('group navigation shares its header row with compact view and creation cont
 
   assert.doesNotMatch(html, /id="add-group-header-btn"|<div class="hdr-spacer"><\/div>/);
   assert.match(html, /onclick="openNavigationPalette\('all'\)"[\s\S]*aria-label="Go to"/);
-  assert.match(tabs, /agent-group-tab-settings/);
+  assert.doesNotMatch(tabs, /agent-group-tab-settings/);
+  assert.match(tabs, /agent-group-compact-settings/);
   assert.match(tabs, /openGroupSettings\(/);
   assert.doesNotMatch(tabs, /openAgentGroupTabActions|aria-haspopup="menu"/);
   assert.match(tabs, /agent-group-compact-trigger/);
@@ -36,6 +37,7 @@ test('group navigation shares its header row with compact view and creation cont
   assert.match(grid, /data-agent-view-toggle="canvas"/);
   assert.match(grid, /data-agent-view-toggle="grid" aria-pressed="/);
   assert.match(grid, /data-agent-view-toggle="canvas" aria-pressed="/);
+  assert.match(grid, /class="agent-grid-settings-btn"[\s\S]*data-agent-grid-settings-button[\s\S]*openGroupSettings\(/);
   assert.match(grid, /class="agent-grid-new-btn"[\s\S]*aria-label="Create agent or group"[\s\S]*class="agent-grid-new-icon"/);
   assert.doesNotMatch(grid, /agent-grid-toolbar|<span>New<\/span>/);
   assert.match(css, /\.agent-grid-header-controls\s*\{[^}]*display:\s*flex;[^}]*margin-left:\s*auto;/s);

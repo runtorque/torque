@@ -28679,6 +28679,7 @@ test('agent grid group tabs render standalone controls and switch active group',
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
   loadScript(context, 'static/js/grid/main.js');
+  loadScript(context, 'static/js/canvas.js');
   loadScript(context, 'static/js/commands.js');
   runInContext(context, `
     var focusedItemId = null;
@@ -28700,7 +28701,7 @@ test('agent grid group tabs render standalone controls and switch active group',
   assert.match(tabsHtml, /class="agent-group-tab active"[\s\S]*title="alpha"[\s\S]*alpha/);
   assert.match(tabsHtml, /onGroupTabClick\(&quot;alpha&quot;, event\)/);
   assert.match(tabsHtml, /title="beta"[\s\S]*beta/);
-  assert.match(tabsHtml, /class="agent-group-tab-settings"[\s\S]*aria-label="Open settings for alpha"[\s\S]*openGroupSettings\(&quot;alpha&quot;\)/);
+  assert.doesNotMatch(tabsHtml, /class="agent-group-tab-settings"/);
   assert.match(tabsHtml, /class="agent-group-compact-trigger"/);
   assert.match(tabsHtml, /class="agent-group-compact-settings btn btn-quiet btn-xs"[\s\S]*aria-label="Open settings for alpha"[\s\S]*openGroupSettings\(&quot;alpha&quot;\)/);
   assert.match(tabsHtml, /class="agent-group-quick-search"/);
@@ -28712,6 +28713,27 @@ test('agent grid group tabs render standalone controls and switch active group',
   assert.match(tabsHtml, /data-agent-grid-header-controls[\s\S]*data-agent-grid-actions-button[\s\S]*data-agent-grid-new-button/);
   assert.match(tabsHtml, /aria-label="Agent actions for alpha"/);
   assert.doesNotMatch(tabsHtml, /agent-group-tab-actions|<select|Delete group/);
+
+  const headerControlsHtml = runInContext(context, `_renderAgentGridHeaderControls('alpha', false)`);
+  assert.match(
+    headerControlsHtml,
+    /^<div class="agent-grid-header-controls"[^>]*><button type="button" class="agent-grid-settings-btn"/,
+  );
+  assert.match(
+    headerControlsHtml,
+    /data-agent-grid-settings-button[^>]*data-group="alpha"[^>]*title="Group settings"[^>]*aria-label="Open settings for alpha"/,
+  );
+  assert.match(
+    headerControlsHtml,
+    /onclick="event\.preventDefault\(\);event\.stopPropagation\(\);openGroupSettings\(&quot;alpha&quot;\)"/,
+  );
+  assert.equal((headerControlsHtml.match(/data-agent-grid-settings-button/g) || []).length, 1);
+  assert.ok(headerControlsHtml.indexOf('data-agent-grid-settings-button') < headerControlsHtml.indexOf('class="segmented-control agent-view-toggle'));
+  assert.ok(headerControlsHtml.indexOf('class="segmented-control agent-view-toggle') < headerControlsHtml.indexOf('data-agent-grid-actions-button'));
+  assert.ok(headerControlsHtml.indexOf('data-agent-grid-actions-button') < headerControlsHtml.indexOf('data-agent-grid-new-button'));
+  assert.equal((tabsHtml.match(/data-agent-grid-settings-button/g) || []).length, 1);
+  assert.equal((tabsHtml.match(/class="agent-group-compact-settings/g) || []).length, 1);
+  assert.equal(runInContext(context, `_renderAgentGridHeaderControls('', false)`), '');
 
   runInContext(context, `
     state.groups.alpha = ['agent-cap'];
@@ -28754,6 +28776,10 @@ test('agent grid group tabs render standalone controls and switch active group',
   tabsHtml = runInContext(context, `_renderAgentGroupTabsHtml()`);
   assert.equal(jsonValue(context, `state.active_group`), 'gamma');
   assert.match(tabsHtml, /class="agent-group-tab active"[\s\S]*title="gamma"[\s\S]*gamma/);
+
+  runInContext(context, `state.groups = {}; state.active_group = '';`);
+  tabsHtml = runInContext(context, `_renderAgentGroupTabsHtml()`);
+  assert.doesNotMatch(tabsHtml, /data-agent-grid-settings-button|agent-group-compact-settings|openGroupSettings\(/);
 });
 
 test('agent grid bulk actions are group scoped and fail closed on unknown worker worktrees', async () => {
@@ -29510,6 +29536,15 @@ test('group-header creation control replaces hierarchical creation controls', ()
   runInContext(context, `render();`);
 
   assert.match(main.innerHTML, /class="group-hdr"[\s\S]*data-agent-grid-header-controls[\s\S]*class="agent-grid-new-btn"[\s\S]*aria-label="Create agent or group"[\s\S]*class="agent-grid-new-icon"/);
+  assert.equal((main.innerHTML.match(/data-agent-grid-settings-button/g) || []).length, 1);
+  assert.doesNotMatch(main.innerHTML, /class="group-btn"/);
+  assert.match(
+    main.innerHTML,
+    /data-agent-grid-settings-button[^>]*aria-label="Open settings for torque"[^>]*onclick="event\.preventDefault\(\);event\.stopPropagation\(\);openGroupSettings\(&quot;torque&quot;\)"/,
+  );
+  assert.ok(main.innerHTML.indexOf('data-agent-grid-settings-button') < main.innerHTML.indexOf('data-agent-grid-actions-button'));
+  assert.ok(main.innerHTML.indexOf('data-agent-grid-actions-button') < main.innerHTML.indexOf('data-agent-grid-new-button'));
+  assert.doesNotMatch(main.innerHTML, /class="segmented-control agent-view-toggle/);
   assert.doesNotMatch(main.innerHTML, /class="ghost-card ghost-card--worker|class="ghost-card ghost-card--engineer|class="ghost-card ghost-card--architect/);
   assert.doesNotMatch(main.innerHTML, /\+ Add Worker|\+ New Engineer|\+ New Architect/);
   assert.doesNotMatch(main.innerHTML, /data-agent-strata=/);
@@ -29519,11 +29554,15 @@ test('group-header creation control replaces hierarchical creation controls', ()
   assert.match(css, /--agent-grid-card-basis:\s*var\(--agent-engineer-column-width\);/);
   assert.match(css, /\.agent-grid-header-controls\s*\{[\s\S]*display:\s*flex;[\s\S]*margin-left:\s*auto;/);
   assert.match(css, /\.agent-grid-new-btn\s*\{[\s\S]*width:\s*24px;[\s\S]*border-radius:\s*var\(--radius-sm\);/);
+  assert.match(css, /\.agent-grid-settings-btn,[\s\S]*\.agent-grid-new-btn\s*\{[\s\S]*width:\s*24px;[\s\S]*height:\s*24px;/);
   assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-grid-card-height:\s*108px;/);
   assert.match(css, /\.agent-grid\s*\{[\s\S]*--agent-worker-card-height:\s*var\(--agent-card-height\);/);
   assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-worker-card-height:\s*var\(--agent-card-height\);/);
   assert.match(css, /body\.runtime-embedded \.cell\s*\{[^}]*padding:\s*22px 6px 10px;/);
   assert.match(css, /body\.runtime-embedded \.cell\.worker\s*\{[^}]*min-height:\s*var\(--agent-card-height,\s*108px\);/);
+
+  runInContext(context, `state.groups = {}; render();`);
+  assert.doesNotMatch(main.innerHTML, /data-agent-grid-settings-button|openGroupSettings\(/);
 });
 
 test('agents-grid v1.6 uses one-line metrics, action threshold labels, empty-row reclaim, and preserves scroll on rerender', () => {

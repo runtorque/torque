@@ -497,12 +497,4 @@ body.runtime-embedded .group-body-inner {
   --agent-engineer-card-height: var(--agent-card-height);
   --agent-worker-card-height: var(--agent-card-height);
 }
-.group-btn {
-  font-size: 12px; color: var(--text-dim);
-  width: 22px; height: 22px;
-  display: flex; align-items: center; justify-content: center;
-  border-radius: 4px; transition: background .15s, color .15s;
-}
-.group-btn:hover { background: var(--bg-hover); color: var(--text); }
-
 /* ------------------------------------------------------------------ */

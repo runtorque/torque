@@ -27,6 +27,10 @@ function _renderAgentGridHeaderControls(groupName, atAgentCap) {
       + '</div>';
   }
   return '<div class="agent-grid-header-controls" data-agent-grid-header-controls>'
+    + '<button type="button" class="agent-grid-settings-btn" draggable="false" data-agent-grid-settings-button'
+    + ' data-group="' + esc(group) + '" title="Group settings" aria-label="Open settings for ' + esc(group) + '"'
+    + ' onclick="event.preventDefault();event.stopPropagation();openGroupSettings(' + groupArg + ')"'
+    + '><span class="agent-grid-settings-icon" aria-hidden="true">&#9881;</span></button>'
     + viewToggle
     + '<button type="button" class="agent-grid-actions-btn" draggable="false" data-agent-grid-actions-button'
     + ' data-group="' + esc(group) + '"'
@@ -560,7 +564,6 @@ function _renderMainGrid(opts, renderMode) {
       html += `  <span class="group-name" title="${esc(gname)}">${esc(gname)}</span>`;
       html += `  <span class="group-count ui-badge ui-badge--compact ui-badge--neutral ui-badge--count">${agents.length}</span>`;
       html += _renderAgentGridHeaderControls(gname, ctx.atAgentCap);
-      html += `  <button class="group-btn" draggable="false" title="Group settings" aria-label="Group settings" onclick="event.stopPropagation();openGroupSettings('${esc(gname)}')">\u2699</button>`;
       html += `</div>`;
 
       html += `<div class="group-body"><div class="group-body-inner">`;
