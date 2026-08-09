@@ -83,6 +83,9 @@ function _handleClientFocusUpdate(msg) {
 
 function _handleFullState(msg) {
   _cancelPendingDeltaSurfaceRender();
+  if (typeof _torqueBumpStateRevision === 'function') {
+    _torqueBumpStateRevision();
+  }
   const prevActive = state.active_session_id;
   const prevOperatorNotices = state.operator_notices || {};
   const prevTasks = state.board_tasks || {};

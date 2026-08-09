@@ -198,8 +198,22 @@ test('dispatch_state-only task delta patches the visible card badge without boar
   assert.equal(badge.textContent, 'LIVE');
   assert.equal(badge.dataset.dispatchState, 'live');
   assert.match(badge.className, /board-card-dispatch-state-live/);
-  assert.deepEqual(renderCalls, []);
-  assert.equal(rafCalls(), 0);
+  // The board fast-path stays render-free: no panel surface flags fire.
+  // Only the status-bar refresh rides the rAF batch for this task delta —
+  // it used to run synchronously inside _handleDelta on every WS message.
+  assert.deepEqual(renderCalls, [{
+    main: false,
+    board: false,
+    context: false,
+    events: false,
+    engineer: false,
+    templates: false,
+    health: false,
+    thinking: false,
+    terminal: false,
+    statusbar: true,
+  }]);
+  assert.equal(rafCalls(), 1);
 });
 
 test('policy root with review children renders escaped bounded finalization badge', () => {

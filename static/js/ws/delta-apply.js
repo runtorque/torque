@@ -791,4 +791,7 @@ function _applyDelta(ops) {
   if (typeof _pruneAgentDoneFlourishes === 'function') {
     _pruneAgentDoneFlourishes(state.agents || {});
   }
+  if (typeof _torqueBumpStateRevision === 'function') {
+    _torqueBumpStateRevision();
+  }
 }

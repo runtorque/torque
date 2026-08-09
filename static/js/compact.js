@@ -265,6 +265,9 @@ function _compactApplyTaskDetail(msg) {
     if (typeof _invalidateTaskLookupIndex === 'function') {
       _invalidateTaskLookupIndex();
     }
+    if (typeof _torqueBumpStateRevision === 'function') {
+      _torqueBumpStateRevision();
+    }
   }
   var cbs = _compactPendingTaskDetailCbs[id] || [];
   delete _compactPendingTaskDetailCbs[id];
@@ -320,6 +323,9 @@ function _compactApplyArchivedTasks(msg) {
   }
   if (typeof _invalidateTaskLookupIndex === 'function') {
     _invalidateTaskLookupIndex();
+  }
+  if (typeof _torqueBumpStateRevision === 'function') {
+    _torqueBumpStateRevision();
   }
 }
 
