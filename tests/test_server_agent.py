@@ -658,18 +658,50 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(resolved["worktree"])
 
-    def test_resolve_worker_launch_config_provider_slug_model_reproduction(self):
-        """Failing-first checkpoint: a provider slug is consumed as a model."""
+    def test_resolve_worker_launch_config_rejects_provider_slug_model(self):
+        """Reject a provider/model category error before launch resolution."""
+        service = self._launch_service(
+            _FakeState(worker_provider="codex"),
+            _FakeBridge(),
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Invalid model override `codex`: that is a provider name",
+        ):
+            service.resolve_worker_launch_config(
+                "backend", overrides={"model": "codex"}
+            )
+
+    def test_resolve_worker_launch_config_allows_unknown_model_id(self):
         service = self._launch_service(
             _FakeState(worker_provider="codex"),
             _FakeBridge(),
         )
 
         resolved = service.resolve_worker_launch_config(
-            "backend", overrides={"model": "codex"}
+            "backend", overrides={"model": "future-account-model"}
         )
 
-        self.assertEqual(resolved["command"], "codex --model codex")
+        self.assertEqual(
+            resolved["command"], "codex --model future-account-model"
+        )
+
+    def test_resolve_worker_launch_config_explicit_command_ignores_slug_model(self):
+        service = self._launch_service(
+            _FakeState(worker_provider="codex"),
+            _FakeBridge(),
+        )
+
+        resolved = service.resolve_worker_launch_config(
+            "backend",
+            overrides={
+                "command": "codex --full-auto",
+                "model": "codex",
+            },
+        )
+
+        self.assertEqual(resolved["command"], "codex --full-auto")
 
     async def test_persisted_worker_model_launches_codex_worker_with_terra(self):
         """A persisted Worker default reaches the fresh Codex launch input."""
