@@ -858,7 +858,16 @@ _ARCHITECT_TOOL_SPECS = [
                 "task": {"type": "string", "description": "Task ID or alias."},
                 "name": {"type": "string", "description": "Optional worker name."},
                 "command": {"type": "string", "description": "Optional worker command override."},
-                "model": {"type": "string", "description": "Optional worker model override."},
+                "model": {
+                    "type": "string",
+                    "description": (
+                        "Optional worker model-id override (for example "
+                        "'gpt-5.6-sol'). This does not select the backend: "
+                        "do not put a provider name such as 'codex' here. "
+                        "Architect dispatch inherits the worker provider "
+                        "because this tool has no provider override."
+                    ),
+                },
                 "reasoning_effort": {"type": "string", "description": "Optional reasoning-effort override."},
             },
             "required": ["task"],

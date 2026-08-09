@@ -10,6 +10,7 @@ from typing import Any
 
 from . import config as torque_config
 from .adapters import (
+    ADAPTERS,
     detect_by_command,
     get_adapter,
     get_default_command_for_provider,
@@ -46,6 +47,32 @@ def validate_startup_command(command: str) -> None:
         raise ValueError(
             f"Invalid startup command field 'command': {exc}"
         ) from exc
+
+
+def validate_model_override(model: str, *, consumed: bool) -> None:
+    """Reject provider slugs passed through Torque's model-flag field.
+
+    This deliberately consults only the static adapter registry. Arbitrary
+    uncatalogued model ids remain forward-compatible, and optional dynamic
+    provider catalogs never become a launch dependency. A full command
+    override consumes neither ``model`` nor this validation.
+    """
+    model = str(model or "").strip()
+    if not consumed or not model:
+        return
+    provider_names = {
+        adapter.name
+        for adapter in ADAPTERS
+        if adapter.name and adapter.name != "generic"
+    }
+    if model not in provider_names:
+        return
+    display_name = model.replace("-", " ").title()
+    raise ValueError(
+        f"Invalid model override `{model}`: that is a provider name. "
+        f"Use provider='{model}' and omit `model`, or supply a supported "
+        f"{display_name} model id."
+    )
 
 
 def _copy_worktree_context(target, source) -> bool:
@@ -373,6 +400,9 @@ class AgentLaunchService:
             detected.name if detected else ""
         )
         adapter = get_adapter(effective_agent_type)
+        validate_model_override(
+            resolved.get("model", ""), consumed=not raw_command
+        )
         if not raw_command:
             command += adapter.resolve_model_flags(resolved.get("model", ""))
             command += adapter.resolve_reasoning_effort_flags(

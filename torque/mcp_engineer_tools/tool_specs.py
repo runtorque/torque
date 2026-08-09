@@ -977,9 +977,11 @@ ENGINEER_TOOLS = [
                 "model": {
                     "type": "string",
                     "description": (
-                        "Model override for a new agent. Only used when "
-                        "creating a new agent and when the boot command "
-                        "is not fully overridden."
+                        "Model-id override for a new agent (for example "
+                        "'gpt-5.6-sol'). Do not put a provider/backend name "
+                        "such as 'codex' here; use the separate `provider` "
+                        "field. Only used when creating a new agent and when "
+                        "the boot command is not fully overridden."
                     ),
                 },
                 "reasoning_effort": {
@@ -1167,7 +1169,12 @@ ENGINEER_TOOLS = [
                 },
                 "model": {
                     "type": "string",
-                    "description": "Model override for the designated engineer.",
+                    "description": (
+                        "Model-id override for the designated engineer (for "
+                        "example 'gpt-5.6-sol'). Do not put a provider/backend "
+                        "name such as 'codex' here; use the separate "
+                        "`provider` field."
+                    ),
                 },
                 "reasoning_effort": {
                     "type": "string",

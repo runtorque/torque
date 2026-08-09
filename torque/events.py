@@ -157,11 +157,15 @@ def worker_boot_doa_timeout_seconds() -> float:
 
 def worker_has_post_boot_activity(event_log: "EventLog", panel_log, *,
                                   cell_id: str, started_at: float) -> bool:
-    """Return True if a worker posted any meaningful signal after boot.
+    """Return whether Torque-observable activity followed ``started_at``.
 
-    Dispatch bookkeeping (``task_dispatched``) and the boot signal itself do
-    not count: the failure mode is a worker whose TUI started but never
-    produced hook/MCP output after Torque attempted to send the prompt.
+    The per-cell event view ignores ``session_start``, ``heartbeat``, and
+    ``context_update``; the global panel view ignores ``agent_started``,
+    ``task_dispatched``, ``task_queued``, and ``worker_boot_doa``. Events at
+    exactly ``started_at`` are outside the predicate. PTY output, prompt-write
+    completion, provider transcripts, and provider-internal errors are not
+    inspected by either bounded in-memory view. The default per-cell and
+    global ring capacities are 200 and 500 events, respectively.
     """
     for event in event_log.get(cell_id, since=started_at):
         if event.event_type not in WORKER_BOOT_DOA_IGNORED_AGENT_EVENTS:
@@ -203,7 +207,7 @@ def emit_worker_boot_doa_if_inactive(state, event_log: "EventLog", panel_log,
                                      cell, *, started_at: float,
                                      timeout_seconds: float | None = None,
                                      now: float | None = None) -> bool:
-    """Emit a safe escalation for booted workers that posted no activity.
+    """Escalate workers with no Torque-observable post-session activity.
 
     Recovery tradeoff: Torque deliberately does **not** retry the dispatch
     prompt or auto-close/relaunch here. A duplicate prompt can corrupt a slow
@@ -249,7 +253,8 @@ def emit_worker_boot_doa_if_inactive(state, event_log: "EventLog", panel_log,
 
     message = (
         f"Worker boot DOA: {cell.name} started {int(timeout)}s ago "
-        "but posted no activity after boot. Inspect the worker and "
+        "but posted no Torque-observable activity after session start. "
+        "Inspect the worker and "
         "re-dispatch or relaunch if needed."
     )
     log.warning(

@@ -2701,6 +2701,36 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("Full-replace", set_tool["description"])
 
+    async def test_dispatch_model_schemas_distinguish_provider_from_model(self):
+        engineer_dispatch = next(
+            tool for tool in self.mcp_mod.ENGINEER_TOOLS
+            if tool["name"] == "engineer_task_dispatch"
+        )
+        engineer_settings = next(
+            tool for tool in self.mcp_mod.ENGINEER_TOOLS
+            if tool["name"] == "engineer_launch_settings"
+        )
+        architect_dispatch = next(
+            tool for tool in self.mcp_mod.ARCHITECT_TOOLS
+            if tool["name"] == "architect_task_dispatch"
+        )
+
+        for tool in (engineer_dispatch, engineer_settings):
+            properties = tool["inputSchema"]["properties"]
+            self.assertIn("provider", properties)
+            model_description = properties["model"]["description"]
+            self.assertIn("gpt-5.6-sol", model_description)
+            self.assertIn("provider", model_description)
+            self.assertIn("codex", model_description)
+
+        architect_props = architect_dispatch["inputSchema"]["properties"]
+        self.assertNotIn("provider", architect_props)
+        architect_model_description = architect_props["model"]["description"]
+        self.assertIn("gpt-5.6-sol", architect_model_description)
+        self.assertIn("does not select the backend", architect_model_description)
+        self.assertIn("inherits the worker provider", architect_model_description)
+        self.assertIn("codex", architect_model_description)
+
     async def test_engineer_batch_dispatch_schema_frames_parallel_waves(self):
         tool = next(
             t for t in self.mcp_mod.ENGINEER_TOOLS

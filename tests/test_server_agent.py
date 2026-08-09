@@ -673,6 +673,54 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
                 "backend", overrides={"model": "codex"}
             )
 
+    def test_validate_model_override_rejects_registered_provider_slugs_only(self):
+        for provider_slug in ("codex", "claude-code", "gemini-cli"):
+            with self.subTest(provider_slug=provider_slug):
+                with self.assertRaisesRegex(
+                    ValueError, f"Invalid model override `{provider_slug}`"
+                ):
+                    self.server_agent_mod.validate_model_override(
+                        provider_slug, consumed=True
+                    )
+
+        for allowed in ("generic", "Codex", "future-account-model"):
+            with self.subTest(allowed=allowed):
+                self.server_agent_mod.validate_model_override(
+                    allowed, consumed=True
+                )
+
+        self.server_agent_mod.validate_model_override(
+            "codex", consumed=False
+        )
+
+    def test_creation_settings_model_converges_on_shared_kind_resolver_guard(self):
+        """UI/persisted creation payloads retain model until shared resolve."""
+        operations = importlib.import_module("torque.server_agent_operations")
+        overrides = operations._create_agent_launch_overrides({
+            "agent_settings": {"model": "codex"},
+        })
+        self.assertEqual(overrides, {"model": "codex"})
+        service = self._launch_service(
+            _FakeState(
+                agent_provider="codex",
+                engineer_provider="codex",
+                architect_provider="codex",
+            ),
+            _FakeBridge(),
+        )
+
+        for resolver in (
+            service.resolve_worker_launch_config,
+            service.resolve_engineer_launch_config,
+            service.resolve_architect_launch_config,
+        ):
+            with self.subTest(resolver=resolver.__name__):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "Invalid model override `codex`: that is a provider name",
+                ):
+                    resolver("backend", overrides=overrides)
+
     def test_resolve_worker_launch_config_allows_unknown_model_id(self):
         service = self._launch_service(
             _FakeState(worker_provider="codex"),

@@ -875,6 +875,10 @@ asyncio.run(main())
         self.assertTrue(changed)
         self.assertTrue(cell.needs_attention)
         self.assertIn("Worker boot DOA", cell.error_message)
+        self.assertIn(
+            "no Torque-observable activity after session start",
+            cell.error_message,
+        )
         events = panel_log.get_recent()
         self.assertEqual(events[-1]["kind"], "worker_boot_doa")
         self.assertEqual(events[-1]["cell_id"], cell.id)

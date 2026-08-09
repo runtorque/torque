@@ -390,12 +390,17 @@ async def handle_dispatch_task_command(
                     launch_overrides["reasoning_effort"] = (
                         reasoning_override
                     )
-                launch_cfg = _resolve_worker_launch_config(
-                    group,
-                    base_dir=base_dir,
-                    explicit_template=explicit_template,
-                    overrides=launch_overrides,
-                )
+                try:
+                    launch_cfg = _resolve_worker_launch_config(
+                        group,
+                        base_dir=base_dir,
+                        explicit_template=explicit_template,
+                        overrides=launch_overrides,
+                    )
+                except ValueError as exc:
+                    # Launch-field validation is intentionally resolved before
+                    # any cell, worktree, session, or prompt provisioning.
+                    return {"type": "error", "message": str(exc)}
                 class_launch = _apply_agent_class_launch_selection(
                     data,
                     launch_cfg,
