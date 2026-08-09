@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import subprocess
@@ -320,6 +321,20 @@ def architect_mainline_runtime_provenance_payload(
         "mainline": mainline,
         "daemon_mainline_comparison": comparison,
     }
+
+
+async def agent_runtime_provenance_for_context(state, cell) -> dict:
+    """Build context provenance without blocking the daemon event loop."""
+    payload = await asyncio.to_thread(
+        agent_session_runtime_provenance_payload, state, cell
+    )
+    if str(getattr(cell, "kind", "") or "").strip() == "architect":
+        payload.update(await asyncio.to_thread(
+            architect_mainline_runtime_provenance_payload,
+            state,
+            str(getattr(cell, "group", "") or ""),
+        ))
+    return payload
 
 
 def _group_mainline_branch(state, group: str, current_branch: str) -> str:

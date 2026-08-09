@@ -4558,7 +4558,9 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                 with mock.patch(
                     "torque.deploy_state._run_git", side_effect=fake_git,
                 ):
-                    payload = self.mcp_mod.architect_mainline_runtime_provenance_payload(
+                    payload = importlib.import_module(
+                        "torque.deploy_state"
+                    ).architect_mainline_runtime_provenance_payload(
                         state, "g", now=321.0,
                     )
                 comparison = payload["daemon_mainline_comparison"]
@@ -4574,7 +4576,9 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             "torque.deploy_state._run_git",
             side_effect=RuntimeError("x" * 1000),
         ) as run_git:
-            failure = self.mcp_mod.architect_mainline_runtime_provenance_payload(
+            failure = importlib.import_module(
+                "torque.deploy_state"
+            ).architect_mainline_runtime_provenance_payload(
                 state, "g", now=321.0,
             )
         comparison = failure["daemon_mainline_comparison"]

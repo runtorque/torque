@@ -18,10 +18,7 @@ import uuid
 from aiohttp import web
 
 from . import __version__
-from .deploy_state import (
-    agent_session_runtime_provenance_payload,
-    architect_mainline_runtime_provenance_payload,
-)
+from .deploy_state import agent_runtime_provenance_for_context
 from .capability_catalog import (
     CAPABILITY_CATALOG,
 )
@@ -1597,17 +1594,7 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
             (tid, task) for tid, task in state.board_tasks.items()
             if task.agent_id == cell_id
         ]
-        runtime_provenance = await asyncio.to_thread(
-            agent_session_runtime_provenance_payload,
-            state,
-            cell,
-        )
-        if str(getattr(cell, "kind", "") or "").strip() == "architect":
-            runtime_provenance.update(await asyncio.to_thread(
-                architect_mainline_runtime_provenance_payload,
-                state,
-                str(getattr(cell, "group", "") or ""),
-            ))
+        runtime_provenance = await agent_runtime_provenance_for_context(state, cell)
         if bool(args.get("detail", False)):
             return json.dumps({
                 "detail": "full",
