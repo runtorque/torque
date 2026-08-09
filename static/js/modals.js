@@ -259,9 +259,13 @@ function openAddWorkerForSection(group) {
 }
 
 function openAddEngineerModal(options, architectId) {
+  const ctx = _normalizeAddEngineerOptions(options, architectId);
+  if (!ctx.hired_by_architect_id && typeof openAgentSettingsDialog === 'function') {
+    openAgentSettingsDialog({ mode: 'create', kind: 'engineer', group: ctx.group });
+    return;
+  }
   const modal = document.getElementById('modal-engineer');
   if (!modal) return;
-  const ctx = _normalizeAddEngineerOptions(options, architectId);
   const architect = ctx.hired_by_architect_id && state && state.agents
     ? state.agents[ctx.hired_by_architect_id]
     : null;
@@ -346,12 +350,16 @@ function openAddArchitectForGroup(group) {
 }
 
 function openAddArchitectModal(group) {
+  const ctx = _normalizeAddArchitectOptions(group);
+  if (typeof openAgentSettingsDialog === 'function') {
+    openAgentSettingsDialog({ mode: 'create', kind: 'architect', group: ctx.group });
+    return;
+  }
   const modal = document.getElementById('modal-architect');
   if (!modal) return;
   const nameInput = document.getElementById('architect-name-input');
   const commandInput = document.getElementById('architect-command-input');
   const summary = document.getElementById('modal-architect-summary');
-  const ctx = _normalizeAddArchitectOptions(group);
   _addArchitectGroup = ctx.group;
   if (summary) {
     const summaryText = _addArchitectGroup

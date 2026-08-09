@@ -82,6 +82,57 @@ def _project_specialization_names(specialization_mgr,
         seen.add(name)
     return names
 
+
+# Creation dialogs submit only explicit per-agent values.  Keep this mapping
+# beside the creation handlers so Architect and Engineer creation cannot drift
+# into separate precedence implementations: AgentLaunchResolver remains the
+# sole owner of launch precedence.
+_CREATE_AGENT_LAUNCH_SETTING_TARGETS = {
+    "provider": "provider",
+    "boot_command": "command",
+    "model": "model",
+    "reasoning_effort": "reasoning_effort",
+    "fast_mode": "fast_mode",
+}
+
+
+def _create_agent_settings_payload(data: dict) -> dict:
+    raw = data.get("agent_settings", {})
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _create_agent_launch_overrides(data: dict) -> dict:
+    """Return explicit launch inputs without resolving inherited values."""
+    overrides = {
+        key: str(data.get(key, "") or "").strip()
+        for key in ("command", "provider", "directory")
+        if str(data.get(key, "") or "").strip()
+    }
+    for source, target in _CREATE_AGENT_LAUNCH_SETTING_TARGETS.items():
+        value = _create_agent_settings_payload(data).get(source)
+        if value is None:
+            continue
+        if isinstance(value, str):
+            value = value.strip()
+            if not value or (source == "fast_mode" and value.lower() == "inherit"):
+                continue
+        overrides[target] = value
+    return overrides
+
+
+def _persist_created_agent_settings(data: dict, state: MatrixState, agent_id: str) -> None:
+    settings = _create_agent_settings_payload(data)
+    if settings:
+        state.update_agent_settings(agent_id, **settings)
+
+
+def _persist_created_agent_digest_settings(data: dict, state: MatrixState,
+                                           agent_id: str) -> None:
+    raw = data.get("agent_digest_settings", {})
+    settings = dict(raw) if isinstance(raw, dict) else {}
+    if settings:
+        state.update_agent_digest_settings(agent_id, **settings)
+
 def _normalize_engineer_specialization_selection(
         raw, valid_names: list | set | tuple | None = None) -> list:
     """Validate, dedupe, and preserve engineer specialization order."""
@@ -857,13 +908,25 @@ async def _handle_add_engineer_command(
     if group not in state.groups:
         state.add_group(group)
     base_dir = await resolve_base_dir(group)
-    pending_specializations = _resolve_pending_engineer_specializations(
-        data, state, group, True)
-    overrides = {
-        key: str(data.get(key, "") or "").strip()
-        for key in ("command", "provider", "directory")
-        if str(data.get(key, "") or "").strip()
-    }
+    if "specializations" in data:
+        try:
+            if specialization_mgr is None:
+                raise ValueError("specialization validation is unavailable")
+            pending_specializations = (
+                _normalize_engineer_specialization_selection(
+                    data.get("specializations"),
+                    valid_names=_project_specialization_names(
+                        specialization_mgr,
+                        base_dir,
+                    ),
+                )
+            )
+        except ValueError as exc:
+            return {"type": "error", "message": str(exc)}
+    else:
+        pending_specializations = _resolve_pending_engineer_specializations(
+            data, state, group, True)
+    overrides = _create_agent_launch_overrides(data)
     launch_cfg = resolve_engineer_launch_config(
         group,
         base_dir=base_dir,
@@ -940,6 +1003,8 @@ async def _handle_add_engineer_command(
         cell.engineer_specializations = list(pending_specializations)
         state._emit_agent(cell)
         state._db_save_agent(cell)
+    _persist_created_agent_settings(data, state, cell.id)
+    _persist_created_agent_digest_settings(data, state, cell.id)
 
     if cell.session_id:
         for prompt_text, send_kwargs in _new_agent_prompt_sequence(
@@ -990,11 +1055,7 @@ async def _handle_add_architect_command(
     if group not in state.groups:
         state.add_group(group)
     base_dir = await resolve_base_dir(group)
-    overrides = {
-        key: str(data.get(key, "") or "").strip()
-        for key in ("command", "provider", "directory")
-        if str(data.get(key, "") or "").strip()
-    }
+    overrides = _create_agent_launch_overrides(data)
     launch_resolver = resolve_architect_launch_config or resolve_engineer_launch_config
     launch_cfg = launch_resolver(
         group,
@@ -1048,6 +1109,9 @@ async def _handle_add_architect_command(
     )
     if not cell:
         return {"type": "error", "message": "Failed to create architect"}
+
+    _persist_created_agent_settings(data, state, cell.id)
+    _persist_created_agent_digest_settings(data, state, cell.id)
 
     startup_prompt = _startup_prompt_for_new_agent(
         agent_type=launch_cfg.get("agent_type", ""),

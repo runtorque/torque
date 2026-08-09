@@ -167,6 +167,7 @@ test('canvas card menu exposes designated engineer relaunch and lifecycle contro
 
   assert.deepEqual(JSON.parse(JSON.stringify(labels(context._cellContextMenuItems('engineer-1')))), [
     'Edit…',
+    'Settings…',
     'Restart Engineer…',
     'Restart…',
     'View Tasks',
@@ -181,6 +182,7 @@ test('canvas card menu exposes designated engineer relaunch and lifecycle contro
   assert.deepEqual(JSON.parse(JSON.stringify(itemLabels)), [
     'Edit…',
     'Pause event delivery',
+    'Settings…',
     'Restart Engineer…',
     'Restart…',
     'View Tasks',

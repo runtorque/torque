@@ -209,6 +209,7 @@ EXPECTED_SETTINGS_MUTATION_COMMANDS = {
     "update_group_settings",
     "update_architect_settings",
     "update_agent_settings",
+    "update_agent_digest_settings",
 }
 EXPECTED_BOARD_ARCHIVE_COMMANDS = {
     "board_archive_task",

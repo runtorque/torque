@@ -587,10 +587,18 @@ function _deltaSurfaceInvalidations(ops, hints) {
         }
         break;
       }
+      case 'agent_settings_update': {
+        const _asFocused = _contextFocusedAgentBeforeDelta();
+        const _asAgentId = String((op && op.agent_id) || '');
+        if (_asFocused && _asAgentId && _asFocused === _asAgentId) {
+          _markSurface(flags, 'engineer');
+        }
+        break;
+      }
       case 'agent_digest_update': {
         _markSurface(flags, 'main');
         const _adFocused = _contextFocusedAgentBeforeDelta();
-        const _adCellId = String((op && op.cell_id) || '');
+        const _adCellId = String((op && (op.agent_id || op.cell_id)) || '');
         if (_adFocused && _adCellId && _adFocused === _adCellId) {
           _markSurface(flags, 'engineer');
         }
@@ -1431,6 +1439,7 @@ function _collectSessionMapInvalidationGroups(ops, hints) {
       case 'journal_append':
       case 'journal_delete':
       case 'agent_digest_update':
+      case 'agent_settings_update':
       case 'engineer_settings_update':
       case 'peer_message_upsert':
       case 'direct_message_upsert':
@@ -1561,6 +1570,7 @@ function _opTouchesGroup(op, group, hint) {
     case 'journal_append':
     case 'journal_delete':
     case 'agent_digest_update':
+    case 'agent_settings_update':
     case 'digest_buffer_stats':
     case 'digest_sent_push':
     case 'engineer_buffer_stats':

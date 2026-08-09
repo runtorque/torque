@@ -619,11 +619,8 @@ function _agentPanelTabRenderParts(agent, kind, activeTab) {
 function _renderEngineerPanel(agent) {
   var activeTab = _agentPanelActiveTab('engineer');
   var parts = _agentPanelTabRenderParts(agent, 'engineer', activeTab);
-  var bodyHtml = _agentPanelBodyWithClassManager(
-    agent,
-    _agentPanelEngineerSpecializationsEditorHtml(agent) + (parts.bodyHtml || ''),
-    activeTab === 'behavior'
-  );
+  var bodyHtml = _agentPanelEngineerSpecializationsEditorHtml(agent)
+    + (parts.bodyHtml || '');
   return _agentPanelShell(
     _agentPanelRoleTitle(agent, 'Engineer'),
     'Journal, digest queue, assigned tasks, and completed work for this engineer\'s group.',

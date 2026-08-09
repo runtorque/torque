@@ -3747,9 +3747,9 @@ test('agent class manager assigns Product Manager as desired and renders effecti
 
   context._agentPanelLastSelectedTabByKind.architect = 'behavior';
   context.renderAgentPanel();
-  assert.match(panel.innerHTML, /Agent Class/);
-  assert.match(panel.innerHTML, /Change Class/);
-  assert.equal(sendCalls.some((call) => /^agent_class_/.test(call.cmd || '')), false, 'compact Behavior summary does not fetch class data until Change Class opens the modal');
+  assert.doesNotMatch(panel.innerHTML, /Agent Class|Change Class/,
+    'Agent Class ownership moved from Behavior into per-agent Settings');
+  assert.equal(sendCalls.some((call) => /^agent_class_/.test(call.cmd || '')), false);
   context.agentPanelToggleClassAssignment(null, 'blueprint');
   assert.equal(classModal.classList.contains('visible'), true);
   assert.deepEqual(JSON.parse(JSON.stringify(sendCalls.slice(-2))), [
@@ -3805,9 +3805,9 @@ test('agent class manager assigns Product Manager as desired and renders effecti
       external_connector_caveat: 'External connector exposure is not governed by Agent Classes.',
     },
   });
-  assert.match(panel.innerHTML, /Desired Agent Class updated\. It will freeze on the next launch or relaunch\./);
-  assert.match(panel.innerHTML, /Desired Agent Class next launch[\s\S]*Product Manager@2/);
-  assert.match(panel.innerHTML, /Pending relaunch[\s\S]*next relaunch freezes Product Manager@2/);
+  assert.match(classModalBody.innerHTML, /Desired Agent Class updated\. It will freeze on the next launch or relaunch\./);
+  assert.match(classModalBody.innerHTML, /Desired Agent Class next launch[\s\S]*Product Manager@2/);
+  assert.match(classModalBody.innerHTML, /Pending relaunch[\s\S]*next relaunch freezes Product Manager@2/);
 
   Object.assign(context.state.agents.blueprint, {
     status: 'running',
@@ -3825,11 +3825,13 @@ test('agent class manager assigns Product Manager as desired and renders effecti
   );
   context.renderAgentPanel();
 
-  assert.match(panel.innerHTML, /Product Manager/);
-  assert.match(panel.innerHTML, /Primary identity now[\s\S]*Product Manager@2/);
-  assert.match(panel.innerHTML, /Base kind metadata[\s\S]*Architect-derived/);
-  assert.match(panel.innerHTML, /Pending relaunch[\s\S]*No — running session already matches desired Agent Class/);
-  assert.doesNotMatch(panel.innerHTML, /Desired Agent Class updated\. It will freeze/);
+  const managerHtml = context._agentPanelClassManagerHtml(context.state.agents.blueprint);
+  assert.match(managerHtml, /Product Manager/);
+  assert.match(managerHtml, /Primary identity now[\s\S]*Product Manager@2/);
+  assert.match(managerHtml, /Base kind metadata[\s\S]*Architect-derived/);
+  assert.match(managerHtml, /Pending relaunch[\s\S]*No — running session already matches desired Agent Class/);
+  assert.doesNotMatch(managerHtml, /Desired Agent Class updated\. It will freeze/);
+  assert.doesNotMatch(panel.innerHTML, /Primary identity now/);
   context.agentPanelCloseClassAssignmentModal(null);
   assert.equal(classModal.classList.contains('visible'), false);
 });
@@ -3886,12 +3888,9 @@ test('agent panel renders Product Manager dogfood state as compact capability AC
 
   assert.match(panel.innerHTML, /Product Manager · Group: alpha/);
   assert.doesNotMatch(panel.innerHTML, /Architect: Product Manager/);
-  assert.match(panel.innerHTML, /Agent Class/);
-  assert.match(panel.innerHTML, /Product Manager/);
+  assert.doesNotMatch(panel.innerHTML, /data-agent-class-manager=/);
   assert.doesNotMatch(panel.innerHTML, /External connectors/);
   assert.doesNotMatch(panel.innerHTML, /agent-profile-scratch-warning[\s\S]*External connector/);
-  assert.match(panel.innerHTML, /Primary identity now[\s\S]*Product Manager@2/);
-  assert.match(panel.innerHTML, /Base kind metadata[\s\S]*Architect-derived/);
   assert.doesNotMatch(panel.innerHTML, /class-policy-product-manager@2/);
   assert.doesNotMatch(panel.innerHTML, /class-policy-product-manager|Product Manager internal policy|default full-architect|differs from desired/);
 
@@ -3902,6 +3901,8 @@ test('agent panel renders Product Manager dogfood state as compact capability AC
     issues: [],
   });
   assert.match(classModalBody.innerHTML, /<option value="product-manager" selected>/);
+  assert.match(classModalBody.innerHTML, /Primary identity now[\s\S]*Product Manager@2/);
+  assert.match(classModalBody.innerHTML, /Base kind metadata[\s\S]*Architect-derived/);
   assert.match(classModalBody.innerHTML, /Effective ACL[\s\S]*task\.propose \(self\)/);
   assert.doesNotMatch(classModalBody.innerHTML, /class-policy-product-manager|Product Manager internal policy|differs from desired default/);
   assert.doesNotMatch(panel.innerHTML, /External connectors/);
@@ -4002,8 +4003,8 @@ test('agent panel assigns and renders Creative as proposal-only Thinking class',
       pending_next_launch: true,
     },
   });
-  assert.match(panel.innerHTML, /Desired Agent Class next launch[\s\S]*Creative@1/);
-  assert.match(panel.innerHTML, /Pending relaunch[\s\S]*next relaunch freezes Creative@1/);
+  assert.match(classModalBody.innerHTML, /Desired Agent Class next launch[\s\S]*Creative@1/);
+  assert.match(classModalBody.innerHTML, /Pending relaunch[\s\S]*next relaunch freezes Creative@1/);
 
   Object.assign(context.state.agents.spark, {
     status: 'running',
@@ -4016,15 +4017,16 @@ test('agent panel assigns and renders Creative as proposal-only Thinking class',
   });
   context.renderAgentPanel();
   assert.match(panel.innerHTML, /Creative · Group: alpha/);
-  assert.match(panel.innerHTML, /Primary identity now[\s\S]*Creative@1/);
   assert.doesNotMatch(panel.innerHTML, /Creative Architect@1|Creative Architect · Group: alpha/);
-  assert.match(panel.innerHTML, /Base kind metadata[\s\S]*Architect-derived/);
-  assert.match(panel.innerHTML, /Agent Class/);
-  assert.match(panel.innerHTML, /Agent Class/);
+  const managerHtml = context._agentPanelClassManagerHtml(context.state.agents.spark);
+  assert.match(managerHtml, /Primary identity now[\s\S]*Creative@1/);
+  assert.match(managerHtml, /Base kind metadata[\s\S]*Architect-derived/);
+  assert.match(managerHtml, /Agent Class/);
+  assert.doesNotMatch(panel.innerHTML, /data-agent-class-manager=/);
   assert.doesNotMatch(panel.innerHTML, /class-policy-creative-architect|External connectors|raw atom|compiler/i);
 });
 
-test('agent panel shows Agent Class summary only on Behavior tab and opens modal from Change Class', () => {
+test('agent panel no longer injects Agent Class on Behavior while audited assignment modal remains callable', () => {
   const { context, panel, classModal } = createHarness();
   const productManagerClass = {
     id: 'product-manager',
@@ -4057,9 +4059,8 @@ test('agent panel shows Agent Class summary only on Behavior tab and opens modal
 
   context._agentPanelLastSelectedTabByKind.architect = 'behavior';
   context.renderAgentPanel();
-  assert.match(panel.innerHTML, /data-agent-class-manager=/);
-  assert.match(panel.innerHTML, /Change Class/);
-  assert.match(panel.innerHTML, /Primary identity now[\s\S]*Product Manager@2/);
+  assert.doesNotMatch(panel.innerHTML, /data-agent-class-manager=/);
+  assert.doesNotMatch(panel.innerHTML, /Change Class/);
 
   context.agentPanelOpenClassAssignment(null, 'blueprint');
   assert.equal(classModal.classList.contains('visible'), true);
@@ -4072,7 +4073,7 @@ test('agent panel shows Agent Class summary only on Behavior tab and opens modal
   assert.doesNotMatch(panel.innerHTML, /Change Class/);
 });
 
-test('agent panel in-place Behavior tab render includes Agent Class summary only on Behavior', () => {
+test('agent panel in-place Behavior tab render keeps Agent Class out of every tab', () => {
   const { context, panel } = createHarness();
   const { content, shell } = installReusableAgentPanelDom(
     panel, 'blueprint', 'architect', ['decisions', 'behavior', 'messages'], 'decisions'
@@ -4106,9 +4107,8 @@ test('agent panel in-place Behavior tab render includes Agent Class summary only
   context._agentPanelLastSelectedTabByKind.architect = 'decisions';
   context.agentPanelSelectTab('behavior');
   assert.equal(shell.dataset.agentPanelTab, 'behavior');
-  assert.match(content.innerHTML, /data-agent-class-manager=/);
-  assert.match(content.innerHTML, /Change Class/);
-  assert.match(content.innerHTML, /Primary identity now[\s\S]*Product Manager@2/);
+  assert.doesNotMatch(content.innerHTML, /data-agent-class-manager=/);
+  assert.doesNotMatch(content.innerHTML, /Change Class/);
 
   context.agentPanelSelectTab('messages');
   assert.equal(shell.dataset.agentPanelTab, 'messages');
@@ -4185,8 +4185,8 @@ test('reused Agent tab indicator matches the tab body after a delta refresh', ()
     'the shared tab CSS must have exactly one active selector after the reused-DOM refresh',
   );
   assert.equal(shell.dataset.agentPanelTab, 'behavior');
-  assert.match(content.innerHTML, /data-agent-class-manager=/);
-  assert.match(content.innerHTML, /Change Class/);
+  assert.doesNotMatch(content.innerHTML, /data-agent-class-manager=/);
+  assert.doesNotMatch(content.innerHTML, /Change Class/);
 });
 
 test('agent class manager assignment errors remain routed to active panel operation', () => {
@@ -4231,9 +4231,9 @@ test('agent class manager assignment errors remain routed to active panel operat
 
   context._agentPanelLastSelectedTabByKind.architect = 'behavior';
   context.renderAgentPanel();
-  assert.match(panel.innerHTML, /Agent Class/);
-  assert.match(panel.innerHTML, /Change Class/);
-  assert.equal(sendCalls.some((call) => /^agent_class_/.test(call.cmd || '')), false, 'compact Behavior summary does not fetch class data until Change Class opens the modal');
+  assert.doesNotMatch(panel.innerHTML, /Agent Class|Change Class/,
+    'Agent Class ownership moved from Behavior into per-agent Settings');
+  assert.equal(sendCalls.some((call) => /^agent_class_/.test(call.cmd || '')), false);
   context.agentPanelToggleClassAssignment(null, 'blueprint');
   assert.equal(classModal.classList.contains('visible'), true);
   context.agentPanelReceiveAgentClasses({
@@ -4251,6 +4251,6 @@ test('agent class manager assignment errors remain routed to active panel operat
   });
   assert.equal(handled, true);
   assert.match(classModalBody.innerHTML, /Unknown Agent Class: product-manager/);
-  assert.match(panel.innerHTML, /Unknown Agent Class: product-manager/);
+  assert.doesNotMatch(panel.innerHTML, /Unknown Agent Class: product-manager/);
   assert.doesNotMatch(classModalBody.innerHTML, /Saving…/);
 });

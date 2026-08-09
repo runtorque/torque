@@ -21,6 +21,7 @@ SETTINGS_MUTATION_COMMAND_NAMES = frozenset({
     "update_group_settings",
     "update_architect_settings",
     "update_agent_settings",
+    "update_agent_digest_settings",
 })
 
 
@@ -146,6 +147,23 @@ def _handle_settings_mutation_command(
             }
         except ValueError as exc:
             return {"type": "error", "message": str(exc)}
+
+    if cmd == "update_agent_digest_settings":
+        agent_id = str(data.get("agent_id", "") or "").strip()
+        cell = state.agents.get(agent_id)
+        if not cell or cell.kind not in {"architect", "engineer"}:
+            return {
+                "type": "error",
+                "message": "per-agent digest settings require an Architect or Engineer id",
+            }
+        settings = dict(data.get("settings", {}) or {})
+        state.update_agent_digest_settings(agent_id, **settings)
+        return {
+            "type": "agent_settings",
+            "agent_id": agent_id,
+            "settings": asdict(state.get_agent_settings(agent_id)),
+            "resolved": state.resolve_agent_settings(agent_id),
+        }
 
     return None
 

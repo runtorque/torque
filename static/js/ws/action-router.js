@@ -58,6 +58,14 @@ function _handleWsMessage(e) {
         refreshStatusBar({ runtime: true });
       }
       _showGroupSettings(msg.group, msg);
+    } else if (msg.type === 'agent_settings') {
+      if (!state.agent_settings) state.agent_settings = {};
+      if (!state.resolved_agent_settings) state.resolved_agent_settings = {};
+      if (msg.agent_id) {
+        state.agent_settings[msg.agent_id] = msg.settings || { agent_id: msg.agent_id };
+        state.resolved_agent_settings[msg.agent_id] = msg.resolved || {};
+      }
+      if (typeof agentSettingsReceive === 'function') agentSettingsReceive(msg);
     } else if (msg.type === 'toast') {
       _showToast(msg.message, msg.level);
     } else if (msg.type === 'system_banner') {
@@ -187,6 +195,9 @@ function _handleWsMessage(e) {
       }
       if (typeof renderEditEngineerSpecializations === 'function') {
         renderEditEngineerSpecializations();
+      }
+      if (typeof renderAgentSettingsSpecializations === 'function') {
+        renderAgentSettingsSpecializations();
       }
       if (typeof agentPanelRenderEngineerSpecializationsEditor === 'function') {
         agentPanelRenderEngineerSpecializationsEditor();

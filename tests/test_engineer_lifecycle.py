@@ -4,6 +4,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 try:
     from helpers import install_aiohttp_stub
@@ -451,6 +452,186 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["type"], "error")
         self.assertEqual(len(state.agents), 1)
 
+    async def test_add_engineer_create_uses_sparse_settings_in_first_launch_and_persists_them(self):
+        state = self._make_state()
+        resolved_launch = self._launch_config("/tmp/project")
+        resolved_launch["command"] = "resolved-first-command"
+        resolver_calls = []
+        create_calls = []
+
+        class FakeSpecializations:
+            @staticmethod
+            def canonical_project_names(*, base_dir=""):
+                self.assertEqual(base_dir, "/tmp/project")
+                return ["frontend", "ui-ux"]
+
+            @staticmethod
+            def render_engineer_preamble(names, *, base_dir=""):
+                self.assertEqual(base_dir, "/tmp/project")
+                return "VERIFIED SPECIALIZATIONS: " + ", ".join(names)
+
+        async def fake_resolve_base_dir(group):
+            self.assertEqual(group, "torque")
+            return "/tmp/project"
+
+        def fake_resolver(group, *, base_dir="", explicit_template="", overrides=None):
+            resolver_calls.append(dict(overrides or {}))
+            return resolved_launch
+
+        async def fake_create(group, name, launch_cfg, **kwargs):
+            create_calls.append((launch_cfg, dict(kwargs)))
+            cell = self.state_mod.AgentCell(
+                id="eng-created", slug="alice", name=name, group=group,
+                kind="engineer", persistent=True,
+            )
+            state.agents[cell.id] = cell
+            return cell
+
+        async def fake_send(*args, **kwargs):
+            del args, kwargs
+
+        result = await self.server_mod._handle_add_engineer_command(
+            {
+                "name": "Alice",
+                "group": "torque",
+                "agent_settings": {
+                    "provider": "codex",
+                    "model": "gpt-first",
+                    "reasoning_effort": "high",
+                    "fast_mode": "on",
+                    "autonomy_mode": "suggest_only",
+                },
+                "agent_digest_settings": {"push_interval": 15},
+                "specializations": ["ui-ux", "frontend", "ui-ux"],
+            },
+            state,
+            resolve_base_dir=fake_resolve_base_dir,
+            resolve_engineer_launch_config=fake_resolver,
+            create_agent_with_config=fake_create,
+            specialization_mgr=FakeSpecializations(),
+            send_agent_prompt=fake_send,
+        )
+
+        self.assertEqual(result["id"], "eng-created")
+        self.assertEqual(resolver_calls, [{
+            "provider": "codex", "model": "gpt-first",
+            "reasoning_effort": "high", "fast_mode": "on",
+        }])
+        self.assertIs(create_calls[0][0], resolved_launch)
+        self.assertIn(
+            "VERIFIED SPECIALIZATIONS: ui-ux, frontend",
+            create_calls[0][1]["persistent_prompt_text"],
+        )
+        self.assertEqual(
+            state.agents["eng-created"].engineer_specializations,
+            ["ui-ux", "frontend"],
+        )
+        stored = state.get_agent_settings("eng-created")
+        self.assertEqual(stored.model, "gpt-first")
+        self.assertEqual(stored.autonomy_mode, "suggest_only")
+        self.assertEqual(
+            state.resolve_agent_settings("eng-created")["push_interval"],
+            {
+                "value": 15,
+                "origin": "per-agent",
+                "inherited": {"value": 60, "origin": "default"},
+            },
+        )
+
+    async def test_add_engineer_rejects_unknown_explicit_specialization_before_create(self):
+        state = self._make_state()
+
+        class FakeSpecializations:
+            @staticmethod
+            def canonical_project_names(*, base_dir=""):
+                self.assertEqual(base_dir, "/tmp/project")
+                return ["frontend"]
+
+        async def fake_resolve_base_dir(group):
+            self.assertEqual(group, "torque")
+            return "/tmp/project"
+
+        def should_not_resolve(*args, **kwargs):
+            raise AssertionError("invalid specializations must not resolve launch")
+
+        async def should_not_create(*args, **kwargs):
+            raise AssertionError("invalid specializations must not create")
+
+        async def should_not_prompt(*args, **kwargs):
+            raise AssertionError("invalid specializations must not prompt")
+
+        result = await self.server_mod._handle_add_engineer_command(
+            {
+                "name": "Invalid",
+                "group": "torque",
+                "specializations": ["not-a-project-specialization"],
+            },
+            state,
+            resolve_base_dir=fake_resolve_base_dir,
+            resolve_engineer_launch_config=should_not_resolve,
+            create_agent_with_config=should_not_create,
+            specialization_mgr=FakeSpecializations(),
+            send_agent_prompt=should_not_prompt,
+        )
+
+        self.assertEqual(result["type"], "error")
+        self.assertIn("Unknown specialization: not-a-project-specialization", result["message"])
+        self.assertFalse(state.agents)
+        self.assertFalse(state.agent_settings)
+
+    async def test_class_create_shares_unknown_specialization_no_create_gate(self):
+        state = self._make_state()
+        operations = importlib.import_module("torque.server_agent_operations")
+        definition = types.SimpleNamespace(
+            id="default-engineer", version="1", base_kind="engineer",
+        )
+
+        class FakeSpecializations:
+            @staticmethod
+            def canonical_project_names(*, base_dir=""):
+                self.assertEqual(base_dir, "/tmp/project")
+                return ["frontend"]
+
+        async def fake_resolve_base_dir(group):
+            self.assertEqual(group, "torque")
+            return "/tmp/project"
+
+        def should_not_call(*args, **kwargs):
+            raise AssertionError("invalid class-create specializations must stop")
+
+        async def should_not_create(*args, **kwargs):
+            raise AssertionError("invalid class-create specializations must not create")
+
+        async def should_not_prompt(*args, **kwargs):
+            raise AssertionError("invalid class-create specializations must not prompt")
+
+        with mock.patch.object(
+                operations, "agent_class_definition_by_id",
+                return_value=definition):
+            result = await operations._handle_agent_class_launch_command(
+                {
+                    "name": "Invalid class create",
+                    "group": "torque",
+                    "class_id": "default-engineer",
+                    "kind": "engineer",
+                    "specializations": ["not-a-project-specialization"],
+                },
+                state,
+                resolve_base_dir=fake_resolve_base_dir,
+                resolve_agent_launch_config=should_not_call,
+                resolve_engineer_launch_config=should_not_call,
+                resolve_architect_launch_config=should_not_call,
+                resolve_worker_launch_config=should_not_call,
+                create_agent_with_config=should_not_create,
+                specialization_mgr=FakeSpecializations(),
+                send_agent_prompt=should_not_prompt,
+            )
+
+        self.assertEqual(result["type"], "error")
+        self.assertIn("Unknown specialization: not-a-project-specialization", result["message"])
+        self.assertFalse(state.agents)
+        self.assertFalse(state.agent_settings)
+
     async def test_add_worker_creates_user_owned_detached_worker(self):
         state = self._make_state()
         bridge = _CapturingBridge()
@@ -652,6 +833,62 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Action-specific context.", prompt)
         self.assertIn("## Custom Instructions", prompt)
         self.assertIn("Prefer reversible scope cuts.", prompt)
+
+    async def test_add_architect_create_uses_same_sparse_launch_mapping_on_first_create(self):
+        state = self._make_state()
+        resolved_launch = self._launch_config("/tmp/project")
+        resolved_launch["command"] = "resolved-architect-command"
+        resolver_calls = []
+        create_calls = []
+
+        async def fake_resolve_base_dir(group):
+            self.assertEqual(group, "torque")
+            return "/tmp/project"
+
+        def fake_resolver(group, *, base_dir="", explicit_template="", overrides=None):
+            resolver_calls.append(dict(overrides or {}))
+            return resolved_launch
+
+        async def fake_create(group, name, launch_cfg, **kwargs):
+            create_calls.append((launch_cfg, dict(kwargs)))
+            cell = self.state_mod.AgentCell(
+                id="arch-created", slug="productmind", name=name, group=group,
+                kind="architect", persistent=True,
+            )
+            state.agents[cell.id] = cell
+            return cell
+
+        async def fake_send(*args, **kwargs):
+            del args, kwargs
+
+        result = await self.server_mod._handle_add_architect_command(
+            {
+                "name": "Productmind",
+                "group": "torque",
+                "agent_settings": {
+                    "boot_command": "codex architect",
+                    "provider": "codex",
+                    "reasoning_effort": "xhigh",
+                    "custom_instructions": "Prefer narrow decisions.",
+                },
+            },
+            state,
+            resolve_base_dir=fake_resolve_base_dir,
+            resolve_engineer_launch_config=fake_resolver,
+            resolve_architect_launch_config=fake_resolver,
+            create_agent_with_config=fake_create,
+            send_agent_prompt=fake_send,
+        )
+
+        self.assertEqual(result["id"], "arch-created")
+        self.assertEqual(resolver_calls, [{
+            "command": "codex architect", "provider": "codex",
+            "reasoning_effort": "xhigh",
+        }])
+        self.assertIs(create_calls[0][0], resolved_launch)
+        stored = state.get_agent_settings("arch-created")
+        self.assertEqual(stored.boot_command, "codex architect")
+        self.assertEqual(stored.custom_instructions, "Prefer narrow decisions.")
 
     async def test_add_architect_product_manager_persistent_prompt_is_restricted(self):
         state = self._make_state()
