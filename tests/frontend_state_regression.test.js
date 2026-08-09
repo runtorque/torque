@@ -35188,3 +35188,126 @@ test('Board filter indicator stays outside lane cache identity and preserves the
   assert.doesNotMatch(panel.innerHTML, /board-filter-indicator/,
     'wide layout retains its existing selected-lane summary instead of duplicating the default-layout indicator');
 });
+
+/* TORQUE:1583 — additive per-agent settings dialog contracts. */
+test('per-agent settings unchanged save emits zero settings, digest, class, or specialization mutations', () => {
+  const { sandbox } = createSandbox({
+    closeModals() {},
+    _showToast() {},
+  });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/modals/agent-settings.js');
+  runInContext(context, `
+    var agentField = { key: 'provider' };
+    var digestField = { key: 'paused' };
+    _agentSettingsDigestFields = [digestField];
+    _agentSettingsFields = function() { return [agentField, digestField]; };
+    var containers = {
+      provider: { dataset: { settingKind: 'agent', overridden: 'false' } },
+      paused: { dataset: { settingKind: 'digest', overridden: 'false' } }
+    };
+    _agentSettingsFieldContainer = function(key) { return containers[key]; };
+    _agentSettingsControlValue = function(field) { return field.key === 'provider' ? 'codex' : false; };
+    _agentSettingsSpecializationsChangedForSave = function() { return false; };
+    _agentSettingsContext = {
+      mode: 'edit', agentId: 'arch-1', kind: 'architect', relaunch: false,
+      baseline: {
+        agent: { provider: { overridden: false, value: 'codex' } },
+        digest: { paused: { overridden: false, value: false } },
+        specializations: null
+      }
+    };
+    saveAgentSettingsDialog();
+  `);
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [],
+    'unchanged Save sends no settings/digest/class/specialization mutation');
+  const source = fs.readFileSync(path.join(repoRoot, 'static/js/modals/agent-settings.js'), 'utf8');
+  assert.doesNotMatch(source, /saveAgentSettingsDialog[\s\S]*?cmd:\s*'agent_class_(?:assign|clear)'/,
+    'dialog Save never owns Agent Class mutation');
+});
+
+test('per-agent setting origin changes from inherited to overridden and reset restores inheritance', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/modals/agent-settings.js');
+  const label = { textContent: '' };
+  const button = { hidden: true };
+  const origin = { querySelector(selector) { return selector === 'span' ? label : button; } };
+  const container = {
+    dataset: { agentSetting: 'provider', overridden: 'false' },
+    querySelector() { return origin; },
+  };
+  sandbox.__originContainer = container;
+  runInContext(context, `
+    _agentSettingsContext = { resolved: { provider: { value: 'codex', origin: 'group' } } };
+    _agentSettingsUpdateOrigin(__originContainer, true);
+  `);
+  assert.equal(label.textContent, 'Overridden for this agent');
+  assert.equal(button.hidden, false);
+  runInContext(context, `_agentSettingsUpdateOrigin(__originContainer, false);`);
+  assert.equal(label.textContent, 'Inherited · group');
+  assert.equal(button.hidden, true);
+});
+
+test('agent context menu exposes Settings only for live Architects and Engineers', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/commands.js');
+  const base = { group: 'alpha', cell_type: 'agent', status: 'running' };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.agents = {
+    architect: { ...base, id: 'architect', kind: 'architect' },
+    engineer: { ...base, id: 'engineer', kind: 'engineer' },
+    worker: { ...base, id: 'worker', kind: 'worker' },
+    terminal: { ...base, id: 'terminal', kind: 'terminal', cell_type: 'terminal' },
+    user: { ...base, id: 'user', kind: 'user' },
+    dismissed: { ...base, id: 'dismissed', kind: 'architect', dismissed_at: 1 },
+    tombstone: { ...base, id: 'tombstone', kind: 'engineer', deleted_at: 1, tombstoned: true },
+  };
+  function hasSettings(id) {
+    return context._cellContextMenuItems(id).some((item) => item && item.label === 'Settings…');
+  }
+  assert.equal(hasSettings('architect'), true);
+  assert.equal(hasSettings('engineer'), true);
+  assert.equal(hasSettings('worker'), false);
+  assert.equal(hasSettings('terminal'), false);
+  assert.equal(hasSettings('user'), false);
+  assert.equal(hasSettings('dismissed'), false);
+  assert.equal(hasSettings('tombstone'), false);
+});
+
+test('Agent Class manager is owned by Architect and Engineer settings while specializations remain panel-wide', () => {
+  const dialogSource = fs.readFileSync(path.join(repoRoot, 'static/js/modals/agent-settings.js'), 'utf8');
+  const classesSource = fs.readFileSync(path.join(repoRoot, 'static/js/agent-panel/classes.js'), 'utf8');
+  const engineerSource = fs.readFileSync(path.join(repoRoot, 'static/js/agent-panel/engineer.js'), 'utf8');
+  const genericSource = fs.readFileSync(path.join(repoRoot, 'static/js/agent_panel.js'), 'utf8');
+  const architectSource = fs.readFileSync(path.join(repoRoot, 'static/js/agent-panel/architect.js'), 'utf8');
+  const workerSource = fs.readFileSync(path.join(repoRoot, 'static/js/agent-panel/worker.js'), 'utf8');
+
+  assert.match(dialogSource, /kind !== 'architect' && kind !== 'engineer'/);
+  assert.match(dialogSource, /_agentPanelClassManagerHtml\(agent\)/,
+    'existing audited class manager is reachable from the shared settings dialog');
+  assert.match(dialogSource, /agentClassPickerPrepare\([\s\S]*?_agentSettingsContext\.kind/,
+    'both create kinds use the existing class launch picker');
+  assert.match(classesSource, /cmd:\s*selected \? 'agent_class_assign' : 'agent_class_clear'/);
+
+  for (const source of [genericSource, architectSource, workerSource, engineerSource]) {
+    assert.doesNotMatch(source, /_agentPanelBodyWithClassManager\(/,
+      'no Behavior-tab call site retains class-manager ownership');
+  }
+  assert.match(engineerSource,
+    /var bodyHtml = _agentPanelEngineerSpecializationsEditorHtml\(agent\)\s*\+ \(parts\.bodyHtml \|\| ''\)/,
+    'Engineer specializations remain unconditional and render on non-Behavior tabs');
+});
+
+test('Engineer creation dialog no longer writes group defaults and both class create routes carry sparse per-agent settings', () => {
+  const launchSource = fs.readFileSync(path.join(repoRoot, 'static/js/modals/engineer-launch.js'), 'utf8');
+  const dialogSource = fs.readFileSync(path.join(repoRoot, 'static/js/modals/agent-settings.js'), 'utf8');
+  assert.match(launchSource, /openAgentSettingsDialog\(\{/);
+  assert.match(dialogSource, /cmd:\s*selectedClassId \? 'create_agent_from_class' : \(ctx\.kind === 'architect' \? 'add_architect' : 'add_engineer'\)/);
+  assert.match(dialogSource, /agent_settings:\s*agentSettings/);
+  assert.match(dialogSource, /agent_digest_settings:\s*digestSettings/);
+  const redirect = launchSource.slice(launchSource.indexOf('function openEngineerLaunchDialog'), launchSource.indexOf('function submitEngineerLaunchDialog'));
+  assert.match(redirect, /openAgentSettingsDialog\(\{[\s\S]*?relaunch: !!cell,[\s\S]*?\}\);\s*return;/,
+    'operator-reachable create/relaunch returns into per-agent settings before legacy group mutation code');
+});

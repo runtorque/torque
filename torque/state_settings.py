@@ -382,7 +382,12 @@ class StateSettingsMixin:
             setattr(current, key, value)
         self.agent_settings[agent_id] = current
         payload = asdict(current)
-        self._emit("agent_settings_update", **payload)
+        self._emit(
+            "agent_settings_update",
+            group=cell.group,
+            **payload,
+            resolved=self.resolve_agent_settings(agent_id),
+        )
         if self.db:
             self.db.save_agent_settings(agent_id, payload)
         return current
@@ -749,6 +754,7 @@ class StateSettingsMixin:
         self._emit(
             "agent_digest_update",
             group=getattr(self.agents.get(agent_id), "group", "") or "",
+            resolved=self.resolve_agent_settings(agent_id),
             **payload,
         )
         if self.db:

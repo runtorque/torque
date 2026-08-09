@@ -1066,7 +1066,7 @@ function _renderArchitectPanel(agent) {
     'Journal, decisions, hired engineers, architect messages, and digest queue.',
     'architect',
     activeTab,
-    _agentPanelBodyWithClassManager(agent, parts.bodyHtml, activeTab === 'behavior'),
+    parts.bodyHtml,
     (parts.headerRightHtml || ''),
     (agent && agent.id) || '',
     _agentPanelUpwardBreadcrumbHtml(agent)

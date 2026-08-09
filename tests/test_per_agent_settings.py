@@ -12,6 +12,7 @@ install_aiohttp_stub()
 
 from torque.db import TorqueDB
 from torque.state import AgentCell, EngineerSettings, GroupSettings, MatrixState
+from torque.commands.settings import _handle_settings_mutation_command
 
 
 class PerAgentSettingsTests(unittest.TestCase):
@@ -178,6 +179,28 @@ class PerAgentSettingsTests(unittest.TestCase):
             )
             self.assertIn("engineer_settings", snapshot)
             self.assertIn("architect_settings", snapshot)
+
+    def test_digest_settings_command_delegates_sparse_clear_and_returns_origins(self):
+        response = _handle_settings_mutation_command({
+            "cmd": "update_agent_digest_settings",
+            "agent_id": "eng-1",
+            "settings": {"push_interval": 15},
+        }, self.state)
+        self.assertEqual(response["type"], "agent_settings")
+        self.assertEqual(
+            response["resolved"]["push_interval"],
+            {"value": 15, "origin": "per-agent"},
+        )
+
+        response = _handle_settings_mutation_command({
+            "cmd": "update_agent_digest_settings",
+            "agent_id": "eng-1",
+            "settings": {"push_interval": None},
+        }, self.state)
+        self.assertEqual(
+            response["resolved"]["push_interval"],
+            {"value": 60, "origin": "group"},
+        )
 
 
 if __name__ == "__main__":

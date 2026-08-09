@@ -1724,10 +1724,18 @@ function _cellContextMenuItems(id) {
   const isDismissedEngineer = _isEngineerDismissedCell(cell);
   const isDismissedArchitect = _isArchitectDismissedCell(cell);
   const isDismissedLifecycleCell = _isLifecycleDismissedCell(cell);
+  const canOpenAgentSettings = cell.cell_type === 'agent'
+    && ((cell.kind || '') === 'architect' || (cell.kind || '') === 'engineer')
+    && !isDismissedLifecycleCell
+    && Number(cell.deleted_at || 0) <= 0
+    && !cell.tombstoned;
 
   const items = [
     { label: 'Edit\u2026', action: `openEditCell('${id}')` },
   ];
+  if (canOpenAgentSettings) {
+    items.push({ label: 'Settings\u2026', action: `openAgentSettingsDialog({ agentId: '${id}' })` });
+  }
   let dismissItem = null;
   if (cell.cell_type === 'agent'
       && (cell.kind || '') === 'architect'

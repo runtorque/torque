@@ -150,6 +150,8 @@ function _handleFullState(msg) {
   if (msg.providers) _cachedProviders = msg.providers;
   if (!state.panel_events) state.panel_events = [];
   if (!state.agent_digest_settings) state.agent_digest_settings = {};
+  if (!state.agent_settings) state.agent_settings = {};
+  if (!state.resolved_agent_settings) state.resolved_agent_settings = {};
   if (!state.digest_buffer_stats) state.digest_buffer_stats = {};
   if (!state.digest_sent_events) state.digest_sent_events = {};
   if (!state.engineer_buffer_stats) state.engineer_buffer_stats = {};

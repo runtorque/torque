@@ -48,6 +48,8 @@ function _applyDelta(ops) {
       case 'agent_remove':
         var removedAgent = state.agents ? state.agents[op.id] : null;
         delete state.agents[op.id];
+        if (state.agent_settings) delete state.agent_settings[op.id];
+        if (state.resolved_agent_settings) delete state.resolved_agent_settings[op.id];
         if (state.agent_digest_settings) delete state.agent_digest_settings[op.id];
         if (state.digest_buffer_stats) delete state.digest_buffer_stats[op.id];
         if (state.digest_sent_events) delete state.digest_sent_events[op.id];
@@ -650,13 +652,33 @@ function _applyDelta(ops) {
         break;
       }
 
+      case 'agent_settings_update': {
+        if (!state.agent_settings) state.agent_settings = {};
+        if (!state.resolved_agent_settings) state.resolved_agent_settings = {};
+        var settingsAgentId = op.agent_id || '';
+        if (settingsAgentId) {
+          var rawAgentSettings = Object.assign({}, op);
+          delete rawAgentSettings.op;
+          delete rawAgentSettings.resolved;
+          delete rawAgentSettings.group;
+          state.agent_settings[settingsAgentId] = rawAgentSettings;
+          if (op.resolved) state.resolved_agent_settings[settingsAgentId] = op.resolved;
+        }
+        break;
+      }
+
       case 'agent_digest_update': {
         if (!state.agent_digest_settings) state.agent_digest_settings = {};
         var digestAgentId = op.agent_id || '';
         if (digestAgentId) {
           var digestSettings = Object.assign({}, op);
           delete digestSettings.op;
+          delete digestSettings.resolved;
           state.agent_digest_settings[digestAgentId] = digestSettings;
+          if (op.resolved) {
+            if (!state.resolved_agent_settings) state.resolved_agent_settings = {};
+            state.resolved_agent_settings[digestAgentId] = op.resolved;
+          }
         }
         break;
       }

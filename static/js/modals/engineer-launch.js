@@ -258,6 +258,16 @@ function onEngineerLaunchProviderChange(currentEffort) {
 function openEngineerLaunchDialog(group, agentId) {
   if (!group) return;
   const cell = agentId && state.agents ? state.agents[agentId] : null;
+  if (typeof openAgentSettingsDialog === 'function') {
+    openAgentSettingsDialog({
+      mode: cell ? 'edit' : 'create',
+      kind: 'engineer',
+      group: group,
+      agentId: cell ? cell.id : '',
+      relaunch: !!cell,
+    });
+    return;
+  }
   const ws = _getEngineerLaunchSettings(group);
   // In create mode, preview the group-level default specializations so the
   // operator sees what will be applied. The server still falls back to the

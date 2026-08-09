@@ -1798,3 +1798,24 @@ Copy this section for a new durable decision:
 
 When a decision changes, keep the old entry, mark it superseded, and link to the
 new decision so the design history remains understandable.
+
+### D-041 — Per-agent settings show server-resolved origin explicitly
+
+- Date: 2026-08-09
+- Status: accepted
+- Decision: Architect and Engineer per-agent Settings render every editable
+  value with the origin returned by the server (`per-agent`, `group`, or
+  `default`). An active override exposes a `Use inherited` action; inherited
+  values remain visible and labelled rather than relying on blank-value
+  inference.
+- Rationale: At the per-agent layer, an intentional override and an inherited
+  blank can be operationally different. The server is the only authority for
+  precedence and origin, so the client must display that result and submit only
+  sparse user changes. This is a deliberate exception to D-033's quieter
+  presentation for group-kind defaults.
+- Scope: The shared Architect/Engineer per-agent Settings dialog.
+- Constraints: Opening and saving an unchanged dialog emits no mutation; reset
+  remains inside the explicit save boundary. The client must not reconstruct
+  group/default precedence.
+- Verification: Frontend regressions cover unchanged save, override origin, and
+  returning a field to inheritance.

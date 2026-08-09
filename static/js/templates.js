@@ -2526,9 +2526,17 @@ function _agentClassRestoreEditorUiState(root, snapshot) {
 
 /* Agent Class launch picker helpers used by add Architect/Engineer/Worker modals. */
 
-function agentClassPickerPrepare(kind, group, baseDir, contextKey) {
+function agentClassPickerPrepare(kind, group, baseDir, contextKey, mount) {
   contextKey = String(contextKey || kind || 'agent-class-picker');
-  _agentClassPickerContexts[contextKey] = { kind: kind, group: group || '', baseDir: baseDir || '' };
+  mount = mount || {};
+  _agentClassPickerContexts[contextKey] = {
+    kind: kind,
+    group: group || '',
+    baseDir: baseDir || '',
+    rowId: mount.rowId || '',
+    selectId: mount.selectId || '',
+    hintId: mount.hintId || '',
+  };
   var resolvedBaseDir = String(baseDir || agentClassBaseDirForGroup(group) || '').trim();
   _agentClassPickerRequestedBaseDir = resolvedBaseDir;
   if (!_agentClassLoadedBaseDir || _agentClassLoadedBaseDir !== resolvedBaseDir) {

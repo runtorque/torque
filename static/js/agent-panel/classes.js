@@ -471,6 +471,9 @@ function _agentPanelClassUi(agent) {
 
 function _agentPanelRefreshClassManagerRender() {
   _agentPanelRenderClassModal();
+  if (typeof _agentSettingsRefreshClassHost === 'function') {
+    _agentSettingsRefreshClassHost();
+  }
   if (typeof _agentPanelRefreshCurrentTab === 'function'
       && _agentPanelRefreshCurrentTab()) return;
   if (typeof renderAgentPanel === 'function') renderAgentPanel();

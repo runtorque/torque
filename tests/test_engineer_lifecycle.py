@@ -451,6 +451,67 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["type"], "error")
         self.assertEqual(len(state.agents), 1)
 
+    async def test_add_engineer_create_uses_sparse_settings_in_first_launch_and_persists_them(self):
+        state = self._make_state()
+        resolved_launch = self._launch_config("/tmp/project")
+        resolved_launch["command"] = "resolved-first-command"
+        resolver_calls = []
+        create_calls = []
+
+        async def fake_resolve_base_dir(group):
+            self.assertEqual(group, "torque")
+            return "/tmp/project"
+
+        def fake_resolver(group, *, base_dir="", explicit_template="", overrides=None):
+            resolver_calls.append(dict(overrides or {}))
+            return resolved_launch
+
+        async def fake_create(group, name, launch_cfg, **kwargs):
+            create_calls.append((launch_cfg, dict(kwargs)))
+            cell = self.state_mod.AgentCell(
+                id="eng-created", slug="alice", name=name, group=group,
+                kind="engineer", persistent=True,
+            )
+            state.agents[cell.id] = cell
+            return cell
+
+        async def fake_send(*args, **kwargs):
+            del args, kwargs
+
+        result = await self.server_mod._handle_add_engineer_command(
+            {
+                "name": "Alice",
+                "group": "torque",
+                "agent_settings": {
+                    "provider": "codex",
+                    "model": "gpt-first",
+                    "reasoning_effort": "high",
+                    "fast_mode": "on",
+                    "autonomy_mode": "suggest_only",
+                },
+                "agent_digest_settings": {"push_interval": 15},
+            },
+            state,
+            resolve_base_dir=fake_resolve_base_dir,
+            resolve_engineer_launch_config=fake_resolver,
+            create_agent_with_config=fake_create,
+            send_agent_prompt=fake_send,
+        )
+
+        self.assertEqual(result["id"], "eng-created")
+        self.assertEqual(resolver_calls, [{
+            "provider": "codex", "model": "gpt-first",
+            "reasoning_effort": "high", "fast_mode": "on",
+        }])
+        self.assertIs(create_calls[0][0], resolved_launch)
+        stored = state.get_agent_settings("eng-created")
+        self.assertEqual(stored.model, "gpt-first")
+        self.assertEqual(stored.autonomy_mode, "suggest_only")
+        self.assertEqual(
+            state.resolve_agent_settings("eng-created")["push_interval"],
+            {"value": 15, "origin": "per-agent"},
+        )
+
     async def test_add_worker_creates_user_owned_detached_worker(self):
         state = self._make_state()
         bridge = _CapturingBridge()
@@ -652,6 +713,62 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Action-specific context.", prompt)
         self.assertIn("## Custom Instructions", prompt)
         self.assertIn("Prefer reversible scope cuts.", prompt)
+
+    async def test_add_architect_create_uses_same_sparse_launch_mapping_on_first_create(self):
+        state = self._make_state()
+        resolved_launch = self._launch_config("/tmp/project")
+        resolved_launch["command"] = "resolved-architect-command"
+        resolver_calls = []
+        create_calls = []
+
+        async def fake_resolve_base_dir(group):
+            self.assertEqual(group, "torque")
+            return "/tmp/project"
+
+        def fake_resolver(group, *, base_dir="", explicit_template="", overrides=None):
+            resolver_calls.append(dict(overrides or {}))
+            return resolved_launch
+
+        async def fake_create(group, name, launch_cfg, **kwargs):
+            create_calls.append((launch_cfg, dict(kwargs)))
+            cell = self.state_mod.AgentCell(
+                id="arch-created", slug="productmind", name=name, group=group,
+                kind="architect", persistent=True,
+            )
+            state.agents[cell.id] = cell
+            return cell
+
+        async def fake_send(*args, **kwargs):
+            del args, kwargs
+
+        result = await self.server_mod._handle_add_architect_command(
+            {
+                "name": "Productmind",
+                "group": "torque",
+                "agent_settings": {
+                    "boot_command": "codex architect",
+                    "provider": "codex",
+                    "reasoning_effort": "xhigh",
+                    "custom_instructions": "Prefer narrow decisions.",
+                },
+            },
+            state,
+            resolve_base_dir=fake_resolve_base_dir,
+            resolve_engineer_launch_config=fake_resolver,
+            resolve_architect_launch_config=fake_resolver,
+            create_agent_with_config=fake_create,
+            send_agent_prompt=fake_send,
+        )
+
+        self.assertEqual(result["id"], "arch-created")
+        self.assertEqual(resolver_calls, [{
+            "command": "codex architect", "provider": "codex",
+            "reasoning_effort": "xhigh",
+        }])
+        self.assertIs(create_calls[0][0], resolved_launch)
+        stored = state.get_agent_settings("arch-created")
+        self.assertEqual(stored.boot_command, "codex architect")
+        self.assertEqual(stored.custom_instructions, "Prefer narrow decisions.")
 
     async def test_add_architect_product_manager_persistent_prompt_is_restricted(self):
         state = self._make_state()

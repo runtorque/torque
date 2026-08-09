@@ -163,7 +163,7 @@ function _renderWorkerPanel(agent) {
     'Per-worker event stream and task history.',
     'worker',
     activeTab,
-    _agentPanelBodyWithClassManager(agent, parts.bodyHtml, activeTab === 'behavior'),
+    parts.bodyHtml,
     (parts.headerRightHtml || ''),
     (agent && agent.id) || '',
     _agentPanelUpwardBreadcrumbHtml(agent)
