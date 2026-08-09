@@ -317,7 +317,9 @@ class BoardMutationMixin:
             update_fields["status"] = ""
         self.board_update_task(tid, **update_fields)
         if move_to_done:
-            self.board_move_task(tid, "Done", clear_status=True)
+            self.board_move_task(
+                tid, "Done", clear_status=True, allow_done_advisory=False
+            )
 
         refreshed = self.board_tasks.get(tid)
         return {
@@ -419,7 +421,9 @@ class BoardMutationMixin:
             messages=messages,
             status="",
         )
-        self.board_move_task(tid, "Done", clear_status=True)
+        self.board_move_task(
+            tid, "Done", clear_status=True, allow_done_advisory=False
+        )
 
         refreshed = self.board_tasks.get(tid)
         return {
@@ -787,8 +791,8 @@ class BoardMutationMixin:
             "boundary": "",
             "missing_gates": ["code_boundary_not_durably_merged"],
             "explanations": [
-                "Code-bearing or unclassified task boundary remains open; "
-                "Done requires durable merged status and merge SHA."
+                "Code-bearing or unclassified task boundary lacks durable "
+                "merged status and merge SHA."
             ],
             "code_boundary": code_gate,
         }
@@ -1122,7 +1126,13 @@ class BoardMutationMixin:
 
     def board_move_task(self, tid: str, lane: str,
                         position: Optional[int] = None,
-                        clear_status: bool = False):
+                        clear_status: bool = False,
+                        allow_done_advisory: bool = True):
+        """Apply an explicit lane move, returning any non-blocking Done finding.
+
+        Internal automatic closeout callers pass ``allow_done_advisory=False``
+        so their existing eligibility rules remain admission gates.
+        """
         tid = self.resolve_task_alias(tid)
         task = self.board_tasks.get(tid)
         if not task or lane not in self.board_lanes:
@@ -1131,19 +1141,30 @@ class BoardMutationMixin:
             if clear_status and task.status:
                 self.board_update_task(tid, status="")
             return
+        if task.lane == ARCHIVED_LANE:
+            return self.board_unarchive_task(
+                tid,
+                lane=lane,
+                position=position,
+                allow_done_advisory=allow_done_advisory,
+                clear_status=clear_status,
+            )
+        advisory = None
         if lane == "Done" and task.lane != "Done" and self._is_finalization_root(task):
             allowed, result = self._finalization_done_allowed(
                 task, caller="board_move_task"
             )
             if not allowed:
-                return result
+                if not allow_done_advisory:
+                    return result
+                # Explicit operator intent wins over finalization bookkeeping.
+                # Keep evaluating/auditing the evidence, but return the finding
+                # as an advisory after the authored lane mutation succeeds.
+                advisory = result
         if clear_status:
             task.status = ""
         if lane == ARCHIVED_LANE:
             self.board_archive_task(tid, position=position)
-            return
-        if task.lane == ARCHIVED_LANE:
-            self.board_unarchive_task(tid, lane=lane, position=position)
             return
         if lane == "Done" and task.lane != "Done":
             # Finalization/code-boundary admission has passed. Expire only
@@ -1163,6 +1184,7 @@ class BoardMutationMixin:
         if lane == "Done":
             self.board_cascade_done(tid, recompute=False)
         self.recompute_task_health()
+        return advisory
 
     def _append_engineer_message_expiry_note(self, task: BoardTask,
                                              timestamp: float) -> bool:
@@ -1519,7 +1541,9 @@ class BoardMutationMixin:
 
     def board_unarchive_task(self, tid: str, *,
                              lane: str = "",
-                             position: Optional[int] = None):
+                             position: Optional[int] = None,
+                             allow_done_advisory: bool = False,
+                             clear_status: bool = False):
         tid = self.resolve_task_alias(tid)
         task = self.board_tasks.get(tid)
         if not task or task.lane != ARCHIVED_LANE:
@@ -1527,12 +1551,15 @@ class BoardMutationMixin:
         target_lane = lane or task.archived_from_lane or "Done"
         if target_lane == ARCHIVED_LANE or target_lane not in self.board_lanes:
             target_lane = "Done" if "Done" in self.board_lanes else self.board_lanes[0]
+        advisory = None
         if target_lane == "Done" and self._is_finalization_root(task):
             allowed, result = self._finalization_done_allowed(
                 task, caller="board_unarchive_task"
             )
             if not allowed:
-                return result
+                if not allow_done_advisory:
+                    return result
+                advisory = result
         # get_task_detail is intentionally in-memory only. Rehydrate only
         # after every rejection-capable target/finalization check has passed,
         # immediately before a task can return to a live surface. A denied
@@ -1542,6 +1569,8 @@ class BoardMutationMixin:
                 "type": "error",
                 "message": "Unable to restore archived task artifacts",
             }
+        if clear_status:
+            task.status = ""
         self._board_apply_archive_state(
             task,
             lane=target_lane,
@@ -1552,6 +1581,7 @@ class BoardMutationMixin:
         )
         self._refresh_finalization_root_projection(task)
         self.recompute_task_health()
+        return advisory
 
     def board_reorder_task(self, tid: str, position: int):
         tid = self.resolve_task_alias(tid)

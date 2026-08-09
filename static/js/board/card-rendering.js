@@ -727,6 +727,30 @@ function _boardTaskDispatchStateBadgeHtml(task) {
     + ' title="' + esc(badge.title) + '">' + esc(badge.label) + '</span>';
 }
 
+function _boardDoneBoundaryAdvisory(task, childrenOf) {
+  if (!task || task.lane !== 'Done') return null;
+  var blocking = [];
+  var visited = {};
+  function visit(candidate) {
+    if (!candidate || visited[candidate.id || '']) return;
+    visited[candidate.id || ''] = true;
+    var boundary = candidate.worktree_boundary;
+    if (boundary && typeof boundary === 'object' && Object.keys(boundary).length) {
+      var fact = boundary.code_delta;
+      var stateName = fact && typeof fact === 'object'
+        ? String(fact.state || '').toLowerCase() : 'legacy_unclassified';
+      var merged = String(boundary.status || '').toLowerCase() === 'merged'
+        && !!String(boundary.merge_commit_sha || '').trim();
+      if (stateName !== 'absent' && !merged) blocking.push(String(candidate.id || ''));
+    }
+    var children = childrenOf && Array.isArray(childrenOf[candidate.id])
+      ? childrenOf[candidate.id] : [];
+    children.forEach(visit);
+  }
+  visit(task);
+  return blocking.length ? { blockingTaskIds: blocking } : null;
+}
+
 function _boardTaskDispatchDeltaChangedFields(change) {
   var fields = {};
   var previous = (change && change.previous) || null;
@@ -1203,6 +1227,14 @@ function _renderBoardCard(t, childrenOf, depth, renderState) {
       'board-card-status', finalization.eligible ? 'success' : 'warning'
     )) + '" title="' + esc(finalizationMissing) + '">'
       + esc(finalization.label) + '</span>';
+  }
+  var boundaryAdvisory = _boardDoneBoundaryAdvisory(t, childrenOf);
+  if (boundaryAdvisory) {
+    var boundaryTitle = 'Unmerged code boundary: '
+      + boundaryAdvisory.blockingTaskIds.slice(0, 8).join(', ').slice(0, 280);
+    meta += '<span class="' + esc(_boardMetadataBadgeClass(
+      'board-card-boundary-advisory', 'warning'
+    )) + '" title="' + esc(boundaryTitle) + '">Boundary advisory</span>';
   }
   var healthState = _boardTaskHealthState(t);
   var healthLabel = _boardTaskHealthLabel(t);

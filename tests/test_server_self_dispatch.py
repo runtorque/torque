@@ -2551,7 +2551,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.board_tasks["task-move"].lane, "Done")
         self.assertEqual(state.board_tasks["task-move"].status, "")
 
-    async def test_board_move_task_handler_reports_finalization_refusal(self):
+    async def test_board_move_task_handler_reports_finalization_advisory(self):
         state = self.state_mod.MatrixState()
         state.add_group("g")
         state.board_lanes = ["Backlog", "To Do", "In Progress", "Done"]
@@ -2576,21 +2576,19 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             "clear_status": True,
         })
 
-        self.assertEqual("error", result["type"])
-        self.assertEqual("code_boundary_not_durably_merged", result["reason"])
-        self.assertFalse(result["clear_status_applied"])
-        self.assertIn("Code-bearing", result["message"])
+        self.assertEqual("task_moved", result["type"])
         self.assertEqual(
             ["code_boundary_not_durably_merged"],
-            result["details"]["missing_gates"],
+            result["advisory"]["missing_gates"],
         )
-        # The refusal occurs before clear_status, so callers are told that
-        # both requested mutations were declined rather than seeing a false
-        # task_moved response.
-        self.assertEqual("In Progress", root.lane)
-        self.assertEqual("On Review", root.status)
+        self.assertEqual(
+            ["move-child"],
+            [item["task_id"] for item in result["advisory"]["code_boundary"]["blocking"]],
+        )
+        self.assertEqual("Done", root.lane)
+        self.assertEqual("", root.status)
 
-    async def test_board_move_refusal_does_not_auto_resume_aggressive_streams(self):
+    async def test_board_move_advisory_keeps_normal_auto_resume_behavior(self):
         state = self.state_mod.MatrixState()
         state.add_group("g")
         state.update_engineer_settings(
@@ -2624,8 +2622,9 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                 "cmd": "board_move_task", "id": root.id, "lane": "Done",
             })
 
-        self.assertEqual("error", result["type"])
-        self.assertEqual([], resume_calls)
+        self.assertEqual("task_moved", result["type"])
+        self.assertIn("advisory", result)
+        self.assertEqual(1, len(resume_calls))
 
     async def test_worktree_merge_auto_moves_sole_linked_task_to_done(self):
         state = self.state_mod.MatrixState()

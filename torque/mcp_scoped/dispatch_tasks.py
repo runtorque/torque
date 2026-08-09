@@ -1394,13 +1394,16 @@ async def dispatch_tasks(ctx: ScopedDispatchContext):
         moved = real_state.board_tasks.get(tid)
         if not moved:
             return "Task not found", True
-        return json.dumps({
+        response = {
             "type": "task_moved",
             "task_id": tid,
             "previous_lane": previous_lane,
             "new_lane": str(getattr(moved, "lane", "") or ""),
             "status": str(getattr(moved, "status", "") or ""),
-        }), False
+        }
+        if isinstance(result, dict) and isinstance(result.get("advisory"), dict):
+            response["advisory"] = result["advisory"]
+        return json.dumps(response), False
 
     if tool_name == "task_dispatch":
         tid = _resolve_task(state, args.get("task", ""))

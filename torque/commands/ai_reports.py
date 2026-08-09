@@ -498,7 +498,9 @@ async def handle_ai_report_command(
                 _save_task(t)
                 return False
             if not task_counts_as_done(t):
-                state.board_move_task(t.id, "Done")
+                state.board_move_task(
+                    t.id, "Done", allow_done_advisory=False
+                )
                 _auto_resolve_product_proposal_roots_and_enqueue(
                     state,
                     t,

@@ -1093,50 +1093,34 @@ async def handle_board_operation_command(
                 _mv_clear_status = data.get("clear_status", False)
                 if not isinstance(_mv_clear_status, bool):
                     _mv_clear_status = False
-                _mv_refusal = state.board_move_task(
+                _mv_advisory = state.board_move_task(
                     _mv_id,
                     _mv_new,
                     data.get("position"),
                     clear_status=_mv_clear_status,
+                    allow_done_advisory=True,
                 )
                 _mv_task_after = state.board_tasks.get(_mv_id)
-                if _mv_refusal is not None:
-                    _mv_missing_gates = _mv_refusal.get("missing_gates", [])
-                    _mv_reason = (
-                        str(_mv_missing_gates[0] or "")
-                        if _mv_missing_gates else "move_refused"
+                if board_sync_manager:
+                    board_sync_manager.enqueue_task(
+                        _mv_id,
+                        reason="task_move",
                     )
-                    _mv_explanations = _mv_refusal.get("explanations", [])
-                    _mv_message = (
-                        str(_mv_explanations[0] or "")
-                        if _mv_explanations else "Task move was refused"
-                    )
-                    result = {
-                        "type": "error",
-                        "message": _mv_message,
-                        "reason": _mv_reason,
-                        "clear_status_applied": False,
-                        "details": _mv_refusal,
-                    }
-                else:
-                    if board_sync_manager:
-                        board_sync_manager.enqueue_task(
-                            _mv_id,
-                            reason="task_move",
-                        )
-                    result = {
-                        "type": "task_moved",
-                        "task_id": _mv_id,
-                        "previous_lane": _mv_previous_lane,
-                        "new_lane": (
-                            str(getattr(_mv_task_after, "lane", "") or "")
-                            if _mv_task_after else _mv_new
-                        ),
-                        "status": (
-                            str(getattr(_mv_task_after, "status", "") or "")
-                            if _mv_task_after else ""
-                        ),
-                    }
+                result = {
+                    "type": "task_moved",
+                    "task_id": _mv_id,
+                    "previous_lane": _mv_previous_lane,
+                    "new_lane": (
+                        str(getattr(_mv_task_after, "lane", "") or "")
+                        if _mv_task_after else _mv_new
+                    ),
+                    "status": (
+                        str(getattr(_mv_task_after, "status", "") or "")
+                        if _mv_task_after else ""
+                    ),
+                }
+                if isinstance(_mv_advisory, dict):
+                    result["advisory"] = _mv_advisory
                 # Moving out of Done may re-block dependents
                 if (
                         result.get("type") == "task_moved"

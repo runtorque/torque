@@ -56,9 +56,11 @@ class FinalizationPolicyTests(unittest.TestCase):
         ready = self.state.evaluate_task_finalization(root.id)
         self.assertEqual(ready["stage"], "ready_to_merge")
         self.assertIn("merge_not_finalized", ready["missing_gates"])
-        self.state.board_move_task(root.id, "Done")
-        self.assertNotEqual(root.lane, "Done")
+        advisory = self.state.board_move_task(root.id, "Done")
+        self.assertEqual(root.lane, "Done")
+        self.assertIn("merge_not_finalized", advisory["missing_gates"])
         self.assertEqual(root.finalization_audit[-1]["outcome"], "blocked")
+        self.state.board_move_task(root.id, "In Progress")
         self.state.record_merge_finalization(
             root.id, mode="direct", reference="merge:abc", reviewed_head_sha="head",
             merged_sha="merge", origin_verified=True, reviewed_tree="tree", merged_tree="tree", equal=True)
@@ -178,7 +180,7 @@ class FinalizationDoneBypassRegressionTests(unittest.TestCase):
         root = self._ineligible_root("TORQUE:915")
         self.state.board_update_task(root.id, pipeline_root_id="missing-root")
         result = self.state.board_move_task(root.id, "Done")
-        self.assertNotEqual(root.lane, "Done")
+        self.assertEqual(root.lane, "Done")
         self.assertFalse(result["eligible"])
         self.assertEqual(root.finalization_audit[-1]["caller"], "board_move_task")
 
@@ -461,8 +463,9 @@ class FinalizationProductionAdmissionTests(unittest.IsolatedAsyncioTestCase):
         root = state.board_tasks["TORQUE:940"]
         self.assertEqual(root.finalization_mode, "review_only")
         self.assertFalse(state.evaluate_task_finalization(root.id)["eligible"])
-        state.board_move_task(root.id, "Done")
-        self.assertNotEqual(root.lane, "Done")
+        advisory = state.board_move_task(root.id, "Done")
+        self.assertEqual(root.lane, "Done")
+        self.assertFalse(advisory["eligible"])
         review_result = await handle_board_operation_command({
             "cmd": "board_add_task", "id": "TORQUE:940:1", "task": "Review", "group": "g",
             "parent_task_id": root.id, "pipeline_root_id": root.id,

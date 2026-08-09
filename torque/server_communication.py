@@ -1833,7 +1833,9 @@ def _handle_engineer_reply(state: MatrixState, cell, *, message: str,
     )
     state.history_complete_task(cell.id, reply_task.id, "answered")
     if not task_counts_as_done(reply_task):
-        state.board_move_task(reply_task.id, "Done")
+        state.board_move_task(
+            reply_task.id, "Done", allow_done_advisory=False
+        )
     cell.pending_engineer_message = bool(
         state.agent_pending_engineer_reply_tasks(cell.id)
     )
@@ -1998,7 +2000,7 @@ async def _resolve_human_ask_task(
         labels=labels,
     )
     if not task_is_closed(task):
-        state.board_move_task(task.id, "Done")
+        state.board_move_task(task.id, "Done", allow_done_advisory=False)
     state._clear_parent_awaiting_input(parent, exclude_task_id=task.id)
 
     q = question
@@ -2395,7 +2397,7 @@ async def _resolve_architect_ask_task(
         "agent_name": "User",
     })
     if not task_is_closed(task):
-        state.board_move_task(task.id, "Done")
+        state.board_move_task(task.id, "Done", allow_done_advisory=False)
     state.board_update_task(task.id, status="", messages=messages)
     if panel_event:
         panel_event(
