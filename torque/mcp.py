@@ -18,7 +18,7 @@ import uuid
 from aiohttp import web
 
 from . import __version__
-from .deploy_state import agent_session_runtime_provenance_payload
+from .deploy_state import agent_runtime_provenance_for_context
 from .capability_catalog import (
     CAPABILITY_CATALOG,
 )
@@ -138,7 +138,8 @@ TOOLS = [
         "description": (
             "Get current agent identity, status, and linked tasks. "
             "Returns the agent's name, group, directory, worktree info, "
-            "its session/daemon code-revision provenance, and bounded summaries "
+            "its session/daemon code-revision provenance, Architect-only daemon/"
+            "local-mainline provenance, and bounded summaries "
             "of board tasks currently assigned to this agent (with the total "
             "available reported). Set detail=true for complete legacy records. Use "
             "this to understand your current assignment before starting work."
@@ -1593,7 +1594,7 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
             (tid, task) for tid, task in state.board_tasks.items()
             if task.agent_id == cell_id
         ]
-        runtime_provenance = agent_session_runtime_provenance_payload(state, cell)
+        runtime_provenance = await agent_runtime_provenance_for_context(state, cell)
         if bool(args.get("detail", False)):
             return json.dumps({
                 "detail": "full",

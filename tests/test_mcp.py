@@ -4403,6 +4403,189 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         })
         self.assertEqual(provenance["comparison"]["status"], "behind")
         self.assertEqual(provenance["comparison"]["commits_behind"], 3)
+        self.assertEqual(
+            provenance["session_daemon_comparison"]["subject"],
+            "session_vs_daemon",
+        )
+        self.assertEqual(provenance["comparison"]["subject"], "session_vs_daemon")
+        self.assertTrue(provenance["comparison"]["deprecated_alias"])
+        self.assertEqual(
+            provenance["comparison"]["alias_for"],
+            "session_daemon_comparison",
+        )
+        self.assertNotIn("mainline", provenance)
+        self.assertNotIn("daemon_mainline_comparison", provenance)
+
+    async def test_architect_context_compares_daemon_with_local_mainline(self):
+        state = self.state_mod.MatrixState()
+        state.boot_timestamp = 200.0
+        state.boot_repo_root = "/repo"
+        state.boot_head_commit = "daemon-old"
+        state.boot_mainline_branch = "main"
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            worktree_base_branch="main",
+        )
+        cell = self.state_mod.AgentCell(
+            id="architect-1",
+            name="Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+            session_code_revision="daemon-old",
+            session_started_at=100.0,
+            session_daemon_started_at=50.0,
+        )
+        state.agents[cell.id] = cell
+        state.groups["g"] = [cell.id]
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        calls = []
+
+        def fake_git(repo_root, *args):
+            calls.append((repo_root, *args))
+            if args == ("rev-parse", "main"):
+                return "main-new"
+            if args == ("rev-list", "--count", "daemon-old..main-new"):
+                return "2"
+            if args == ("rev-list", "--count", "main-new..daemon-old"):
+                return "0"
+            self.fail(f"Unexpected git call: {args}")
+
+        with (
+            mock.patch("torque.deploy_state._run_git", side_effect=fake_git),
+            mock.patch("torque.deploy_state.time.time", return_value=250.0),
+        ):
+            text, is_error = await self.mcp_mod._dispatch_tool(
+                "torque_context", {}, cell.id, fake_handle_command, state,
+            )
+            detail_text, detail_is_error = await self.mcp_mod._dispatch_tool(
+                "torque_context", {"detail": True}, cell.id,
+                fake_handle_command, state,
+            )
+
+        self.assertFalse(is_error)
+        self.assertFalse(detail_is_error)
+        provenance = json.loads(text)["runtime_provenance"]
+        self.assertEqual(
+            provenance,
+            json.loads(detail_text)["runtime_provenance"],
+        )
+        self.assertEqual(
+            provenance["session_daemon_comparison"],
+            {"subject": "session_vs_daemon", "status": "current", "commits_behind": 0},
+        )
+        self.assertEqual(provenance["mainline"], {
+            "ref": "main",
+            "code_revision": "main-new",
+            "source": "local_ref",
+            "checked_at": 250.0,
+            "fetch_performed": False,
+        })
+        self.assertEqual(provenance["daemon_mainline_comparison"], {
+            "subject": "daemon_vs_local_mainline",
+            "status": "behind",
+            "commits_behind": 2,
+            "detail": "daemon is 2 commit(s) behind local mainline",
+        })
+        self.assertEqual(calls, [
+            ("/repo", "rev-parse", "main"),
+            ("/repo", "rev-list", "--count", "daemon-old..main-new"),
+            ("/repo", "rev-list", "--count", "main-new..daemon-old"),
+        ] * 2)
+        self.assertFalse(any("fetch" in call for call in calls))
+
+    async def test_non_architect_context_never_reads_local_mainline(self):
+        state = self.state_mod.MatrixState()
+        state.boot_repo_root = "/repo"
+        state.boot_head_commit = "same"
+        state.boot_mainline_branch = "main"
+        cell = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+            session_code_revision="same",
+        )
+        state.agents[cell.id] = cell
+        state.groups["g"] = [cell.id]
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        with mock.patch("torque.deploy_state._run_git") as run_git:
+            text, is_error = await self.mcp_mod._dispatch_tool(
+                "torque_context", {}, cell.id, fake_handle_command, state,
+            )
+
+        self.assertFalse(is_error)
+        run_git.assert_not_called()
+        provenance = json.loads(text)["runtime_provenance"]
+        self.assertNotIn("mainline", provenance)
+        self.assertNotIn("daemon_mainline_comparison", provenance)
+
+    def test_architect_local_mainline_comparison_controls(self):
+        state = self.state_mod.MatrixState()
+        state.boot_repo_root = "/repo"
+        state.boot_head_commit = "daemon"
+        state.boot_mainline_branch = "main"
+
+        cases = (
+            ("equal", "daemon", (), "current", 0, None),
+            ("ahead", "main-old", ("0", "4"), "ahead", 0, None),
+            ("diverged", "main-other", ("3", "2"), "diverged", 3, 2),
+        )
+        for name, resolved, counts, status, behind, ahead in cases:
+            with self.subTest(name=name):
+                calls = []
+
+                def fake_git(repo_root, *args):
+                    calls.append((repo_root, *args))
+                    if args == ("rev-parse", "main"):
+                        return resolved
+                    if args == (
+                        "rev-list", "--count", f"daemon..{resolved}",
+                    ):
+                        return counts[0]
+                    if args == (
+                        "rev-list", "--count", f"{resolved}..daemon",
+                    ):
+                        return counts[1]
+                    self.fail(f"Unexpected git call: {args}")
+
+                with mock.patch(
+                    "torque.deploy_state._run_git", side_effect=fake_git,
+                ):
+                    payload = importlib.import_module(
+                        "torque.deploy_state"
+                    ).architect_mainline_runtime_provenance_payload(
+                        state, "g", now=321.0,
+                    )
+                comparison = payload["daemon_mainline_comparison"]
+                self.assertEqual(comparison["status"], status)
+                self.assertEqual(comparison["commits_behind"], behind)
+                if ahead is not None:
+                    self.assertEqual(comparison["commits_ahead"], ahead)
+                expected_count = 1 if name == "equal" else 3
+                self.assertEqual(len(calls), expected_count)
+                self.assertFalse(any("fetch" in call for call in calls))
+
+        with mock.patch(
+            "torque.deploy_state._run_git",
+            side_effect=RuntimeError("x" * 1000),
+        ) as run_git:
+            failure = importlib.import_module(
+                "torque.deploy_state"
+            ).architect_mainline_runtime_provenance_payload(
+                state, "g", now=321.0,
+            )
+        comparison = failure["daemon_mainline_comparison"]
+        self.assertEqual(comparison["status"], "unknown")
+        self.assertIsNone(comparison["commits_behind"])
+        self.assertLessEqual(len(comparison["detail"]), 300)
+        run_git.assert_called_once_with("/repo", "rev-parse", "main")
 
     async def test_torque_context_includes_upstream_artifacts_for_derived_tasks(self):
         state = self.state_mod.MatrixState()

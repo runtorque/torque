@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import subprocess
@@ -29,6 +30,11 @@ def _error_text(exc: Exception) -> str:
         detail = (exc.stderr or exc.stdout or "").strip()
         return detail or f"git exited with status {exc.returncode}"
     return str(exc) or exc.__class__.__name__
+
+
+def _bounded_detail(value: object, limit: int = 300) -> str:
+    text = " ".join(str(value or "").split())
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
 
 
 def _dedupe_torque_task_ids(text: str) -> list[str]:
@@ -154,26 +160,36 @@ def agent_session_runtime_provenance_payload(state, cell) -> dict:
             "code_revision": daemon_revision,
             "started_at": float(getattr(state, "boot_timestamp", 0) or 0),
         },
-        "comparison": {
+        "session_daemon_comparison": {
+            "subject": "session_vs_daemon",
             "status": "unknown",
             "commits_behind": None,
         },
     }
-    comparison = payload["comparison"]
+    comparison = payload["session_daemon_comparison"]
+
+    def finish() -> dict:
+        payload["comparison"] = {
+            **comparison,
+            "deprecated_alias": True,
+            "alias_for": "session_daemon_comparison",
+        }
+        return payload
+
     if not session_revision:
         comparison["detail"] = (
             "session revision was not recorded; relaunch to capture provenance"
         )
-        return payload
+        return finish()
     if not daemon_revision:
         comparison["detail"] = "daemon boot revision is unavailable"
-        return payload
+        return finish()
     if session_revision == daemon_revision:
         comparison.update(status="current", commits_behind=0)
-        return payload
+        return finish()
     if not repo_root:
         comparison["detail"] = "daemon repository is unavailable for comparison"
-        return payload
+        return finish()
     try:
         behind = int(_run_git(
             repo_root, "rev-list", "--count", f"{session_revision}..{daemon_revision}"
@@ -185,7 +201,7 @@ def agent_session_runtime_provenance_payload(state, cell) -> dict:
         comparison["detail"] = (
             f"unable to compare revisions: {_error_text(exc)}"
         )
-        return payload
+        return finish()
     if behind and not ahead:
         comparison.update(
             status="behind",
@@ -207,6 +223,117 @@ def agent_session_runtime_provenance_payload(state, cell) -> dict:
         )
     else:
         comparison["detail"] = "revisions could not be ordered"
+    return finish()
+
+
+def architect_mainline_runtime_provenance_payload(
+    state,
+    group: str,
+    *,
+    now: float | None = None,
+) -> dict:
+    """Return daemon/local-mainline evidence for authorized Architect context.
+
+    The configured ref is resolved from the already-local repository. This
+    deliberately performs no fetch, so it only answers freshness against that
+    local ref at ``checked_at``.
+    """
+    checked_at = float(time.time() if now is None else now)
+    repo_root = str(getattr(state, "boot_repo_root", "") or "").strip()
+    daemon_revision = str(
+        getattr(state, "boot_head_commit", "") or ""
+    ).strip()
+    mainline_ref = _group_mainline_branch(state, group, "")
+    mainline = {
+        "ref": mainline_ref,
+        "code_revision": "",
+        "source": "local_ref",
+        "checked_at": checked_at,
+        "fetch_performed": False,
+    }
+    comparison = {
+        "subject": "daemon_vs_local_mainline",
+        "status": "unknown",
+        "commits_behind": None,
+    }
+
+    def unknown(detail: str) -> dict:
+        comparison["detail"] = _bounded_detail(detail)
+        return {
+            "mainline": mainline,
+            "daemon_mainline_comparison": comparison,
+        }
+
+    if not repo_root:
+        return unknown("daemon repository is unavailable for comparison")
+    if not daemon_revision:
+        return unknown("daemon boot revision is unavailable")
+    if not mainline_ref:
+        return unknown("configured local mainline ref is unavailable")
+    try:
+        mainline_revision = _run_git(repo_root, "rev-parse", mainline_ref)
+        mainline["code_revision"] = mainline_revision
+        if not mainline_revision:
+            return unknown("configured local mainline ref resolved to no revision")
+        if daemon_revision == mainline_revision:
+            comparison.update(status="current", commits_behind=0)
+        else:
+            behind = int(_run_git(
+                repo_root,
+                "rev-list",
+                "--count",
+                f"{daemon_revision}..{mainline_revision}",
+            ) or "0")
+            ahead = int(_run_git(
+                repo_root,
+                "rev-list",
+                "--count",
+                f"{mainline_revision}..{daemon_revision}",
+            ) or "0")
+            if behind and not ahead:
+                comparison.update(
+                    status="behind",
+                    commits_behind=behind,
+                    detail=(
+                        f"daemon is {behind} commit(s) behind local mainline"
+                    ),
+                )
+            elif ahead and not behind:
+                comparison.update(
+                    status="ahead",
+                    commits_behind=0,
+                    detail=f"daemon is {ahead} commit(s) ahead of local mainline",
+                )
+            elif ahead and behind:
+                comparison.update(
+                    status="diverged",
+                    commits_behind=behind,
+                    commits_ahead=ahead,
+                    detail="daemon and local mainline revisions have diverged",
+                )
+            else:
+                comparison["detail"] = "revisions could not be ordered"
+    except Exception as exc:
+        return unknown(
+            f"unable to compare daemon with local mainline: {_error_text(exc)}"
+        )
+    return {
+        "mainline": mainline,
+        "daemon_mainline_comparison": comparison,
+    }
+
+
+async def agent_runtime_provenance_for_context(state, cell) -> dict:
+    """Build context provenance without blocking the daemon event loop."""
+    payload = await asyncio.to_thread(
+        agent_session_runtime_provenance_payload, state, cell
+    )
+    if str(getattr(cell, "kind", "") or "").strip() == "architect":
+        payload.update(await asyncio.to_thread(
+            architect_mainline_runtime_provenance_payload,
+            state,
+            str(getattr(cell, "group", "") or ""),
+        ))
     return payload
 
 
