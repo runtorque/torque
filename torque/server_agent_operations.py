@@ -908,8 +908,24 @@ async def _handle_add_engineer_command(
     if group not in state.groups:
         state.add_group(group)
     base_dir = await resolve_base_dir(group)
-    pending_specializations = _resolve_pending_engineer_specializations(
-        data, state, group, True)
+    if "specializations" in data:
+        try:
+            if specialization_mgr is None:
+                raise ValueError("specialization validation is unavailable")
+            pending_specializations = (
+                _normalize_engineer_specialization_selection(
+                    data.get("specializations"),
+                    valid_names=_project_specialization_names(
+                        specialization_mgr,
+                        base_dir,
+                    ),
+                )
+            )
+        except ValueError as exc:
+            return {"type": "error", "message": str(exc)}
+    else:
+        pending_specializations = _resolve_pending_engineer_specializations(
+            data, state, group, True)
     overrides = _create_agent_launch_overrides(data)
     launch_cfg = resolve_engineer_launch_config(
         group,

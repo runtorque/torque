@@ -35226,7 +35226,7 @@ test('per-agent settings unchanged save emits zero settings, digest, class, or s
     'dialog Save never owns Agent Class mutation');
 });
 
-test('per-agent setting origin changes from inherited to overridden and reset restores inheritance', () => {
+test('per-agent override reset shows server fallback and defers sparse null to Save without replacing drafts', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/modals/agent-settings.js');
@@ -35234,19 +35234,50 @@ test('per-agent setting origin changes from inherited to overridden and reset re
   const button = { hidden: true };
   const origin = { querySelector(selector) { return selector === 'span' ? label : button; } };
   const container = {
-    dataset: { agentSetting: 'provider', overridden: 'false' },
+    dataset: { agentSetting: 'provider', settingKind: 'agent', overridden: 'true' },
     querySelector() { return origin; },
   };
+  const providerControl = { value: 'gemini-cli', focused: true };
+  const otherDraft = { value: 'keep this draft', selectionStart: 5, selectionEnd: 5 };
   sandbox.__originContainer = container;
+  sandbox.__providerControl = providerControl;
+  sandbox.__otherDraft = otherDraft;
   runInContext(context, `
-    _agentSettingsContext = { resolved: { provider: { value: 'codex', origin: 'group' } } };
+    _agentSettingsContext = {
+      kind: 'engineer', mode: 'edit', agentId: 'eng-1',
+      resolved: {
+        provider: {
+          value: 'gemini-cli', origin: 'per-agent',
+          inherited: { value: 'codex', origin: 'group' }
+        }
+      },
+      baseline: {
+        agent: { provider: { overridden: true, value: 'gemini-cli' } },
+        digest: {}, specializations: null
+      }
+    };
+    _agentSettingsFields = function() { return [{ key: 'provider', type: 'text' }]; };
+    _agentSettingsFieldContainer = function() { return __originContainer; };
+    document.getElementById = function(id) {
+      if (id === 'agent-settings-provider') return __providerControl;
+      if (id === 'other-draft') return __otherDraft;
+      return null;
+    };
     _agentSettingsUpdateOrigin(__originContainer, true);
   `);
   assert.equal(label.textContent, 'Overridden for this agent');
   assert.equal(button.hidden, false);
-  runInContext(context, `_agentSettingsUpdateOrigin(__originContainer, false);`);
+  runInContext(context, `agentSettingsUseInherited('provider');`);
+  assert.equal(providerControl.value, 'codex');
   assert.equal(label.textContent, 'Inherited · group');
   assert.equal(button.hidden, true);
+  assert.equal(container.dataset.overridden, 'false');
+  assert.equal(otherDraft.value, 'keep this draft');
+  assert.equal(otherDraft.selectionStart, 5);
+  assert.equal(providerControl.focused, true,
+    'reset mutates only the existing control and does not replace focused modal DOM');
+  assert.deepEqual(jsonValue(context, `_agentSettingsSparseDiff('agent')`), { provider: null },
+    'reset remains pending until Save emits the sparse null clear');
 });
 
 test('agent context menu exposes Settings only for live Architects and Engineers', () => {

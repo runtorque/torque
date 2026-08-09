@@ -435,33 +435,53 @@ class StateSettingsMixin:
             "model": "agent_model", "reasoning_effort": "agent_reasoning_effort",
             "fast_mode": "agent_fast_mode",
         }
+
+        def inherited_agent_value(name: str):
+            attr = mapping.get(name)
+            value = getattr(group_settings, attr, None) if attr else None
+            if value in {None, "", "inherit"} and name in generic_mapping:
+                value = getattr(generic, generic_mapping[name], None)
+            origin = (
+                "group"
+                if group_exists and value not in {None, "", "inherit"}
+                else "default"
+            )
+            return value, origin
+
         for name in set(AgentSettings.__dataclass_fields__) - {"agent_id"}:
             value = getattr(overrides, name)
             if not self._agent_setting_inherits(name, value):
-                origin = "per-agent"
+                inherited_value, inherited_origin = inherited_agent_value(name)
+                resolved[name] = {
+                    "value": value,
+                    "origin": "per-agent",
+                    "inherited": {
+                        "value": inherited_value,
+                        "origin": inherited_origin,
+                    },
+                }
             else:
-                attr = mapping.get(name)
-                value = getattr(group_settings, attr, None) if attr else None
-                if value in {None, "", "inherit"} and name in generic_mapping:
-                    value = getattr(generic, generic_mapping[name], None)
-                origin = (
-                    "group"
-                    if group_exists and value not in {None, "", "inherit"}
-                    else "default"
-                )
-            resolved[name] = {"value": value, "origin": origin}
+                value, origin = inherited_agent_value(name)
+                resolved[name] = {"value": value, "origin": origin}
         digest = self.get_agent_digest_settings(agent_id)
+        inherited_digest = self._legacy_agent_digest_settings(agent_id)
         override_fields = set(
             getattr(self.agent_digest_settings.get(agent_id), "override_fields", []) or []
         )
         for name in ("paused", "push_interval", "max_interval", "heartbeat_interval",
                      "digest_verbosity", "enabled_events"):
-            resolved[name] = {
+            entry = {
                 "value": getattr(digest, name),
                 "origin": "per-agent" if name in override_fields else (
                     "group" if group_exists else "default"
                 ),
             }
+            if name in override_fields:
+                entry["inherited"] = {
+                    "value": getattr(inherited_digest, name),
+                    "origin": "group" if group_exists else "default",
+                }
+            resolved[name] = entry
         resolved["agent_class_id"] = {
             "value": cell.agent_class_id,
             "origin": "per-agent" if cell.agent_class_id else "default",

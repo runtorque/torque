@@ -59,12 +59,22 @@ function _agentSettingsResolved(key) {
   return resolved[key] || { value: '', origin: 'default' };
 }
 
-function _agentSettingsDisplayValue(field) {
-  if (!_agentSettingsContext || _agentSettingsContext.mode === 'create') return '';
-  var value = _agentSettingsResolved(field.key).value;
+function _agentSettingsInherited(key) {
+  var resolved = _agentSettingsResolved(key);
+  if (resolved && resolved.inherited) return resolved.inherited;
+  if (resolved && resolved.origin !== 'per-agent') return resolved;
+  return { value: '', origin: 'default' };
+}
+
+function _agentSettingsValueText(value) {
   if (Array.isArray(value)) return value.join(', ');
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   return value == null ? '' : String(value);
+}
+
+function _agentSettingsDisplayValue(field) {
+  if (!_agentSettingsContext || _agentSettingsContext.mode === 'create') return '';
+  return _agentSettingsValueText(_agentSettingsResolved(field.key).value);
 }
 
 function _agentSettingsOriginText(origin) {
@@ -239,14 +249,16 @@ function _agentSettingsFieldContainer(key) {
   return document.querySelector('[data-agent-setting="' + key + '"]');
 }
 
-function _agentSettingsUpdateOrigin(container, overridden) {
+function _agentSettingsUpdateOrigin(container, overridden, inherited) {
   if (!container) return;
   container.dataset.overridden = overridden ? 'true' : 'false';
   var origin = container.querySelector('[data-agent-settings-origin]');
   if (!origin) return;
   var label = origin.querySelector('span');
   var button = origin.querySelector('button');
-  if (label) label.textContent = overridden ? 'Overridden for this agent' : _agentSettingsOriginText((_agentSettingsResolved(container.dataset.agentSetting || 'engineer_specializations').origin || 'default'));
+  var key = container.dataset.agentSetting || 'engineer_specializations';
+  var inheritedEntry = inherited || _agentSettingsInherited(key);
+  if (label) label.textContent = overridden ? 'Overridden for this agent' : _agentSettingsOriginText(inheritedEntry.origin || 'default');
   if (button) button.hidden = !overridden;
 }
 
@@ -271,15 +283,17 @@ function agentSettingsUseInherited(key) {
     var specs = document.querySelector('[data-agent-specializations]');
     if (!specs) return;
     var specsInput = document.getElementById('agent-settings-specializations');
-    if (specsInput) specsInput.value = '';
+    var inheritedSpecs = _agentSettingsInherited(key);
+    if (specsInput) specsInput.value = _agentSettingsValueText(inheritedSpecs.value);
     specs.dataset.touched = 'true';
-    _agentSettingsUpdateOrigin(specs, false);
+    _agentSettingsUpdateOrigin(specs, false, inheritedSpecs);
   } else {
     var container = _agentSettingsFieldContainer(key);
     if (!container) return;
     var field = _agentSettingsFields(_agentSettingsContext.kind).filter(function(item) { return item.key === key; })[0];
     var id = 'agent-settings-' + key.replace(/_/g, '-');
-    var value = _agentSettingsDisplayValue(field);
+    var inherited = _agentSettingsInherited(key);
+    var value = _agentSettingsValueText(inherited.value);
     if (field.type === 'provider') _populateProviderSelect(id, value, true);
     else if (field.type === 'model') _populateModelSelect(id, _agentSettingsProvider(), value, 'Inherited', 'agent-settings-reasoning-effort', _getReasoningEffortValue('agent-settings-reasoning-effort'));
     else {
@@ -287,7 +301,7 @@ function agentSettingsUseInherited(key) {
       if (control) control.value = value;
     }
     container.dataset.touched = 'true';
-    _agentSettingsUpdateOrigin(container, false);
+    _agentSettingsUpdateOrigin(container, false, inherited);
   }
   _agentSettingsRecomputeDirty();
 }

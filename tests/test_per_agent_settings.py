@@ -46,7 +46,11 @@ class PerAgentSettingsTests(unittest.TestCase):
         self.state.update_engineer_settings("g", default_worker_concurrency=7)
         after = self.state.resolve_agent_settings("eng-1")
 
-        self.assertEqual(before["provider"], {"value": "gemini-cli", "origin": "per-agent"})
+        self.assertEqual(before["provider"], {
+            "value": "gemini-cli",
+            "origin": "per-agent",
+            "inherited": {"value": "codex", "origin": "group"},
+        })
         self.assertEqual(after["default_worker_concurrency"], {"value": 7, "origin": "group"})
 
     def test_digest_row_tracks_overrides_per_field_not_per_row(self):
@@ -55,7 +59,11 @@ class PerAgentSettingsTests(unittest.TestCase):
 
         resolved = self.state.resolve_agent_settings("eng-1")
 
-        self.assertEqual(resolved["push_interval"], {"value": 15, "origin": "per-agent"})
+        self.assertEqual(resolved["push_interval"], {
+            "value": 15,
+            "origin": "per-agent",
+            "inherited": {"value": 60, "origin": "group"},
+        })
         self.assertEqual(resolved["max_interval"], {"value": 900, "origin": "group"})
 
     def test_nullable_overrides_survive_restart_without_ephemeral_activity(self):
@@ -152,7 +160,11 @@ class PerAgentSettingsTests(unittest.TestCase):
 
         self.assertEqual(
             self.state.resolve_agent_settings("eng-1")["restrict_to_created_agents"],
-            {"value": False, "origin": "per-agent"},
+            {
+                "value": False,
+                "origin": "per-agent",
+                "inherited": {"value": True, "origin": "group"},
+            },
         )
 
     def test_agent_settings_keys_project_through_both_snapshot_sites(self):
@@ -189,7 +201,11 @@ class PerAgentSettingsTests(unittest.TestCase):
         self.assertEqual(response["type"], "agent_settings")
         self.assertEqual(
             response["resolved"]["push_interval"],
-            {"value": 15, "origin": "per-agent"},
+            {
+                "value": 15,
+                "origin": "per-agent",
+                "inherited": {"value": 60, "origin": "group"},
+            },
         )
 
         response = _handle_settings_mutation_command({
