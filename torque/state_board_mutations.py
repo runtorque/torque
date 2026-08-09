@@ -1141,21 +1141,13 @@ class BoardMutationMixin:
             if clear_status and task.status:
                 self.board_update_task(tid, status="")
             return
-        if task.lane == ARCHIVED_LANE:
-            return self.board_unarchive_task(
-                tid,
-                lane=lane,
-                position=position,
-                allow_done_advisory=allow_done_advisory,
-                clear_status=clear_status,
-            )
         advisory = None
         if lane == "Done" and task.lane != "Done" and self._is_finalization_root(task):
             allowed, result = self._finalization_done_allowed(
                 task, caller="board_move_task"
             )
             if not allowed:
-                if not allow_done_advisory:
+                if task.lane == ARCHIVED_LANE or not allow_done_advisory:
                     return result
                 # Explicit operator intent wins over finalization bookkeeping.
                 # Keep evaluating/auditing the evidence, but return the finding
@@ -1165,6 +1157,9 @@ class BoardMutationMixin:
             task.status = ""
         if lane == ARCHIVED_LANE:
             self.board_archive_task(tid, position=position)
+            return
+        if task.lane == ARCHIVED_LANE:
+            self.board_unarchive_task(tid, lane=lane, position=position)
             return
         if lane == "Done" and task.lane != "Done":
             # Finalization/code-boundary admission has passed. Expire only
@@ -1541,9 +1536,7 @@ class BoardMutationMixin:
 
     def board_unarchive_task(self, tid: str, *,
                              lane: str = "",
-                             position: Optional[int] = None,
-                             allow_done_advisory: bool = False,
-                             clear_status: bool = False):
+                             position: Optional[int] = None):
         tid = self.resolve_task_alias(tid)
         task = self.board_tasks.get(tid)
         if not task or task.lane != ARCHIVED_LANE:
@@ -1551,15 +1544,12 @@ class BoardMutationMixin:
         target_lane = lane or task.archived_from_lane or "Done"
         if target_lane == ARCHIVED_LANE or target_lane not in self.board_lanes:
             target_lane = "Done" if "Done" in self.board_lanes else self.board_lanes[0]
-        advisory = None
         if target_lane == "Done" and self._is_finalization_root(task):
             allowed, result = self._finalization_done_allowed(
                 task, caller="board_unarchive_task"
             )
             if not allowed:
-                if not allow_done_advisory:
-                    return result
-                advisory = result
+                return result
         # get_task_detail is intentionally in-memory only. Rehydrate only
         # after every rejection-capable target/finalization check has passed,
         # immediately before a task can return to a live surface. A denied
@@ -1569,8 +1559,6 @@ class BoardMutationMixin:
                 "type": "error",
                 "message": "Unable to restore archived task artifacts",
             }
-        if clear_status:
-            task.status = ""
         self._board_apply_archive_state(
             task,
             lane=target_lane,
@@ -1581,7 +1569,6 @@ class BoardMutationMixin:
         )
         self._refresh_finalization_root_projection(task)
         self.recompute_task_health()
-        return advisory
 
     def board_reorder_task(self, tid: str, position: int):
         tid = self.resolve_task_alias(tid)

@@ -130,23 +130,6 @@ class CodeBoundaryDoneGateTests(unittest.TestCase):
         self.assertEqual(root.lane, "In Progress")
         self.assertFalse(result["eligible"])
 
-    def test_explicit_done_move_from_archive_returns_advisory(self):
-        root = self._root(boundary=_boundary("present", sha="in-flight"))
-        root.status = "On Review"
-        self.state.board_archive_task(root.id)
-
-        result = self.state.board_move_task(
-            root.id, "Done", clear_status=True
-        )
-
-        self.assertEqual(root.lane, "Done")
-        self.assertEqual(root.status, "")
-        self.assertFalse(result["eligible"])
-        self.assertEqual(
-            [root.id],
-            [item["task_id"] for item in result["code_boundary"]["blocking"]],
-        )
-
     def test_atomic_policy_done_update_cannot_bypass_open_code_boundary(self):
         root = self._root(boundary=_boundary("present"))
         review = self.state.board_add_task(
