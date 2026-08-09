@@ -1093,37 +1093,43 @@ async def handle_board_operation_command(
                 _mv_clear_status = data.get("clear_status", False)
                 if not isinstance(_mv_clear_status, bool):
                     _mv_clear_status = False
-                _mv_refusal = state.board_move_task(
+                _mv_acknowledge_unmerged = data.get(
+                    "acknowledge_unmerged", False
+                )
+                if not isinstance(_mv_acknowledge_unmerged, bool):
+                    _mv_acknowledge_unmerged = False
+                _mv_advisory = state.board_move_task(
                     _mv_id,
                     _mv_new,
                     data.get("position"),
                     clear_status=_mv_clear_status,
+                    allow_done_advisory=True,
+                    acknowledge_unmerged=_mv_acknowledge_unmerged,
                 )
                 _mv_task_after = state.board_tasks.get(_mv_id)
-                if _mv_refusal is not None:
-                    _mv_missing_gates = _mv_refusal.get("missing_gates", [])
-                    _mv_reason = (
-                        str(_mv_missing_gates[0] or "")
-                        if _mv_missing_gates else "move_refused"
+                if (
+                        isinstance(_mv_advisory, dict)
+                        and _mv_advisory.get("type")
+                        == "task_move_acknowledgement_required"
+                ):
+                    result = _mv_advisory
+                    result["previous_lane"] = _mv_previous_lane
+                    result["new_lane"] = _mv_new
+                    result["status"] = str(
+                        getattr(_mv_task_after, "status", "") or ""
                     )
-                    _mv_explanations = _mv_refusal.get("explanations", [])
-                    _mv_message = (
-                        str(_mv_explanations[0] or "")
-                        if _mv_explanations else "Task move was refused"
-                    )
-                    result = {
-                        "type": "error",
-                        "message": _mv_message,
-                        "reason": _mv_reason,
-                        "clear_status_applied": False,
-                        "details": _mv_refusal,
-                    }
+                    result["clear_status"] = _mv_clear_status
+                    if data.get("position") is not None:
+                        result["position"] = data.get("position")
+                    continue_result = False
                 else:
-                    if board_sync_manager:
-                        board_sync_manager.enqueue_task(
-                            _mv_id,
-                            reason="task_move",
-                        )
+                    continue_result = True
+                if continue_result and board_sync_manager:
+                    board_sync_manager.enqueue_task(
+                        _mv_id,
+                        reason="task_move",
+                    )
+                if continue_result:
                     result = {
                         "type": "task_moved",
                         "task_id": _mv_id,
@@ -1137,6 +1143,8 @@ async def handle_board_operation_command(
                             if _mv_task_after else ""
                         ),
                     }
+                if continue_result and isinstance(_mv_advisory, dict):
+                    result["advisory"] = _mv_advisory
                 # Moving out of Done may re-block dependents
                 if (
                         result.get("type") == "task_moved"

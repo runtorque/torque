@@ -121,13 +121,15 @@ class LegacyReviewCardinalityTests(unittest.TestCase):
         self.assertIn("satisfied distinct count=1", rejection["message"])
         self.assertIn("shortfall=1", rejection["message"])
 
-    def test_board_root_close_is_refused_by_the_same_cardinality_gate(self):
+    def test_board_root_close_returns_cardinality_advisory(self):
         root = self._root(self._two_gates())
         self._review(root, "review-1", "reviewer-1", lane="Done")
 
-        result = self.state.board_move_task(root.id, "Done")
+        result = self.state.board_move_task(
+            root.id, "Done", acknowledge_unmerged=True
+        )
 
-        self.assertEqual(root.lane, "In Progress")
+        self.assertEqual(root.lane, "Done")
         self.assertFalse(result["eligible"])
         self.assertIn("declared count=2", result["explanations"][0])
 

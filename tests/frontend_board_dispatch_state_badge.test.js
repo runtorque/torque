@@ -258,3 +258,56 @@ test('policy root with review children renders escaped bounded finalization badg
   assert.ok(tooltip.length <= 320);
   assert.doesNotMatch(tooltip, /x{400}/);
 });
+
+test('Done card marks unmerged superseded code boundary as a non-blocking advisory', () => {
+  const context = createBadgeRenderContext();
+  vm.runInContext(`
+    state = { board_tasks: {}, agents: {}, groups: {}, group_settings: {} };
+    _boardLaneEntryText = () => '';
+    _boardMetadataBadgeClass = (name, intent) => name + ' metadata-badge--' + intent;
+    _boardDependencyBlockedLabel = () => '';
+    _boardAssignedEngineerBadgeHtml = () => '';
+    _boardTaskDispatchStateBadgeHtml = () => '';
+    _boardTaskDispatchEligibility = () => null;
+    _boardTaskHealthState = () => 'healthy';
+    _boardTaskHealthLabel = () => '';
+    _boardExternalGithubChipHtml = () => '';
+    _boardTaskSync = () => ({});
+    _boardTaskHasGithubLink = () => false;
+    _artifactCountForTask = () => 0;
+    _renderBoardQuickEdit = () => '';
+    _boardAgentName = () => '';
+    _boardVerificationPreview = () => '';
+    behaviorOverlayApprovalCardHtml = () => '';
+    formatCode = (value) => esc(value);
+    _taskCreatedByBadgeHtml = () => '';
+    _branchBoundaryOverviewForContext = () => null;
+    boardFocusTask = () => {}; boardCardMouseEnter = () => {}; boardCardMouseLeave = () => {};
+    boardCardMenu = () => {}; openEditTask = () => {}; boardCopyTaskIdFromCard = () => {};
+    _boardCollapsedTasks = {}; _boardFocusedTask = ''; _boardSelectedTasks = {}; _boardHoveredTask = ''; _boardQuickEditTask = ''; _boardHasActiveFilters = () => false; _boardTasks = () => [];
+  `, context);
+  const html = vm.runInContext(`_renderBoardCard({
+    id: 'ROOT', task: 'Closed root', lane: 'Done', labels: []
+  }, {
+    ROOT: [{
+      id: 'ROOT:2', task: 'Superseded review', lane: 'Done', labels: [],
+      worktree_boundary: {
+        status: 'superseded', commit_sha: 'candidate',
+        code_delta: { state: 'present' }
+      }
+    }]
+  }, 0, {})`, context);
+  assert.match(html, />Boundary advisory<\/span>/);
+  assert.match(html, /metadata-badge--warning/);
+  assert.match(html, /Unmerged code boundary: ROOT:2/);
+
+  const inFlightHtml = vm.runInContext(`_renderBoardCard({
+    id: 'IN-FLIGHT', task: 'Acknowledged close', lane: 'Done', labels: [],
+    worktree_boundary: {
+      status: 'open', branch: 'topic/in-flight', commit_sha: 'candidate',
+      code_delta: { state: 'present' }
+    }
+  }, {}, 0, {})`, context);
+  assert.match(inFlightHtml, />Boundary advisory<\/span>/);
+  assert.match(inFlightHtml, /Unmerged code boundary: IN-FLIGHT/);
+});

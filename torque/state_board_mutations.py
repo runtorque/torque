@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import subprocess
 import time
 from dataclasses import asdict, fields
 from datetime import datetime, timezone
@@ -39,6 +40,66 @@ from .state import (
     task_is_engineer_message_followup,
     task_suppresses_done_cascade,
 )
+
+
+def explicit_done_mainline_status(
+        task: BoardTask, *, mainline: str = "") -> dict:
+    """Classify an explicit close using the task's own durable merge SHA."""
+    boundary = getattr(task, "worktree_boundary", {}) or {}
+    if not isinstance(boundary, dict):
+        boundary = {}
+    repo_root = str(boundary.get("repo_root", "") or "").strip()
+    mainline = (
+        str(mainline or "").strip()
+        or str(boundary.get("base_branch", "") or "").strip()
+        or "main"
+    )
+    merge_sha = str(boundary.get("merge_commit_sha", "") or "").strip()
+    branch = str(boundary.get("branch", "") or "").strip()
+    result = {
+        "required": True,
+        "verified_in_mainline": False,
+        "repo_root": repo_root,
+        "mainline": mainline,
+        "merge_commit_sha": merge_sha,
+        "branch": branch,
+        "reason": "missing_merge_sha",
+        "error": "",
+    }
+    if not merge_sha:
+        return result
+    if not repo_root:
+        result["reason"] = "missing_repo_root"
+        return result
+    try:
+        proc = subprocess.run(
+            [
+                "git", "-C", repo_root, "merge-base", "--is-ancestor",
+                merge_sha, mainline,
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        result["reason"] = "ancestry_check_error"
+        result["error"] = str(exc)[:240]
+        return result
+    if proc.returncode == 0:
+        result.update({
+            "required": False,
+            "verified_in_mainline": True,
+            "reason": "merge_sha_in_mainline",
+        })
+    elif proc.returncode == 1:
+        result["reason"] = "merge_sha_not_in_mainline"
+    else:
+        result["reason"] = "ancestry_check_error"
+        result["error"] = proc.stderr.decode(
+            errors="replace"
+        ).strip()[:240]
+    return result
 
 
 class BoardMutationMixin:
@@ -317,7 +378,9 @@ class BoardMutationMixin:
             update_fields["status"] = ""
         self.board_update_task(tid, **update_fields)
         if move_to_done:
-            self.board_move_task(tid, "Done", clear_status=True)
+            self.board_move_task(
+                tid, "Done", clear_status=True, allow_done_advisory=False
+            )
 
         refreshed = self.board_tasks.get(tid)
         return {
@@ -419,7 +482,9 @@ class BoardMutationMixin:
             messages=messages,
             status="",
         )
-        self.board_move_task(tid, "Done", clear_status=True)
+        self.board_move_task(
+            tid, "Done", clear_status=True, allow_done_advisory=False
+        )
 
         refreshed = self.board_tasks.get(tid)
         return {
@@ -787,8 +852,8 @@ class BoardMutationMixin:
             "boundary": "",
             "missing_gates": ["code_boundary_not_durably_merged"],
             "explanations": [
-                "Code-bearing or unclassified task boundary remains open; "
-                "Done requires durable merged status and merge SHA."
+                "Code-bearing or unclassified task boundary lacks durable "
+                "merged status and merge SHA."
             ],
             "code_boundary": code_gate,
         }
@@ -1122,7 +1187,14 @@ class BoardMutationMixin:
 
     def board_move_task(self, tid: str, lane: str,
                         position: Optional[int] = None,
-                        clear_status: bool = False):
+                        clear_status: bool = False,
+                        allow_done_advisory: bool = True,
+                        acknowledge_unmerged: bool = False):
+        """Apply an explicit lane move, returning any non-blocking Done finding.
+
+        Internal automatic closeout callers pass ``allow_done_advisory=False``
+        so their existing eligibility rules remain admission gates.
+        """
         tid = self.resolve_task_alias(tid)
         task = self.board_tasks.get(tid)
         if not task or lane not in self.board_lanes:
@@ -1131,12 +1203,72 @@ class BoardMutationMixin:
             if clear_status and task.status:
                 self.board_update_task(tid, status="")
             return
+        advisory = None
         if lane == "Done" and task.lane != "Done" and self._is_finalization_root(task):
             allowed, result = self._finalization_done_allowed(
                 task, caller="board_move_task"
             )
             if not allowed:
-                return result
+                if task.lane == ARCHIVED_LANE or not allow_done_advisory:
+                    return result
+                acknowledgement = explicit_done_mainline_status(
+                    task,
+                    mainline=str(
+                        getattr(self, "boot_mainline_branch", "") or ""
+                    ).strip(),
+                )
+                if acknowledgement["required"] and not acknowledge_unmerged:
+                    blocking = result.get("code_boundary", {}).get(
+                        "blocking", []
+                    )
+                    blocking_ids = [
+                        str(item.get("task_id", "") or "").strip()
+                        for item in blocking if isinstance(item, dict)
+                    ]
+                    referenced = [
+                        self.board_tasks.get(task_id)
+                        for task_id in blocking_ids
+                        if self.board_tasks.get(task_id)
+                    ]
+                    boundary_refs = []
+                    for referenced_task in referenced:
+                        boundary = getattr(
+                            referenced_task, "worktree_boundary", {}
+                        ) or {}
+                        if not isinstance(boundary, dict):
+                            continue
+                        boundary_refs.append({
+                            "task_id": referenced_task.id,
+                            "branch": str(
+                                boundary.get("branch", "") or ""
+                            ).strip(),
+                            "commit_sha": str(
+                                boundary.get("commit_sha", "") or ""
+                            ).strip(),
+                        })
+                    acknowledgement["blocking"] = boundary_refs
+                    ref = next((
+                        item.get("branch") or item.get("commit_sha")
+                        for item in boundary_refs
+                        if item.get("branch") or item.get("commit_sha")
+                    ), acknowledgement.get("branch")
+                       or acknowledgement.get("merge_commit_sha")
+                       or task.id)
+                    return {
+                        "type": "task_move_acknowledgement_required",
+                        "task_id": task.id,
+                        "message": (
+                            "Closing this task will leave unmerged code at "
+                            f"{ref}. Acknowledge that the code will not be "
+                            "merged here or will be handled another way."
+                        ),
+                        "acknowledgement": acknowledgement,
+                        "advisory": result,
+                    }
+                # Explicit operator intent wins over finalization bookkeeping.
+                # Keep evaluating/auditing the evidence, but return the finding
+                # as an advisory after the authored lane mutation succeeds.
+                advisory = result
         if clear_status:
             task.status = ""
         if lane == ARCHIVED_LANE:
@@ -1163,6 +1295,7 @@ class BoardMutationMixin:
         if lane == "Done":
             self.board_cascade_done(tid, recompute=False)
         self.recompute_task_health()
+        return advisory
 
     def _append_engineer_message_expiry_note(self, task: BoardTask,
                                              timestamp: float) -> bool:

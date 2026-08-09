@@ -882,6 +882,13 @@ _ARCHITECT_TOOL_SPECS = [
                     "type": "boolean",
                     "description": "Clear the task's status badge while moving it.",
                 },
+                "acknowledge_unmerged": {
+                    "type": "boolean",
+                    "description": (
+                        "Acknowledge that unmerged code will be left behind "
+                        "or handled another way when moving to Done."
+                    ),
+                },
             },
             "required": ["task", "new_lane"],
         },

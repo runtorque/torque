@@ -6,6 +6,10 @@ function _handleWsMessage(e) {
     var askResolveHandled = typeof handleAskResolveResponse === 'function'
       && handleAskResolveResponse(msg);
     if (askResolveHandled) return;
+    var boardMoveAcknowledgementHandled =
+      typeof handleBoardMoveAcknowledgementResponse === 'function'
+      && handleBoardMoveAcknowledgementResponse(msg);
+    if (boardMoveAcknowledgementHandled) return;
     if (typeof _compactHandleLazyResponse === 'function'
         && _compactHandleLazyResponse(msg)) {
       if (typeof renderActivePanel === 'function') renderActivePanel();

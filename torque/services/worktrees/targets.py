@@ -118,7 +118,9 @@ def _maybe_auto_move_merged_task_to_done(
         elif task_counts_as_done(task):
             decision["reason"] = f"task {task.id} already counts as done"
         else:
-            gate_result = state.board_move_task(task.id, "Done")
+            gate_result = state.board_move_task(
+                task.id, "Done", allow_done_advisory=False
+            )
             if not task_counts_as_done(task):
                 missing = (gate_result or {}).get("missing_gates", []) if isinstance(gate_result, dict) else []
                 decision["reason"] = "finalization gates block Done" + (
