@@ -1796,6 +1796,11 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Cannot derive feature/review", result["message"])
             self.assertIn("may conflict", result["message"])
             self.assertIn("not known", result["message"])
+            self.assertIn("not observational", result["message"])
+            self.assertIn(
+                "success rebases and rewrites the branch commits",
+                result["message"],
+            )
             self.assertIn("not a guaranteed recovery", result["message"])
             self.assertNotIn("Suggested command", result["message"])
             self.assertNotIn("suggested_command", result)

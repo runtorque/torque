@@ -578,9 +578,10 @@ def format_stale_base_warning(info: dict | None, *,
         rebase_guidance = (
             "  Whether a rebase can complete is not known until Git replays "
             "each commit.\n"
-            f"  Diagnostic only: `{rebase_command}` attempts that replay "
-            "and may conflict; the supported command aborts on failure. "
-            "This is not a guaranteed recovery.\n"
+            f"  Rebase attempt: `{rebase_command}`. This is not "
+            "observational: success rebases and rewrites the branch commits; "
+            "a conflict failure aborts the rebase. The attempt may conflict "
+            "and is not a guaranteed recovery.\n"
         )
     else:
         rebase_guidance = (

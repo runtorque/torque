@@ -155,8 +155,10 @@ def _attach_stale_base_rebase_diagnostic(
     result["diagnostic_command"] = command
     result["suggestion"] = (
         f"Run `{command}` to determine whether the required commit replay "
-        "can complete. It may conflict and is not a guaranteed recovery. "
-        f"If it succeeds, {retry_action}."
+        "can complete. This is not observational: success rebases and "
+        "rewrites the branch commits; a conflict failure aborts the rebase. "
+        "The attempt may conflict and is not a guaranteed recovery. "
+        f"After success, {retry_action}."
     )
     stale_base = result.get("stale_base")
     if isinstance(stale_base, dict):
@@ -227,9 +229,10 @@ def _stale_base_review_derive_result(aid: str,
     ) if warning else (
         "Cannot derive feature/review from a stale worktree base.\n\n"
         "Whether a rebase can complete is not known until Git replays each "
-        f"commit. Diagnostic only: `{command}` attempts that replay and may "
-        "conflict; the supported command aborts on failure. This is not a "
-        "guaranteed recovery."
+        f"commit. Rebase attempt: `{command}`. This is not observational: "
+        "success rebases and rewrites the branch commits; a conflict failure "
+        "aborts the rebase. The attempt may conflict and is not a guaranteed "
+        "recovery."
     )
     return _attach_stale_base_rebase_diagnostic({
         "type": "error",
