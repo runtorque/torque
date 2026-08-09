@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -1508,6 +1509,128 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             "handle_command",
             None,
             closure,
+        )
+
+    async def test_engineer_worktree_adopt_full_path_supports_relaunch_modes(self):
+        mcp_engineer_mod = importlib.import_module("torque.mcp_engineer")
+
+        class FakeWorktreeManager:
+            async def validate_existing_worktree(
+                    self, worktree_path, *, repo_root="", branch="",
+                    base_branch="", worktree_submodules=None):
+                return self_outer.server_mod.ExistingWorktreeTarget(
+                    repo_root=repo_root,
+                    worktree_path=worktree_path,
+                    branch=branch,
+                    head_sha="adopted-head",
+                    base_branch=base_branch,
+                    git_root=repo_root,
+                    is_dirty=False,
+                    listed_worktree_entry={},
+                )
+
+            async def count_commits(self, _cell):
+                return 3
+
+        self_outer = self
+        for relaunch in (False, True):
+            with self.subTest(relaunch=relaunch):
+                state = self.state_mod.MatrixState()
+                state.add_group("g")
+                engineer = self.state_mod.AgentCell(
+                    id="engineer-1",
+                    name="Alice",
+                    slug="alice",
+                    group="g",
+                    cell_type="agent",
+                    kind="engineer",
+                    status="running",
+                    persistent=True,
+                )
+                worker = self.state_mod.AgentCell(
+                    id="worker-1",
+                    name="Worker",
+                    slug="worker",
+                    group="g",
+                    cell_type="agent",
+                    kind="worker",
+                    owner_engineer_id=engineer.id,
+                    created_by_engineer_id=engineer.id,
+                    status="stopped",
+                )
+                state.agents.update({engineer.id: engineer, worker.id: worker})
+                state.groups["g"].extend([engineer.id, worker.id])
+                handle_command = self._extract_handle_command(
+                    state,
+                    worktree_mgr=FakeWorktreeManager(),
+                )
+                relaunches = []
+
+                async def fake_relaunch(cell, **_kwargs):
+                    relaunches.append(cell.id)
+
+                with mock.patch(
+                    "torque.server._relaunch_agent_after_worktree_removal",
+                    side_effect=fake_relaunch,
+                ):
+                    text, is_error = (
+                        await mcp_engineer_mod._dispatch_engineer_tool(
+                            "engineer_worktree_adopt",
+                            {
+                                "agent": worker.id,
+                                "worktree_path": (
+                                    "/repo/.torque/worktrees/adopted"
+                                ),
+                                "branch": "torque/alice/adopted",
+                                "repo_root": "/repo",
+                                "base_branch": "main",
+                                "relaunch": relaunch,
+                            },
+                            handle_command,
+                            state,
+                            caller_id=engineer.id,
+                        )
+                    )
+
+                self.assertFalse(is_error, text)
+                payload = json.loads(text)
+                self.assertTrue(payload["ok"])
+                self.assertEqual(payload["agent_id"], worker.id)
+                self.assertEqual(
+                    worker.worktree_path,
+                    "/repo/.torque/worktrees/adopted",
+                )
+                self.assertEqual(worker.worktree_branch, "torque/alice/adopted")
+                self.assertEqual(relaunches, [worker.id] if relaunch else [])
+
+    async def test_worktree_adopt_refuses_ambiguous_id_and_path_target(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+            status="stopped",
+        )
+        state.agents[worker.id] = worker
+        state.groups["g"].append(worker.id)
+        handle_command = self._extract_handle_command(state)
+
+        result = await handle_command({
+            "cmd": "worktree_adopt",
+            "id": worker.id,
+            "worktree_path": "/repo/.torque/worktrees/different-target",
+            "branch": "torque/alice/different-target",
+            "repo_root": "/repo",
+            "base_branch": "main",
+        })
+
+        self.assertEqual(result["type"], "error")
+        self.assertEqual(
+            result["message"],
+            "Specify either id or worktree_path+branch, not both.",
         )
 
 
