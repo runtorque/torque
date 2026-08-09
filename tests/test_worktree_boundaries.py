@@ -1403,8 +1403,12 @@ class WorktreeBoundaryTests(unittest.TestCase):
             (repo / "base.txt").write_text("base\n")
             base_sha = commit("base")
             git("checkout", "-b", "topic")
+            (repo / "feature.txt").write_text("oldest ancestor\n")
+            oldest_ancestor_sha = commit("oldest review boundary")
+            (repo / "feature.txt").write_text("ancestor\n")
+            ancestor_sha = commit("earlier review boundary")
             (repo / "feature.txt").write_text("contained\n")
-            contained_sha = commit("contained review boundary")
+            contained_sha = commit("final review boundary")
             git("checkout", "main")
             git("merge", "--squash", "topic")
             merge_sha = commit("squash contained boundary")
@@ -1469,9 +1473,31 @@ class WorktreeBoundaryTests(unittest.TestCase):
                     "review": {"verdict": "block"},
                 },
                 boundary=boundary(
-                    contained_sha,
+                    ancestor_sha,
                     superseded_by=selected_review.id,
                     recorded_at="2026-08-07T14:55:00+00:00",
+                ),
+            )
+            same_sha = _task(
+                "root:review-same-sha",
+                action_name="feature/review",
+                parent_task_id=implementation.id,
+                pipeline_root_id=root.id,
+                boundary=boundary(
+                    contained_sha,
+                    superseded_by=selected_review.id,
+                    recorded_at="2026-08-07T14:54:30+00:00",
+                ),
+            )
+            far_ancestor = _task(
+                "root:review-far-ancestor",
+                action_name="feature/review",
+                parent_task_id=implementation.id,
+                pipeline_root_id=root.id,
+                boundary=boundary(
+                    oldest_ancestor_sha,
+                    superseded_by=valid.id,
+                    recorded_at="2026-08-07T14:54:00+00:00",
                 ),
             )
             other_root_exact_edge = _task(
@@ -1494,6 +1520,79 @@ class WorktreeBoundaryTests(unittest.TestCase):
                     recorded_at="2026-08-07T14:53:00+00:00",
                 ),
             )
+            implementation_edge_with_verdict = _task(
+                "root:review-implementation-edge-with-verdict",
+                action_name="feature/review",
+                parent_task_id=implementation.id,
+                pipeline_root_id=root.id,
+                completion_evidence={
+                    "review": {"verdict": "ship"},
+                    "review_verdict_amendment": {"verdict": "ship"},
+                },
+                boundary=boundary(
+                    uncontained_sha,
+                    superseded_by=implementation.id,
+                    recorded_at="2026-08-07T14:52:30+00:00",
+                ),
+            )
+            implementation_edge_without_verdict = _task(
+                "root:review-implementation-edge-without-verdict",
+                action_name="feature/review",
+                parent_task_id=implementation.id,
+                pipeline_root_id=root.id,
+                boundary=boundary(
+                    uncontained_sha,
+                    superseded_by=implementation.id,
+                    recorded_at="2026-08-07T14:52:20+00:00",
+                ),
+            )
+            structural_invalid = []
+            invalid_boundaries = {
+                "wrong-repo": boundary(
+                    contained_sha,
+                    superseded_by=selected_review.id,
+                    recorded_at="2026-08-07T14:52:10+00:00",
+                ),
+                "missing-time": boundary(
+                    contained_sha,
+                    superseded_by=selected_review.id,
+                    recorded_at="",
+                ),
+                "reversed-time": boundary(
+                    contained_sha,
+                    superseded_by=selected_review.id,
+                    recorded_at="2026-08-07T15:01:00+00:00",
+                ),
+                "absent-delta": boundary(
+                    contained_sha,
+                    superseded_by=selected_review.id,
+                    recorded_at="2026-08-07T14:52:05+00:00",
+                ),
+                "unknown-delta": boundary(
+                    contained_sha,
+                    superseded_by=selected_review.id,
+                    recorded_at="2026-08-07T14:52:04+00:00",
+                ),
+                "incoherent-commit": boundary(
+                    contained_sha,
+                    superseded_by=selected_review.id,
+                    recorded_at="2026-08-07T14:52:03+00:00",
+                ),
+            }
+            invalid_boundaries["wrong-repo"]["repo_root"] = str(repo / "other")
+            invalid_boundaries["absent-delta"]["code_delta"]["state"] = "absent"
+            invalid_boundaries["unknown-delta"]["code_delta"]["state"] = "unknown"
+            invalid_boundaries["incoherent-commit"]["code_delta"][
+                "commit_sha"
+            ] = ancestor_sha
+            for suffix, invalid_boundary in invalid_boundaries.items():
+                structural_invalid.append(_task(
+                    f"root:review-{suffix}",
+                    action_name="feature/review",
+                    parent_task_id=implementation.id,
+                    pipeline_root_id=root.id,
+                    boundary=invalid_boundary,
+                ))
             sibling = _task(
                 "root:review-sibling",
                 action_name="feature/review",
@@ -1536,9 +1635,12 @@ class WorktreeBoundaryTests(unittest.TestCase):
                 ),
             )
             tasks = [
-                root, implementation, selected_review, valid,
-                other_root_exact_edge, wrong_edge, sibling, reroute,
-                uncontained_near, contained_far,
+                root, implementation, selected_review, valid, same_sha,
+                far_ancestor,
+                other_root_exact_edge, wrong_edge,
+                implementation_edge_with_verdict,
+                implementation_edge_without_verdict, sibling, reroute,
+                *structural_invalid, uncontained_near, contained_far,
             ]
             target_ids = [implementation.id, selected_review.id]
 
@@ -1551,12 +1653,23 @@ class WorktreeBoundaryTests(unittest.TestCase):
             candidate_ids = {task.id for task in candidates}
             self.assertEqual(
                 candidate_ids,
-                {valid.id, uncontained_near.id, contained_far.id},
+                {
+                    valid.id, same_sha.id,
+                    far_ancestor.id, uncontained_near.id, contained_far.id,
+                },
             )
             self.assertNotIn(other_root_exact_edge.id, candidate_ids)
             self.assertNotIn(wrong_edge.id, candidate_ids)
+            self.assertNotIn(
+                implementation_edge_with_verdict.id, candidate_ids
+            )
+            self.assertNotIn(
+                implementation_edge_without_verdict.id, candidate_ids
+            )
             self.assertNotIn(sibling.id, candidate_ids)
             self.assertNotIn(reroute.id, candidate_ids)
+            for invalid in structural_invalid:
+                self.assertNotIn(invalid.id, candidate_ids)
 
             verified = asyncio.run(
                 verified_review_cycle_containment_task_ids(
@@ -1567,7 +1680,10 @@ class WorktreeBoundaryTests(unittest.TestCase):
                     task_ids=target_ids,
                 )
             )
-            self.assertEqual(verified, (valid.id,))
+            self.assertEqual(
+                verified,
+                (valid.id, same_sha.id, far_ancestor.id),
+            )
             self.assertNotIn(uncontained_near.id, verified)
             # This commit is contained, but its immediate successor failed
             # containment.  No transitive trust may skip that failed hop.

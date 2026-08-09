@@ -3504,11 +3504,15 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
 
         return _mark
 
-    async def test_plain_second_shipping_review_closes_root_via_real_finalization(self):
+    async def _assert_plain_second_shipping_review_closes_root(
+            self, *, different_sha: bool):
         from torque.services.worktrees.finalize import (
             _finalize_successful_worktree_merge,
         )
-        from torque.worktree_boundaries import code_boundary_done_status
+        from torque.worktree_boundaries import (
+            code_boundary_done_status,
+            review_cycle_containment_candidates,
+        )
 
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -3536,12 +3540,13 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             git("checkout", "-b", "topic")
             (repo / "feature.txt").write_text("candidate\n")
             first_sha = commit("candidate before blocked review")
-            (repo / "fix.txt").write_text("blocked-review fix\n")
+            (repo / "feature.txt").write_text("blocked-review fix\n")
             fixed_sha = commit("fix after blocked review")
-            # Model the supported post-review rebase by moving the first Ship
-            # boundary to the final head before a plain extra review is
-            # derived.  The extra review has no review_cycle_continue audit.
-            (repo / "final.txt").write_text("post-review rebase result\n")
+            # The fresh review covers a later commit that changes a path the
+            # earlier shipping boundary already changed.  Squashing the final
+            # commit means neither review SHA is in landing ancestry, while
+            # replaying the earlier boundary onto the landed tree conflicts.
+            (repo / "feature.txt").write_text("final reviewed candidate\n")
             final_sha = commit("final reviewed candidate")
             git("checkout", "main")
             git("merge", "--squash", "topic")
@@ -3641,7 +3646,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                     "review": {"verdict": "ship", "agent_id": "reviewer-2"},
                 },
                 worktree_boundary=boundary(
-                    final_sha,
+                    fixed_sha if different_sha else final_sha,
                     status="superseded",
                     superseded_by="TORQUE:1:4",
                 ),
@@ -3669,6 +3674,16 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                 first_shipping_review.completion_evidence,
             )
 
+            target_ids = (first_fix.id, final_review.id)
+            candidates = review_cycle_containment_candidates(
+                state.board_tasks.values(),
+                repo_root=str(repo),
+                branch="topic",
+                task_ids=target_ids,
+            )
+            self.assertIn(first_shipping_review.id, {
+                task.id for task in candidates
+            })
             state.board_cascade_done(final_review.id)
             self.assertEqual(root.lane, "In Progress")
             self.assertFalse(code_boundary_done_status(
@@ -3685,6 +3700,13 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                 async def validate(self, _cell):
                     return False
 
+            marked_task_ids = []
+            mark_boundaries = self._mark_boundaries_for_state(state)
+
+            def recording_mark(cell, landed_sha, merged_task_ids=()):
+                marked_task_ids.extend(merged_task_ids)
+                return mark_boundaries(cell, landed_sha, merged_task_ids)
+
             result = await _finalize_successful_worktree_merge(
                 state=state,
                 cell=worker,
@@ -3695,15 +3717,13 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                     "remove_worktree_on_merge": False,
                 },
                 merge_sha=merge_sha,
-                merged_task_ids=(first_fix.id, final_review.id),
+                merged_task_ids=target_ids,
                 stale_base=None,
                 preserve_merge_diff=False,
                 boundary_task_for_diff=None,
                 merge_diff_snapshot=None,
                 merge_resume_targets=None,
-                mark_branch_boundaries_merged=(
-                    self._mark_boundaries_for_state(state)
-                ),
+                mark_branch_boundaries_merged=recording_mark,
                 cleanup_after_merge=no_cleanup,
                 broadcast_toast=no_toast,
                 bridge=types.SimpleNamespace(),
@@ -3712,18 +3732,32 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                 panel_event=None,
             )
             self.assertTrue(result["ok"])
+            self.assertEqual(
+                marked_task_ids,
+                [*target_ids, first_shipping_review.id],
+            )
 
             state.board_cascade_done(final_review.id)
-            self.assertEqual(root.lane, "Done")
             gate = code_boundary_done_status(state.board_get_chain(root.id))
-            self.assertTrue(gate["eligible"])
             self.assertEqual(gate["blocking"], [])
+            self.assertTrue(gate["eligible"])
+            self.assertEqual(root.lane, "Done")
             self.assertEqual(first_review.worktree_boundary, {})
             for task in (
                     root, first_fix, first_shipping_review, final_review):
                 self.assertEqual(
                     task.worktree_boundary["merge_commit_sha"], merge_sha
                 )
+
+    async def test_plain_second_shipping_review_closes_root_via_real_finalization(self):
+        await self._assert_plain_second_shipping_review_closes_root(
+            different_sha=False
+        )
+
+    async def test_ancestor_shipping_review_closes_root_via_real_finalization(self):
+        await self._assert_plain_second_shipping_review_closes_root(
+            different_sha=True
+        )
 
     async def test_one_shipping_review_controls_close_via_real_finalization(self):
         from torque.services.worktrees.finalize import (
