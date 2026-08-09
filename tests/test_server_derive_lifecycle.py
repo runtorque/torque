@@ -1,5 +1,7 @@
+import asyncio
 import importlib
 import json
+import os
 import sys
 import tempfile
 import types
@@ -1673,8 +1675,10 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["type"], "error")
         self.assertEqual(result["code"], "stale_base")
         self.assertIn("STALE BASE", result["message"])
-        self.assertIn("worktree_rebase", result["message"])
-        self.assertEqual(result["suggested_command"],
+        self.assertIn("may conflict", result["message"])
+        self.assertNotIn("Recommended:", result["message"])
+        self.assertNotIn("suggested_command", result)
+        self.assertEqual(result["diagnostic_command"],
                          f"worktree_rebase id={implementer.id}")
         self.assertTrue(result["stale_base"]["stale"])
         self.assertEqual(
@@ -1690,6 +1694,122 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("rerun_tests", evidence)
         self.assertEqual(calls, [])
         self.assertEqual(fix.status, "")
+
+    async def test_stale_review_rebase_diagnostic_does_not_promise_recovery(self):
+        state = self._make_state()
+        implementer, _reviewer, _root, fix = (
+            self._add_second_review_cycle_chain(state)
+        )
+        review = state.board_tasks["task-review"]
+        review.lane = "Done"
+        calls, dispatch = self._recording_dispatch(state)
+
+        async def git(repo, *args):
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", str(repo), *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env={
+                    key: value for key, value in os.environ.items()
+                    if key != "TORQUE_CELL_ID"
+                },
+            )
+            stdout, stderr = await proc.communicate()
+            self.assertEqual(
+                proc.returncode,
+                0,
+                f"git {' '.join(args)} failed: {stderr.decode().strip()}",
+            )
+            return stdout.decode().strip()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            await git(repo, "init", "-b", "main")
+            await git(repo, "config", "user.name", "Torque Test")
+            await git(repo, "config", "user.email", "torque@example.com")
+            (repo / "shared.txt").write_text("original\n")
+            await git(repo, "add", "shared.txt")
+            await git(repo, "commit", "-m", "Initial")
+
+            manager = self.server_mod.WorktreeManager()
+            worktree = await manager.create(
+                implementer,
+                str(repo),
+                base_branch="main",
+            )
+            self.assertTrue(worktree)
+            (Path(worktree) / "shared.txt").write_text("worker\n")
+            branch_head = await manager.checkpoint(
+                implementer,
+                message="Worker change",
+            )
+            self.assertTrue(branch_head)
+
+            (repo / "shared.txt").write_text("base\n")
+            await git(repo, "add", "shared.txt")
+            await git(repo, "commit", "-m", "Base change")
+            base_head = await git(repo, "rev-parse", "main")
+
+            stale = await manager.stale_base_info(implementer)
+            self.assertTrue(stale["stale"])
+            merge_check = await manager.check_merge_conflicts(implementer)
+            self.assertFalse(merge_check["clean"])
+            self.assertEqual(
+                [item["path"] for item in merge_check["conflicts"]],
+                ["shared.txt"],
+            )
+
+            # The supported rebase is the parity check. It conflicts, aborts,
+            # and restores both the branch tip and clean worktree state.
+            self.assertFalse(await manager.rebase_onto_base(implementer))
+            self.assertEqual(await git(worktree, "rev-parse", "HEAD"), branch_head)
+            self.assertEqual(await git(repo, "rev-parse", "main"), base_head)
+            self.assertEqual(await git(worktree, "status", "--porcelain"), "")
+            refs_before_gate = await git(repo, "show-ref")
+            status_before_gate = await git(worktree, "status", "--porcelain")
+
+            review.worktree_boundary = {
+                "version": "1",
+                "repo_root": str(repo),
+                "branch": implementer.worktree_branch,
+                "base_branch": "main",
+                "commit_sha": branch_head,
+                "status": "open",
+                "recorded_at": "2026-08-09T00:00:00+00:00",
+            }
+            handle_command = self._extract_handle_command(
+                state,
+                dispatch,
+                worktree_mgr=manager,
+            )
+            result = await handle_command({
+                "cmd": "ai_report",
+                "cell_id": implementer.id,
+                "action": "derive",
+                "action_name": "feature/review",
+                "message": "Review the fixes",
+            })
+
+            self.assertEqual(result["type"], "error")
+            self.assertEqual(result["code"], "stale_base")
+            self.assertIn("Cannot derive feature/review", result["message"])
+            self.assertIn("may conflict", result["message"])
+            self.assertIn("not known", result["message"])
+            self.assertIn("not a guaranteed recovery", result["message"])
+            self.assertNotIn("Suggested command", result["message"])
+            self.assertNotIn("suggested_command", result)
+            self.assertEqual(
+                result["diagnostic_command"],
+                f"worktree_rebase id={implementer.id}",
+            )
+            self.assertEqual(await git(repo, "show-ref"), refs_before_gate)
+            self.assertEqual(
+                await git(worktree, "status", "--porcelain"),
+                status_before_gate,
+            )
+            self.assertEqual(calls, [])
+            self.assertEqual(fix.status, "")
 
     async def test_feature_review_derive_composed_state_names_safe_continuation(self):
         state = self._make_state()

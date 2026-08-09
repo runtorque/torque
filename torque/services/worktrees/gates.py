@@ -70,7 +70,8 @@ def _untracked_overwrite_message(paths: list[str], *,
 
 
 def _stale_base_warning(stale_base: dict | None, *,
-                        rebase_command: str = "") -> str:
+                        rebase_command: str = "",
+                        rebase_is_diagnostic: bool = False) -> str:
     stale_base = stale_base or {}
     if not stale_base.get("stale"):
         return ""
@@ -78,6 +79,7 @@ def _stale_base_warning(stale_base: dict | None, *,
         return format_stale_base_warning(
             stale_base,
             rebase_command=rebase_command,
+            rebase_is_diagnostic=rebase_is_diagnostic,
         )
     return str(stale_base.get("warning", "") or "").strip() \
         or format_stale_base_warning(stale_base)
@@ -140,6 +142,30 @@ def _attach_stale_base_guidance(result: dict, aid: str, *,
     return result
 
 
+def _attach_stale_base_rebase_diagnostic(
+    result: dict,
+    aid: str,
+    *,
+    retry_action: str,
+) -> dict:
+    """Attach truthful guidance when rebase parity cannot be preflighted."""
+    command = _stale_base_rebase_command(aid)
+    retry_action = str(retry_action or "retry").strip() or "retry"
+    result["code"] = "stale_base"
+    result["diagnostic_command"] = command
+    result["suggestion"] = (
+        f"Run `{command}` to determine whether the required commit replay "
+        "can complete. It may conflict and is not a guaranteed recovery. "
+        f"If it succeeds, {retry_action}."
+    )
+    stale_base = result.get("stale_base")
+    if isinstance(stale_base, dict):
+        result["post_rebase_evidence_required"] = (
+            _stale_base_post_rebase_evidence_required(stale_base)
+        )
+    return result
+
+
 def _attach_stale_base(result: dict, stale_base: dict | None) -> dict:
     warning = _stale_base_warning(stale_base)
     if warning:
@@ -189,23 +215,23 @@ def _stale_base_merge_result(aid: str, stale_base: dict | None) -> dict:
 
 def _stale_base_review_derive_result(aid: str,
                                      stale_base: dict | None) -> dict:
+    command = _stale_base_rebase_command(aid)
     warning = _stale_base_warning(
         stale_base,
-        rebase_command=_stale_base_rebase_command(aid),
-    )
-    suggestion = _stale_base_suggestion(
-        aid,
-        retry_action="re-run diff and derive feature/review",
+        rebase_command=command,
+        rebase_is_diagnostic=True,
     )
     message = (
         "Cannot derive feature/review from a stale worktree base.\n\n"
-        f"{warning}\n\n"
-        f"Suggested command: `{_stale_base_rebase_command(aid)}`."
+        f"{warning}"
     ) if warning else (
         "Cannot derive feature/review from a stale worktree base.\n\n"
-        f"{suggestion}"
+        "Whether a rebase can complete is not known until Git replays each "
+        f"commit. Diagnostic only: `{command}` attempts that replay and may "
+        "conflict; the supported command aborts on failure. This is not a "
+        "guaranteed recovery."
     )
-    return _attach_stale_base_guidance({
+    return _attach_stale_base_rebase_diagnostic({
         "type": "error",
         "message": message,
         "stale_base": stale_base,
