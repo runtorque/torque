@@ -538,7 +538,8 @@ def stale_base_post_rebase_evidence_template(info: dict | None) -> dict:
 
 
 def format_stale_base_warning(info: dict | None, *,
-                              rebase_command: str = "") -> str:
+                              rebase_command: str = "",
+                              rebase_is_diagnostic: bool = False) -> str:
     """Return the loud operator warning for a branch forked behind base."""
     info = info or {}
     branch = str(info.get("branch", "") or "worktree branch").strip()
@@ -573,6 +574,20 @@ def format_stale_base_warning(info: dict | None, *,
         "post_rebase_head_sha, base_head_sha, exact rerun_tests, "
         "review_boundary_updated."
     )
+    if rebase_is_diagnostic:
+        rebase_guidance = (
+            "  Whether a rebase can complete is not known until Git replays "
+            "each commit.\n"
+            f"  Rebase attempt: `{rebase_command}`. This is not "
+            "observational: success rebases and rewrites the branch commits; "
+            "a conflict failure aborts the rebase. The attempt may conflict "
+            "and is not a guaranteed recovery.\n"
+        )
+    else:
+        rebase_guidance = (
+            f"  Recommended: `{rebase_command}` then re-run diff before "
+            "merge.\n"
+        )
     return (
         f"⚠ STALE BASE: {branch} forks from {fork} ({fork_subject}).\n"
         f"  Current branch head: {branch_head}.\n"
@@ -581,7 +596,7 @@ def format_stale_base_warning(info: dict | None, *,
         f"  {commits} commits + {files} files changed on {base} since fork.\n"
         "  `engineer_diff summary` against this base WILL mis-classify\n"
         "  other-branch changes as deletions.\n"
-        f"  Recommended: `{rebase_command}` then re-run diff before merge.\n"
+        f"{rebase_guidance}"
         f"{evidence_line} Template: {evidence}"
     )
 
