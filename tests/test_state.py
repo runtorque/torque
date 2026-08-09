@@ -4965,6 +4965,46 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         self.assertEqual(state.agent_pending_engineer_reply_tasks(worker.id), [])
         self.assertFalse(state.agent_is_busy(worker.id))
 
+    def test_board_update_done_expires_open_engineer_message_child(self):
+        state = self._make_state()
+        parent = state.board_add_task(
+            "Implement feature", "g", lane="In Progress", id="task-parent",
+        )
+        follow_up = self._add_engineer_followup(
+            state, parent, "task-reply"
+        )
+
+        state.board_update_task(parent.id, lane="Done")
+
+        self.assertEqual(parent.lane, "Done")
+        self._assert_engineer_followup_expired(state, follow_up.id)
+        self.assertFalse(state.task_has_unresolved_descendants(parent.id))
+
+    def test_blocked_board_update_done_retains_engineer_message_child(self):
+        state = self._make_state()
+        parent = state.board_add_task(
+            "Gated feature", "g", lane="In Progress", id="task-parent",
+            finalization_mode="review_only",
+            required_review_gates=[{
+                "id": "audit", "role": "audit",
+                "review_task_id": "task-review",
+            }],
+            finalization_boundary={
+                "artifact_digest": "digest", "artifact_version": "v1",
+                "source_identity": "artifact", "immutable": True,
+            },
+        )
+        follow_up = self._add_engineer_followup(
+            state, parent, "task-reply"
+        )
+
+        result = state.board_update_task(parent.id, lane="Done")
+
+        self.assertFalse(result["eligible"])
+        self.assertEqual(parent.lane, "In Progress")
+        self.assertEqual(follow_up.lane, "Backlog")
+        self.assertEqual(follow_up.status, "Awaiting Reply")
+
     def test_parent_done_does_not_double_close_answered_engineer_message_child(self):
         state = self._make_state()
         parent = state.board_add_task(

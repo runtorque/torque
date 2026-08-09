@@ -1046,6 +1046,11 @@ class BoardMutationMixin:
         # archive-transition early return above has been passed.
         if "artifacts" in fields:
             task._artifact_content_dehydrated = False
+        if lane_changed and new_lane == "Done":
+            # Candidate/finalization/code-boundary admission has succeeded.
+            # Expire transient coordination descendants at the last safe
+            # point before the authored Done mutation becomes visible.
+            self.expire_engineer_message_descendants(tid)
         for key, value in fields.items():
             if key in valid:
                 setattr(task, key, value)
@@ -1140,6 +1145,11 @@ class BoardMutationMixin:
         if task.lane == ARCHIVED_LANE:
             self.board_unarchive_task(tid, lane=lane, position=position)
             return
+        if lane == "Done" and task.lane != "Done":
+            # Finalization/code-boundary admission has passed. Expire only
+            # transient coordination descendants at the last safe point
+            # before committing the parent to Done.
+            self.expire_engineer_message_descendants(tid)
         old_lane = task.lane
         self._board_apply_archive_state(
             task,
@@ -1298,10 +1308,7 @@ class BoardMutationMixin:
         task = self.board_tasks.get(tid)
         if not task or not task_counts_as_done(task):
             return []
-        expired = self.expire_engineer_message_descendants(tid)
         if task_suppresses_done_cascade(task):
-            if expired and recompute:
-                self.recompute_task_health()
             return []
         if "Done" not in self.board_lanes:
             return []
@@ -1319,7 +1326,7 @@ class BoardMutationMixin:
             if board_task_is_closed(parent):
                 pid = next_pid
                 continue
-            if self.task_has_unresolved_descendants(parent.id):
+            if self.task_has_completion_blocking_descendants(parent.id):
                 break
             # Legacy finalization intentionally does not activate the newer
             # six-condition policy.  Cascade is nevertheless the one root-Done
@@ -1339,6 +1346,7 @@ class BoardMutationMixin:
             if not allowed:
                 break
 
+            self.expire_engineer_message_descendants(parent.id)
             parent.status = ""
             self._board_apply_archive_state(
                 parent,
@@ -1351,7 +1359,7 @@ class BoardMutationMixin:
             self._cascade_review_handoff_completions(parent, changed)
             pid = next_pid
 
-        if (changed or expired) and recompute:
+        if changed and recompute:
             self.recompute_task_health()
         return changed
 

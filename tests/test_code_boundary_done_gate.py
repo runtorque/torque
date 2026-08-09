@@ -170,6 +170,58 @@ class CodeBoundaryDoneGateTests(unittest.TestCase):
         self.assertEqual(root.completion_evidence["merge"]["sha"], "merge123")
         self.assertEqual(root.lane, "Done")
 
+    def test_merge_evidence_expires_engineer_message_before_done_1588_shape(self):
+        root = self._root(boundary=self._merge_boundary())
+        review = self._ship(root)
+        message = self.state.board_add_task(
+            "Engineer: Need status", "g", id="engineer-message",
+            lane="Backlog", status="Awaiting Reply",
+            parent_task_id=root.id, pipeline_root_id=root.id, pipeline_depth=1,
+            labels=["torque:derived", "torque:engineer-message"],
+        )
+        self.state.board_cascade_done(review.id)
+        self.assertEqual(root.lane, "In Progress")
+
+        root.worktree_boundary.update(self._merge_boundary(merged=True))
+        self._record_merge_evidence()
+
+        self.assertEqual(root.lane, "Done")
+        self.assertEqual(message.lane, "Done")
+        self.assertEqual(message.status, "")
+
+    def test_blocked_code_gate_does_not_expire_engineer_message(self):
+        root = self._root(boundary=self._merge_boundary())
+        review = self._ship(root)
+        message = self.state.board_add_task(
+            "Engineer: Need status", "g", id="engineer-message",
+            lane="Backlog", status="Awaiting Reply",
+            parent_task_id=root.id, pipeline_root_id=root.id, pipeline_depth=1,
+            labels=["torque:derived", "torque:engineer-message"],
+        )
+
+        self.state.board_cascade_done(review.id)
+
+        self.assertEqual(root.lane, "In Progress")
+        self.assertEqual(message.lane, "Backlog")
+        self.assertEqual(message.status, "Awaiting Reply")
+
+    def test_merge_evidence_recheck_preserves_human_ask_block(self):
+        root = self._root(boundary=self._merge_boundary())
+        review = self._ship(root)
+        ask = self.state.board_add_task(
+            "Human decision", "g", id="human-ask", lane="Backlog",
+            status="Awaiting Reply", parent_task_id=root.id,
+            pipeline_root_id=root.id, pipeline_depth=1,
+            labels=["torque:derived", "torque:human"],
+        )
+        self.state.board_cascade_done(review.id)
+
+        root.worktree_boundary.update(self._merge_boundary(merged=True))
+        self._record_merge_evidence()
+
+        self.assertEqual(ask.lane, "Backlog")
+        self.assertEqual(root.lane, "In Progress")
+
     def test_last_descendant_without_merge_evidence_remains_blocked(self):
         root = self._root(boundary=self._merge_boundary())
         review = self._ship(root)
