@@ -32,7 +32,11 @@ from .pty_core import (
     preexec_acquire_ctty as _preexec_acquire_ctty,
     set_winsize as _pty_set_winsize,
 )
-from .server_agent import mcp_entrypoint_for_cell, mcp_env_vars_for_cell
+from .server_agent import (
+    mcp_entrypoint_for_cell,
+    mcp_env_vars_for_cell,
+    validate_startup_command,
+)
 from .session_end_backstop import CodexIdleSessionEndDetector
 from .state import AgentCell, MatrixState
 from .terminal_adapter import (
@@ -218,6 +222,7 @@ class LocalPtyAdapter:
         restore_focus_to_prev_tab: bool = False,
     ) -> None:
         del sdk_system_prompt, target_session_id, target_window_id
+        validate_startup_command(cell.command)
         prep = self._prepare_create(cell, env_vars=env_vars, shell=shell)
         session_id = uuid.uuid4().hex
 
@@ -254,16 +259,26 @@ class LocalPtyAdapter:
         self._sessions[session_id] = session
         session.reader_task = asyncio.create_task(self._read_loop(session))
 
-        await self._finalize_create(
-            cell,
-            session_id,
-            prep=prep,
-            env_file=env_file,
-            init_script=init_script,
-            system_prompt=system_prompt,
-            mcp_entrypoint=mcp_entrypoint,
-            restore_focus_to_prev_tab=restore_focus_to_prev_tab,
-        )
+        try:
+            await self._finalize_create(
+                cell,
+                session_id,
+                prep=prep,
+                env_file=env_file,
+                init_script=init_script,
+                system_prompt=system_prompt,
+                mcp_entrypoint=mcp_entrypoint,
+                restore_focus_to_prev_tab=restore_focus_to_prev_tab,
+            )
+        except Exception:
+            try:
+                await self.close_session(session_id)
+            except Exception:
+                log.exception(
+                    "Failed to close PTY session %s after create failure",
+                    session_id,
+                )
+            raise
 
     def _prepare_create(
         self,
@@ -1385,6 +1400,7 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
             raise RuntimeError(
                 "PTY supervisor is restarting; try again shortly.")
         del sdk_system_prompt, target_session_id, target_window_id
+        validate_startup_command(cell.command)
         prep = self._prepare_create(cell, env_vars=env_vars, shell=shell)
         session_id = uuid.uuid4().hex
         session = _PtySession(
@@ -1420,22 +1436,32 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
                 f"supervisor create failed: {result.get('message') or result}")
         session.supervisor_pid = int(result.get("pid") or 0)
 
-        await self._client.subscribe(
-            session_id,
-            on_output=self._make_output_handler(session),
-            on_exit=self._make_exit_handler(session),
-        )
+        try:
+            await self._client.subscribe(
+                session_id,
+                on_output=self._make_output_handler(session),
+                on_exit=self._make_exit_handler(session),
+            )
 
-        await self._finalize_create(
-            cell,
-            session_id,
-            prep=prep,
-            env_file=env_file,
-            init_script=init_script,
-            system_prompt=system_prompt,
-            mcp_entrypoint=mcp_entrypoint,
-            restore_focus_to_prev_tab=restore_focus_to_prev_tab,
-        )
+            await self._finalize_create(
+                cell,
+                session_id,
+                prep=prep,
+                env_file=env_file,
+                init_script=init_script,
+                system_prompt=system_prompt,
+                mcp_entrypoint=mcp_entrypoint,
+                restore_focus_to_prev_tab=restore_focus_to_prev_tab,
+            )
+        except Exception:
+            try:
+                await self.close_session(session_id)
+            except Exception:
+                log.exception(
+                    "Failed to close supervised PTY session %s after create failure",
+                    session_id,
+                )
+            raise
 
     async def list_supervisor_sessions(self) -> list:
         return await self._client.list_sessions()

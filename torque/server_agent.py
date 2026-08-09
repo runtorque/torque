@@ -36,6 +36,18 @@ ARCHITECT_MCP_ENTRYPOINT = "torque/mcp_architect.py"
 ENGINEER_MCP_ENTRYPOINT = "torque/mcp_engineer.py"
 
 
+def validate_startup_command(command: str) -> None:
+    """Reject a startup ``command`` that cannot be tokenized by the launcher."""
+    if not command:
+        return
+    try:
+        shlex.split(command)
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid startup command field 'command': {exc}"
+        ) from exc
+
+
 def _copy_worktree_context(target, source) -> bool:
     """Copy an existing worktree context from one cell to another.
 
@@ -737,6 +749,65 @@ class AgentLaunchService:
         launch_cfg["system_prompt"] = ""
         cell.command = launch_cfg.get("command", cell.command)
 
+    async def _rollback_failed_agent_create(
+        self,
+        cell,
+        launch_cfg: dict,
+        *,
+        created_worktree: bool,
+    ) -> None:
+        """Best-effort rollback for resources owned by one failed create.
+
+        Inherited and adopted worktrees predate this transaction and are never
+        removed. Nested worktree removal deliberately preserves its branch ref
+        so a submodule HEAD cannot become unreachable; the structured removal
+        result and this warning make that sole recoverable residue explicit.
+        """
+        if created_worktree and self.worktree_mgr:
+            try:
+                result = await self.worktree_mgr.remove_result(
+                    cell,
+                    force=True,
+                    worktree_submodules=launch_cfg.get(
+                        "worktree_submodules", []
+                    ),
+                )
+                preserved = [
+                    item.get("branch", "")
+                    for item in result.get("nested_submodules", [])
+                    if item.get("branch_preserved")
+                ]
+                if preserved:
+                    log.warning(
+                        "Failed agent create rollback preserved nested "
+                        "submodule branch ref(s) for recoverability: %s",
+                        ", ".join(branch for branch in preserved if branch),
+                    )
+                if not result.get("worktree_removed"):
+                    log.error(
+                        "Failed agent create rollback could not remove "
+                        "worktree for cell=%s: %s",
+                        getattr(cell, "id", "<unknown>"),
+                        result,
+                    )
+            except Exception:
+                log.exception(
+                    "Failed agent create rollback could not remove worktree "
+                    "for cell=%s",
+                    getattr(cell, "id", "<unknown>"),
+                )
+        try:
+            hard_delete = getattr(self.state, "_hard_delete_agent", None)
+            if callable(hard_delete):
+                hard_delete(cell.id)
+            else:
+                self.state.remove_agent(cell.id)
+        except Exception:
+            log.exception(
+                "Failed agent create rollback could not remove cell=%s",
+                getattr(cell, "id", "<unknown>"),
+            )
+
     async def create_agent_with_config(self, group: str, name: str,
                                        launch_cfg: dict, *,
                                        explicit_template: str = "",
@@ -751,6 +822,7 @@ class AgentLaunchService:
                                        inherited_worktree_from=None,
                                        restore_focus_to_prev_tab: bool = False):
         """Create an agent cell, prepare its worktree, and open the session."""
+        validate_startup_command(launch_cfg.get("command", ""))
         runner_backend = normalize_runner_backend(
             launch_cfg.get("runner_backend", ""),
             launch_cfg.get("agent_type", ""),
@@ -771,111 +843,120 @@ class AgentLaunchService:
             log.warning("add_agent returned None for group=%s name=%s",
                         group, name)
             return None
-        cell.session_resume = bool(launch_cfg.get("session_resume", True))
-        cell.fast_mode = normalize_codex_fast_mode(launch_cfg.get("fast_mode"), strict=False)
-        cell.idle_timeout = int(launch_cfg.get("idle_timeout", 0) or 0)
-        cell.kind = str(kind or "").strip()
-        cell.persistent = bool(persistent)
-        cell.hired_by_architect_id = str(hired_by_architect_id or "").strip()
-        cell.worktree_base_dir = (
-            launch_cfg.get("worktree_base_dir") or ".torque/worktrees"
-        )
-        cell.worktree_auto_checkpoint = bool(
-            launch_cfg.get("worktree_auto_checkpoint", False)
-        )
-        cell.checkpoint_on_progress = bool(
-            launch_cfg.get("checkpoint_on_progress", False)
-        )
-        cell.worktree_merge_squash = bool(
-            launch_cfg.get("worktree_merge_squash", True)
-        )
-        cell.template = explicit_template or launch_cfg.get("template", "")
-        cell.created_by_engineer_id = str(created_by_engineer_id or "").strip()
-        cell.owner_engineer_id = str(owner_engineer_id or "").strip() or str(
-            created_by_engineer_id or ""
-        ).strip()
-        if launch_cfg.get("agent_type"):
-            cell.agent_type = launch_cfg["agent_type"]
-        cell.runner_backend = runner_backend
-        if launch_cfg.get("agent_class_id"):
-            cell.agent_class_id = str(launch_cfg.get("agent_class_id") or "").strip()
-            cell.agent_class_version = str(launch_cfg.get("agent_class_version") or "").strip()
-            cell.agent_class_assigned_at = time.time()
-            cell.agent_class_assigned_by = "trusted-user-launch"
+        created_worktree = False
         try:
-            self.state.apply_effective_agent_class_for_launch(
-                cell,
-                base_dir=cell.directory or launch_cfg.get("directory", ""),
+            cell.session_resume = bool(launch_cfg.get("session_resume", True))
+            cell.fast_mode = normalize_codex_fast_mode(launch_cfg.get("fast_mode"), strict=False)
+            cell.idle_timeout = int(launch_cfg.get("idle_timeout", 0) or 0)
+            cell.kind = str(kind or "").strip()
+            cell.persistent = bool(persistent)
+            cell.hired_by_architect_id = str(hired_by_architect_id or "").strip()
+            cell.worktree_base_dir = (
+                launch_cfg.get("worktree_base_dir") or ".torque/worktrees"
             )
-        except Exception:
-            log.exception(
-                "Failed to apply Agent Class launch snapshot for cell=%s",
-                getattr(cell, "id", ""),
+            cell.worktree_auto_checkpoint = bool(
+                launch_cfg.get("worktree_auto_checkpoint", False)
             )
-            raise
-        inherited_worktree = _copy_worktree_context(
-            cell, inherited_worktree_from
-        )
-        adopted_worktree = launch_cfg.get("adopted_worktree") or {}
-        if adopted_worktree and not inherited_worktree:
-            cell.worktree_path = str(adopted_worktree.get("worktree_path", "") or "")
-            cell.worktree_branch = str(adopted_worktree.get("branch", "") or "")
-            cell.worktree_repo_root = str(adopted_worktree.get("repo_root", "") or "")
-            cell.git_root = cell.worktree_repo_root
-            cell.worktree_base_branch = str(adopted_worktree.get("base_branch", "") or "")
-            if cell.worktree_path:
-                cell.directory = cell.worktree_path
-                launch_cfg["directory"] = cell.worktree_path
-            launch_cfg["worktree"] = False
-        if (cell.kind == "architect"
-                and not torque_config.ARCHITECT_USES_WORKTREE
-                and not inherited_worktree):
-            launch_cfg["worktree"] = False
-            if cell.directory and self.worktree_mgr:
+            cell.checkpoint_on_progress = bool(
+                launch_cfg.get("checkpoint_on_progress", False)
+            )
+            cell.worktree_merge_squash = bool(
+                launch_cfg.get("worktree_merge_squash", True)
+            )
+            cell.template = explicit_template or launch_cfg.get("template", "")
+            cell.created_by_engineer_id = str(created_by_engineer_id or "").strip()
+            cell.owner_engineer_id = str(owner_engineer_id or "").strip() or str(
+                created_by_engineer_id or ""
+            ).strip()
+            if launch_cfg.get("agent_type"):
+                cell.agent_type = launch_cfg["agent_type"]
+            cell.runner_backend = runner_backend
+            if launch_cfg.get("agent_class_id"):
+                cell.agent_class_id = str(launch_cfg.get("agent_class_id") or "").strip()
+                cell.agent_class_version = str(launch_cfg.get("agent_class_version") or "").strip()
+                cell.agent_class_assigned_at = time.time()
+                cell.agent_class_assigned_by = "trusted-user-launch"
+            try:
+                self.state.apply_effective_agent_class_for_launch(
+                    cell,
+                    base_dir=cell.directory or launch_cfg.get("directory", ""),
+                )
+            except Exception:
+                log.exception(
+                    "Failed to apply Agent Class launch snapshot for cell=%s",
+                    getattr(cell, "id", ""),
+                )
+                raise
+            inherited_worktree = _copy_worktree_context(
+                cell, inherited_worktree_from
+            )
+            adopted_worktree = launch_cfg.get("adopted_worktree") or {}
+            if adopted_worktree and not inherited_worktree:
+                cell.worktree_path = str(adopted_worktree.get("worktree_path", "") or "")
+                cell.worktree_branch = str(adopted_worktree.get("branch", "") or "")
+                cell.worktree_repo_root = str(adopted_worktree.get("repo_root", "") or "")
+                cell.git_root = cell.worktree_repo_root
+                cell.worktree_base_branch = str(adopted_worktree.get("base_branch", "") or "")
+                if cell.worktree_path:
+                    cell.directory = cell.worktree_path
+                    launch_cfg["directory"] = cell.worktree_path
+                launch_cfg["worktree"] = False
+            if (cell.kind == "architect"
+                    and not torque_config.ARCHITECT_USES_WORKTREE
+                    and not inherited_worktree):
+                launch_cfg["worktree"] = False
+                if cell.directory and self.worktree_mgr:
+                    repo_root = await self.worktree_mgr.get_repo_root(cell.directory)
+                    if repo_root:
+                        cell.directory = repo_root
+                        launch_cfg["directory"] = repo_root
+            self.state._emit_agent(cell)
+            self.state._db_save_agent(cell)
+            self.state.history_record_agent(cell)
+
+            if launch_cfg.get("worktree") and cell.directory and not inherited_worktree:
                 repo_root = await self.worktree_mgr.get_repo_root(cell.directory)
                 if repo_root:
-                    cell.directory = repo_root
-                    launch_cfg["directory"] = repo_root
-        self.state._emit_agent(cell)
-        self.state._db_save_agent(cell)
-        self.state.history_record_agent(cell)
-
-        if launch_cfg.get("worktree") and cell.directory and not inherited_worktree:
-            repo_root = await self.worktree_mgr.get_repo_root(cell.directory)
-            if repo_root:
-                worktree_path = await self.worktree_mgr.create(
-                    cell,
-                    repo_root,
-                    base_dir=cell.worktree_base_dir or ".torque/worktrees",
-                    base_branch=launch_cfg.get("worktree_base_branch", ""),
-                    symlinks=launch_cfg.get("worktree_symlinks", []),
-                    include_gitignored_symlinks=launch_cfg.get(
-                        "worktree_symlink_gitignored_paths", False),
-                    worktree_name=launch_cfg.get("worktree_name", ""),
-                    worktree_submodules=launch_cfg.get(
-                        "worktree_submodules", []),
-                    state=self.state,
-                )
-                if worktree_path:
-                    cell.directory = worktree_path
-                    self.state._emit_agent(cell)
-                    self.state._db_save_agent(cell)
-                    self.state.history_update_agent(
-                        cell, worktree_branch=cell.worktree_branch
+                    worktree_path = await self.worktree_mgr.create(
+                        cell,
+                        repo_root,
+                        base_dir=cell.worktree_base_dir or ".torque/worktrees",
+                        base_branch=launch_cfg.get("worktree_base_branch", ""),
+                        symlinks=launch_cfg.get("worktree_symlinks", []),
+                        include_gitignored_symlinks=launch_cfg.get(
+                            "worktree_symlink_gitignored_paths", False),
+                        worktree_name=launch_cfg.get("worktree_name", ""),
+                        worktree_submodules=launch_cfg.get(
+                            "worktree_submodules", []),
+                        state=self.state,
                     )
-                else:
-                    log.warning("worktree create failed silently for cell=%s repo=%s",
-                                cell.slug or cell.name or cell.id, repo_root)
+                    if worktree_path:
+                        created_worktree = True
+                        cell.directory = worktree_path
+                        self.state._emit_agent(cell)
+                        self.state._db_save_agent(cell)
+                        self.state.history_update_agent(
+                            cell, worktree_branch=cell.worktree_branch
+                        )
+                    else:
+                        log.warning("worktree create failed silently for cell=%s repo=%s",
+                                    cell.slug or cell.name or cell.id, repo_root)
+                        if cell.worktree_path:
+                            created_worktree = True
+                            raise RuntimeError(
+                                "Worktree create failed after provisioning "
+                                f"resources at {cell.worktree_path}"
+                            )
 
-        persistent_prompt_text = append_agent_class_prompt_block(
-            persistent_prompt_text,
-            cell,
-        )
-        self.apply_persistent_prompt(cell, launch_cfg, persistent_prompt_text)
-        self.state._emit_agent(cell)
-        self.state._db_save_agent(cell)
+            persistent_prompt_text = append_agent_class_prompt_block(
+                persistent_prompt_text,
+                cell,
+            )
+            self.apply_persistent_prompt(cell, launch_cfg, persistent_prompt_text)
+            validate_startup_command(cell.command)
+            self.state._emit_agent(cell)
+            self.state._db_save_agent(cell)
 
-        try:
             await self.bridge.create_session(
                 cell,
                 env_vars=runtime_env_vars_for_cell(
@@ -890,38 +971,24 @@ class AgentLaunchService:
                 target_window_id=target_window_id,
                 restore_focus_to_prev_tab=restore_focus_to_prev_tab,
             )
+            record_session_runtime_provenance(self.state, cell)
+            self.state._emit_agent(cell)
+            self.state._db_save_agent(cell)
+            return cell
         except Exception as exc:
-            message = f"Agent session failed to start: {exc}"
             log.warning(
-                "bridge.create_session failed for cell=%s group=%s: %s",
+                "Agent create failed for cell=%s group=%s: %s",
                 cell.slug or cell.name or cell.id,
                 cell.group,
                 exc,
                 exc_info=True,
             )
-            try:
-                cell.error_message = message
-                cell.needs_attention = True
-                self.state._emit_agent(cell)
-                self.state._db_save_agent(cell)
-                panel_log = getattr(self.state, "panel_log", None)
-                if panel_log and hasattr(panel_log, "append"):
-                    pe = panel_log.append(
-                        kind="agent_error", cell_id=cell.id,
-                        agent_name=cell.name, group=cell.group,
-                        message=message,
-                    )
-                    self.state._emit("event_append", **pe)
-            except Exception:
-                log.exception(
-                    "Failed to emit create_session agent_error for cell=%s",
-                    getattr(cell, "id", "<unknown>"),
-                )
+            await self._rollback_failed_agent_create(
+                cell,
+                launch_cfg,
+                created_worktree=created_worktree,
+            )
             raise
-        record_session_runtime_provenance(self.state, cell)
-        self.state._emit_agent(cell)
-        self.state._db_save_agent(cell)
-        return cell
 
     async def send_agent_prompt(self, cell, prompt: str, *,
                                 delay: float = 0,

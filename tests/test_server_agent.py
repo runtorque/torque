@@ -1253,7 +1253,7 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("worktree create failed silently for cell=worker repo=/repo",
                       "\n".join(logs.output))
 
-    async def test_create_agent_with_config_logs_and_events_create_session_failure(self):
+    async def test_create_agent_with_config_logs_and_rolls_back_session_failure(self):
         events_mod = importlib.import_module("torque.events")
         state = self.state_mod.MatrixState()
         state.add_group("backend")
@@ -1266,14 +1266,12 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
                     "backend", "Worker", self._launch_cfg(),
                 )
 
-        cell = next(iter(state.agents.values()))
-        event = state.panel_log.get_recent(1)[0]
-        self.assertEqual(event["kind"], "agent_error")
-        self.assertEqual(event["cell_id"], cell.id)
-        self.assertIn("terminal session timeout", event["message"])
-        self.assertIn("bridge.create_session failed for cell=worker group=backend",
+        self.assertEqual(state.agents, {})
+        self.assertEqual(state.panel_log.get_recent(1), [])
+        self.assertIn("Agent create failed for cell=worker group=backend",
                       "\n".join(logs.output))
 
+        cell = types.SimpleNamespace(slug="worker", name="Worker", id="worker-1")
         with self.assertLogs("torque", level="WARNING") as logs:
             prompts = self.server_agent_mod._new_agent_prompt_sequence(
                 {"initial_prompt": ""},

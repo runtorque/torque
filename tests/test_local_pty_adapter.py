@@ -29,6 +29,53 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.pty_mod.LocalPtyAdapter.capabilities.supports_focus_tracking)
         self.assertFalse(self.pty_mod.LocalPtyAdapter.capabilities.supports_toolbelt_registration)
 
+    async def test_create_session_rejects_malformed_command_before_opening_pty(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("Torque")
+        cell = state.add_terminal(
+            name="Malformed",
+            group="Torque",
+            terminal_backend="pty",
+            command="codex --message TORQUE:1559's preserved worktree",
+        )
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+
+        with mock.patch.object(self.pty_mod.pty, "openpty") as openpty:
+            with self.assertRaisesRegex(
+                ValueError,
+                "Invalid startup command field 'command': No closing quotation",
+            ):
+                await adapter.create_session(cell)
+
+        openpty.assert_not_called()
+        self.assertEqual(adapter._sessions, {})
+        self.assertIsNone(cell.session_id)
+
+    async def test_create_session_closes_spawned_pty_when_finalize_fails(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("Torque")
+        cell = state.add_terminal(
+            name="Finalize failure",
+            group="Torque",
+            terminal_backend="pty",
+            command="sleep 30",
+        )
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+
+        with mock.patch.object(
+            adapter,
+            "_finalize_create",
+            mock.AsyncMock(side_effect=RuntimeError("synthetic finalize failure")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "synthetic finalize failure"):
+                await adapter.create_session(cell)
+
+        for _ in range(20):
+            if not adapter._sessions:
+                break
+            await asyncio.sleep(0.05)
+        self.assertEqual(adapter._sessions, {})
+
     async def test_create_session_emits_output_and_tracks_focus(self):
         state = self.state_mod.MatrixState()
         state.add_group("Torque")

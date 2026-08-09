@@ -345,6 +345,12 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
         malformed = "codex --message TORQUE:1559's preserved worktree"
         base_dir = ".torque/test-create-rollback"
         (self.repo_root / "shared.env").write_text("TOKEN=test\n")
+        branches_before = await self._git_out(
+            "branch", "--format=%(refname:short)"
+        )
+        nested_branches_before = await self._git_out(
+            "branch", "--format=%(refname:short)", cwd=self._module_dir()
+        )
 
         with self.assertRaisesRegex(ValueError, "No closing quotation") as raised:
             await service.create_agent_with_config(
@@ -370,12 +376,143 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
         worktrees = await self._git_out("worktree", "list", "--porcelain")
         self.assertNotIn(str(worktree_dir), worktrees)
         branches = await self._git_out("branch", "--format=%(refname:short)")
-        self.assertNotIn("malformed-worker", branches)
+        self.assertEqual(branches_before, branches)
         nested_worktrees = await self._git_out(
             "worktree", "list", "--porcelain", cwd=self._module_dir()
         )
         self.assertNotIn(str(worktree_dir), nested_worktrees)
+        nested_branches = await self._git_out(
+            "branch", "--format=%(refname:short)", cwd=self._module_dir()
+        )
+        self.assertEqual(nested_branches_before, nested_branches)
         self.assertIn("command", str(raised.exception))
+
+    async def test_agent_create_valid_command_provisions_and_launches(self):
+        install_aiohttp_stub()
+        server_agent = importlib.import_module("torque.server_agent")
+        state_mod = importlib.import_module("torque.state")
+        state = state_mod.MatrixState()
+        state.add_group("backend")
+
+        class CapturingBridge:
+            def __init__(self):
+                self.cells = []
+
+            async def create_session(self, cell, **_kwargs):
+                shlex.split(cell.command)
+                self.cells.append(cell)
+
+        bridge = CapturingBridge()
+        service = server_agent.AgentLaunchService(
+            state=state,
+            connection=None,
+            bridge=bridge,
+            worktree_mgr=self.mgr,
+            template_mgr=None,
+        )
+        (self.repo_root / "shared.env").write_text("TOKEN=test\n")
+
+        cell = await service.create_agent_with_config(
+            "backend",
+            "Valid Worker",
+            {
+                "profile": "Default",
+                "command": "codex --model gpt-5.6-sol",
+                "directory": str(self.repo_root),
+                "tab_color": "",
+                "worktree": True,
+                "worktree_base_dir": ".torque/test-valid-create",
+                "worktree_base_branch": "main",
+                "worktree_symlinks": ["shared.env"],
+                "worktree_submodules": [self.sub_path],
+            },
+            kind="worker",
+        )
+
+        self.assertEqual(bridge.cells, [cell])
+        worktree = Path(cell.worktree_path)
+        self.assertTrue(worktree.is_dir())
+        self.assertTrue((worktree / self.sub_path).is_dir())
+        self.assertTrue((worktree / "shared.env").is_symlink())
+        git_dir = Path(await self._git_out("rev-parse", "--git-dir", cwd=worktree))
+        if not git_dir.is_absolute():
+            git_dir = worktree / git_dir
+        exclude = (git_dir / "info" / "exclude").read_text()
+        self.assertIn("shared.env", exclude)
+        self.assertTrue(await self._show_ref_exists(self.repo_root, cell.worktree_branch))
+
+        result = await self.mgr.remove_result(
+            cell, worktree_submodules=[self.sub_path]
+        )
+        self.assertTrue(result["worktree_removed"], result)
+
+    async def test_agent_create_finalize_failure_rolls_back_owned_resources(self):
+        install_aiohttp_stub()
+        server_agent = importlib.import_module("torque.server_agent")
+        state_mod = importlib.import_module("torque.state")
+        state = state_mod.MatrixState()
+        state.add_group("backend")
+
+        class FinalizeFailingBridge:
+            def __init__(self):
+                self.worktree_path = ""
+                self.branch = ""
+                self.nested_branch = ""
+
+            async def create_session(bridge_self, cell, **_kwargs):
+                bridge_self.worktree_path = cell.worktree_path
+                bridge_self.branch = cell.worktree_branch
+                bridge_self.nested_branch = await self._git_out(
+                    "branch", "--show-current",
+                    cwd=Path(cell.worktree_path) / self.sub_path,
+                )
+                raise RuntimeError("synthetic finalize failure")
+
+        bridge = FinalizeFailingBridge()
+        service = server_agent.AgentLaunchService(
+            state=state,
+            connection=None,
+            bridge=bridge,
+            worktree_mgr=self.mgr,
+            template_mgr=None,
+        )
+        (self.repo_root / "shared.env").write_text("TOKEN=test\n")
+
+        with self.assertLogs("torque", level="WARNING") as logs:
+            with self.assertRaisesRegex(RuntimeError, "synthetic finalize failure"):
+                await service.create_agent_with_config(
+                    "backend",
+                    "Rollback Worker",
+                    {
+                        "profile": "Default",
+                        "command": "codex --model gpt-5.6-sol",
+                        "directory": str(self.repo_root),
+                        "tab_color": "",
+                        "worktree": True,
+                        "worktree_base_dir": ".torque/test-finalize-rollback",
+                        "worktree_base_branch": "main",
+                        "worktree_symlinks": ["shared.env"],
+                        "worktree_submodules": [self.sub_path],
+                    },
+                    kind="worker",
+                )
+
+        self.assertEqual(state.agents, {})
+        self.assertFalse(Path(bridge.worktree_path).exists())
+        main_worktrees = await self._git_out("worktree", "list", "--porcelain")
+        self.assertNotIn(bridge.worktree_path, main_worktrees)
+        self.assertFalse(await self._show_ref_exists(self.repo_root, bridge.branch))
+        nested_worktrees = await self._git_out(
+            "worktree", "list", "--porcelain", cwd=self._module_dir()
+        )
+        self.assertNotIn(bridge.worktree_path, nested_worktrees)
+        self.assertTrue(
+            await self._show_ref_exists(self._module_dir(), bridge.nested_branch)
+        )
+        self.assertIn(
+            "preserved nested submodule branch ref(s) for recoverability",
+            "\n".join(logs.output),
+        )
 
     async def test_checkpoint_commits_submodule_first_and_bumps_gitlink(self):
         cell, wt = await self._create_nested()
