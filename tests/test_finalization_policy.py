@@ -37,7 +37,9 @@ class FinalizationPolicyTests(unittest.TestCase):
         root = self.state.board_add_task("Old", "g", id="TORQUE:899")
         result = self.state.evaluate_task_finalization(root.id)
         self.assertTrue(result["eligible"])
-        self.state.board_move_task(root.id, "Done")
+        self.state.board_move_task(
+            root.id, "Done", acknowledge_unmerged=True
+        )
         self.assertEqual(root.lane, "Done")
 
     def test_merge_requires_structured_exact_review_and_merge_parity(self):
@@ -67,7 +69,9 @@ class FinalizationPolicyTests(unittest.TestCase):
             root.id, mode="direct", reference="merge:abc", reviewed_head_sha="head",
             merged_sha="merge", origin_verified=True, reviewed_tree="tree", merged_tree="tree", equal=True)
         self.assertTrue(self.state.evaluate_task_finalization(root.id)["eligible"])
-        self.state.board_move_task(root.id, "Done")
+        self.state.board_move_task(
+            root.id, "Done", acknowledge_unmerged=True
+        )
         self.assertEqual(root.lane, "Done")
 
     def test_review_only_requires_exact_immutable_evidence_boundary(self):
@@ -266,7 +270,9 @@ class FinalizationDoneBypassRegressionTests(unittest.TestCase):
 
     def test_state_update_cannot_admit_policy_on_done_legacy_root(self):
         root = self.state.board_add_task("Legacy root", "g", id="TORQUE:914")
-        self.state.board_move_task(root.id, "Done")
+        self.state.board_move_task(
+            root.id, "Done", acknowledge_unmerged=True
+        )
         result = self.state.board_update_task(
             root.id,
             finalization_mode="review_only",
@@ -530,7 +536,9 @@ class FinalizationProductionAdmissionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(combined.finalization_mode, "legacy")
 
         already_done = state.board_add_task("Legacy done", "g", id="TORQUE:942")
-        state.board_move_task(already_done.id, "Done")
+        state.board_move_task(
+            already_done.id, "Done", acknowledge_unmerged=True
+        )
         already_done_result = await handle_board_operation_command({
             "cmd": "board_update_task", "id": already_done.id,
             **{

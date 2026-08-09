@@ -6209,7 +6209,9 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             relaunch_agent=None, reply_id='stale-reply')
         self.assertEqual(stale['type'], 'error')
         self.assertEqual(sent, [])
-        state.board_move_task(task.id, 'Done')
+        state.board_move_task(
+            task.id, 'Done', acknowledge_unmerged=True
+        )
         closed = await self.server_mod.resolve_blocked_task_reply(
             state, task, architect, 'Answer', send_prompt=must_not_send,
             relaunch_agent=None, reply_id='closed-reply')

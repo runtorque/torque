@@ -2535,6 +2535,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             "cmd": "board_move_task",
             "id": "task-move",
             "lane": "Done",
+            "acknowledge_unmerged": True,
             "clear_status": True,
         })
 
@@ -8432,7 +8433,9 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             [queued.id],
         )
 
-        state.board_move_task(active.id, "Done")
+        state.board_move_task(
+            active.id, "Done", acknowledge_unmerged=True
+        )
         state.agents[worker.id].current_task_id = ""
         calls = []
 
@@ -9296,7 +9299,9 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual([item["task_id"] for item in targets], [queued.id])
 
-        state.board_move_task(external.id, "Done")
+        state.board_move_task(
+            external.id, "Done", acknowledge_unmerged=True
+        )
 
         calls = []
 
@@ -9419,7 +9424,9 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item["task_id"] for item in targets], [queued.id])
         self.assertEqual([item["group"] for item in targets], ["B"])
 
-        state.board_move_task(external.id, "Done")
+        state.board_move_task(
+            external.id, "Done", acknowledge_unmerged=True
+        )
 
         calls = []
 

@@ -7,6 +7,7 @@ import types
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 
 def _aiohttp_stub():
@@ -159,6 +160,58 @@ class CodeBoundaryDoneGateTests(unittest.TestCase):
 
         self.assertEqual(root.lane, "Done")
         self.assertFalse(advisory["eligible"])
+
+    def test_explicit_done_boundaryless_root_requires_acknowledgement(self):
+        root = self._root(boundary={})
+
+        required = self.state.board_move_task(root.id, "Done")
+
+        self.assertEqual(
+            required["type"], "task_move_acknowledgement_required"
+        )
+        self.assertEqual(required["acknowledgement"]["reason"],
+                         "missing_merge_sha")
+        self.assertEqual(required["acknowledgement"]["blocking"], [])
+        self.assertNotIn("advisory", required)
+        self.assertIn("no branch or commit reference was recorded",
+                      required["message"])
+        self.assertEqual(root.lane, "In Progress")
+
+        result = self.state.board_move_task(
+            root.id, "Done", acknowledge_unmerged=True
+        )
+
+        self.assertIsNone(result)
+        self.assertEqual(root.lane, "Done")
+
+    def test_explicit_done_boundary_without_merge_sha_names_commit(self):
+        root = self._root(boundary={
+            **_boundary("present", sha="45ff0a96"),
+        })
+
+        required = self.state.board_move_task(root.id, "Done")
+
+        self.assertEqual(
+            required["type"], "task_move_acknowledgement_required"
+        )
+        self.assertEqual(required["acknowledgement"]["reason"],
+                         "missing_merge_sha")
+        self.assertIn("45ff0a96", required["message"])
+        self.assertEqual(root.lane, "In Progress")
+
+    def test_internal_done_boundaryless_root_bypasses_acknowledgement(self):
+        root = self._root(boundary={})
+        mutations = importlib.import_module("torque.state_board_mutations")
+
+        with mock.patch.object(
+                mutations, "explicit_done_mainline_status") as classify:
+            result = self.state.board_move_task(
+                root.id, "Done", allow_done_advisory=False
+            )
+
+        classify.assert_not_called()
+        self.assertIsNone(result)
+        self.assertEqual(root.lane, "Done")
 
     def test_ship_code_present_unmerged_blocks_fresh_1315_shape(self):
         root = self._root()
@@ -420,7 +473,9 @@ class CodeBoundaryDoneGateTests(unittest.TestCase):
                 self.assertEqual(root.lane, "In Progress")
                 boundary["status"] = "merged"
                 boundary["merge_commit_sha"] = "merged-sha"
-                self.state.board_move_task(root.id, "Done")
+                self.state.board_move_task(
+                    root.id, "Done", acknowledge_unmerged=True
+                )
                 self.assertEqual(root.lane, "Done")
 
     def test_merge_projection_carries_classifier_to_root(self):

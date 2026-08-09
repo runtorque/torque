@@ -132,7 +132,13 @@ class TorqueSmokeFlowTests(unittest.IsolatedAsyncioTestCase):
             task = self.state.board_tasks.get(payload.get("id", ""))
             if not task:
                 return {"type": "error", "message": "Task not found"}
-            self.state.board_move_task(task.id, payload.get("lane", ""))
+            self.state.board_move_task(
+                task.id,
+                payload.get("lane", ""),
+                acknowledge_unmerged=payload.get(
+                    "acknowledge_unmerged", False
+                ),
+            )
             return {"type": "ok", "id": task.id}
 
         if cmd == "dispatch_task":
@@ -247,7 +253,9 @@ class TorqueSmokeFlowTests(unittest.IsolatedAsyncioTestCase):
             }
         )
         self.state.board_update_task(task.id, messages=done_messages, status="")
-        self.state.board_move_task(task.id, "Done")
+        self.state.board_move_task(
+            task.id, "Done", allow_done_advisory=False
+        )
         agent.current_task_id = ""
         agent.status = "idle"
 
