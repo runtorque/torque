@@ -854,7 +854,9 @@ def _review_cycle_containment_candidate_hops(tasks: Iterable, *,
     Repository and branch identity may reject an audited reciprocal link, but
     can never create one.  Walking backward starts at the explicitly selected
     implementation plus its direct shipping review, so branch siblings and
-    reroute victims never become containment candidates.
+    reroute victims never become containment candidates.  These hops express
+    structural admission only; the merge-time verifier separately proves Git
+    containment for each exact candidate-to-successor edge.
     """
     tasks = list(tasks)
     tasks_by_id = {
@@ -1099,7 +1101,8 @@ def review_cycle_containment_candidates(tasks: Iterable, *,
     Audited review-cycle links remain authoritative.  Plain extra reviews add
     only the exact earlier-boundary supersession edge rooted at the selected
     direct review; repository, branch, root, ordering, and present-delta facts
-    may reject that edge but can never create one.
+    may reject that edge but can never create one.  This is structural
+    admission only; merge-time Git containment is verified separately.
     """
     candidates: list = []
     candidate_ids: set[str] = set()
@@ -1125,10 +1128,19 @@ async def verified_review_cycle_containment_task_ids(
 
     Ancestry is conclusive.  Squash/rebase-style landings additionally require
     one parent, the exact stored fork, disjoint base movement, and a no-op
-    three-way merge of the candidate into the actual landed tree.  Every Git
-    or evidence error fails closed for that candidate.
+    three-way merge of the candidate into the actual landed tree.  For an
+    exact structurally admitted supersession hop, squash containment may also
+    be proven transitively when the candidate is an ancestor of its already
+    proven successor and the terminal selected review's tree independently
+    matches the landing.  Structural admission and Git proof remain separate;
+    every Git or evidence error fails closed for that candidate.
     """
     tasks = list(tasks)
+    tasks_by_id = {
+        _clean_text(getattr(task, "id", "")): task
+        for task in tasks
+        if _clean_text(getattr(task, "id", ""))
+    }
     hops = _review_cycle_containment_candidate_hops(
         tasks,
         repo_root=repo_root,
@@ -1185,14 +1197,14 @@ async def verified_review_cycle_containment_task_ids(
         else ""
     )
 
-    async def candidate_is_contained(task) -> bool:
+    async def evidenced_boundary_commit(task) -> tuple[str, str]:
         boundary = task_boundary(task)
         fact = boundary.get("code_delta")
         if (
                 boundary_code_delta_state(boundary) != CODE_DELTA_PRESENT
                 or not isinstance(fact, dict)
         ):
-            return False
+            return "", ""
         base_ref = _clean_text(fact.get("base_sha", ""))
         boundary_ref = _clean_text(boundary.get("commit_sha", ""))
         classified_ref = _clean_text(fact.get("commit_sha", ""))
@@ -1202,21 +1214,68 @@ async def verified_review_cycle_containment_task_ids(
                 or not classified_ref
                 or classified_ref != boundary_ref
         ):
-            return False
+            return "", ""
         base_commit = await resolve_commit(base_ref)
         boundary_commit = await resolve_commit(boundary_ref)
         if not base_commit or not boundary_commit:
-            return False
+            return "", ""
 
         code, _ = await git(
             "merge-base", "--is-ancestor", base_commit, boundary_commit
         )
         if code:
+            return "", ""
+        return base_commit, boundary_commit
+
+    async def selected_review_is_landed(task) -> bool:
+        boundary = task_boundary(task)
+        if (
+                _clean_text(boundary.get("repo_root", "")) != repo_root
+                or _clean_text(boundary.get("branch", "")) != branch
+        ):
+            return False
+        _base_commit, boundary_commit = await evidenced_boundary_commit(task)
+        if not boundary_commit:
             return False
         code, _ = await git(
             "merge-base", "--is-ancestor", boundary_commit, merged_commit
         )
+        if code == 0:
+            return True
+        if not merged_tree:
+            return False
+        code, tree_out = await git(
+            "rev-parse", "--verify", f"{boundary_commit}^{{tree}}"
+        )
+        tree_lines = tree_out.decode("ascii", errors="ignore").splitlines()
+        return (
+            code == 0
+            and len(tree_lines) == 1
+            and tree_lines[0].strip() == merged_tree
+        )
+
+    async def candidate_is_contained(
+            task, successor_id: str, proven_successor_ids: set[str]) -> bool:
+        base_commit, boundary_commit = await evidenced_boundary_commit(task)
+        if not base_commit or not boundary_commit:
+            return False
+
+        code, _ = await git(
+            "merge-base", "--is-ancestor", boundary_commit, merged_commit
+        )
         contained = code == 0
+        if not contained and successor_id in proven_successor_ids:
+            successor = tasks_by_id.get(successor_id)
+            _successor_base, successor_commit = (
+                await evidenced_boundary_commit(successor)
+                if successor else ("", "")
+            )
+            if successor_commit:
+                code, _ = await git(
+                    "merge-base", "--is-ancestor",
+                    boundary_commit, successor_commit,
+                )
+                contained = code == 0
         if not contained:
             if not landing_parent or not merged_tree:
                 return False
@@ -1273,6 +1332,27 @@ async def verified_review_cycle_containment_task_ids(
         for task_id in _normalize_boundary_task_ids(task_ids)
         if _clean_text(task_id)
     }
+    hop_successor_ids = {
+        _clean_text(successor_id)
+        for _task, successor_id in hops
+        if _clean_text(successor_id)
+    }
+    proven_successor_ids: set[str] = set()
+    for task_id in admitted_ids:
+        task = tasks_by_id.get(task_id)
+        if (
+                not task
+                or task_id not in hop_successor_ids
+                or _clean_text(
+                    getattr(task, "action_name", "")
+                ).lower() != "feature/review"
+                or _clean_text(getattr(task, "parent_task_id", ""))
+                not in admitted_ids
+        ):
+            continue
+        if await selected_review_is_landed(task):
+            proven_successor_ids.add(task_id)
+
     verified: list[str] = []
     pending = list(hops)
     while pending:
@@ -1285,9 +1365,11 @@ async def verified_review_cycle_containment_task_ids(
             if successor_id not in admitted_ids:
                 deferred.append((task, successor_id))
                 continue
-            if not await candidate_is_contained(task):
+            if not await candidate_is_contained(
+                    task, successor_id, proven_successor_ids):
                 continue
             admitted_ids.add(task_id)
+            proven_successor_ids.add(task_id)
             verified.append(task_id)
             made_progress = True
         if not made_progress:
