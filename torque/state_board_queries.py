@@ -11,6 +11,7 @@ from .state import (
     board_task_counts_as_done,
     board_task_is_closed,
     task_counts_as_done,
+    task_is_engineer_message_followup,
     task_suppresses_done_cascade,
 )
 
@@ -235,6 +236,18 @@ class BoardQueryMixin:
     def task_has_unresolved_descendants(self, task_id: str) -> bool:
         """Return whether any descendant branch is still unresolved."""
         return bool(self.task_open_descendants(task_id))
+
+    def task_has_completion_blocking_descendants(self, task_id: str) -> bool:
+        """Return whether unresolved real work still blocks auto-completion.
+
+        Engineer-message follow-ups are transient coordination records that
+        expire when an otherwise eligible root completes.  Keep the broad
+        unresolved-descendant query unchanged for every other caller.
+        """
+        return any(
+            not task_is_engineer_message_followup(descendant)
+            for descendant in self.task_open_descendants(task_id)
+        )
 
     def task_has_live_handoff_descendants(self, task_id: str) -> bool:
         """Return whether work has been handed off beyond this task.

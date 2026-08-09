@@ -975,6 +975,37 @@ prompt: |
         self.assertIn('unresolved descendants', decision['reason'])
         self.assertEqual(root.lane, 'In Progress')
 
+    def test_merge_auto_done_helper_expires_engineer_message(self):
+        state = self.state_mod.MatrixState()
+        state.add_group('g')
+        worker = self.state_mod.AgentCell(
+            id='worker-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'].append(worker.id)
+        root = state.board_add_task(
+            'Root task', 'g', lane='In Progress', id='task-1',
+            agent_id=worker.id,
+        )
+        message = state.board_add_task(
+            'Engineer: Need status', 'g', lane='Backlog', id='task-1:1',
+            status='Awaiting Reply', parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            labels=['torque:derived', 'torque:engineer-message'],
+        )
+
+        decision = self.server_mod._maybe_auto_move_merged_task_to_done(
+            state, worker, enabled=True,
+        )
+
+        self.assertTrue(decision['moved'])
+        self.assertEqual(root.lane, 'Done')
+        self.assertEqual(message.lane, 'Done')
+        self.assertEqual(message.status, '')
+
     def test_merge_auto_done_helper_honors_finalization_gates(self):
         state = self.state_mod.MatrixState()
         state.add_group('g')
@@ -1015,6 +1046,43 @@ prompt: |
         self.assertFalse(decision['moved'])
         self.assertIn('finalization gates block Done', decision['reason'])
         self.assertEqual(root.lane, 'In Progress')
+
+    def test_merge_auto_done_blocked_gate_retains_engineer_message(self):
+        state = self.state_mod.MatrixState()
+        state.add_group('g')
+        worker = self.state_mod.AgentCell(
+            id='worker-1', name='Worker', group='g', cell_type='agent',
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'].append(worker.id)
+        root = state.board_add_task(
+            'Gated root', 'g', lane='In Progress', id='task-1',
+            agent_id=worker.id, finalization_mode='review_only',
+            required_review_gates=[{
+                'id': 'audit', 'role': 'audit',
+                'review_task_id': 'task-1:review',
+            }],
+            finalization_boundary={
+                'artifact_digest': 'digest', 'artifact_version': 'v1',
+                'source_identity': 'artifact', 'immutable': True,
+            },
+        )
+        message = state.board_add_task(
+            'Engineer: Need status', 'g', lane='Backlog', id='task-1:message',
+            status='Awaiting Reply', parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            labels=['torque:derived', 'torque:engineer-message'],
+        )
+
+        decision = self.server_mod._maybe_auto_move_merged_task_to_done(
+            state, worker, enabled=True,
+        )
+
+        self.assertFalse(decision['moved'])
+        self.assertIn('finalization gates block Done', decision['reason'])
+        self.assertEqual(root.lane, 'In Progress')
+        self.assertEqual(message.lane, 'Backlog')
+        self.assertEqual(message.status, 'Awaiting Reply')
 
     def test_compact_snapshot_opt_in_from_query_or_payload(self):
         request = types.SimpleNamespace(query={'compact': '1'})

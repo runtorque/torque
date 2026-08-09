@@ -111,7 +111,7 @@ def _maybe_auto_move_merged_task_to_done(
         task, reason = _worktree_merge_auto_done_candidate(state, cell)
         if not task:
             decision["reason"] = reason or "no eligible linked task"
-        elif state.task_has_unresolved_descendants(task.id):
+        elif state.task_has_completion_blocking_descendants(task.id):
             decision["reason"] = (
                 f"task {task.id} still has unresolved descendants"
             )
