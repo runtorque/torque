@@ -2705,6 +2705,67 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             [item["task_id"] for item in moved["advisory"]["code_boundary"]["blocking"]],
         )
 
+    async def test_archived_board_move_restore_error_does_not_sync_or_report_move(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        state.board_lanes = [
+            "Backlog", "To Do", "In Progress", "Done", "Archived"
+        ]
+        task = state.board_add_task(
+            "Archived root", "g", lane="Done", id="restore-failure",
+        )
+        state.board_archive_task(task.id)
+        sync_calls = []
+        sync_manager = types.SimpleNamespace(
+            enqueue_task=lambda task_id, reason: sync_calls.append(
+                (task_id, reason)
+            )
+        )
+        handle_command = self._extract_handle_command(
+            state, board_sync_manager=sync_manager
+        )
+
+        with mock.patch.object(
+                state, "_rehydrate_archived_task_artifacts",
+                return_value=False):
+            result = await handle_command({
+                "cmd": "board_move_task",
+                "id": task.id,
+                "lane": "Done",
+                "acknowledge_unmerged": True,
+            })
+
+        self.assertEqual("error", result["type"])
+        self.assertNotIn("advisory", result)
+        self.assertEqual("Archived", task.lane)
+        self.assertEqual([], sync_calls)
+
+    async def test_stale_unarchive_request_does_not_sync_or_report_restore(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        task = state.board_add_task(
+            "Already live", "g", lane="Done", id="already-live",
+        )
+        sync_calls = []
+        sync_manager = types.SimpleNamespace(
+            enqueue_task=lambda task_id, reason: sync_calls.append(
+                (task_id, reason)
+            )
+        )
+        handle_command = self._extract_handle_command(
+            state, board_sync_manager=sync_manager
+        )
+
+        result = await handle_command({
+            "cmd": "board_unarchive_task",
+            "id": task.id,
+        })
+
+        self.assertEqual("error", result["type"])
+        self.assertNotEqual("task_unarchived", result["type"])
+        self.assertEqual("Done", task.lane)
+        self.assertEqual([], sync_calls)
+
     async def test_board_move_advisory_keeps_normal_auto_resume_behavior(self):
         state = self.state_mod.MatrixState()
         state.add_group("g")

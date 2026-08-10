@@ -80,6 +80,8 @@ def _handle_board_unarchive_command(
     task_id = _resolve_task_id(state, data.get("id", ""))
     if task_id not in state.board_tasks:
         return {"type": "error", "message": "Task not found"}
+    if state.board_tasks[task_id].lane != "Archived":
+        return {"type": "error", "message": "Task is not archived"}
     mutation = state.board_unarchive_task(
         task_id,
         lane=data.get("lane", ""),
