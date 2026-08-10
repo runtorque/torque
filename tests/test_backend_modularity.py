@@ -43,6 +43,15 @@ def _call_name(node):
     return ""
 
 
+def _dotted_name(node):
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        owner = _dotted_name(node.value)
+        return f"{owner}.{node.attr}" if owner else node.attr
+    return ""
+
+
 def _assignment_names(node):
     targets = node.targets if isinstance(node, ast.Assign) else [node.target]
     return {
@@ -50,6 +59,19 @@ def _assignment_names(node):
         for target in targets
         if isinstance(target, ast.Name)
     }
+
+
+def _function_scope_nodes(function):
+    pending = list(reversed(function.body))
+    while pending:
+        node = pending.pop()
+        yield node
+        if isinstance(
+            node,
+            (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda),
+        ):
+            continue
+        pending.extend(reversed(list(ast.iter_child_nodes(node))))
 
 
 def _external_ticket_offload_inventory(repo_root):
@@ -178,47 +200,51 @@ def _external_ticket_offload_inventory(repo_root):
             offload_helpers.add(function_name)
 
     parsed = {}
-    bindings = {}
-    for path in torque_root.rglob("*.py"):
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        parsed[path] = tree
-        file_bindings = {
+    module_bindings = {}
+
+    def empty_bindings():
+        return {
             "wrappers": set(),
             "helpers": set(),
             "factories": set(),
             "classes": set(),
             "modules": set(),
         }
+
+    def record_external_import(node, file_bindings):
+        if isinstance(node, ast.ImportFrom) and (
+            (node.module or "").endswith("external_tickets")
+        ):
+            for imported in node.names:
+                local_name = imported.asname or imported.name
+                if imported.name in blocking_wrappers:
+                    file_bindings["wrappers"].add(local_name)
+                if imported.name in offload_helpers:
+                    file_bindings["helpers"].add(local_name)
+                if imported.name in adapter_factories:
+                    file_bindings["factories"].add(local_name)
+                if imported.name in adapter_classes:
+                    file_bindings["classes"].add(local_name)
+        elif isinstance(node, ast.Import):
+            for imported in node.names:
+                if imported.name.endswith("external_tickets"):
+                    file_bindings["modules"].add(
+                        imported.asname or imported.name
+                    )
+        elif isinstance(node, ast.ImportFrom) and node.module == "torque":
+            for imported in node.names:
+                if imported.name == "external_tickets":
+                    file_bindings["modules"].add(
+                        imported.asname or imported.name
+                    )
+
+    for path in torque_root.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        parsed[path] = tree
+        file_bindings = empty_bindings()
         for node in tree.body:
-            if isinstance(node, ast.ImportFrom) and (
-                (node.module or "").endswith("external_tickets")
-            ):
-                for imported in node.names:
-                    local_name = imported.asname or imported.name
-                    if imported.name in blocking_wrappers:
-                        file_bindings["wrappers"].add(local_name)
-                    if imported.name in offload_helpers:
-                        file_bindings["helpers"].add(local_name)
-                    if imported.name in adapter_factories:
-                        file_bindings["factories"].add(local_name)
-                    if imported.name in adapter_classes:
-                        file_bindings["classes"].add(local_name)
-            elif isinstance(node, ast.Import):
-                for imported in node.names:
-                    if imported.name.endswith("external_tickets"):
-                        file_bindings["modules"].add(
-                            imported.asname or imported.name
-                        )
-            elif (
-                isinstance(node, ast.ImportFrom)
-                and node.module == "torque"
-            ):
-                for imported in node.names:
-                    if imported.name == "external_tickets":
-                        file_bindings["modules"].add(
-                            imported.asname or imported.name
-                        )
-        bindings[path] = file_bindings
+            record_external_import(node, file_bindings)
+        module_bindings[path] = file_bindings
 
     def reference_kind(node, file_bindings):
         if isinstance(node, ast.Name):
@@ -226,8 +252,8 @@ def _external_ticket_offload_inventory(repo_root):
                 if node.id in file_bindings[kind]:
                     return kind
         if isinstance(node, ast.Attribute):
-            owner = node.value
-            if isinstance(owner, ast.Name) and owner.id in file_bindings["modules"]:
+            owner = _dotted_name(node.value)
+            if owner in file_bindings["modules"]:
                 if node.attr in blocking_wrappers:
                     return "wrappers"
                 if node.attr in offload_helpers:
@@ -238,12 +264,12 @@ def _external_ticket_offload_inventory(repo_root):
                     return "classes"
         return ""
 
-    # Preserve provenance while carrying ordinary aliases within each module.
+    # Preserve provenance while carrying module-level aliases within each file.
     changed = True
     while changed:
         changed = False
         for path, tree in parsed.items():
-            file_bindings = bindings[path]
+            file_bindings = module_bindings[path]
             for node in tree.body:
                 if not isinstance(node, (ast.Assign, ast.AnnAssign)) or not node.value:
                     continue
@@ -255,58 +281,123 @@ def _external_ticket_offload_inventory(repo_root):
                     file_bindings[kind].update(new_names)
                     changed = True
 
-    # Composition keywords establish runtime/object fields that carry a
-    # blocking wrapper. Unlike local aliases, these intentionally cross files.
-    wrapper_fields = {}
+    # A composition constructor ties each injected wrapper field to an owner
+    # type. Calls are accepted as DI references only when their receiver is
+    # proven to have that owner type.
+    owner_fields = {}
+    owner_field_origins = {}
     for path, tree in parsed.items():
-        file_bindings = bindings[path]
+        file_bindings = module_bindings[path]
         for call in (
             node for node in ast.walk(tree) if isinstance(node, ast.Call)
         ):
-            for keyword in call.keywords:
-                if (
-                    keyword.arg
-                    and reference_kind(keyword.value, file_bindings) == "wrappers"
-                ):
-                    wrapper_fields.setdefault(keyword.arg, set()).add(
-                        (str(path.relative_to(repo_root)), keyword.value.lineno)
-                    )
+            wrapper_keywords = [
+                keyword
+                for keyword in call.keywords
+                if keyword.arg
+                and reference_kind(keyword.value, file_bindings) == "wrappers"
+            ]
+            if not wrapper_keywords:
+                continue
+            owner = _call_name(call.func)
+            if not owner:
+                continue
+            for keyword in wrapper_keywords:
+                owner_fields.setdefault(owner, set()).add(keyword.arg)
+                owner_field_origins.setdefault(
+                    (owner, keyword.arg), set()
+                ).add((str(path.relative_to(repo_root)), keyword.value.lineno))
+
+    module_owner_variables = {path: {} for path in parsed}
+    for path, tree in parsed.items():
+        for node in tree.body:
+            if (
+                isinstance(node, (ast.Assign, ast.AnnAssign))
+                and isinstance(node.value, ast.Call)
+                and _call_name(node.value.func) in owner_fields
+            ):
+                owner = _call_name(node.value.func)
+                for name in _assignment_names(node):
+                    module_owner_variables[path][name] = owner
+
+    def function_bindings(function, file_bindings):
+        local = {kind: set(values) for kind, values in file_bindings.items()}
+        bound_names = {
+            argument.arg
+            for argument in (
+                function.args.posonlyargs
+                + function.args.args
+                + function.args.kwonlyargs
+            )
+        }
+        for node in _function_scope_nodes(function):
+            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                bound_names.update(_assignment_names(node))
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                if node is not function:
+                    bound_names.add(node.name)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                bound_names.update(
+                    alias.asname or alias.name.split(".")[0]
+                    for alias in node.names
+                )
+        for kind in ("wrappers", "helpers", "factories", "classes", "modules"):
+            local[kind].difference_update(bound_names)
+        for node in _function_scope_nodes(function):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                record_external_import(node, local)
+        changed = True
+        while changed:
+            changed = False
+            for node in _function_scope_nodes(function):
+                if not isinstance(node, (ast.Assign, ast.AnnAssign)) or not node.value:
+                    continue
+                kind = reference_kind(node.value, local)
+                if not kind:
+                    continue
+                new_names = _assignment_names(node) - local[kind]
+                if new_names:
+                    local[kind].update(new_names)
+                    changed = True
+        return local
 
     violations = []
     safe_sites = []
     for path, tree in parsed.items():
         relative_path = path.relative_to(repo_root)
-        file_bindings = bindings[path]
+        file_bindings = module_bindings[path]
         for function in ast.walk(tree):
             if not isinstance(function, ast.AsyncFunctionDef):
                 continue
-            local_wrappers = set(file_bindings["wrappers"])
-            changed = True
-            while changed:
-                changed = False
-                for node in ast.walk(function):
-                    if (
-                        not isinstance(node, (ast.Assign, ast.AnnAssign))
-                        or not node.value
-                    ):
-                        continue
-                    is_wrapper_reference = (
-                        reference_kind(node.value, file_bindings) == "wrappers"
-                        or (
-                            isinstance(node.value, ast.Name)
-                            and node.value.id in local_wrappers
-                        )
-                        or (
-                            isinstance(node.value, ast.Attribute)
-                            and node.value.attr in wrapper_fields
-                        )
-                    )
-                    if not is_wrapper_reference:
-                        continue
-                    new_names = _assignment_names(node) - local_wrappers
-                    if new_names:
-                        local_wrappers.update(new_names)
-                        changed = True
+            local_bindings = function_bindings(function, file_bindings)
+            locally_bound = {
+                argument.arg
+                for argument in (
+                    function.args.posonlyargs
+                    + function.args.args
+                    + function.args.kwonlyargs
+                )
+            }
+            for node in _function_scope_nodes(function):
+                if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                    locally_bound.update(_assignment_names(node))
+                elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    if node is not function:
+                        locally_bound.add(node.name)
+
+            owner_variables = {
+                name: owner
+                for name, owner in module_owner_variables[path].items()
+                if name not in locally_bound
+            }
+            for argument in (
+                function.args.posonlyargs
+                + function.args.args
+                + function.args.kwonlyargs
+            ):
+                owner = _call_name(argument.annotation)
+                if owner in owner_fields:
+                    owner_variables[argument.arg] = owner
             adapter_variables = {
                 argument.arg
                 for argument in (
@@ -314,21 +405,75 @@ def _external_ticket_offload_inventory(repo_root):
                     + function.args.args
                     + function.args.kwonlyargs
                 )
-                if _call_name(argument.annotation) in file_bindings["classes"]
+                if reference_kind(argument.annotation, local_bindings) == "classes"
             }
-            for node in ast.walk(function):
-                if not isinstance(node, (ast.Assign, ast.AnnAssign)) or not node.value:
+            for node in _function_scope_nodes(function):
+                if (
+                    not isinstance(node, (ast.Assign, ast.AnnAssign))
+                    or not isinstance(node.value, ast.Call)
+                ):
                     continue
-                value = node.value
-                if not isinstance(value, ast.Call):
-                    continue
-                called = _call_name(value.func)
-                if called not in file_bindings["factories"] | file_bindings["classes"]:
-                    continue
-                adapter_variables.update(_assignment_names(node))
+                kind = reference_kind(node.value.func, local_bindings)
+                if kind in {"factories", "classes"}:
+                    adapter_variables.update(_assignment_names(node))
+                owner = _call_name(node.value.func)
+                if owner in owner_fields:
+                    for name in _assignment_names(node):
+                        owner_variables[name] = owner
+
+            def is_owner_wrapper_reference(node):
+                return (
+                    isinstance(node, ast.Attribute)
+                    and isinstance(node.value, ast.Name)
+                    and node.value.id in owner_variables
+                    and node.attr in owner_fields[owner_variables[node.value.id]]
+                )
+
+            local_wrappers = set(local_bindings["wrappers"])
+            changed = True
+            while changed:
+                changed = False
+                for node in _function_scope_nodes(function):
+                    if (
+                        not isinstance(node, (ast.Assign, ast.AnnAssign))
+                        or not node.value
+                    ):
+                        continue
+                    is_wrapper_reference = (
+                        reference_kind(node.value, local_bindings) == "wrappers"
+                        or (
+                            isinstance(node.value, ast.Name)
+                            and node.value.id in local_wrappers
+                        )
+                        or is_owner_wrapper_reference(node.value)
+                    )
+                    if not is_wrapper_reference:
+                        continue
+                    new_names = _assignment_names(node) - local_wrappers
+                    if new_names:
+                        local_wrappers.update(new_names)
+                        changed = True
+
+            def is_blocking_reference(node):
+                return (
+                    reference_kind(node, local_bindings) == "wrappers"
+                    or (
+                        isinstance(node, ast.Name)
+                        and node.id in local_wrappers
+                    )
+                    or is_owner_wrapper_reference(node)
+                    or (
+                        isinstance(node, ast.Attribute)
+                        and isinstance(node.value, ast.Name)
+                        and node.value.id in adapter_variables
+                        and node.attr in blocking_methods
+                    )
+                )
 
             for call in (
-                node for node in ast.walk(function) if isinstance(node, ast.Call)
+                node
+                for node in _function_scope_nodes(function)
+                if isinstance(node, ast.Call)
             ):
                 called = _call_name(call.func)
                 is_wrapper_call = (
@@ -337,8 +482,8 @@ def _external_ticket_offload_inventory(repo_root):
                 ) or (
                     isinstance(call.func, ast.Attribute)
                     and (
-                        reference_kind(call.func, file_bindings) == "wrappers"
-                        or called in wrapper_fields
+                        reference_kind(call.func, local_bindings) == "wrappers"
+                        or is_owner_wrapper_reference(call.func)
                     )
                 )
                 is_adapter_call = (
@@ -351,8 +496,9 @@ def _external_ticket_offload_inventory(repo_root):
                         )
                         or (
                             isinstance(call.func.value, ast.Call)
-                            and _call_name(call.func.value.func)
-                            in file_bindings["factories"] | file_bindings["classes"]
+                            and reference_kind(
+                                call.func.value.func, local_bindings
+                            ) in {"factories", "classes"}
                         )
                     )
                 )
@@ -364,7 +510,7 @@ def _external_ticket_offload_inventory(repo_root):
                     continue
 
                 is_offload = (
-                    reference_kind(call.func, file_bindings) == "helpers"
+                    reference_kind(call.func, local_bindings) == "helpers"
                 ) or (
                     isinstance(call.func, ast.Attribute)
                     and isinstance(call.func.value, ast.Name)
@@ -372,34 +518,17 @@ def _external_ticket_offload_inventory(repo_root):
                     and called == "to_thread"
                 )
                 if not is_offload or not call.args:
-                    if call.args:
+                    if call.args and is_blocking_reference(call.args[0]):
                         operation_name = _call_name(call.args[0])
-                        operation_is_blocking = (
-                            reference_kind(call.args[0], file_bindings) == "wrappers"
-                            or operation_name in local_wrappers | blocking_methods
-                            or (
-                                isinstance(call.args[0], ast.Attribute)
-                                and call.args[0].attr in wrapper_fields
-                            )
+                        violations.append(
+                            f"{relative_path}:{call.lineno} async "
+                            f"{function.name} passes blocking external-ticket "
+                            f"operation {operation_name} through unrecognized "
+                            f"boundary {called or '<call>'}"
                         )
-                        if operation_is_blocking:
-                            violations.append(
-                                f"{relative_path}:{call.lineno} async "
-                                f"{function.name} passes blocking external-ticket "
-                                f"operation {operation_name} through unrecognized "
-                                f"boundary {called or '<call>'}"
-                            )
                     continue
                 operation_name = _call_name(call.args[0])
-                operation_is_blocking = (
-                    reference_kind(call.args[0], file_bindings) == "wrappers"
-                    or operation_name in local_wrappers | blocking_methods
-                    or (
-                        isinstance(call.args[0], ast.Attribute)
-                        and call.args[0].attr in wrapper_fields
-                    )
-                )
-                if operation_is_blocking:
+                if is_blocking_reference(call.args[0]):
                     safe_sites.append(
                         f"{relative_path}:{call.lineno} async {function.name} "
                         f"offloads {operation_name} via {called}"
@@ -411,7 +540,8 @@ def _external_ticket_offload_inventory(repo_root):
         "blocking_wrappers": sorted(blocking_wrappers),
         "offload_helpers": sorted(offload_helpers),
         "wrapper_fields": {
-            name: sorted(origins) for name, origins in sorted(wrapper_fields.items())
+            f"{owner}.{field}": sorted(origins)
+            for (owner, field), origins in sorted(owner_field_origins.items())
         },
         "safe_sites": sorted(safe_sites),
         "violations": sorted(violations),
@@ -659,7 +789,8 @@ class BackendSizeGuardrailTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (commands / "di_violation.py").write_text(
-                "async def handle(runtime, task):\n"
+                "from ..composition import Runtime\n"
+                "async def handle(runtime: Runtime, task):\n"
                 "    return runtime.publish_ticket(task)\n",
                 encoding="utf-8",
             )
@@ -670,18 +801,49 @@ class BackendSizeGuardrailTests(unittest.TestCase):
                 "    return publish_ticket(task)\n",
                 encoding="utf-8",
             )
+            (commands / "local_import.py").write_text(
+                "async def handle(task):\n"
+                "    from ..external_tickets import publish_ticket\n"
+                "    return publish_ticket(task)\n",
+                encoding="utf-8",
+            )
+            (commands / "module_factory.py").write_text(
+                "import torque.external_tickets as tickets\n"
+                "async def handle(task):\n"
+                "    backend = tickets.get_adapter()\n"
+                "    return backend.publish(task)\n",
+                encoding="utf-8",
+            )
+            (commands / "shadowed.py").write_text(
+                "from ..external_tickets import publish_ticket\n"
+                "async def handle(publish_ticket, task):\n"
+                "    return publish_ticket(task)\n",
+                encoding="utf-8",
+            )
+            (commands / "unrelated_method.py").write_text(
+                "class Other:\n"
+                "    def publish_ticket(self, task):\n"
+                "        return task\n"
+                "async def handle(other: Other, task):\n"
+                "    return other.publish_ticket(task)\n",
+                encoding="utf-8",
+            )
 
             inventory = _external_ticket_offload_inventory(repo)
 
         self.assertIn("publish_ticket", inventory["blocking_wrappers"])
         self.assertEqual(
             [("torque/composition.py", 5)],
-            inventory["wrapper_fields"]["publish_ticket"],
+            inventory["wrapper_fields"]["Runtime.publish_ticket"],
         )
         self.assertEqual(
             [
-                "torque/commands/di_violation.py:2 async handle calls blocking "
+                "torque/commands/di_violation.py:3 async handle calls blocking "
                 "external-ticket operation publish_ticket directly",
+                "torque/commands/local_import.py:3 async handle calls blocking "
+                "external-ticket operation publish_ticket directly",
+                "torque/commands/module_factory.py:4 async handle calls blocking "
+                "external-ticket operation publish directly",
                 "torque/commands/violation.py:3 async handle calls blocking "
                 "external-ticket operation publish_ticket directly"
             ],
