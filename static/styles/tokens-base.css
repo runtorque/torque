@@ -42,6 +42,7 @@
   --control-height-xs: 22px;
   --control-height-sm: 24px;
   --control-height-md: 28px;
+  --app-header-height: 30px;
   --control-padding-x-xs: 7px;
   --control-padding-x-sm: 8px;
   --control-padding-x-md: 10px;
@@ -195,7 +196,7 @@ textarea,
 header {
   position: sticky; top: 0; z-index: 10;
   display: flex; align-items: center; gap: 6px;
-  min-height: 30px;
+  min-height: var(--app-header-height);
   padding: 3px 8px;
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border);

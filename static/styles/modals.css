@@ -1769,13 +1769,13 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 /* ------------------------------------------------------------------ */
 .toast-stack {
   position: fixed;
+  top: calc(var(--app-header-height) + var(--space-2));
   right: 14px;
-  bottom: 38px;
   z-index: 250;
   display: flex;
   width: min(380px, calc(100vw - 28px));
   max-height: min(70vh, 560px);
-  flex-direction: column-reverse;
+  flex-direction: column;
   gap: 8px;
   overflow: visible;
   pointer-events: none;
@@ -1786,7 +1786,7 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  transform: translateY(10px);
+  transform: translateY(-10px);
   opacity: 0;
   width: 100%;
   box-sizing: border-box;
