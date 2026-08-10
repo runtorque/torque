@@ -964,6 +964,7 @@ from .server_review import (
     _resolve_inherited_worktree_source,
     _agent_can_receive_dispatch,
     _promote_task_for_active_report,
+    _reconcile_reviewer_assignment_for_dispatch,
     _worktree_branch_has_commits_ahead,
     _stream_review_derive_parent_task,
     _stream_has_open_feature_review_boundary,
@@ -4558,6 +4559,12 @@ async def main(connection=None):
                 next_boundary_task_id = latest.id
         if task.resume_after_boundary_task_id != next_boundary_task_id:
             task.resume_after_boundary_task_id = next_boundary_task_id
+        _reconcile_reviewer_assignment_for_dispatch(
+            state,
+            task,
+            cell.id,
+            actor_name=cell.name,
+        )
         state.board_update_task(
             task.id,
             agent_id=cell.id,

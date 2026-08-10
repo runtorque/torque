@@ -30,6 +30,167 @@ from .worktree_boundaries import branch_boundary_tasks
 from .worktree_streams import compute_worktree_stream
 
 
+_REVIEW_GATE_ACTION = "feature/review"
+_REVIEWER_ASSIGNMENT_HISTORY_LIMIT = 20
+
+
+def _prior_review_task_ids_for_agent(
+        state, task, agent_id: str) -> list[str]:
+    """Return prior feature/review task ids assigned to ``agent_id``."""
+    agent_id = str(agent_id or "").strip()
+    if not state or not task or not agent_id:
+        return []
+    task_id = str(getattr(task, "id", "") or "").strip()
+    result = []
+    for candidate in state.board_get_chain(task_id):
+        candidate_id = str(getattr(candidate, "id", "") or "").strip()
+        if not candidate_id or candidate_id == task_id:
+            continue
+        action_name = str(
+            getattr(candidate, "action_name", "") or ""
+        ).strip().lower()
+        if action_name != _REVIEW_GATE_ACTION:
+            continue
+        reviewer_id = str(
+            getattr(candidate, "agent_id", "") or ""
+        ).strip()
+        if reviewer_id == agent_id:
+            result.append(candidate_id)
+    return result
+
+
+def _reviewer_reuse_assignment(
+        *, reviewer_id: str, prior_review_task_ids: list[str],
+        selection_source: str) -> dict:
+    """Build the durable, reader-facing prior-reviewer reuse record."""
+    return {
+        "kind": "prior_reviewer_reuse",
+        "reviewer_id": str(reviewer_id or "").strip(),
+        "prior_review_task_ids": list(prior_review_task_ids),
+        "selection_source": (
+            str(selection_source or "").strip()
+            or "existing_agent_target"
+        ),
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _apply_reviewer_reuse_assignment(task, assignment: dict,
+                                     actor_name: str) -> None:
+    """Persist reader-facing reuse metadata on a review task."""
+    evidence = dict(getattr(task, "completion_evidence", {}) or {})
+    evidence["reviewer_assignment"] = assignment
+    task.completion_evidence = evidence
+    labels = list(getattr(task, "labels", []) or [])
+    if "torque:reviewer-reused" not in labels:
+        labels.append("torque:reviewer-reused")
+    task.labels = labels
+    reviewer_id = assignment["reviewer_id"]
+    prior_ids = ", ".join(assignment["prior_review_task_ids"])
+    task.messages.append({
+        "timestamp": time.time(),
+        "action": "reviewer_reused",
+        "message": (
+            "Prior reviewer reuse: "
+            f"reviewer {reviewer_id} previously reviewed this task chain in "
+            f"{prior_ids}. This assignment is not a fresh reviewer."
+        ),
+        "agent_name": actor_name,
+    })
+
+
+def _reviewer_assignments_match(current: dict, desired: dict) -> bool:
+    """Compare the current truth fields while ignoring audit timestamps."""
+    if not isinstance(current, dict) or not isinstance(desired, dict):
+        return False
+    return (
+        current.get("kind") == desired.get("kind")
+        and str(current.get("reviewer_id", "") or "").strip()
+        == str(desired.get("reviewer_id", "") or "").strip()
+        and [str(value) for value in current.get(
+            "prior_review_task_ids", []) or []]
+        == [str(value) for value in desired.get(
+            "prior_review_task_ids", []) or []]
+    )
+
+
+def _reconcile_reviewer_assignment_for_dispatch(
+        state, task, reviewer_id: str, actor_name: str = "") -> bool:
+    """Make current reuse attribution truthful for the actual dispatch seat.
+
+    Superseded current assignments remain in bounded completion-evidence
+    history. Repeating an unchanged dispatch performs no writes and appends no
+    messages.
+    """
+    if str(getattr(task, "action_name", "") or "").strip().lower() \
+            != _REVIEW_GATE_ACTION:
+        return False
+    reviewer_id = str(reviewer_id or "").strip()
+    prior_ids = _prior_review_task_ids_for_agent(state, task, reviewer_id)
+    desired = (
+        _reviewer_reuse_assignment(
+            reviewer_id=reviewer_id,
+            prior_review_task_ids=prior_ids,
+            selection_source="dispatch_reconciliation",
+        )
+        if prior_ids else {}
+    )
+    evidence = dict(getattr(task, "completion_evidence", {}) or {})
+    current = evidence.get("reviewer_assignment", {}) or {}
+    labels = list(getattr(task, "labels", []) or [])
+    label_present = "torque:reviewer-reused" in labels
+
+    if desired and _reviewer_assignments_match(current, desired):
+        if label_present:
+            return False
+        task.labels = [*labels, "torque:reviewer-reused"]
+        return True
+    if not desired and not current and not label_present:
+        return False
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if isinstance(current, dict) and current:
+        history = [
+            dict(entry) for entry in evidence.get(
+                "reviewer_assignment_history", []) or []
+            if isinstance(entry, dict)
+        ]
+        history.append({
+            **current,
+            "superseded_at": now_iso,
+            "replacement_reviewer_id": reviewer_id,
+        })
+        evidence["reviewer_assignment_history"] = history[
+            -_REVIEWER_ASSIGNMENT_HISTORY_LIMIT:
+        ]
+
+    if desired:
+        evidence["reviewer_assignment"] = desired
+        if not label_present:
+            labels.append("torque:reviewer-reused")
+    else:
+        evidence.pop("reviewer_assignment", None)
+        labels = [
+            label for label in labels
+            if label != "torque:reviewer-reused"
+        ]
+    task.completion_evidence = evidence
+    task.labels = labels
+    task.messages.append({
+        "timestamp": time.time(),
+        "action": "reviewer_assignment_reconciled",
+        "message": (
+            f"Reviewer assignment reconciled for actual reviewer {reviewer_id}: "
+            + (
+                "prior-reviewer reuse in " + ", ".join(prior_ids) + "."
+                if prior_ids else "fresh reviewer; prior reuse superseded."
+            )
+        ),
+        "agent_name": actor_name,
+    })
+    return True
+
+
 def _ai_derive_parent_task(state: MatrixState, task):
     """Return the structural parent for a newly derived ``torque ai`` task.
 
@@ -897,7 +1058,6 @@ def _review_task_has_ship_verdict(task) -> bool:
     return False
 
 
-_REVIEW_GATE_ACTION = "feature/review"
 
 
 def _coerce_action_bool(value) -> bool:

@@ -9,7 +9,6 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
 from typing import Any
 
 from ..config import log
@@ -25,6 +24,11 @@ from ..external_tickets import (
     run_external_ticket_operation,
 )
 from ..mcp_canonical import canonical_tool_name
+from ..server_review import (
+    _apply_reviewer_reuse_assignment,
+    _prior_review_task_ids_for_agent,
+    _reviewer_reuse_assignment,
+)
 from ..state import task_counts_as_done, task_is_closed
 
 
@@ -50,78 +54,6 @@ TORQUE_AI_MCP_REPORT_TOOL_NAMES = frozenset({
 })
 # Private compatibility name used by the extracted implementation body.
 _TORQUE_AI_MCP_REPORT_ACTIONS = TORQUE_AI_MCP_REPORT_ACTIONS
-
-
-def _prior_review_task_ids_for_agent(state, task, agent_id: str) -> list[str]:
-    """Return prior feature/review task ids assigned to ``agent_id``.
-
-    Review routing is allowed to reuse the reviewer who found a blocker, but
-    that assignment must remain distinguishable from a fresh independent
-    review.  This history lookup is structural: derive prose is not a routing
-    contract and is deliberately not parsed for reviewer exclusions.
-    """
-    agent_id = str(agent_id or "").strip()
-    if not state or not task or not agent_id:
-        return []
-    task_id = str(getattr(task, "id", "") or "").strip()
-    result = []
-    for candidate in state.board_get_chain(task_id):
-        action_name = str(
-            getattr(candidate, "action_name", "") or ""
-        ).strip().lower()
-        if action_name != _REVIEW_GATE_ACTION:
-            continue
-        reviewer_id = str(
-            getattr(candidate, "agent_id", "") or ""
-        ).strip()
-        if reviewer_id != agent_id:
-            continue
-        candidate_id = str(getattr(candidate, "id", "") or "").strip()
-        if candidate_id:
-            result.append(candidate_id)
-    return result
-
-
-def _reviewer_reuse_assignment(
-        *,
-        reviewer_id: str,
-        prior_review_task_ids: list[str],
-        selection_source: str) -> dict:
-    """Build the durable, reader-facing prior-reviewer reuse record."""
-    return {
-        "kind": "prior_reviewer_reuse",
-        "reviewer_id": str(reviewer_id or "").strip(),
-        "prior_review_task_ids": list(prior_review_task_ids),
-        "selection_source": (
-            str(selection_source or "").strip()
-            or "existing_agent_target"
-        ),
-        "recorded_at": datetime.now(timezone.utc).isoformat(),
-    }
-
-
-def _apply_reviewer_reuse_assignment(task, assignment: dict,
-                                     actor_name: str) -> None:
-    """Persist reader-facing reuse metadata on the derived review task."""
-    evidence = dict(getattr(task, "completion_evidence", {}) or {})
-    evidence["reviewer_assignment"] = assignment
-    task.completion_evidence = evidence
-    labels = list(getattr(task, "labels", []) or [])
-    if "torque:reviewer-reused" not in labels:
-        labels.append("torque:reviewer-reused")
-    task.labels = labels
-    reviewer_id = assignment["reviewer_id"]
-    prior_ids = ", ".join(assignment["prior_review_task_ids"])
-    task.messages.append({
-        "timestamp": time.time(),
-        "action": "reviewer_reused",
-        "message": (
-            "Prior reviewer reuse: "
-            f"reviewer {reviewer_id} previously reviewed this task chain in "
-            f"{prior_ids}. This assignment is not a fresh reviewer."
-        ),
-        "agent_name": actor_name,
-    })
 
 
 @dataclass(slots=True)

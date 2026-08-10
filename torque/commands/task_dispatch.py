@@ -559,6 +559,9 @@ async def handle_dispatch_task_command(
 
             if cell:
                 final_prompt = ""
+                reviewer_disclosure_marker = (
+                    "\n\n__TORQUE_REVIEWER_ASSIGNMENT_DISCLOSURE__"
+                )
                 shared_context_block = build_prompt_memory_block(
                     state.db,
                     cell=cell,
@@ -630,7 +633,7 @@ async def handle_dispatch_task_command(
                         prompt = task.task
 
                     if prompt:
-                        prompt += reviewer_assignment_disclosure(task)
+                        prompt += reviewer_disclosure_marker
                         upstream_artifacts = (
                             torque_ctx["task"]["upstream_artifacts"]
                         )
@@ -735,6 +738,13 @@ async def handle_dispatch_task_command(
                         .dispatch_lane or "In Progress"
                 _record_task_dispatch(
                     cell, task, dispatch_lane)
+                # Reuse attribution is reconciled by the successful-dispatch
+                # writer against this actual cell, so render its disclosure
+                # only after that truth-maintenance step.
+                final_prompt = final_prompt.replace(
+                    reviewer_disclosure_marker,
+                    reviewer_assignment_disclosure(task),
+                )
 
                 # Track dispatch count after prompt resolution
                 cell.tasks_dispatched += 1
