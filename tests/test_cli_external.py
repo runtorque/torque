@@ -166,6 +166,37 @@ class CliExternalTicketTests(unittest.TestCase):
         self.assertIn("task-review-1, task-review-1b", rendered)
         self.assertIn("not a fresh reviewer", rendered)
 
+    def test_ai_derive_forwards_fresh_reviewer_constraint(self):
+        calls = []
+        self.cli._resolve_self_and_task = lambda _args: (
+            {"id": "agent-1"},
+            {"id": "task-1", "slug": "task-1"},
+        )
+
+        def fake_api_call(cmd, port=0, **kwargs):
+            calls.append((cmd, kwargs))
+            return {
+                "ok": True,
+                "data": {"task_id": "task-review-2", "agent_id": "fresh-1"},
+            }
+
+        self.cli.api_call = fake_api_call
+        args = SimpleNamespace(
+            port=18932,
+            description="Review the fix",
+            context="",
+            action="feature/review",
+            var=[],
+            group="",
+            require_fresh_reviewer=True,
+        )
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.cli.cmd_ai_derive(args)
+
+        self.assertEqual(calls[0][0], "ai_report")
+        self.assertTrue(calls[0][1]["require_fresh_reviewer"])
+
     def test_board_import_calls_external_import_endpoint(self):
         calls = []
         self.cli.get_state_local = lambda _port: {"groups": {"g": []}}

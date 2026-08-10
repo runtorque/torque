@@ -25,6 +25,19 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         if tasks:
             await asyncio.gather(*tasks)
 
+    async def test_derive_tool_spec_keeps_fresh_reviewer_contract(self):
+        spec_mod = importlib.import_module("torque.mcp_ai_reports")
+        self.assertEqual(spec_mod.DERIVE_TOOL_SPEC["name"], "torque_derive")
+        derive = next(
+            tool for tool in self.mcp_mod.TOOLS
+            if tool["name"] == "torque_derive"
+        )
+        fresh = derive["inputSchema"]["properties"][
+            "require_fresh_reviewer"
+        ]
+        self.assertEqual(fresh["type"], "boolean")
+        self.assertIn("Default false", fresh["description"])
+
     async def test_canonical_task_get_reports_same_group_engineer_scope_refusal(self):
         state = self.state_mod.MatrixState()
         state.groups["g"] = []
@@ -171,11 +184,12 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         text, is_error = await self.mcp_mod._dispatch_tool(
             "torque_derive",
             {
-                "description": "Implement follow-up",
+                "description": "Review follow-up",
                 "context": "Keep the matrix current.",
-                "action": "feature/implement",
+                "action": "feature/review",
                 "action_vars": {"TEST_COMMAND": "python3 -m unittest"},
                 "group": "g",
+                "require_fresh_reviewer": True,
             },
             cell.id,
             fake_handle_command,
@@ -241,11 +255,12 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                     "cmd": "ai_report",
                     "cell_id": "agent-1",
                     "action": "derive",
-                    "message": "Implement follow-up",
+                    "message": "Review follow-up",
                     "description": "Keep the matrix current.",
-                    "action_name": "feature/implement",
+                    "action_name": "feature/review",
                     "action_vars": {"TEST_COMMAND": "python3 -m unittest"},
                     "group": "g",
+                    "require_fresh_reviewer": True,
                 },
             ],
         )

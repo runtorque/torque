@@ -26,6 +26,8 @@ from ..external_tickets import (
 from ..mcp_canonical import canonical_tool_name
 from ..server_review import (
     _apply_reviewer_reuse_assignment,
+    _fresh_reviewer_seat_available,
+    _fresh_reviewer_unavailable_error,
     _prior_review_task_ids_for_agent,
     _reviewer_reuse_assignment,
 )
@@ -1141,11 +1143,15 @@ async def handle_ai_report_command(
                 "explicit_target" if target_agent else ""
             )
             reviewer_reuse = None
+            require_fresh_reviewer = (
+                data.get("require_fresh_reviewer") is True
+            )
             if (
                 task
                 and not target_agent
                 and str(act_name or "").strip().lower()
                 == _REVIEW_GATE_ACTION
+                and not require_fresh_reviewer
             ):
                 prior_reviewer = \
                     _prior_live_reviewer_agent_for_chain(
@@ -1179,6 +1185,16 @@ async def handle_ai_report_command(
                 result = {"type": "error",
                           "message":
                               "Derive requires a description"}
+            elif require_fresh_reviewer and (
+                    str(act_name or "").strip().lower()
+                    != _REVIEW_GATE_ACTION):
+                result = {
+                    "type": "error",
+                    "message": (
+                        "require_fresh_reviewer is valid only for "
+                        "feature/review derives"
+                    ),
+                }
             else:
                 # Validate transition
                 base_dir = cell.worktree_repo_root \
@@ -1238,6 +1254,19 @@ async def handle_ai_report_command(
                                 f"({max_d}) reached"}
                     elif stale_base_rejection:
                         result = stale_base_rejection
+                    elif (
+                            require_fresh_reviewer
+                            and not target_agent
+                            and not _fresh_reviewer_seat_available(
+                                state,
+                                derive_group or task.group,
+                            )
+                    ):
+                        result = _fresh_reviewer_unavailable_error(
+                            state,
+                            task,
+                            derive_group or task.group,
+                        )
                     else:
                         # Keep parent in In Progress;
                         # update its status from transition
@@ -1487,7 +1516,8 @@ async def handle_ai_report_command(
                                 # re-review). Otherwise keep the
                                 # normal fresh-agent behavior.
                                 reuse_self = False
-                                if not target_agent:
+                                if not target_agent \
+                                        and not require_fresh_reviewer:
                                     ancestor_agent = \
                                         _nearest_ancestor_agent_for_action_stage(
                                             state,
