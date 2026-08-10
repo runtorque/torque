@@ -157,7 +157,7 @@ def worker_boot_doa_timeout_seconds() -> float:
 
 def worker_has_post_boot_activity(event_log: "EventLog", panel_log, *,
                                   cell_id: str, started_at: float) -> bool:
-    """Return whether Torque-observable activity followed ``started_at``.
+    """Return whether Torque-observable activity followed dispatch.
 
     The per-cell event view ignores ``session_start``, ``heartbeat``, and
     ``context_update``; the global panel view ignores ``agent_started``,
@@ -207,7 +207,7 @@ def emit_worker_boot_doa_if_inactive(state, event_log: "EventLog", panel_log,
                                      cell, *, started_at: float,
                                      timeout_seconds: float | None = None,
                                      now: float | None = None) -> bool:
-    """Escalate workers with no Torque-observable post-session activity.
+    """Escalate workers with no Torque-observable post-dispatch activity.
 
     Recovery tradeoff: Torque deliberately does **not** retry the dispatch
     prompt or auto-close/relaunch here. A duplicate prompt can corrupt a slow
@@ -252,8 +252,8 @@ def emit_worker_boot_doa_if_inactive(state, event_log: "EventLog", panel_log,
         return False
 
     message = (
-        f"Worker boot DOA: {cell.name} started {int(timeout)}s ago "
-        "but posted no Torque-observable activity after session start. "
+        f"Worker boot DOA: {cell.name} was dispatched {int(timeout)}s ago "
+        "but posted no Torque-observable activity after dispatch. "
         "Inspect the worker and "
         "re-dispatch or relaunch if needed."
     )
@@ -853,8 +853,6 @@ class EventBus:
         if cell.status != prev_status or clocks_changed:
             self._state._db_save_agent(cell)
         self._log.append(event)
-        if event.event_type == "session_start":
-            self._schedule_worker_boot_doa_check(cell, event.timestamp)
         log.debug("Event: cell='%s' type=%s activity='%s' detail='%s'",
                   cell.name, event.event_type, cell.activity,
                   cell.activity_detail[:50] if cell.activity_detail else "")
@@ -921,8 +919,12 @@ class EventBus:
             and event_session_id != current_session_id
         )
 
-    def _schedule_worker_boot_doa_check(self, cell, started_at: float):
-        """Schedule the safe boot-DOA escalation check for worker sessions."""
+    def arm_worker_boot_doa_watchdog(self, cell, dispatched_at: float | None = None):
+        """Arm the boot-DOA check after daemon-side dispatch completion.
+
+        This deliberately does not depend on the provider ``session_start``
+        hook: resumed Codex sessions do not emit that hook.
+        """
         if _cell_kind(cell) != "worker":
             return
         timeout = worker_boot_doa_timeout_seconds()
@@ -941,7 +943,7 @@ class EventBus:
             timeout,
             self._run_worker_boot_doa_check,
             cell.id,
-            float(started_at or 0.0),
+            float(time.time() if dispatched_at is None else dispatched_at),
             timeout,
         )
 

@@ -108,6 +108,101 @@ def _write_rollout(
 
 
 class CodexUsageBackfillTests(unittest.TestCase):
+    def test_refresh_does_not_infer_owner_session_during_provisioning(self):
+        """A deterministic provisioning callback reproduces the race window."""
+        with tempfile.TemporaryDirectory() as tmp:
+            codex_home = Path(tmp) / "codex"
+            shared_root = Path(tmp) / "repo"
+            shared_root.mkdir()
+            _write_rollout(
+                codex_home,
+                session_id=_CODEX_SESSION_ID,
+                cwd=str(shared_root),
+            )
+            owner = _codex_cell(
+                "owner",
+                status="running",
+                session_id="owner-pty",
+            )
+            owner.directory = str(shared_root)
+            worker = _codex_cell(
+                "new-worker",
+                status="stopped",
+                session_id=None,
+                agent_session_id="",
+            )
+            worker.directory = str(shared_root)
+            state = _make_state(owner, worker)
+
+            def provision(on_cell_created):
+                # The daemon creates the cell before assigning its PTY session
+                # and provisioned worktree.  The callback is the barrier: the
+                # refresh runs at that exact interleave, without sleeps.
+                on_cell_created()
+                worker.session_id = "worker-pty"
+
+            reports = []
+            provision(lambda: reports.append(
+                refresh_codex_provider_usage_for_agents(
+                    state,
+                    codex_home=codex_home,
+                )
+            ))
+
+        self.assertEqual(worker.agent_session_id, "")
+        self.assertEqual(
+            reports[0].skipped["no_torque_session_id_for_inference"],
+            1,
+        )
+
+    def test_refresh_rejects_provider_session_owned_by_other_live_cell(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            codex_home = Path(tmp) / "codex"
+            shared_root = Path(tmp) / "repo"
+            shared_root.mkdir()
+            _write_rollout(codex_home, cwd=str(shared_root))
+            owner = _codex_cell(
+                "owner", status="running", session_id="owner-pty")
+            owner.directory = str(shared_root)
+            target = _codex_cell(
+                "target",
+                status="running",
+                session_id="target-pty",
+                agent_session_id="",
+            )
+            target.directory = str(shared_root)
+            state = _make_state(owner, target)
+
+            report = refresh_codex_provider_usage_for_agents(
+                state,
+                codex_home=codex_home,
+            )
+
+        self.assertEqual(target.agent_session_id, "")
+        self.assertEqual(
+            report.skipped["provider_session_owned_by_live_cell"], 1)
+
+    def test_refresh_preserves_persisted_same_cell_resume(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            codex_home = Path(tmp) / "codex"
+            _write_rollout(codex_home)
+            cell = _codex_cell(
+                "resuming",
+                status="stopped",
+                session_id=None,
+                agent_session_id=_CODEX_SESSION_ID,
+            )
+            state = _make_state(cell)
+
+            report = refresh_codex_provider_usage_for_agents(
+                state,
+                codex_home=codex_home,
+            )
+
+        self.assertEqual(report.changed, 1)
+        self.assertEqual(cell.agent_session_id, _CODEX_SESSION_ID)
+        self.assertEqual(cell.context_window["session_id"], _CODEX_SESSION_ID)
+
     def test_backfills_dormant_codex_provider_usage_from_matching_rollout(self):
         with tempfile.TemporaryDirectory() as tmp:
             codex_home = Path(tmp)
@@ -262,10 +357,12 @@ class CodexUsageBackfillTests(unittest.TestCase):
             )
 
         self.assertEqual(report.changed, 1, "context_window still refreshes")
-        self.assertEqual(report.skipped["no_agent_session_id"], 1)
+        self.assertEqual(
+            report.skipped["no_torque_session_id_for_inference"], 1)
         self.assertEqual(report.skipped["no_rollout"], 1)
         self.assertIn("Backfilled 1 / skipped 2", report.summary())
-        self.assertIn("no_agent_session_id=1", report.summary())
+        self.assertIn(
+            "no_torque_session_id_for_inference=1", report.summary())
         self.assertIn("no_rollout=1", report.summary())
         self.assertEqual(second.changed, 0)
         self.assertEqual(second.skipped["no_rate_limits"], 1)
@@ -364,4 +461,3 @@ class CodexUsageBackfillTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

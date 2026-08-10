@@ -3116,6 +3116,7 @@ def _build_task_dispatch_runtime(
     build_postscript,
     create_agent_with_config,
     create_child_terminals,
+    event_bus,
     panel_event,
     record_task_dispatch,
     resolve_base_dir,
@@ -3128,6 +3129,11 @@ def _build_task_dispatch_runtime(
 ) -> TaskDispatchRuntime:
     """Compose runtime integrations for task dispatch."""
     return TaskDispatchRuntime(
+        arm_worker_boot_doa_watchdog=getattr(
+            event_bus,
+            "arm_worker_boot_doa_watchdog",
+            lambda _cell: None,
+        ),
         agent_can_receive_dispatch=_agent_can_receive_dispatch,
         agent_dismissed_at=_agent_dismissed_at,
         append_task_artifacts=_append_task_artifacts,
@@ -5414,7 +5420,7 @@ async def main(connection=None):
                         build_dispatch_persistent_prompt=_build_dispatch_persistent_prompt,
                         build_postscript=_build_postscript,
                         create_agent_with_config=_create_agent_with_config,
-                        create_child_terminals=_create_child_terminals,
+                        create_child_terminals=_create_child_terminals, event_bus=event_bus,
                         panel_event=_panel_event,
                         record_task_dispatch=_record_task_dispatch,
                         resolve_base_dir=_resolve_base_dir,

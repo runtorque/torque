@@ -876,7 +876,7 @@ asyncio.run(main())
         self.assertTrue(cell.needs_attention)
         self.assertIn("Worker boot DOA", cell.error_message)
         self.assertIn(
-            "no Torque-observable activity after session start",
+            "no Torque-observable activity after dispatch",
             cell.error_message,
         )
         events = panel_log.get_recent()
@@ -1020,25 +1020,31 @@ asyncio.run(main())
         state.board_tasks[task.id] = task
         return state, cell, task
 
-    async def test_worker_boot_doa_timer_escalates_on_scheduled_path(self):
-        """End-to-end: the EventBus timer scheduled on session_start fires the
-        escalation when the worker posts no activity within the window."""
+    async def test_worker_boot_doa_timer_fires_without_session_start(self):
+        """Daemon dispatch arms the watchdog even when no hook arrives."""
         state, cell, task = self._boot_doa_worker_state()
         panel_log = self.events_mod.PanelEventLog()
         bus = self.events_mod.EventBus(
             state, self.events_mod.EventLog(), panel_log=panel_log)
-        bus.start()
+        scheduled = []
+        loop = mock.Mock()
+        loop.call_later.side_effect = (
+            lambda _delay, callback, *args: scheduled.append(
+                (callback, args)) or mock.Mock()
+        )
+        bus._loop = loop
 
         with mock.patch.dict(
-                os.environ, {self.events_mod.WORKER_BOOT_DOA_ENV: "0.05"}):
-            await bus.emit(self.base_mod.AgentEvent(
-                cell_id=cell.id, timestamp=0.0,
-                event_type="session_start", data={}))
-            # Timer is armed but escalation has not fired yet.
-            self.assertIn(cell.id, bus._boot_doa_timers)
+                os.environ, {self.events_mod.WORKER_BOOT_DOA_ENV: "60"}), \
+                mock.patch.object(
+                    self.events_mod.time, "time", return_value=161.0):
+            bus.arm_worker_boot_doa_watchdog(cell, dispatched_at=100.0)
+            self.assertEqual(bus._log.get(cell.id), [])
+            self.assertEqual(len(scheduled), 1)
             self.assertFalse(cell.needs_attention)
-            # Advance past the watchdog window with no worker activity.
-            await asyncio.sleep(0.15)
+            bus._loop = None
+            callback, args = scheduled[0]
+            callback(*args)
 
         self.assertTrue(cell.needs_attention)
         self.assertIn("Worker boot DOA", cell.error_message)
@@ -1059,9 +1065,7 @@ asyncio.run(main())
 
         with mock.patch.dict(
                 os.environ, {self.events_mod.WORKER_BOOT_DOA_ENV: "0.05"}):
-            await bus.emit(self.base_mod.AgentEvent(
-                cell_id=cell.id, timestamp=0.0,
-                event_type="session_start", data={}))
+            bus.arm_worker_boot_doa_watchdog(cell, dispatched_at=0.0)
             # Worker posts real activity before the window elapses.
             await bus.emit(self.base_mod.AgentEvent(
                 cell_id=cell.id, timestamp=1.0,
