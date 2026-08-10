@@ -276,6 +276,109 @@ class TorqueDoctorTests(unittest.TestCase):
         self.assertIn(f"landed: {landed} task=TORQUE:landed", rendered)
         self.assertIn("[nested_branch_cleanup]", rendered)
         self.assertIn("total/ancestral/non_ancestral: 4/3/1", rendered)
+    def test_doctor_reports_stranded_roots_via_canonical_boundary_gate(self):
+        superseded = {
+            "status": "superseded",
+            "reason": "abandoned_for_pipeline_reroute",
+            "superseded_by_task_id": "other-root:replacement",
+            "code_delta": {"state": "present"},
+        }
+        legacy_unclassified = {"status": "open", "commit_sha": "legacy"}
+        tasks = [
+            BoardTask(id="root-1", task="First root", lane="In Progress"),
+            BoardTask(
+                id="root-1:old-review",
+                task="Archived reroute victim",
+                lane="Archived",
+                parent_task_id="root-1",
+                pipeline_depth=1,
+                pipeline_root_id="root-1",
+                worktree_boundary=superseded,
+            ),
+            BoardTask(
+                id="root-1:other-boundary",
+                task="Second boundary on same root",
+                lane="In Progress",
+                parent_task_id="root-1",
+                pipeline_depth=1,
+                pipeline_root_id="root-1",
+                worktree_boundary={
+                    "status": "open",
+                    "code_delta": {"state": "unknown"},
+                },
+            ),
+            BoardTask(id="root-2", task="Second root", lane="Backlog"),
+            BoardTask(
+                id="root-2:legacy",
+                task="Legacy boundary",
+                lane="Done",
+                parent_task_id="root-2",
+                pipeline_depth=1,
+                pipeline_root_id="root-2",
+                worktree_boundary=legacy_unclassified,
+            ),
+        ]
+        self.db.save_board_tasks(tasks)
+        reroute_before = self.db._conn.execute(
+            "SELECT lane, worktree_boundary FROM board_tasks WHERE id=?",
+            ("root-1:old-review",),
+        ).fetchone()
+
+        report = build_doctor_report_for_db(self.db_path)
+        section = report["stranded_code_boundary_roots"]
+        reroute_after = self.db._conn.execute(
+            "SELECT lane, worktree_boundary FROM board_tasks WHERE id=?",
+            ("root-1:old-review",),
+        ).fetchone()
+
+        self.assertEqual(section["root_count"], 2)
+        self.assertEqual(section["root_ids"], ["root-1", "root-2"])
+        self.assertEqual(len(section["roots"][0]["blocking"]), 2)
+        self.assertIn(
+            "root-1:old-review",
+            [entry["task_id"] for entry in section["roots"][0]["blocking"]],
+        )
+        self.assertEqual(
+            section["roots"][1]["blocking"][0]["state"],
+            "legacy_unclassified",
+        )
+        self.assertIn("[stranded_code_boundary_roots]", format_doctor_report(report))
+        self.assertIn("roots=2 (root-1, root-2)", format_doctor_report(report))
+        self.assertEqual(reroute_before, reroute_after)
+
+    def test_doctor_excludes_completed_roots_and_never_mutates_reroute_evidence(self):
+        boundary = {
+            "status": "superseded",
+            "reason": "abandoned_for_pipeline_reroute",
+            "superseded_by_task_id": "other-root:review",
+            "code_delta": {"state": "present"},
+        }
+        tasks = []
+        for root_id, lane in (("done-root", "Done"), ("archived-root", "Archived")):
+            tasks.extend([
+                BoardTask(id=root_id, task=root_id, lane=lane),
+                BoardTask(
+                    id=f"{root_id}:victim",
+                    task="Reroute victim",
+                    lane="Archived",
+                    parent_task_id=root_id,
+                    pipeline_depth=1,
+                    pipeline_root_id=root_id,
+                    worktree_boundary=dict(boundary),
+                ),
+            ])
+        self.db.save_board_tasks(tasks)
+        before = self.db._conn.execute(
+            "SELECT id, lane, worktree_boundary FROM board_tasks ORDER BY id"
+        ).fetchall()
+
+        report = build_doctor_report_for_db(self.db_path)
+
+        after = self.db._conn.execute(
+            "SELECT id, lane, worktree_boundary FROM board_tasks ORDER BY id"
+        ).fetchall()
+        self.assertEqual(report["stranded_code_boundary_roots"]["root_count"], 0)
+        self.assertEqual(before, after)
 
     def test_pty_supervisor_check_status_matrix(self):
         from torque.doctor import _check_pty_supervisor_reachable

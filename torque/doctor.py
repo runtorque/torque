@@ -24,6 +24,7 @@ from .agent_classes import (
     validate_all_agent_classes,
 )
 from .mcp_idempotency import collect_mcp_idempotency_storage_stats
+from .worktree_boundaries import code_boundary_done_status
 from .doctor_agent_classes import (
     collect_frozen_missing_tools,
     format_frozen_missing_tools_warning,
@@ -1850,6 +1851,85 @@ def _warn_stuck_input_sessions(report: dict) -> dict | None:
     }
 
 
+def _collect_stranded_code_boundary_roots_section(
+    conn: sqlite3.Connection,
+) -> dict:
+    """Report actionable roots whose canonical code-boundary Done gate blocks.
+
+    All task rows are loaded, including archived children, because boundary
+    evidence remains pipeline evidence after a child is archived.  Completed
+    or archived roots are excluded: their Done transition is no longer an
+    actionable gate.  This collector is deliberately read-only; in particular
+    rerouted/superseded evidence is reported, never repaired or stamped.
+    """
+    empty = {"root_count": 0, "root_ids": [], "roots": []}
+    if not _table_exists(conn, "board_tasks"):
+        return empty
+    required = ("id", "lane", "pipeline_root_id", "worktree_boundary")
+    if not all(_column_exists(conn, "board_tasks", column) for column in required):
+        return empty
+    try:
+        rows = conn.execute(
+            "SELECT id, lane, pipeline_root_id, worktree_boundary "
+            "FROM board_tasks"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return empty
+
+    tasks = []
+    by_id = {}
+    for task_id, lane, pipeline_root_id, raw_boundary in rows:
+        try:
+            boundary = json.loads(raw_boundary or "{}")
+        except (json.JSONDecodeError, TypeError):
+            boundary = {}
+        if not isinstance(boundary, dict):
+            boundary = {}
+        task = SimpleNamespace(
+            id=str(task_id or ""),
+            lane=str(lane or ""),
+            pipeline_root_id=str(pipeline_root_id or ""),
+            worktree_boundary=boundary,
+        )
+        tasks.append(task)
+        by_id[task.id] = task
+
+    chains = {}
+    for task in tasks:
+        root_id = task.pipeline_root_id or task.id
+        chains.setdefault(root_id, []).append(task)
+
+    stranded = []
+    for root_id in sorted(chains):
+        root = by_id.get(root_id)
+        if root is None or root.lane.strip().lower() in {"done", "archived"}:
+            continue
+        gate = code_boundary_done_status(chains[root_id])
+        if gate["eligible"]:
+            continue
+        stranded.append({
+            "root_id": root_id,
+            "root_lane": root.lane,
+            "blocking": list(gate.get("blocking", []) or []),
+        })
+    return {
+        "root_count": len(stranded),
+        "root_ids": [entry["root_id"] for entry in stranded],
+        "roots": stranded,
+    }
+
+
+def _warn_stranded_code_boundary_roots(report: dict) -> dict | None:
+    section = report.get("stranded_code_boundary_roots", {}) or {}
+    if not int(section.get("root_count", 0) or 0):
+        return None
+    return {
+        "name": "stranded_code_boundary_roots",
+        "status": "warn",
+        "details": section,
+    }
+
+
 _DOCTOR_CHECKS = [
     _check_migration_version,
     _check_unmigrated_agents,
@@ -1864,6 +1944,7 @@ _DOCTOR_CHECKS = [
 ]
 
 _DOCTOR_WARNINGS = [
+    _warn_stranded_code_boundary_roots,
     _warn_unassigned_tasks_when_engineer_present,
     _warn_task_aliases_missing_canonical,
     doctor_artifacts.task_artifact_id_collision_warning,
@@ -1912,6 +1993,9 @@ def build_doctor_report(
         ),
         "agents": agents,
         "tasks": tasks,
+        "stranded_code_boundary_roots": (
+            _collect_stranded_code_boundary_roots_section(conn)
+        ),
         "task_artifact_ids": doctor_artifacts.collect_task_artifact_id_section(
             conn, table_exists=_table_exists, column_exists=_column_exists),
         "task_aliases": _collect_task_aliases_section(conn),
@@ -2029,6 +2113,7 @@ def format_doctor_report(report: dict) -> str:
     pending_hires = report.get("pending_hires", {}) or {}
     worktrees = report.get("worktrees", {}) or {}
     tasks = report.get("tasks", {})
+    stranded_roots = report.get("stranded_code_boundary_roots", {}) or {}
     task_aliases = report.get("task_aliases", {}) or {}
     mcp_health = report.get("mcp_health", {}) or {}
     mcp_idempotency_storage = report.get("mcp_idempotency_storage", {}) or {}
@@ -2167,6 +2252,12 @@ def format_doctor_report(report: dict) -> str:
         "  unassigned_when_engineer_present: "
         f"{int(tasks.get('unassigned_when_engineer_present', 0) or 0)}",
         *doctor_artifacts.format_task_artifact_id_section(report.get("task_artifact_ids", {})),
+        "",
+        "[stranded_code_boundary_roots]",
+        "  root_count:  "
+        f"{int(stranded_roots.get('root_count', 0) or 0)}",
+        "  root_ids:    "
+        f"{', '.join(list(stranded_roots.get('root_ids', []) or [])) or '(none)'}",
         "",
         "[task_aliases]",
         f"  total:                         {int(task_aliases.get('total', 0) or 0)}",
@@ -2346,6 +2437,15 @@ def format_doctor_report(report: dict) -> str:
                 lines.append(
                     "  - engineer present but unassigned tasks remain: "
                     f"{details.get('count', 0)}"
+                )
+            elif name == "stranded_code_boundary_roots":
+                root_ids = ", ".join(details.get("root_ids", []) or [])
+                lines.append(
+                    "  - actionable pipeline roots are blocked by persisted "
+                    "code-boundary evidence: "
+                    f"roots={int(details.get('root_count', 0) or 0)}"
+                    + (f" ({root_ids})" if root_ids else "")
+                    + "; report only—review merge/reroute evidence manually"
                 )
             elif name == "mcp_idempotency_storage_bloat":
                 table_bytes = details.get("table_bytes")
