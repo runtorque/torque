@@ -365,7 +365,7 @@ function _terminalShouldShowTabs(cells) {
 
 function renderTerminalWorkspace(opts) {
   opts = opts || {};
-  const component = String(opts.component || 'all');
+  let component = String(opts.component || 'all');
   const root = document.getElementById('terminal-workspace');
   if (!root) return;
   if (component === 'all' || component === 'composer') {
@@ -404,6 +404,20 @@ function renderTerminalWorkspace(opts) {
     : null;
   const displayPath = _terminalDisplayPath(cell);
   const dom = _ensureTerminalWorkspaceDom(root);
+  const componentBindingOwner = dom.shell || root;
+  const cellId = String((cell && cell.id) || '');
+  // A terminal invalidation normally owns only terminal chrome/status/xterm.
+  // Selection can change in the delta application immediately before that
+  // invalidation (focus_update, selected_agent_id, active-group fallback, or
+  // removal of the viewed cell). In that case the sibling components are not
+  // merely stale data: their handlers still target the old agent. Upgrade this
+  // one refresh to the deliberate full selection render. The marker lives on
+  // the shell so recreating the DOM cannot accidentally inherit an old binding.
+  if (component === 'terminal'
+      && (!Object.prototype.hasOwnProperty.call(componentBindingOwner, '_torqueRenderedCellId')
+        || String(componentBindingOwner._torqueRenderedCellId || '') !== cellId)) {
+    component = 'all';
+  }
   // Direct messages and the composer are interactive components in their own
   // right. Targeted refreshes stop here instead of entering the terminal's
   // render/capture/restore cycle (and, critically, instead of calling the
@@ -468,6 +482,7 @@ function renderTerminalWorkspace(opts) {
     if (!terminalOnly) {
       _renderTerminalDirectMessages(dom.directMessages, null);
       _renderTerminalCompose(dom.compose, null);
+      componentBindingOwner._torqueRenderedCellId = cellId;
     }
     const emptyHtml = ''
       + '<div class="terminal-empty ui-state ui-state--empty ui-state--fill">'
@@ -493,6 +508,7 @@ function renderTerminalWorkspace(opts) {
     if (!terminalOnly) {
       _renderTerminalDirectMessages(dom.directMessages, cell);
       _renderTerminalCompose(dom.compose, cell);
+      componentBindingOwner._torqueRenderedCellId = cellId;
     }
     const stoppedHtml = cell.cell_type === 'terminal'
       ? ''
@@ -547,6 +563,7 @@ function renderTerminalWorkspace(opts) {
   if (!terminalOnly) {
     _renderTerminalDirectMessages(dom.directMessages, cell);
     _renderTerminalCompose(dom.compose, cell);
+    componentBindingOwner._torqueRenderedCellId = cellId;
   }
   const statusText = (displayPath || 'No directory') + '  |  ' + _terminalStatusLabel(cell);
   if (dom.statusbar.textContent !== statusText) dom.statusbar.textContent = statusText;

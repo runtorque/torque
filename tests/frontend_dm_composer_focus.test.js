@@ -31,6 +31,7 @@ function buildHarness() {
     contains(node) { return node && node.inTerminalWorkspace === true; },
   };
   const dom = {
+    shell: {},
     topbar: { _torqueLastHtml: '', innerHTML: '' },
     tabs: null,
     stage: { _torqueLastHtml: null },
@@ -129,6 +130,7 @@ function buildHarness() {
       sandbox._restoreTerminalWorkspaceState = function() {};
       sandbox._restoreTerminalWorkspaceTerminalState = function() {};
       sandbox._renderCycleComponent = component || '';
+      if (component) dom.shell._torqueRenderedCellId = 'agent-1';
       vm.runInContext(
         '_renderCycleComponent'
           + " ? renderTerminalWorkspace({ component: _renderCycleComponent })"
