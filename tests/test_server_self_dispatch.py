@@ -5796,7 +5796,10 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(local_cleanup["branch_delete_returncode"], 1)
         self.assertEqual(local_cleanup["force_delete_returncode"], 0)
 
-    async def test_worktree_merge_pr_local_base_match_remote_mismatch_does_not_authorize_force_delete(self):
+    async def _assert_failed_sync_does_not_authorize_force_delete(
+        self,
+        failed_sync,
+    ):
         state, worker, _task = self._make_pr_merge_state()
         cleanup_calls = []
         worktree_mgr = self._FakePrWorktreeManager({
@@ -5811,16 +5814,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             "pr_status": {"ok": True, "state": "MERGED"},
         }, sync_results=[
             {"ok": True, "phase": "remote_base_sync", "synced": False},
-            {
-                "ok": False,
-                "phase": "remote_base_sync",
-                "remote": "origin",
-                "base_branch": "main",
-                "base_sha": "squash789",
-                "remote_sha": "different-origin-main",
-                "synced": False,
-                "error": "remote base diverged",
-            },
+            failed_sync,
         ])
 
         async def fake_cleanup_after_merge(
@@ -5870,6 +5864,41 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         cleanup = result["cleanup"]["local_branch_cleanup"]
         self.assertFalse(cleanup["branch_deleted"])
         self.assertNotIn("force_delete_returncode", cleanup)
+
+    async def test_worktree_merge_pr_local_base_match_remote_mismatch_does_not_authorize_force_delete(self):
+        await self._assert_failed_sync_does_not_authorize_force_delete({
+            "ok": False,
+            "phase": "remote_base_sync",
+            "remote": "origin",
+            "base_branch": "main",
+            "base_sha": "squash789",
+            "remote_sha": "different-origin-main",
+            "synced": False,
+            "error": "remote base diverged",
+        })
+
+    async def test_worktree_merge_pr_failed_sync_remote_match_divergent_base_does_not_authorize_force_delete(self):
+        await self._assert_failed_sync_does_not_authorize_force_delete({
+            "ok": False,
+            "phase": "remote_base_sync",
+            "remote": "origin",
+            "base_branch": "main",
+            "base_sha": "old-local-main",
+            "remote_sha": "squash789",
+            "synced": False,
+            "error": "local update-ref failed",
+        })
+
+    async def test_worktree_merge_pr_failed_base_only_match_does_not_authorize_force_delete(self):
+        await self._assert_failed_sync_does_not_authorize_force_delete({
+            "ok": False,
+            "phase": "remote_base_sync",
+            "remote": "origin",
+            "base_branch": "main",
+            "base_sha": "squash789",
+            "synced": False,
+            "error": "remote read failed",
+        })
 
     async def test_worktree_merge_pr_default_keep_warm_preserves_cleanup(self):
         state, worker, task = self._make_pr_merge_state()

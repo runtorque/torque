@@ -1039,6 +1039,7 @@ def _origin_verification_evidence(
     source = ""
     matched_sha = ""
     result = None
+    verified = False
 
     def _verified_remote_match(match: dict | None) -> bool:
         """Require remote truth, not a coincidentally matching local base ref."""
@@ -1066,6 +1067,7 @@ def _origin_verification_evidence(
     if guard.get("ok"):
         match = guard.get("base_match")
         if _verified_remote_match(match):
+            verified = True
             matched_sha = str(match.get("sha") or "").strip()
             source = str(match.get("source") or "authoritative_guard").strip()
             result = match.get("result") if isinstance(
@@ -1081,6 +1083,7 @@ def _origin_verification_evidence(
     if not matched_sha and isinstance(post_merge_sync, dict):
         match = _base_match_from_result(post_merge_sync, merge_sha)
         if _verified_remote_match(match):
+            verified = True
             matched_sha = str(match.get("sha") or "").strip()
             source = str(match.get("source") or "remote_base_sync").strip()
             result = post_merge_sync
@@ -1098,7 +1101,6 @@ def _origin_verification_evidence(
         if not source:
             source = str(post_merge_sync.get("phase") or "remote_base_sync")
 
-    verified = bool(merge_sha and matched_sha and _sha_equal(matched_sha, merge_sha))
     origin_ref = ""
     if remote and base_branch:
         origin_ref = f"{remote}/{base_branch}"
