@@ -326,34 +326,18 @@ def _stale_base_packet(boundary: dict, pr: dict) -> dict:
 def _current_head_packet(*, reviewed_sha: str, branch_advanced: bool,
                          boundary: dict, pr: dict,
                          readiness: dict) -> dict:
+    # Boundary and PR head SHAs describe the branch when those records were
+    # written.  They are useful historical metadata, but they do not verify
+    # the branch ref now and must never be promoted to the authoritative head.
+    _ = boundary, pr
     readiness_branch_head = ""
     if str((readiness or {}).get("source", "") or "").strip() == (
             "merge_readiness_check"):
         readiness_branch_head = str(
             (readiness or {}).get("branch_head", "") or ""
         ).strip()
-    pr_head_sha = str((pr or {}).get("head_sha", "") or "").strip()
-    current = str(
-        readiness_branch_head
-        or (boundary or {}).get("head_sha", "")
-        or (boundary or {}).get("current_head_sha", "")
-        or pr_head_sha
-        or ""
-    ).strip()
-    source = ""
-    if current:
-        if current == readiness_branch_head:
-            source = "merge_readiness_check"
-        elif current == str((boundary or {}).get("head_sha", "") or "").strip():
-            source = "merge_check"
-        elif current == str(
-            (boundary or {}).get("current_head_sha", "") or ""
-        ).strip():
-            source = "boundary_current_head"
-        else:
-            source = "pull_request"
-    else:
-        source = "unknown"
+    current = readiness_branch_head
+    source = "merge_readiness_check" if current else "unknown"
     return {
         "reviewed_boundary_sha": reviewed_sha,
         "current_branch_head_sha": current,

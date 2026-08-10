@@ -377,6 +377,9 @@ class WorktreeStreamTests(unittest.TestCase):
                 "base_branch": "main",
                 "status": "open",
                 "commit_sha": "reviewed123",
+                "head_sha": "reviewed123",
+                "current_head_sha": "reviewed123",
+                "pr": {"head_sha": "reviewed123"},
             },
             completion_evidence={
                 "review": {
@@ -433,6 +436,34 @@ class WorktreeStreamTests(unittest.TestCase):
         self.assertEqual(packet["review_final"]["verdict"], "ship")
         self.assertEqual(product.completion_evidence, evidence_before[product.id])
         self.assertEqual(review.completion_evidence, evidence_before[review.id])
+
+    def test_historical_heads_do_not_verify_current_branch_head(self):
+        unknown = {
+            "state": "unknown",
+            "stale": None,
+            "source": "merge_readiness_check_failed",
+        }
+        cases = (
+            ({"head_sha": "reviewed123"}, {}),
+            ({"current_head_sha": "reviewed123"}, {}),
+            ({}, {"head_sha": "reviewed123"}),
+        )
+        for boundary, pr in cases:
+            with self.subTest(boundary=boundary, pr=pr):
+                packet = self.streams_mod._current_head_packet(
+                    reviewed_sha="reviewed123",
+                    branch_advanced=False,
+                    boundary=boundary,
+                    pr=pr,
+                    readiness=unknown,
+                )
+                self.assertEqual(packet["reviewed_boundary_sha"], "reviewed123")
+                self.assertEqual(packet["current_branch_head_sha"], "")
+                self.assertEqual(
+                    packet["current_branch_head_sha_source"],
+                    "unknown",
+                )
+                self.assertFalse(packet["current_branch_head_sha_verified"])
 
     def test_merge_readiness_exposes_worker_attested_completion_deviation(self):
         state = self._make_state()
@@ -581,6 +612,7 @@ class WorktreeStreamTests(unittest.TestCase):
             "/repo", "torque/worker", "main", {
                 "state": "fresh", "stale": False,
                 "source": "merge_readiness_check", "merge_clean": True,
+                "branch_head": "reviewed-head",
             },
         )
 
@@ -660,6 +692,15 @@ class WorktreeStreamTests(unittest.TestCase):
         )
         state.board_tasks[product.id] = product
         state.board_tasks[review.id] = review
+        self.streams_mod._merge_readiness_cache_put(
+            "/repo", "torque/worker", "main", {
+                "state": "stale", "stale": True,
+                "source": "merge_readiness_check",
+                "base_advanced": True,
+                "merge_clean": True,
+                "branch_head": "reviewed-head",
+            },
+        )
 
         stream = self.streams_mod.compute_worktree_stream(
             state,
@@ -674,7 +715,10 @@ class WorktreeStreamTests(unittest.TestCase):
         packet = stream["merge_readiness"]
         self.assertEqual(packet["stale_base"]["state"], "stale")
         self.assertTrue(packet["stale_base"]["stale"])
-        self.assertEqual(packet["stale_base"]["source"], "boundary")
+        self.assertEqual(
+            packet["stale_base"]["source"],
+            "merge_readiness_check",
+        )
         self.assertEqual(packet["recommended_next_action"], "rebase")
         self.assertEqual(packet["recommended_tool"], "worktree_rebase")
         self.assertEqual(
@@ -704,6 +748,7 @@ class WorktreeStreamTests(unittest.TestCase):
                 "state": "stale", "stale": True,
                 "source": "merge_readiness_check", "base_advanced": True,
                 "merge_clean": False, "merge_conflict": True,
+                "branch_head": "reviewed-head",
             },
         )
 
