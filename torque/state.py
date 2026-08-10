@@ -2772,6 +2772,7 @@ class MatrixState(
         self.context_panel_split_ratio: float = 0.38
         self.supervisor_panel_state: dict = {}
         self.events_dismissed_attention: dict[str, float] = {}
+        self.mission_control_dismissed_cards: dict[str, float] = {}
         self.board_filters_by_group: dict[str, dict] = {}
         self.board_selected_lanes_by_group: dict[str, str] = {}
         self.board_hidden_wide_lanes_by_group: dict[str, dict] = {}

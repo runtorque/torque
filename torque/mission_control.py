@@ -25,6 +25,7 @@ from .worktree_streams import compute_worktree_streams
 VERSION = 1
 DEFAULT_LIMIT_PER_SECTION = 20
 DEFAULT_RECENT_COMPLETED_SECONDS = 7 * 24 * 60 * 60
+DEFAULT_REVIEW_RECENT_SECONDS = 24 * 60 * 60
 _FIXED_SECTION_KEYS = (
     "needs_operator_now",
     "at_risk_watchlist",
@@ -435,6 +436,68 @@ def _task_needs_review(task: Any) -> bool:
     return False
 
 
+def _task_has_live_review_seat(state: Any, task: Any) -> bool:
+    """Return whether the review is on the task's current running seat."""
+    agent_id = str(getattr(task, "agent_id", "") or "").strip()
+    agent = getattr(state, "agents", {}).get(agent_id) if agent_id else None
+    if not agent or str(getattr(agent, "status", "") or "") != "running":
+        return False
+    current_task_id = str(getattr(agent, "current_task_id", "") or "").strip()
+    return not current_task_id or current_task_id == str(getattr(task, "id", "") or "")
+
+
+def _task_moved_recently(
+    task: Any,
+    *,
+    now_ts: float,
+    recent_seconds: int = DEFAULT_REVIEW_RECENT_SECONDS,
+) -> bool:
+    updated_ts = _task_updated_ts(task)
+    return bool(updated_ts and updated_ts >= float(now_ts) - max(0, recent_seconds))
+
+
+def _review_signal_card(state: Any, task: Any, *, now_ts: float) -> tuple[str, dict]:
+    """Route agent review work to an honest agent-facing status section."""
+    live = _task_has_live_review_seat(state, task)
+    healthy = str(getattr(task, "health_state", "") or "healthy").strip() in {"", "healthy"}
+    recent = _task_moved_recently(task, now_ts=now_ts)
+    if live and healthy:
+        return "in_flight", _task_card(
+            state,
+            task,
+            card_id=f"mc:task:{task.id}:review_active",
+            kind="review",
+            gate="agent_review_active",
+            reason="Agent review work has a live worker seat.",
+            recommended_next_action="continue_agent_review",
+            evidence_chips=["review_signal", "live_seat"],
+            severity="low",
+            priority=30,
+        )
+    stale = not recent
+    return "at_risk_watchlist", _task_card(
+        state,
+        task,
+        card_id=f"mc:task:{task.id}:review_stalled",
+        kind="review",
+        gate="review_abandoned_or_stalled" if stale else "review_unstaffed",
+        reason=(
+            "Agent review work has no live seat and has not moved recently."
+            if stale else
+            "Agent review work has no live worker seat."
+        ),
+        recommended_next_action="inspect_review_pipeline",
+        evidence_chips=[
+            "review_signal",
+            "no_live_seat" if not live else "unhealthy_live_seat",
+            "stale_movement" if stale else "recent_movement",
+        ],
+        caveat_chips=["agent_work_not_operator_gate"],
+        severity="high" if stale else "medium",
+        priority=76 if stale else 58,
+    )
+
+
 def _board_sync_error_card(state: Any, task: Any) -> dict | None:
     board_sync = getattr(task, "board_sync", {}) or {}
     if not isinstance(board_sync, dict):
@@ -604,18 +667,13 @@ def build_mission_control_summary(
             needs_operator_now.append(card)
             seen_task_ids.update(card.get("task_ids", []))
         if _task_needs_review(task):
-            needs_operator_now.append(_task_card(
-                state,
-                task,
-                card_id=f"mc:task:{task.id}:review_needed",
-                kind="review",
-                gate="review_needed",
-                reason="An explicit review task or review boundary is open.",
-                recommended_next_action="run_review",
-                evidence_chips=["review_boundary_or_task"],
-                severity="high",
-                priority=84,
-            ))
+            review_section, review_card = _review_signal_card(
+                state, task, now_ts=float(now_ts),
+            )
+            if review_section == "in_flight":
+                in_flight.append(review_card)
+            else:
+                at_risk_watchlist.append(review_card)
             seen_task_ids.add(task.id)
         sync_card = _board_sync_error_card(state, task)
         if sync_card:
@@ -785,6 +843,12 @@ def build_mission_control_summary(
         "in_flight": _sort_cards(in_flight),
         "recently_completed": _sort_cards(recently_completed),
     }
+    dismissed = getattr(state, "mission_control_dismissed_cards", {}) or {}
+    if isinstance(dismissed, dict) and dismissed:
+        sorted_sections = {
+            key: [card for card in cards if card.get("id") not in dismissed]
+            for key, cards in sorted_sections.items()
+        }
     sections = {
         key: _limit_section(sorted_sections[key], limit)
         for key in _FIXED_SECTION_KEYS

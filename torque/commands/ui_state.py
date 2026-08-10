@@ -33,6 +33,7 @@ UI_STATE_COMMAND_NAMES = frozenset({
     "ui_set_context_panel_split",
     "ui_set_supervisor_panel_state",
     "events_dismiss",
+    "mission_control_dismiss",
     "board_set_filters",
     "board_set_selected_lanes",
     "board_set_hidden_wide_lanes",
@@ -434,6 +435,34 @@ def _handle_ui_state_command(data: dict, state: MatrixState):
             state._db_save_ui(
                 "events_dismissed_attention",
                 json.dumps(state.events_dismissed_attention),
+            )
+
+    elif cmd == "mission_control_dismiss":
+        card_id = str(data.get("id", "") or "").strip()
+        if not card_id:
+            result = {"type": "error", "message": "Missing Mission Control card id"}
+        else:
+            try:
+                timestamp = float(data.get("timestamp", 0) or 0)
+            except (TypeError, ValueError):
+                timestamp = 0.0
+            if timestamp <= 0:
+                timestamp = time.time()
+            dismissed_cards = getattr(
+                state, "mission_control_dismissed_cards", {},
+            )
+            if not isinstance(dismissed_cards, dict):
+                dismissed_cards = {}
+            dismissed_cards[card_id] = timestamp
+            state.mission_control_dismissed_cards = dismissed_cards
+            state._emit(
+                "ui_update",
+                key="mission_control_dismissed_cards",
+                value=state.mission_control_dismissed_cards,
+            )
+            state._db_save_ui(
+                "mission_control_dismissed_cards",
+                json.dumps(state.mission_control_dismissed_cards),
             )
 
     elif cmd == "board_set_filters":

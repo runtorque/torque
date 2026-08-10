@@ -1619,6 +1619,8 @@
   min-width: 0;
 }
 .mc-card-topline { justify-content: space-between; gap: 8px; }
+.mc-card-actions { display: inline-flex; align-items: center; gap: var(--space-1); flex: 0 0 auto; }
+.mc-card-dismiss { min-width: var(--control-height-sm); padding-inline: 0; }
 .mc-ref,
 .mc-card-kind {
   color: var(--muted);

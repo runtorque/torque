@@ -3439,6 +3439,20 @@ class TorqueDBTests(unittest.TestCase):
 
         self.assertEqual(loaded["events_dismissed_attention"], dismissed)
 
+    def test_load_all_restores_mission_control_dismissed_cards(self):
+        dismissed = {
+            "mc:task:TORQUE:1:ask": 123.0,
+            "mc:deploy:Torque:pending": 456.0,
+        }
+        self.db.save_ui_state(
+            "mission_control_dismissed_cards",
+            json.dumps(dismissed),
+        )
+
+        loaded = self.db.load_all()
+
+        self.assertEqual(loaded["mission_control_dismissed_cards"], dismissed)
+
     def test_load_all_restores_standalone_panel_layout(self):
         layout = {
             "version": 1,

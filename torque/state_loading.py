@@ -311,6 +311,10 @@ class StateLoadingMixin:
             self.events_dismissed_attention = data.get(
                 "events_dismissed_attention", {}
             ) or {}
+            dismissed_cards = data.get("mission_control_dismissed_cards", {})
+            self.mission_control_dismissed_cards = (
+                dismissed_cards if isinstance(dismissed_cards, dict) else {}
+            )
             self.board_filters_by_group = data.get(
                 "board_filters_by_group", {}
             ) or {}

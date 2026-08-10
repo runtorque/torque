@@ -1407,6 +1407,9 @@ function _applyUiSurfaceInvalidation(flags, key) {
   if (key === 'events_dismissed_attention') {
     _markSurface(flags, 'events');
   }
+  if (key === 'mission_control_dismissed_cards') {
+    _markSurface(flags, 'mission-control');
+  }
   if (key === 'board_filters_by_group'
       || key === 'board_selected_lanes_by_group'
       || key === 'board_hidden_wide_lanes_by_group'

@@ -1,8 +1,11 @@
 import importlib
+import json
+import tempfile
 import types
 import unittest
 from dataclasses import asdict
 from datetime import datetime, timezone
+from pathlib import Path
 
 try:
     from helpers import install_aiohttp_stub
@@ -73,7 +76,14 @@ class MissionControlSummaryTests(unittest.TestCase):
         self.assertEqual(before_agents, {aid: asdict(agent) for aid, agent in self.state.agents.items()})
         self.assertEqual(summary["source_freshness"]["tasks"]["state"], "ok")
 
-    def test_ready_to_merge_and_deploy_pending_are_operator_now(self):
+    def test_human_ask_is_operator_now(self):
+        task = self.add_task("Needs answer", id="human-ask", labels=["torque:human"])
+
+        ids = [card["id"] for card in self.cards(self.summary(), "needs_operator_now")]
+
+        self.assertIn(f"mc:task:{task.id}:ask", ids)
+
+    def test_ready_to_merge_stream_is_operator_now(self):
         stream = {
             "stream_id": "stream:repo:feature",
             "group": "Torque",
@@ -85,15 +95,35 @@ class MissionControlSummaryTests(unittest.TestCase):
             "foreground_task_title": "Feature",
             "last_activity_at": iso(self.now - 1),
         }
-        deploy = {"pending_deploy": {"count": 2, "torque_task_ids": ["TORQUE:9"]}}
-
-        summary = self.summary(streams=[stream], deploy_state=deploy)
+        summary = self.summary(streams=[stream])
 
         ids = [card["id"] for card in self.cards(summary, "needs_operator_now")]
         self.assertIn("mc:stream:stream:repo:feature:ready_to_merge", ids)
-        self.assertIn("mc:deploy:Torque:pending", ids)
         actions = {card["id"]: card["recommended_next_action"] for card in self.cards(summary, "needs_operator_now")}
         self.assertEqual(actions["mc:stream:stream:repo:feature:ready_to_merge"], "merge_ready_stream")
+
+    def test_awaiting_human_validation_stream_is_operator_now(self):
+        stream = {
+            "stream_id": "stream:repo:validation",
+            "group": "Torque",
+            "state": "awaiting_human_validation",
+            "product_task_ids": ["TORQUE:2"],
+            "foreground_task_id": "TORQUE:2",
+            "foreground_task_title": "Validate feature",
+            "last_activity_at": iso(self.now - 1),
+        }
+
+        cards = self.cards(self.summary(streams=[stream]), "needs_operator_now")
+
+        card = next(card for card in cards if card["stream_id"] == stream["stream_id"])
+        self.assertEqual(card["recommended_next_action"], "perform_live_smoke")
+
+    def test_deploy_pending_is_operator_now(self):
+        deploy = {"pending_deploy": {"count": 2, "torque_task_ids": ["TORQUE:9"]}}
+
+        summary = self.summary(deploy_state=deploy)
+
+        actions = {card["id"]: card["recommended_next_action"] for card in self.cards(summary, "needs_operator_now")}
         self.assertEqual(actions["mc:deploy:Torque:pending"], "record_deploy_or_relaunch")
 
     def test_unverified_head_state_requires_readiness_check(self):
@@ -242,19 +272,98 @@ class MissionControlSummaryTests(unittest.TestCase):
         hidden = self.summary(include_recent_completed=False)
         self.assertEqual(self.cards(hidden, "recently_completed"), [])
 
-    def test_review_needed_only_explicit_review_or_implemented_no_review_boundary(self):
+    def test_review_signal_routes_live_work_in_flight_and_stale_unstaffed_work_at_risk(self):
         review = self.add_task("Review it", id="review", action_name="feature/review")
+        review.updated_at = iso(self.now - (2 * 24 * 60 * 60))
         no_review_boundary = self.add_task("Implemented", id="impl")
         no_review_boundary.health_details = {"reasons": ["implemented_no_review_boundary"]}
+        no_review_boundary.updated_at = iso(self.now - 10)
+        open_boundary = self.add_task("Open boundary", id="open-boundary")
+        open_boundary.worktree_boundary = {"status": "awaiting-review"}
+        open_boundary.updated_at = iso(self.now - 10)
         branch_ahead_only = self.add_task("Branch ahead", id="ahead")
         branch_ahead_only.worktree_boundary = {"branch": "feature", "head_sha": "abc"}
+        live_review = self.add_task(
+            "Live review", id="live-review", action_name="feature/review",
+            agent_id="reviewer-1",
+        )
+        live_review.updated_at = iso(self.now - 60)
+        self.state.agents["reviewer-1"] = self.state_mod.AgentCell(
+            id="reviewer-1",
+            name="Reviewer",
+            group="Torque",
+            status="running",
+            current_task_id=live_review.id,
+        )
 
         summary = self.summary()
 
-        ids = [card["id"] for card in self.cards(summary, "needs_operator_now")]
-        self.assertIn(f"mc:task:{review.id}:review_needed", ids)
-        self.assertIn(f"mc:task:{no_review_boundary.id}:review_needed", ids)
-        self.assertNotIn(f"mc:task:{branch_ahead_only.id}:review_needed", ids)
+        operator_ids = [card["id"] for card in self.cards(summary, "needs_operator_now")]
+        self.assertFalse(any("review" in card_id for card_id in operator_ids))
+        risk = {card["primary_task_id"]: card for card in self.cards(summary, "at_risk_watchlist")}
+        self.assertEqual(risk[review.id]["gate"], "review_abandoned_or_stalled")
+        self.assertEqual(risk[no_review_boundary.id]["gate"], "review_unstaffed")
+        self.assertEqual(risk[open_boundary.id]["gate"], "review_unstaffed")
+        self.assertNotIn(branch_ahead_only.id, risk)
+        in_flight = {card["primary_task_id"]: card for card in self.cards(summary, "in_flight")}
+        self.assertEqual(in_flight[live_review.id]["gate"], "agent_review_active")
+
+    def test_feature_review_without_live_seat_is_never_operator_now(self):
+        task = self.add_task("Review without seat", id="no-seat", action_name="feature/review")
+        task.updated_at = iso(self.now - (8 * 24 * 60 * 60))
+
+        summary = self.summary()
+
+        self.assertNotIn(task.id, [
+            card["primary_task_id"]
+            for card in self.cards(summary, "needs_operator_now")
+        ])
+
+    def test_dismissed_card_stays_hidden_across_summary_rebuild(self):
+        task = self.add_task("Needs answer", id="dismiss-me", labels=["torque:human"])
+        card_id = f"mc:task:{task.id}:ask"
+        self.assertIn(card_id, [card["id"] for card in self.cards(self.summary(), "needs_operator_now")])
+
+        self.state.mission_control_dismissed_cards = {card_id: self.now}
+
+        first = self.summary()
+        second = self.summary()
+        self.assertNotIn(card_id, [card["id"] for card in self.cards(first, "needs_operator_now")])
+        self.assertNotIn(card_id, [card["id"] for card in self.cards(second, "needs_operator_now")])
+
+    def test_dismiss_command_persists_independent_cards_across_new_state_load(self):
+        from torque.commands.ui_state import _handle_ui_state_command
+        from torque.db import TorqueDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+        state = self.state_mod.MatrixState(db=db)
+        state.add_group("Torque")
+        one = state.board_add_task("Ask one", "Torque", id="ask-one", labels=["torque:human"])
+        two = state.board_add_task("Ask two", "Torque", id="ask-two", labels=["torque:human"])
+        one_id = f"mc:task:{one.id}:ask"
+        two_id = f"mc:task:{two.id}:ask"
+
+        _handle_ui_state_command({"cmd": "mission_control_dismiss", "id": one_id, "timestamp": self.now}, state)
+        _handle_ui_state_command({"cmd": "mission_control_dismiss", "id": two_id, "timestamp": self.now + 1}, state)
+
+        restored = self.state_mod.MatrixState(db=db)
+        restored.load()
+        self.assertEqual(restored.mission_control_dismissed_cards, {
+            one_id: self.now,
+            two_id: self.now + 1,
+        })
+        rebuilt = self.mc.build_mission_control_summary(
+            restored, group="Torque", now_ts=self.now, streams=[],
+        )
+        self.assertEqual(self.cards(rebuilt, "needs_operator_now"), [])
+        self.assertEqual(
+            json.loads(db.load_ui_state_value("mission_control_dismissed_cards")),
+            {one_id: self.now, two_id: self.now + 1},
+        )
 
     def test_in_flight_healthy_active_work_and_group_scope_no_peer_leakage(self):
         active = self.add_task("Active", id="active")

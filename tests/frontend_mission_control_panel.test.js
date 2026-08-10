@@ -304,6 +304,48 @@ test('Mission Control filter, collapse, selection, and rerender state are preser
   assert.doesNotMatch(html, /Feature stream/);
 });
 
+test('Mission Control dismisses only the chosen card and preserves rerender state', () => {
+  const { sandbox, document, sendCalls } = createSandbox();
+  const data = summary({
+    sections: {
+      needs_operator_now: { count: 2, items: [
+        card(),
+        card({
+          id: 'mc:task:TORQUE:4:ask',
+          title: 'Second operator question',
+          primary_task_id: 'TORQUE:4',
+          task_ids: ['TORQUE:4'],
+        }),
+      ], truncated: false },
+    },
+  });
+  vm.runInContext(`missionControlReceiveSummary(${JSON.stringify(data)})`, sandbox);
+  sendCalls.length = 0;
+  const filter = document.getElementById('mission-control-filter');
+  filter.value = 'operator';
+  filter.selectionStart = 2;
+  filter.selectionEnd = 5;
+  filter.focus();
+  const main = document.getElementById('mission-control-main');
+  main.scrollTop = 73;
+  vm.runInContext("_missionControlFilter = 'operator'; missionControlDismissCard('mc:task:TORQUE:1:ask')", sandbox);
+
+  const html = document.getElementById('panel-mission-control').innerHTML;
+  const restoredFilter = document.getElementById('mission-control-filter');
+  assert.equal(sendCalls.length, 1);
+  assert.equal(sendCalls[0].cmd, 'mission_control_dismiss');
+  assert.equal(sendCalls[0].id, 'mc:task:TORQUE:1:ask');
+  assert.equal(typeof sendCalls[0].timestamp, 'number');
+  assert.doesNotMatch(html, /Answer release question/);
+  assert.match(html, /Second operator question/);
+  assert.match(html, /operator gates: 1/);
+  assert.equal(restoredFilter.value, 'operator');
+  assert.equal(restoredFilter.selectionStart, 2);
+  assert.equal(restoredFilter.selectionEnd, 5);
+  assert.equal(document.activeElement, restoredFilter);
+  assert.equal(document.getElementById('mission-control-main').scrollTop, 73);
+});
+
 test('Mission Control side placement preserves workspace scroll and active filter during rerender', () => {
   const { sandbox, document } = createSandbox();
   vm.runInContext(`missionControlReceiveSummary(${JSON.stringify(summary())})`, sandbox);

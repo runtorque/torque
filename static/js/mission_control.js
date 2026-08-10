@@ -138,6 +138,28 @@ function missionControlSelectCard(cardId) {
   renderMissionControlPanel();
 }
 
+function _missionControlDismissedMap() {
+  if (!state || typeof state !== 'object') return {};
+  if (!state.mission_control_dismissed_cards
+      || typeof state.mission_control_dismissed_cards !== 'object') {
+    state.mission_control_dismissed_cards = {};
+  }
+  return state.mission_control_dismissed_cards;
+}
+
+function missionControlDismissCard(cardId) {
+  cardId = String(cardId || '').trim();
+  if (!cardId) return false;
+  var timestamp = Date.now() / 1000;
+  _missionControlDismissedMap()[cardId] = timestamp;
+  if (_missionControlSelectedCardId === cardId) _missionControlSelectedCardId = '';
+  if (typeof send === 'function') {
+    send({ cmd: 'mission_control_dismiss', id: cardId, timestamp: timestamp });
+  }
+  renderMissionControlPanel();
+  return true;
+}
+
 function _missionControlSummaryForCurrentGroup() {
   var group = _missionControlGroup() || '';
   if (!_missionControlData || String(_missionControlData.group || '') !== group) return null;
@@ -148,9 +170,14 @@ function _missionControlSection(summary, sectionKey) {
   var sections = summary && summary.sections;
   var section = sections && sections[sectionKey];
   if (!section || typeof section !== 'object') return { count: 0, items: [], truncated: false };
+  var items = Array.isArray(section.items) ? section.items : [];
+  var dismissed = _missionControlDismissedMap();
+  var visibleItems = items.filter(function(card) {
+    return !dismissed[String((card && card.id) || '')];
+  });
   return {
-    count: Number(section.count || 0) || 0,
-    items: Array.isArray(section.items) ? section.items : [],
+    count: Math.max(0, (Number(section.count || 0) || 0) - (items.length - visibleItems.length)),
+    items: visibleItems,
     truncated: !!section.truncated,
   };
 }
@@ -289,7 +316,10 @@ function _missionControlCardHtml(card, sectionKey) {
   html += '<div class="mc-card-topline">';
   html += '<span class="mc-ref">' + esc(_missionControlRefLabel(card)) + '</span>';
   html += '<span class="mc-card-id">' + esc(cardId || 'no-id') + '</span>';
-  html += '<span class="mc-card-kind">' + esc(card.kind || 'card') + '</span>';
+  html += '<span class="mc-card-actions"><span class="mc-card-kind">' + esc(card.kind || 'card') + '</span>';
+  html += '<button type="button" class="btn btn-quiet btn-xs mc-card-dismiss"'
+    + ' onclick="event.stopPropagation();missionControlDismissCard(\'' + esc(cardId) + '\')"'
+    + ' title="Dismiss this Mission Control card" aria-label="Dismiss ' + esc(card.title || cardId || 'Mission Control card') + '">&#215;</button></span>';
   html += '</div>';
   html += '<div class="mc-card-title">' + esc(card.title || cardId || 'Untitled') + '</div>';
   html += '<div class="mc-card-meta">';
@@ -396,17 +426,18 @@ function _missionControlSelectedDetailHtml(summary) {
 
 function _missionControlShellHtml(summary) {
   var group = _missionControlGroup() || '';
-  var counts = summary && summary.counts ? summary.counts : {};
-  var operatorNow = Number(counts.needs_operator_now || _missionControlSection(summary, 'needs_operator_now').count || 0) || 0;
+  var operatorNow = _missionControlSection(summary, 'needs_operator_now').count;
   var hasOperatorNow = operatorNow > 0;
-  var total = Number(counts.total_cards || 0) || 0;
+  var total = MISSION_CONTROL_SECTION_ORDER.reduce(function(sum, key) {
+    return sum + _missionControlSection(summary, key).count;
+  }, 0);
   var html = '';
   html += '<div class="mission-control-panel' + (hasOperatorNow ? ' has-operator-now' : '') + '">';
   html += '<div class="tpled-header mc-header ui-panel-header ui-panel-header--surface">';
   html += '<div class="tpled-header-copy ui-panel-header__copy"><div class="tpled-header-title-row ui-panel-header__title-row"><span class="tpled-header-title ui-panel-header__title">Mission Control</span>'
     + (hasOperatorNow ? '<span class="mc-now-badge ui-badge ui-badge--compact ui-badge--warning ui-badge--count">operator gates: ' + esc(String(operatorNow)) + '</span>' : '')
     + '</div>';
-  html += '<div class="tpled-header-subtitle ui-panel-header__subtitle">Read-only readiness console for ' + esc(group || 'all groups') + '. Actions stay on existing surfaces.</div></div>';
+  html += '<div class="tpled-header-subtitle ui-panel-header__subtitle">Readiness console for ' + esc(group || 'all groups') + '. Source actions stay on existing surfaces; cards can be dismissed here.</div></div>';
   html += '</div>';
   html += '<div class="tpled-header-controls mc-controls ui-toolbar ui-toolbar--bordered">';
   html += '<input id="mission-control-filter" class="mc-filter" value="' + esc(_missionControlFilter) + '" oninput="missionControlSetFilter(this.value)" placeholder="Filter cards…" />';
