@@ -1625,16 +1625,47 @@ function _terminalComposePersistFromDom(root) {
   _terminalComposeDrafts[input.dataset.cellId] = _terminalComposeInputText(input);
 }
 
-function _captureTerminalWorkspaceState(root, cell) {
-  if (typeof _captureSurfaceState !== 'function') return null;
+function _captureTerminalComponentState(root) {
+  if (typeof _captureSurfaceState !== 'function' || !root) return null;
   const snapshot = _captureSurfaceState(root);
   const active = document.activeElement;
-  if (snapshot && snapshot.focus && active && active.dataset
-      && active.dataset.cellId
-      && cell && active.dataset.cellId !== String(cell.id || '')) {
+  // Terminal and DM nodes commonly have ids, so _captureSurfaceState's
+  // document lookup fallback cannot by itself prove that focus belongs to
+  // this component. Enforce the component boundary with DOM containment.
+  if (snapshot && snapshot.focus
+      && (!active || typeof root.contains !== 'function' || !root.contains(active))) {
     snapshot.focus = null;
   }
-  if (snapshot) snapshot.terminalDirectMessages = _captureTerminalDirectMessagesState(root);
+  return snapshot;
+}
+
+function _terminalWorkspaceComponentRoot(root, selector) {
+  if (!root || typeof root.querySelector !== 'function') return null;
+  const direct = root.querySelector(selector);
+  if (direct) return direct;
+  const shell = root.querySelector('.terminal-shell');
+  return shell && typeof shell.querySelector === 'function'
+    ? shell.querySelector(selector)
+    : null;
+}
+
+function _captureTerminalWorkspaceState(root, cell) {
+  if (typeof _captureSurfaceState !== 'function') return null;
+  const terminalRoot = _terminalWorkspaceComponentRoot(root, '.terminal-stage');
+  const directMessagesRoot = _terminalWorkspaceComponentRoot(root, '.terminal-direct-messages-slot');
+  const composerRoot = _terminalWorkspaceComponentRoot(root, '.terminal-compose-slot');
+  const snapshot = {
+    terminal: _captureTerminalComponentState(terminalRoot),
+    directMessages: _captureTerminalComponentState(directMessagesRoot),
+    composer: _captureTerminalComponentState(composerRoot),
+    terminalDirectMessages: _captureTerminalDirectMessagesState(root),
+  };
+  const active = document.activeElement;
+  if (snapshot.composer && snapshot.composer.focus && active && active.dataset
+      && active.dataset.cellId
+      && cell && active.dataset.cellId !== String(cell.id || '')) {
+    snapshot.composer.focus = null;
+  }
   return snapshot;
 }
 
@@ -1647,11 +1678,27 @@ function _terminalWorkspaceFocusedComposeHasDraft(root) {
   return _terminalComposeInputText(active).length > 0;
 }
 
-function _restoreTerminalWorkspaceState(root, snapshot, cell) {
+function _restoreTerminalWorkspaceTerminalState(root, snapshot) {
+  if (typeof _restoreSurfaceState !== 'function' || !root || !snapshot) return;
+  const terminalRoot = _terminalWorkspaceComponentRoot(root, '.terminal-stage');
+  _restoreSurfaceState(terminalRoot, snapshot.terminal);
+}
+
+function _restoreTerminalWorkspaceDirectMessagesState(root, snapshot) {
+  if (!root || !snapshot) return;
   if (typeof _restoreSurfaceState === 'function') {
-    _restoreSurfaceState(root, snapshot);
+    const directMessagesRoot = _terminalWorkspaceComponentRoot(root, '.terminal-direct-messages-slot');
+    _restoreSurfaceState(directMessagesRoot, snapshot.directMessages);
   }
   _restoreTerminalDirectMessagesState(root, snapshot);
+}
+
+function _restoreTerminalWorkspaceComposerState(root, snapshot, cell) {
+  if (!root || !snapshot) return;
+  if (typeof _restoreSurfaceState === 'function') {
+    const composerRoot = _terminalWorkspaceComponentRoot(root, '.terminal-compose-slot');
+    _restoreSurfaceState(composerRoot, snapshot.composer);
+  }
   const input = _terminalComposeTextarea(root);
   if (!input) return;
   const cellId = input.dataset ? (input.dataset.cellId || '') : '';
@@ -1669,6 +1716,12 @@ function _restoreTerminalWorkspaceState(root, snapshot, cell) {
   }
   _terminalComposeAutoResize(input);
   _terminalComposeSetButtonState(input);
+}
+
+function _restoreTerminalWorkspaceState(root, snapshot, cell) {
+  _restoreTerminalWorkspaceTerminalState(root, snapshot);
+  _restoreTerminalWorkspaceDirectMessagesState(root, snapshot);
+  _restoreTerminalWorkspaceComposerState(root, snapshot, cell);
 }
 
 function _renderTerminalCompose(root, cell) {
