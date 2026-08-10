@@ -35,6 +35,272 @@ from torque.worktree_manager.refresh import RefreshMixin
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
+def _call_name(node):
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return ""
+
+
+def _external_ticket_offload_inventory(repo_root):
+    """Derive blocking external-ticket operations and unsafe async callers."""
+    torque_root = repo_root / "torque"
+    external_path = torque_root / "external_tickets.py"
+    external_tree = ast.parse(
+        external_path.read_text(encoding="utf-8"),
+        filename=str(external_path),
+    )
+
+    adapter_classes = {
+        node.name: node
+        for node in external_tree.body
+        if isinstance(node, ast.ClassDef)
+        and (
+            node.name == "ExternalTicketAdapter"
+            or any(
+                isinstance(base, ast.Name)
+                and base.id.endswith("ExternalTicketAdapter")
+                for base in node.bases
+            )
+        )
+    }
+    class_methods = {}
+    blocking_methods = set()
+    for class_name, class_node in adapter_classes.items():
+        methods = {
+            node.name: node
+            for node in class_node.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        edges = {name: set() for name in methods}
+        direct_sinks = set()
+        for method_name, method in methods.items():
+            for call in (
+                node for node in ast.walk(method) if isinstance(node, ast.Call)
+            ):
+                if (
+                    isinstance(call.func, ast.Attribute)
+                    and isinstance(call.func.value, ast.Name)
+                    and call.func.value.id == "subprocess"
+                    and call.func.attr == "run"
+                ):
+                    direct_sinks.add(method_name)
+                if (
+                    isinstance(call.func, ast.Attribute)
+                    and isinstance(call.func.value, ast.Name)
+                    and call.func.value.id == "self"
+                    and call.func.attr in methods
+                ):
+                    edges[method_name].add(call.func.attr)
+        reachable = set(direct_sinks)
+        changed = True
+        while changed:
+            changed = False
+            for method_name, callees in edges.items():
+                if method_name not in reachable and callees & reachable:
+                    reachable.add(method_name)
+                    changed = True
+        class_methods[class_name] = sorted(reachable)
+        blocking_methods.update(reachable)
+
+    module_functions = {
+        node.name: node
+        for node in external_tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    blocking_wrappers = set()
+    for function_name, function in module_functions.items():
+        for call in (
+            node for node in ast.walk(function) if isinstance(node, ast.Call)
+        ):
+            if (
+                isinstance(call.func, ast.Attribute)
+                and isinstance(call.func.value, ast.Name)
+                and call.func.value.id == "adapter"
+                and call.func.attr in blocking_methods
+            ):
+                blocking_wrappers.add(function_name)
+
+    offload_helpers = set()
+    for function_name, function in module_functions.items():
+        if not isinstance(function, ast.AsyncFunctionDef):
+            continue
+        if any(
+            isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id == "asyncio"
+            and call.func.attr == "to_thread"
+            for call in ast.walk(function)
+            if isinstance(call, ast.Call)
+        ):
+            offload_helpers.add(function_name)
+
+    parsed = {}
+    imported_aliases = set(blocking_wrappers)
+    helper_aliases = set(offload_helpers)
+    adapter_factory_aliases = {"get_adapter"}
+    adapter_class_aliases = set(adapter_classes)
+    module_aliases = {}
+    for path in torque_root.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        parsed[path] = tree
+        aliases = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and (
+                (node.module or "").endswith("external_tickets")
+            ):
+                for imported in node.names:
+                    local_name = imported.asname or imported.name
+                    if imported.name in blocking_wrappers:
+                        imported_aliases.add(local_name)
+                    if imported.name in offload_helpers:
+                        helper_aliases.add(local_name)
+                    if imported.name == "get_adapter":
+                        adapter_factory_aliases.add(local_name)
+                    if imported.name in adapter_classes:
+                        adapter_class_aliases.add(local_name)
+            elif isinstance(node, ast.Import):
+                for imported in node.names:
+                    if imported.name.endswith("external_tickets"):
+                        aliases.add(imported.asname or imported.name.split(".")[-1])
+            elif (
+                isinstance(node, ast.ImportFrom)
+                and node.module == "torque"
+            ):
+                for imported in node.names:
+                    if imported.name == "external_tickets":
+                        aliases.add(imported.asname or imported.name)
+        module_aliases[path] = aliases
+
+    # Carry aliases through composition keywords and runtime-field assignments.
+    changed = True
+    while changed:
+        changed = False
+        for tree in parsed.values():
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call):
+                    for keyword in node.keywords:
+                        if (
+                            keyword.arg
+                            and _call_name(keyword.value) in imported_aliases
+                            and keyword.arg not in imported_aliases
+                        ):
+                            imported_aliases.add(keyword.arg)
+                            changed = True
+                elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+                    value = node.value
+                    if not value or _call_name(value) not in imported_aliases:
+                        continue
+                    targets = (
+                        node.targets if isinstance(node, ast.Assign)
+                        else [node.target]
+                    )
+                    for target in targets:
+                        if isinstance(target, ast.Name) and target.id not in imported_aliases:
+                            imported_aliases.add(target.id)
+                            changed = True
+
+    violations = []
+    safe_sites = []
+    for path, tree in parsed.items():
+        relative_path = path.relative_to(repo_root)
+        aliases = module_aliases[path]
+        for function in ast.walk(tree):
+            if not isinstance(function, ast.AsyncFunctionDef):
+                continue
+            adapter_variables = {
+                argument.arg
+                for argument in (
+                    function.args.posonlyargs
+                    + function.args.args
+                    + function.args.kwonlyargs
+                )
+                if _call_name(argument.annotation) in adapter_class_aliases
+            }
+            for node in ast.walk(function):
+                if not isinstance(node, (ast.Assign, ast.AnnAssign)) or not node.value:
+                    continue
+                value = node.value
+                if not isinstance(value, ast.Call):
+                    continue
+                called = _call_name(value.func)
+                if called not in adapter_factory_aliases | adapter_class_aliases:
+                    continue
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                adapter_variables.update(
+                    target.id for target in targets if isinstance(target, ast.Name)
+                )
+
+            for call in (
+                node for node in ast.walk(function) if isinstance(node, ast.Call)
+            ):
+                called = _call_name(call.func)
+                is_wrapper_call = (
+                    isinstance(call.func, ast.Name)
+                    and called in imported_aliases
+                ) or (
+                    isinstance(call.func, ast.Attribute)
+                    and isinstance(call.func.value, ast.Name)
+                    and call.func.value.id in aliases
+                    and called in blocking_wrappers
+                )
+                is_adapter_call = (
+                    isinstance(call.func, ast.Attribute)
+                    and called in blocking_methods
+                    and (
+                        (
+                            isinstance(call.func.value, ast.Name)
+                            and call.func.value.id in adapter_variables
+                        )
+                        or (
+                            isinstance(call.func.value, ast.Call)
+                            and _call_name(call.func.value.func)
+                            in adapter_factory_aliases | adapter_class_aliases
+                        )
+                    )
+                )
+                if is_wrapper_call or is_adapter_call:
+                    violations.append(
+                        f"{relative_path}:{call.lineno} async {function.name} "
+                        f"calls blocking external-ticket operation {called} directly"
+                    )
+                    continue
+
+                is_offload = called in helper_aliases or (
+                    isinstance(call.func, ast.Attribute)
+                    and isinstance(call.func.value, ast.Name)
+                    and call.func.value.id == "asyncio"
+                    and called == "to_thread"
+                )
+                if not is_offload or not call.args:
+                    if call.args:
+                        operation_name = _call_name(call.args[0])
+                        if operation_name in imported_aliases | blocking_methods:
+                            violations.append(
+                                f"{relative_path}:{call.lineno} async "
+                                f"{function.name} passes blocking external-ticket "
+                                f"operation {operation_name} through unrecognized "
+                                f"boundary {called or '<call>'}"
+                            )
+                    continue
+                operation_name = _call_name(call.args[0])
+                if operation_name in imported_aliases | blocking_methods:
+                    safe_sites.append(
+                        f"{relative_path}:{call.lineno} async {function.name} "
+                        f"offloads {operation_name} via {called}"
+                    )
+
+    return {
+        "adapter_classes": class_methods,
+        "blocking_methods": sorted(blocking_methods),
+        "blocking_wrappers": sorted(blocking_wrappers),
+        "offload_helpers": sorted(offload_helpers),
+        "safe_sites": sorted(safe_sites),
+        "violations": sorted(violations),
+    }
+
+
 class WorktreeManagerBoundaryTests(unittest.TestCase):
     def test_worktree_manager_composes_domain_mixins(self):
         ownership = (
@@ -212,6 +478,71 @@ class BackendSizeGuardrailTests(unittest.TestCase):
                             f"{path.relative_to(REPO_ROOT)} imports {blocked}"
                         )
         self.assertEqual([], violations)
+
+    def test_external_ticket_sync_operations_are_offloaded_from_async_callers(self):
+        inventory = _external_ticket_offload_inventory(REPO_ROOT)
+
+        self.assertTrue(inventory["blocking_methods"])
+        self.assertTrue(inventory["blocking_wrappers"])
+        self.assertEqual([], inventory["violations"])
+        self.assertEqual(4, len(inventory["safe_sites"]))
+        self.assertTrue(any(
+            site.startswith("torque/commands/board_operations.py:")
+            and "offloads import_external_ticket via to_thread" in site
+            for site in inventory["safe_sites"]
+        ))
+        external_tree = self._module_tree("torque/external_tickets.py")
+        helper = next(
+            node for node in external_tree.body
+            if isinstance(node, ast.AsyncFunctionDef)
+            and node.name in inventory["offload_helpers"]
+        )
+        helper_doc = ast.get_docstring(helper)
+        self.assertIn("must not invoke", helper_doc)
+        self.assertIn("asyncio.to_thread", helper_doc)
+        self.assertIn("tests/test_backend_modularity.py", helper_doc)
+
+    def test_external_ticket_offload_guard_rejects_synthetic_direct_async_call(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            torque = repo / "torque"
+            commands = torque / "commands"
+            commands.mkdir(parents=True)
+            (torque / "external_tickets.py").write_text(
+                "import asyncio\n"
+                "import subprocess\n"
+                "class ExternalTicketAdapter:\n"
+                "    pass\n"
+                "class GitHubExternalTicketAdapter(ExternalTicketAdapter):\n"
+                "    def _run_gh(self, args):\n"
+                "        return subprocess.run(args)\n"
+                "    def publish(self, task):\n"
+                "        return self._run_gh(['gh', task])\n"
+                "def get_adapter():\n"
+                "    return GitHubExternalTicketAdapter()\n"
+                "def publish_ticket(task):\n"
+                "    adapter = get_adapter()\n"
+                "    return adapter.publish(task)\n"
+                "async def run_external_ticket_operation(operation, *args):\n"
+                "    return await asyncio.to_thread(operation, *args)\n",
+                encoding="utf-8",
+            )
+            (commands / "violation.py").write_text(
+                "from ..external_tickets import publish_ticket\n"
+                "async def handle(task):\n"
+                "    return publish_ticket(task)\n",
+                encoding="utf-8",
+            )
+
+            inventory = _external_ticket_offload_inventory(repo)
+
+        self.assertEqual(
+            [
+                "torque/commands/violation.py:3 async handle calls blocking "
+                "external-ticket operation publish_ticket directly"
+            ],
+            inventory["violations"],
+        )
 
     def test_scoped_mcp_dispatcher_is_a_domain_registry(self):
         path = REPO_ROOT / "torque" / "mcp_tools_shared.py"
