@@ -461,7 +461,7 @@ def _review_signal_card(state: Any, task: Any, *, now_ts: float) -> tuple[str, d
     live = _task_has_live_review_seat(state, task)
     healthy = str(getattr(task, "health_state", "") or "healthy").strip() in {"", "healthy"}
     recent = _task_moved_recently(task, now_ts=now_ts)
-    if live and healthy:
+    if live and healthy and recent:
         return "in_flight", _task_card(
             state,
             task,
@@ -475,21 +475,35 @@ def _review_signal_card(state: Any, task: Any, *, now_ts: float) -> tuple[str, d
             priority=30,
         )
     stale = not recent
+    if stale:
+        gate = "review_abandoned_or_stalled"
+        if live and healthy:
+            reason = "Agent review work has a live seat but has not moved recently."
+        elif live:
+            reason = "Agent review work has an unhealthy live seat and has not moved recently."
+        else:
+            reason = "Agent review work has no live seat and has not moved recently."
+    elif live:
+        gate = "review_unhealthy"
+        reason = "Agent review work has an unhealthy live worker seat."
+    else:
+        gate = "review_unstaffed"
+        reason = "Agent review work has no live worker seat."
     return "at_risk_watchlist", _task_card(
         state,
         task,
         card_id=f"mc:task:{task.id}:review_stalled",
         kind="review",
-        gate="review_abandoned_or_stalled" if stale else "review_unstaffed",
-        reason=(
-            "Agent review work has no live seat and has not moved recently."
-            if stale else
-            "Agent review work has no live worker seat."
-        ),
+        gate=gate,
+        reason=reason,
         recommended_next_action="inspect_review_pipeline",
         evidence_chips=[
             "review_signal",
-            "no_live_seat" if not live else "unhealthy_live_seat",
+            (
+                "no_live_seat"
+                if not live
+                else "healthy_live_seat" if healthy else "unhealthy_live_seat"
+            ),
             "stale_movement" if stale else "recent_movement",
         ],
         caveat_chips=["agent_work_not_operator_gate"],

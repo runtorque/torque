@@ -319,6 +319,66 @@ class MissionControlSummaryTests(unittest.TestCase):
             for card in self.cards(summary, "needs_operator_now")
         ])
 
+    def test_stale_live_healthy_review_routes_at_risk(self):
+        task = self.add_task(
+            "Stale live review",
+            id="stale-live-review",
+            action_name="feature/review",
+            agent_id="stale-reviewer",
+        )
+        task.updated_at = iso(self.now - (2 * 24 * 60 * 60))
+        self.state.agents["stale-reviewer"] = self.state_mod.AgentCell(
+            id="stale-reviewer",
+            name="Stale Reviewer",
+            group="Torque",
+            status="running",
+            current_task_id=task.id,
+        )
+
+        summary = self.summary()
+
+        self.assertNotIn(task.id, {
+            card["primary_task_id"]
+            for card in self.cards(summary, "in_flight")
+        })
+        card = next(
+            card for card in self.cards(summary, "at_risk_watchlist")
+            if card["id"] == f"mc:task:{task.id}:review_stalled"
+        )
+        self.assertEqual(card["gate"], "review_abandoned_or_stalled")
+        self.assertIn("live seat", card["reason"])
+        self.assertIn("healthy_live_seat", card["evidence_chips"])
+        self.assertIn("stale_movement", card["evidence_chips"])
+
+    def test_recent_unhealthy_live_review_routes_at_risk_with_truthful_reason(self):
+        task = self.add_task(
+            "Unhealthy live review",
+            id="unhealthy-live-review",
+            action_name="feature/review",
+            agent_id="unhealthy-reviewer",
+        )
+        task.updated_at = iso(self.now - 60)
+        task.health_state = "blocked"
+        self.state.agents["unhealthy-reviewer"] = self.state_mod.AgentCell(
+            id="unhealthy-reviewer",
+            name="Unhealthy Reviewer",
+            group="Torque",
+            status="running",
+            current_task_id=task.id,
+        )
+
+        summary = self.summary()
+
+        card = next(
+            card for card in self.cards(summary, "at_risk_watchlist")
+            if card["id"] == f"mc:task:{task.id}:review_stalled"
+        )
+        self.assertEqual(card["gate"], "review_unhealthy")
+        self.assertIn("unhealthy live worker seat", card["reason"])
+        self.assertNotIn("no live", card["reason"])
+        self.assertIn("unhealthy_live_seat", card["evidence_chips"])
+        self.assertIn("recent_movement", card["evidence_chips"])
+
     def test_dismissed_card_stays_hidden_across_summary_rebuild(self):
         task = self.add_task("Needs answer", id="dismiss-me", labels=["torque:human"])
         card_id = f"mc:task:{task.id}:ask"

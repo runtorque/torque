@@ -415,10 +415,7 @@ def hot_json_dumps_bytes(payload) -> bytes:
         return orjson.dumps(
             payload,
             default=_hot_json_default,
-            option=(
-                orjson.OPT_NON_STR_KEYS
-                | orjson.OPT_PASSTHROUGH_DATETIME
-            ),
+            option=(orjson.OPT_NON_STR_KEYS | orjson.OPT_PASSTHROUGH_DATETIME),
         )
     return json.dumps(payload, default=_hot_json_default).encode("utf-8")
 
@@ -3745,6 +3742,7 @@ class MatrixState(
             "context_panel_split_ratio": self.context_panel_split_ratio,
             "supervisor_panel_state": self.supervisor_panel_state,
             "events_dismissed_attention": self.events_dismissed_attention,
+            "mission_control_dismissed_cards": self.mission_control_dismissed_cards,
             "board_filters_by_group": self.board_filters_by_group,
             "board_selected_lanes_by_group": self.board_selected_lanes_by_group,
             "board_hidden_wide_lanes_by_group": self.board_hidden_wide_lanes_by_group,
@@ -4066,6 +4064,7 @@ class MatrixState(
             "context_panel_split_ratio": self.context_panel_split_ratio,
             "supervisor_panel_state": self.supervisor_panel_state,
             "events_dismissed_attention": self.events_dismissed_attention,
+            "mission_control_dismissed_cards": self.mission_control_dismissed_cards,
             "board_filters_by_group": self.board_filters_by_group,
             "board_selected_lanes_by_group": self.board_selected_lanes_by_group,
             "board_hidden_wide_lanes_by_group": self.board_hidden_wide_lanes_by_group,

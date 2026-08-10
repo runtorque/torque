@@ -6162,6 +6162,18 @@ class SelectedPrincipalIdTests(unittest.TestCase):
         d = state.to_dict()
         self.assertEqual(d["selected_agent_id"], "agent-a")
 
+    def test_to_dict_includes_mission_control_dismissed_cards(self):
+        state = self.state_mod.MatrixState()
+        state.mission_control_dismissed_cards = {
+            "mc:task:ask-one:ask": 123.0,
+            "mc:task:ask-two:ask": 456.0,
+        }
+
+        self.assertEqual(
+            state.to_dict()["mission_control_dismissed_cards"],
+            state.mission_control_dismissed_cards,
+        )
+
     def test_to_dict_compact_includes_selected_principal_id(self):
         state = self.state_mod.MatrixState()
         state.selected_principal_id = "architect-b"
@@ -6173,6 +6185,18 @@ class SelectedPrincipalIdTests(unittest.TestCase):
         state.selected_agent_id = "agent-b"
         d = state.to_dict_compact()
         self.assertEqual(d["selected_agent_id"], "agent-b")
+
+    def test_to_dict_compact_includes_mission_control_dismissed_cards(self):
+        state = self.state_mod.MatrixState()
+        state.mission_control_dismissed_cards = {
+            "mc:task:ask-one:ask": 123.0,
+            "mc:task:ask-two:ask": 456.0,
+        }
+
+        self.assertEqual(
+            state.to_dict_compact()["mission_control_dismissed_cards"],
+            state.mission_control_dismissed_cards,
+        )
 
     def test_persists_and_restores_selected_principal_id(self):
         from torque.db import TorqueDB

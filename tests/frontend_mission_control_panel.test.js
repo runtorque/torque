@@ -346,6 +346,46 @@ test('Mission Control dismisses only the chosen card and preserves rerender stat
   assert.equal(document.getElementById('mission-control-main').scrollTop, 73);
 });
 
+test('Mission Control reconnect hydration restores persisted canonical dismissals', () => {
+  const { sandbox, document } = createSandbox();
+  const firstId = 'mc:task:TORQUE:1:ask';
+  const secondId = 'mc:task:TORQUE:4:ask';
+  const data = summary({
+    sections: {
+      needs_operator_now: { count: 2, items: [
+        card(),
+        card({
+          id: secondId,
+          title: 'Second operator question',
+          primary_task_id: 'TORQUE:4',
+          task_ids: ['TORQUE:4'],
+        }),
+      ], truncated: false },
+    },
+  });
+  vm.runInContext(`missionControlReceiveSummary(${JSON.stringify(data)})`, sandbox);
+
+  // A reconnect replaces the full state snapshot rather than replaying missed
+  // ui_update deltas. The persisted map must still drive the next render.
+  vm.runInContext(`state = {
+    active_group: 'Torque',
+    mission_control_dismissed_cards: { ${JSON.stringify(firstId)}: 123 }
+  }; renderMissionControlPanel();`, sandbox);
+
+  const html = document.getElementById('panel-mission-control').innerHTML;
+  assert.doesNotMatch(html, /Answer release question/);
+  assert.match(html, /Second operator question/);
+  assert.match(html, /operator gates: 1/);
+
+  const invalidation = fs.readFileSync(
+    path.join(repoRoot, 'static/js/ws/invalidation.js'), 'utf8',
+  );
+  assert.match(
+    invalidation,
+    /key === 'mission_control_dismissed_cards'[\s\S]*?_markSurface\(flags, 'mission-control'\)/,
+  );
+});
+
 test('Mission Control side placement preserves workspace scroll and active filter during rerender', () => {
   const { sandbox, document } = createSandbox();
   vm.runInContext(`missionControlReceiveSummary(${JSON.stringify(summary())})`, sandbox);
