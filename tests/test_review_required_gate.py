@@ -562,10 +562,7 @@ class ReviewRequiredHandleCommandGateTests(unittest.IsolatedAsyncioTestCase):
             "action": "error",
             "message": "implementation failed",
         })
-        self.assertNotEqual(
-            error_result.get("type") if isinstance(error_result, dict) else None,
-            "review_required",
-        )
+        self.assertEqual(error_result, {"type": "ok"})
 
         task.deliverable_required = True
         task.deliverable_type = "file"
@@ -683,8 +680,11 @@ class ReviewRequiredHandleCommandGateTests(unittest.IsolatedAsyncioTestCase):
             "Done checkpoint",
             current_task.worktree_boundary["message"],
         )
-        self.assertIsNone(ready_result)
-        self.assertIsNone(done_result)
+        self.assertEqual(
+            ready_result,
+            {"type": "ok", "task_id": task.id},
+        )
+        self.assertEqual(done_result, {"type": "ok"})
 
     async def test_required_review_chain_closes_through_merge_finalization(self):
         from torque.services.worktrees.finalize import (
@@ -1248,10 +1248,7 @@ class ReviewRequiredHandleCommandGateTests(unittest.IsolatedAsyncioTestCase):
             "action": "blocked",
             "message": "stuck on a thing",
         })
-        self.assertNotEqual(
-            result.get("type") if isinstance(result, dict) else None,
-            "review_required",
-        )
+        self.assertEqual(result, {"type": "ok"})
         # progress is informational too.
         result = await handle_command({
             "cmd": "ai_report",
@@ -1259,10 +1256,7 @@ class ReviewRequiredHandleCommandGateTests(unittest.IsolatedAsyncioTestCase):
             "action": "progress",
             "message": "still working",
         })
-        self.assertNotEqual(
-            result.get("type") if isinstance(result, dict) else None,
-            "review_required",
-        )
+        self.assertEqual(result, {"type": "ok"})
 
 
 class ReviewerDeriveChainE2ETests(unittest.IsolatedAsyncioTestCase):

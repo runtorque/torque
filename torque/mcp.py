@@ -57,8 +57,7 @@ from .mcp_public_call_authorization import (
     public_argument_validation_error,
     public_call_refusal_message,
 )
-from .mcp_tool_search import deferred_tool_specs, public_tool_spec
-from .mcp_tool_search import tool_search_response
+from .mcp_tool_search import deferred_tool_specs, public_tool_spec, tool_search_response
 from .mcp_canonical import (
     authority_is_proposal_only,
     canonical_callable_handler_registry,
@@ -67,6 +66,7 @@ from .mcp_canonical import (
     canonicalize_tool_specs,
     modernize_tool_authority,
 )
+from .mcp_ai_reports import ai_report_transport_override
 from .help_docs import dispatch_help_tool, help_tool_specs
 from .mcp_tools_shared import (
     _direct_user_message_response,
@@ -2044,18 +2044,9 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
         payload["message"] = args.get("message", "")
         if args.get("task"):
             payload["task_id"] = args["task"]
-
     result = await handle_command(payload)
-    if (
-        result
-        and result.get("type") == "error"
-        and result.get("retryable")
-    ):
-        return (
-            result.get("message", "Retryable report refusal."),
-            True,
-            False,  # no_cache
-        )
+    if transport_override := ai_report_transport_override(result, action):
+        return transport_override
     if result and result.get("type") == "error":
         return result.get("message", "Unknown error"), True
     if result and result.get("type") == "deliverable_missing":
@@ -2089,15 +2080,7 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
             False,  # no_cache
         )
 
-    if not result:
-        return (
-            f"AI report action {action} returned no result; refusing to "
-            "report success. Retry after inspecting task context.",
-            True,
-            False,  # no_cache
-        )
     return json.dumps(result), False
-
 
 # ---------------------------------------------------------------------------
 # JSON-RPC helpers
