@@ -358,8 +358,7 @@ async def handle_board_operation_command(
 
     elif cmd == "board_unarchive_task":
         result = _handle_board_unarchive_command(state, data)
-        if not (isinstance(result, dict)
-                and result.get("type") == "error"):
+        if isinstance(result, dict) and result.get("type") == "task_unarchived":
             if board_sync_manager:
                 board_sync_manager.enqueue_task(
                     data.get("id", ""),
@@ -964,8 +963,7 @@ async def handle_board_operation_command(
 
     elif cmd == "board_unarchive_task":
         result = _handle_board_unarchive_command(state, data)
-        if not (isinstance(result, dict)
-                and result.get("type") == "error"):
+        if isinstance(result, dict) and result.get("type") == "task_unarchived":
             if board_sync_manager:
                 board_sync_manager.enqueue_task(
                     data.get("id", ""),
@@ -1122,6 +1120,37 @@ async def handle_board_operation_command(
                     if data.get("position") is not None:
                         result["position"] = data.get("position")
                     continue_result = False
+                elif (
+                        isinstance(_mv_advisory, dict)
+                        and _mv_advisory.get("type") == "error"
+                ):
+                    result = _mv_advisory
+                    continue_result = False
+                elif (
+                        _mv_previous_lane == "Archived"
+                        and (
+                            not _mv_task_after
+                            or _mv_task_after.lane == "Archived"
+                        )
+                ):
+                    if (
+                            isinstance(_mv_advisory, dict)
+                            and not _mv_advisory.get("eligible", True)
+                    ):
+                        result = {
+                            "type": "finalization_blocked",
+                            "task_id": _mv_id,
+                            "finalization": _mv_advisory,
+                            "missing_gates": _mv_advisory.get(
+                                "missing_gates", []
+                            ),
+                        }
+                    else:
+                        result = {
+                            "type": "error",
+                            "message": "Archived task was not restored",
+                        }
+                    continue_result = False
                 else:
                     continue_result = True
                 if continue_result and board_sync_manager:
@@ -1143,7 +1172,11 @@ async def handle_board_operation_command(
                             if _mv_task_after else ""
                         ),
                     }
-                if continue_result and isinstance(_mv_advisory, dict):
+                if (
+                        continue_result
+                        and isinstance(_mv_advisory, dict)
+                        and not _mv_advisory.get("type")
+                ):
                     result["advisory"] = _mv_advisory
                 # Moving out of Done may re-block dependents
                 if (

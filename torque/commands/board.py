@@ -75,14 +75,43 @@ def _handle_board_archive_tasks_command(
 def _handle_board_unarchive_command(
     state: MatrixState,
     data: dict,
-) -> dict | None:
+) -> dict:
     """Unarchive one board task."""
     task_id = _resolve_task_id(state, data.get("id", ""))
     if task_id not in state.board_tasks:
         return {"type": "error", "message": "Task not found"}
-    state.board_unarchive_task(
+    if state.board_tasks[task_id].lane != "Archived":
+        return {"type": "error", "message": "Task is not archived"}
+    mutation = state.board_unarchive_task(
         task_id,
         lane=data.get("lane", ""),
         position=data.get("position"),
+        allow_done_advisory=True,
+        acknowledge_unmerged=data.get("acknowledge_unmerged") is True,
+        clear_status=data.get("clear_status") is True,
     )
-    return None
+    if isinstance(mutation, dict):
+        if mutation.get("type") in {
+                "error", "task_move_acknowledgement_required"}:
+            return mutation
+    task = state.board_tasks.get(task_id)
+    if (
+            isinstance(mutation, dict)
+            and not mutation.get("eligible", True)
+            and (not task or task.lane == "Archived")):
+        return {
+            "type": "finalization_blocked",
+            "task_id": task_id,
+            "finalization": mutation,
+            "missing_gates": mutation.get("missing_gates", []),
+        }
+    if not task or task.lane == "Archived":
+        return {"type": "error", "message": "Task was not restored"}
+    result = {
+        "type": "task_unarchived",
+        "task_id": task_id,
+        "new_lane": task.lane,
+    }
+    if isinstance(mutation, dict):
+        result["advisory"] = mutation
+    return result

@@ -9,6 +9,7 @@ const repoRoot = path.resolve(__dirname, '..');
 function createContext({ accepted }) {
   const sent = [];
   const confirmations = [];
+  const toasts = [];
   const sandbox = {
     console,
     Promise,
@@ -19,6 +20,9 @@ function createContext({ accepted }) {
     send(command) {
       sent.push(command);
       return true;
+    },
+    _showToast(message, level) {
+      toasts.push({ message, level });
     },
   };
   sandbox.global = sandbox;
@@ -31,7 +35,7 @@ function createContext({ accepted }) {
     context,
     { filename: 'static/js/board/selection.js' },
   );
-  return { context, confirmations, sent };
+  return { context, confirmations, sent, toasts };
 }
 
 test('Done acknowledgement prompt resends the move with explicit acknowledgement', async () => {
@@ -59,6 +63,61 @@ test('Done acknowledgement prompt resends the move with explicit acknowledgement
     clear_status: true,
     position: 3,
   }]);
+});
+
+test('unarchive acknowledgement resends Restore with explicit acknowledgement', async () => {
+  const { context, sent } = createContext({ accepted: true });
+  assert.equal(context.handleBoardMoveAcknowledgementResponse({
+    type: 'task_move_acknowledgement_required',
+    command: 'board_unarchive_task',
+    task_id: 'TORQUE:1620',
+    new_lane: 'Done',
+    message: 'Restoring will leave branch torque/worker/unmerged.',
+  }), true);
+  await Promise.resolve();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [{
+    cmd: 'board_unarchive_task',
+    id: 'TORQUE:1620',
+    lane: 'Done',
+    acknowledge_unmerged: true,
+    clear_status: false,
+  }]);
+});
+
+test('successful Restore renders advisory with every blocking task id', () => {
+  const { context, toasts } = createContext({ accepted: false });
+  assert.equal(context.handleBoardDoneAdvisoryResponse({
+    type: 'task_unarchived',
+    task_id: 'TORQUE:1620',
+    advisory: {
+      missing_gates: ['code_boundary_not_durably_merged'],
+      code_boundary: {
+        blocking: [{ task_id: 'TORQUE:1620:1' }, { task_id: 'TORQUE:1620:3' }],
+      },
+    },
+  }), true);
+
+  assert.deepEqual(toasts, [{
+    message: 'Restored to Done with a finalization advisory. Blocking tasks: TORQUE:1620:1, TORQUE:1620:3. Missing gates: code_boundary_not_durably_merged.',
+    level: 'warning',
+  }]);
+});
+
+test('typed finalization refusal renders structured blocking task ids', () => {
+  const { context, toasts } = createContext({ accepted: false });
+  assert.equal(context.handleBoardDoneAdvisoryResponse({
+    type: 'finalization_blocked',
+    task_id: 'TORQUE:1620',
+    finalization: {
+      missing_gates: ['review'],
+      code_boundary: { blocking: [{ task_id: 'TORQUE:1620:2' }] },
+    },
+  }), true);
+
+  assert.match(toasts[0].message, /finalization is blocked/);
+  assert.match(toasts[0].message, /TORQUE:1620:2/);
+  assert.equal(toasts[0].level, 'warning');
 });
 
 test('cancelling Done acknowledgement leaves the task untouched', async () => {

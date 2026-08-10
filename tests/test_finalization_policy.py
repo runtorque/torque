@@ -140,7 +140,7 @@ class FinalizationDoneBypassRegressionTests(unittest.TestCase):
             finalization_boundary={"artifact_digest": "digest", "artifact_version": "v1", "source_identity": "artifact", "immutable": True},
         )
 
-    def test_unarchive_to_done_cannot_bypass_finalization(self):
+    def test_internal_unarchive_to_done_cannot_bypass_finalization(self):
         root = self._ineligible_root()
         self.state.board_archive_task(root.id)
         result = self.state.board_unarchive_task(root.id, lane="Done")

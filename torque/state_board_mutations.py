@@ -1205,19 +1205,28 @@ class BoardMutationMixin:
             if clear_status and task.status:
                 self.board_update_task(tid, status="")
             return
+        if task.lane == ARCHIVED_LANE:
+            return self.board_unarchive_task(
+                tid,
+                lane=lane,
+                position=position,
+                allow_done_advisory=allow_done_advisory,
+                acknowledge_unmerged=acknowledge_unmerged,
+                clear_status=clear_status,
+            )
         advisory = None
         if lane == "Done" and task.lane != "Done" and self._is_finalization_root(task):
             allowed, result = self._finalization_done_allowed(
                 task, caller="board_move_task"
             )
             if not allowed:
-                if task.lane == ARCHIVED_LANE or not allow_done_advisory:
+                if not allow_done_advisory:
                     return result
                 # The finalization finding is advisory for an explicit move.
                 # Whether the actor must acknowledge unmerged work is a
                 # separate classification of the root's own merge evidence.
                 advisory = result
-            if allow_done_advisory and task.lane != ARCHIVED_LANE:
+            if allow_done_advisory:
                 acknowledgement = explicit_done_mainline_status(
                     task,
                     mainline=str(
@@ -1285,9 +1294,6 @@ class BoardMutationMixin:
             task.status = ""
         if lane == ARCHIVED_LANE:
             self.board_archive_task(tid, position=position)
-            return
-        if task.lane == ARCHIVED_LANE:
-            self.board_unarchive_task(tid, lane=lane, position=position)
             return
         if lane == "Done" and task.lane != "Done":
             # Finalization/code-boundary admission has passed. Expire only
@@ -1664,7 +1670,10 @@ class BoardMutationMixin:
 
     def board_unarchive_task(self, tid: str, *,
                              lane: str = "",
-                             position: Optional[int] = None):
+                             position: Optional[int] = None,
+                             allow_done_advisory: bool = False,
+                             acknowledge_unmerged: bool = False,
+                             clear_status: bool = False):
         tid = self.resolve_task_alias(tid)
         task = self.board_tasks.get(tid)
         if not task or task.lane != ARCHIVED_LANE:
@@ -1672,12 +1681,77 @@ class BoardMutationMixin:
         target_lane = lane or task.archived_from_lane or "Done"
         if target_lane == ARCHIVED_LANE or target_lane not in self.board_lanes:
             target_lane = "Done" if "Done" in self.board_lanes else self.board_lanes[0]
+        advisory = None
         if target_lane == "Done" and self._is_finalization_root(task):
             allowed, result = self._finalization_done_allowed(
                 task, caller="board_unarchive_task"
             )
             if not allowed:
-                return result
+                if not allow_done_advisory:
+                    return result
+                advisory = result
+            if allow_done_advisory:
+                acknowledgement = explicit_done_mainline_status(
+                    task,
+                    mainline=str(
+                        getattr(self, "boot_mainline_branch", "") or ""
+                    ).strip(),
+                )
+                if acknowledgement["required"] and not acknowledge_unmerged:
+                    blocking = (
+                        advisory.get("code_boundary", {}).get("blocking", [])
+                        if isinstance(advisory, dict) else []
+                    )
+                    blocking_ids = [
+                        str(item.get("task_id", "") or "").strip()
+                        for item in blocking if isinstance(item, dict)
+                    ]
+                    boundary_refs = []
+                    for blocking_id in blocking_ids:
+                        referenced_task = self.board_tasks.get(blocking_id)
+                        boundary = getattr(
+                            referenced_task, "worktree_boundary", {}
+                        ) or {}
+                        if not referenced_task or not isinstance(boundary, dict):
+                            continue
+                        boundary_refs.append({
+                            "task_id": referenced_task.id,
+                            "branch": str(boundary.get("branch", "") or "").strip(),
+                            "commit_sha": str(
+                                boundary.get("commit_sha", "") or ""
+                            ).strip(),
+                        })
+                    acknowledgement["blocking"] = boundary_refs
+                    ref = next((
+                        item.get("branch") or item.get("commit_sha")
+                        for item in boundary_refs
+                        if item.get("branch") or item.get("commit_sha")
+                    ), acknowledgement.get("branch")
+                       or acknowledgement.get("commit_sha")
+                       or acknowledgement.get("merge_commit_sha")
+                       or "")
+                    response = {
+                        "type": "task_move_acknowledgement_required",
+                        "command": "board_unarchive_task",
+                        "task_id": task.id,
+                        "new_lane": target_lane,
+                        "message": (
+                            "Restoring this task will leave unmerged code at "
+                            f"{ref}. Acknowledge that the code will not be "
+                            "merged here or will be handled another way."
+                            if ref else
+                            "Restoring this task may leave unmerged code, but "
+                            "no branch or commit reference was recorded. "
+                            "Acknowledge that the code will not be merged "
+                            "here or will be handled another way."
+                        ),
+                        "acknowledgement": acknowledgement,
+                    }
+                    if advisory is not None:
+                        response["advisory"] = advisory
+                    if position is not None:
+                        response["position"] = position
+                    return response
         # get_task_detail is intentionally in-memory only. Rehydrate only
         # after every rejection-capable target/finalization check has passed,
         # immediately before a task can return to a live surface. A denied
@@ -1687,6 +1761,8 @@ class BoardMutationMixin:
                 "type": "error",
                 "message": "Unable to restore archived task artifacts",
             }
+        if clear_status:
+            task.status = ""
         self._board_apply_archive_state(
             task,
             lane=target_lane,
@@ -1697,6 +1773,7 @@ class BoardMutationMixin:
         )
         self._refresh_finalization_root_projection(task)
         self.recompute_task_health()
+        return advisory
 
     def board_reorder_task(self, tid: str, position: int):
         tid = self.resolve_task_alias(tid)
