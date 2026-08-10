@@ -2148,7 +2148,9 @@ function terminalComposeSubmit(evt, cellId) {
   _terminalComposeScrollToBottom(id);
   terminalComposeClear(id);
   _terminalComposeHistoryReset(id, input);
-  if (directAgent && typeof renderTerminalWorkspace === 'function') renderTerminalWorkspace();
+  if (directAgent && typeof renderTerminalWorkspace === 'function') {
+    renderTerminalWorkspace({ component: 'composer' });
+  }
   return false;
 }
 
@@ -2223,7 +2225,9 @@ function terminalComposeKeydown(evt, cellId) {
     const directAgent = _terminalComposeDirectAgentForCellId(cellId);
     if (directAgent && _terminalDirectMessageReplyToByAgent[String(directAgent.id)]) {
       delete _terminalDirectMessageReplyToByAgent[String(directAgent.id)];
-      if (typeof renderTerminalWorkspace === 'function') renderTerminalWorkspace({ suppressTerminalFocus: true });
+      if (typeof renderTerminalWorkspace === 'function') {
+        renderTerminalWorkspace({ component: 'composer', suppressTerminalFocus: true });
+      }
       return;
     }
     const hasDraft = !!String(_terminalComposeInputText(input) || '').length

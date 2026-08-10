@@ -365,9 +365,12 @@ function _terminalShouldShowTabs(cells) {
 
 function renderTerminalWorkspace(opts) {
   opts = opts || {};
+  let component = String(opts.component || 'all');
   const root = document.getElementById('terminal-workspace');
   if (!root) return;
-  _terminalComposePersistFromDom(root);
+  if (component === 'all' || component === 'composer') {
+    _terminalComposePersistFromDom(root);
+  }
   // A detached panel window is a separate full webview showing only its panel;
   // the terminal workspace is CSS-hidden there. It must never open a PTY socket,
   // fit() a zero-size xterm, or send resize/focus frames — doing so clobbers the
@@ -401,7 +404,46 @@ function renderTerminalWorkspace(opts) {
     : null;
   const displayPath = _terminalDisplayPath(cell);
   const dom = _ensureTerminalWorkspaceDom(root);
-  const workspaceState = _captureTerminalWorkspaceState(root, cell);
+  const componentBindingOwner = dom.shell || root;
+  const cellId = String((cell && cell.id) || '');
+  // A terminal invalidation normally owns only terminal chrome/status/xterm.
+  // Selection can change in the delta application immediately before that
+  // invalidation (focus_update, selected_agent_id, active-group fallback, or
+  // removal of the viewed cell). In that case the sibling components are not
+  // merely stale data: their handlers still target the old agent. Upgrade this
+  // one refresh to the deliberate full selection render. The marker lives on
+  // the shell so recreating the DOM cannot accidentally inherit an old binding.
+  if (component === 'terminal'
+      && (!Object.prototype.hasOwnProperty.call(componentBindingOwner, '_torqueRenderedCellId')
+        || String(componentBindingOwner._torqueRenderedCellId || '') !== cellId)) {
+    component = 'all';
+  }
+  // Direct messages and the composer are interactive components in their own
+  // right. Targeted refreshes stop here instead of entering the terminal's
+  // render/capture/restore cycle (and, critically, instead of calling the
+  // sibling renderer). Selection changes still use the default full render.
+  if (component === 'direct-messages') {
+    _renderTerminalDirectMessages(dom.directMessages, cell);
+    return;
+  }
+  if (component === 'composer') {
+    const composerState = {
+      composer: typeof _captureTerminalComponentState === 'function'
+        ? _captureTerminalComponentState(dom.compose)
+        : null,
+    };
+    _renderTerminalCompose(dom.compose, cell);
+    _restoreTerminalWorkspaceComposerState(root, composerState, cell);
+    return;
+  }
+  const terminalOnly = component === 'terminal';
+  const workspaceState = terminalOnly
+    ? {
+      terminal: typeof _captureTerminalComponentState === 'function'
+        ? _captureTerminalComponentState(dom.stage)
+        : null,
+    }
+    : _captureTerminalWorkspaceState(root, cell);
   const preserveTerminalTailOnFit = _terminalWorkspaceFocusedComposeHasDraft(root);
   if (opts.suppressTerminalFocus && workspaceState && workspaceState.terminal
       && workspaceState.terminal.focus
@@ -437,8 +479,11 @@ function renderTerminalWorkspace(opts) {
   }
 
   if (!cell) {
-    _renderTerminalDirectMessages(dom.directMessages, null);
-    _renderTerminalCompose(dom.compose, null);
+    if (!terminalOnly) {
+      _renderTerminalDirectMessages(dom.directMessages, null);
+      _renderTerminalCompose(dom.compose, null);
+      componentBindingOwner._torqueRenderedCellId = cellId;
+    }
     const emptyHtml = ''
       + '<div class="terminal-empty ui-state ui-state--empty ui-state--fill">'
       + '  <div class="terminal-empty-title ui-state__title">Select an agent</div>'
@@ -453,14 +498,18 @@ function renderTerminalWorkspace(opts) {
       dom.statusbar.textContent = 'Standalone PTY workspace';
     }
     _deactivateEmbeddedTerminalWorkspace();
-    _restoreTerminalWorkspaceState(root, workspaceState, null);
+    if (terminalOnly) _restoreTerminalWorkspaceTerminalState(root, workspaceState);
+    else _restoreTerminalWorkspaceState(root, workspaceState, null);
     return;
   }
 
   const sessionKey = cell.id + ':' + (cell.session_id || '');
   if (!cell.session_id) {
-    _renderTerminalDirectMessages(dom.directMessages, cell);
-    _renderTerminalCompose(dom.compose, cell);
+    if (!terminalOnly) {
+      _renderTerminalDirectMessages(dom.directMessages, cell);
+      _renderTerminalCompose(dom.compose, cell);
+      componentBindingOwner._torqueRenderedCellId = cellId;
+    }
     const stoppedHtml = cell.cell_type === 'terminal'
       ? ''
         + '  <div class="terminal-empty-title ui-state__title">' + esc(cell.name) + ' is stopped</div>'
@@ -486,7 +535,8 @@ function renderTerminalWorkspace(opts) {
       dom.statusbar.textContent = statusLabel;
     }
     if (!stoppedEntry) _deactivateEmbeddedTerminalWorkspace();
-    _restoreTerminalWorkspaceState(root, workspaceState, cell);
+    if (terminalOnly) _restoreTerminalWorkspaceTerminalState(root, workspaceState);
+    else _restoreTerminalWorkspaceState(root, workspaceState, cell);
     return;
   }
 
@@ -510,11 +560,15 @@ function renderTerminalWorkspace(opts) {
   // re-renders the empty placeholder.
   dom.stage._torqueLastHtml = null;
 
-  _renderTerminalDirectMessages(dom.directMessages, cell);
-  _renderTerminalCompose(dom.compose, cell);
+  if (!terminalOnly) {
+    _renderTerminalDirectMessages(dom.directMessages, cell);
+    _renderTerminalCompose(dom.compose, cell);
+    componentBindingOwner._torqueRenderedCellId = cellId;
+  }
   const statusText = (displayPath || 'No directory') + '  |  ' + _terminalStatusLabel(cell);
   if (dom.statusbar.textContent !== statusText) dom.statusbar.textContent = statusText;
   const statusTitle = cell.current_path || cell.directory || '';
   if (dom.statusbar.title !== statusTitle) dom.statusbar.title = statusTitle;
-  _restoreTerminalWorkspaceState(root, workspaceState, cell);
+  if (terminalOnly) _restoreTerminalWorkspaceTerminalState(root, workspaceState);
+  else _restoreTerminalWorkspaceState(root, workspaceState, cell);
 }

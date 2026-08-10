@@ -19031,8 +19031,12 @@ test('focus_update terminal invalidation refreshes terminal workspace and update
     selectedTerminalId = 'agent-1';
     focusedItemId = 'agent-1';
     var __terminalRenderOpts = [];
+    var __terminalComponentOpts = [];
     var __terminalRefreshCalls = 0;
-    renderTerminalWorkspace = function() { __terminalRefreshCalls += 1; };
+    renderTerminalWorkspace = function(opts) {
+      __terminalRefreshCalls += 1;
+      __terminalComponentOpts.push(Object.assign({}, opts || {}));
+    };
     render = function(opts) {
       renderCalls.main++;
       __terminalRenderOpts.push(Object.assign({}, opts || {}));
@@ -19049,9 +19053,78 @@ test('focus_update terminal invalidation refreshes terminal workspace and update
   assert.equal(jsonValue(context, `selectedTerminalId`), 'agent-2');
   assert.equal(runInContext(context, `__terminalRefreshCalls`), 1,
     'focus_update must refresh terminal workspace');
-  assert.equal(jsonValue(context, `__terminalRenderOpts[0].skipTerminalRefresh`), false);
+  assert.equal(jsonValue(context, `__terminalRenderOpts[0].skipTerminalRefresh`), true,
+    'the grid render does not own the terminal component refresh');
+  assert.equal(jsonValue(context, `__terminalComponentOpts[0].component`), 'terminal');
   assert.equal(sandbox.renderCalls.context, 0,
     'context panel is not visible in this harness, but main render still handled terminal refresh');
+});
+
+test('selection-changing focus_update rebinds terminal, direct messages, and composer to the new cell', () => {
+  const { sandbox, document } = createSandbox();
+  const workspace = document.register('terminal-workspace');
+  workspace.classList.add('active');
+  document.body.classList.add('runtime-embedded');
+  const context = vm.createContext(sandbox);
+  [
+    'static/js/ws.js', 'static/js/render.js', 'static/js/grid/group-tabs.js',
+    'static/js/grid/agent-card.js', 'static/js/grid/terminal-row.js',
+    'static/js/grid/sections.js', 'static/js/agent-detail.js',
+    'static/js/agent-focus.js', 'static/js/grid/main.js', 'static/js/terminal.js',
+    'static/js/terminal/direct-messages.js', 'static/js/terminal/composer.js',
+    'static/js/terminal/composer-attachments.js', 'static/js/terminal/xterm-runtime.js',
+  ].forEach((path) => loadScript(context, path));
+  const dom = attachTerminalWorkspaceDom(document);
+
+  runInContext(context, `
+    render = function() {};
+    updateEventsAttentionBadge = function() {};
+    _expectedSeq = 1;
+    state.runtime = { embedded_terminal: true };
+    state.groups = { alpha: ['agent-1', 'agent-2'] };
+    state.group_settings = { alpha: {} };
+    state.children = { 'agent-1': [], 'agent-2': [] };
+    state.agents = {
+      'agent-1': {
+        id: 'agent-1', name: 'Agent One', group: 'alpha', cell_type: 'agent',
+        kind: 'worker', session_id: 'sess-1', status: 'running'
+      },
+      'agent-2': {
+        id: 'agent-2', name: 'Agent Two', group: 'alpha', cell_type: 'agent',
+        kind: 'worker', session_id: 'sess-2', status: 'running'
+      }
+    };
+    state.direct_messages_by_agent = {
+      'agent-1': [{ message_id: 'dm-1', message: 'one', sender_id: 'agent-1', sender_kind: 'worker', recipient_kind: 'user', created_at: 1 }],
+      'agent-2': [{ message_id: 'dm-2', message: 'two', sender_id: 'agent-2', sender_kind: 'worker', recipient_kind: 'user', created_at: 2 }]
+    };
+    state.active_session_id = 'sess-1';
+    selectedAgentId = 'agent-1';
+    selectedTerminalId = 'agent-1';
+    focusedItemId = 'agent-1';
+    _createEmbeddedTerminalSurface = function() { return {}; };
+    _connectEmbeddedTerminal = function() {};
+    _activateEmbeddedTerminalSurface = function() {};
+    _applyEmbeddedTerminalScrollbackFromSettings = function() {};
+    renderTerminalWorkspace();
+  `);
+
+  assert.match(dom.topbar.innerHTML, /Agent One/);
+  assert.match(dom.directMessages.innerHTML, /data-agent-id="agent-1"/);
+  assert.match(dom.compose.innerHTML, /data-cell-id="agent-1"/);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{ op: 'focus_update', active_session_id: 'sess-2', current_window_id: 'standalone' }],
+  });
+
+  assert.equal(jsonValue(context, 'selectedTerminalId'), 'agent-2');
+  assert.equal(jsonValue(context, 'selectedAgentId'), 'agent-2');
+  assert.match(dom.topbar.innerHTML, /Agent Two/);
+  assert.match(dom.directMessages.innerHTML, /data-agent-id="agent-2"/,
+    'DM list must follow the selected terminal cell');
+  assert.match(dom.compose.innerHTML, /data-cell-id="agent-2"/,
+    'composer handlers and message target must follow the selected terminal cell');
 });
 
 test('selected viewed agent upsert refreshes terminal workspace for status and path changes', () => {
@@ -19070,8 +19143,12 @@ test('selected viewed agent upsert refreshes terminal workspace for status and p
     selectedTerminalId = 'agent-1';
     focusedItemId = 'agent-1';
     var __terminalRenderOpts = [];
+    var __terminalComponentOpts = [];
     var __terminalRefreshCalls = 0;
-    renderTerminalWorkspace = function() { __terminalRefreshCalls += 1; };
+    renderTerminalWorkspace = function(opts) {
+      __terminalRefreshCalls += 1;
+      __terminalComponentOpts.push(Object.assign({}, opts || {}));
+    };
     render = function(opts) {
       renderCalls.main++;
       __terminalRenderOpts.push(Object.assign({}, opts || {}));
@@ -19095,7 +19172,9 @@ test('selected viewed agent upsert refreshes terminal workspace for status and p
   assert.equal(jsonValue(context, `state.agents['agent-1'].current_path`), '/repo/new');
   assert.equal(runInContext(context, `__terminalRefreshCalls`), 1,
     'viewed agent status/path changes must refresh terminal workspace');
-  assert.equal(jsonValue(context, `__terminalRenderOpts[0].skipTerminalRefresh`), false);
+  assert.equal(jsonValue(context, `__terminalRenderOpts[0].skipTerminalRefresh`), true,
+    'the grid render does not own the terminal component refresh');
+  assert.equal(jsonValue(context, `__terminalComponentOpts[0].component`), 'terminal');
 });
 
 test('off-agent direct_message_upsert updates cache without refreshing terminal workspace', () => {
@@ -19302,9 +19381,15 @@ test('incoming direct_message_upsert refreshes the real terminal direct-message 
 
   runInContext(context, `
     var __terminalRefreshCalls = 0;
+    var __terminalComponentOpts = [];
+    var __renderTerminalWorkspaceImpl = renderTerminalWorkspace;
+    renderTerminalWorkspace = function(opts) {
+      __terminalRefreshCalls += 1;
+      __terminalComponentOpts.push(Object.assign({}, opts || {}));
+      return __renderTerminalWorkspaceImpl(opts);
+    };
     render = function(opts) {
       if (!opts || !opts.skipTerminalRefresh) {
-        __terminalRefreshCalls += 1;
         renderTerminalWorkspace();
       }
     };
@@ -19333,6 +19418,8 @@ test('incoming direct_message_upsert refreshes the real terminal direct-message 
     send = function(message) { __noticeLifecycleCommands.push(message); return true; };
     _showNoticeToast = function() { __noticeToastCalls += 1; };
     renderTerminalWorkspace();
+    __terminalRefreshCalls = 0;
+    __terminalComponentOpts = [];
   `);
   assert.doesNotMatch(dom.directMessages.innerHTML, /delta hello/);
 
@@ -19381,6 +19468,7 @@ test('incoming direct_message_upsert refreshes the real terminal direct-message 
 
   assert.equal(runInContext(context, `__terminalRefreshCalls`), 1,
     'viewed direct message delta must refresh the real terminal workspace');
+  assert.equal(jsonValue(context, `__terminalComponentOpts[0].component`), 'direct-messages');
   assert.match(dom.directMessages.innerHTML, /delta hello/);
   assert.match(dom.directMessages.innerHTML, /terminal-direct-message--agent-to-user/);
   assert.equal(runInContext(context, `__noticeToastCalls`), 0,
