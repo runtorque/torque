@@ -131,6 +131,8 @@ class TorqueDoctorTests(unittest.TestCase):
         self._git(repo, "branch", unknown, no_evidence)
         historical_unknown = "torque/test/historical-ffffff"
         self._git(repo, "branch", historical_unknown, no_evidence)
+        unavailable_merge = "torque/test/unavailable-gggggg"
+        self._git(repo, "branch", unavailable_merge, no_evidence)
         active = "torque/test/active-eeeeee"
         self._git(repo, "branch", active, mismatch)
         active_path = Path(self.tmp.name) / "active-worktree"
@@ -191,6 +193,14 @@ class TorqueDoctorTests(unittest.TestCase):
             worktree_boundary={"branch": historical_unknown},
             completion_evidence={"review": {"verdict": "ship"}},
         ))
+        self.db.save_board_task(BoardTask(
+            id="TORQUE:unavailable",
+            task="Unavailable recorded merge",
+            worktree_boundary={"branch": unavailable_merge},
+            completion_evidence={
+                "merge": {"branch": unavailable_merge, "sha": "deadbeef"}
+            },
+        ))
         before = self._git(repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads")
         nested_before = self._git(
             nested, "for-each-ref", "--format=%(refname) %(objectname)",
@@ -210,10 +220,10 @@ class TorqueDoctorTests(unittest.TestCase):
         self.assertEqual(nested_after, nested_before)
         section = report["squash_branch_cleanup"]
         self.assertTrue(section["read_only"])
-        self.assertEqual(section["total_non_ancestral"], 6)
+        self.assertEqual(section["total_non_ancestral"], 7)
         self.assertEqual(section["excluded_worktree_count"], 1)
         self.assertEqual(section["counts"], {
-            "landed": 1, "unmerged": 2, "unknown": 2,
+            "landed": 1, "unmerged": 2, "unknown": 3,
         })
         by_branch = {item["branch"]: item for item in section["branches"]}
         self.assertEqual(by_branch[landed]["task_id"], "TORQUE:landed")
@@ -228,6 +238,13 @@ class TorqueDoctorTests(unittest.TestCase):
         self.assertEqual(
             by_branch[historical_unknown]["reason"],
             "historical_task_missing_merge_evidence",
+        )
+        self.assertEqual(
+            by_branch[unavailable_merge]["classification"], "unknown"
+        )
+        self.assertEqual(
+            by_branch[unavailable_merge]["reason"],
+            "recorded_merge_commit_unavailable",
         )
         self.assertNotIn(active, by_branch)
         nested_section = report["nested_branch_cleanup"]

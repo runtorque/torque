@@ -271,6 +271,41 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("branch_delete_failed", result["mismatches"])
 
+    async def test_remove_preserves_matching_squash_branch_without_origin_proof(self):
+        cell = self._make_cell(agent_id="squash-unverified-origin")
+        wt_path = await self.mgr.create(
+            cell, str(self.repo_root), base_branch="main"
+        )
+        branch = cell.worktree_branch
+        changed = Path(wt_path) / "unverified.txt"
+        changed.write_text("landed but origin unverified\n")
+        await self._git("add", "unverified.txt", cwd=wt_path)
+        await self._git("commit", "-m", "Unverified source", cwd=wt_path)
+
+        await self._git("merge", "--squash", branch)
+        with mock.patch.dict("os.environ", {"TORQUE_CELL_ID": ""}):
+            await self._git("commit", "-m", "Squash landing")
+        merge_sha = await self._git("rev-parse", "HEAD")
+
+        result = await self.mgr.remove_path_result(
+            str(self.repo_root),
+            wt_path,
+            branch=branch,
+            name=cell.name,
+            merge_commit_sha=merge_sha,
+            origin_verified=False,
+        )
+
+        cleanup = result["local_branch_cleanup"]
+        self.assertTrue(result["worktree_removed"])
+        self.assertFalse(cleanup["branch_deleted"])
+        self.assertEqual(cleanup["reason"], "origin_merge_not_verified")
+        self.assertNotIn("force_delete_returncode", cleanup)
+        exists, _, _ = await self._git_code(
+            "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"
+        )
+        self.assertEqual(exists, 0)
+
     async def test_remove_preserves_non_ancestral_branch_without_merge_evidence(self):
         cell = self._make_cell(agent_id="squash-no-evidence")
         wt_path = await self.mgr.create(cell, str(self.repo_root), base_branch="main")

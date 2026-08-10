@@ -1040,10 +1040,32 @@ def _origin_verification_evidence(
     matched_sha = ""
     result = None
 
+    def _verified_remote_match(match: dict | None) -> bool:
+        """Require remote truth, not a coincidentally matching local base ref."""
+        if not isinstance(match, dict):
+            return False
+        if not _sha_equal(str(match.get("sha") or "").strip(), merge_sha):
+            return False
+        source = str(match.get("source") or "").strip()
+        if source == "remote_ground_truth":
+            result = match.get("result")
+            return not isinstance(result, dict) or result.get("ok") is not False
+        if source != "remote_base_sync":
+            return False
+        sync = match.get("result")
+        if not isinstance(sync, dict) or not sync.get("ok"):
+            return False
+        remote_sha = str(sync.get("remote_sha") or "").strip()
+        base_sha = str(sync.get("base_sha") or "").strip()
+        return bool(
+            _sha_equal(remote_sha, merge_sha)
+            and (not base_sha or _sha_equal(base_sha, merge_sha))
+        )
+
     guard = authoritative_guard if isinstance(authoritative_guard, dict) else {}
     if guard.get("ok"):
         match = guard.get("base_match")
-        if isinstance(match, dict):
+        if _verified_remote_match(match):
             matched_sha = str(match.get("sha") or "").strip()
             source = str(match.get("source") or "authoritative_guard").strip()
             result = match.get("result") if isinstance(
@@ -1058,7 +1080,7 @@ def _origin_verification_evidence(
 
     if not matched_sha and isinstance(post_merge_sync, dict):
         match = _base_match_from_result(post_merge_sync, merge_sha)
-        if match:
+        if _verified_remote_match(match):
             matched_sha = str(match.get("sha") or "").strip()
             source = str(match.get("source") or "remote_base_sync").strip()
             result = post_merge_sync

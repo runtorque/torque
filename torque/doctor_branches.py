@@ -199,12 +199,14 @@ def collect_squash_branch_cleanup_section(
                 for sha in record["merge_shas"]
             ]
             if recorded:
-                entry["reason"] = "recorded_merge_tree_differs"
                 entry["recorded_merge_commits"] = [sha for _, sha in recorded]
+                resolved_merge_tree = False
                 for task_id, merge_sha in recorded:
                     merge_tree_code, merge_tree, _ = _git(
                         repo_root, "rev-parse", f"{merge_sha}^{{tree}}"
                     )
+                    if merge_tree_code == 0 and merge_tree:
+                        resolved_merge_tree = True
                     if (
                         branch_tree_code == 0
                         and merge_tree_code == 0
@@ -219,6 +221,12 @@ def collect_squash_branch_cleanup_section(
                             "tree_sha": branch_tree,
                         }
                         break
+                else:
+                    if resolved_merge_tree:
+                        entry["reason"] = "recorded_merge_tree_differs"
+                    else:
+                        entry["classification"] = "unknown"
+                        entry["reason"] = "recorded_merge_commit_unavailable"
             elif any(record["historical_without_merge"] for record in joined):
                 entry["classification"] = "unknown"
                 entry["reason"] = "historical_task_missing_merge_evidence"
