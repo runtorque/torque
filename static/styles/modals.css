@@ -1884,6 +1884,7 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 .agent-settings-dialog .agent-settings-body {
   overflow: auto;
   display: grid;
+  grid-auto-rows: max-content;
   gap: var(--space-4);
   align-content: start;
   padding: var(--space-4);

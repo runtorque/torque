@@ -35329,6 +35329,18 @@ test('Board filter indicator stays outside lane cache identity and preserves the
 });
 
 /* TORQUE:1583 — additive per-agent settings dialog contracts. */
+test('per-agent settings grid preserves max-content section rows inside the bounded scroller', () => {
+  const modalCss = fs.readFileSync(path.join(repoRoot, 'static/styles/modals.css'), 'utf8');
+  const bodyRule = modalCss.match(/\.agent-settings-dialog \.agent-settings-body\s*\{([^}]*)\}/);
+  assert.ok(bodyRule, 'the per-agent dialog keeps a scoped body layout rule');
+  assert.match(bodyRule[1], /overflow:\s*auto\s*;/,
+    'overflowing sections remain reachable through the dialog body scroller');
+  assert.match(bodyRule[1], /grid-auto-rows:\s*max-content\s*;/,
+    'implicit rows use each section’s full content height instead of sharing the bounded body height');
+  assert.match(modalCss, /\.gs-settings-section\s*\{[^}]*overflow:\s*hidden\s*;/s,
+    'section corner clipping remains intact while row sizing is fixed by the parent grid');
+});
+
 test('per-agent settings unchanged save emits zero settings, digest, class, or specialization mutations', () => {
   const { sandbox } = createSandbox({
     closeModals() {},
