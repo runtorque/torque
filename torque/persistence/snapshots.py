@@ -225,6 +225,15 @@ class SnapshotPersistenceMixin:
                                    or {}),
                     ),
                 )
+            if state_dict.get("mission_control_dismissed_cards") is not None:
+                c.execute(
+                    "INSERT INTO ui_state (key, value) VALUES (?,?)",
+                    (
+                        "mission_control_dismissed_cards",
+                        json.dumps(state_dict.get("mission_control_dismissed_cards")
+                                   or {}),
+                    ),
+                )
             if state_dict.get("board_filters_by_group") is not None:
                 c.execute(
                     "INSERT INTO ui_state (key, value) VALUES (?,?)",
@@ -646,6 +655,10 @@ class SnapshotPersistenceMixin:
             "events_dismissed_attention": (
                 json.loads(ui.get("events_dismissed_attention", "{}"))
                 if ui.get("events_dismissed_attention") else {}
+            ),
+            "mission_control_dismissed_cards": (
+                json.loads(ui.get("mission_control_dismissed_cards", "{}"))
+                if ui.get("mission_control_dismissed_cards") else {}
             ),
             "board_filters_by_group": board_filters_by_group,
             "board_selected_lanes_by_group": board_selected_lanes_by_group,

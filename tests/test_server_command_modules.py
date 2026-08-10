@@ -85,6 +85,7 @@ EXPECTED_UI_STATE_COMMANDS = {
     "ui_set_context_panel_split",
     "ui_set_supervisor_panel_state",
     "events_dismiss",
+    "mission_control_dismiss",
     "board_set_filters",
     "board_set_selected_lanes",
     "board_set_hidden_wide_lanes",
