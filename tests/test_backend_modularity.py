@@ -43,6 +43,15 @@ def _call_name(node):
     return ""
 
 
+def _assignment_names(node):
+    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+    return {
+        target.id
+        for target in targets
+        if isinstance(target, ast.Name)
+    }
+
+
 def _external_ticket_offload_inventory(repo_root):
     """Derive blocking external-ticket operations and unsafe async callers."""
     torque_root = repo_root / "torque"
@@ -109,18 +118,50 @@ def _external_ticket_offload_inventory(repo_root):
         for node in external_tree.body
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
+    adapter_factories = {"get_adapter"}
     blocking_wrappers = set()
-    for function_name, function in module_functions.items():
-        for call in (
-            node for node in ast.walk(function) if isinstance(node, ast.Call)
-        ):
-            if (
-                isinstance(call.func, ast.Attribute)
-                and isinstance(call.func.value, ast.Name)
-                and call.func.value.id == "adapter"
-                and call.func.attr in blocking_methods
+    changed = True
+    while changed:
+        changed = False
+        for function_name, function in module_functions.items():
+            if function_name in blocking_wrappers:
+                continue
+            adapter_variables = set()
+            for node in ast.walk(function):
+                if not isinstance(node, (ast.Assign, ast.AnnAssign)) or not node.value:
+                    continue
+                if (
+                    isinstance(node.value, ast.Call)
+                    and _call_name(node.value.func)
+                    in adapter_factories | set(adapter_classes)
+                ):
+                    adapter_variables.update(_assignment_names(node))
+            for call in (
+                node for node in ast.walk(function) if isinstance(node, ast.Call)
             ):
-                blocking_wrappers.add(function_name)
+                direct_adapter_dispatch = (
+                    isinstance(call.func, ast.Attribute)
+                    and call.func.attr in blocking_methods
+                    and (
+                        (
+                            isinstance(call.func.value, ast.Name)
+                            and call.func.value.id in adapter_variables
+                        )
+                        or (
+                            isinstance(call.func.value, ast.Call)
+                            and _call_name(call.func.value.func)
+                            in adapter_factories | set(adapter_classes)
+                        )
+                    )
+                )
+                wrapper_dispatch = (
+                    isinstance(call.func, ast.Name)
+                    and call.func.id in blocking_wrappers
+                )
+                if direct_adapter_dispatch or wrapper_dispatch:
+                    blocking_wrappers.add(function_name)
+                    changed = True
+                    break
 
     offload_helpers = set()
     for function_name, function in module_functions.items():
@@ -137,78 +178,135 @@ def _external_ticket_offload_inventory(repo_root):
             offload_helpers.add(function_name)
 
     parsed = {}
-    imported_aliases = set(blocking_wrappers)
-    helper_aliases = set(offload_helpers)
-    adapter_factory_aliases = {"get_adapter"}
-    adapter_class_aliases = set(adapter_classes)
-    module_aliases = {}
+    bindings = {}
     for path in torque_root.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         parsed[path] = tree
-        aliases = set()
-        for node in ast.walk(tree):
+        file_bindings = {
+            "wrappers": set(),
+            "helpers": set(),
+            "factories": set(),
+            "classes": set(),
+            "modules": set(),
+        }
+        for node in tree.body:
             if isinstance(node, ast.ImportFrom) and (
                 (node.module or "").endswith("external_tickets")
             ):
                 for imported in node.names:
                     local_name = imported.asname or imported.name
                     if imported.name in blocking_wrappers:
-                        imported_aliases.add(local_name)
+                        file_bindings["wrappers"].add(local_name)
                     if imported.name in offload_helpers:
-                        helper_aliases.add(local_name)
-                    if imported.name == "get_adapter":
-                        adapter_factory_aliases.add(local_name)
+                        file_bindings["helpers"].add(local_name)
+                    if imported.name in adapter_factories:
+                        file_bindings["factories"].add(local_name)
                     if imported.name in adapter_classes:
-                        adapter_class_aliases.add(local_name)
+                        file_bindings["classes"].add(local_name)
             elif isinstance(node, ast.Import):
                 for imported in node.names:
                     if imported.name.endswith("external_tickets"):
-                        aliases.add(imported.asname or imported.name.split(".")[-1])
+                        file_bindings["modules"].add(
+                            imported.asname or imported.name
+                        )
             elif (
                 isinstance(node, ast.ImportFrom)
                 and node.module == "torque"
             ):
                 for imported in node.names:
                     if imported.name == "external_tickets":
-                        aliases.add(imported.asname or imported.name)
-        module_aliases[path] = aliases
+                        file_bindings["modules"].add(
+                            imported.asname or imported.name
+                        )
+        bindings[path] = file_bindings
 
-    # Carry aliases through composition keywords and runtime-field assignments.
+    def reference_kind(node, file_bindings):
+        if isinstance(node, ast.Name):
+            for kind in ("wrappers", "helpers", "factories", "classes"):
+                if node.id in file_bindings[kind]:
+                    return kind
+        if isinstance(node, ast.Attribute):
+            owner = node.value
+            if isinstance(owner, ast.Name) and owner.id in file_bindings["modules"]:
+                if node.attr in blocking_wrappers:
+                    return "wrappers"
+                if node.attr in offload_helpers:
+                    return "helpers"
+                if node.attr in adapter_factories:
+                    return "factories"
+                if node.attr in adapter_classes:
+                    return "classes"
+        return ""
+
+    # Preserve provenance while carrying ordinary aliases within each module.
     changed = True
     while changed:
         changed = False
-        for tree in parsed.values():
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Call):
-                    for keyword in node.keywords:
-                        if (
-                            keyword.arg
-                            and _call_name(keyword.value) in imported_aliases
-                            and keyword.arg not in imported_aliases
-                        ):
-                            imported_aliases.add(keyword.arg)
-                            changed = True
-                elif isinstance(node, (ast.Assign, ast.AnnAssign)):
-                    value = node.value
-                    if not value or _call_name(value) not in imported_aliases:
-                        continue
-                    targets = (
-                        node.targets if isinstance(node, ast.Assign)
-                        else [node.target]
+        for path, tree in parsed.items():
+            file_bindings = bindings[path]
+            for node in tree.body:
+                if not isinstance(node, (ast.Assign, ast.AnnAssign)) or not node.value:
+                    continue
+                kind = reference_kind(node.value, file_bindings)
+                if not kind:
+                    continue
+                new_names = _assignment_names(node) - file_bindings[kind]
+                if new_names:
+                    file_bindings[kind].update(new_names)
+                    changed = True
+
+    # Composition keywords establish runtime/object fields that carry a
+    # blocking wrapper. Unlike local aliases, these intentionally cross files.
+    wrapper_fields = {}
+    for path, tree in parsed.items():
+        file_bindings = bindings[path]
+        for call in (
+            node for node in ast.walk(tree) if isinstance(node, ast.Call)
+        ):
+            for keyword in call.keywords:
+                if (
+                    keyword.arg
+                    and reference_kind(keyword.value, file_bindings) == "wrappers"
+                ):
+                    wrapper_fields.setdefault(keyword.arg, set()).add(
+                        (str(path.relative_to(repo_root)), keyword.value.lineno)
                     )
-                    for target in targets:
-                        if isinstance(target, ast.Name) and target.id not in imported_aliases:
-                            imported_aliases.add(target.id)
-                            changed = True
 
     violations = []
     safe_sites = []
     for path, tree in parsed.items():
         relative_path = path.relative_to(repo_root)
-        aliases = module_aliases[path]
+        file_bindings = bindings[path]
         for function in ast.walk(tree):
             if not isinstance(function, ast.AsyncFunctionDef):
                 continue
+            local_wrappers = set(file_bindings["wrappers"])
+            changed = True
+            while changed:
+                changed = False
+                for node in ast.walk(function):
+                    if (
+                        not isinstance(node, (ast.Assign, ast.AnnAssign))
+                        or not node.value
+                    ):
+                        continue
+                    is_wrapper_reference = (
+                        reference_kind(node.value, file_bindings) == "wrappers"
+                        or (
+                            isinstance(node.value, ast.Name)
+                            and node.value.id in local_wrappers
+                        )
+                        or (
+                            isinstance(node.value, ast.Attribute)
+                            and node.value.attr in wrapper_fields
+                        )
+                    )
+                    if not is_wrapper_reference:
+                        continue
+                    new_names = _assignment_names(node) - local_wrappers
+                    if new_names:
+                        local_wrappers.update(new_names)
+                        changed = True
             adapter_variables = {
                 argument.arg
                 for argument in (
@@ -216,7 +314,7 @@ def _external_ticket_offload_inventory(repo_root):
                     + function.args.args
                     + function.args.kwonlyargs
                 )
-                if _call_name(argument.annotation) in adapter_class_aliases
+                if _call_name(argument.annotation) in file_bindings["classes"]
             }
             for node in ast.walk(function):
                 if not isinstance(node, (ast.Assign, ast.AnnAssign)) or not node.value:
@@ -225,12 +323,9 @@ def _external_ticket_offload_inventory(repo_root):
                 if not isinstance(value, ast.Call):
                     continue
                 called = _call_name(value.func)
-                if called not in adapter_factory_aliases | adapter_class_aliases:
+                if called not in file_bindings["factories"] | file_bindings["classes"]:
                     continue
-                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-                adapter_variables.update(
-                    target.id for target in targets if isinstance(target, ast.Name)
-                )
+                adapter_variables.update(_assignment_names(node))
 
             for call in (
                 node for node in ast.walk(function) if isinstance(node, ast.Call)
@@ -238,12 +333,13 @@ def _external_ticket_offload_inventory(repo_root):
                 called = _call_name(call.func)
                 is_wrapper_call = (
                     isinstance(call.func, ast.Name)
-                    and called in imported_aliases
+                    and called in local_wrappers
                 ) or (
                     isinstance(call.func, ast.Attribute)
-                    and isinstance(call.func.value, ast.Name)
-                    and call.func.value.id in aliases
-                    and called in blocking_wrappers
+                    and (
+                        reference_kind(call.func, file_bindings) == "wrappers"
+                        or called in wrapper_fields
+                    )
                 )
                 is_adapter_call = (
                     isinstance(call.func, ast.Attribute)
@@ -256,7 +352,7 @@ def _external_ticket_offload_inventory(repo_root):
                         or (
                             isinstance(call.func.value, ast.Call)
                             and _call_name(call.func.value.func)
-                            in adapter_factory_aliases | adapter_class_aliases
+                            in file_bindings["factories"] | file_bindings["classes"]
                         )
                     )
                 )
@@ -267,7 +363,9 @@ def _external_ticket_offload_inventory(repo_root):
                     )
                     continue
 
-                is_offload = called in helper_aliases or (
+                is_offload = (
+                    reference_kind(call.func, file_bindings) == "helpers"
+                ) or (
                     isinstance(call.func, ast.Attribute)
                     and isinstance(call.func.value, ast.Name)
                     and call.func.value.id == "asyncio"
@@ -276,7 +374,15 @@ def _external_ticket_offload_inventory(repo_root):
                 if not is_offload or not call.args:
                     if call.args:
                         operation_name = _call_name(call.args[0])
-                        if operation_name in imported_aliases | blocking_methods:
+                        operation_is_blocking = (
+                            reference_kind(call.args[0], file_bindings) == "wrappers"
+                            or operation_name in local_wrappers | blocking_methods
+                            or (
+                                isinstance(call.args[0], ast.Attribute)
+                                and call.args[0].attr in wrapper_fields
+                            )
+                        )
+                        if operation_is_blocking:
                             violations.append(
                                 f"{relative_path}:{call.lineno} async "
                                 f"{function.name} passes blocking external-ticket "
@@ -285,7 +391,15 @@ def _external_ticket_offload_inventory(repo_root):
                             )
                     continue
                 operation_name = _call_name(call.args[0])
-                if operation_name in imported_aliases | blocking_methods:
+                operation_is_blocking = (
+                    reference_kind(call.args[0], file_bindings) == "wrappers"
+                    or operation_name in local_wrappers | blocking_methods
+                    or (
+                        isinstance(call.args[0], ast.Attribute)
+                        and call.args[0].attr in wrapper_fields
+                    )
+                )
+                if operation_is_blocking:
                     safe_sites.append(
                         f"{relative_path}:{call.lineno} async {function.name} "
                         f"offloads {operation_name} via {called}"
@@ -296,6 +410,9 @@ def _external_ticket_offload_inventory(repo_root):
         "blocking_methods": sorted(blocking_methods),
         "blocking_wrappers": sorted(blocking_wrappers),
         "offload_helpers": sorted(offload_helpers),
+        "wrapper_fields": {
+            name: sorted(origins) for name, origins in sorted(wrapper_fields.items())
+        },
         "safe_sites": sorted(safe_sites),
         "violations": sorted(violations),
     }
@@ -521,8 +638,8 @@ class BackendSizeGuardrailTests(unittest.TestCase):
                 "def get_adapter():\n"
                 "    return GitHubExternalTicketAdapter()\n"
                 "def publish_ticket(task):\n"
-                "    adapter = get_adapter()\n"
-                "    return adapter.publish(task)\n"
+                "    backend = get_adapter()\n"
+                "    return backend.publish(task)\n"
                 "async def run_external_ticket_operation(operation, *args):\n"
                 "    return await asyncio.to_thread(operation, *args)\n",
                 encoding="utf-8",
@@ -533,11 +650,38 @@ class BackendSizeGuardrailTests(unittest.TestCase):
                 "    return publish_ticket(task)\n",
                 encoding="utf-8",
             )
+            (torque / "composition.py").write_text(
+                "from .external_tickets import publish_ticket\n"
+                "class Runtime:\n"
+                "    def __init__(self, **kwargs):\n"
+                "        self.__dict__.update(kwargs)\n"
+                "runtime = Runtime(publish_ticket=publish_ticket)\n",
+                encoding="utf-8",
+            )
+            (commands / "di_violation.py").write_text(
+                "async def handle(runtime, task):\n"
+                "    return runtime.publish_ticket(task)\n",
+                encoding="utf-8",
+            )
+            (commands / "unrelated.py").write_text(
+                "def publish_ticket(task):\n"
+                "    return task\n"
+                "async def handle(task):\n"
+                "    return publish_ticket(task)\n",
+                encoding="utf-8",
+            )
 
             inventory = _external_ticket_offload_inventory(repo)
 
+        self.assertIn("publish_ticket", inventory["blocking_wrappers"])
+        self.assertEqual(
+            [("torque/composition.py", 5)],
+            inventory["wrapper_fields"]["publish_ticket"],
+        )
         self.assertEqual(
             [
+                "torque/commands/di_violation.py:2 async handle calls blocking "
+                "external-ticket operation publish_ticket directly",
                 "torque/commands/violation.py:3 async handle calls blocking "
                 "external-ticket operation publish_ticket directly"
             ],
