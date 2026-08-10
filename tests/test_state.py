@@ -5765,6 +5765,7 @@ class MatrixStateEngineerStreamTests(unittest.IsolatedAsyncioTestCase):
                 "stale": False,
                 "source": "merge_readiness_check",
                 "merge_clean": True,
+                "branch_head": "abc123",
             },
         )
         return state, product

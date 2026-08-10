@@ -326,6 +326,7 @@ def _architect_attention_stream_item(stream: dict) -> dict:
         "branch_advanced": bool((stream or {}).get("branch_advanced", False)),
         "recommended_next_action": _stream_recommended_next_action(stream),
         "last_activity_at": str((stream or {}).get("last_activity_at", "") or ""),
+        "head": dict(readiness.get("head", {}) or {}),
         # These records are intentionally typed worker-supplied evidence, not
         # an inference from task prose.  Include them in the Architect's
         # decision projections rather than leaving them only in the lower
@@ -617,6 +618,7 @@ def _architect_attention_digest_json(state, architect_id: str,
         stale = _stream_stale_base(stream)
         if (
             stream_state == "fixing_blockers"
+            or stream_state == "merge_readiness_unknown"
             or bool((stream or {}).get("branch_advanced", False))
             or bool(stale.get("stale"))
             or _stream_recommended_next_action(stream) == "rebase"

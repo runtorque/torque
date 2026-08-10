@@ -23684,6 +23684,57 @@ test('renderAgentPanel surfaces merge-readiness packets on Session Map stream ca
   assert.match(panel.innerHTML, /Merge report:/);
 });
 
+test('renderAgentPanel labels an unknown current branch head as unverified', () => {
+  const { context, document } = createEngineerHarness();
+  const panel = document.register('panel-agent');
+
+  context.state.agents = {
+    'eng-1': {
+      id: 'eng-1',
+      name: 'Builder',
+      group: 'alpha',
+      kind: 'engineer',
+      cell_type: 'agent',
+      status: 'running',
+    },
+  };
+  context.state.engineer_session_maps = {
+    'alpha::eng-1': {
+      streams: {
+        items: [{
+          stream_id: 'stream:/repo::torque/unverified-head',
+          branch: 'torque/unverified-head',
+          state: 'merge_readiness_unknown',
+          merge_state: 'not_ready',
+          merge_readiness: {
+            state: 'merge_readiness_unknown',
+            merge_state: 'not_ready',
+            head: {
+              reviewed_boundary_sha: 'abcdef1234567890',
+              current_branch_head_sha: '',
+              current_branch_head_sha_source: 'unknown',
+              current_branch_head_sha_verified: false,
+              branch_advanced: false,
+            },
+            review_final: { verdict: 'ship', task_id: 'TORQUE:2' },
+            recommended_next_action: 'check_merge_readiness',
+          },
+        }],
+      },
+    },
+  };
+  context._engineerJournalSubviewByGroup.alpha = 'session_map';
+  context.focusedItemId = 'eng-1';
+
+  context.renderAgentPanel();
+
+  assert.match(panel.innerHTML, /merge-readiness-label">Reviewed<\/div><div[^>]*>abcdef1/);
+  assert.match(panel.innerHTML, /merge-readiness-label">Head<\/div><div[^>]*>Unverified/);
+  assert.doesNotMatch(panel.innerHTML, /merge-readiness-label">Head<\/div><div[^>]*>abcdef1/);
+  assert.match(panel.innerHTML, /Check Merge Readiness/);
+  assert.match(panel.innerHTML, /Ship · TORQUE:2/);
+});
+
 test('merge-readiness cards expose distinct visual classes for merge states', () => {
   const { context } = createEngineerHarness();
   const html = context._agentPanelLegacyRenderOpenStreamCard({
