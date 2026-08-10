@@ -233,6 +233,28 @@ class ServerAiReportMandatoryReviewGateTests(unittest.IsolatedAsyncioTestCase):
             "message": question,
         })
 
+    async def _ai_report(self, state, cell, action, message):
+        handle_command = self._extract_handle_command(state)
+        return await handle_command({
+            "cmd": "ai_report",
+            "cell_id": cell.id,
+            "action": action,
+            "message": message,
+        })
+
+    @staticmethod
+    def _append_block_reply(task, block, *, delivery_state="delivered"):
+        task.messages.append({
+            "timestamp": block["timestamp"] + 0.5,
+            "action": "block_reply",
+            "message": "Use the resolved contract.",
+            "worker_id": block["agent_id"],
+            "block_id": block["block_id"],
+            "reply_message_id": "reply-" + block["block_id"],
+            "delivery_state": delivery_state,
+            "acknowledged_at": 0.0,
+        })
+
     def _pipeline_action_mgr(self):
         return FakeActionManager({
             "pipeline": {
@@ -281,6 +303,78 @@ class ServerAiReportMandatoryReviewGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(NON_USER_ASK_LABEL, ask.labels)
         self.assertTrue(cell.needs_attention)
         self.assertEqual(task.status, "Awaiting Input")
+
+    async def test_progress_acknowledges_delivered_reply_and_clears_block_signals(self):
+        state, cell, task = self._state_cell_task()
+
+        await self._ai_report(state, cell, "blocked", "Which contract?")
+        block = task.messages[-1]
+        self._append_block_reply(task, block)
+
+        self.assertIn("torque:blocked", task.labels)
+        self.assertEqual(cell.activity, "waiting")
+        self.assertEqual(task.health_state, "blocked")
+
+        await self._ai_report(
+            state, cell, "progress", "Continuing with the ruling."
+        )
+
+        self.assertNotIn("torque:blocked", task.labels)
+        self.assertEqual(cell.activity, "")
+        self.assertEqual(task.health_state, "healthy")
+        self.assertEqual(len(task.messages), 3)
+        self.assertEqual(task.messages[0]["action"], "blocked")
+        self.assertEqual(task.messages[1]["action"], "block_reply")
+        self.assertTrue(task.messages[1]["acknowledged_at"])
+        self.assertEqual(
+            task.messages[1]["acknowledged_by_action"], "progress"
+        )
+
+    async def test_progress_keeps_block_signals_for_newer_unanswered_block(self):
+        state, cell, task = self._state_cell_task()
+        await self._ai_report(state, cell, "blocked", "First question?")
+        first_block = task.messages[-1]
+        self._append_block_reply(task, first_block)
+        await self._ai_report(state, cell, "blocked", "New question?")
+
+        await self._ai_report(state, cell, "progress", "Partial progress")
+
+        self.assertTrue(task.messages[1]["acknowledged_at"])
+        self.assertIn("torque:blocked", task.labels)
+        self.assertEqual(cell.activity, "waiting")
+        self.assertEqual(task.health_state, "blocked")
+
+    async def test_progress_keeps_block_signals_for_failed_reply(self):
+        for delivery_state in ("failed", "unrecoverable"):
+            with self.subTest(delivery_state=delivery_state):
+                state, cell, task = self._state_cell_task()
+                await self._ai_report(
+                    state, cell, "blocked", "Which contract?"
+                )
+                self._append_block_reply(
+                    task, task.messages[-1],
+                    delivery_state=delivery_state,
+                )
+
+                await self._ai_report(
+                    state, cell, "progress", "Cannot use the ruling yet."
+                )
+
+                self.assertFalse(task.messages[1]["acknowledged_at"])
+                self.assertIn("torque:blocked", task.labels)
+                self.assertEqual(cell.activity, "waiting")
+                self.assertEqual(task.health_state, "blocked")
+
+    async def test_done_health_short_circuit_is_unchanged_for_unanswered_block(self):
+        state, cell, task = self._state_cell_task(action_name="custom/no-review")
+        await self._ai_report(state, cell, "blocked", "Which contract?")
+
+        await self._ai_report(state, cell, "done", "Finished")
+
+        self.assertEqual(task.lane, "Done")
+        self.assertNotIn("torque:blocked", task.labels)
+        self.assertEqual(cell.activity, "")
+        self.assertEqual(task.health_state, "healthy")
 
     async def test_ai_ask_suppresses_user_attention_for_engineer_owned_worker(self):
         state, worker, task = self._state_cell_task(kind="worker")
