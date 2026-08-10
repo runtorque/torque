@@ -34,6 +34,41 @@ _REVIEW_GATE_ACTION = "feature/review"
 _REVIEWER_ASSIGNMENT_HISTORY_LIMIT = 20
 
 
+def _reviewer_ids_for_review_task(task) -> set[str]:
+    """Return live and durable reviewer identities recorded on ``task``."""
+    reviewer_ids = set()
+    reviewer_id = str(getattr(task, "agent_id", "") or "").strip()
+    if reviewer_id:
+        reviewer_ids.add(reviewer_id)
+    evidence = getattr(task, "completion_evidence", {}) or {}
+    if not isinstance(evidence, dict):
+        return reviewer_ids
+    review_evidence = evidence.get("review", {}) or {}
+    completed_reviewer_id = ""
+    if isinstance(review_evidence, dict):
+        completed_reviewer_id = str(
+            review_evidence.get("agent_id", "") or ""
+        ).strip()
+    if not completed_reviewer_id:
+        completion_evidence = evidence.get("completion", {}) or {}
+        if isinstance(completion_evidence, dict):
+            completed_reviewer_id = str(
+                completion_evidence.get("agent_id", "") or ""
+            ).strip()
+    if completed_reviewer_id:
+        reviewer_ids.add(completed_reviewer_id)
+    assignments = [evidence.get("reviewer_assignment", {})]
+    assignments.extend(evidence.get("reviewer_assignment_history", []) or [])
+    for assignment in assignments:
+        if not isinstance(assignment, dict):
+            continue
+        for key in ("reviewer_id", "replacement_reviewer_id"):
+            recorded_id = str(assignment.get(key, "") or "").strip()
+            if recorded_id:
+                reviewer_ids.add(recorded_id)
+    return reviewer_ids
+
+
 def _prior_review_task_ids_for_agent(
         state, task, agent_id: str) -> list[str]:
     """Return prior feature/review task ids assigned to ``agent_id``."""
@@ -51,10 +86,7 @@ def _prior_review_task_ids_for_agent(
         ).strip().lower()
         if action_name != _REVIEW_GATE_ACTION:
             continue
-        reviewer_id = str(
-            getattr(candidate, "agent_id", "") or ""
-        ).strip()
-        if reviewer_id == agent_id:
+        if agent_id in _reviewer_ids_for_review_task(candidate):
             result.append(candidate_id)
     return result
 
@@ -71,35 +103,7 @@ def _prior_reviewer_ids_for_chain(state, task) -> list[str]:
         if str(getattr(candidate, "action_name", "") or "").strip().lower() \
                 != _REVIEW_GATE_ACTION:
             continue
-        reviewer_id = str(getattr(candidate, "agent_id", "") or "").strip()
-        if reviewer_id:
-            reviewer_ids.add(reviewer_id)
-        evidence = getattr(candidate, "completion_evidence", {}) or {}
-        if not isinstance(evidence, dict):
-            continue
-        review_evidence = evidence.get("review", {}) or {}
-        completed_reviewer_id = ""
-        if isinstance(review_evidence, dict):
-            completed_reviewer_id = str(
-                review_evidence.get("agent_id", "") or ""
-            ).strip()
-        if not completed_reviewer_id:
-            completion_evidence = evidence.get("completion", {}) or {}
-            if isinstance(completion_evidence, dict):
-                completed_reviewer_id = str(
-                    completion_evidence.get("agent_id", "") or ""
-                ).strip()
-        if completed_reviewer_id:
-            reviewer_ids.add(completed_reviewer_id)
-        assignments = [evidence.get("reviewer_assignment", {})]
-        assignments.extend(evidence.get("reviewer_assignment_history", []) or [])
-        for assignment in assignments:
-            if not isinstance(assignment, dict):
-                continue
-            for key in ("reviewer_id", "replacement_reviewer_id"):
-                recorded_id = str(assignment.get(key, "") or "").strip()
-                if recorded_id:
-                    reviewer_ids.add(recorded_id)
+        reviewer_ids.update(_reviewer_ids_for_review_task(candidate))
     return sorted(reviewer_ids)
 
 

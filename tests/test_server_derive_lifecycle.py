@@ -1721,6 +1721,52 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(reviewer.id, reuse_messages[0]["message"])
         self.assertIn("task-review", reuse_messages[0]["message"])
 
+    async def test_feature_review_derive_discloses_reuse_after_assignment_cleanup(self):
+        for evidence_kind in ("review", "completion"):
+            with self.subTest(evidence_kind=evidence_kind):
+                state = self._make_state()
+                implementer, reviewer, _root, _fix = (
+                    self._add_second_review_cycle_chain(state)
+                )
+                prior_review = state.board_tasks["task-review"]
+                prior_review.agent_id = ""
+                prior_review.lane = "Archived"
+                prior_review.completion_evidence = {
+                    evidence_kind: {
+                        "agent_id": reviewer.id,
+                        "agent_name": reviewer.name,
+                    },
+                }
+                calls, dispatch = self._recording_dispatch(state)
+                handle_command = self._extract_handle_command(state, dispatch)
+
+                result = await handle_command({
+                    "cmd": "ai_report",
+                    "cell_id": implementer.id,
+                    "action": "derive",
+                    "action_name": "feature/review",
+                    "message": "Reassign the prior reviewer after cleanup",
+                    "target_agent": reviewer.id,
+                })
+
+                self.assertEqual(result["type"], "ok")
+                self.assertEqual(result["agent_id"], reviewer.id)
+                self.assertEqual(calls[0]["agent_id"], reviewer.id)
+                reuse = result["reviewer_reuse"]
+                self.assertEqual(reuse["reviewer_id"], reviewer.id)
+                self.assertEqual(
+                    reuse["prior_review_task_ids"], [prior_review.id]
+                )
+                self.assertEqual(
+                    reuse["selection_source"], "explicit_target"
+                )
+                review_task = state.board_tasks[result["task_id"]]
+                self.assertEqual(
+                    review_task.completion_evidence["reviewer_assignment"],
+                    reuse,
+                )
+                self.assertIn("torque:reviewer-reused", review_task.labels)
+
     async def test_feature_review_fresh_seat_constraint_skips_prior_reviewer(self):
         state = self._make_state()
         implementer, reviewer, _root, _fix = (
