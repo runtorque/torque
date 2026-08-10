@@ -273,6 +273,97 @@ test('terminal workspace restore does not refocus the composer when desktop focu
     'an unknown desktop focus owner must not have focus taken by the DM composer');
 });
 
+function makeTerminalWorkspaceParts(terminal, composer) {
+  const stage = makePanel(terminal);
+  const compose = makePanel(composer);
+  const directMessages = makePanel(null);
+  return {
+    stage,
+    compose,
+    directMessages,
+    workspace: {
+      contains(node) { return node === terminal || node === composer; },
+      querySelector(selector) {
+        if (selector === '.terminal-stage') return stage;
+        if (selector === '.terminal-compose-slot') return compose;
+        if (selector === '.terminal-direct-messages-slot') return directMessages;
+        if (selector === '.terminal-compose-input') return composer;
+        return null;
+      },
+    },
+  };
+}
+
+test('a DM-owned snapshot cannot restore focus into the terminal component', () => {
+  const terminal = makeFakeTextarea('terminal-helper-agent-1');
+  const composer = makeFakeTextarea('terminal-compose-input-agent-1');
+  composer.dataset = { cellId: 'agent-1' };
+  composer.classList = makeClassList(['terminal-compose-input']);
+  const parts = makeTerminalWorkspaceParts(terminal, composer);
+  const sandbox = buildSandbox(composer, {
+    [terminal.id]: terminal,
+    [composer.id]: composer,
+  });
+  sandbox._captureTerminalDirectMessagesState = function() { return null; };
+  sandbox._restoreTerminalDirectMessagesState = function() {};
+  sandbox._terminalComposeInputText = function(input) { return input.value; };
+  sandbox._terminalComposeDrafts = {};
+  sandbox._terminalComposeTextarea = function() { return composer; };
+  sandbox._terminalComposeOwnsLiveEditing = function() { return true; };
+  sandbox._terminalComposeAutoResize = function() {};
+  sandbox._terminalComposeSetButtonState = function() {};
+  loadScript(sandbox, 'static/js/terminal/composer.js');
+  sandbox._terminalComposeAutoResize = function() {};
+  sandbox._terminalComposeSetButtonState = function() {};
+
+  const snapshot = sandbox._captureTerminalWorkspaceState(parts.workspace, { id: 'agent-1' });
+  assert.ok(snapshot.composer && snapshot.composer.focus,
+    'composer focus belongs only to the DM component snapshot');
+  assert.equal(snapshot.terminal && snapshot.terminal.focus, null,
+    'the terminal component snapshot must not capture DM focus');
+
+  sandbox.document.activeElement = sandbox.document.body;
+  terminal.focusCalls.length = 0;
+  sandbox._restoreTerminalWorkspaceTerminalState(parts.workspace, snapshot);
+  assert.equal(terminal.focusCalls.length, 0,
+    'a DM-driven restore cannot move focus into the terminal');
+});
+
+test('a terminal-owned snapshot cannot restore focus into the DM composer component', () => {
+  const terminal = makeFakeTextarea('terminal-helper-agent-1');
+  const composer = makeFakeTextarea('terminal-compose-input-agent-1');
+  composer.dataset = { cellId: 'agent-1' };
+  composer.classList = makeClassList(['terminal-compose-input']);
+  const parts = makeTerminalWorkspaceParts(terminal, composer);
+  const sandbox = buildSandbox(terminal, {
+    [terminal.id]: terminal,
+    [composer.id]: composer,
+  });
+  sandbox._captureTerminalDirectMessagesState = function() { return null; };
+  sandbox._restoreTerminalDirectMessagesState = function() {};
+  sandbox._terminalComposeInputText = function(input) { return input.value; };
+  sandbox._terminalComposeDrafts = {};
+  sandbox._terminalComposeTextarea = function() { return composer; };
+  sandbox._terminalComposeOwnsLiveEditing = function() { return true; };
+  sandbox._terminalComposeAutoResize = function() {};
+  sandbox._terminalComposeSetButtonState = function() {};
+  loadScript(sandbox, 'static/js/terminal/composer.js');
+  sandbox._terminalComposeAutoResize = function() {};
+  sandbox._terminalComposeSetButtonState = function() {};
+
+  const snapshot = sandbox._captureTerminalWorkspaceState(parts.workspace, { id: 'agent-1' });
+  assert.ok(snapshot.terminal && snapshot.terminal.focus,
+    'terminal focus belongs only to the terminal component snapshot');
+  assert.equal(snapshot.composer && snapshot.composer.focus, null,
+    'the DM component snapshot must not capture terminal focus');
+
+  sandbox.document.activeElement = sandbox.document.body;
+  composer.focusCalls.length = 0;
+  sandbox._restoreTerminalWorkspaceComposerState(parts.workspace, snapshot, { id: 'agent-1' });
+  assert.equal(composer.focusCalls.length, 0,
+    'a terminal-driven restore cannot move focus into the composer');
+});
+
 test('_restoreSurfaceState does not refocus a composer after the operator moves to another control', () => {
   const composer = makeFakeTextarea('terminal-compose-input-agent-1');
   const operatorControl = { id: 'operator-settings-search', tagName: 'INPUT', isConnected: true };

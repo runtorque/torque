@@ -743,8 +743,9 @@ function _terminalDirectMessageFocusIsTerminal(root) {
 
 function _captureTerminalDirectMessageInteractionState(root, cell) {
   const snapshot = root ? _captureTerminalWorkspaceState(root, cell) : null;
-  if (snapshot && snapshot.focus && _terminalDirectMessageFocusIsTerminal(root)) {
-    snapshot.focus = null;
+  if (snapshot && snapshot.terminal && snapshot.terminal.focus
+      && _terminalDirectMessageFocusIsTerminal(root)) {
+    snapshot.terminal.focus = null;
   }
   return snapshot;
 }

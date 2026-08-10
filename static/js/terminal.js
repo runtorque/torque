@@ -403,9 +403,10 @@ function renderTerminalWorkspace(opts) {
   const dom = _ensureTerminalWorkspaceDom(root);
   const workspaceState = _captureTerminalWorkspaceState(root, cell);
   const preserveTerminalTailOnFit = _terminalWorkspaceFocusedComposeHasDraft(root);
-  if (opts.suppressTerminalFocus && workspaceState && workspaceState.focus
+  if (opts.suppressTerminalFocus && workspaceState && workspaceState.terminal
+      && workspaceState.terminal.focus
       && _terminalDirectMessageFocusIsTerminal(root)) {
-    workspaceState.focus = null;
+    workspaceState.terminal.focus = null;
   }
   const title = cell && cell.name ? cell.name : 'Terminal';
   // Idempotent topbar: skip the innerHTML clobber when the rendered
