@@ -19060,6 +19060,73 @@ test('focus_update terminal invalidation refreshes terminal workspace and update
     'context panel is not visible in this harness, but main render still handled terminal refresh');
 });
 
+test('selection-changing focus_update rebinds terminal, direct messages, and composer to the new cell', () => {
+  const { sandbox, document } = createSandbox();
+  const workspace = document.register('terminal-workspace');
+  workspace.classList.add('active');
+  document.body.classList.add('runtime-embedded');
+  const context = vm.createContext(sandbox);
+  [
+    'static/js/ws.js', 'static/js/render.js', 'static/js/grid/group-tabs.js',
+    'static/js/grid/agent-card.js', 'static/js/grid/terminal-row.js',
+    'static/js/grid/sections.js', 'static/js/agent-detail.js',
+    'static/js/agent-focus.js', 'static/js/grid/main.js', 'static/js/terminal.js',
+    'static/js/terminal/direct-messages.js', 'static/js/terminal/composer.js',
+    'static/js/terminal/composer-attachments.js', 'static/js/terminal/xterm-runtime.js',
+  ].forEach((path) => loadScript(context, path));
+  const dom = attachTerminalWorkspaceDom(document);
+
+  runInContext(context, `
+    render = function() {};
+    updateEventsAttentionBadge = function() {};
+    _expectedSeq = 1;
+    state.runtime = { embedded_terminal: true };
+    state.groups = { alpha: ['agent-1', 'agent-2'] };
+    state.group_settings = { alpha: {} };
+    state.children = { 'agent-1': [], 'agent-2': [] };
+    state.agents = {
+      'agent-1': {
+        id: 'agent-1', name: 'Agent One', group: 'alpha', cell_type: 'agent',
+        kind: 'worker', session_id: 'sess-1', status: 'running'
+      },
+      'agent-2': {
+        id: 'agent-2', name: 'Agent Two', group: 'alpha', cell_type: 'agent',
+        kind: 'worker', session_id: 'sess-2', status: 'running'
+      }
+    };
+    state.direct_messages_by_agent = {
+      'agent-1': [{ message_id: 'dm-1', message: 'one', sender_id: 'agent-1', sender_kind: 'worker', recipient_kind: 'user', created_at: 1 }],
+      'agent-2': [{ message_id: 'dm-2', message: 'two', sender_id: 'agent-2', sender_kind: 'worker', recipient_kind: 'user', created_at: 2 }]
+    };
+    state.active_session_id = 'sess-1';
+    selectedAgentId = 'agent-1';
+    selectedTerminalId = 'agent-1';
+    focusedItemId = 'agent-1';
+    _createEmbeddedTerminalSurface = function() { return {}; };
+    _connectEmbeddedTerminal = function() {};
+    _activateEmbeddedTerminalSurface = function() {};
+    _applyEmbeddedTerminalScrollbackFromSettings = function() {};
+    renderTerminalWorkspace();
+  `);
+
+  assert.match(dom.topbar.innerHTML, /Agent One/);
+  assert.match(dom.directMessages.innerHTML, /data-agent-id="agent-1"/);
+  assert.match(dom.compose.innerHTML, /data-cell-id="agent-1"/);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{ op: 'focus_update', active_session_id: 'sess-2', current_window_id: 'standalone' }],
+  });
+
+  assert.equal(jsonValue(context, 'selectedTerminalId'), 'agent-2');
+  assert.equal(jsonValue(context, 'selectedAgentId'), 'agent-2');
+  assert.match(dom.topbar.innerHTML, /Agent Two/);
+  assert.match(dom.directMessages.innerHTML, /data-agent-id="agent-2"/,
+    'DM list must follow the selected terminal cell');
+  assert.match(dom.compose.innerHTML, /data-cell-id="agent-2"/,
+    'composer handlers and message target must follow the selected terminal cell');
+});
+
 test('selected viewed agent upsert refreshes terminal workspace for status and path changes', () => {
   const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
   runInContext(context, `
