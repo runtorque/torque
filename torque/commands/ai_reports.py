@@ -29,7 +29,7 @@ from ..server_review import (
     _prior_review_task_ids_for_agent,
     _reviewer_reuse_assignment,
 )
-from ..state import task_counts_as_done, task_is_closed
+from ..state import ARCHIVED_LANE, task_counts_as_done, task_is_closed
 
 
 _REVIEW_GATE_ACTION = "feature/review"
@@ -174,6 +174,52 @@ async def handle_ai_report_command(
             cell,
             task_id=task_id,
         )
+        if action == "progress" and not task:
+            # Keep a durable record of the refused report without marking the
+            # agent as active or performing any other success-like side effect.
+            # The empty task id is intentional: attribution was not safe.
+            state.history_record_message(
+                cell.id,
+                "progress",
+                message,
+                task_id="",
+                mark_progress=False,
+            )
+            requested_task_id = str(task_id or "").strip()
+            current_task_id = str(cell.current_task_id or "").strip()
+            current_task = state.board_tasks.get(current_task_id)
+            linked = [
+                candidate
+                for candidate in state.board_tasks.values()
+                if candidate.agent_id == cell.id
+                and candidate.lane not in ("Done", "Backlog", ARCHIVED_LANE)
+            ]
+            if requested_task_id:
+                reason = (
+                    f"requested task {requested_task_id} was not found"
+                )
+            elif current_task and not state.task_occupies_execution_slot(
+                current_task,
+                agent_id=cell.id,
+            ):
+                reason = (
+                    f"current task {current_task.id} does not occupy the "
+                    "agent's execution slot"
+                )
+            elif current_task_id:
+                reason = f"current task {current_task_id} was not found"
+            else:
+                reason = "the agent has no occupying current task"
+            if len(linked) > 1:
+                reason += (
+                    f", and {len(linked)} active tasks are linked to this worker"
+                )
+            elif not linked:
+                reason += ", and no active task is linked to this worker"
+            return {
+                "type": "error",
+                "message": f"No unique reportable task: {reason}",
+            }
         if (
                 action == "done"
                 and not task
