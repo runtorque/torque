@@ -136,7 +136,8 @@ function _showToast(message, level, opts) {
     _dismissToast(el);
   };
   el.appendChild(close);
-  _toastStack().appendChild(el);
+  var stack = _toastStack();
+  stack.insertBefore(el, stack.firstChild);
 
   var defaultDuration = kind === 'error' ? 0 : (kind === 'warning' ? 8000 : 5000);
   var duration = Object.prototype.hasOwnProperty.call(opts, 'duration')

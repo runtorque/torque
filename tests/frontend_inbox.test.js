@@ -148,6 +148,14 @@ function createToastContext() {
         this.children.push(child);
         return child;
       },
+      insertBefore(child, reference) {
+        child.parentNode = this;
+        var index = reference ? this.children.indexOf(reference) : -1;
+        if (index < 0) this.children.push(child);
+        else this.children.splice(index, 0, child);
+        return child;
+      },
+      get firstChild() { return this.children[0] || null; },
       remove() {
         if (!this.parentNode || !this.parentNode.children) return;
         const index = this.parentNode.children.indexOf(this);
@@ -560,6 +568,32 @@ test('durable client errors and toast controls use the notification substrate', 
   assert.match(css, /\.toast-close\s*\{/);
   assert.match(deltas, /operator_notice_upsert/);
   assert.match(deltas, /operator_notices_read_all/);
+});
+
+test('toasts stack newest-first below the top-right notification bell', () => {
+  const css = source('static/styles/modals.css');
+  const tokens = source('static/styles/tokens-base.css');
+  const features = source('static/styles/feature-panels.css');
+  const stackRule = css.match(/\.toast-stack\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body || '';
+  const toastRule = css.match(/\.toast\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body || '';
+  const bellRule = features.match(/\.inbox-bell-button--app\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body || '';
+  const { context, stack } = createToastContext();
+
+  const older = context._showToast('Older', 'info', { duration: 0 });
+  const newer = context._showToast('Newer', 'info', { duration: 0 });
+
+  assert.match(tokens, /--app-header-height:\s*30px/);
+  assert.match(stackRule, /top:\s*calc\(var\(--app-header-height\)\s*\+\s*var\(--space-2\)\)/);
+  assert.doesNotMatch(stackRule, /bottom:/);
+  assert.match(stackRule, /flex-direction:\s*column\b/);
+  assert.deepEqual(stack.children, [newer, older],
+    'the latest toast must remain closest to the top-right bell');
+  assert.match(toastRule, /transform:\s*translateY\(-10px\)/,
+    'top-anchored toasts should descend into place');
+  assert.match(stackRule, /pointer-events:\s*none/,
+    'the empty fixed stack must not intercept header or bell clicks');
+  assert.match(bellRule, /pointer-events:\s*auto/,
+    'the app-level bell remains clickable beneath the empty stack region');
 });
 
 test('message toast body click and keyboard open the exact canonical source agent', () => {

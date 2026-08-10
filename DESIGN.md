@@ -469,7 +469,8 @@ The canonical CSS API lives in `static/styles/components.css`:
 - Inline validation stays beside the control or operation it belongs to. It is
   not copied into the Inbox unless the failure outlives that local context or
   needs later recovery.
-- Toasts acknowledge transient actions. They stack at the bottom-right, can
+- Toasts acknowledge transient actions. They stack below the global bell at
+  the top-right, with the newest item closest to that anchor, can
   always be dismissed, pause while hovered or focused, and may offer one typed
   action. Information and success feedback expire; error overlays remain until
   dismissed. Closing an overlay never deletes a durable Inbox record.
@@ -1779,6 +1780,24 @@ scope.
 - Verification: Frontend regressions protect the single-bell DOM contract,
   mount and mode visibility, badge discovery, accessible expansion state, and
   top-right popover anchoring at narrow and wide viewport widths.
+
+### D-049 — Transient toasts descend from global attention chrome
+
+- Date: 2026-08-09
+- Status: accepted
+- Decision: Toasts stack below the top-right notification bell, with the newest
+  toast nearest the bell and entry motion descending from that anchor.
+- Rationale: Bottom-right toasts obstruct the direct-message composer and
+  interrupt the operator's primary typing workflow. Aligning transient delivery
+  with the global attention control keeps feedback visible without covering the
+  composer.
+- Scope: Toast placement, visual ordering, and entry motion.
+- Constraints: The stack remains click-through while individual toast controls
+  remain interactive and keyboard accessible. Toast lifecycle, levels, Inbox
+  behavior, and delivery APIs do not change. The header-height token determines
+  the vertical offset in both browser and desktop layouts.
+- Verification: Frontend regressions protect the top anchor, newest-first
+  ordering, descending motion, and pointer-event boundary around the bell.
 
 ## Decision entry template
 
