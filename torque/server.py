@@ -3570,7 +3570,10 @@ async def main(connection=None):
             )
         return await worktree_mgr.checkpoint(cell, message=message)
 
-    async def _safe_remove_worktree_result(cell) -> dict:
+    async def _safe_remove_worktree_result(
+            cell, *, merge_commit_sha: str = "",
+            origin_verified: bool = False,
+            merge_branch: str = "") -> dict:
         """Remove a worktree only when it is not active/shared, then verify."""
         if not cell or not cell.worktree_path:
             return {
@@ -3639,13 +3642,22 @@ async def main(connection=None):
 
         if hasattr(worktree_mgr, "remove_result"):
             submodules = _worktree_submodules_for_cell(cell)
+            proof_matches_branch = bool(
+                merge_branch
+                and merge_branch == str(cell.worktree_branch or "").strip()
+            )
+            proof_kwargs = {
+                "merge_commit_sha": merge_commit_sha if proof_matches_branch else "",
+                "origin_verified": origin_verified if proof_matches_branch else False,
+            }
             if submodules:
                 result = await worktree_mgr.remove_result(
                     cell,
                     worktree_submodules=submodules,
+                    **proof_kwargs,
                 )
             else:
-                result = await worktree_mgr.remove_result(cell)
+                result = await worktree_mgr.remove_result(cell, **proof_kwargs)
         else:
             ok = await worktree_mgr.remove(cell)
             result = {
@@ -3675,7 +3687,10 @@ async def main(connection=None):
 
     async def _cleanup_after_merge(cell, *,
                                    close_agent: bool = False,
-                                   remove_worktree: bool = False) -> dict:
+                                   remove_worktree: bool = False,
+                                   merge_commit_sha: str = "",
+                                   origin_verified: bool = False,
+                                   merge_branch: str = "") -> dict:
         """Apply optional post-merge cleanup and return a status summary."""
         cleanup = {
             "close_agent": close_agent,
@@ -3698,9 +3713,30 @@ async def main(connection=None):
                 for c in removed:
                     if not c.worktree_path:
                         continue
-                    remove_result = await _safe_remove_worktree_result(c)
+                    if (
+                            merge_branch
+                            and merge_branch == str(c.worktree_branch or "").strip()
+                    ):
+                        remove_result = await _safe_remove_worktree_result(
+                            c,
+                            merge_commit_sha=merge_commit_sha,
+                            origin_verified=origin_verified,
+                            merge_branch=merge_branch,
+                        )
+                    else:
+                        remove_result = await _safe_remove_worktree_result(c)
                     if remove_result.get("worktree_removed"):
                         removed_worktree = True
+                    if remove_result.get("local_branch_cleanup"):
+                        cleanup["local_branch_cleanup"] = {
+                            **remove_result["local_branch_cleanup"],
+                            "branch_delete_returncode": remove_result.get(
+                                "branch_delete_returncode"
+                            ),
+                            "branch_delete_stderr": remove_result.get(
+                                "branch_delete_stderr", ""
+                            ),
+                        }
                     if not remove_result.get("ok"):
                         cleanup["errors"].append(
                             remove_result.get("message")
@@ -3715,10 +3751,25 @@ async def main(connection=None):
             return cleanup
 
         repo_root = cell.worktree_repo_root
-        remove_result = await _safe_remove_worktree_result(cell)
+        remove_result = await _safe_remove_worktree_result(
+            cell,
+            merge_commit_sha=merge_commit_sha,
+            origin_verified=origin_verified,
+            merge_branch=merge_branch,
+        )
         ok = bool(remove_result.get("ok"))
         if remove_result.get("worktree_removed"):
             cleanup["worktree_removed"] = True
+        if remove_result.get("local_branch_cleanup"):
+            cleanup["local_branch_cleanup"] = {
+                **remove_result["local_branch_cleanup"],
+                "branch_delete_returncode": remove_result.get(
+                    "branch_delete_returncode"
+                ),
+                "branch_delete_stderr": remove_result.get(
+                    "branch_delete_stderr", ""
+                ),
+            }
         if not ok:
             cleanup["errors"].append(
                 remove_result.get("message")

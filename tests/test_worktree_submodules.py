@@ -1580,6 +1580,7 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
             *,
             close_agent=False,
             remove_worktree=False,
+            **_kwargs,
         ):
             return {
                 "close_agent": close_agent,

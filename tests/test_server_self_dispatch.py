@@ -1386,8 +1386,13 @@ class ServerSelfDispatchTests(unittest.TestCase):
         async def close_agent_session_only(*_args, **_kwargs):
             return []
 
-        async def safe_remove_worktree_result(cell):
+        async def safe_remove_worktree_result(cell, **_kwargs):
             self.assertIs(cell, worker)
+            self.assertEqual(_kwargs, {
+                "merge_commit_sha": "",
+                "origin_verified": False,
+                "merge_branch": "",
+            })
             return {
                 "ok": False,
                 "worktree_removed": False,
@@ -1424,6 +1429,9 @@ class ServerSelfDispatchTests(unittest.TestCase):
                 worker,
                 close_agent=False,
                 remove_worktree=True,
+                merge_commit_sha="",
+                origin_verified=False,
+                merge_branch="",
             )
         )
 
@@ -2858,6 +2866,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             *,
             close_agent=False,
             remove_worktree=False,
+            **_kwargs,
         ):
             return {
                 "close_agent": close_agent,
@@ -5692,20 +5701,44 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             "merge_state": "CLEAN",
             "pending": False,
             "pr_status": {"ok": True, "state": "MERGED"},
-        })
+        }, sync_results=[
+            {"ok": True, "phase": "remote_base_sync", "base_sha": "base789"},
+            {
+                "ok": True,
+                "phase": "remote_base_sync",
+                "remote_sha": "squash789",
+                "base_sha": "squash789",
+                "synced": True,
+            },
+        ])
 
         async def fake_cleanup_after_merge(
             _cell,
             *,
             close_agent=False,
             remove_worktree=False,
+            **_kwargs,
         ):
-            cleanup_calls.append((close_agent, remove_worktree))
+            cleanup_calls.append((close_agent, remove_worktree, _kwargs))
             return {
                 "close_agent": close_agent,
                 "remove_worktree": remove_worktree,
                 "agent_closed": close_agent,
                 "worktree_removed": remove_worktree,
+                "local_branch_cleanup": {
+                    "attempted": True,
+                    "status": "tree_match_deleted",
+                    "branch": _kwargs.get("merge_branch", ""),
+                    "branch_tip_sha": "head123",
+                    "merge_commit_sha": _kwargs.get("merge_commit_sha", ""),
+                    "tree_sha": "tree123",
+                    "origin_verified": _kwargs.get("origin_verified", False),
+                    "branch_deleted": True,
+                    "branch_delete_returncode": 1,
+                    "branch_delete_stderr": "not fully merged",
+                    "force_delete_returncode": 0,
+                    "force_delete_stderr": "",
+                },
                 "errors": [],
             }
 
@@ -5730,7 +5763,15 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["mode"], "pull_request")
         self.assertEqual(result["sha"], "squash789")
         self.assertEqual(result["pr_url"], "https://github.com/acme/repo/pull/7")
-        self.assertEqual(cleanup_calls, [(True, True)])
+        self.assertEqual(cleanup_calls, [(
+            True,
+            True,
+            {
+                "merge_commit_sha": "squash789",
+                "origin_verified": True,
+                "merge_branch": worker.worktree_branch,
+            },
+        )])
         boundary = task.worktree_boundary
         self.assertEqual(boundary["status"], "merged")
         self.assertEqual(boundary["merge_commit_sha"], "squash789")
@@ -5746,6 +5787,14 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task.lane, "Done")
         self.assertEqual(task.agent_id, "")
         self.assertEqual(worktree_mgr.sync_calls, 2)
+        local_cleanup = task.completion_evidence["merge"]["local_branch_cleanup"]
+        self.assertEqual(local_cleanup["status"], "tree_match_deleted")
+        self.assertEqual(local_cleanup["branch_tip_sha"], "head123")
+        self.assertEqual(local_cleanup["merge_commit_sha"], "squash789")
+        self.assertEqual(local_cleanup["tree_sha"], "tree123")
+        self.assertTrue(local_cleanup["origin_verified"])
+        self.assertEqual(local_cleanup["branch_delete_returncode"], 1)
+        self.assertEqual(local_cleanup["force_delete_returncode"], 0)
 
     async def test_worktree_merge_pr_default_keep_warm_preserves_cleanup(self):
         state, worker, task = self._make_pr_merge_state()
@@ -5767,6 +5816,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             *,
             close_agent=False,
             remove_worktree=False,
+            **_kwargs,
         ):
             cleanup_calls.append((close_agent, remove_worktree))
             return {
@@ -5826,6 +5876,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             *,
             close_agent=False,
             remove_worktree=False,
+            **_kwargs,
         ):
             cleanup_calls.append((close_agent, remove_worktree))
             return {
@@ -5885,6 +5936,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             *,
             close_agent=False,
             remove_worktree=False,
+            **_kwargs,
         ):
             cleanup_calls.append((close_agent, remove_worktree))
             return {
@@ -5953,6 +6005,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             *,
             close_agent=False,
             remove_worktree=False,
+            **_kwargs,
         ):
             cleanup_calls.append((close_agent, remove_worktree))
             return {
@@ -6042,6 +6095,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             *,
             close_agent=False,
             remove_worktree=False,
+            **_kwargs,
         ):
             return {
                 "close_agent": close_agent,
@@ -6342,6 +6396,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             *,
             close_agent=False,
             remove_worktree=False,
+            **_kwargs,
         ):
             events.append("worktree_remove")
             if remove_worktree:
@@ -6424,6 +6479,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             *,
             close_agent=False,
             remove_worktree=False,
+            **_kwargs,
         ):
             return {
                 "close_agent": close_agent,
@@ -6601,6 +6657,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             *,
             close_agent=False,
             remove_worktree=False,
+            **_kwargs,
         ):
             cleanup_calls.append((close_agent, remove_worktree))
             return {
@@ -6741,6 +6798,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             *,
             close_agent=False,
             remove_worktree=False,
+            **_kwargs,
         ):
             return {
                 "close_agent": close_agent,
@@ -6805,6 +6863,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             *,
             close_agent=False,
             remove_worktree=False,
+            **_kwargs,
         ):
             cleanup_calls.append((close_agent, remove_worktree))
             if close_agent:
@@ -6964,6 +7023,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                     *,
                     close_agent=False,
                     remove_worktree=False,
+                    **_kwargs,
                 ):
                     cleanup_calls.append((close_agent, remove_worktree))
                     return {
@@ -7136,7 +7196,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         })
 
         async def cleanup_after_merge(cell, *, close_agent=False,
-                                      remove_worktree=False):
+                                      remove_worktree=False, **_kwargs):
             if close_agent:
                 state.remove_agent(cell.id)
             if remove_worktree:
