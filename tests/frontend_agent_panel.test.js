@@ -784,6 +784,125 @@ test('role pane rerender routes through capture and restore', () => {
   assert.equal(textarea.selectionEnd, 12);
 });
 
+test('relocated Agent Settings timeline renders initial overlay version zero as v0', () => {
+  const { context } = createHarness();
+  const agent = {
+    id: 'eng-1', name: 'Builder', kind: 'engineer', group: 'alpha', cell_type: 'agent',
+  };
+  context.state.agents = { 'eng-1': agent };
+  context.behaviorOverlayReceiveMessage({
+    type: 'behavior_overlay',
+    agent_id: 'eng-1',
+    active: { agent_id: 'eng-1', active_version_id: 'bov-0' },
+    version: {
+      id: 'bov-0', agent_id: 'eng-1', version_number: 0,
+      text_sha256: 'zero-hash', text_bytes: 0,
+      rationale: 'Initial seed', created_at: 1,
+    },
+    text: '',
+  });
+
+  const html = context._behaviorOverlayAgentSettingsPaneHtml(agent);
+  assert.match(html, /<span class="behavior-overlay-version-number">v0<\/span>/);
+  assert.match(html, /<span class="detail-task-status">v0<\/span>/);
+  assert.doesNotMatch(html, /<span class="behavior-overlay-version-number">v\?<\/span>/);
+});
+
+test('Agent Settings proposal response refreshes the matching mount without a proposal fetch loop', () => {
+  const { context, sendCalls } = createHarness();
+  const agent = {
+    id: 'eng-1', name: 'Builder', kind: 'engineer', group: 'alpha', cell_type: 'agent',
+  };
+  const mount = { innerHTML: '', querySelector() { return null; } };
+  const panel = context.document.getElementById('panel-agent');
+  context.document.getElementById = function(id) {
+    if (id === 'panel-agent') return panel;
+    if (id === 'agent-settings-behavior-overlay') return mount;
+    return null;
+  };
+  context.state.agents = { 'eng-1': agent };
+  context.behaviorOverlayReceiveMessage({
+    type: 'behavior_overlay',
+    agent_id: 'eng-1',
+    active: { agent_id: 'eng-1', active_version_id: 'bov-1' },
+    version: {
+      id: 'bov-1', agent_id: 'eng-1', version_number: 1,
+      text_sha256: 'one-hash', text_bytes: 4,
+    },
+    text: 'seed',
+  });
+  vm.runInContext(`_agentSettingsContext = { mode: 'edit', agentId: 'eng-1' };`, context);
+  context.renderBehaviorOverlayAgentSettingsPane(agent);
+  assert.equal(sendCalls.filter((call) => call.cmd === 'behavior_overlay_proposals').length, 1);
+  assert.doesNotMatch(mount.innerHTML, /Late proposal/);
+
+  context.behaviorOverlayReceiveMessage({
+    type: 'behavior_overlay_proposals',
+    proposals: [{
+      id: 'bop-late', agent_id: 'eng-1', status: 'proposed',
+      next_actor_kind: 'architect', approval_route: 'architect',
+      proposed_text_sha256: 'late-hash', proposed_text_bytes: 18,
+      rationale: 'Late proposal',
+    }],
+  });
+
+  assert.match(mount.innerHTML, /Late proposal/);
+  assert.match(mount.innerHTML, /View diff/);
+  assert.equal(sendCalls.filter((call) => call.cmd === 'behavior_overlay_proposals').length, 1,
+    'proposal-list rerender must reuse the loaded response rather than refetching');
+});
+
+test('open matching role mount hides stale text and refetches after an active-version delta', () => {
+  const { context, sendCalls } = createHarness();
+  const roleKey = 'role:alpha:engineer';
+  const roleMount = { innerHTML: '', querySelector() { return null; } };
+  const modal = {
+    classList: { contains(name) { return name === 'visible'; } },
+  };
+  const panel = context.document.getElementById('panel-agent');
+  context.document.getElementById = function(id) {
+    if (id === 'panel-agent') return panel;
+    if (id === 'modal-group-settings') return modal;
+    if (id === 'gs-engineer-role-behavior-overlay') return roleMount;
+    return null;
+  };
+  vm.runInContext(`_settingsGroup = 'alpha';`, context);
+  context.behaviorOverlayReceiveMessage({
+    type: 'behavior_overlay',
+    scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer',
+    scope_id: roleKey,
+    active: {
+      scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer',
+      active_version_id: 'bov-r1',
+    },
+    version: {
+      id: 'bov-r1', scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer',
+      version_number: 1, text_sha256: 'old-hash', text_bytes: 15,
+    },
+    text: 'stale role text',
+  });
+  assert.match(roleMount.innerHTML, /stale role text/);
+
+  context.behaviorOverlayApplyDelta({
+    op: 'behavior_overlay_version_append',
+    id: 'bov-r2', scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer',
+    version_number: 2, text_sha256: 'new-hash', text_bytes: 13,
+  });
+  context.behaviorOverlayApplyDelta({
+    op: 'behavior_overlay_active_update',
+    scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer',
+    active_version_id: 'bov-r2', updated_at: 2,
+  });
+
+  assert.doesNotMatch(roleMount.innerHTML, /stale role text/);
+  assert.match(roleMount.innerHTML, /Refreshing current full overlay text/);
+  assert.ok(sendCalls.some((call) => call.cmd === 'behavior_overlay_read'
+    && call.scope_kind === 'role'
+    && call.scope_group === 'alpha'
+    && call.scope_key === 'engineer'),
+  'the visible matching role mount requests fresh full text');
+});
+
 test('role-scope behavior approval modal renders diff before enabling user actions', () => {
   const { context, sendCalls } = createHarness();
   const elements = {};
