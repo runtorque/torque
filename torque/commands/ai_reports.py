@@ -174,17 +174,9 @@ async def handle_ai_report_command(
             cell,
             task_id=task_id,
         )
-        if action == "progress" and not task:
-            # Keep a durable record of the refused report without marking the
-            # agent as active or performing any other success-like side effect.
-            # The empty task id is intentional: attribution was not safe.
-            state.history_record_message(
-                cell.id,
-                "progress",
-                message,
-                task_id="",
-                mark_progress=False,
-            )
+
+        def _unresolved_report_context():
+            """Describe why this report cannot be attributed uniquely."""
             requested_task_id = str(task_id or "").strip()
             current_task_id = str(cell.current_task_id or "").strip()
             current_task = state.board_tasks.get(current_task_id)
@@ -195,9 +187,7 @@ async def handle_ai_report_command(
                 and candidate.lane not in ("Done", "Backlog", ARCHIVED_LANE)
             ]
             if requested_task_id:
-                reason = (
-                    f"requested task {requested_task_id} was not found"
-                )
+                reason = f"requested task {requested_task_id} was not found"
             elif current_task and not state.task_occupies_execution_slot(
                 current_task,
                 agent_id=cell.id,
@@ -216,6 +206,43 @@ async def handle_ai_report_command(
                 )
             elif not linked:
                 reason += ", and no active task is linked to this worker"
+            return reason, current_task_id, linked
+
+        def _retryable_unresolved_completion(action_name, report_message):
+            # Keep the attempted report measurable without pretending it was
+            # safely attributed or marking the worker active.
+            state.history_record_message(
+                cell.id,
+                action_name,
+                report_message,
+                task_id="",
+                mark_progress=False,
+            )
+            reason, _current_task_id, _linked = _unresolved_report_context()
+            return {
+                "type": "error",
+                "retryable": True,
+                "no_cache": True,
+                "message": (
+                    f"No unique reportable task: {reason}. Inspect context, "
+                    "report this task-binding blocker with your completion "
+                    "summary, have the owner restore one unique reportable "
+                    f"task, then retry {action_name}."
+                ),
+            }
+
+        if action == "progress" and not task:
+            # Keep a durable record of the refused report without marking the
+            # agent as active or performing any other success-like side effect.
+            # The empty task id is intentional: attribution was not safe.
+            state.history_record_message(
+                cell.id,
+                "progress",
+                message,
+                task_id="",
+                mark_progress=False,
+            )
+            reason, _current_task_id, _linked = _unresolved_report_context()
             return {
                 "type": "error",
                 "message": f"No unique reportable task: {reason}",
@@ -249,6 +276,20 @@ async def handle_ai_report_command(
                         f"Eligible task(s): {task_list}"
                     ),
                 }
+        if action == "done" and not task and not result:
+            attempted_message = str(message or "").strip() or "Done"
+            declaration = str(terminal_declaration or "").strip()
+            if declaration:
+                attempted_message += (
+                    f"\n\nTerminal declaration: {declaration}"
+                )
+            return _retryable_unresolved_completion(
+                "done", attempted_message
+            )
+        if action == "ready" and not task:
+            _reason, current_task_id, linked = _unresolved_report_context()
+            if current_task_id or linked:
+                return _retryable_unresolved_completion("ready", "Ready")
         derive_stream_backstop = False
         if (
             not task
@@ -811,6 +852,8 @@ async def handle_ai_report_command(
                     resolve_base_dir=_resolve_base_dir,
                     close_agent=_close_agent_session_only,
                 )
+            if not result:
+                result = {"type": "ok"}
 
         elif action == "blocked":
             cell.needs_attention = True
@@ -839,6 +882,18 @@ async def handle_ai_report_command(
                 cell.name, cell.group, message,
                 task_id=task.id if task else "")
             state.recompute_task_health()
+            if task:
+                result = {"type": "ok"}
+            else:
+                result = {
+                    "type": "warning",
+                    "status": "partial",
+                    "message": (
+                        "Agent blocker and attention escalation were recorded, "
+                        "but no task message or blocked label was recorded. "
+                        "Ownership must repair task attribution."
+                    ),
+                }
 
         elif action == "error":
             cell.error_message = message
@@ -856,6 +911,18 @@ async def handle_ai_report_command(
                 cell.name, cell.group, message,
                 task_id=task.id if task else "")
             state.recompute_task_health()
+            if task:
+                result = {"type": "ok"}
+            else:
+                result = {
+                    "type": "warning",
+                    "status": "partial",
+                    "message": (
+                        "Agent error and attention escalation were recorded, "
+                        "but no current task message or error label was recorded. "
+                        "Ownership must repair task attribution."
+                    ),
+                }
 
         elif action == "progress":
             cell.activity_detail = message
@@ -879,6 +946,7 @@ async def handle_ai_report_command(
                 message=message)
             state._emit("event_append", **pe)
             state.recompute_task_health()
+            result = {"type": "ok"}
 
         elif action == "verify":
             if not task:
@@ -1039,11 +1107,12 @@ async def handle_ai_report_command(
                     task_completed = _complete_task_or_leave_follow_up_open(task)
                     if task_completed:
                         _notify_unblocked_dependents(task)
-                _panel_event(
-                    "task_completed", cell.id,
-                    cell.name, cell.group,
-                    "Ready (task completed)",
-                    task_id=task.id if task else "")
+                if task:
+                    _panel_event(
+                        "task_completed", cell.id,
+                        cell.name, cell.group,
+                        "Ready (task completed)",
+                        task_id=task.id)
                 await _maybe_auto_resume_targets(
                     state,
                     handle_command,
@@ -1054,6 +1123,10 @@ async def handle_ai_report_command(
                 await _drain_auto_dispatch_queue(
                     task.group if task else cell.group
                 )
+                result = {
+                    "type": "ok" if task else "agent_released",
+                    "task_id": task.id if task else "",
+                }
 
         elif action == "derive":
             # Derive a new task and dispatch it

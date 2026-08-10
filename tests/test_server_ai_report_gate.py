@@ -1,6 +1,8 @@
 import importlib
+import tempfile
 import types
 import unittest
+from pathlib import Path
 
 try:
     from helpers import install_aiohttp_stub
@@ -8,6 +10,7 @@ except ModuleNotFoundError:
     from tests.helpers import install_aiohttp_stub
 
 from torque.direct_message_mirrors import NON_USER_ASK_LABEL
+from torque.db import TorqueDB
 
 
 class FakeActionManager:
@@ -50,7 +53,7 @@ class ServerAiReportMandatoryReviewGateTests(unittest.IsolatedAsyncioTestCase):
         return (lambda x: lambda: x)(value).__closure__[0]
 
     def _extract_handle_command(self, state, *, action_mgr=None,
-                                dispatch_command=None):
+                                dispatch_command=None, panel_event=None):
         main_code = self.server_mod.main.__code__
         handle_code = next(
             const
@@ -104,7 +107,7 @@ class ServerAiReportMandatoryReviewGateTests(unittest.IsolatedAsyncioTestCase):
             "_checkpoint_on_report": noop_async,
             "_cleanup_after_merge": noop_async,
             "_close_agent_session_only": noop_async,
-            "_panel_event": lambda *args, **kwargs: None,
+            "_panel_event": panel_event or (lambda *args, **kwargs: None),
             "_record_task_boundary": noop_async,
             "_resolve_base_dir": noop_async,
             "_runtime_payload": lambda: {},
@@ -253,6 +256,193 @@ class ServerAiReportMandatoryReviewGateTests(unittest.IsolatedAsyncioTestCase):
             state,
         )
 
+    def _unresolved_active_state(self):
+        state, cell, root = self._state_cell_task()
+        child = state.board_add_task(
+            "Implement review follow-up", "g", lane="In Progress",
+            id="task-child", action_name="feature/implement",
+            agent_id=cell.id, parent_task_id=root.id,
+            pipeline_root_id=root.id, pipeline_depth=1,
+        )
+        state.board_add_task(
+            "Review follow-up", "g", lane="In Progress",
+            id="task-review", action_name="feature/review",
+            agent_id="reviewer-1", parent_task_id=child.id,
+            pipeline_root_id=root.id, pipeline_depth=2,
+        )
+        cell.current_task_id = child.id
+        linked = [
+            task for task in state.board_tasks.values()
+            if task.agent_id == cell.id
+            and task.lane not in ("Done", "Backlog", self.state_mod.ARCHIVED_LANE)
+        ]
+        self.assertEqual(cell.current_task_id, child.id)
+        self.assertEqual(root.agent_id, cell.id)
+        self.assertEqual(child.agent_id, cell.id)
+        self.assertFalse(state.task_occupies_execution_slot(root, agent_id=cell.id))
+        self.assertFalse(state.task_occupies_execution_slot(child, agent_id=cell.id))
+        self.assertIsNone(state.agent_current_task(cell.id))
+        self.assertEqual({task.id for task in linked}, {root.id, child.id})
+        self.assertIsNone(self.server_mod._resolve_ai_report_task(state, cell))
+        return state, cell, root, child
+
+    async def test_unresolved_done_and_active_ready_are_retryable_without_side_effects(self):
+        for action in ("done", "ready"):
+            with self.subTest(action=action):
+                state, cell, root, child = self._unresolved_active_state()
+                history = []
+                events = []
+                state.history_record_message = lambda *args, **kwargs: history.append(
+                    (args, kwargs)
+                )
+                handle = self._extract_handle_command(
+                    state,
+                    panel_event=lambda *args, **kwargs: events.append((args, kwargs)),
+                )
+                args = {"message": "Implementation complete"} if action == "done" else {}
+
+                response = await self.mcp_mod._dispatch_tool(
+                    f"torque_{action}", args, cell.id, handle, state,
+                )
+
+                self.assertEqual(cell.current_task_id, child.id)
+                self.assertEqual(root.lane, "In Progress")
+                self.assertEqual(child.lane, "In Progress")
+                self.assertEqual(root.messages, [])
+                self.assertEqual(child.messages, [])
+                self.assertFalse(any(event[0][0] == "task_completed" for event in events))
+                self.assertEqual(len(history), 1)
+                self.assertEqual(history[0][0][1], action)
+                self.assertEqual(history[0][1], {"task_id": "", "mark_progress": False})
+                self.assertEqual(len(response), 3)
+                text, is_error, cacheable = response
+                self.assertTrue(is_error)
+                self.assertFalse(cacheable)
+                self.assertIn("No unique reportable task", text)
+                self.assertIn("have the owner restore one unique reportable task", text)
+
+    async def test_unresolved_blocked_and_error_return_explicit_partial_warning(self):
+        for action in ("blocked", "error"):
+            with self.subTest(action=action):
+                state, cell, root, child = self._unresolved_active_state()
+                history = []
+                state.history_record_message = lambda *args, **kwargs: history.append(
+                    (args, kwargs)
+                )
+                handle = self._extract_handle_command(state)
+                arg_name = "reason" if action == "blocked" else "message"
+
+                text, is_error = await self.mcp_mod._dispatch_tool(
+                    f"torque_{action}", {arg_name: "Binding is broken"},
+                    cell.id, handle, state,
+                )
+                payload = self.mcp_mod.json.loads(text)
+
+                self.assertFalse(is_error)
+                self.assertEqual(payload["type"], "warning")
+                self.assertEqual(payload["status"], "partial")
+                self.assertIn("Ownership must repair task attribution", payload["message"])
+                self.assertTrue(cell.needs_attention)
+                if action == "blocked":
+                    self.assertEqual(cell.activity, "waiting")
+                else:
+                    self.assertEqual(cell.error_message, "Binding is broken")
+                self.assertEqual(root.messages, [])
+                self.assertEqual(child.messages, [])
+                self.assertNotIn(f"torque:{action}", root.labels)
+                self.assertNotIn(f"torque:{action}", child.labels)
+                self.assertEqual(history[0][0][1:], (action, "Binding is broken"))
+                self.assertEqual(history[0][1], {"task_id": ""})
+
+    async def test_genuinely_taskless_ready_releases_without_completion_event(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        cell = self.state_mod.AgentCell(
+            id="worker-free", name="Free worker", group="g",
+            cell_type="agent", kind="worker",
+        )
+        state.agents[cell.id] = cell
+        events = []
+        handle = self._extract_handle_command(
+            state,
+            panel_event=lambda *args, **kwargs: events.append((args, kwargs)),
+        )
+
+        text, is_error = await self.mcp_mod._dispatch_tool(
+            "torque_ready", {}, cell.id, handle, state,
+        )
+
+        self.assertFalse(is_error)
+        self.assertEqual(self.mcp_mod.json.loads(text)["type"], "agent_released")
+        self.assertFalse(any(event[0][0] == "task_completed" for event in events))
+
+    async def test_mapped_ai_report_missing_result_fails_closed_and_is_not_cacheable(self):
+        async def missing_result(_payload):
+            return None
+
+        response = await self.mcp_mod._dispatch_tool(
+            "torque_done", {"message": "Done"}, "worker-1",
+            missing_result, self.state_mod.MatrixState(),
+        )
+
+        self.assertEqual(len(response), 3)
+        text, is_error, cacheable = response
+        self.assertTrue(is_error)
+        self.assertFalse(cacheable)
+        self.assertIn("returned no result", text)
+
+    async def test_same_idempotency_key_retries_done_after_binding_repair(self):
+        state, cell, root, child = self._unresolved_active_state()
+        root.action_name = "custom/no-review"
+        child.action_name = "custom/no-review"
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        db = TorqueDB(Path(temp_dir.name) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+        state.db = db
+        handle = self._extract_handle_command(state)
+        body = {
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {
+                "name": "task_complete",
+                "arguments": {
+                    "message": "Implementation complete",
+                    "terminal_declaration": (
+                        "No further work is needed; I will not derive after this."
+                    ),
+                },
+            },
+        }
+
+        first, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+            body, cell_id=cell.id, handle_command=handle, state=state,
+            idempotency_header="same-done-key",
+        )
+
+        self.assertEqual(status, 200)
+        self.assertTrue(first["result"]["isError"])
+        self.assertIsNone(db.load_mcp_idempotency("same-done-key"))
+        root.agent_id = ""
+        state.board_tasks.pop("task-review")
+        self.assertTrue(state.task_occupies_execution_slot(child, agent_id=cell.id))
+        self.assertIs(self.server_mod._resolve_ai_report_task(state, cell), child)
+        body["id"] = 2
+
+        second, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+            body, cell_id=cell.id, handle_command=handle, state=state,
+            idempotency_header="same-done-key",
+        )
+
+        self.assertEqual(status, 200)
+        self.assertFalse(
+            second["result"]["isError"],
+            second["result"]["content"],
+        )
+        self.assertEqual(child.lane, "Done")
+        self.assertEqual(cell.current_task_id, "")
+        self.assertIsNotNone(db.load_mcp_idempotency("same-done-key"))
+
     async def test_progress_fails_closed_when_linked_tasks_are_not_reportable(self):
         state, cell, root = self._state_cell_task()
         child = state.board_add_task(
@@ -350,7 +540,7 @@ class ServerAiReportMandatoryReviewGateTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertFalse(is_error)
-        self.assertEqual(text, '{"type":"ok"}')
+        self.assertEqual(self.mcp_mod.json.loads(text), {"type": "ok"})
         self.assertEqual(task.messages[-1]["action"], "progress")
         self.assertEqual(task.messages[-1]["message"], "Progress on the active task")
         self.assertEqual(saved_task_ids, [task.id])
