@@ -83,6 +83,200 @@ class TorqueDoctorTests(unittest.TestCase):
             "ALTER TABLE board_tasks ADD COLUMN engineer_owner_id TEXT NOT NULL DEFAULT ''"
         )
 
+    def _git(self, repo: Path, *args: str) -> str:
+        env = dict(os.environ)
+        env.pop("TORQUE_CELL_ID", None)
+        return subprocess.check_output(
+            ["git", "-C", str(repo), *args],
+            text=True,
+            stderr=subprocess.STDOUT,
+            env=env,
+        ).strip()
+
+    def test_squash_branch_cleanup_report_is_read_only_and_classifies_evidence(self):
+        repo = Path(self.tmp.name) / "repo"
+        repo.mkdir()
+        self._git(repo, "init", "-b", "main")
+        self._git(repo, "config", "user.name", "Torque Test")
+        self._git(repo, "config", "user.email", "torque@example.com")
+        (repo / "base.txt").write_text("base\n")
+        self._git(repo, "add", "base.txt")
+        self._git(repo, "commit", "-m", "base")
+
+        landed = "torque/test/landed-aaaaaa"
+        self._git(repo, "checkout", "-b", landed)
+        (repo / "landed.txt").write_text("landed\n")
+        self._git(repo, "add", "landed.txt")
+        self._git(repo, "commit", "-m", "source")
+        self._git(repo, "checkout", "main")
+        self._git(repo, "merge", "--squash", landed)
+        self._git(repo, "commit", "-m", "squash landing")
+        merge_sha = self._git(repo, "rev-parse", "HEAD")
+
+        mismatch = "torque/test/mismatch-bbbbbb"
+        self._git(repo, "checkout", "-b", mismatch)
+        (repo / "unmerged.txt").write_text("not landed\n")
+        self._git(repo, "add", "unmerged.txt")
+        self._git(repo, "commit", "-m", "unmerged")
+        self._git(repo, "checkout", "main")
+
+        no_evidence = "torque/test/no-evidence-cccccc"
+        self._git(repo, "checkout", "-b", no_evidence)
+        (repo / "no-evidence.txt").write_text("live\n")
+        self._git(repo, "add", "no-evidence.txt")
+        self._git(repo, "commit", "-m", "live")
+        self._git(repo, "checkout", "main")
+
+        unknown = "torque/test/unknown-dddddd"
+        self._git(repo, "branch", unknown, no_evidence)
+        historical_unknown = "torque/test/historical-ffffff"
+        self._git(repo, "branch", historical_unknown, no_evidence)
+        unavailable_merge = "torque/test/unavailable-gggggg"
+        self._git(repo, "branch", unavailable_merge, no_evidence)
+        active = "torque/test/active-eeeeee"
+        self._git(repo, "branch", active, mismatch)
+        active_path = Path(self.tmp.name) / "active-worktree"
+        self._git(repo, "worktree", "add", str(active_path), active)
+
+        nested = repo / "ee"
+        nested.mkdir()
+        self._git(nested, "init", "-b", "main")
+        self._git(nested, "config", "user.name", "Torque Test")
+        self._git(nested, "config", "user.email", "torque@example.com")
+        (nested / "nested.txt").write_text("base\n")
+        self._git(nested, "add", "nested.txt")
+        self._git(nested, "commit", "-m", "nested base")
+        nested_mirror = "torque/submodules/ee/torque/test/merged-aaaaaa"
+        nested_checked = "torque/submodules/ee/torque/test/live-bbbbbb"
+        nested_non_ancestral = "torque/submodules/ee/torque/test/live-cccccc"
+        nested_preserved = "torque/preserved/ee/123456789abc"
+        self._git(nested, "branch", nested_mirror)
+        self._git(nested, "branch", nested_checked)
+        self._git(nested, "branch", nested_preserved)
+        self._git(nested, "checkout", "-b", nested_non_ancestral)
+        (nested / "nested-live.txt").write_text("live\n")
+        self._git(nested, "add", "nested-live.txt")
+        self._git(nested, "commit", "-m", "nested live")
+        self._git(nested, "checkout", "main")
+        nested_active_path = Path(self.tmp.name) / "nested-active-worktree"
+        self._git(
+            nested, "worktree", "add", str(nested_active_path), nested_checked
+        )
+        (repo / ".gitmodules").write_text(
+            '[submodule "ee"]\n\tpath = ee\n\turl = ../ee\n'
+        )
+
+        self.db.save_board_task(BoardTask(
+            id="TORQUE:landed",
+            task="Landed",
+            worktree_boundary={"branch": landed},
+            completion_evidence={
+                "merge": {"branch": landed, "sha": merge_sha}
+            },
+        ))
+        self.db.save_board_task(BoardTask(
+            id="TORQUE:mismatch",
+            task="Mismatch",
+            worktree_boundary={"branch": mismatch},
+            completion_evidence={
+                "merge": {"branch": mismatch, "sha": merge_sha}
+            },
+        ))
+        self.db.save_board_task(BoardTask(
+            id="TORQUE:no-evidence",
+            task="No evidence",
+            worktree_boundary={"branch": no_evidence},
+        ))
+        self.db.save_board_task(BoardTask(
+            id="TORQUE:historical",
+            task="Historical without merge evidence",
+            worktree_boundary={"branch": historical_unknown},
+            completion_evidence={"review": {"verdict": "ship"}},
+        ))
+        self.db.save_board_task(BoardTask(
+            id="TORQUE:unavailable",
+            task="Unavailable recorded merge",
+            worktree_boundary={"branch": unavailable_merge},
+            completion_evidence={
+                "merge": {"branch": unavailable_merge, "sha": "deadbeef"}
+            },
+        ))
+        before = self._git(repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads")
+        nested_before = self._git(
+            nested, "for-each-ref", "--format=%(refname) %(objectname)",
+            "refs/heads",
+        )
+
+        report = build_doctor_report_for_db(
+            self.db_path, project_base_dir=repo
+        )
+        after = self._git(repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads")
+        nested_after = self._git(
+            nested, "for-each-ref", "--format=%(refname) %(objectname)",
+            "refs/heads",
+        )
+
+        self.assertEqual(after, before)
+        self.assertEqual(nested_after, nested_before)
+        section = report["squash_branch_cleanup"]
+        self.assertTrue(section["read_only"])
+        self.assertEqual(section["total_non_ancestral"], 7)
+        self.assertEqual(section["excluded_worktree_count"], 1)
+        self.assertEqual(section["counts"], {
+            "landed": 1, "unmerged": 2, "unknown": 3,
+        })
+        by_branch = {item["branch"]: item for item in section["branches"]}
+        self.assertEqual(by_branch[landed]["task_id"], "TORQUE:landed")
+        self.assertEqual(by_branch[landed]["merge_commit_sha"], merge_sha)
+        self.assertEqual(
+            by_branch[mismatch]["reason"], "recorded_merge_tree_differs"
+        )
+        self.assertEqual(
+            by_branch[no_evidence]["reason"], "no_recorded_merge_evidence"
+        )
+        self.assertEqual(by_branch[unknown]["classification"], "unknown")
+        self.assertEqual(
+            by_branch[historical_unknown]["reason"],
+            "historical_task_missing_merge_evidence",
+        )
+        self.assertEqual(
+            by_branch[unavailable_merge]["classification"], "unknown"
+        )
+        self.assertEqual(
+            by_branch[unavailable_merge]["reason"],
+            "recorded_merge_commit_unavailable",
+        )
+        self.assertNotIn(active, by_branch)
+        nested_section = report["nested_branch_cleanup"]
+        self.assertEqual(
+            nested_section["mechanism"],
+            "worktree_removed_branch_intentionally_preserved",
+        )
+        self.assertEqual(
+            nested_section["production_scope"],
+            "report_only_follow_up_required",
+        )
+        self.assertTrue(nested_section["read_only"])
+        self.assertEqual(len(nested_section["repositories"]), 1)
+        nested_report = nested_section["repositories"][0]
+        self.assertEqual(nested_report["path"], "ee")
+        self.assertEqual(nested_report["total"], 4)
+        self.assertEqual(nested_report["ancestral"], 3)
+        self.assertEqual(nested_report["non_ancestral"], 1)
+        self.assertEqual(nested_report["checked_out"], 1)
+        self.assertEqual(nested_report["checked_out_ancestral"], 1)
+        self.assertEqual(nested_report["mirror"], 3)
+        self.assertEqual(nested_report["mirror_unoccupied"], 2)
+        self.assertEqual(nested_report["preserved"], 1)
+        self.assertEqual(
+            nested_report["non_ancestral_branches"], [nested_non_ancestral]
+        )
+        rendered = format_doctor_report(report)
+        self.assertIn("[squash_branch_cleanup]", rendered)
+        self.assertIn(f"landed: {landed} task=TORQUE:landed", rendered)
+        self.assertIn("[nested_branch_cleanup]", rendered)
+        self.assertIn("total/ancestral/non_ancestral: 4/3/1", rendered)
+
     def test_pty_supervisor_check_status_matrix(self):
         from torque.doctor import _check_pty_supervisor_reachable
         # Present + unreachable = down/wedged => fail.

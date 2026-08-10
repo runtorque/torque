@@ -1039,11 +1039,35 @@ def _origin_verification_evidence(
     source = ""
     matched_sha = ""
     result = None
+    verified = False
+
+    def _verified_remote_match(match: dict | None) -> bool:
+        """Require remote truth, not a coincidentally matching local base ref."""
+        if not isinstance(match, dict):
+            return False
+        if not _sha_equal(str(match.get("sha") or "").strip(), merge_sha):
+            return False
+        source = str(match.get("source") or "").strip()
+        if source == "remote_ground_truth":
+            result = match.get("result")
+            return not isinstance(result, dict) or result.get("ok") is not False
+        if source != "remote_base_sync":
+            return False
+        sync = match.get("result")
+        if not isinstance(sync, dict) or not sync.get("ok"):
+            return False
+        remote_sha = str(sync.get("remote_sha") or "").strip()
+        base_sha = str(sync.get("base_sha") or "").strip()
+        return bool(
+            _sha_equal(remote_sha, merge_sha)
+            and (not base_sha or _sha_equal(base_sha, merge_sha))
+        )
 
     guard = authoritative_guard if isinstance(authoritative_guard, dict) else {}
     if guard.get("ok"):
         match = guard.get("base_match")
-        if isinstance(match, dict):
+        if _verified_remote_match(match):
+            verified = True
             matched_sha = str(match.get("sha") or "").strip()
             source = str(match.get("source") or "authoritative_guard").strip()
             result = match.get("result") if isinstance(
@@ -1058,7 +1082,8 @@ def _origin_verification_evidence(
 
     if not matched_sha and isinstance(post_merge_sync, dict):
         match = _base_match_from_result(post_merge_sync, merge_sha)
-        if match:
+        if _verified_remote_match(match):
+            verified = True
             matched_sha = str(match.get("sha") or "").strip()
             source = str(match.get("source") or "remote_base_sync").strip()
             result = post_merge_sync
@@ -1076,7 +1101,6 @@ def _origin_verification_evidence(
         if not source:
             source = str(post_merge_sync.get("phase") or "remote_base_sync")
 
-    verified = bool(merge_sha and matched_sha and _sha_equal(matched_sha, merge_sha))
     origin_ref = ""
     if remote and base_branch:
         origin_ref = f"{remote}/{base_branch}"
@@ -1195,6 +1219,47 @@ def _record_merge_completion_evidence(
             if value:
                 cleanup_evidence[key] = value
         merge["remote_branch_cleanup"] = cleanup_evidence
+    cleanup = result.get("cleanup")
+    local_cleanup = (
+        cleanup.get("local_branch_cleanup")
+        if isinstance(cleanup, dict)
+        else None
+    )
+    if isinstance(local_cleanup, dict):
+        local_cleanup_evidence = {
+            "attempted": bool(local_cleanup.get("attempted")),
+            "status": _completion_evidence_text(
+                local_cleanup.get("status", ""), limit=80
+            ),
+            "branch_deleted": bool(local_cleanup.get("branch_deleted")),
+            "origin_verified": bool(local_cleanup.get("origin_verified")),
+            "branch_delete_returncode": local_cleanup.get(
+                "branch_delete_returncode"
+            ),
+            "branch_delete_stderr": _completion_evidence_text(
+                local_cleanup.get("branch_delete_stderr", ""), limit=500
+            ),
+        }
+        for key in (
+            "branch",
+            "branch_tip_sha",
+            "merge_commit_sha",
+            "tree_sha",
+            "branch_tree_sha",
+            "merge_tree_sha",
+            "reason",
+            "force_delete_stderr",
+        ):
+            value = _completion_evidence_text(
+                local_cleanup.get(key, ""), limit=500
+            )
+            if value:
+                local_cleanup_evidence[key] = value
+        if local_cleanup.get("force_delete_returncode") is not None:
+            local_cleanup_evidence["force_delete_returncode"] = (
+                local_cleanup.get("force_delete_returncode")
+            )
+        merge["local_branch_cleanup"] = local_cleanup_evidence
 
     timestamp = datetime.now(timezone.utc).isoformat()
     actor_name = _completion_evidence_text(getattr(cell, "name", "")) \

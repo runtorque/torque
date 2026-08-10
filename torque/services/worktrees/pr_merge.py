@@ -1064,6 +1064,10 @@ async def _run_pr_worktree_merge(
                 handle_command=handle_command,
                 panel_event=panel_event,
                 board_sync_manager=board_sync_manager,
+                cleanup_merge_evidence={
+                    "merge_commit_sha": merge_sha,
+                    "origin_verified": bool(origin_verification.get("verified")),
+                },
             )
     except Exception as exc:
         confirmation = await _confirm_pr_merged_and_base_at_merge(

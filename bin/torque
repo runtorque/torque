@@ -595,7 +595,7 @@ def db_read_state():
 
 def db_read_doctor_report():
     """Read the doctor report directly from SQLite."""
-    return build_doctor_report_for_db(TORQUE_DB)
+    return build_doctor_report_for_db(TORQUE_DB, project_base_dir=os.getcwd())
 
 
 def _is_tombstoned_cell(cell):

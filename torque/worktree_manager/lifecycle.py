@@ -1414,7 +1414,9 @@ class LifecycleMixin:
                                  branch: str = "",
                                  name: str = "",
                                  force: bool = True,
-                                 worktree_submodules=None) -> dict:
+                                 worktree_submodules=None,
+                                 merge_commit_sha: str = "",
+                                 origin_verified: bool = False) -> dict:
         """Remove a git worktree and verify the real post-state.
 
         ``git worktree remove`` can fail or, in some busy/attached cases,
@@ -1448,6 +1450,7 @@ class LifecycleMixin:
             "git_stderr": "",
             "branch_delete_returncode": None,
             "branch_delete_stderr": "",
+            "local_branch_cleanup": {},
             "pre_state": {},
             "post_state": {},
             "deinit": {},
@@ -1562,9 +1565,79 @@ class LifecycleMixin:
                         branch,
                         result["branch_delete_stderr"],
                     )
+                    proof = {
+                        "attempted": True,
+                        "status": "preserved",
+                        "branch": branch,
+                        "merge_commit_sha": str(merge_commit_sha or "").strip(),
+                        "origin_verified": bool(origin_verified),
+                        "branch_deleted": False,
+                    }
+                    result["local_branch_cleanup"] = proof
+                    if mid_state.get("branch_worktree_entries"):
+                        proof["reason"] = "branch_has_worktree"
+                    elif not proof["merge_commit_sha"]:
+                        proof["reason"] = "merge_commit_missing"
+                    elif not origin_verified:
+                        proof["reason"] = "origin_merge_not_verified"
+                    else:
+                        branch_tip_sha = await self.rev_parse(repo_root, branch) or ""
+                        branch_tree_sha = (
+                            await self.rev_parse(repo_root, f"{branch}^{{tree}}") or ""
+                        )
+                        merge_tree_sha = (
+                            await self.rev_parse(
+                                repo_root,
+                                f"{proof['merge_commit_sha']}^{{tree}}",
+                            ) or ""
+                        )
+                        proof["branch_tip_sha"] = branch_tip_sha
+                        proof["branch_tree_sha"] = branch_tree_sha
+                        proof["merge_tree_sha"] = merge_tree_sha
+                        if not branch_tip_sha or not branch_tree_sha:
+                            proof["reason"] = "branch_tip_unavailable"
+                        elif not merge_tree_sha:
+                            proof["reason"] = "merge_commit_unavailable"
+                        elif branch_tree_sha != merge_tree_sha:
+                            proof["reason"] = "tree_mismatch"
+                        else:
+                            force_delete = await asyncio.create_subprocess_exec(
+                                "git", "-C", repo_root,
+                                "branch", "-D", branch,
+                                stdout=asyncio.subprocess.PIPE,
+                                stderr=asyncio.subprocess.PIPE,
+                            )
+                            _, force_stderr = await force_delete.communicate()
+                            proof["force_delete_returncode"] = force_delete.returncode
+                            proof["force_delete_stderr"] = (
+                                force_stderr.decode(errors="replace").strip()
+                            )
+                            if force_delete.returncode == 0:
+                                result["local_branch_cleanup"] = {
+                                    "attempted": True,
+                                    "status": "tree_match_deleted",
+                                    "branch": branch,
+                                    "branch_tip_sha": branch_tip_sha,
+                                    "merge_commit_sha": proof["merge_commit_sha"],
+                                    "tree_sha": branch_tree_sha,
+                                    "origin_verified": True,
+                                    "branch_deleted": True,
+                                    "force_delete_returncode": 0,
+                                    "force_delete_stderr": "",
+                                }
+                            else:
+                                proof["reason"] = "force_delete_failed"
             except Exception:
                 log.debug("Could not delete branch %s", branch)
-                result["branch_delete_returncode"] = -1
+                if result["branch_delete_returncode"] is None:
+                    result["branch_delete_returncode"] = -1
+                proof = result.get("local_branch_cleanup")
+                if (
+                        isinstance(proof, dict)
+                        and proof.get("status") == "preserved"
+                        and not proof.get("reason")
+                ):
+                    proof["reason"] = "proof_check_failed"
             try:
                 from torque.worktree_streams import invalidate_branch_exists_cache
                 invalidate_branch_exists_cache(repo_root, branch)
@@ -1639,7 +1712,9 @@ class LifecycleMixin:
             return False
 
     async def remove_result(self, cell, force: bool = True,
-                            worktree_submodules=None) -> dict:
+                            worktree_submodules=None,
+                            merge_commit_sha: str = "",
+                            origin_verified: bool = False) -> dict:
         """Remove the git worktree/branch for a cell and verify post-state.
 
         Args:
@@ -1679,6 +1754,8 @@ class LifecycleMixin:
             name=cell.name,
             force=force,
             worktree_submodules=worktree_submodules,
+            merge_commit_sha=merge_commit_sha,
+            origin_verified=origin_verified,
         )
 
         if result.get("worktree_removed"):

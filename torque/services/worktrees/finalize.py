@@ -573,6 +573,7 @@ async def _finalize_successful_worktree_merge(
     handle_command,
     panel_event,
     board_sync_manager=None,
+    cleanup_merge_evidence: dict | None = None,
 ) -> dict:
     """Apply all local side effects after a direct or PR merge succeeds."""
     merge_branch = str(getattr(cell, "worktree_branch", "") or "").strip()
@@ -704,10 +705,23 @@ async def _finalize_successful_worktree_merge(
         log.info("Cleared context for '%s' after merge", cell.name)
     reset_failed_with_followups = False
     if close_flag or remove_flag:
+        cleanup_kwargs = {
+            "close_agent": close_flag,
+            "remove_worktree": remove_flag,
+        }
+        if isinstance(cleanup_merge_evidence, dict):
+            cleanup_kwargs.update({
+                "merge_commit_sha": str(
+                    cleanup_merge_evidence.get("merge_commit_sha") or ""
+                ).strip(),
+                "origin_verified": bool(
+                    cleanup_merge_evidence.get("origin_verified")
+                ),
+                "merge_branch": merge_branch,
+            })
         cleanup = await cleanup_after_merge(
             cell,
-            close_agent=close_flag,
-            remove_worktree=remove_flag,
+            **cleanup_kwargs,
         )
     elif cell.worktree_path:
         # Reset worktree branch to base tip so new work starts fresh (avoids

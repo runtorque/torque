@@ -29,8 +29,7 @@ from .doctor_agent_classes import (
     format_frozen_missing_tools_warning,
     frozen_missing_tools_warning,
 )
-from . import doctor_artifacts
-
+from . import doctor_artifacts, doctor_branches
 DOCTOR_SCHEMA_VERSION = 3
 _KINDS_MIGRATION_VERSION_KEY = "schema_kinds_migration_version"
 _KINDS_MIGRATION_MIGRATED_AT_KEY = "schema_kinds_migration_migrated_at"
@@ -1813,7 +1812,6 @@ def _check_pty_supervisor_reachable(report: dict) -> dict:
         },
     }
 
-
 def _warn_mcp_idempotency_storage(report: dict) -> dict | None:
     storage = report.get("mcp_idempotency_storage", {}) or {}
     warnings = list(storage.get("warnings", []) or [])
@@ -1837,7 +1835,6 @@ def _warn_mcp_idempotency_storage(report: dict) -> dict | None:
             ),
         },
     }
-
 
 def _warn_stuck_input_sessions(report: dict) -> dict | None:
     sup = report.get("pty_supervisor", {}) or {}
@@ -1935,6 +1932,8 @@ def build_doctor_report(
             architect_names=architect_names,
         ),
         "worktrees": _collect_worktrees_section(conn),
+        "squash_branch_cleanup": doctor_branches.collect_squash_branch_cleanup_section(conn, project_base_dir),
+        "nested_branch_cleanup": doctor_branches.collect_nested_branch_cleanup_section(conn, project_base_dir),
         "ai": _collect_ai_section(conn),
         "multiprocessing_children": _collect_multiprocessing_children_section(),
         "pty_supervisor": _collect_pty_supervisor_section(db_path),
@@ -2159,6 +2158,8 @@ def format_doctor_report(report: dict) -> str:
         "  isolation_guard_missing: "
         f"{len(list(worktrees.get('isolation_guard_missing', []) or []))}",
         "",
+        *doctor_branches.format_squash_branch_cleanup_section(report.get("squash_branch_cleanup", {})),
+        *doctor_branches.format_nested_branch_cleanup_section(report.get("nested_branch_cleanup", {})),
         "[tasks]",
         f"  total:       {int(tasks.get('total', 0) or 0)}",
         f"  assigned:    {int(tasks.get('assigned', 0) or 0)}",

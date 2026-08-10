@@ -189,6 +189,152 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         # Clean up the real worktree now that the no-op was detected.
         self.assertTrue(await self.mgr.remove(cell))
 
+    async def test_remove_squash_branch_when_recorded_merge_tree_matches(self):
+        cell = self._make_cell(agent_id="squash-positive")
+        wt_path = await self.mgr.create(cell, str(self.repo_root), base_branch="main")
+        branch = cell.worktree_branch
+        changed = Path(wt_path) / "squash.txt"
+        changed.write_text("landed by squash\n")
+        await self._git("add", "squash.txt", cwd=wt_path)
+        await self._git("commit", "-m", "Squash source", cwd=wt_path)
+        branch_tip = await self._git("rev-parse", branch)
+        branch_tree = await self._git("rev-parse", f"{branch}^{{tree}}")
+
+        await self._git("merge", "--squash", branch)
+        with mock.patch.dict("os.environ", {"TORQUE_CELL_ID": ""}):
+            await self._git("commit", "-m", "Squash landing")
+        merge_sha = await self._git("rev-parse", "HEAD")
+        self.assertEqual(branch_tree, await self._git("rev-parse", f"{merge_sha}^{{tree}}"))
+        ancestor_code, _, _ = await self._git_code(
+            "merge-base", "--is-ancestor", branch, merge_sha
+        )
+        self.assertNotEqual(ancestor_code, 0)
+
+        result = await self.mgr.remove_path_result(
+            str(self.repo_root),
+            wt_path,
+            branch=branch,
+            name=cell.name,
+            merge_commit_sha=merge_sha,
+            origin_verified=True,
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertNotEqual(result["branch_delete_returncode"], 0)
+        self.assertEqual(result["local_branch_cleanup"], {
+            "attempted": True,
+            "status": "tree_match_deleted",
+            "branch": branch,
+            "branch_tip_sha": branch_tip,
+            "merge_commit_sha": merge_sha,
+            "tree_sha": branch_tree,
+            "origin_verified": True,
+            "branch_deleted": True,
+            "force_delete_returncode": 0,
+            "force_delete_stderr": "",
+        })
+        exists, _, _ = await self._git_code(
+            "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"
+        )
+        self.assertNotEqual(exists, 0)
+
+    async def test_remove_preserves_branch_when_recorded_merge_tree_differs(self):
+        cell = self._make_cell(agent_id="squash-negative")
+        wt_path = await self.mgr.create(cell, str(self.repo_root), base_branch="main")
+        branch = cell.worktree_branch
+        changed = Path(wt_path) / "unmerged.txt"
+        changed.write_text("not landed\n")
+        await self._git("add", "unmerged.txt", cwd=wt_path)
+        await self._git("commit", "-m", "Unmerged source", cwd=wt_path)
+        (self.repo_root / "main-only.txt").write_text("different landing\n")
+        await self._git("add", "main-only.txt")
+        with mock.patch.dict("os.environ", {"TORQUE_CELL_ID": ""}):
+            await self._git("commit", "-m", "Different landing")
+        merge_sha = await self._git("rev-parse", "HEAD")
+
+        result = await self.mgr.remove_path_result(
+            str(self.repo_root),
+            wt_path,
+            branch=branch,
+            name=cell.name,
+            merge_commit_sha=merge_sha,
+            origin_verified=True,
+        )
+
+        self.assertTrue(result["worktree_removed"])
+        self.assertFalse(result["branch_deleted"])
+        self.assertEqual(result["local_branch_cleanup"]["status"], "preserved")
+        self.assertEqual(result["local_branch_cleanup"]["reason"], "tree_mismatch")
+        self.assertNotEqual(
+            result["local_branch_cleanup"]["branch_tree_sha"],
+            result["local_branch_cleanup"]["merge_tree_sha"],
+        )
+        self.assertIn("branch_delete_failed", result["mismatches"])
+
+    async def test_remove_preserves_matching_squash_branch_without_origin_proof(self):
+        cell = self._make_cell(agent_id="squash-unverified-origin")
+        wt_path = await self.mgr.create(
+            cell, str(self.repo_root), base_branch="main"
+        )
+        branch = cell.worktree_branch
+        changed = Path(wt_path) / "unverified.txt"
+        changed.write_text("landed but origin unverified\n")
+        await self._git("add", "unverified.txt", cwd=wt_path)
+        await self._git("commit", "-m", "Unverified source", cwd=wt_path)
+
+        await self._git("merge", "--squash", branch)
+        with mock.patch.dict("os.environ", {"TORQUE_CELL_ID": ""}):
+            await self._git("commit", "-m", "Squash landing")
+        merge_sha = await self._git("rev-parse", "HEAD")
+
+        result = await self.mgr.remove_path_result(
+            str(self.repo_root),
+            wt_path,
+            branch=branch,
+            name=cell.name,
+            merge_commit_sha=merge_sha,
+            origin_verified=False,
+        )
+
+        cleanup = result["local_branch_cleanup"]
+        self.assertTrue(result["worktree_removed"])
+        self.assertFalse(cleanup["branch_deleted"])
+        self.assertEqual(cleanup["reason"], "origin_merge_not_verified")
+        self.assertNotIn("force_delete_returncode", cleanup)
+        exists, _, _ = await self._git_code(
+            "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"
+        )
+        self.assertEqual(exists, 0)
+
+    async def test_remove_preserves_non_ancestral_branch_without_merge_evidence(self):
+        cell = self._make_cell(agent_id="squash-no-evidence")
+        wt_path = await self.mgr.create(cell, str(self.repo_root), base_branch="main")
+        branch = cell.worktree_branch
+        changed = Path(wt_path) / "unknown.txt"
+        changed.write_text("unknown state\n")
+        await self._git("add", "unknown.txt", cwd=wt_path)
+        await self._git("commit", "-m", "Unknown source", cwd=wt_path)
+        (self.repo_root / "main-only.txt").write_text("new main\n")
+        await self._git("add", "main-only.txt")
+        with mock.patch.dict("os.environ", {"TORQUE_CELL_ID": ""}):
+            await self._git("commit", "-m", "Advance main")
+
+        result = await self.mgr.remove_path_result(
+            str(self.repo_root), wt_path, branch=branch, name=cell.name
+        )
+
+        self.assertTrue(result["worktree_removed"])
+        self.assertFalse(result["branch_deleted"])
+        self.assertEqual(result["local_branch_cleanup"], {
+            "attempted": True,
+            "status": "preserved",
+            "branch": branch,
+            "merge_commit_sha": "",
+            "origin_verified": False,
+            "branch_deleted": False,
+            "reason": "merge_commit_missing",
+        })
+
     async def test_create_worktree_expands_glob_symlink_patterns(self):
         cell = self._make_cell()
 
