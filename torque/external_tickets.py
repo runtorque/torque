@@ -275,8 +275,11 @@ async def run_external_ticket_operation(operation, /, *args, **kwargs):
     """Run a synchronous adapter operation without blocking the event loop.
 
     Adapters remain synchronous so CLI and offline callers continue to work.
-    Async daemon handlers must use this boundary for operations that may invoke
-    the GitHub CLI.
+    Async daemon handlers must not invoke operations that may reach the GitHub
+    CLI on the event loop. Use this helper or offload the operation directly
+    with asyncio.to_thread. The
+    ``test_external_ticket_sync_operations_are_offloaded_from_async_callers``
+    guardrail in tests/test_backend_modularity.py enforces both accepted forms.
     """
     return await asyncio.to_thread(operation, *args, **kwargs)
 
