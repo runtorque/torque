@@ -1779,6 +1779,66 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, [])
         self.assertEqual(len(state.board_tasks), 3)
 
+    async def test_fresh_seat_refusal_keeps_completed_reviewer_after_assignment_cleanup(self):
+        state = self._make_state()
+        implementer, reviewer, _root, _fix = (
+            self._add_second_review_cycle_chain(state)
+        )
+        prior_review = state.board_tasks["task-review"]
+        prior_review.agent_id = ""
+        prior_review.lane = "Archived"
+        prior_review.completion_evidence = {
+            "review": {
+                "verdict": "ship",
+                "agent_id": reviewer.id,
+                "agent_name": reviewer.name,
+            },
+            "completion": {
+                "action": "done",
+                "agent_id": reviewer.id,
+                "agent_name": reviewer.name,
+            },
+        }
+        state.group_settings["g"].max_agents = 2
+        calls, dispatch = self._recording_dispatch(state)
+        handle_command = self._extract_handle_command(state, dispatch)
+
+        result = await handle_command({
+            "cmd": "ai_report",
+            "cell_id": implementer.id,
+            "action": "derive",
+            "action_name": "feature/review",
+            "message": "Obtain a fresh-seat review after archival",
+            "require_fresh_reviewer": True,
+        })
+
+        self.assertEqual(result["type"], "error")
+        self.assertEqual(result["code"], "fresh_reviewer_unavailable")
+        self.assertEqual(result["prior_reviewer_ids"], [reviewer.id])
+        self.assertIn(reviewer.id, result["message"])
+        self.assertNotIn("(none)", result["message"])
+        self.assertEqual(calls, [])
+        self.assertEqual(len(state.board_tasks), 3)
+
+        prior_review.completion_evidence = {
+            "completion": {
+                "action": "done",
+                "agent_id": reviewer.id,
+                "agent_name": reviewer.name,
+            },
+        }
+        fallback = await handle_command({
+            "cmd": "ai_report",
+            "cell_id": implementer.id,
+            "action": "derive",
+            "action_name": "feature/review",
+            "message": "Obtain a fresh seat from completion fallback",
+            "require_fresh_reviewer": True,
+        })
+        self.assertEqual(fallback["prior_reviewer_ids"], [reviewer.id])
+        self.assertEqual(calls, [])
+        self.assertEqual(len(state.board_tasks), 3)
+
     async def test_reused_reviewer_records_boundary_at_fix_worktree_head(self):
         """A re-review boundary must name the SHA the reviewer was handed."""
         state = self._make_state()

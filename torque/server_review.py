@@ -77,6 +77,20 @@ def _prior_reviewer_ids_for_chain(state, task) -> list[str]:
         evidence = getattr(candidate, "completion_evidence", {}) or {}
         if not isinstance(evidence, dict):
             continue
+        review_evidence = evidence.get("review", {}) or {}
+        completed_reviewer_id = ""
+        if isinstance(review_evidence, dict):
+            completed_reviewer_id = str(
+                review_evidence.get("agent_id", "") or ""
+            ).strip()
+        if not completed_reviewer_id:
+            completion_evidence = evidence.get("completion", {}) or {}
+            if isinstance(completion_evidence, dict):
+                completed_reviewer_id = str(
+                    completion_evidence.get("agent_id", "") or ""
+                ).strip()
+        if completed_reviewer_id:
+            reviewer_ids.add(completed_reviewer_id)
         assignments = [evidence.get("reviewer_assignment", {})]
         assignments.extend(evidence.get("reviewer_assignment_history", []) or [])
         for assignment in assignments:
