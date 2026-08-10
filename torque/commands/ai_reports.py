@@ -411,6 +411,40 @@ async def handle_ai_report_command(
                         message_id, read_at=now, reader_id=c.id, emit=True)
                 changed = True
             if changed:
+                replies = {
+                    str(entry.get("block_id", "") or ""): entry
+                    for entry in list(getattr(t, "messages", []) or [])
+                    if isinstance(entry, dict)
+                    and entry.get("action") == "block_reply"
+                    and str(entry.get("worker_id", "") or "") == c.id
+                    and entry.get("block_id")
+                }
+
+                def _block_is_unanswered(entry):
+                    reply = replies.get(
+                        str(entry.get("block_id", "") or "")
+                    )
+                    return not (
+                        reply
+                        and reply.get("delivery_state") == "delivered"
+                        and reply.get("acknowledged_at")
+                    )
+
+                unanswered_block = any(
+                    _block_is_unanswered(entry)
+                    for entry in list(getattr(t, "messages", []) or [])
+                    if isinstance(entry, dict)
+                    and entry.get("action") == "blocked"
+                    and str(entry.get("agent_id", "") or "") == c.id
+                )
+                if not unanswered_block:
+                    t.labels = [
+                        label for label in t.labels
+                        if label != "torque:blocked"
+                    ]
+                    if c.activity == "waiting":
+                        c.activity = ""
+                        state._emit_agent(c)
                 _save_task(t)
             return changed
 
