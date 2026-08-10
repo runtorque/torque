@@ -70,14 +70,12 @@ var _AGENT_PANEL_MCP_DEFAULT_HOOK = 'PostToolUse';
 var _agentPanelTabSpecByKind = {
   architect: [
     { key: 'decisions', label: 'Decisions' },
-    { key: 'behavior', label: 'Behavior' },
     { key: 'journal', label: 'Journal' },
     { key: 'messages', label: 'Messages' },
     { key: 'events', label: 'Events' },
   ],
   engineer: [
     { key: 'journal', label: 'Journal' },
-    { key: 'behavior', label: 'Behavior' },
     { key: 'events', label: 'Events' },
     { key: 'queued', label: 'Queued' },
     { key: 'worklog', label: 'Completed' },

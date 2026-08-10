@@ -572,11 +572,7 @@ function agentPanelHandleEngineerSpecializationsError(msg) {
 function _agentPanelTabRenderParts(agent, kind, activeTab) {
   var parts = { bodyHtml: '', headerRightHtml: '' };
   if (kind === 'engineer') {
-    if (activeTab === 'behavior') {
-      parts.bodyHtml = typeof renderBehaviorOverlayTab === 'function'
-        ? renderBehaviorOverlayTab(agent)
-        : '<div class="agent-panel-empty ui-state ui-state--error ui-state--compact" role="alert">Behavior overlay UI is unavailable. Refresh the Agent panel to try again.</div>';
-    } else if (activeTab === 'events') {
+    if (activeTab === 'events') {
       parts.headerRightHtml = _agentPanelDigestHeaderRight(agent);
       parts.bodyHtml += _renderEngineerEvents(agent);
     } else if (activeTab === 'queued') {
@@ -597,11 +593,7 @@ function _agentPanelTabRenderParts(agent, kind, activeTab) {
     return parts;
   }
   if (kind === 'architect') {
-    if (activeTab === 'behavior') {
-      parts.bodyHtml = typeof renderBehaviorOverlayTab === 'function'
-        ? renderBehaviorOverlayTab(agent)
-        : '<div class="agent-panel-empty ui-state ui-state--error ui-state--compact" role="alert">Behavior overlay UI is unavailable. Refresh the Agent panel to try again.</div>';
-    } else if (activeTab === 'messages') {
+    if (activeTab === 'messages') {
       parts.bodyHtml = _agentPanelArchitectMessages(agent);
     } else if (activeTab === 'events') {
       parts.headerRightHtml = _agentPanelDigestHeaderRight(agent);

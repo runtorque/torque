@@ -19630,7 +19630,7 @@ test('grid card helpers derive from lookup indexes instead of full scans', () =>
     ['w-1']);
 });
 
-test('behavior overlay deltas invalidate only the focused Behavior tab target', () => {
+test('behavior overlay deltas never invalidate the Agent panel', () => {
   const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
   runInContext(context, `
     selectedAgentId = 'eng-1';
@@ -19673,8 +19673,8 @@ test('behavior overlay deltas invalidate only the focused Behavior tab target', 
     }],
   });
   flushRaf();
-  assert.equal(sandbox.renderCalls.engineer, 1,
-    'focused Behavior tab target should refresh surgically via engineer surface');
+  assert.equal(sandbox.renderCalls.engineer, 0,
+    'the relocated settings editor must not rebuild the Agent panel');
 });
 
 test('behavior overlay deltas do not invalidate focused engineer when another tab is active', () => {
@@ -35345,4 +35345,127 @@ test('Engineer creation dialog no longer writes group defaults and both class cr
   const redirect = launchSource.slice(launchSource.indexOf('function openEngineerLaunchDialog'), launchSource.indexOf('function submitEngineerLaunchDialog'));
   assert.match(redirect, /openAgentSettingsDialog\(\{[\s\S]*?relaunch: !!cell,[\s\S]*?\}\);\s*return;/,
     'operator-reachable create/relaunch returns into per-agent settings before legacy group mutation code');
+});
+
+test('behavior overlays mount in scoped settings surfaces without a worker-role editor', () => {
+  const { sandbox, document } = createSandbox();
+  const context = vm.createContext(sandbox);
+  const modal = document.register('modal-group-settings');
+  modal.classList.add('visible');
+  const architectMount = document.register('gs-architect-role-behavior-overlay');
+  const engineerMount = document.register('gs-engineer-role-behavior-overlay');
+  sandbox.state.behavior_overlay_active = {};
+  sandbox.state.behavior_overlay_versions = {};
+  sandbox.state.behavior_overlay_proposals = {};
+  loadScript(context, 'static/js/behavior_overlay.js');
+  runInContext(context, `_settingsGroup = 'alpha'; renderGroupBehaviorRolePanes('alpha');`);
+
+  assert.match(architectMount.innerHTML, /data-behavior-overlay-role="architect"/);
+  assert.match(architectMount.innerHTML, /Role overlay text/);
+  assert.match(architectMount.innerHTML, /Loading versions/);
+  assert.match(engineerMount.innerHTML, /data-behavior-overlay-role="engineer"/);
+  assert.match(engineerMount.innerHTML, /Role overlay text/);
+  assert.equal(document.getElementById('gs-worker-role-behavior-overlay'), null,
+    'worker role relocation remains out of scope');
+  assert.equal(sandbox.sendCalls.some((call) => call.scope_key === 'worker'), false,
+    'the unmounted worker pane remains inert');
+
+  const beforeClosedDelta = engineerMount.innerHTML;
+  modal.classList.remove('visible');
+  context.behaviorOverlayApplyDelta({
+    op: 'behavior_overlay_active_update',
+    scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer',
+    active_version_id: 'bov-closed',
+  });
+  assert.equal(engineerMount.innerHTML, beforeClosedDelta,
+    'role deltas are a no-op for the closed Group Settings surface');
+});
+
+test('Architect and Engineer settings own the agent-scoped overlay editor and preserve proposal access', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  sandbox.state.behavior_overlay_active = {};
+  sandbox.state.behavior_overlay_versions = {};
+  sandbox.state.behavior_overlay_proposals = {
+    'bop-open': {
+      id: 'bop-open', agent_id: 'eng-1', status: 'proposed',
+      next_actor_kind: 'architect', approval_route: 'architect',
+      proposed_text_sha256: 'abc123', proposed_text_bytes: 12,
+      rationale: 'Keep this proposal reachable',
+    },
+  };
+  loadScript(context, 'static/js/behavior_overlay.js');
+  const architectHtml = context._behaviorOverlayAgentSettingsPaneHtml({
+    id: 'arch-1', name: 'Planner', kind: 'architect', group: 'alpha',
+  });
+  const engineerHtml = context._behaviorOverlayAgentSettingsPaneHtml({
+    id: 'eng-1', name: 'Builder', kind: 'engineer', group: 'alpha',
+  });
+
+  for (const html of [architectHtml, engineerHtml]) {
+    assert.match(html, /behavior-overlay-agent-settings/);
+    assert.match(html, /Agent-specific overlay/);
+    assert.match(html, /Proposed behavior text/);
+    assert.doesNotMatch(html, /data-behavior-overlay-role=/,
+      'agent settings do not duplicate the group role editor');
+  }
+  assert.match(engineerHtml, /Keep this proposal reachable/);
+  assert.match(engineerHtml, /View diff/);
+});
+
+test('Behavior tab is removed while Agent Class and scoped overlay mounts remain reachable', () => {
+  const panelSource = fs.readFileSync(path.join(repoRoot, 'static/js/agent_panel.js'), 'utf8');
+  const engineerSource = fs.readFileSync(path.join(repoRoot, 'static/js/agent-panel/engineer.js'), 'utf8');
+  const dialogSource = fs.readFileSync(path.join(repoRoot, 'static/js/modals/agent-settings.js'), 'utf8');
+  const htmlSource = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+
+  const tabSpec = panelSource.slice(
+    panelSource.indexOf('var _agentPanelTabSpecByKind'),
+    panelSource.indexOf('function _agentPanelEsc'),
+  );
+  assert.doesNotMatch(tabSpec, /key:\s*'behavior'/);
+  assert.doesNotMatch(engineerSource, /renderBehaviorOverlayTab|activeTab === 'behavior'/);
+  assert.match(dialogSource, /_agentPanelClassManagerHtml\(agent\)/,
+    'Agent Class remains reachable from per-agent settings');
+  assert.match(dialogSource, /agent-settings-behavior-overlay/);
+  assert.match(htmlSource, /id="gs-architect-role-behavior-overlay"/);
+  assert.match(htmlSource, /id="gs-engineer-role-behavior-overlay"/);
+  assert.doesNotMatch(htmlSource, /id="gs-worker-role-behavior-overlay"/);
+});
+
+test('non-visible agent overlay deltas never rebuild the Engineer panel', () => {
+  const { sandbox, document } = createSandbox();
+  const context = vm.createContext(sandbox);
+  const mount = document.register('agent-settings-behavior-overlay');
+  mount.innerHTML = 'eng-1 overlay';
+  sandbox.state.agents = {
+    'eng-1': { id: 'eng-1', name: 'One', kind: 'engineer', group: 'alpha' },
+    'eng-2': { id: 'eng-2', name: 'Two', kind: 'engineer', group: 'alpha' },
+  };
+  sandbox.state.behavior_overlay_active = {};
+  sandbox.state.behavior_overlay_versions = {};
+  sandbox.state.behavior_overlay_proposals = {};
+  sandbox.panelRenders = 0;
+  sandbox.renderAgentPanel = function() { sandbox.panelRenders += 1; };
+  loadScript(context, 'static/js/behavior_overlay.js');
+  runInContext(context, `_agentSettingsContext = { mode: 'edit', agentId: 'eng-1' };`);
+
+  context.behaviorOverlayReceiveMessage({
+    type: 'behavior_overlay', agent_id: 'eng-2',
+    active: { agent_id: 'eng-2', active_version_id: 'bov-2' },
+    version: { id: 'bov-2', agent_id: 'eng-2', version_number: 1 },
+    text: 'other agent',
+  });
+  assert.equal(sandbox.panelRenders, 0);
+  assert.equal(mount.innerHTML, 'eng-1 overlay');
+
+  context.behaviorOverlayReceiveMessage({
+    type: 'behavior_overlay', agent_id: 'eng-1',
+    active: { agent_id: 'eng-1', active_version_id: 'bov-1' },
+    version: { id: 'bov-1', agent_id: 'eng-1', version_number: 1 },
+    text: 'visible agent',
+  });
+  assert.equal(sandbox.panelRenders, 0);
+  assert.match(mount.innerHTML, /visible agent/,
+    'the matching settings mount refreshes in isolation');
 });

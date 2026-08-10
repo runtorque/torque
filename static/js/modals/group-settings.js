@@ -1632,6 +1632,9 @@ function _showGroupSettings(group, data) {
   _gsInitialTab = 'group';
   _gsInitialSubtab = '';
   document.getElementById('modal-group-settings').classList.add('visible');
+  if (typeof renderGroupBehaviorRolePanes === 'function') {
+    renderGroupBehaviorRolePanes(group);
+  }
   if (rerenderState) {
     _restoreGroupSettingsRerenderState(rerenderState);
     return;
