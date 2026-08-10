@@ -5148,6 +5148,8 @@ def cmd_ai_derive(args):
             kwargs["action_vars"] = tvars
     if args.group:
         kwargs["group"] = args.group
+    if getattr(args, "require_fresh_reviewer", False):
+        kwargs["require_fresh_reviewer"] = True
     resp = api_call("ai_report", port=args.port, **kwargs)
     data = check_ok(resp)
     new_tid = data.get("task_id", "")
@@ -6753,6 +6755,13 @@ def build_parser():
     p.add_argument("-v", "--var", nargs="+", metavar="KEY=VALUE",
                    help="Action variables")
     p.add_argument("-g", "--group", help="Target group (inherit from task)")
+    p.add_argument(
+        "--require-fresh-reviewer", action="store_true",
+        help=(
+            "For feature/review, require a seat not previously assigned "
+            "to review this task chain"
+        ),
+    )
     p.add_argument("task_ref", nargs="?",
                    help="Task slug/ID (auto-detected)")
     p.set_defaults(func=cmd_ai_derive)

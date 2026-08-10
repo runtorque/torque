@@ -503,8 +503,9 @@ TOOLS = [
             "which actions can be derived and where the task is routed "
             "(new agent, self, parent agent, or root agent). For "
             "feature/review, prior-reviewer reuse is disclosed in the "
-            "result and review record; context prose does not impose "
-            "reviewer exclusions."
+            "result and review record. Set require_fresh_reviewer to make "
+            "same-task prior-reviewer exclusion a routing constraint; "
+            "context prose does not impose reviewer exclusions."
         ),
         "inputSchema": {
             "type": "object",
@@ -533,6 +534,15 @@ TOOLS = [
                     "type": "string",
                     "description": (
                         "Target group (defaults to current task's group)."
+                    ),
+                },
+                "require_fresh_reviewer": {
+                    "type": "boolean",
+                    "description": (
+                        "For feature/review only, require automatic routing "
+                        "to create a seat not previously assigned to review "
+                        "this task chain. Default false preserves block/fix "
+                        "re-review continuity."
                     ),
                 },
             },
@@ -2036,6 +2046,10 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
             payload["action_vars"] = args["action_vars"]
         if args.get("group"):
             payload["group"] = args["group"]
+        if "require_fresh_reviewer" in args:
+            payload["require_fresh_reviewer"] = bool(
+                args["require_fresh_reviewer"]
+            )
     elif action == "ask":
         payload["message"] = args.get("question", "")
         if args.get("description"):

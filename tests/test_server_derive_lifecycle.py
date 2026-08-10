@@ -1721,6 +1721,64 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(reviewer.id, reuse_messages[0]["message"])
         self.assertIn("task-review", reuse_messages[0]["message"])
 
+    async def test_feature_review_fresh_seat_constraint_skips_prior_reviewer(self):
+        state = self._make_state()
+        implementer, reviewer, _root, _fix = (
+            self._add_second_review_cycle_chain(state)
+        )
+        calls, dispatch = self._recording_dispatch(state)
+        handle_command = self._extract_handle_command(state, dispatch)
+
+        result = await handle_command({
+            "cmd": "ai_report",
+            "cell_id": implementer.id,
+            "action": "derive",
+            "action_name": "feature/review",
+            "message": "Obtain a fresh-seat review",
+            "require_fresh_reviewer": True,
+        })
+
+        self.assertEqual(result["type"], "ok")
+        self.assertNotEqual(result["agent_id"], reviewer.id)
+        self.assertTrue(calls[0]["create_agent"])
+        self.assertNotIn("agent_id", calls[0])
+        self.assertNotIn("reviewer_reuse", result)
+
+    async def test_feature_review_fresh_seat_refusal_names_constraint_and_reviewers(self):
+        state = self._make_state()
+        implementer, reviewer, _root, _fix = (
+            self._add_second_review_cycle_chain(state)
+        )
+        prior_review = state.board_tasks["task-review"]
+        prior_review.completion_evidence = {
+            "reviewer_assignment_history": [{
+                "reviewer_id": "review-older",
+                "replacement_reviewer_id": reviewer.id,
+            }],
+        }
+        state.group_settings["g"].max_agents = 2
+        calls, dispatch = self._recording_dispatch(state)
+        handle_command = self._extract_handle_command(state, dispatch)
+        result = await handle_command({
+            "cmd": "ai_report",
+            "cell_id": implementer.id,
+            "action": "derive",
+            "action_name": "feature/review",
+            "message": "Obtain a fresh-seat review",
+            "require_fresh_reviewer": True,
+        })
+
+        self.assertEqual(result["type"], "error")
+        self.assertEqual(result["code"], "fresh_reviewer_unavailable")
+        self.assertIn("require_fresh_reviewer", result["message"])
+        self.assertIn(reviewer.id, result["message"])
+        self.assertIn("review-older", result["message"])
+        self.assertEqual(
+            result["prior_reviewer_ids"], [reviewer.id, "review-older"]
+        )
+        self.assertEqual(calls, [])
+        self.assertEqual(len(state.board_tasks), 3)
+
     async def test_reused_reviewer_records_boundary_at_fix_worktree_head(self):
         """A re-review boundary must name the SHA the reviewer was handed."""
         state = self._make_state()

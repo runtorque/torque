@@ -59,6 +59,72 @@ def _prior_review_task_ids_for_agent(
     return result
 
 
+def _prior_reviewer_ids_for_chain(state, task) -> list[str]:
+    """Return reviewer ids already assigned in ``task``'s structural chain."""
+    if not state or not task:
+        return []
+    task_id = str(getattr(task, "id", "") or "").strip()
+    reviewer_ids = set()
+    for candidate in state.board_get_chain(task_id):
+        if str(getattr(candidate, "id", "") or "").strip() == task_id:
+            continue
+        if str(getattr(candidate, "action_name", "") or "").strip().lower() \
+                != _REVIEW_GATE_ACTION:
+            continue
+        reviewer_id = str(getattr(candidate, "agent_id", "") or "").strip()
+        if reviewer_id:
+            reviewer_ids.add(reviewer_id)
+        evidence = getattr(candidate, "completion_evidence", {}) or {}
+        if not isinstance(evidence, dict):
+            continue
+        assignments = [evidence.get("reviewer_assignment", {})]
+        assignments.extend(evidence.get("reviewer_assignment_history", []) or [])
+        for assignment in assignments:
+            if not isinstance(assignment, dict):
+                continue
+            for key in ("reviewer_id", "replacement_reviewer_id"):
+                recorded_id = str(assignment.get(key, "") or "").strip()
+                if recorded_id:
+                    reviewer_ids.add(recorded_id)
+    return sorted(reviewer_ids)
+
+
+def _fresh_reviewer_seat_available(state, group: str) -> bool:
+    """Match the new-agent capacity rule without consulting display labels."""
+    if not state:
+        return False
+    settings = state.get_group_settings(group)
+    max_agents = int(getattr(settings, "max_agents", 0) or 0)
+    if max_agents <= 0:
+        return True
+    current = sum(
+        1 for agent_id in state.groups.get(group, [])
+        if state.agents.get(agent_id)
+        and getattr(state.agents[agent_id], "cell_type", "") == "agent"
+    )
+    return current < max_agents
+
+
+def _fresh_reviewer_unavailable_error(state, task, group: str) -> dict:
+    """Build the actionable refusal for an unsatisfiable fresh-seat derive."""
+    reviewer_ids = _prior_reviewer_ids_for_chain(state, task)
+    reviewer_text = ", ".join(reviewer_ids) if reviewer_ids else "(none)"
+    return {
+        "type": "error",
+        "code": "fresh_reviewer_unavailable",
+        "message": (
+            "Cannot derive feature/review with "
+            "require_fresh_reviewer=true: no new reviewer seat is available "
+            f"in group {group}. Already-used reviewer ids: {reviewer_text}. "
+            "Increase the group agent capacity or release an unused agent, "
+            "then retry; omit require_fresh_reviewer only when prior-reviewer "
+            "reuse is intentionally acceptable."
+        ),
+        "constraint": "require_fresh_reviewer",
+        "prior_reviewer_ids": reviewer_ids,
+    }
+
+
 def _reviewer_reuse_assignment(
         *, reviewer_id: str, prior_review_task_ids: list[str],
         selection_source: str) -> dict:
