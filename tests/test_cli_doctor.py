@@ -2,11 +2,15 @@ import contextlib
 import importlib.util
 import io
 import json
+import tempfile
 import unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
+
+from torque.db import TorqueDB
+from torque.state import BoardTask
 
 
 
@@ -57,6 +61,36 @@ class CliDoctorTests(unittest.TestCase):
         self.assertEqual(result, report)
         db_read.assert_called_once_with()
         api_call.assert_not_called()
+
+    def test_offline_sqlite_report_includes_stranded_boundary_roots(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "torque.db"
+            db = TorqueDB(db_path)
+            db.init()
+            db.save_board_tasks([
+                BoardTask(id="offline-root", task="Offline root", lane="Backlog"),
+                BoardTask(
+                    id="offline-root:review",
+                    task="Archived blocked review",
+                    lane="Archived",
+                    parent_task_id="offline-root",
+                    pipeline_depth=1,
+                    pipeline_root_id="offline-root",
+                    worktree_boundary={
+                        "status": "superseded",
+                        "code_delta": {"state": "present"},
+                    },
+                ),
+            ])
+            db.close()
+
+            with mock.patch.object(self.cli, "TORQUE_DB", db_path):
+                report = self.cli.db_read_doctor_report()
+
+        self.assertEqual(
+            report["stranded_code_boundary_roots"]["root_ids"],
+            ["offline-root"],
+        )
 
     def test_cmd_doctor_prints_json_report(self):
         report = {"schema_version": 3, "result": "pass", "checks": []}

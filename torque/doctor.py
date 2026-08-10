@@ -13,9 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import yaml
-
-from . import ai_deps
-from . import install_locations
+from . import ai_deps, doctor_agent_classes, doctor_artifacts, doctor_boundaries, doctor_branches, install_locations
 from .agent_classes import (
     AGENT_CLASS_SCHEMA_VERSION,
     agent_class_authoring_contract,
@@ -24,12 +22,6 @@ from .agent_classes import (
     validate_all_agent_classes,
 )
 from .mcp_idempotency import collect_mcp_idempotency_storage_stats
-from .doctor_agent_classes import (
-    collect_frozen_missing_tools,
-    format_frozen_missing_tools_warning,
-    frozen_missing_tools_warning,
-)
-from . import doctor_artifacts, doctor_branches
 DOCTOR_SCHEMA_VERSION = 3
 _KINDS_MIGRATION_VERSION_KEY = "schema_kinds_migration_version"
 _KINDS_MIGRATION_MIGRATED_AT_KEY = "schema_kinds_migration_migrated_at"
@@ -1148,7 +1140,7 @@ def _collect_agent_classes_section(conn: sqlite3.Connection | None = None, base_
     previews = [enriched_agent_class_preview(definition, base_dir=base_dir) for definition in classes]
     assignments: list[dict] = []
     audit_recent: list[dict] = []
-    frozen_missing_tools = collect_frozen_missing_tools(conn)
+    frozen_missing_tools = doctor_agent_classes.collect_frozen_missing_tools(conn)
     if conn is not None and _table_exists(conn, "agents"):
         cols = [
             "id", "name", "kind", "cell_type", "agent_class_id",
@@ -1864,11 +1856,12 @@ _DOCTOR_CHECKS = [
 ]
 
 _DOCTOR_WARNINGS = [
+    doctor_boundaries.stranded_code_boundary_roots_warning,
     _warn_unassigned_tasks_when_engineer_present,
     _warn_task_aliases_missing_canonical,
     doctor_artifacts.task_artifact_id_collision_warning,
     _warn_ignored_legacy_template_files,
-    frozen_missing_tools_warning,
+    doctor_agent_classes.frozen_missing_tools_warning,
     _warn_no_engineers,
     _warn_engineer_generalist_specialization,
     _warn_engineer_binding_env_mismatch,
@@ -1912,6 +1905,7 @@ def build_doctor_report(
         ),
         "agents": agents,
         "tasks": tasks,
+        "stranded_code_boundary_roots": doctor_boundaries.collect_stranded_code_boundary_roots(conn),
         "task_artifact_ids": doctor_artifacts.collect_task_artifact_id_section(
             conn, table_exists=_table_exists, column_exists=_column_exists),
         "task_aliases": _collect_task_aliases_section(conn),
@@ -2168,6 +2162,10 @@ def format_doctor_report(report: dict) -> str:
         f"{int(tasks.get('unassigned_when_engineer_present', 0) or 0)}",
         *doctor_artifacts.format_task_artifact_id_section(report.get("task_artifact_ids", {})),
         "",
+        *doctor_boundaries.format_stranded_code_boundary_roots_section(
+            report.get("stranded_code_boundary_roots", {})
+        ),
+        "",
         "[task_aliases]",
         f"  total:                         {int(task_aliases.get('total', 0) or 0)}",
         "  literal_collisions:            "
@@ -2347,6 +2345,8 @@ def format_doctor_report(report: dict) -> str:
                     "  - engineer present but unassigned tasks remain: "
                     f"{details.get('count', 0)}"
                 )
+            elif name == "stranded_code_boundary_roots":
+                lines.append(doctor_boundaries.format_stranded_code_boundary_roots_warning(details))
             elif name == "mcp_idempotency_storage_bloat":
                 table_bytes = details.get("table_bytes")
                 table_display = (
@@ -2529,7 +2529,7 @@ def format_doctor_report(report: dict) -> str:
                     f": {int(details.get('count', 0) or 0)}"
                 )
             elif name == "frozen_agent_class_missing_tools":
-                lines.extend(format_frozen_missing_tools_warning(details))
+                lines.extend(doctor_agent_classes.format_frozen_missing_tools_warning(details))
             else:
                 lines.append(f"  - {name}")
     failed_checks = list(report.get("failed_checks", []) or [])
