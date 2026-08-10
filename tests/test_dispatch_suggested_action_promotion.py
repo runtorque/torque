@@ -76,6 +76,72 @@ class DispatchActionBindingTests(unittest.TestCase):
         self.assertEqual(task.action_name, "feature/implement")
         self.assertEqual(task.suggested_action, "oneshot/fix")
 
+    def test_successful_dispatch_arms_boot_doa_watchdog(self):
+        task = self.state.board_add_task(
+            "Dispatch worker",
+            "g",
+            id="TASK:watchdog",
+            action_name="feature/implement",
+        )
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            kind="worker",
+            cell_type="agent",
+            status="running",
+            session_id="pty-1",
+        )
+        self.state.agents[worker.id] = worker
+        self.state.groups["g"].append(worker.id)
+        runtime = self._runtime()
+        armed = []
+        panel_events = []
+
+        runtime.agent_can_receive_dispatch = lambda _cell: True
+        runtime.arm_worker_boot_doa_watchdog = lambda cell: armed.append(cell.id)
+        runtime.action_mgr = types.SimpleNamespace(
+            load_action=lambda *_args, **_kwargs: None,
+            get_deliverable=lambda *_args, **_kwargs: None,
+            has_required_transition=lambda *_args, **_kwargs: False,
+            render_action=lambda *_args, **_kwargs: {"prompt": "Implement"},
+        )
+        runtime.build_prompt_memory_block = lambda *_args, **_kwargs: ""
+        runtime.build_torque_context = lambda *_args, **_kwargs: {
+            "task": {"upstream_artifacts": []},
+            "context": {"is_clean": True},
+        }
+        runtime.append_task_artifacts = lambda prompt, *_args: prompt
+        runtime.build_postscript = lambda *_args, **_kwargs: ""
+        runtime.assemble_worker_prompt = lambda **_kwargs: "prompt"
+        runtime.behavior_overlay_prompt_block_for_cell = (
+            lambda *_args, **_kwargs: ""
+        )
+        runtime.should_show_guidance_hint = lambda *_args, **_kwargs: False
+        runtime.find_active_worktree_owner = lambda *_args, **_kwargs: None
+        runtime.record_task_dispatch = lambda cell, dispatched, lane: (
+            setattr(cell, "current_task_id", dispatched.id),
+            setattr(dispatched, "agent_id", cell.id),
+            setattr(dispatched, "lane", lane),
+        )
+        runtime.reviewer_assignment_disclosure = lambda _task: ""
+        runtime.panel_event = (
+            lambda *args, **kwargs: panel_events.append((args, kwargs))
+        )
+
+        async def send_prompt(*_args, **_kwargs):
+            return None
+
+        runtime.send_agent_prompt = send_prompt
+        result = asyncio.run(self.dispatch_mod.handle_dispatch_task_command(
+            {"id": task.id, "agent_id": worker.id},
+            runtime,
+        ))
+
+        self.assertEqual(result["type"], "ok")
+        self.assertEqual(armed, [worker.id])
+        self.assertEqual(panel_events[-1][0][0], "task_dispatched")
+
     def test_invalid_provider_slug_model_prevents_all_worker_provisioning(self):
         """Resolver failure precedes cell, session, worktree, and prompt work."""
         server_agent = importlib.reload(

@@ -29,6 +29,7 @@ def task_has_action_binding(task) -> bool:
 
 @dataclass(slots=True)
 class TaskDispatchRuntime:
+    arm_worker_boot_doa_watchdog: Any
     agent_can_receive_dispatch: Any
     agent_dismissed_at: Any
     append_task_artifacts: Any
@@ -79,6 +80,7 @@ async def handle_dispatch_task_command(
     runtime: TaskDispatchRuntime,
 ) -> dict | None:
     _agent_can_receive_dispatch = runtime.agent_can_receive_dispatch
+    _arm_worker_boot_doa_watchdog = runtime.arm_worker_boot_doa_watchdog
     _agent_dismissed_at = runtime.agent_dismissed_at
     _append_task_artifacts = runtime.append_task_artifacts
     _apply_agent_class_launch_selection = runtime.apply_agent_class_launch_selection
@@ -813,6 +815,7 @@ async def handle_dispatch_task_command(
                     cell.name, cell.group,
                     task.task[:80],
                     task_id=task.id)
+                _arm_worker_boot_doa_watchdog(cell)
                 result = {
                     "type": "ok",
                     "task_id": tid,

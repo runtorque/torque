@@ -340,6 +340,7 @@ def backfill_codex_provider_usage_for_cell(
 
 
 def _resolve_rollout_for_cell(
+    state,
     cell,
     *,
     codex_home: str | Path | None,
@@ -358,6 +359,13 @@ def _resolve_rollout_for_cell(
     if not include_session_inference:
         return (None, "", "no_agent_session_id")
 
+    # Cwd matching is only a repair path for an established PTY session.  A
+    # newly-created cell temporarily advertises its launch directory before
+    # provisioning assigns a Torque session id; inferring during that window
+    # can adopt another cell's rollout from the shared directory.
+    if not str(getattr(cell, "session_id", "") or "").strip():
+        return (None, "", "no_torque_session_id_for_inference")
+
     workdirs = _path_candidates_for_cell(cell)
     if not workdirs:
         return (None, "", "no_agent_session_id")
@@ -368,6 +376,19 @@ def _resolve_rollout_for_cell(
     if located is None:
         return (None, "", "no_rollout")
     rollout_path, inferred_sid = located
+    for owner in getattr(state, "agents", {}).values():
+        if (
+            owner is cell
+            or getattr(owner, "id", None) == getattr(cell, "id", None)
+        ):
+            continue
+        if not str(getattr(owner, "session_id", "") or "").strip():
+            continue
+        if str(getattr(owner, "agent_session_id", "") or "").strip() != inferred_sid:
+            continue
+        if state.agent_is_tombstoned(owner):
+            continue
+        return (None, "", "provider_session_owned_by_live_cell")
     return (rollout_path, inferred_sid, None)
 
 
@@ -382,6 +403,7 @@ def _refresh_codex_provider_usage_for_cell(
     if not _is_codex_agent(cell):
         return "not_codex"
     rollout_path, agent_session_id, skip_reason = _resolve_rollout_for_cell(
+        state,
         cell,
         codex_home=codex_home,
         include_session_inference=include_session_inference,
