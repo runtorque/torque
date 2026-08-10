@@ -176,6 +176,18 @@ function _agentSettingsClassHtml() {
     + '</div></section>';
 }
 
+function _agentSettingsBehaviorOverlayHtml() {
+  if (!_agentSettingsContext || _agentSettingsContext.mode === 'create') return '';
+  var agent = state.agents && state.agents[_agentSettingsContext.agentId];
+  return '<section class="gs-settings-section" data-agent-settings-section="Dynamic Behavior overlay">'
+    + '<div class="gs-settings-section-title">Dynamic Behavior overlay</div>'
+    + '<div id="agent-settings-behavior-overlay" class="gs-settings-section-body">'
+    + (typeof _behaviorOverlayAgentSettingsPaneHtml === 'function'
+      ? _behaviorOverlayAgentSettingsPaneHtml(agent)
+      : '<div class="agent-panel-empty ui-state ui-state--error ui-state--compact" role="alert">Behavior overlay UI is unavailable.</div>')
+    + '</div></section>';
+}
+
 function _agentSettingsRender() {
   var body = document.getElementById('agent-settings-body');
   if (!body || !_agentSettingsContext) return;
@@ -192,6 +204,7 @@ function _agentSettingsRender() {
   });
   html += _agentSettingsSpecializationsHtml();
   html += _agentSettingsClassHtml();
+  html += _agentSettingsBehaviorOverlayHtml();
   html += '<p class="agent-settings-runtime-note">Launch fields affect this launch for a new agent and the next fresh launch or relaunch for an existing agent. Desired Agent Class follows the same launch boundary; authority for a running session remains frozen. Engineer specializations are included in a new Engineer’s first persistent prompt. Digest delivery takes effect immediately. Behavior and orchestration preferences are stored now but are not yet consumed by the current runtime.</p>';
   body.innerHTML = html;
   fields.forEach(function(field) {

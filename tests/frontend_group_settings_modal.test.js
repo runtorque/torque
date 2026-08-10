@@ -1351,7 +1351,7 @@ test('group settings uses Group/Workers split plus scoped Engineer and Architect
   assert.match(html, /data-subpane="worker-notifications"/);
   assert.doesNotMatch(html, /data-pane="agents"/);
   assert.doesNotMatch(html, /data-subtab="agent-terminals"/);
-  assert.doesNotMatch(modals, /renderBehaviorOverlayRolePane\(_settingsGroup/);
+  assert.match(modals, /renderGroupBehaviorRolePanes\(group\)/);
 
   assert.match(
     html,
@@ -1359,7 +1359,7 @@ test('group settings uses Group/Workers split plus scoped Engineer and Architect
   );
   assert.match(html, /data-subpane="engineer-general"/);
   assert.match(html, /data-subpane="engineer-behavior"/);
-  assert.doesNotMatch(html, /id="gs-engineer-role-behavior-overlay"/);
+  assert.match(html, /id="gs-engineer-role-behavior-overlay"/);
   assert.match(html, /data-subpane="engineer-system"/);
   assert.doesNotMatch(html, /<details[^>]+id="gs-engineer-[^\"]+-section"/);
 
@@ -1369,7 +1369,7 @@ test('group settings uses Group/Workers split plus scoped Engineer and Architect
   );
   assert.match(html, /data-subpane="architect-general"/);
   assert.match(html, /data-subpane="architect-behavior"/);
-  assert.doesNotMatch(html, /id="gs-architect-role-behavior-overlay"/);
+  assert.match(html, /id="gs-architect-role-behavior-overlay"/);
   assert.match(html, /data-subpane="architect-system"/);
   assert.doesNotMatch(html, /<details[^>]+id="gs-architect-[^\"]+-section"/);
 

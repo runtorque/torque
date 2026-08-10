@@ -661,10 +661,8 @@ function _deltaSurfaceInvalidations(ops, hints) {
       case 'behavior_overlay_active_update':
       case 'behavior_overlay_proposal_upsert':
       case 'behavior_overlay_proposal_resolve': {
-        if (typeof behaviorOverlayDeltaInvalidatesFocusedPanel === 'function'
-            && behaviorOverlayDeltaInvalidatesFocusedPanel(op)) {
-          _markSurface(flags, 'engineer');
-        }
+        // Overlay editors own isolated settings mounts. Never invalidate the
+        // Agent panel for overlay traffic.
         break;
       }
       case 'ui_update':

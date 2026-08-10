@@ -445,310 +445,6 @@ test('engineer panel specialization editor surfaces API error contract inline an
   assert.deepEqual(toastCalls, messages.map((message) => ({ message, type: 'error' })));
 });
 
-test('Behavior tab renders overlay editor, proposals, and version timeline', () => {
-  const { context, panel, sendCalls } = createHarness();
-  setFocusedAgent(context, {
-    id: 'eng-1',
-    name: 'Builder',
-    kind: 'engineer',
-    group: 'alpha',
-    cell_type: 'agent',
-  });
-  context.state.behavior_overlay_active = {
-    'eng-1': { agent_id: 'eng-1', active_version_id: 'bov-2' },
-  };
-  context.state.behavior_overlay_versions = {
-    'eng-1': [
-      { id: 'bov-2', agent_id: 'eng-1', version_number: 2, text_sha256: 'abcdef123456', text_bytes: 12, rationale: 'Current', created_at: 10 },
-      { id: 'bov-1', agent_id: 'eng-1', version_number: 1, text_sha256: '0000000000', text_bytes: 0, rationale: 'Seed', created_at: 1 },
-    ],
-  };
-  context.state.behavior_overlay_proposals = {
-    'bop-1': {
-      id: 'bop-1',
-      agent_id: 'eng-1',
-      status: 'proposed',
-      next_actor_kind: 'architect',
-      approval_route: 'architect',
-      proposed_text_sha256: 'feedface1234',
-      proposed_text_bytes: 18,
-      rationale: 'Improve cadence',
-    },
-  };
-  vm.runInContext(`_agentPanelLastSelectedTabByKind.engineer = 'behavior';`, context);
-
-  context.renderAgentPanel();
-
-  assert.match(panel.innerHTML, /Behavior overlays/);
-  assert.match(panel.innerHTML, /data-behavior-overlay-layer="inherited"/);
-  assert.match(panel.innerHTML, /Inherited role overlay/);
-  assert.match(panel.innerHTML, /group-wide · engineers/);
-  assert.match(panel.innerHTML, /read-only inherited/);
-  assert.match(panel.innerHTML, /data-behavior-overlay-layer="agent-specific"/);
-  assert.match(panel.innerHTML, /Agent-specific engineer overlay/);
-  assert.match(panel.innerHTML, /agent-specific · editable/);
-  assert.match(panel.innerHTML, /All engineers \(role\)/);
-  assert.match(panel.innerHTML, /Proposed behavior text/);
-  assert.match(panel.innerHTML, /Open proposals for this agent/);
-  assert.match(panel.innerHTML, /Improve cadence/);
-  assert.match(panel.innerHTML, /Version timeline/);
-  assert.match(panel.innerHTML, /Request rollback/);
-  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls)), [
-    { cmd: 'behavior_overlay_read', seed: true, scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer', role_kind: 'engineer' },
-    { cmd: 'behavior_overlay_versions', limit: 50, scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer', role_kind: 'engineer' },
-    { cmd: 'behavior_overlay_proposals', status_filter: '', limit: 200 },
-    { cmd: 'behavior_overlay_read', agent_id: 'eng-1', seed: true },
-    { cmd: 'behavior_overlay_versions', agent_id: 'eng-1', limit: 50 },
-  ]);
-});
-
-test('Behavior tab visually separates read-only inherited role text from agent-specific editor', () => {
-  const { context, panel } = createHarness();
-  setFocusedAgent(context, {
-    id: 'eng-1',
-    name: 'Builder',
-    kind: 'engineer',
-    group: 'alpha',
-    cell_type: 'agent',
-  });
-  vm.runInContext(`_agentPanelLastSelectedTabByKind.engineer = 'behavior';`, context);
-  context.behaviorOverlayReceiveMessage({
-    type: 'behavior_overlay',
-    scope_kind: 'role',
-    scope_group: 'alpha',
-    scope_key: 'engineer',
-    scope_id: 'role:alpha:engineer',
-    active: { scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer', active_version_id: 'bov-role' },
-    version: { id: 'bov-role', scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer', version_number: 3, text_sha256: 'rolehash', text_bytes: 20 },
-    text: 'shared role guidance',
-  });
-  context.behaviorOverlayReceiveMessage({
-    type: 'behavior_overlay',
-    agent_id: 'eng-1',
-    active: { agent_id: 'eng-1', active_version_id: 'bov-agent' },
-    version: { id: 'bov-agent', agent_id: 'eng-1', version_number: 2, text_sha256: 'agenthash', text_bytes: 19 },
-    text: 'agent-only guidance',
-  });
-
-  context.renderAgentPanel();
-
-  const inheritedStart = panel.innerHTML.indexOf('data-behavior-overlay-layer="inherited"');
-  const agentSpecificStart = panel.innerHTML.indexOf('data-behavior-overlay-layer="agent-specific"');
-  assert.notEqual(inheritedStart, -1);
-  assert.notEqual(agentSpecificStart, -1);
-  assert.ok(inheritedStart < agentSpecificStart);
-  assert.match(panel.innerHTML, /Current inherited role text/);
-  assert.match(panel.innerHTML, /shared role guidance/);
-  assert.match(panel.innerHTML, /Agent-specific engineer overlay/);
-  assert.match(panel.innerHTML, /agent-only guidance/);
-  assert.doesNotMatch(panel.innerHTML, /behaviorOverlaySubmitDraft\('role'/);
-  assert.ok(panel.innerHTML.includes("behaviorOverlaySubmitDraft('own','eng-1','eng-1','engineer',false)"));
-});
-
-test('Behavior timeline renders initial overlay version zero as v0', () => {
-  const { context, panel } = createHarness();
-  setFocusedAgent(context, {
-    id: 'eng-1',
-    name: 'Builder',
-    kind: 'engineer',
-    group: 'alpha',
-    cell_type: 'agent',
-  });
-  vm.runInContext(`_agentPanelLastSelectedTabByKind.engineer = 'behavior';`, context);
-  context.behaviorOverlayReceiveMessage({
-    type: 'behavior_overlay',
-    agent_id: 'eng-1',
-    active: { agent_id: 'eng-1', active_version_id: 'bov-0' },
-    version: { id: 'bov-0', agent_id: 'eng-1', version_number: 0, text_sha256: 'zero-hash', text_bytes: 0, rationale: 'Initial seed', created_at: 1 },
-    text: '',
-  });
-
-  context.renderAgentPanel();
-
-  assert.match(panel.innerHTML, /<span class="behavior-overlay-version-number">v0<\/span>/);
-  assert.match(panel.innerHTML, /<span class="detail-task-status">v0<\/span>/);
-  assert.doesNotMatch(panel.innerHTML, /<span class="behavior-overlay-version-number">v\?<\/span>/);
-});
-
-test('Behavior proposal response does not refetch proposals on focused rerender', () => {
-  const { context, panel, sendCalls } = createHarness();
-  setFocusedAgent(context, {
-    id: 'eng-1',
-    name: 'Builder',
-    kind: 'engineer',
-    group: 'alpha',
-    cell_type: 'agent',
-  });
-  context.state.behavior_overlay_active = {
-    'eng-1': { agent_id: 'eng-1', active_version_id: 'bov-1' },
-  };
-  context.state.behavior_overlay_versions = {
-    'eng-1': [
-      { id: 'bov-1', agent_id: 'eng-1', version_number: 1, text_sha256: 'aaaa', text_bytes: 4, rationale: 'Seed', created_at: 1 },
-    ],
-  };
-  vm.runInContext(`_agentPanelLastSelectedTabByKind.engineer = 'behavior';`, context);
-
-  context.renderAgentPanel();
-  assert.equal(sendCalls.filter((call) => call.cmd === 'behavior_overlay_proposals').length, 1);
-
-  context.behaviorOverlayReceiveMessage({
-    type: 'behavior_overlay_proposals',
-    proposals: [{
-      id: 'bop-loop',
-      agent_id: 'eng-1',
-      status: 'proposed',
-      next_actor_kind: 'architect',
-      proposed_text_sha256: 'bbbb',
-      proposed_text_bytes: 9,
-      rationale: 'No fetch loop',
-    }],
-  });
-
-  assert.equal(context.state.behavior_overlay_proposals['bop-loop'].rationale, 'No fetch loop');
-  assert.equal(sendCalls.filter((call) => call.cmd === 'behavior_overlay_proposals').length, 1);
-});
-
-test('Architect Behavior tab renders hired-engineer governance controls', () => {
-  const { context, panel } = createHarness();
-  context.state.group_settings = {
-    alpha: { engineer_behavior_requires_user_approval: true },
-  };
-  context.state.agents = {
-    'arch-1': { id: 'arch-1', name: 'Planner', kind: 'architect', group: 'alpha', cell_type: 'agent' },
-    'eng-1': { id: 'eng-1', name: 'Builder', kind: 'engineer', group: 'alpha', cell_type: 'agent', hired_by_architect_id: 'arch-1' },
-  };
-  context.focusedItemId = 'arch-1';
-  context.state.behavior_overlay_active = {
-    'arch-1': { agent_id: 'arch-1', active_version_id: 'bov-a' },
-    'eng-1': { agent_id: 'eng-1', active_version_id: 'bov-e' },
-  };
-  context.state.behavior_overlay_versions = {
-    'eng-1': [
-      { id: 'bov-e', agent_id: 'eng-1', version_number: 2, text_sha256: 'eeee', text_bytes: 5, rationale: 'Current', created_at: 2 },
-      { id: 'bov-old', agent_id: 'eng-1', version_number: 1, text_sha256: 'oooo', text_bytes: 3, rationale: 'Prior', created_at: 1 },
-    ],
-  };
-  context.state.behavior_overlay_proposals = {
-    'bop-2': {
-      id: 'bop-2',
-      agent_id: 'eng-1',
-      status: 'proposed',
-      next_actor_kind: 'architect',
-      approval_route: 'architect_then_user',
-      proposed_text_sha256: '0123456789abcdef',
-      proposed_text_bytes: 42,
-      rationale: 'Architect direct edit',
-    },
-  };
-  vm.runInContext(`
-    _agentPanelLastSelectedTabByKind.architect = 'behavior';
-    _behaviorOverlayInnerTabByAgent['arch-1'] = 'engineer';
-  `, context);
-
-  context.renderAgentPanel();
-
-  assert.match(panel.innerHTML, /data-agent-panel-behavior-view="engineer"/);
-  assert.match(panel.innerHTML, /All engineers \(role\)/);
-  assert.match(panel.innerHTML, /Hired engineer governance/);
-  assert.match(panel.innerHTML, /Builder/);
-  assert.match(panel.innerHTML, /architect → user approval required/);
-  assert.match(panel.innerHTML, /Direct edit hired engineer overlay/);
-  assert.match(panel.innerHTML, /Architect direct edit/);
-  assert.match(panel.innerHTML, /Approve/);
-  assert.match(panel.innerHTML, /Reject/);
-  assert.match(panel.innerHTML, /Request rollback/);
-});
-
-test('architect Engineer Behavior tab refreshes when proposal list response adds visible proposals', () => {
-  const { context, panel, sendCalls } = createHarness();
-  const roleKey = 'role:alpha:engineer';
-  context.state.group_settings = {
-    alpha: { engineer_behavior_requires_user_approval: true },
-  };
-  context.state.agents = {
-    'arch-1': { id: 'arch-1', name: 'Planner', kind: 'architect', group: 'alpha', cell_type: 'agent' },
-    'eng-1': { id: 'eng-1', name: 'Builder', kind: 'engineer', group: 'alpha', cell_type: 'agent', hired_by_architect_id: 'arch-1' },
-  };
-  context.focusedItemId = 'arch-1';
-  context.state.behavior_overlay_active = {
-    [roleKey]: { scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer', active_version_id: 'bov-role' },
-    'eng-1': { agent_id: 'eng-1', active_version_id: 'bov-eng' },
-  };
-  context.state.behavior_overlay_versions = {
-    [roleKey]: [
-      { id: 'bov-role', scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer', version_number: 1, text_sha256: 'rolehash', text_bytes: 9, rationale: 'Role seed', created_at: 1 },
-    ],
-    'eng-1': [
-      { id: 'bov-eng', agent_id: 'eng-1', version_number: 1, text_sha256: 'enghash', text_bytes: 8, rationale: 'Engineer seed', created_at: 1 },
-    ],
-  };
-  vm.runInContext(`
-    _agentPanelLastSelectedTabByKind.architect = 'behavior';
-    _behaviorOverlayInnerTabByAgent['arch-1'] = 'engineer';
-    _behaviorOverlayReadByAgent['role:alpha:engineer'] = {
-      active: state.behavior_overlay_active['role:alpha:engineer'],
-      version: state.behavior_overlay_versions['role:alpha:engineer'][0],
-      text: 'role text',
-      received_at: Date.now(),
-    };
-    _behaviorOverlayReadByAgent['eng-1'] = {
-      active: state.behavior_overlay_active['eng-1'],
-      version: state.behavior_overlay_versions['eng-1'][0],
-      text: 'engineer text',
-      received_at: Date.now(),
-    };
-    _behaviorOverlayVersionsByAgent['role:alpha:engineer'] = state.behavior_overlay_versions['role:alpha:engineer'].slice();
-    _behaviorOverlayVersionsByAgent['eng-1'] = state.behavior_overlay_versions['eng-1'].slice();
-  `, context);
-
-  context.renderAgentPanel();
-
-  assert.match(panel.innerHTML, /data-agent-panel-behavior-view="engineer"/);
-  assert.match(panel.innerHTML, /All engineers \(role\)/);
-  assert.match(panel.innerHTML, /Hired engineer governance/);
-  assert.doesNotMatch(panel.innerHTML, /Late proposal/);
-  assert.equal(sendCalls.filter((call) => call.cmd === 'behavior_overlay_proposals').length, 1);
-
-  context.behaviorOverlayReceiveMessage({
-    type: 'behavior_overlay_proposals',
-    proposals: [{
-      id: 'bop-late',
-      agent_id: 'eng-1',
-      target_kind: 'engineer',
-      status: 'proposed',
-      next_actor_kind: 'architect',
-      approval_route: 'architect',
-      proposed_text_sha256: 'latehash',
-      proposed_text_bytes: 18,
-      rationale: 'Late proposal',
-    }],
-  });
-
-  assert.match(panel.innerHTML, /Late proposal/);
-  assert.equal(sendCalls.filter((call) => call.cmd === 'behavior_overlay_proposals').length, 1);
-
-  context.behaviorOverlayReceiveMessage({
-    type: 'behavior_overlay_proposals',
-    proposals: [{
-      id: 'bop-role-late',
-      scope_kind: 'role',
-      scope_group: 'alpha',
-      scope_key: 'engineer',
-      role_kind: 'engineer',
-      status: 'proposed',
-      next_actor_kind: 'user',
-      approval_route: 'user',
-      proposed_text_sha256: 'rolelatehash',
-      proposed_text_bytes: 20,
-      rationale: 'Late role proposal',
-    }],
-  });
-
-  assert.match(panel.innerHTML, /Late role proposal/);
-  assert.equal(sendCalls.filter((call) => call.cmd === 'behavior_overlay_proposals').length, 1);
-});
-
 test('active behavior deltas invalidate cached full text before submit', () => {
   const { context, sendCalls } = createHarness();
   context.state.agents = {
@@ -949,73 +645,6 @@ test('role behavior overlay renderer still supports engineer, architect, and wor
   assert.ok(roleReadCalls.some((call) => call.scope_kind === 'role' && call.role_kind === 'worker' && call.scope_group === 'alpha'));
 });
 
-test('role behavior deltas invalidate only matching focused behavior scopes', () => {
-  const { context } = createHarness();
-  context.state.agents = {
-    'eng-1': { id: 'eng-1', name: 'Builder', kind: 'engineer', group: 'alpha', cell_type: 'agent' },
-    'arch-1': { id: 'arch-1', name: 'Planner', kind: 'architect', group: 'alpha', cell_type: 'agent' },
-    'worker-1': { id: 'worker-1', name: 'Worker', kind: 'worker', group: 'alpha', cell_type: 'agent' },
-  };
-  context.focusedItemId = 'eng-1';
-  vm.runInContext(`_agentPanelLastSelectedTabByKind.engineer = 'behavior';`, context);
-
-  assert.equal(context.behaviorOverlayDeltaInvalidatesFocusedPanel({
-    op: 'behavior_overlay_active_update',
-    scope_kind: 'role',
-    scope_group: 'alpha',
-    scope_key: 'engineer',
-    active_version_id: 'bov-new',
-  }), true);
-  assert.equal(context.behaviorOverlayDeltaInvalidatesFocusedPanel({
-    op: 'behavior_overlay_active_update',
-    scope_kind: 'role',
-    scope_group: 'alpha',
-    scope_key: 'architect',
-    active_version_id: 'bov-arch',
-  }), false);
-  assert.equal(context.behaviorOverlayDeltaInvalidatesFocusedPanel({
-    op: 'behavior_overlay_active_update',
-    scope_kind: 'role',
-    scope_group: 'beta',
-    scope_key: 'engineer',
-    active_version_id: 'bov-beta',
-  }), false);
-
-  context.focusedItemId = 'arch-1';
-  vm.runInContext(`_agentPanelLastSelectedTabByKind.architect = 'behavior';`, context);
-  assert.equal(context.behaviorOverlayDeltaInvalidatesFocusedPanel({
-    op: 'behavior_overlay_active_update',
-    scope_kind: 'role',
-    scope_group: 'alpha',
-    scope_key: 'engineer',
-    active_version_id: 'bov-engineer',
-  }), false, 'architect default Architect subtab should not refresh for engineer role scope');
-  vm.runInContext(`_behaviorOverlayInnerTabByAgent['arch-1'] = 'engineer';`, context);
-  assert.equal(context.behaviorOverlayDeltaInvalidatesFocusedPanel({
-    op: 'behavior_overlay_active_update',
-    scope_kind: 'role',
-    scope_group: 'alpha',
-    scope_key: 'engineer',
-    active_version_id: 'bov-engineer',
-  }), true, 'architect Engineer subtab displays the engineer role scope');
-  assert.equal(context.behaviorOverlayDeltaInvalidatesFocusedPanel({
-    op: 'behavior_overlay_active_update',
-    scope_kind: 'role',
-    scope_group: 'alpha',
-    scope_key: 'architect',
-    active_version_id: 'bov-architect',
-  }), false, 'architect Engineer subtab should not refresh for architect role scope');
-
-  context.focusedItemId = 'worker-1';
-  assert.equal(context.behaviorOverlayDeltaInvalidatesFocusedPanel({
-    op: 'behavior_overlay_active_update',
-    scope_kind: 'role',
-    scope_group: 'alpha',
-    scope_key: 'worker',
-    active_version_id: 'bov-worker',
-  }), false, 'workers have no per-worker Behavior tab');
-});
-
 test('role active deltas invalidate cached full text before submit', () => {
   const { context, sendCalls } = createHarness();
   const roleKey = 'role:alpha:engineer';
@@ -1081,58 +710,6 @@ test('role active deltas invalidate cached full text before submit', () => {
   assert.equal(proposal.role_kind, 'engineer');
 });
 
-test('focused Behavior role view refetches instead of showing stale role text after active delta', () => {
-  const { context, panel, sendCalls } = createHarness();
-  const roleKey = 'role:alpha:engineer';
-  setFocusedAgent(context, {
-    id: 'eng-1',
-    name: 'Builder',
-    kind: 'engineer',
-    group: 'alpha',
-    cell_type: 'agent',
-  });
-  vm.runInContext(`_agentPanelLastSelectedTabByKind.engineer = 'behavior';`, context);
-  context.behaviorOverlayReceiveMessage({
-    type: 'behavior_overlay',
-    scope_kind: 'role',
-    scope_group: 'alpha',
-    scope_key: 'engineer',
-    scope_id: roleKey,
-    active: { scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer', active_version_id: 'bov-r1' },
-    version: { id: 'bov-r1', scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer', version_number: 1, text_sha256: 'oldhash', text_bytes: 15 },
-    text: 'stale role text',
-  });
-
-  context.renderAgentPanel();
-  assert.match(panel.innerHTML, /stale role text/);
-
-  context.behaviorOverlayApplyDelta({
-    op: 'behavior_overlay_version_append',
-    id: 'bov-r2',
-    scope_kind: 'role',
-    scope_group: 'alpha',
-    scope_key: 'engineer',
-    version_number: 2,
-    text_sha256: 'newhash',
-    text_bytes: 13,
-  });
-  context.behaviorOverlayApplyDelta({
-    op: 'behavior_overlay_active_update',
-    scope_kind: 'role',
-    scope_group: 'alpha',
-    scope_key: 'engineer',
-    active_version_id: 'bov-r2',
-  });
-  context.renderAgentPanel();
-
-  assert.doesNotMatch(panel.innerHTML, /stale role text/);
-  assert.match(panel.innerHTML, /Refreshing inherited role overlay text/);
-  assert.ok(sendCalls.some((call) => call.cmd === 'behavior_overlay_read'
-    && call.scope_kind === 'role'
-    && call.scope_group === 'alpha'
-    && call.scope_key === 'engineer'));
-});
-
 test('role pane rerender routes through capture and restore', () => {
   const { context, captureCalls, restoreCalls } = createHarness();
   const elements = {};
@@ -1147,6 +724,7 @@ test('role pane rerender routes through capture and restore', () => {
         scrollTop: 0,
         scrollLeft: 0,
         focused: false,
+        classList: { contains(name) { return id === 'modal-group-settings' && name === 'visible'; } },
         contains(el) { return el && (el === this || el._insideRolePane); },
         querySelector() { return null; },
         focus() { this.focused = true; },
@@ -1204,6 +782,125 @@ test('role pane rerender routes through capture and restore', () => {
   assert.equal(textarea.value, 'operator draft');
   assert.equal(textarea.selectionStart, 4);
   assert.equal(textarea.selectionEnd, 12);
+});
+
+test('relocated Agent Settings timeline renders initial overlay version zero as v0', () => {
+  const { context } = createHarness();
+  const agent = {
+    id: 'eng-1', name: 'Builder', kind: 'engineer', group: 'alpha', cell_type: 'agent',
+  };
+  context.state.agents = { 'eng-1': agent };
+  context.behaviorOverlayReceiveMessage({
+    type: 'behavior_overlay',
+    agent_id: 'eng-1',
+    active: { agent_id: 'eng-1', active_version_id: 'bov-0' },
+    version: {
+      id: 'bov-0', agent_id: 'eng-1', version_number: 0,
+      text_sha256: 'zero-hash', text_bytes: 0,
+      rationale: 'Initial seed', created_at: 1,
+    },
+    text: '',
+  });
+
+  const html = context._behaviorOverlayAgentSettingsPaneHtml(agent);
+  assert.match(html, /<span class="behavior-overlay-version-number">v0<\/span>/);
+  assert.match(html, /<span class="detail-task-status">v0<\/span>/);
+  assert.doesNotMatch(html, /<span class="behavior-overlay-version-number">v\?<\/span>/);
+});
+
+test('Agent Settings proposal response refreshes the matching mount without a proposal fetch loop', () => {
+  const { context, sendCalls } = createHarness();
+  const agent = {
+    id: 'eng-1', name: 'Builder', kind: 'engineer', group: 'alpha', cell_type: 'agent',
+  };
+  const mount = { innerHTML: '', querySelector() { return null; } };
+  const panel = context.document.getElementById('panel-agent');
+  context.document.getElementById = function(id) {
+    if (id === 'panel-agent') return panel;
+    if (id === 'agent-settings-behavior-overlay') return mount;
+    return null;
+  };
+  context.state.agents = { 'eng-1': agent };
+  context.behaviorOverlayReceiveMessage({
+    type: 'behavior_overlay',
+    agent_id: 'eng-1',
+    active: { agent_id: 'eng-1', active_version_id: 'bov-1' },
+    version: {
+      id: 'bov-1', agent_id: 'eng-1', version_number: 1,
+      text_sha256: 'one-hash', text_bytes: 4,
+    },
+    text: 'seed',
+  });
+  vm.runInContext(`_agentSettingsContext = { mode: 'edit', agentId: 'eng-1' };`, context);
+  context.renderBehaviorOverlayAgentSettingsPane(agent);
+  assert.equal(sendCalls.filter((call) => call.cmd === 'behavior_overlay_proposals').length, 1);
+  assert.doesNotMatch(mount.innerHTML, /Late proposal/);
+
+  context.behaviorOverlayReceiveMessage({
+    type: 'behavior_overlay_proposals',
+    proposals: [{
+      id: 'bop-late', agent_id: 'eng-1', status: 'proposed',
+      next_actor_kind: 'architect', approval_route: 'architect',
+      proposed_text_sha256: 'late-hash', proposed_text_bytes: 18,
+      rationale: 'Late proposal',
+    }],
+  });
+
+  assert.match(mount.innerHTML, /Late proposal/);
+  assert.match(mount.innerHTML, /View diff/);
+  assert.equal(sendCalls.filter((call) => call.cmd === 'behavior_overlay_proposals').length, 1,
+    'proposal-list rerender must reuse the loaded response rather than refetching');
+});
+
+test('open matching role mount hides stale text and refetches after an active-version delta', () => {
+  const { context, sendCalls } = createHarness();
+  const roleKey = 'role:alpha:engineer';
+  const roleMount = { innerHTML: '', querySelector() { return null; } };
+  const modal = {
+    classList: { contains(name) { return name === 'visible'; } },
+  };
+  const panel = context.document.getElementById('panel-agent');
+  context.document.getElementById = function(id) {
+    if (id === 'panel-agent') return panel;
+    if (id === 'modal-group-settings') return modal;
+    if (id === 'gs-engineer-role-behavior-overlay') return roleMount;
+    return null;
+  };
+  vm.runInContext(`_settingsGroup = 'alpha';`, context);
+  context.behaviorOverlayReceiveMessage({
+    type: 'behavior_overlay',
+    scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer',
+    scope_id: roleKey,
+    active: {
+      scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer',
+      active_version_id: 'bov-r1',
+    },
+    version: {
+      id: 'bov-r1', scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer',
+      version_number: 1, text_sha256: 'old-hash', text_bytes: 15,
+    },
+    text: 'stale role text',
+  });
+  assert.match(roleMount.innerHTML, /stale role text/);
+
+  context.behaviorOverlayApplyDelta({
+    op: 'behavior_overlay_version_append',
+    id: 'bov-r2', scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer',
+    version_number: 2, text_sha256: 'new-hash', text_bytes: 13,
+  });
+  context.behaviorOverlayApplyDelta({
+    op: 'behavior_overlay_active_update',
+    scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer',
+    active_version_id: 'bov-r2', updated_at: 2,
+  });
+
+  assert.doesNotMatch(roleMount.innerHTML, /stale role text/);
+  assert.match(roleMount.innerHTML, /Refreshing current full overlay text/);
+  assert.ok(sendCalls.some((call) => call.cmd === 'behavior_overlay_read'
+    && call.scope_kind === 'role'
+    && call.scope_group === 'alpha'
+    && call.scope_key === 'engineer'),
+  'the visible matching role mount requests fresh full text');
 });
 
 test('role-scope behavior approval modal renders diff before enabling user actions', () => {
@@ -1312,8 +1009,8 @@ test('role-scope behavior approval modal renders diff before enabling user actio
 test('agent panel folds MCP into Events subtabs for standalone and toolbelt modes', () => {
   const { context, panel } = createHarness();
   const expectedSpecs = {
-    architect: ['decisions', 'behavior', 'journal', 'messages', 'events'],
-    engineer: ['journal', 'behavior', 'events', 'queued', 'worklog'],
+    architect: ['decisions', 'journal', 'messages', 'events'],
+    engineer: ['journal', 'events', 'queued', 'worklog'],
     worker: ['events', 'messages', 'worklog'],
   };
   const agents = {
@@ -3745,10 +3442,10 @@ test('agent class manager assigns Product Manager as desired and renders effecti
     effective_agent_class_snapshot: defaultArchitectClass,
   });
 
-  context._agentPanelLastSelectedTabByKind.architect = 'behavior';
+  context._agentPanelLastSelectedTabByKind.architect = 'journal';
   context.renderAgentPanel();
   assert.doesNotMatch(panel.innerHTML, /Agent Class|Change Class/,
-    'Agent Class ownership moved from Behavior into per-agent Settings');
+    'Agent Class ownership remains in per-agent Settings');
   assert.equal(sendCalls.some((call) => /^agent_class_/.test(call.cmd || '')), false);
   context.agentPanelToggleClassAssignment(null, 'blueprint');
   assert.equal(classModal.classList.contains('visible'), true);
@@ -3883,7 +3580,7 @@ test('agent panel renders Product Manager dogfood state as compact capability AC
     effective_agent_class_snapshot: productManagerClass,
   });
 
-  context._agentPanelLastSelectedTabByKind.architect = 'behavior';
+  context._agentPanelLastSelectedTabByKind.architect = 'journal';
   context.renderAgentPanel();
 
   assert.match(panel.innerHTML, /Product Manager · Group: alpha/);
@@ -3960,7 +3657,7 @@ test('agent panel assigns and renders Creative as proposal-only Thinking class',
     effective_agent_class_snapshot: defaultArchitectClass,
   });
 
-  context._agentPanelLastSelectedTabByKind.architect = 'behavior';
+  context._agentPanelLastSelectedTabByKind.architect = 'journal';
   context.renderAgentPanel();
   context.agentPanelToggleClassAssignment(null, 'spark');
   assert.equal(classModal.classList.contains('visible'), true);
@@ -4026,7 +3723,7 @@ test('agent panel assigns and renders Creative as proposal-only Thinking class',
   assert.doesNotMatch(panel.innerHTML, /class-policy-creative-architect|External connectors|raw atom|compiler/i);
 });
 
-test('agent panel no longer injects Agent Class on Behavior while audited assignment modal remains callable', () => {
+test('agent panel keeps Agent Class out while audited assignment modal remains callable', () => {
   const { context, panel, classModal } = createHarness();
   const productManagerClass = {
     id: 'product-manager',
@@ -4057,7 +3754,7 @@ test('agent panel no longer injects Agent Class on Behavior while audited assign
   assert.doesNotMatch(panel.innerHTML, /data-agent-class-manager=/);
   assert.doesNotMatch(panel.innerHTML, /Change Class/);
 
-  context._agentPanelLastSelectedTabByKind.architect = 'behavior';
+  context._agentPanelLastSelectedTabByKind.architect = 'journal';
   context.renderAgentPanel();
   assert.doesNotMatch(panel.innerHTML, /data-agent-class-manager=/);
   assert.doesNotMatch(panel.innerHTML, /Change Class/);
@@ -4073,53 +3770,10 @@ test('agent panel no longer injects Agent Class on Behavior while audited assign
   assert.doesNotMatch(panel.innerHTML, /Change Class/);
 });
 
-test('agent panel in-place Behavior tab render keeps Agent Class out of every tab', () => {
-  const { context, panel } = createHarness();
-  const { content, shell } = installReusableAgentPanelDom(
-    panel, 'blueprint', 'architect', ['decisions', 'behavior', 'messages'], 'decisions'
-  );
-  const productManagerClass = {
-    id: 'product-manager',
-    version: '2',
-    base_kind: 'architect',
-    display_name: 'Product Manager',
-    primary_identity_label: 'Product Manager',
-    secondary_base_kind_label: 'Architect-derived',
-    lifecycle: 'stable',
-    status: 'restricted',
-    launchable: true,
-    builtin: true,
-  };
-  setFocusedAgent(context, {
-    id: 'blueprint',
-    name: 'Blueprint',
-    kind: 'architect',
-    group: 'alpha',
-    cell_type: 'agent',
-    status: 'running',
-    directory: '/repo',
-    effective_agent_class_id: 'product-manager',
-    effective_agent_class_version: '2',
-    effective_agent_class_snapshot: productManagerClass,
-    mcp_messages: [],
-  });
-
-  context._agentPanelLastSelectedTabByKind.architect = 'decisions';
-  context.agentPanelSelectTab('behavior');
-  assert.equal(shell.dataset.agentPanelTab, 'behavior');
-  assert.doesNotMatch(content.innerHTML, /data-agent-class-manager=/);
-  assert.doesNotMatch(content.innerHTML, /Change Class/);
-
-  context.agentPanelSelectTab('messages');
-  assert.equal(shell.dataset.agentPanelTab, 'messages');
-  assert.doesNotMatch(content.innerHTML, /data-agent-class-manager=/);
-  assert.doesNotMatch(content.innerHTML, /Change Class/);
-});
-
 test('reused Agent tabs retain exactly one active class after a switch and delta refresh', () => {
   const { context, panel } = createHarness();
   const { tabButtons } = installReusableAgentPanelDom(
-    panel, 'blueprint', 'architect', ['decisions', 'behavior', 'journal'], 'decisions'
+    panel, 'blueprint', 'architect', ['decisions', 'journal', 'messages'], 'decisions'
   );
   setFocusedAgent(context, {
     id: 'blueprint',
@@ -4130,20 +3784,20 @@ test('reused Agent tabs retain exactly one active class after a switch and delta
     mcp_messages: [],
   });
 
-  context.agentPanelSelectTab('behavior');
+  context.agentPanelSelectTab('journal');
   context._agentPanelRefreshCurrentTab();
 
   assert.deepEqual(
     tabButtons.filter((button) => button.classList.contains('active'))
       .map((button) => button.dataset.agentPanelTabKey),
-    ['behavior'],
+    ['journal'],
   );
 });
 
 test('reused Agent tab indicator matches the tab body after a delta refresh', () => {
   const { context, panel } = createHarness();
   const { content, shell, tabButtons } = installReusableAgentPanelDom(
-    panel, 'blueprint', 'architect', ['decisions', 'behavior', 'journal'], 'decisions'
+    panel, 'blueprint', 'architect', ['decisions', 'journal', 'messages'], 'decisions'
   );
   const productManagerClass = {
     id: 'product-manager',
@@ -4169,22 +3823,22 @@ test('reused Agent tab indicator matches the tab body after a delta refresh', ()
     mcp_messages: [],
   });
 
-  context.agentPanelSelectTab('behavior');
+  context.agentPanelSelectTab('journal');
   context._agentPanelRefreshCurrentTab();
 
   const selectedIndicators = tabButtons
     .filter((button) => button.getAttribute('aria-selected') === 'true')
     .map((button) => button.dataset.agentPanelTabKey);
-  assert.deepEqual(selectedIndicators, ['behavior']);
+  assert.deepEqual(selectedIndicators, ['journal']);
   assert.deepEqual(
     tabButtons
       .filter((button) => button.classList.contains('active')
         || button.getAttribute('aria-selected') === 'true')
       .map((button) => button.dataset.agentPanelTabKey),
-    ['behavior'],
+    ['journal'],
     'the shared tab CSS must have exactly one active selector after the reused-DOM refresh',
   );
-  assert.equal(shell.dataset.agentPanelTab, 'behavior');
+  assert.equal(shell.dataset.agentPanelTab, 'journal');
   assert.doesNotMatch(content.innerHTML, /data-agent-class-manager=/);
   assert.doesNotMatch(content.innerHTML, /Change Class/);
 });
@@ -4229,10 +3883,10 @@ test('agent class manager assignment errors remain routed to active panel operat
     effective_agent_class_snapshot: defaultArchitectClass,
   });
 
-  context._agentPanelLastSelectedTabByKind.architect = 'behavior';
+  context._agentPanelLastSelectedTabByKind.architect = 'journal';
   context.renderAgentPanel();
   assert.doesNotMatch(panel.innerHTML, /Agent Class|Change Class/,
-    'Agent Class ownership moved from Behavior into per-agent Settings');
+    'Agent Class ownership remains in per-agent Settings');
   assert.equal(sendCalls.some((call) => /^agent_class_/.test(call.cmd || '')), false);
   context.agentPanelToggleClassAssignment(null, 'blueprint');
   assert.equal(classModal.classList.contains('visible'), true);
