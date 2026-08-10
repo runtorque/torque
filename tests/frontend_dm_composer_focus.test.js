@@ -101,14 +101,33 @@ function buildHarness() {
       sandbox._activateEmbeddedTerminalSurface = function() {};
       sandbox._directMessagesRenderCalls = 0;
       sandbox._composerRenderCalls = 0;
+      const composerIdentity = {};
+      const directMessagesIdentity = {};
+      const liveState = {
+        composerIdentity,
+        composerFocus: true,
+        composerDraft: 'draft under streamed output',
+        composerCaret: [7, 15],
+        directMessagesIdentity,
+        directMessagesScrollTop: 240,
+        directMessagesPinnedToTail: false,
+      };
       sandbox._renderTerminalDirectMessages = function() {
         sandbox._directMessagesRenderCalls += 1;
+        liveState.directMessagesIdentity = {};
+        liveState.directMessagesScrollTop = 0;
+        liveState.directMessagesPinnedToTail = true;
       };
       sandbox._renderTerminalCompose = function() {
         sandbox._composerRenderCalls += 1;
+        liveState.composerIdentity = {};
+        liveState.composerFocus = false;
+        liveState.composerDraft = '';
+        liveState.composerCaret = [0, 0];
       };
       sandbox._terminalStatusLabel = function() { return 'working'; };
       sandbox._restoreTerminalWorkspaceState = function() {};
+      sandbox._restoreTerminalWorkspaceTerminalState = function() {};
       sandbox._renderCycleComponent = component || '';
       vm.runInContext(
         '_renderCycleComponent'
@@ -119,6 +138,9 @@ function buildHarness() {
       return {
         directMessages: sandbox._directMessagesRenderCalls,
         composer: sandbox._composerRenderCalls,
+        liveState,
+        composerIdentity,
+        directMessagesIdentity,
       };
     },
   };
@@ -140,6 +162,10 @@ test('DM-driven render does not enter the composer render cycle', () => {
   assert.equal(calls.directMessages, 1, 'the direct-message list is refreshed');
   assert.equal(calls.composer, 0,
     'new messages must preserve the composer DOM, focus, caret, draft, and selection');
+  assert.equal(calls.liveState.composerIdentity, calls.composerIdentity);
+  assert.equal(calls.liveState.composerFocus, true);
+  assert.equal(calls.liveState.composerDraft, 'draft under streamed output');
+  assert.deepEqual(calls.liveState.composerCaret, [7, 15]);
 });
 
 test('terminal-driven render does not enter the direct-message render cycle', () => {
@@ -150,6 +176,13 @@ test('terminal-driven render does not enter the direct-message render cycle', ()
     'streaming terminal output must preserve the DM list DOM and viewport state');
   assert.equal(calls.composer, 0,
     'streaming terminal output must preserve the composer DOM and live editing state');
+  assert.equal(calls.liveState.directMessagesIdentity, calls.directMessagesIdentity);
+  assert.equal(calls.liveState.directMessagesScrollTop, 240);
+  assert.equal(calls.liveState.directMessagesPinnedToTail, false);
+  assert.equal(calls.liveState.composerIdentity, calls.composerIdentity);
+  assert.equal(calls.liveState.composerFocus, true);
+  assert.equal(calls.liveState.composerDraft, 'draft under streamed output');
+  assert.deepEqual(calls.liveState.composerCaret, [7, 15]);
 });
 
 test('a falsy desktop active element cannot license a queued first-mount focus steal', () => {

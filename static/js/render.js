@@ -985,7 +985,13 @@ function renderInvalidatedSurfaces(flags) {
   // clobber the shared PTY). Drop the main/terminal/focus flags but keep the
   // panel-surface dispatch below so the visible panel updates from deltas.
   if (typeof _detachedWindowActive === 'function' && _detachedWindowActive()) {
-    flags = Object.assign({}, flags, { main: false, terminal: false, focus: false });
+    flags = Object.assign({}, flags, {
+      main: false,
+      terminal: false,
+      directMessages: false,
+      composer: false,
+      focus: false,
+    });
   }
   // TORQUE:236 v10: when the main flag fires, skip render()'s trailing
   // agent-panel refresh — the surfaces loop below already dispatches
@@ -997,10 +1003,22 @@ function renderInvalidatedSurfaces(flags) {
     render({
       skipPanelRefresh: true,
       skipFocusRefresh: !flags.focus,
-      skipTerminalRefresh: !flags.terminal,
+      // Terminal and DM deltas have independent component render cycles below.
+      // Do not let the grid renderer turn either one back into a full workspace
+      // render as a side effect of flags.main.
+      skipTerminalRefresh: true,
     });
   } else if (flags.focus && typeof renderAgentFocusPanel === 'function') {
     renderAgentFocusPanel();
+  }
+  if (flags.terminal && typeof renderTerminalWorkspace === 'function') {
+    renderTerminalWorkspace({ component: 'terminal' });
+  }
+  if (flags.directMessages && typeof renderTerminalWorkspace === 'function') {
+    renderTerminalWorkspace({ component: 'direct-messages' });
+  }
+  if (flags.composer && typeof renderTerminalWorkspace === 'function') {
+    renderTerminalWorkspace({ component: 'composer' });
   }
   const surfaces = _currentPanelSurfaces();
   for (let i = 0; i < surfaces.length; i++) {

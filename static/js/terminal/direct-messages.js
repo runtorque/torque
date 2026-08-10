@@ -1036,13 +1036,13 @@ function terminalDirectMessageReply(evt, agentId, messageId) {
   if (!aid || !mid) return false;
   const root = document.getElementById ? document.getElementById('terminal-workspace') : null;
   const cell = _resolveTerminalWorkspaceCell();
-  const snapshot = _captureTerminalDirectMessageInteractionState(root, cell);
   _terminalDirectMessageSelectedByAgent[aid] = mid;
   _terminalDirectMessageReplyToByAgent[aid] = mid;
+  const slot = root && root.querySelector ? root.querySelector('.terminal-direct-messages-slot') : null;
+  if (slot) _renderTerminalDirectMessages(slot, cell);
   if (typeof renderTerminalWorkspace === 'function') {
-    renderTerminalWorkspace({ suppressTerminalFocus: true });
+    renderTerminalWorkspace({ component: 'composer', suppressTerminalFocus: true });
   }
-  if (root) _restoreTerminalWorkspaceState(root, snapshot, cell);
   const input = root && root.querySelector ? root.querySelector('.terminal-compose-input') : null;
   if (input && typeof input.focus === 'function') input.focus();
   return false;
@@ -1053,6 +1053,8 @@ function terminalDirectMessageCancelReply(evt, agentId) {
   if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
   const aid = String(agentId || '').trim();
   if (aid) delete _terminalDirectMessageReplyToByAgent[aid];
-  if (typeof renderTerminalWorkspace === 'function') renderTerminalWorkspace();
+  if (typeof renderTerminalWorkspace === 'function') {
+    renderTerminalWorkspace({ component: 'composer' });
+  }
   return false;
 }

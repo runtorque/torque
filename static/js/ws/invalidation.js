@@ -557,7 +557,7 @@ function _deltaSurfaceInvalidations(ops, hints) {
         if (op.op !== 'peer_message_upsert') {
           const _terminalViewedAgentId = _terminalWorkspaceViewedAgentIdBeforeDelta();
           if (_terminalViewedAgentId && _pmIds.indexOf(_terminalViewedAgentId) >= 0) {
-            _markSurface(flags, 'main', 'terminal');
+            _markSurface(flags, 'main', 'directMessages');
           }
         }
         if (_pmFocused && _pmIds.indexOf(String(_pmFocused.id || '')) >= 0) {
@@ -569,7 +569,7 @@ function _deltaSurfaceInvalidations(ops, hints) {
         const _loopAgentId = String((op.loop && op.loop.agent_id) || op.agent_id || '');
         const _terminalViewedAgentId = _terminalWorkspaceViewedAgentIdBeforeDelta();
         if (_terminalViewedAgentId && _loopAgentId === _terminalViewedAgentId) {
-          _markSurface(flags, 'main', 'terminal');
+          _markSurface(flags, 'main', 'directMessages');
         }
         break;
       }
@@ -1393,10 +1393,10 @@ function _applyUiSurfaceInvalidation(flags, key) {
     _markSurface(flags, 'main', 'board', 'chat', 'actions', 'context', 'events', 'engineer', 'templates', 'history', 'initiatives', 'thinking');
   }
   if (key === 'terminal_direct_messages_height') {
-    _markSurface(flags, 'main', 'terminal');
+    _markSurface(flags, 'main', 'directMessages');
   }
   if (key === 'terminal_compose_height') {
-    _markSurface(flags, 'main', 'terminal');
+    _markSurface(flags, 'main', 'composer');
   }
   if (key === 'context_panel_split_ratio') {
     _markSurface(flags, 'context');

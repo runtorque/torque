@@ -19031,8 +19031,12 @@ test('focus_update terminal invalidation refreshes terminal workspace and update
     selectedTerminalId = 'agent-1';
     focusedItemId = 'agent-1';
     var __terminalRenderOpts = [];
+    var __terminalComponentOpts = [];
     var __terminalRefreshCalls = 0;
-    renderTerminalWorkspace = function() { __terminalRefreshCalls += 1; };
+    renderTerminalWorkspace = function(opts) {
+      __terminalRefreshCalls += 1;
+      __terminalComponentOpts.push(Object.assign({}, opts || {}));
+    };
     render = function(opts) {
       renderCalls.main++;
       __terminalRenderOpts.push(Object.assign({}, opts || {}));
@@ -19049,7 +19053,9 @@ test('focus_update terminal invalidation refreshes terminal workspace and update
   assert.equal(jsonValue(context, `selectedTerminalId`), 'agent-2');
   assert.equal(runInContext(context, `__terminalRefreshCalls`), 1,
     'focus_update must refresh terminal workspace');
-  assert.equal(jsonValue(context, `__terminalRenderOpts[0].skipTerminalRefresh`), false);
+  assert.equal(jsonValue(context, `__terminalRenderOpts[0].skipTerminalRefresh`), true,
+    'the grid render does not own the terminal component refresh');
+  assert.equal(jsonValue(context, `__terminalComponentOpts[0].component`), 'terminal');
   assert.equal(sandbox.renderCalls.context, 0,
     'context panel is not visible in this harness, but main render still handled terminal refresh');
 });
@@ -19070,8 +19076,12 @@ test('selected viewed agent upsert refreshes terminal workspace for status and p
     selectedTerminalId = 'agent-1';
     focusedItemId = 'agent-1';
     var __terminalRenderOpts = [];
+    var __terminalComponentOpts = [];
     var __terminalRefreshCalls = 0;
-    renderTerminalWorkspace = function() { __terminalRefreshCalls += 1; };
+    renderTerminalWorkspace = function(opts) {
+      __terminalRefreshCalls += 1;
+      __terminalComponentOpts.push(Object.assign({}, opts || {}));
+    };
     render = function(opts) {
       renderCalls.main++;
       __terminalRenderOpts.push(Object.assign({}, opts || {}));
@@ -19095,7 +19105,9 @@ test('selected viewed agent upsert refreshes terminal workspace for status and p
   assert.equal(jsonValue(context, `state.agents['agent-1'].current_path`), '/repo/new');
   assert.equal(runInContext(context, `__terminalRefreshCalls`), 1,
     'viewed agent status/path changes must refresh terminal workspace');
-  assert.equal(jsonValue(context, `__terminalRenderOpts[0].skipTerminalRefresh`), false);
+  assert.equal(jsonValue(context, `__terminalRenderOpts[0].skipTerminalRefresh`), true,
+    'the grid render does not own the terminal component refresh');
+  assert.equal(jsonValue(context, `__terminalComponentOpts[0].component`), 'terminal');
 });
 
 test('off-agent direct_message_upsert updates cache without refreshing terminal workspace', () => {
@@ -19302,9 +19314,15 @@ test('incoming direct_message_upsert refreshes the real terminal direct-message 
 
   runInContext(context, `
     var __terminalRefreshCalls = 0;
+    var __terminalComponentOpts = [];
+    var __renderTerminalWorkspaceImpl = renderTerminalWorkspace;
+    renderTerminalWorkspace = function(opts) {
+      __terminalRefreshCalls += 1;
+      __terminalComponentOpts.push(Object.assign({}, opts || {}));
+      return __renderTerminalWorkspaceImpl(opts);
+    };
     render = function(opts) {
       if (!opts || !opts.skipTerminalRefresh) {
-        __terminalRefreshCalls += 1;
         renderTerminalWorkspace();
       }
     };
@@ -19333,6 +19351,8 @@ test('incoming direct_message_upsert refreshes the real terminal direct-message 
     send = function(message) { __noticeLifecycleCommands.push(message); return true; };
     _showNoticeToast = function() { __noticeToastCalls += 1; };
     renderTerminalWorkspace();
+    __terminalRefreshCalls = 0;
+    __terminalComponentOpts = [];
   `);
   assert.doesNotMatch(dom.directMessages.innerHTML, /delta hello/);
 
@@ -19381,6 +19401,7 @@ test('incoming direct_message_upsert refreshes the real terminal direct-message 
 
   assert.equal(runInContext(context, `__terminalRefreshCalls`), 1,
     'viewed direct message delta must refresh the real terminal workspace');
+  assert.equal(jsonValue(context, `__terminalComponentOpts[0].component`), 'direct-messages');
   assert.match(dom.directMessages.innerHTML, /delta hello/);
   assert.match(dom.directMessages.innerHTML, /terminal-direct-message--agent-to-user/);
   assert.equal(runInContext(context, `__noticeToastCalls`), 0,
