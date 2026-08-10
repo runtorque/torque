@@ -2046,6 +2046,16 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
             payload["task_id"] = args["task"]
 
     result = await handle_command(payload)
+    if (
+        result
+        and result.get("type") == "error"
+        and result.get("retryable")
+    ):
+        return (
+            result.get("message", "Retryable report refusal."),
+            True,
+            False,  # no_cache
+        )
     if result and result.get("type") == "error":
         return result.get("message", "Unknown error"), True
     if result and result.get("type") == "deliverable_missing":
@@ -2079,7 +2089,14 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
             False,  # no_cache
         )
 
-    return json.dumps(result) if result else '{"type":"ok"}', False
+    if not result:
+        return (
+            f"AI report action {action} returned no result; refusing to "
+            "report success. Retry after inspecting task context.",
+            True,
+            False,  # no_cache
+        )
+    return json.dumps(result), False
 
 
 # ---------------------------------------------------------------------------
