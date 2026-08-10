@@ -358,8 +358,7 @@ async def handle_board_operation_command(
 
     elif cmd == "board_unarchive_task":
         result = _handle_board_unarchive_command(state, data)
-        if not (isinstance(result, dict)
-                and result.get("type") == "error"):
+        if isinstance(result, dict) and result.get("type") == "task_unarchived":
             if board_sync_manager:
                 board_sync_manager.enqueue_task(
                     data.get("id", ""),
@@ -964,8 +963,7 @@ async def handle_board_operation_command(
 
     elif cmd == "board_unarchive_task":
         result = _handle_board_unarchive_command(state, data)
-        if not (isinstance(result, dict)
-                and result.get("type") == "error"):
+        if isinstance(result, dict) and result.get("type") == "task_unarchived":
             if board_sync_manager:
                 board_sync_manager.enqueue_task(
                     data.get("id", ""),

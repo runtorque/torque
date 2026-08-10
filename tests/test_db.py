@@ -211,6 +211,34 @@ class TorqueDBTests(unittest.TestCase):
         self.assertEqual(task.artifacts[0]["content"], "")
         self.assertTrue(getattr(task, "_artifact_content_dehydrated", False))
 
+    def test_operator_unarchive_advisory_rehydrates_before_restoring(self):
+        self.db.save_board_task(BoardTask(
+            id="archived-finalization-advisory", task="Archived", group="g",
+            lane="Archived", archived_from_lane="Done",
+            artifacts=[{"id": "artifact-1", "type": "log", "content": "stored"}],
+        ))
+        state = MatrixState(self.db)
+        state.load()
+        task = state.board_tasks["archived-finalization-advisory"]
+        advisory = {
+            "eligible": False,
+            "missing_gates": ["review"],
+            "code_boundary": {"blocking": []},
+        }
+
+        with mock.patch.object(
+                state, "_finalization_done_allowed",
+                return_value=(False, advisory)):
+            result = state.board_unarchive_task(
+                task.id, lane="Done", allow_done_advisory=True,
+                acknowledge_unmerged=True,
+            )
+
+        self.assertEqual(result, advisory)
+        self.assertEqual(task.lane, "Done")
+        self.assertEqual(task.artifacts[0]["content"], "stored")
+        self.assertFalse(getattr(task, "_artifact_content_dehydrated", False))
+
     def test_global_settings_round_trips_relay_fields(self):
         self.db.save_global_settings(GlobalSettings(
             relay_enabled=True,

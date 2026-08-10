@@ -11,7 +11,7 @@ function handleBoardMoveAcknowledgementResponse(msg) {
   }).then(function(accepted) {
     if (!accepted) return;
     var command = {
-      cmd: 'board_move_task',
+      cmd: String(msg.command || 'board_move_task'),
       id: taskId,
       lane: String(msg.new_lane || 'Done'),
       acknowledge_unmerged: true,
@@ -22,6 +22,34 @@ function handleBoardMoveAcknowledgementResponse(msg) {
     }
     send(command);
   });
+  return true;
+}
+
+function handleBoardDoneAdvisoryResponse(msg) {
+  var isBlocked = msg && msg.type === 'finalization_blocked';
+  if (!msg || (!isBlocked && msg.type !== 'task_unarchived'
+      && msg.type !== 'task_moved')) return false;
+  var advisory = isBlocked ? msg.finalization : msg.advisory;
+  if (!advisory) return false;
+  var blocking = advisory.code_boundary && advisory.code_boundary.blocking;
+  var blockingIds = Array.isArray(blocking) ? blocking.map(function(item) {
+    return String(item && item.task_id || '').trim();
+  }).filter(Boolean) : [];
+  var missing = Array.isArray(advisory.missing_gates)
+    ? advisory.missing_gates.map(String).filter(Boolean) : [];
+  var details = [];
+  if (blockingIds.length) details.push('Blocking tasks: ' + blockingIds.join(', '));
+  if (missing.length) details.push('Missing gates: ' + missing.join(', '));
+  if (typeof _showToast === 'function') {
+    _showToast(
+      (isBlocked
+        ? 'Could not restore the task because finalization is blocked.'
+        : (msg.type === 'task_unarchived' ? 'Restored' : 'Moved')
+          + ' to Done with a finalization advisory.')
+        + (details.length ? ' ' + details.join('. ') + '.' : ''),
+      'warning'
+    );
+  }
   return true;
 }
 

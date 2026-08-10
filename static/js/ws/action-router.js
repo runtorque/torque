@@ -10,6 +10,10 @@ function _handleWsMessage(e) {
       typeof handleBoardMoveAcknowledgementResponse === 'function'
       && handleBoardMoveAcknowledgementResponse(msg);
     if (boardMoveAcknowledgementHandled) return;
+    var boardDoneAdvisoryHandled =
+      typeof handleBoardDoneAdvisoryResponse === 'function'
+      && handleBoardDoneAdvisoryResponse(msg);
+    if (boardDoneAdvisoryHandled) return;
     if (typeof _compactHandleLazyResponse === 'function'
         && _compactHandleLazyResponse(msg)) {
       if (typeof renderActivePanel === 'function') renderActivePanel();

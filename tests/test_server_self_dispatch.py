@@ -2602,6 +2602,109 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("Done", root.lane)
         self.assertEqual("", root.status)
 
+    async def test_board_unarchive_command_returns_advisory_and_syncs_only_after_move(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        state.board_lanes = [
+            "Backlog", "To Do", "In Progress", "Done", "Archived"
+        ]
+        root = state.board_add_task(
+            "Archived code-owning root", "g", lane="Done", id="restore-root",
+        )
+        state.board_archive_task(root.id)
+        state.board_add_task(
+            "Unmerged implementation", "g", lane="Done", id="restore-child",
+            parent_task_id=root.id, pipeline_root_id=root.id, pipeline_depth=1,
+            worktree_boundary={
+                "status": "open", "commit_sha": "candidate",
+                "branch": "topic/restore-unmerged",
+                "code_delta": {"state": "present"},
+            },
+        )
+        root.finalization_mode = "review_only"
+        sync_calls = []
+        sync_manager = types.SimpleNamespace(
+            enqueue_task=lambda task_id, reason: sync_calls.append(
+                (task_id, reason)
+            )
+        )
+        handle_command = self._extract_handle_command(
+            state, board_sync_manager=sync_manager
+        )
+
+        refused = await handle_command({
+            "cmd": "board_unarchive_task",
+            "id": root.id,
+        })
+
+        self.assertEqual(
+            "task_move_acknowledgement_required", refused["type"]
+        )
+        self.assertEqual("board_unarchive_task", refused["command"])
+        self.assertEqual("Archived", root.lane)
+        self.assertEqual([], sync_calls)
+
+        restored = await handle_command({
+            "cmd": "board_unarchive_task",
+            "id": root.id,
+            "acknowledge_unmerged": True,
+        })
+
+        self.assertEqual("task_unarchived", restored["type"])
+        self.assertEqual("Done", restored["new_lane"])
+        self.assertEqual(
+            ["restore-child"],
+            [
+                item["task_id"]
+                for item in restored["advisory"]["code_boundary"]["blocking"]
+            ],
+        )
+        self.assertEqual("Done", root.lane)
+        self.assertEqual(
+            [("restore-root", "task_unarchive")], sync_calls
+        )
+
+    async def test_archived_board_move_uses_same_done_acknowledgement_path(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        state.board_lanes = [
+            "Backlog", "To Do", "In Progress", "Done", "Archived"
+        ]
+        root = state.board_add_task(
+            "Archived root", "g", lane="Done", id="drag-root",
+        )
+        state.board_archive_task(root.id)
+        state.board_add_task(
+            "Unmerged child", "g", lane="Done", id="drag-child",
+            parent_task_id=root.id, pipeline_root_id=root.id, pipeline_depth=1,
+            worktree_boundary={
+                "status": "open", "commit_sha": "drag-candidate",
+                "branch": "topic/drag-unmerged",
+                "code_delta": {"state": "present"},
+            },
+        )
+        root.finalization_mode = "review_only"
+        handle_command = self._extract_handle_command(state)
+
+        refused = await handle_command({
+            "cmd": "board_move_task", "id": root.id, "lane": "Done",
+        })
+        self.assertEqual(
+            "task_move_acknowledgement_required", refused["type"]
+        )
+        self.assertEqual("Archived", root.lane)
+
+        moved = await handle_command({
+            "cmd": "board_move_task", "id": root.id, "lane": "Done",
+            "acknowledge_unmerged": True,
+        })
+        self.assertEqual("task_moved", moved["type"])
+        self.assertEqual("Done", root.lane)
+        self.assertEqual(
+            ["drag-child"],
+            [item["task_id"] for item in moved["advisory"]["code_boundary"]["blocking"]],
+        )
+
     async def test_board_move_advisory_keeps_normal_auto_resume_behavior(self):
         state = self.state_mod.MatrixState()
         state.add_group("g")

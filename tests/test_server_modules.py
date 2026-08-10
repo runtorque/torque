@@ -1606,10 +1606,13 @@ prompt: |
 
         result = self.server_mod._handle_board_unarchive_command(
             state,
-            {'id': parent.id, 'lane': 'Done', 'include_descendants': True},
+            {
+                'id': parent.id, 'lane': 'Done',
+                'include_descendants': True, 'acknowledge_unmerged': True,
+            },
         )
 
-        self.assertIsNone(result)
+        self.assertEqual(result['type'], 'task_unarchived')
         self.assertEqual(state.board_tasks[parent.id].lane, 'Done')
         self.assertEqual(state.board_tasks[child.id].lane, 'Archived')
 
