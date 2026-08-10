@@ -374,6 +374,240 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
             closure,
         )
 
+    def test_dispatch_reconciles_reused_assignment_to_fresh_reviewer(self):
+        state = self._make_state()
+        reviewer_a = self._make_agent("reviewer-a")
+        reviewer_b = self._make_agent("reviewer-b")
+        state.agents = {
+            reviewer_a.id: reviewer_a,
+            reviewer_b.id: reviewer_b,
+        }
+        root = state.board_add_task(
+            "Implement feature",
+            "g",
+            id="task-root",
+            action_name="feature/implement",
+        )
+        state.board_add_task(
+            "First review",
+            "g",
+            lane="Done",
+            id="task-review-a",
+            action_name="feature/review",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+            agent_id=reviewer_a.id,
+        )
+        review = state.board_add_task(
+            "Review fixes",
+            "g",
+            lane="To Do",
+            id="task-rereview",
+            action_name="feature/review",
+            parent_task_id="task-review-a",
+            pipeline_root_id=root.id,
+            pipeline_depth=2,
+            agent_id=reviewer_a.id,
+            labels=["torque:reviewer-reused", "keep-me"],
+        )
+        original_assignment = {
+            "kind": "prior_reviewer_reuse",
+            "reviewer_id": reviewer_a.id,
+            "prior_review_task_ids": ["task-review-a"],
+            "selection_source": "automatic_chain_reuse",
+            "recorded_at": "2026-08-09T00:00:00+00:00",
+        }
+        review.completion_evidence = {
+            "reviewer_assignment": original_assignment,
+            "verdict": {"verdict": "ship", "gate_id": "gate-1"},
+            "status": "verified",
+        }
+
+        self._dispatch_linker(state)(reviewer_b, review, "In Progress")
+
+        self.assertEqual(review.agent_id, reviewer_b.id)
+        self.assertNotIn("torque:reviewer-reused", review.labels)
+        self.assertIn("keep-me", review.labels)
+        self.assertNotIn("reviewer_assignment", review.completion_evidence)
+        self.assertEqual(
+            review.completion_evidence["reviewer_assignment_history"],
+            [{
+                **original_assignment,
+                "superseded_at": review.completion_evidence[
+                    "reviewer_assignment_history"
+                ][0]["superseded_at"],
+                "replacement_reviewer_id": reviewer_b.id,
+            }],
+        )
+        self.assertEqual(
+            review.completion_evidence["verdict"],
+            {"verdict": "ship", "gate_id": "gate-1"},
+        )
+        self.assertEqual(review.completion_evidence["status"], "verified")
+        self.assertEqual(
+            self.server_mod.reviewer_assignment_disclosure(review), ""
+        )
+
+    def test_dispatch_reconciles_between_reused_reviewers_idempotently(self):
+        state = self._make_state()
+        reviewer_a = self._make_agent("reviewer-a")
+        reviewer_b = self._make_agent("reviewer-b")
+        state.agents = {
+            reviewer_a.id: reviewer_a,
+            reviewer_b.id: reviewer_b,
+        }
+        root = state.board_add_task(
+            "Implement feature", "g", id="task-root",
+            action_name="feature/implement",
+        )
+        review_a = state.board_add_task(
+            "First review", "g", lane="Done", id="task-review-a",
+            action_name="feature/review", parent_task_id=root.id,
+            pipeline_root_id=root.id, pipeline_depth=1,
+            agent_id=reviewer_a.id,
+        )
+        state.board_add_task(
+            "Second review", "g", lane="Done", id="task-review-b",
+            action_name="feature/review", parent_task_id=review_a.id,
+            pipeline_root_id=root.id, pipeline_depth=2,
+            agent_id=reviewer_b.id,
+        )
+        review = state.board_add_task(
+            "Review fixes", "g", lane="To Do", id="task-rereview",
+            action_name="feature/review", parent_task_id="task-review-b",
+            pipeline_root_id=root.id, pipeline_depth=3,
+            agent_id=reviewer_a.id,
+            labels=["torque:reviewer-reused"],
+        )
+        assignment_a = {
+            "kind": "prior_reviewer_reuse",
+            "reviewer_id": reviewer_a.id,
+            "prior_review_task_ids": [review_a.id],
+            "selection_source": "automatic_chain_reuse",
+            "recorded_at": "2026-08-09T00:00:00+00:00",
+        }
+        review.completion_evidence = {
+            "reviewer_assignment": assignment_a,
+            "reviewer_assignment_history": [
+                {"reviewer_id": f"old-{index}"} for index in range(25)
+            ],
+            "verdict": {"verdict": "block"},
+            "custom_evidence": {"preserve": True},
+        }
+        linker = self._dispatch_linker(state)
+
+        linker(reviewer_b, review, "In Progress")
+
+        assignment_b = review.completion_evidence["reviewer_assignment"]
+        self.assertEqual(assignment_b["reviewer_id"], reviewer_b.id)
+        self.assertEqual(
+            assignment_b["prior_review_task_ids"], ["task-review-b"]
+        )
+        history = review.completion_evidence[
+            "reviewer_assignment_history"
+        ]
+        self.assertEqual(len(history), 20)
+        self.assertEqual(history[-1]["reviewer_id"], reviewer_a.id)
+        self.assertEqual(
+            history[-1]["replacement_reviewer_id"], reviewer_b.id
+        )
+        self.assertEqual(
+            review.completion_evidence["verdict"], {"verdict": "block"}
+        )
+        self.assertEqual(
+            review.completion_evidence["custom_evidence"],
+            {"preserve": True},
+        )
+        messages_after_swap = list(review.messages)
+        recorded_at = assignment_b["recorded_at"]
+
+        linker(reviewer_b, review, "In Progress")
+
+        self.assertEqual(
+            review.completion_evidence["reviewer_assignment_history"],
+            history,
+        )
+        self.assertEqual(review.messages, messages_after_swap)
+        self.assertEqual(
+            review.completion_evidence["reviewer_assignment"]["recorded_at"],
+            recorded_at,
+        )
+
+    async def test_seat_swap_prompt_discloses_only_actual_reused_reviewer(self):
+        state = self._make_state()
+        reviewer_a = self._make_agent("reviewer-a")
+        reviewer_b = self._make_agent("reviewer-b")
+        state.agents = {
+            reviewer_a.id: reviewer_a,
+            reviewer_b.id: reviewer_b,
+        }
+        root = state.board_add_task(
+            "Implement feature", "g", id="task-root",
+            action_name="feature/implement",
+        )
+        review_a = state.board_add_task(
+            "First review", "g", lane="Done", id="task-review-a",
+            action_name="feature/review", parent_task_id=root.id,
+            pipeline_root_id=root.id, pipeline_depth=1,
+            agent_id=reviewer_a.id,
+        )
+        state.board_add_task(
+            "Second review", "g", lane="Done", id="task-review-b",
+            action_name="feature/review", parent_task_id=review_a.id,
+            pipeline_root_id=root.id, pipeline_depth=2,
+            agent_id=reviewer_b.id,
+        )
+        review = state.board_add_task(
+            "Review fixes", "g", lane="To Do", id="task-rereview",
+            action_name="feature/review", parent_task_id="task-review-b",
+            pipeline_root_id=root.id, pipeline_depth=3,
+            agent_id=reviewer_a.id,
+            labels=["torque:reviewer-reused"],
+        )
+        review.completion_evidence = {
+            "reviewer_assignment": {
+                "kind": "prior_reviewer_reuse",
+                "reviewer_id": reviewer_a.id,
+                "prior_review_task_ids": [review_a.id],
+            },
+        }
+        sent_prompts = []
+
+        async def send_agent_prompt(cell, prompt, **_kwargs):
+            sent_prompts.append((cell.id, prompt))
+
+        holder = {}
+
+        async def recursive_dispatch(payload):
+            return await holder["handle_command"](payload)
+
+        handle_command = self._extract_handle_command(
+            state,
+            recursive_dispatch,
+            action_mgr=self._AutoCloseActionManager(),
+            closure_overrides={
+                "_build_postscript": lambda *args, **kwargs: "",
+                "_record_task_dispatch": self._dispatch_linker(state),
+                "_send_agent_prompt": send_agent_prompt,
+            },
+        )
+        holder["handle_command"] = handle_command
+
+        result = await handle_command({
+            "cmd": "dispatch_task",
+            "id": review.id,
+            "agent_id": reviewer_b.id,
+        })
+
+        self.assertEqual(result["type"], "ok")
+        prompt = sent_prompts[0][1]
+        self.assertIn("Reviewer assignment disclosure", prompt)
+        self.assertIn(reviewer_b.id, prompt)
+        self.assertIn("task-review-b", prompt)
+        self.assertNotIn(reviewer_a.id, prompt)
+        self.assertNotIn("task-review-a", prompt)
+
     def _latest_boundary_state(self, state, worktree_mgr):
         main_code = self.server_mod.main.__code__
         boundary_code = next(
