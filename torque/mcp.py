@@ -66,7 +66,7 @@ from .mcp_canonical import (
     canonicalize_tool_specs,
     modernize_tool_authority,
 )
-from .mcp_ai_reports import ai_report_transport_override
+from .mcp_ai_reports import DERIVE_TOOL_SPEC, ai_report_transport_override
 from .help_docs import dispatch_help_tool, help_tool_specs
 from .mcp_tools_shared import (
     _direct_user_message_response,
@@ -494,61 +494,7 @@ TOOLS = [
             "required": ["name"],
         },
     },
-    {
-        "name": "torque_derive", "authority": {"requirements": [{"capability": "task.report","minimum_scope": "self","handler_scoped": True}]},
-        "description": (
-            "Derive a subtask and dispatch it. The parent task stays "
-            "In Progress with a status badge while the derived task "
-            "is worked on. The action's transitions field controls "
-            "which actions can be derived and where the task is routed "
-            "(new agent, self, parent agent, or root agent). For "
-            "feature/review, prior-reviewer reuse is disclosed in the "
-            "result and review record. Set require_fresh_reviewer to make "
-            "same-task prior-reviewer exclusion a routing constraint; "
-            "context prose does not impose reviewer exclusions."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "description": {
-                    "type": "string",
-                    "description": "Short title for the derived task.",
-                },
-                "context": {
-                    "type": "string",
-                    "description": "Longer description or context.",
-                },
-                "action": {
-                    "type": "string",
-                    "description": (
-                        "Action name for the derived task "
-                        "(e.g. 'pipeline/review')."
-                    ),
-                },
-                "action_vars": {
-                    "type": "object",
-                    "description": "Action variables as key-value pairs.",
-                    "additionalProperties": {"type": "string"},
-                },
-                "group": {
-                    "type": "string",
-                    "description": (
-                        "Target group (defaults to current task's group)."
-                    ),
-                },
-                "require_fresh_reviewer": {
-                    "type": "boolean",
-                    "description": (
-                        "For feature/review only, require automatic routing "
-                        "to create a seat not previously assigned to review "
-                        "this task chain. Default false preserves block/fix "
-                        "re-review continuity."
-                    ),
-                },
-            },
-            "required": ["description"],
-        },
-    },
+    DERIVE_TOOL_SPEC,
     {
         "name": "torque_ask", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self","handler_scoped": True}]},
         "description": (

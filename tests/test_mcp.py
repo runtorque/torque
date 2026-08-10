@@ -25,6 +25,19 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         if tasks:
             await asyncio.gather(*tasks)
 
+    async def test_derive_tool_spec_keeps_fresh_reviewer_contract(self):
+        spec_mod = importlib.import_module("torque.mcp_ai_reports")
+        self.assertEqual(spec_mod.DERIVE_TOOL_SPEC["name"], "torque_derive")
+        derive = next(
+            tool for tool in self.mcp_mod.TOOLS
+            if tool["name"] == "torque_derive"
+        )
+        fresh = derive["inputSchema"]["properties"][
+            "require_fresh_reviewer"
+        ]
+        self.assertEqual(fresh["type"], "boolean")
+        self.assertIn("Default false", fresh["description"])
+
     async def test_canonical_task_get_reports_same_group_engineer_scope_refusal(self):
         state = self.state_mod.MatrixState()
         state.groups["g"] = []
