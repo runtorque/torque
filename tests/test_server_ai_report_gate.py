@@ -40,6 +40,8 @@ class ServerAiReportMandatoryReviewGateTests(unittest.IsolatedAsyncioTestCase):
         install_aiohttp_stub()
         self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
+        self.mcp_mod = importlib.import_module("torque.mcp")
+        self.mcp_mod = importlib.reload(self.mcp_mod)
         self.server_mod = importlib.import_module("torque.server")
         self.server_mod = importlib.reload(self.server_mod)
 
@@ -241,6 +243,117 @@ class ServerAiReportMandatoryReviewGateTests(unittest.IsolatedAsyncioTestCase):
             "action": action,
             "message": message,
         })
+
+    async def _mcp_progress(self, state, cell, message):
+        return await self.mcp_mod._dispatch_tool(
+            "torque_progress",
+            {"message": message},
+            cell.id,
+            self._extract_handle_command(state),
+            state,
+        )
+
+    async def test_progress_fails_closed_when_linked_tasks_are_not_reportable(self):
+        state, cell, root = self._state_cell_task()
+        child = state.board_add_task(
+            "Implement review follow-up",
+            "g",
+            lane="In Progress",
+            id="task-child",
+            action_name="feature/implement",
+            agent_id=cell.id,
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+        )
+        state.board_add_task(
+            "Review follow-up",
+            "g",
+            lane="In Progress",
+            id="task-review",
+            action_name="feature/review",
+            agent_id="reviewer-1",
+            parent_task_id=child.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=2,
+        )
+        cell.current_task_id = child.id
+        history = []
+        state.history_record_message = lambda *args, **kwargs: history.append(
+            (args, kwargs)
+        )
+
+        self.assertFalse(state.task_occupies_execution_slot(root, agent_id=cell.id))
+        self.assertFalse(state.task_occupies_execution_slot(child, agent_id=cell.id))
+        self.assertIsNone(state.agent_current_task(cell.id))
+        self.assertIsNone(self.server_mod._resolve_ai_report_task(state, cell))
+
+        text, is_error = await self._mcp_progress(
+            state, cell, "Progress that cannot be attributed"
+        )
+
+        self.assertTrue(is_error)
+        self.assertIn("No unique reportable task", text)
+        self.assertIn("current task task-child does not occupy", text)
+        self.assertEqual(root.messages, [])
+        self.assertEqual(child.messages, [])
+        self.assertEqual(
+            history,
+            [((cell.id, "progress", "Progress that cannot be attributed"), {
+                "task_id": "",
+                "mark_progress": False,
+            })],
+        )
+        self.assertEqual(cell.activity_detail, "")
+        self.assertEqual(cell.last_progress_at, 0.0)
+
+    async def test_progress_fails_closed_for_one_sided_stale_pointer(self):
+        state, cell, stale_task = self._state_cell_task()
+        stale_task.agent_id = ""
+        history = []
+        state.history_record_message = lambda *args, **kwargs: history.append(
+            (args, kwargs)
+        )
+
+        self.assertFalse(
+            state.task_occupies_execution_slot(stale_task, agent_id=cell.id)
+        )
+        self.assertIsNone(state.agent_current_task(cell.id))
+        self.assertIsNone(self.server_mod._resolve_ai_report_task(state, cell))
+
+        text, is_error = await self._mcp_progress(
+            state, cell, "Progress from a stale pointer"
+        )
+
+        self.assertTrue(is_error)
+        self.assertIn("No unique reportable task", text)
+        self.assertIn("current task task-1 does not occupy", text)
+        self.assertIn("no active task is linked", text)
+        self.assertEqual(stale_task.messages, [])
+        self.assertEqual(
+            history,
+            [((cell.id, "progress", "Progress from a stale pointer"), {
+                "task_id": "",
+                "mark_progress": False,
+            })],
+        )
+        self.assertEqual(cell.activity_detail, "")
+        self.assertEqual(cell.last_progress_at, 0.0)
+
+    async def test_progress_on_single_occupying_task_is_unchanged(self):
+        state, cell, task = self._state_cell_task()
+        saved_task_ids = []
+        state._db_save_task = lambda saved: saved_task_ids.append(saved.id)
+
+        text, is_error = await self._mcp_progress(
+            state, cell, "Progress on the active task"
+        )
+
+        self.assertFalse(is_error)
+        self.assertEqual(text, '{"type":"ok"}')
+        self.assertEqual(task.messages[-1]["action"], "progress")
+        self.assertEqual(task.messages[-1]["message"], "Progress on the active task")
+        self.assertEqual(saved_task_ids, [task.id])
 
     @staticmethod
     def _append_block_reply(task, block, *, delivery_state="delivered"):
