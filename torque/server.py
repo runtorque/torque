@@ -786,6 +786,8 @@ def _runtime_payload(*, bridge=None, state=None) -> dict:
         "terminal_backend": "pty",
         "home_directory": str(Path.home()),
         "profile": os.environ.get("TORQUE_PROFILE", "").strip(),
+        "ui_default": torque_config.UI_DEFAULT,
+        "legacy_ui_path": "/legacy/",
         "data_dir": str(DATA_DIR),
         "port": WS_PORT,
         "default_command": default_command,
@@ -5791,6 +5793,8 @@ async def main(connection=None):
         ui_client_id_from_request=_ui_client_id_from_request,
     )
     handle_index = http_routes.handle_index
+    handle_legacy = http_routes.handle_legacy
+    handle_react_ui = http_routes.handle_react_ui
     handle_ws = http_routes.handle_ws
     handle_terminal_ws = http_routes.handle_terminal_ws
     handle_api_cmd = http_routes.handle_api_cmd
@@ -5811,6 +5815,12 @@ async def main(connection=None):
 
     app_server = web.Application()
     app_server.router.add_get("/", handle_index)
+    app_server.router.add_get("/assets/{path:.*}", handle_index)
+    app_server.router.add_get("/legacy", handle_legacy)
+    app_server.router.add_get("/legacy/", handle_legacy)
+    app_server.router.add_get("/ui-next", handle_react_ui)
+    app_server.router.add_get("/ui-next/", handle_react_ui)
+    app_server.router.add_get("/ui-next/{path:.*}", handle_react_ui)
     app_server.router.add_get("/api/runtime", http_routes.handle_runtime)
     app_server.router.add_get("/ws", handle_ws)
     app_server.router.add_get("/ws/terminal/{cell_id}", handle_terminal_ws)

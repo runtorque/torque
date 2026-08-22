@@ -364,6 +364,8 @@ COMPACT_BOARD_TASK_FIELDS = (
     "agent_id",
     "assigned_engineer_id",
     "assigned_architect_id",
+    "created_by_architect_id",
+    "created_by_engineer_id",
     "parent_task_id",
     "pipeline_depth",
     "status",

@@ -16,7 +16,7 @@ pub const MENU_REVEAL_LOGS: &str = "reveal_logs";
 pub const MENU_DOCUMENTATION: &str = "documentation";
 pub const MENU_KEYBOARD_SHORTCUTS: &str = "keyboard_shortcuts";
 pub const MENU_SHOW_WELCOME: &str = "show_welcome";
-pub const MENU_RESTART_DAEMON: &str = "restart_daemon";
+pub const MENU_RESTART_SUPERVISOR: &str = "restart_supervisor";
 pub const MENU_OPEN_SETTINGS: &str = "open_settings";
 
 const CHEATSHEET_JSON: &str = include_str!(concat!(
@@ -106,12 +106,16 @@ where
         "Settings\u{2026}",
         Some("CmdOrCtrl+,"),
     )?;
-    let restart_daemon = menu_item(manager, MENU_RESTART_DAEMON, "Restart Daemon")?;
+    let restart_supervisor = menu_item(
+        manager,
+        MENU_RESTART_SUPERVISOR,
+        "Restart Terminal Supervisor",
+    )?;
     let torque_app = SubmenuBuilder::new(manager, "Torque")
         .about(Some(AboutMetadata::default()))
         .separator()
         .item(&settings)
-        .item(&restart_daemon)
+        .item(&restart_supervisor)
         .separator()
         .services()
         .separator()
@@ -208,12 +212,16 @@ where
         "Settings\u{2026}",
         Some("CmdOrCtrl+,"),
     )?;
-    let restart_daemon = menu_item(manager, MENU_RESTART_DAEMON, "Restart Daemon")?;
+    let restart_supervisor = menu_item(
+        manager,
+        MENU_RESTART_SUPERVISOR,
+        "Restart Terminal Supervisor",
+    )?;
     let torque_app = SubmenuBuilder::new(manager, "Torque")
         .about(Some(AboutMetadata::default()))
         .separator()
         .item(&settings)
-        .item(&restart_daemon)
+        .item(&restart_supervisor)
         .separator()
         .services()
         .separator()

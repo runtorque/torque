@@ -125,6 +125,11 @@ The same daemon serves several deployment shapes:
   `make open` opens the browser UI. This is the primary browser-only path and
   supports headless development setups.
 
+Both shapes load the primary React renderer from `/`. `/legacy/` remains the
+classic fallback during the Phase 6 burn-in, and `TORQUE_UI_DEFAULT=legacy`
+can select that renderer at the root for one profile process without changing
+its database.
+
 The desktop and standalone paths use profile-scoped data directories under
 `~/.torque/profiles/`.
 

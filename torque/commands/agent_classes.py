@@ -216,12 +216,18 @@ async def _handle_agent_class_command(
         }
 
     if cmd == "agent_class_audit":
+        agent_id = str(data.get("agent_id", "") or "").strip()
         if not db:
-            return {"type": "agent_class_audit", "events": []}
+            return {
+                "type": "agent_class_audit",
+                "agent_id": agent_id,
+                "events": [],
+            }
         return {
             "type": "agent_class_audit",
+            "agent_id": agent_id,
             "events": db.list_agent_class_audit(
-                agent_id=str(data.get("agent_id", "") or ""),
+                agent_id=agent_id,
                 limit=int(data.get("limit", 50) or 50),
             ),
         }

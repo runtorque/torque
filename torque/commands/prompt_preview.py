@@ -231,4 +231,9 @@ async def handle_prompt_preview_command(
             ),
         }
 
+    if tid:
+        # Echo the target so concurrent React inspectors can retain previews
+        # without a global last-response race. Legacy consumers ignore it.
+        result["id"] = tid
+        result["task_id"] = tid
     return result

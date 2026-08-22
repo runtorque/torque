@@ -35,8 +35,42 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  verify-ui-community:
+    name: Verify UI and community package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ui/.nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install locked dependencies
+        run: npm --prefix ui ci
+      - name: Lint, typecheck, test, and build
+        run: make ui-check
+      - name: Verify daemon routes and protocol catalog
+        run: python3 -m unittest tests.test_react_ui_routes tests.test_react_ui_protocol_catalog tests.test_tauri_security
+      - name: Verify Tauri command permissions
+        run: python3 scripts/lint_tauri_permissions.py
+      - name: Verify fail-closed community package
+        run: python3 scripts/assert_community_package_excludes_ee.py
+
+  verify-desktop:
+    name: Verify desktop host
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Rust stable
+        run: rustup toolchain install stable --profile minimal
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      - name: Test desktop host
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
   prepare:
     name: Cut version commit + tag
+    needs: [verify-ui-community, verify-desktop]
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.cut.outputs.version }}
@@ -60,13 +94,10 @@ jobs:
           set -euo pipefail
 
           version="${VERSION_INPUT#v}"
-          case "$version" in
-            [0-9]*.[0-9]*.[0-9]*) ;;
-            *)
-              echo "Version must look like X.Y.Z. Got: $VERSION_INPUT" >&2
-              exit 1
-              ;;
-          esac
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Version must be exactly X.Y.Z. Got: $VERSION_INPUT" >&2
+            exit 1
+          fi
           tag="v$version"
           dry_run="${DRY_RUN:-false}"
 
@@ -143,6 +174,19 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.ref }}
           fetch-depth: 0
+
+      - name: Install pinned Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: ui/.nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Build React UI
+        run: |
+          set -euo pipefail
+          npm --prefix ui ci
+          npm --prefix ui run build
 
       - name: Install Rust stable
         run: |
@@ -284,12 +328,17 @@ jobs:
             exit 1
           fi
 
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+          hdiutil verify "$dmg_path"
+
           cp "$dmg_path" "$dist_dir/Torque-${VERSION}-macos-${{ matrix.arch }}.dmg"
           ditto -c -k --sequesterRsrc --keepParent "$app_path" "$dist_dir/Torque-${VERSION}-macos-${{ matrix.arch }}.app.zip"
+          unzip -t "$dist_dir/Torque-${VERSION}-macos-${{ matrix.arch }}.app.zip"
 
           (
             cd "$dist_dir"
             shasum -a 256 * > "SHA256SUMS-macos-${{ matrix.arch }}.txt"
+            shasum -a 256 -c "SHA256SUMS-macos-${{ matrix.arch }}.txt"
           )
 
       - name: Upload workflow artifacts

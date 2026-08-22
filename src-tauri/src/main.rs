@@ -42,7 +42,6 @@ fn run_app() -> Result<(), String> {
     let setup_settings = settings.clone();
     let setup_daemon_state = daemon_state.clone();
     let app = tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .menu(|handle| menu::build_main_menu(handle))
         .invoke_handler(tauri::generate_handler![
@@ -91,14 +90,14 @@ fn show_main_window(
     let window = app
         .get_webview_window("main")
         .ok_or_else(|| "main window was not created".to_string())?;
-    if settings.port != 18933 || first_run_required {
-        let mut target = settings.url();
-        if first_run_required {
-            target = format!("{}?onboarding=1", target.trim_end_matches('/'));
-        }
-        let url = target
+    if settings.ui_url.is_some() || settings.port != 18933 || first_run_required {
+        let target = settings.frontend_url();
+        let mut url: tauri::Url = target
             .parse()
             .map_err(|error| format!("Unable to parse Torque desktop URL '{}': {error}", target))?;
+        if first_run_required {
+            url.query_pairs_mut().append_pair("onboarding", "1");
+        }
         window.navigate(url).map_err(|error| error.to_string())?;
     }
     restore_main_window_bounds(&window, settings);
@@ -198,13 +197,7 @@ fn fetch_main_window_bounds(settings: &DaemonSettings) -> Option<commands::windo
         .ok()?
         .into_json()
         .ok()?;
-    serde_json::from_value(
-        response
-            .get("window_bounds")?
-            .get("main")?
-            .clone(),
-    )
-    .ok()
+    serde_json::from_value(response.get("window_bounds")?.get("main")?.clone()).ok()
 }
 
 fn post_api_cmd(settings: &DaemonSettings, payload: serde_json::Value) {
@@ -285,8 +278,12 @@ fn handle_menu_event(app: &tauri::AppHandle, event: tauri::menu::MenuEvent) {
         }
         menu::MENU_RELOAD => eval_active(app, &window_state, "window.location.reload();"),
         menu::MENU_FORCE_RELOAD => eval_active(app, &window_state, "window.location.reload();"),
-        menu::MENU_RESTART_DAEMON => {
-            eval_active(app, &window_state, "window.restartDaemon && window.restartDaemon();")
+        menu::MENU_RESTART_SUPERVISOR => {
+            eval_active(
+                app,
+                &window_state,
+                "window.restartTerminalSupervisor && window.restartTerminalSupervisor();",
+            )
         }
         menu::MENU_OPEN_SETTINGS => eval_active(
             app,

@@ -7,6 +7,8 @@ import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from .react_ui_assets import normalize_ui_default
+
 WS_PORT = int(os.environ.get("TORQUE_PORT", 18932))
 DEFAULT_COMMAND = os.environ.get("TORQUE_DEFAULT_CMD", "claude")
 
@@ -38,6 +40,8 @@ BIND_HOST = "0.0.0.0" if os.environ.get("TORQUE_BIND_ALL") else "127.0.0.1"
 # The entry point sets SCRIPT_DIR before anything imports config.
 SCRIPT_DIR: Path = Path(__file__).parent
 WEBVIEW_FILE: Path = SCRIPT_DIR / "webview.html"
+REACT_UI_DIR: Path = SCRIPT_DIR / "ui" / "dist"
+UI_DEFAULT: str = normalize_ui_default(os.environ.get("TORQUE_UI_DEFAULT"))
 LEGACY_ATTACHMENTS_DIR: Path = Path.home() / ".torque" / "attachments"
 
 
@@ -135,7 +139,7 @@ _STALE_PRE_KINDS_BACKUP_NAME = "torque.db.pre-kinds.bak"
 
 def init_paths(script_dir: Path):
     """Called once from the entry point to anchor code and data paths."""
-    global SCRIPT_DIR, DATA_DIR, STATE_FILE, DB_FILE, WEBVIEW_FILE, LOG_FILE, ATTACHMENTS_DIR
+    global SCRIPT_DIR, DATA_DIR, STATE_FILE, DB_FILE, WEBVIEW_FILE, REACT_UI_DIR, LOG_FILE, ATTACHMENTS_DIR
     global EVENT_INGEST_SOCKET_FILE, EVENT_INGEST_PID_FILE, EVENT_INGEST_DB_FILE, EVENT_INGEST_LOG_FILE
     SCRIPT_DIR = script_dir
     DATA_DIR = resolve_data_dir(script_dir)
@@ -143,6 +147,7 @@ def init_paths(script_dir: Path):
     STATE_FILE = DATA_DIR / "state.json"
     DB_FILE = DATA_DIR / "torque.db"
     WEBVIEW_FILE = script_dir / "webview.html"
+    REACT_UI_DIR = script_dir / "ui" / "dist"
     LOG_FILE = DATA_DIR / "torque.log"
     ATTACHMENTS_DIR = _resolve_attachments_dir(script_dir, DATA_DIR)
     EVENT_INGEST_SOCKET_FILE = DATA_DIR / "event_ingest.sock"

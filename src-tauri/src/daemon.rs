@@ -46,6 +46,7 @@ pub struct DaemonSettings {
     pub data_dir: PathBuf,
     pub script_path: PathBuf,
     pub python_executable: PathBuf,
+    pub ui_url: Option<String>,
 }
 
 impl DaemonSettings {
@@ -128,6 +129,12 @@ impl DaemonSettings {
             .filter(|value| !value.is_empty())
             .map(expand_home)
             .unwrap_or_else(|| find_on_path("python3").unwrap_or_else(|| PathBuf::from("python3")));
+        let ui_url = env_map
+            .get("TORQUE_UI_URL")
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .map(|value| normalize_ui_url(&value))
+            .transpose()?;
 
         Ok(Self {
             mode,
@@ -136,11 +143,16 @@ impl DaemonSettings {
             data_dir,
             script_path: repo_root.join("torque.py"),
             python_executable,
+            ui_url,
         })
     }
 
     pub fn url(&self) -> String {
         format!("http://127.0.0.1:{}/", self.port)
+    }
+
+    pub fn frontend_url(&self) -> String {
+        self.ui_url.clone().unwrap_or_else(|| self.url())
     }
 
     fn server_env(&self) -> std::collections::HashMap<String, String> {
@@ -170,6 +182,27 @@ impl DaemonSettings {
         );
         env_map
     }
+}
+
+fn normalize_ui_url(value: &str) -> Result<String, EnsureError> {
+    let mut url = tauri::Url::parse(value).map_err(|error| {
+        EnsureError::Config(format!("Invalid TORQUE_UI_URL '{value}': {error}"))
+    })?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err(EnsureError::Config(format!(
+            "Invalid TORQUE_UI_URL '{value}'. Expected an http(s) URL with a host."
+        )));
+    }
+    if url.query().is_some() || url.fragment().is_some() {
+        return Err(EnsureError::Config(format!(
+            "Invalid TORQUE_UI_URL '{value}'. Query strings and fragments are not allowed."
+        )));
+    }
+    if !url.path().ends_with('/') {
+        let path = format!("{}/", url.path());
+        url.set_path(&path);
+    }
+    Ok(url.to_string())
 }
 
 #[derive(Debug)]
@@ -730,6 +763,7 @@ mod tests {
             data_dir,
             script_path: PathBuf::from("/tmp/torque.py"),
             python_executable: PathBuf::from("python3"),
+            ui_url: None,
         }
     }
 
@@ -796,6 +830,7 @@ mod tests {
             ("TORQUE_DESKTOP_DATA_DIR", "~/torque desktop"),
             ("TORQUE_REPO_ROOT", "/repo/root"),
             ("TORQUE_PYTHON_EXECUTABLE", "/custom/python3"),
+            ("TORQUE_UI_URL", "http://127.0.0.1:5173/ui-next"),
             ("HOME", "/home/tester"),
         ])
         .expect("settings should resolve");
@@ -809,6 +844,22 @@ mod tests {
         );
         assert_eq!(settings.script_path, PathBuf::from("/repo/root/torque.py"));
         assert_eq!(settings.python_executable, PathBuf::from("/custom/python3"));
+        assert_eq!(settings.frontend_url(), "http://127.0.0.1:5173/ui-next/");
+        assert_eq!(settings.url(), "http://127.0.0.1:19001/");
+    }
+
+    #[test]
+    fn settings_from_env_map_rejects_unsafe_ui_urls() {
+        let error = DaemonSettings::from_env_map([
+            ("TORQUE_UI_URL", "file:///tmp/index.html"),
+            ("HOME", "/home/tester"),
+            ("TORQUE_REPO_ROOT", "/repo/root"),
+        ])
+        .expect_err("file URLs must not become desktop renderer origins");
+
+        assert!(error
+            .to_string()
+            .contains("Expected an http(s) URL with a host"));
     }
 
     #[test]
@@ -1018,6 +1069,7 @@ ThreadingHTTPServer(('127.0.0.1', int(os.environ['TORQUE_PORT'])), Handler).serv
             data_dir,
             script_path: script_path.clone(),
             python_executable: python,
+            ui_url: None,
         };
 
         let state = ensure_server(&settings).expect("fake daemon should become ready");

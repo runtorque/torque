@@ -16,8 +16,21 @@ MARKDOWN_FILES = [
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 
 
+def _unavailable_submodule_roots() -> tuple[Path, ...]:
+    gitmodules = ROOT / ".gitmodules"
+    if not gitmodules.is_file():
+        return ()
+    roots = []
+    for match in re.finditer(r"^\s*path\s*=\s*(.+?)\s*$", gitmodules.read_text(), re.MULTILINE):
+        root = (ROOT / match.group(1)).resolve()
+        if not (root / ".git").exists():
+            roots.append(root)
+    return tuple(roots)
+
+
 def _missing_markdown_links() -> list[str]:
     errors = []
+    unavailable_submodules = _unavailable_submodule_roots()
     for path in MARKDOWN_FILES:
         text = path.read_text(encoding="utf-8")
         for match in LINK_RE.finditer(text):
@@ -28,6 +41,8 @@ def _missing_markdown_links() -> list[str]:
                 continue
             resolved = (path.parent / target).resolve()
             if resolved.exists():
+                continue
+            if any(resolved.is_relative_to(root) for root in unavailable_submodules):
                 continue
             line = text.count("\n", 0, match.start()) + 1
             errors.append(

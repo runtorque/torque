@@ -1,7 +1,7 @@
 # Torque Design System
 
 Status: living document
-Last updated: 2026-07-17
+Last updated: 2026-08-12
 
 This document is the source of truth for Torque's product design language. It
 records the rules that make the interface feel like one system and the decisions
@@ -17,7 +17,8 @@ decision entry explaining why.
 
 Every UI change should:
 
-1. Reuse or extend the shared tokens in `static/styles/tokens-base.css`.
+1. Reuse or extend the shared semantic tokens: `static/styles/tokens-base.css`
+   for the classic UI and `ui/src/design/tokens.css` for the React UI.
 2. Apply the same component rule everywhere that component appears.
 3. Preserve focus, caret, scroll position, selection, drafts, and expanded state
    across routine rerenders.
@@ -515,7 +516,8 @@ The canonical CSS API lives in `static/styles/components.css`:
 
 ## Implementation map
 
-The frontend has no build step. CSS cascade order is explicit in `webview.html`:
+Torque has two frontend implementations during migration. The classic UI has
+no build step; its CSS cascade order is explicit in `webview.html`:
 
 1. `static/styles/tokens-base.css`
 2. `static/styles/components.css`
@@ -530,6 +532,19 @@ The frontend has no build step. CSS cascade order is explicit in `webview.html`:
 Shared foundations belong in tokens. Component rules belong in the narrowest
 existing stylesheet that owns the surface. Avoid late global overrides unless
 the rule is intentionally global and documented here.
+
+The React UI lives under `ui/` and mirrors the same design grammar through:
+
+1. `ui/src/design/tokens.css` for semantic values;
+2. `ui/src/design/globals.css` for reset, document, focus, motion, selection,
+   and scrollbar rules;
+3. `ui/src/design/primitives.tsx` and its CSS Module for shared accessible
+   controls, menus, dialogs, and state surfaces;
+4. feature-local CSS Modules for layout and feature-specific geometry.
+
+React components must not import the classic stylesheets wholesale. A durable
+token or component rule must be updated in both implementations while they
+coexist, unless the rule applies only to a surface that exists in one client.
 
 ## Standardization inventory
 
@@ -559,6 +574,22 @@ scope.
 | Empty/loading/error states | Standardized, recovery semantics audited | New async failures name a recovery path; loading and inserted errors announce once |
 
 ## Decision log
+
+### D-054 — Secondary surfaces hydrate through typed lazy-resource projection
+
+- Decision: Phase 4 panels request their heavyweight domain slices only after
+  the owning product area is opened. Command responses are normalized into
+  stable Redux projection keys; live deltas continue to update those same
+  keys. Reconnects repeat the active panel's read set once per connection.
+- Rationale: Planning, Mission Control, supervisor, catalogs, history, and
+  settings are too broad for the compact boot snapshot. Treating command
+  responses as one transient “last message” also makes panels race each other.
+  Stable resource keys give every panel independent loading/empty/error state
+  without expanding the hot snapshot or coupling React to response ordering.
+- Scope: React Planning, Control Center, catalog, settings, event, health,
+  supervisor, and relay surfaces under `ui/`.
+- Consequence: new lazy command response types must be mapped at the protocol
+  boundary before feature components consume them.
 
 ### D-001 — Compact navigation tabs are rectangular
 
@@ -1798,6 +1829,463 @@ scope.
   the vertical offset in both browser and desktop layouts.
 - Verification: Frontend regressions protect the top anchor, newest-first
   ordering, descending motion, and pointer-event boundary around the bell.
+
+### D-050 — React uses unstyled accessible primitives, not a themed component suite
+
+- Date: 2026-08-11
+- Status: accepted
+- Decision: The React client uses React Aria Components for shared interactive
+  semantics and focus behavior, then applies Torque's tokens and CSS Modules.
+  It does not adopt the visual language of a themed component suite.
+- Rationale: Torque needs reliable dialogs, menus, popovers, and keyboard/focus
+  behavior, while its dense operator grammar is too specific to inherit a
+  consumer-oriented theme without continual overrides.
+- Scope: `ui/src/design/`, workspace chrome, Board menus and dialogs, and future
+  React feature components.
+- Constraints: Prefer native elements for simple controls. Tauri imports stay
+  behind the host adapter. Primitive adoption must not introduce Tailwind or a
+  CSS-in-JS runtime.
+- Verification: React Testing Library covers roles, names, focusable actions,
+  and controlled dialog behavior; browser checks cover real focus restoration.
+
+### D-051 — Board drag-and-drop has one mutation path and a keyboard sensor
+
+- Date: 2026-08-11
+- Status: accepted
+- Decision: The React Board uses dnd-kit pointer and keyboard sensors. Both
+  resolve to the existing `board_move_task` or `board_reorder_task` commands;
+  the client never mutates authoritative task order optimistically.
+- Rationale: One backend-owned mutation path keeps the classic and React clients
+  coherent, while the keyboard sensor makes reordering available without a
+  pointer and avoids inventing a parallel persistence model.
+- Scope: React Board lanes, task cards, empty-lane drop zones, and ordering.
+- Constraints: Snapshot/delta confirmation remains authoritative. Routine
+  deltas must not clear selection, focus, inline drafts, collapsed hierarchy,
+  or viewport position. Reduced-motion rules apply to drag transitions.
+- Verification: Unit tests cover ordering/filter/hierarchy projections; browser
+  tests cover creation, detail hydration, lane completion, and keyboard access.
+
+### D-052 — React workspace state is split by durability
+
+- Date: 2026-08-11
+- Status: accepted
+- Decision: Group choice, Board filters, lane sorts, and card density persist
+  through existing `ui_*` and `board_set_*` commands. Ephemeral selection,
+  focused task, open dialogs, command-palette state, inline drafts, and pipeline
+  collapse state live only in the React workspace store or owning component.
+- Rationale: Reopening Torque should restore deliberate workspace preferences,
+  not stale momentary interaction state. Keeping ephemeral state outside the
+  server projection also prevents high-frequency deltas from resetting work in
+  progress.
+- Scope: React Redux store, Board feature state, group navigation, and command
+  palette.
+- Constraints: Stable component keys and ownership boundaries must preserve
+  local drafts and scroll position during routine task and agent updates.
+  Single-task selection remains card-local; bulk-action chrome appears only
+  when modifier selection produces a set of at least two tasks.
+- Verification: Reducer/component tests cover selection and create flows; live
+  delta tests verify full-detail merges without replacing compact records.
+
+### D-053 — One visible terminal surface owns one PTY client
+
+- Date: 2026-08-11
+- Status: accepted
+- Decision: Each visible React terminal mount owns exactly one imperative xterm
+  controller and one `/ws/terminal/{cell_id}` connection. Terminal output writes
+  directly to xterm and never enters Redux. Detaching a terminal transfers its
+  persisted surface ownership: the main workspace disposes its mount before the
+  detached window creates one.
+- Rationale: PTY output is too frequent for application-state reconciliation,
+  and two visible clients can race last-writer-wins resize and focus commands.
+  Explicit ownership preserves scrollback responsiveness while keeping React
+  responsible only for terminal chrome and bounded connection status.
+- Scope: React agent focus surface, terminal tabs, xterm controller, detached
+  Agents/Terminal windows, and the Tauri panel allow-list.
+- Constraints: Hidden, zero-size, inactive, and non-owning surfaces never emit
+  focus or resize frames. Strict Mode effect replay reuses a short-lived lease
+  instead of opening a second socket. Session-id changes create a new controller;
+  routine surrounding React renders preserve the existing DOM mount and buffer.
+- Verification: Controller tests cover direct output, reconnect, hidden-surface
+  suppression, and Strict Mode lease churn. Live browser checks cover agent
+  switching, one-xterm cardinality, `0 + 1` main/detached ownership, and clean
+  daemon-restart behavior.
+
+### D-054 — Native desktop behavior enters React through a narrow host and menu bridge
+
+- Date: 2026-08-11
+- Status: accepted
+- Decision: React exposes only named native-menu callbacks, while privileged
+  behavior stays behind `DesktopHost` and allow-listed Tauri commands. Window
+  labels, detached panel ids, external URLs, and confirmation text are validated
+  at the native boundary.
+- Rationale: Menu events must reach whichever React surface owns the state,
+  without giving product components ambient access to Tauri or a global invoke
+  API. The same feature code can then run in a browser and a future Electron
+  host.
+- Scope: Tauri menus and commands, React application shell, detached windows,
+  onboarding, logs, bounds persistence, and supervisor restart.
+- Constraints: Tauri imports remain in `ui/src/host/tauri.ts`. Browser hosts
+  fail closed for native-only capabilities. Desktop restart targets the terminal
+  supervisor in place; it does not terminate the Tauri-owned daemon.
+- Verification: Rust tests cover validation and daemon lifecycle; component and
+  host tests cover menu callbacks and command arguments; Tauri capabilities
+  restrict command access to `main` and `panel-*` windows.
+
+### D-055 — Optional UI products compose validated registries at build time
+
+- Date: 2026-08-11
+- Status: accepted
+- Decision: Community exports an empty versioned extension registry. A private
+  build may compose separately supplied registries through the shared validator;
+  invalid ids, core collisions, titles, placements, loaders, or runtime
+  capability names fail the build/test path.
+- Rationale: Explicit composition preserves tree-shaking and makes absence the
+  safe community default. Runtime discovery would expand the native and CSP
+  attack surface without a current product need.
+- Scope: `ui/src/extensions/`, private product build integration, standalone
+  installation, and release checks.
+- Constraints: Community modules never import private product paths. Optional
+  panels cannot replace core panels, and package output contains no source,
+  dependencies, source maps, private directories, or private markers.
+- Verification: Registry tests exercise private-build-shaped composition and
+  rejection paths; the packaging guard builds and scans the installed community
+  artifact in UI and release CI.
+
+### D-056 — Phase 5 quality budgets are executable release inputs
+
+- Date: 2026-08-11
+- Status: accepted
+- Decision: The React suite protects representative 500-agent/2,000-task state
+  hydration plus 1,000 deltas and a 10,000-frame terminal burst with generous
+  three-second CI ceilings. Global reduced-motion overrides and xterm screen
+  reader mode are explicit test contracts.
+- Rationale: Concrete, repeatable workloads detect architectural regressions
+  earlier than subjective smoke testing while leaving enough headroom for
+  shared CI runners.
+- Scope: Protocol projection, terminal controller, global interaction CSS, and
+  release preflight.
+- Constraints: Terminal output remains outside Redux. Budgets are regression
+  alarms rather than end-user latency claims and must be recalibrated with
+  recorded evidence if infrastructure changes materially.
+- Verification: Vitest runs the workloads and accessibility policy assertions;
+  release CI cannot cut a version commit unless the UI suite passes.
+
+### D-057 — React is the default renderer; classic retirement is staged
+
+- Date: 2026-08-11
+- Status: accepted
+- Decision: The daemon root and primary Tauri launch use React. `/ui-next/`
+  remains a compatible React alias and `/legacy/` remains the operational
+  classic fallback during burn-in. `TORQUE_UI_DEFAULT=legacy` may change the
+  root renderer for one process/profile without entering durable state.
+- Rationale: A URL-only cutover is reversible without a database migration and
+  lets production evidence accumulate before removing a mature fallback.
+  Staging write retirement separately avoids combining the highest-risk rollout
+  moment with destructive asset and test removal.
+- Scope: daemon routing, browser and Tauri launch behavior, installation,
+  diagnostics, operator guidance, and classic fallback ownership.
+- Constraints: The Torque maintainers own the fallback for at least 30 days and
+  two production releases. Retirement also requires no unresolved P0/P1 React
+  regression, no required parity gap, and a successful release-candidate
+  rollback drill. Classic writes remain enabled until a separate reviewed
+  retirement change. The classic shell exposes an app-wide `New UI` switch to
+  `/ui-next/`, so it remains usable even while the root renderer is rolled back.
+- Verification: Route/runtime tests protect the default and override; React
+  reports bounded redacted client faults to the durable Inbox; browser smoke
+  tests cover `/`, `/ui-next/`, `/legacy/`, and profile rollback; release gates
+  continue to verify community and Tauri artifacts.
+
+### D-058 — Board drag geometry follows the rendered lane model
+
+- Date: 2026-08-11
+- Status: accepted
+- Decision: React Board lanes fill their CSS grid tracks, and their sortable
+  item order matches the hierarchy-expanded DOM order. Pointer collision favors
+  the card directly under the cursor, falls back to the lane body or nearest
+  target at seams, and derives server insertion from card midpoints. The grid
+  distributes available width evenly; task content wraps and never participates
+  in track sizing. Horizontal scrolling begins only when the lane-count minimum
+  cannot fit the viewport.
+- Rationale: Empty grid-track space created dead drag regions, while a mismatch
+  between the sortable item list and rendered hierarchy caused neighboring
+  cards to animate out of sequence. Card-center collision also became sticky
+  after the first sibling moved, particularly with different card heights.
+- Scope: React Board lane layout, pointer and keyboard collision behavior,
+  same-lane ordering, and cross-lane placement.
+- Constraints: The server remains authoritative; a drag emits one existing
+  `board_reorder_task` or `board_move_task` command on drop. Non-manual lane
+  sorts do not accept a same-lane manual reorder. During a cross-lane gesture,
+  only a transient client-side lane order is updated so the active card joins
+  the destination sortable context; the authoritative mutation still occurs
+  once, on drop. Positioned cross-lane moves reindex the destination lane. Lane
+  borders belong to one lane rather than an ownerless grid gap, the whole lane
+  is droppable, and collision filtering never selects the active card itself.
+- Verification: Unit tests protect successive downward, upward, keyboard, and
+  invalid-target insertion calculations; browser checks cover continuous lane
+  drop areas and rendered card movement.
+
+### D-059 — Board lanes progressively mount their task cards
+
+- Date: 2026-08-11
+- Status: accepted
+- Decision: Each React Board lane mounts its first 20 visible hierarchy rows,
+  then reveals additional batches of 20 as a lane-tail sentinel approaches the
+  Board's own scroll viewport. Lane headers continue to report the complete filtered task count.
+  The lane grid has a viewport-height minimum but grows to the tallest lane so
+  separators span the complete scrollable board.
+- Rationale: Large completed lanes can contain hundreds of tasks. Mounting all
+  of their card components and sortable registrations up front makes routine
+  rendering and drag collision work scale with board history rather than the
+  operator's current viewport.
+- Scope: React Board card rendering, keyboard navigation, sortable registration,
+  and full-height lane layout.
+- Constraints: The full task snapshot remains client-side and authoritative;
+  progressive mounting bounds DOM and drag work but is not server pagination.
+  Previously revealed cards remain mounted so scrolling never discards focus,
+  selection, or an in-progress drag. Filtering, sorting, grouping, or hierarchy
+  collapse starts a fresh render window.
+- Verification: Component coverage protects the initial per-lane bound and the
+  remaining-task sentinel; UI checks protect lint, types, tests, and production
+  build output.
+
+### D-060 — Agent inspection keeps command responses target-scoped
+
+- Date: 2026-08-11
+- Status: accepted
+- Decision: The React workspace stores auxiliary command responses by response
+  type and target identity, while retaining the most recent response only as a
+  compatibility fallback. Agent inspection combines runtime events, MCP calls,
+  persisted task/message history, Agent Class assignment and audit, and
+  principal journals without allowing one asynchronous response to replace an
+  unrelated one. Global historical runs live in Control Center and load run
+  details on selection.
+- Rationale: Classic agent panels routinely issue multiple read commands at
+  once. A single last-response slot made correct React parity impossible: a
+  worktree preflight could replace its diff, or one agent's history could
+  replace another agent's class status. Target-scoped storage also lets panels
+  retain their content while another surface refreshes.
+- Scope: React projection storage, focused agent inspection, global agent-run
+  history, Agent Class assignment/audit, and architect/engineer journal reads.
+- Constraints: The server remains authoritative. Agent Class assignment changes
+  desired next-launch authority only; the UI must show pending state and require
+  an explicit relaunch to change the effective frozen session snapshot. MCP
+  arguments and results remain subject to the server's capture/redaction policy.
+- Verification: Component tests inject interleaved responses for events, MCP,
+  history, class status/audit, and worktree data; backend coverage requires
+  class-audit responses to echo their target agent id.
+
+### D-061 — A task dialog is the complete Board work surface
+
+- Date: 2026-08-11
+- Status: accepted
+- Decision: Opening a React Board task exposes one scrollable work surface for
+  identity, group and assignment, action/role variables, dependencies,
+  scheduling, verification, external-ticket sync and communication, human ask
+  resolution, attachments, structured artifacts, completion evidence, prompt
+  preview, dispatch, and pipeline detachment. Compact cards remain concise;
+  multi-task metadata and lifecycle operations live in a persistent selection
+  bar and an explicit batch-edit dialog.
+- Rationale: Splitting task authority across hidden context-menu branches makes
+  operational state hard to discover and caused the migration's original
+  four-field editor to silently omit meaningful BoardTask fields. A complete
+  detail boundary can hydrate compact records once and makes destructive,
+  provider, and verification actions legible before execution.
+- Scope: React Board task detail, card menus, selection bar, archived-task
+  loading, external import/sync, schedules, lane management, filters, and saved
+  views.
+- Constraints: The daemon remains authoritative and every write uses an
+  existing command. Auxiliary previews are ignored until the requesting task
+  observes a new response, preventing stale global previews from appearing in
+  a newly opened dialog. File uploads remain staged until task save; removal is
+  explicit. Archived tasks are lazy-loaded and are not returned to the active
+  lane projection.
+- Verification: Component tests cover full-field updates, human/external/
+  artifact surface availability, multi-select dispatch, archive hydration, and
+  external import. UI check and production build remain required, with a live
+  daemon smoke covering lane, saved-view, and schedule dialogs.
+
+### D-062 — Planning and operational knowledge keep their native lifecycles
+
+- Date: 2026-08-11
+- Status: accepted
+- Decision: The React Planning workspace exposes complete, distinct editors
+  for Initiatives, Areas, Area notes, Scratchpad notes, Idea Briefs, Architect
+  decisions, and pending hires. Catalog authoring likewise preserves separate
+  Action, Role, Template, Specialization, Agent Class, and Dynamic Behavior
+  contracts. Shared memory and Architect peer chat live in focused agent
+  inspection because they are operational context, not Board-task fields.
+- Rationale: These records have different authority, approval, archival, and
+  linking semantics. Treating them as generic editable cards would erase the
+  product safeguards around Idea Brief promotion, Dynamic Behavior review,
+  Architect decisions, and durable memory scope.
+- Scope: React Planning, Action and catalog editors, Dynamic Behavior approval
+  queue, agent-linked Context, and Architect peer messaging.
+- Constraints: Every mutation uses an existing daemon command. Behavior changes
+  remain proposals until their declared next actor approves them; Idea Brief
+  proposal remains product-safe review only; Agent Class and Role authoring do
+  not bypass frozen-session authority. Advanced Role, Template, and
+  Specialization fields remain JSON-editable so the UI does not truncate future
+  schema additions.
+- Verification: Component tests cover Initiative linking, scoped memory
+  publishing/pinning, Role authoring, and Agent Class authoring. The complete UI
+  check and production build are required.
+
+### D-063 — Operator signals retain lifecycle, provenance, and authority
+
+- Date: 2026-08-11
+- Status: accepted
+- Decision: The React operator surfaces preserve alert and notification
+  lifecycle in Inbox, evidence and deep links in Mission Control, raw payloads
+  in Activity, maintained-source provenance in Help, and daemon authority in
+  supervisor, Relay, and AI controls. Advanced settings retain the complete
+  server-returned schema alongside dedicated common controls.
+- Rationale: Operational summaries are useful only when the operator can trace
+  them to evidence and act without losing durable state. Relay pairing links
+  and provider secrets have stricter handling than ordinary preferences, while
+  new daemon settings must not disappear merely because the frontend has not
+  designed a dedicated field yet.
+- Scope: React Inbox, Mission Control, Activity, Help, global/group settings,
+  Relay connection and pairing, AI providers and corpus indexing, and PTY
+  supervisor controls.
+- Constraints: Provider secrets remain write-only, one-time Relay material is
+  shown only from the direct command response, supervisor termination honors
+  server capability flags, and Help topics come only from the daemon allowlist.
+- Verification: Component tests cover notice lifecycle, Mission/health/
+  supervisor data, and Help topics. Live smoke covers source-backed Help,
+  advanced schemas, and protected supervisor controls.
+
+### D-064 — Board lane geometry owns both drop intent and dividers
+
+- Date: 2026-08-11
+- Status: superseded by D-066
+- Decision: Pointer drag collision first resolves the horizontal lane and then
+  the nearest vertical card in that lane. Lane padding and divider seams no
+  longer mean “append to lane.” The single Board grid row grows to the tallest
+  lane while retaining a viewport-height minimum, so every divider spans the
+  complete scrollable Board.
+- Rationale: Global closest-card fallback can cross a lane boundary, while a
+  lane-only fallback discards vertical intent and makes cards jump to the
+  bottom. Separately sized lane boxes leave dividers stranded at viewport
+  height when another lane grows.
+- Scope: React Board collision detection and lane grid sizing.
+- Constraints: Empty lanes still use the lane itself as their drop target;
+  keyboard dragging retains closest-center fallback; progressive card mounting
+  remains unchanged.
+- Verification: Unit coverage protects lane-seam and vertical-padding
+  resolution. The production build and live computed geometry must show equal
+  lane heights with a viewport-height minimum.
+
+### D-065 — React workspace chrome persists semantic preferences
+
+- Date: 2026-08-11
+- Status: accepted
+- Decision: The React workspace has one stable primary product surface with a
+  persistent, resizable navigation rail; independent work moves to native
+  detached windows. Appearance is applied locally before first paint, while
+  keyboard bindings, status-bar visibility, terminal message/composer heights,
+  detached-window bounds, and workspace widths use the daemon's durable UI
+  settings.
+- Rationale: Persisting user intent avoids layout jumps and lost working state
+  without coupling the replacement UI to the classic frontend's DOM-specific
+  dock and floating-panel model. Native windows also transfer cleanly between
+  Tauri today and a possible Electron host later.
+- Scope: React application shell, appearance and keybinding preferences,
+  status bar, terminal conversation sizing, and native panel detachment.
+- Constraints: Classic arbitrary dock/floating coordinates and classic-only
+  split ratios do not drive React layout. Host-specific APIs remain isolated in
+  the host adapter, and all resize affordances must remain keyboard accessible.
+  The Agents terminal and direct-message regions share a visible full-width
+  separator; resizing either region persists the conversation height without
+  introducing nested outer margins around the terminal workspace. The message
+  composer uses the same separator pattern above its text box instead of a
+  browser-native corner resize handle, and persists its own height separately.
+- Verification: Preference normalization and keybinding tests, UI check and
+  production build, plus live smoke for sidebar resizing, status items,
+  detached-panel capability gating, and restored terminal heights.
+
+### D-066 — Board lanes are independent working viewports
+
+- Date: 2026-08-12
+- Status: accepted
+- Decision: The Board owns horizontal overflow only. Every lane fills the Board
+  viewport, keeps its header outside the scroll surface, and gives its task body
+  an independent vertical scrollbar. Lane-local creation stays at the top of
+  that body. The workspace-level create command opens the complete create-task
+  dialog. A card's non-interactive shell is its drag activator; selectable text
+  and interactive controls do not begin pointer drags.
+- Rationale: A shared vertical document made one long historical lane control
+  every other lane, hid creation controls below hundreds of tasks, and made
+  dividers appear truncated. Whole-card pickup is faster than targeting a small
+  handle while preserving ordinary text selection.
+- Scope: React Board lane geometry, progressive mounting, task creation, and
+  pointer drag activation. This supersedes D-059's shared Board scroll-root
+  clause and D-064's tallest-row layout clause.
+- Constraints: Progressive mounting observes the owning lane body. Lane headers
+  and dividers remain visible for the complete Board viewport. Keyboard dragging
+  and the server-authoritative move/reorder command path remain unchanged.
+- Verification: Component coverage protects lane-local observation and creation
+  placement; the production build and live computed styles verify independent
+  overflow, full-height dividers, and the global dialog flow.
+
+### D-067 — Core work surfaces preserve action hierarchy and context
+
+- Date: 2026-08-12
+- Status: accepted
+- Decision: High-frequency editors keep their primary fields, current state,
+  and primary actions visible while secondary contracts use stable tabs with an
+  independently scrolling panel. An empty master-detail workspace collapses to
+  one action-oriented state until a selectable record exists. The command
+  palette is a real fuzzy-search surface with complete keyboard result control.
+  Aggregate counts belong in panel headers, local collection counts remain in
+  their section headers, and navigation tabs do not duplicate counts. Cards use
+  shared content/metadata spacing tokens; truncated user-authored values expose
+  their full accessible text and a passive title tooltip.
+- Rationale: Operators should not lose task identity or primary actions while
+  configuring execution details, and empty inspectors should not imply a
+  selection that does not exist. Shared density, count placement, and truncation
+  rules make Board, Agents, Planning, and Control read as one product rather
+  than adjacent feature implementations.
+- Scope: React task details, command palette, Agents empty state, panel and
+  collection counts, empty-state guidance, and card metadata across primary
+  product areas.
+- Constraints: Tabs are navigation rather than dashboards and therefore do not
+  carry aggregate badges. Lane and section counts remain local where they aid
+  scanning. Native title tooltips supplement rather than replace complete DOM
+  text and accessible names. Desktop task dialogs use an exact flex-owned body
+  height so only the secondary panel scrolls; compact layouts return the task
+  editor body to document scrolling when a fixed primary/secondary split would
+  be too narrow.
+- Verification: Component coverage protects task tabs and persistent primary
+  fields, empty Agents onboarding, fuzzy filtering and keyboard activation,
+  header count placement, and long-label titles. The production build plus live
+  normal and compact browser smoke verifies layout and overflow behavior.
+
+### D-068 — Board cards state task provenance and execution responsibility
+
+- Date: 2026-08-12
+- Status: accepted
+- Decision: Every Board card identifies who created the task and who currently
+  owns its execution. When a concrete worker differs from the responsible
+  Architect or Engineer, the worker appears as a subordinate “via” identity.
+  User-created and unassigned work use explicit `You` and `Unassigned` labels.
+  Every persisted agent identity is a direct link to that agent's focused
+  workspace; fallback identities remain inert text.
+  The card itself is the drag affordance, so no redundant grab-handle glyph is
+  shown. Drag transforms translate cards without scaling their intrinsic size.
+- Rationale: Creation provenance, accountable ownership, and the active worker
+  are different facts. Combining them into one anonymous agent badge obscured
+  the chain of responsibility, while scaling a lifted card to a neighbor's
+  height made variable-density Board ordering feel physically unstable.
+- Scope: React Board task normalization, card metadata, detail summary, and
+  sortable transforms.
+- Constraints: Creator provenance is immutable display data. Responsible
+  execution prefers assigned Engineer, then assigned Architect, then a concrete
+  agent. Text-selection and interactive-control exclusions still take priority
+  over card dragging.
+- Verification: Model and component tests protect ownership projection, visible
+  role labels, active-worker attribution, handle removal, and translation-only
+  transforms. A live pointer drag between unequal-height cards verifies that the
+  lifted card retains its width and height.
 
 ## Decision entry template
 

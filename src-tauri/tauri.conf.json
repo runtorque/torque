@@ -4,7 +4,8 @@
   "version": "2.2.0",
   "identifier": "net.torque.desktop",
   "build": {
-    "frontendDist": "../static"
+    "beforeBuildCommand": "npm --prefix ui run build",
+    "frontendDist": "../ui/dist"
   },
   "app": {
     "windows": [
@@ -21,9 +22,10 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' http://127.0.0.1:*; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*; img-src 'self' data: blob: http://127.0.0.1:*; font-src 'self' data: http://127.0.0.1:*; style-src 'self' 'unsafe-inline' http://127.0.0.1:*; script-src 'self' http://127.0.0.1:*",
+      "dangerousDisableAssetCspModification": false
     },
-    "withGlobalTauri": true
+    "withGlobalTauri": false
   },
   "bundle": {
     "active": true,

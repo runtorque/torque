@@ -1,0 +1,173 @@
+import {
+  KNOWN_DELTA_OPERATIONS,
+  type DeltaFrame,
+  type KnownDeltaOperation,
+  type KnownDeltaOperationName,
+  type StateFrame,
+  type UnknownRecord,
+} from './types';
+
+export const compactStateFixture: StateFrame = {
+  type: 'state',
+  seq: 10,
+  runtime: {
+    standalone: true,
+    profile: 'phase-one-test',
+    port: 18932,
+    version: 'test',
+  },
+  agents: {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Foundation Worker',
+      kind: 'worker',
+      group: 'Foundation',
+      status: 'running',
+    },
+  },
+  groups: {
+    Foundation: { name: 'Foundation', color: '#6172f3' },
+  },
+  children: { Foundation: ['agent-1'] },
+  board_tasks: {
+    'task-1': {
+      id: 'task-1',
+      task: 'Build the foundation',
+      group: 'Foundation',
+      lane: 'In Progress',
+    },
+  },
+  board_lanes: ['Backlog', 'Ready', 'In Progress', 'Done'],
+};
+
+export const fullStateFixture: StateFrame = {
+  ...compactStateFixture,
+  seq: 20,
+  agents: {
+    'agent-1': {
+      ...(compactStateFixture.agents as UnknownRecord)['agent-1'] as UnknownRecord,
+      messages: [{ id: 'message-1', text: 'Sanitized full snapshot fixture' }],
+      events: [{ id: 'event-1', kind: 'agent_started' }],
+    },
+  },
+};
+
+const fixturePayloads: Record<KnownDeltaOperationName, UnknownRecord> = {
+  agent_digest_update: { agent_id: 'agent-2', paused: false, resolved: { paused: false } },
+  agent_message_history_append: { agent_id: 'agent-2', entry: { id: 'history-1' }, limit: 100 },
+  agent_message_loop_upsert: { loop: { id: 'loop-1', state: 'active' } },
+  agent_peer_thread_remove: { thread_id: 'thread-removed' },
+  agent_peer_thread_upsert: { thread_id: 'thread-1', thread: { thread_id: 'thread-1' } },
+  agent_remove: { id: 'agent-removed' },
+  agent_settings_update: { agent_id: 'agent-2', model: 'fixture', resolved: { model: 'fixture' } },
+  agent_upsert: { id: 'agent-2', name: 'Protocol Worker', kind: 'worker', group: 'Foundation' },
+  ai_index_status_update: { status: 'ready' },
+  ai_settings_update: { enabled: false },
+  ai_summary_status_update: { status: 'idle' },
+  architect_dismissed: { architect_id: 'architect-1', dismissed_at: 1 },
+  architect_journal_append: { architect_id: 'architect-1', id: 'architect-journal-1' },
+  architect_rehired: { architect_id: 'architect-1' },
+  architect_settings_update: { group: 'Foundation', model: 'fixture' },
+  area_link_remove: { id: 'area-link-removed', area_id: 'area-1' },
+  area_link_upsert: { id: 'area-link-1', area_id: 'area-1' },
+  area_note_upsert: { id: 'area-note-1', area_id: 'area-1' },
+  area_upsert: { id: 'area-1', title: 'Fixture area' },
+  behavior_overlay_active_update: { agent_id: 'agent-2', active_version_id: 'overlay-version-1' },
+  behavior_overlay_proposal_resolve: { id: 'overlay-proposal-resolved', status: 'rejected' },
+  behavior_overlay_proposal_upsert: { id: 'overlay-proposal-1', status: 'proposed' },
+  behavior_overlay_version_append: { id: 'overlay-version-1', agent_id: 'agent-2', version_number: 1 },
+  context_update: { agent_id: 'agent-2', context_window: { used_percentage: 25 } },
+  decision_remove: { id: 'decision-removed' },
+  decision_upsert: { id: 'decision-1', status: 'accepted' },
+  digest_buffer_stats: { agent_id: 'agent-2', buffered_events: 1 },
+  digest_sent_push: { agent_id: 'agent-2', events: [{ id: 'digest-event-1' }] },
+  direct_message_read: { agent_id: 'agent-2', message: { id: 'dm-1' }, read_at: 2 },
+  direct_message_upsert: { agent_id: 'agent-2', message: { id: 'dm-2', text: 'fixture' } },
+  engineer_buffer_stats: { group: 'Foundation', buffered_events: 1 },
+  engineer_sent_events: { group: 'Foundation', events: [{ id: 'engineer-event-1' }] },
+  engineer_settings_update: { group: 'Foundation', model: 'fixture' },
+  engineer_streams: { group: 'Foundation', streams: { items: [{ id: 'stream-1' }] } },
+  engineer_streams_update: { group: 'Foundation', items: [{ id: 'stream-2' }] },
+  engineer_worklog_append: { group: 'Foundation', entry: { id: 'worklog-1' } },
+  event_append: { id: 'event-1', kind: 'agent_started', cell_id: 'agent-2' },
+  focus_update: { active_session_id: 'agent-2', current_window_id: 'main' },
+  global_settings_update: { theme: 'dark' },
+  group_remove: { name: 'Removed' },
+  group_rename: { old_name: 'Old', new_name: 'Renamed' },
+  group_settings_update: { name: 'Foundation', color: '#6172f3' },
+  group_update: { name: 'Foundation', agents: ['agent-2'] },
+  groups_reorder: { groups: ['Foundation', 'Renamed'] },
+  idea_brief_upsert: { id: 'idea-1', title: 'Fixture idea' },
+  initiative_link_remove: { id: 'initiative-link-removed', initiative_id: 'initiative-1' },
+  initiative_link_upsert: { id: 'initiative-link-1', initiative_id: 'initiative-1' },
+  initiative_upsert: { id: 'initiative-1', title: 'Fixture initiative' },
+  journal_append: { id: 'journal-1', author_cell_id: 'engineer-1' },
+  journal_delete: { id: 'journal-removed', author_cell_id: 'engineer-1' },
+  lanes_update: { lanes: ['Backlog', 'Ready', 'In Progress', 'Done'] },
+  mcp_call_append: { call: { id: 'call-1', cell_id: 'agent-2', hook_event_name: 'PostToolUse' } },
+  operator_notice_summary: { summary: { unread: 1 } },
+  operator_notice_upsert: { notice: { id: 'notice-1', title: 'Fixture notice' } },
+  operator_notices_read_all: { read_at: 3 },
+  peer_message_upsert: { agent_id: 'agent-2', message: { id: 'peer-message-1' } },
+  pending_hire_resolve: { id: 'hire-removed' },
+  pending_hire_upsert: { id: 'hire-1', status: 'pending' },
+  perceived_empty_episode: { cell_id: 'agent-2', episode: { id: 'episode-1' } },
+  planning_area_link_remove: { id: 'planning-link-removed', area_id: 'area-1' },
+  planning_area_link_upsert: { id: 'planning-link-1', area_id: 'area-1' },
+  planning_area_note_upsert: { id: 'planning-note-1', area_id: 'area-1' },
+  planning_area_upsert: { id: 'planning-area-1', title: 'Planning fixture' },
+  provider_usage: { provider: 'codex', usage: { five_hour: { used_percentage: 10 } } },
+  relay_config: { enabled: false },
+  relay_connection: { status: 'disabled' },
+  runtime: { standalone: true, profile: 'phase-one-test', port: 18932, version: 'test-next' },
+  schedule_remove: { id: 'schedule-removed' },
+  schedule_upsert: { id: 'schedule-1', enabled: true },
+  task_remove: { id: 'task-removed' },
+  task_upsert: { id: 'task-2', task: 'Replay deltas', group: 'Foundation', lane: 'Ready' },
+  thinking_scratchpad_note_upsert: { id: 'thinking-note-1', text: 'fixture' },
+  ui_update: { key: 'active_group', value: 'Foundation' },
+  worktree_merge_progress: { id: 'merge-1', phase: 'preflight' },
+};
+
+export const knownDeltaOperationFixtures: KnownDeltaOperation[] =
+  KNOWN_DELTA_OPERATIONS.map((op) => ({ op, ...fixturePayloads[op] })) as KnownDeltaOperation[];
+
+export const allKnownOperationsFixture: DeltaFrame = {
+  type: 'delta',
+  seq: 11,
+  ops: knownDeltaOperationFixtures,
+};
+
+export const representativeDeltaFixture: DeltaFrame = {
+  type: 'delta',
+  seq: 11,
+  ops: [
+    {
+      op: 'agent_upsert',
+      id: 'agent-2',
+      name: 'Protocol Worker',
+      kind: 'worker',
+      group: 'Foundation',
+      status: 'idle',
+    },
+    {
+      op: 'task_upsert',
+      id: 'task-2',
+      task: 'Replay deltas',
+      group: 'Foundation',
+      lane: 'Ready',
+    },
+    {
+      op: 'runtime',
+      standalone: true,
+      profile: 'phase-one-test',
+      port: 18932,
+      version: 'test-next',
+    },
+    {
+      op: 'ui_update',
+      key: 'active_group',
+      value: 'Foundation',
+    },
+  ],
+};

@@ -2,15 +2,13 @@
   "$schema": "../gen/schemas/capabilities.json",
   "identifier": "torque-default",
   "description": "Torque desktop shell permissions for native menus, detached panels, logs, dialogs, and shell links.",
-  "windows": ["*"],
+  "windows": ["main", "panel-*"],
   "remote": {
     "urls": ["http://127.0.0.1:*"]
   },
   "permissions": [
     "core:default",
     "core:webview:allow-create-webview-window",
-    "shell:allow-open",
-    "dialog:allow-confirm",
     "allow-detach",
     "allow-focus-window",
     "allow-reattach",

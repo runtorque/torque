@@ -27,6 +27,8 @@ class MakefileInstallTests(unittest.TestCase):
             f"{command_key}={self._footer_command(source)}",
             *[f"{key}={value}" for key, value in variables.items()],
         ]
+        if target == "test-ee":
+            arguments.append("TEST_EE_REQUIRE_CHECKOUT=0")
         return subprocess.run(
             arguments, cwd=ROOT, text=True, capture_output=True, env=env,
         )
@@ -180,6 +182,21 @@ class MakefileInstallTests(unittest.TestCase):
         )
 
         self.assertIn('profile="qa-profile"', proc.stdout)
+
+    def test_tauri_mac_bundle_defaults_to_ad_hoc_signing_and_verifies_artifacts(self):
+        proc = self._run_make_dry("tauri-build-mac")
+
+        self.assertIn('APPLE_SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:--}"', proc.stdout)
+        self.assertIn("cargo tauri build --bundles app,dmg", proc.stdout)
+        self.assertIn("codesign --verify --deep --strict --verbose=2", proc.stdout)
+        self.assertIn("hdiutil verify", proc.stdout)
+
+    def test_open_targets_react_root_and_named_classic_fallback(self):
+        primary = self._run_make_dry("open", "TORQUE_PORT=19001")
+        legacy = self._run_make_dry("open-legacy", "TORQUE_PORT=19001")
+
+        self.assertIn('open "http://127.0.0.1:19001/"', primary.stdout)
+        self.assertIn('open "http://127.0.0.1:19001/legacy/"', legacy.stdout)
 
     def test_removed_toolbelt_make_targets_not_advertised_in_first_party_docs(self):
         stale_target_re = re.compile(

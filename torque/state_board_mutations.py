@@ -1309,6 +1309,11 @@ class BoardMutationMixin:
             position=position,
             clear_attention=(lane == "Done"),
         )
+        if position is not None:
+            # A cross-lane insertion index describes a slot, not a durable
+            # position value. Normalize the destination lane so the moved task
+            # cannot tie an existing task and sort unpredictably on clients.
+            self.board_reorder_task(task.id, position)
         self._refresh_finalization_root_projection(task)
         if lane == "Done":
             self.board_cascade_done(tid, recompute=False)

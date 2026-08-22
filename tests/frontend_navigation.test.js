@@ -14,6 +14,20 @@ function load(context, file) {
   vm.runInContext(source(file), context, { filename: file });
 }
 
+test('classic shell exposes an app-wide switch to the React UI', () => {
+  const html = source('webview.html');
+  const css = source('static/styles/feature-panels.css');
+
+  assert.match(
+    html,
+    /id="new-ui-switch" class="hdr-btn classic-ui-switch" type="button"[\s\S]*?onclick="window\.location\.assign\('\/ui-next\/'\)"[\s\S]*?>New UI<\/button>/,
+  );
+  assert.match(
+    css,
+    /\.classic-ui-switch\s*\{[^}]*pointer-events:\s*auto;[^}]*text-decoration:\s*none;/s,
+  );
+});
+
 test('group navigation shares its header row with compact view and creation controls', () => {
   const html = source('webview.html');
   const tabs = source('static/js/grid/group-tabs.js');

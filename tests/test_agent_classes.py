@@ -1225,6 +1225,7 @@ class AgentClassDoctorAndCommandTests(unittest.TestCase):
         self.assertIn("effective_authority", preview["agent_class"])
         self.assertEqual(assigned["status"]["assigned_class_id"], "product-manager")
         self.assertTrue(status["status"]["pending_next_launch"])
+        self.assertEqual(audit["agent_id"], self.cell.id)
         self.assertGreaterEqual(len(audit["events"]), 1)
         self.assertEqual(cleared["status"]["assigned_class_id"], "")
         self.assertEqual(archived["operation"], "archived")

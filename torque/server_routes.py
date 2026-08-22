@@ -28,6 +28,11 @@ from .event_ingest_db import redact_event_for_mcp_call_log
 from .events import build_event_ingest_envelope
 from .mcp import dispatch_mcp_rpc_body
 from .mcp_retry import api_request_hash, is_api_write_command, replay_failed_writes
+from .react_ui_assets import (
+    react_ui_cache_headers,
+    react_ui_request_path,
+    resolve_react_ui_file,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +47,8 @@ class EventRoutes:
 @dataclass(frozen=True, slots=True)
 class HttpRoutes:
     handle_index: Any
+    handle_legacy: Any
+    handle_react_ui: Any
     handle_runtime: Any
     handle_ws: Any
     handle_terminal_ws: Any
@@ -389,9 +396,41 @@ def build_http_routes(
     _send_ui_ws_json = send_ui_ws_json
     _tail_log_entries = tail_log_entries
     _ui_client_id_from_request = ui_client_id_from_request
-    async def handle_index(_request):
+    def _serve_legacy():
             from .config import WEBVIEW_FILE  # re-read after init_paths
-            return web.FileResponse(WEBVIEW_FILE)
+            return web.FileResponse(WEBVIEW_FILE, headers={
+                "Cache-Control": "no-store",
+            })
+
+    def _serve_react_path(request_path: str):
+            from .config import REACT_UI_DIR  # re-read after init_paths
+            path = resolve_react_ui_file(REACT_UI_DIR, request_path)
+            if path is None:
+                if not (REACT_UI_DIR / "index.html").is_file():
+                    return web.Response(
+                        status=503,
+                        text="Torque React UI is not built. Run: make ui-build\n",
+                        content_type="text/plain",
+                    )
+                raise web.HTTPNotFound()
+            return web.FileResponse(path, headers=react_ui_cache_headers(path))
+
+    async def handle_index(request):
+            from .config import UI_DEFAULT
+            if UI_DEFAULT == "legacy":
+                return _serve_legacy()
+            return _serve_react_path(react_ui_request_path(
+                request.path,
+                request.match_info.get("path", ""),
+            ))
+
+    async def handle_legacy(_request):
+            return _serve_legacy()
+
+    async def handle_react_ui(request):
+            if request.path == "/ui-next":
+                raise web.HTTPPermanentRedirect("/ui-next/")
+            return _serve_react_path(request.match_info.get("path", ""))
 
     async def handle_runtime(_request):
             """Return lightweight runtime identity for launcher readiness probes."""
@@ -959,6 +998,8 @@ def build_http_routes(
 
     return HttpRoutes(
         handle_index=handle_index,
+        handle_legacy=handle_legacy,
+        handle_react_ui=handle_react_ui,
         handle_runtime=handle_runtime,
         handle_ws=handle_ws,
         handle_terminal_ws=handle_terminal_ws,

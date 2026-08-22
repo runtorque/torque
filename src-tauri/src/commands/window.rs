@@ -182,7 +182,7 @@ pub fn detach_panel(
     }
 
     let label = make_detached_label(&panel);
-    let url = detached_url(&settings.url(), &panel, &label)?;
+    let url = detached_url(&settings.frontend_url(), &panel, &label)?;
     let mut builder = WebviewWindowBuilder::new(app, label.clone(), WebviewUrl::External(url))
         .title(format!("Torque — {}", panel_title(&panel)))
         .inner_size(
@@ -252,7 +252,8 @@ pub fn window_bounds(window: &WebviewWindow) -> Result<WindowBounds, String> {
 pub fn sanitize_panel(panel: &str) -> Option<String> {
     let panel = panel.trim().to_ascii_lowercase();
     match panel.as_str() {
-        "board" | "actions" | "templates" | "context" | "events" | "engineer" => Some(panel),
+        "board" | "actions" | "templates" | "context" | "events" | "engineer" | "agents"
+        | "terminal" | "planning" | "control" => Some(panel),
         _ => None,
     }
 }
@@ -265,6 +266,10 @@ pub fn panel_title(panel: &str) -> &'static str {
         "context" => "Context",
         "events" => "Events",
         "engineer" => "Agent",
+        "agents" => "Agents",
+        "terminal" => "Terminal",
+        "planning" => "Planning",
+        "control" => "Control Center",
         _ => "Panel",
     }
 }
@@ -287,7 +292,7 @@ fn detached_url(base: &str, panel: &str, label: &str) -> Result<tauri::Url, Stri
     let sep = if base.contains('?') { '&' } else { '?' };
     let url = format!(
         "{}{}panel={}&window={}",
-        base.trim_end_matches('/'),
+        base,
         sep,
         percent_encode(panel),
         percent_encode(label)
@@ -381,6 +386,21 @@ mod tests {
         assert_eq!(panel_from_label(&label).as_deref(), Some("engineer"));
         assert_eq!(sanitize_panel("Library"), None);
         assert_eq!(sanitize_panel("templates").as_deref(), Some("templates"));
+        assert_eq!(sanitize_panel("agents").as_deref(), Some("agents"));
+        assert_eq!(sanitize_panel("terminal").as_deref(), Some("terminal"));
+        assert_eq!(sanitize_panel("planning").as_deref(), Some("planning"));
+        assert_eq!(sanitize_panel("control").as_deref(), Some("control"));
+    }
+
+    #[test]
+    fn detached_url_preserves_route_base_for_relative_assets() {
+        let url = detached_url("http://127.0.0.1:18933/ui-next/", "board", "panel-board-1")
+            .expect("detached URL");
+
+        assert_eq!(
+            url.as_str(),
+            "http://127.0.0.1:18933/ui-next/?panel=board&window=panel-board-1"
+        );
     }
 
     #[test]
