@@ -5,6 +5,7 @@ const browserChannel = process.env.TORQUE_PLAYWRIGHT_CHANNEL;
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
+  workers: 1, // Files mutate the same daemon profile and active-group state.
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? 'github' : 'list',

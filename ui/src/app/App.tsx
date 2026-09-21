@@ -157,6 +157,8 @@ export function WorkspaceShell({ host, sendCommand }: WorkspaceShellProps) {
   const [addGroupOpen, setAddGroupOpen] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupDirectory, setNewGroupDirectory] = useState('');
+  const [reorderGroup, setReorderGroup] = useState('');
+  const [groupBefore, setGroupBefore] = useState('');
   const [renameGroup, setRenameGroup] = useState('');
   const [renameGroupName, setRenameGroupName] = useState('');
   const [inboxView, setInboxView] = useState<'alert' | 'notification'>('alert');
@@ -178,6 +180,15 @@ export function WorkspaceShell({ host, sendCommand }: WorkspaceShellProps) {
   const legacyUrl = new URL('/legacy/', window.location.origin).toString();
   const detachedPanel = query.get('panel');
   const detachedWindowLabel = query.get('window') ?? '';
+  const activeDetachedWindow = asRecord(asRecord(workspace.detachedPanels)[workspaceUi.activePanel]);
+  const activeDetachedLabel = !detachedPanel && hasHostCapability(host, 'detach-panel') ? textValue(activeDetachedWindow.label) : '';
+  const reattachActive = async () => {
+    try {
+      await host.reattachWindow(activeDetachedLabel);
+      const next = { ...asRecord(workspace.detachedPanels) }; delete next[workspaceUi.activePanel];
+      if (!sendCommand({ cmd: 'ui_set_detached_panels', detached_panels: next })) commandUnavailable();
+    } catch { commandUnavailable(); }
+  };
   const persistedSidebarWidth = Number(workspace.sidebarWidth ?? 0);
   const [sidebarWidth, setSidebarWidth] = useState(Number.isFinite(persistedSidebarWidth) && persistedSidebarWidth > 0 ? persistedSidebarWidth : 188);
   const globalSettings = operations.globalSettings;
@@ -382,7 +393,7 @@ export function WorkspaceShell({ host, sendCommand }: WorkspaceShellProps) {
 
   useEffect(() => {
     const target = window as NativeMenuWindow;
-    const openControl = (tab: 'mission' | 'activity' | 'settings' | 'help') => {
+    const openControl = (tab: 'mission' | 'activity' | 'logs' | 'settings' | 'help') => {
       dispatch(workspaceUiActions.setActivePanel('control'));
       dispatch(workspaceUiActions.setControlTab(tab));
     };
@@ -408,7 +419,7 @@ export function WorkspaceShell({ host, sendCommand }: WorkspaceShellProps) {
     target.openGlobalSettings = () => openControl('settings');
     target.openCheatsheet = () => openControl('help');
     target.openWelcome = () => setWelcomeOpen(true);
-    target.openLogViewer = () => openControl('activity');
+    target.openLogViewer = () => openControl('logs');
     target.detachActivePanel = () => {
       if (!hasHostCapability(host, 'detach-panel') || detachedPanel) return;
       const panel = workspaceUi.activePanel;
@@ -488,7 +499,7 @@ export function WorkspaceShell({ host, sendCommand }: WorkspaceShellProps) {
     return <main className={styles.detachedShell}>
       {detachedPanel === 'board' ? <BoardPanel group={activeGroup} sendCommand={sendCommand} onCommandUnavailable={commandUnavailable} /> : null}
       {detachedPanel === 'planning' ? <Suspense fallback={<StateSurface title="Loading Planning" description="Preparing planning resources." />}><PlanningWorkspace group={activeGroup} sendCommand={sendCommand} onCommandUnavailable={commandUnavailable} /></Suspense> : null}
-      {detachedPanel === 'control' ? <Suspense fallback={<StateSurface title="Loading Control Center" description="Preparing operational resources." />}><ControlCenter key={activeGroup} group={activeGroup} sendCommand={sendCommand} onCommandUnavailable={commandUnavailable} /></Suspense> : null}
+      {detachedPanel === 'control' ? <Suspense fallback={<StateSurface title="Loading Control Center" description="Preparing operational resources." />}><ControlCenter host={host} key={activeGroup} group={activeGroup} sendCommand={sendCommand} onCommandUnavailable={commandUnavailable} /></Suspense> : null}
       <div className={styles.toastRegion} role="region" aria-label="Notifications" aria-live="polite">{toasts.map((toast) => <div key={toast.id} className={`${styles.toast} ${styles[`toast_${toast.level}`] ?? ''}`}>{toast.message}</div>)}</div>
     </main>;
   }
@@ -501,10 +512,10 @@ export function WorkspaceShell({ host, sendCommand }: WorkspaceShellProps) {
           <div><strong>Torque</strong><span>{textValue(runtime.profile, 'default')}</span></div>
         </header>
         <nav className={styles.primaryNav} aria-label="Product areas">
-          <button className={workspaceUi.activePanel === 'board' ? styles.navActive : ''} aria-current={workspaceUi.activePanel === 'board' ? 'page' : undefined} onClick={() => dispatch(workspaceUiActions.setActivePanel('board'))}><span>▦</span> Board <kbd>B</kbd></button>
+          <button className={workspaceUi.activePanel === 'board' && !activeDetachedLabel ? styles.navActive : ''} aria-current={workspaceUi.activePanel === 'board' && !activeDetachedLabel ? 'page' : undefined} onClick={() => dispatch(workspaceUiActions.setActivePanel('board'))}><span>▦</span> Board <kbd>B</kbd></button>
           <button className={workspaceUi.activePanel === 'agents' ? styles.navActive : ''} aria-current={workspaceUi.activePanel === 'agents' ? 'page' : undefined} onClick={() => dispatch(workspaceUiActions.setActivePanel('agents'))}><span>⌁</span> Agents <kbd>A</kbd></button>
-          <button className={workspaceUi.activePanel === 'planning' ? styles.navActive : ''} aria-current={workspaceUi.activePanel === 'planning' ? 'page' : undefined} onClick={() => dispatch(workspaceUiActions.setActivePanel('planning'))}><span>◇</span> Planning <kbd>P</kbd></button>
-          <button className={workspaceUi.activePanel === 'control' ? styles.navActive : ''} aria-current={workspaceUi.activePanel === 'control' ? 'page' : undefined} onClick={() => dispatch(workspaceUiActions.setActivePanel('control'))}><span>◎</span> Control <kbd>O</kbd></button>
+          <button className={workspaceUi.activePanel === 'planning' && !activeDetachedLabel ? styles.navActive : ''} aria-current={workspaceUi.activePanel === 'planning' && !activeDetachedLabel ? 'page' : undefined} onClick={() => dispatch(workspaceUiActions.setActivePanel('planning'))}><span>◇</span> Planning <kbd>P</kbd></button>
+          <button className={workspaceUi.activePanel === 'control' && !activeDetachedLabel ? styles.navActive : ''} aria-current={workspaceUi.activePanel === 'control' && !activeDetachedLabel ? 'page' : undefined} onClick={() => dispatch(workspaceUiActions.setActivePanel('control'))}><span>◎</span> Control <kbd>O</kbd></button>
         </nav>
         <section className={styles.groupNav} aria-labelledby="groups-heading">
           <header><h2 id="groups-heading">Groups</h2><span>{groupNames.length}</span><button aria-label="Add group" onClick={() => setAddGroupOpen(true)}>＋</button></header>
@@ -512,7 +523,7 @@ export function WorkspaceShell({ host, sendCommand }: WorkspaceShellProps) {
             {groupNames.map((group, index) => {
               const settings = asRecord(groups[group]);
               const color = typeof settings.color === 'string' ? settings.color : '#6172f3';
-              return <div key={group} className={styles.groupRow}><button className={group === activeGroup ? styles.groupActive : ''} onClick={() => selectGroup(group)}><i style={{ background: color }} />{displayName(groups[group], group)}</button><ActionMenu label={`${group} group options`}><ActionMenuItem onAction={() => { setRenameGroup(group); setRenameGroupName(group); }}>Rename</ActionMenuItem><ActionMenuItem onAction={() => { dispatch(workspaceUiActions.setActivePanel('control')); dispatch(workspaceUiActions.setControlTab('settings')); }}>Settings</ActionMenuItem><ActionMenuItem onAction={() => runCommand({ cmd: 'move_group', group, before: index === 0 ? '' : groupNames[0] })} isDisabled={groupNames.length < 2}>{index === 0 ? 'Move to bottom' : 'Move to top'}</ActionMenuItem><ActionMenuItem onAction={() => { void host.confirm({ title: `Remove ${group}?`, message: 'The group can be removed only when its agents and protected state allow it.', confirmLabel: 'Remove', destructive: true }).then((confirmed) => { if (confirmed) runCommand({ cmd: 'remove_group', group }); }); }}>Remove…</ActionMenuItem></ActionMenu></div>;
+              return <div key={group} className={styles.groupRow} draggable onDragStart={(event) => event.dataTransfer.setData('application/x-torque-group', group)} onDragOver={(event) => { if (event.dataTransfer.types.includes('application/x-torque-group')) event.preventDefault(); }} onDrop={(event) => { const moved = event.dataTransfer.getData('application/x-torque-group'); if (moved && moved !== group && groupNames.includes(moved)) { event.preventDefault(); runCommand({ cmd: 'move_group', group: moved, before: group }); } }}><button className={group === activeGroup ? styles.groupActive : ''} onClick={() => selectGroup(group)}><i style={{ background: color }} />{displayName(groups[group], group)}</button><ActionMenu label={`${group} group options`}><ActionMenuItem onAction={() => { setRenameGroup(group); setRenameGroupName(group); }}>Rename</ActionMenuItem><ActionMenuItem onAction={() => { dispatch(workspaceUiActions.setActivePanel('control')); dispatch(workspaceUiActions.setControlTab('settings')); }}>Settings</ActionMenuItem><ActionMenuItem onAction={() => { setReorderGroup(group); setGroupBefore(''); }}>Move group…</ActionMenuItem><ActionMenuItem onAction={() => runCommand({ cmd: 'move_group', group, before: index === 0 ? '' : groupNames[0] })} isDisabled={groupNames.length < 2}>{index === 0 ? 'Move to bottom' : 'Move to top'}</ActionMenuItem><ActionMenuItem onAction={() => { void host.confirm({ title: `Remove ${group}?`, message: 'The group can be removed only when its agents and protected state allow it.', confirmLabel: 'Remove', destructive: true }).then((confirmed) => { if (confirmed) runCommand({ cmd: 'remove_group', group }); }); }}>Remove…</ActionMenuItem></ActionMenu></div>;
             })}
           </div>
         </section>
@@ -531,7 +542,7 @@ export function WorkspaceShell({ host, sendCommand }: WorkspaceShellProps) {
           <a href={legacyUrl} className={styles.legacyLink}>Classic UI</a>
           <ActionMenu label="Workspace actions" trigger={<Button tone="quiet">•••</Button>}>
             <ActionMenuItem onAction={() => (window as NativeMenuWindow).detachActivePanel?.()} isDisabled={!hasHostCapability(host, 'detach-panel')}>Detach current panel</ActionMenuItem>
-            <ActionMenuItem onAction={() => { dispatch(workspaceUiActions.setActivePanel('control')); dispatch(workspaceUiActions.setControlTab('activity')); }}>Open logs</ActionMenuItem>
+            <ActionMenuItem onAction={() => { dispatch(workspaceUiActions.setActivePanel('control')); dispatch(workspaceUiActions.setControlTab('logs')); }}>Open logs</ActionMenuItem>
             <ActionMenuItem onAction={() => { if (hasHostCapability(host, 'reveal-log-directory')) void host.revealLogDirectory(); }} isDisabled={!hasHostCapability(host, 'reveal-log-directory')}>Reveal log directory</ActionMenuItem>
             <ActionMenuItem onAction={() => { void host.confirm({ title: 'Restart Torque daemon?', message: 'Live sessions may briefly reconnect.', confirmLabel: 'Restart', destructive: true }).then((confirmed) => { if (confirmed) runCommand({ cmd: 'restart' }); }); }}>Restart daemon…</ActionMenuItem>
             <ActionMenuItem onAction={() => { void host.confirm({ title: 'Stop Torque daemon?', message: 'The UI will disconnect until Torque is launched again.', confirmLabel: 'Stop', destructive: true }).then((confirmed) => { if (confirmed) runCommand({ cmd: 'stop' }); }); }}>Stop daemon…</ActionMenuItem>
@@ -556,10 +567,11 @@ export function WorkspaceShell({ host, sendCommand }: WorkspaceShellProps) {
         </header>
 
         {connection.status === 'disconnected' ? <div className={styles.connectionBanner}>Connection lost. Torque will reconnect automatically.</div> : null}
-        {workspaceUi.activePanel === 'board' ? <BoardPanel group={activeGroup} sendCommand={sendCommand} onCommandUnavailable={commandUnavailable} /> : null}
-        {workspaceUi.activePanel === 'agents' ? <AgentWorkspace group={activeGroup} host={host} sendCommand={sendCommand} onCommandUnavailable={commandUnavailable} /> : null}
-        {workspaceUi.activePanel === 'planning' ? <Suspense fallback={<StateSurface title="Loading Planning" description="Preparing planning resources." />}><PlanningWorkspace group={activeGroup} sendCommand={sendCommand} onCommandUnavailable={commandUnavailable} /></Suspense> : null}
-        {workspaceUi.activePanel === 'control' ? <Suspense fallback={<StateSurface title="Loading Control Center" description="Preparing operational resources." />}><ControlCenter key={activeGroup} group={activeGroup} sendCommand={sendCommand} onCommandUnavailable={commandUnavailable} /></Suspense> : null}
+        {workspaceUi.activePanel === 'board' && !activeDetachedLabel ? <BoardPanel group={activeGroup} sendCommand={sendCommand} onCommandUnavailable={commandUnavailable} /> : null}
+        {activeDetachedLabel ? <StateSurface title={`${workspaceUi.activePanel[0]?.toUpperCase()}${workspaceUi.activePanel.slice(1)} workspace detached`} description="This workspace is open in its native window." action={<><Button onPress={() => { void host.focusWindow(activeDetachedLabel).catch(commandUnavailable); }}>Focus detached workspace</Button><Button onPress={() => { void reattachActive(); }}>Reattach workspace</Button></>} /> : null}
+        {workspaceUi.activePanel === 'agents' ? <div className={styles.agentWorkspaceHost} hidden={Boolean(activeDetachedLabel)}><AgentWorkspace active={!activeDetachedLabel} group={activeGroup} host={host} sendCommand={sendCommand} onCommandUnavailable={commandUnavailable} /></div> : null}
+        {workspaceUi.activePanel === 'planning' && !activeDetachedLabel ? <Suspense fallback={<StateSurface title="Loading Planning" description="Preparing planning resources." />}><PlanningWorkspace group={activeGroup} sendCommand={sendCommand} onCommandUnavailable={commandUnavailable} /></Suspense> : null}
+        {workspaceUi.activePanel === 'control' && !activeDetachedLabel ? <Suspense fallback={<StateSurface title="Loading Control Center" description="Preparing operational resources." />}><ControlCenter host={host} key={activeGroup} group={activeGroup} sendCommand={sendCommand} onCommandUnavailable={commandUnavailable} /></Suspense> : null}
         <footer className={styles.statusBar} aria-label="Workspace status">
           {statusVisibility.daemon_status ? <span data-state={connection.status}>● Daemon {connection.status}</span> : null}
           {statusVisibility.deploy ? <span>Deploy {textValue(deployState.status, textValue(deployState.state, '—'))}{Number(deployState.commits_behind ?? deployState.behind ?? 0) ? ` +${Number(deployState.commits_behind ?? deployState.behind)}` : ''}</span> : null}
@@ -589,6 +601,10 @@ export function WorkspaceShell({ host, sendCommand }: WorkspaceShellProps) {
           <label>Default directory<input value={newGroupDirectory} onChange={(event) => setNewGroupDirectory(event.target.value)} placeholder="Optional" /></label>
           <footer><Button tone="quiet" onPress={() => setAddGroupOpen(false)}>Cancel</Button><Button tone="primary" type="submit" isDisabled={!newGroupName.trim()}>Create group</Button></footer>
         </form>
+      </ModalDialog>
+
+      <ModalDialog title="Move group" description={reorderGroup} size="small" isOpen={Boolean(reorderGroup)} onOpenChange={(open) => { if (!open) setReorderGroup(''); }}>
+        <form onSubmit={(event) => { event.preventDefault(); runCommand({ cmd: 'move_group', group: reorderGroup, before: groupBefore }); setReorderGroup(''); }}><label>Group position<select value={groupBefore} onChange={(event) => setGroupBefore(event.target.value)}><option value="">At end</option>{groupNames.filter((name) => name !== reorderGroup).map((name) => <option key={name} value={name}>Before {name}</option>)}</select></label><Button type="submit" tone="primary">Move group</Button></form>
       </ModalDialog>
 
       <ModalDialog title="Rename group" description={renameGroup} size="small" isOpen={Boolean(renameGroup)} onOpenChange={(open) => { if (!open) setRenameGroup(''); }}>

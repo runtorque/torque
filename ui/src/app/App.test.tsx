@@ -1,6 +1,6 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { Provider } from 'react-redux';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { browserHost, createTauriHost } from '../host';
 import { compactStateFixture } from '../protocol/fixtures';
@@ -23,6 +23,22 @@ function renderShell(host = browserHost, frame: StateFrame = compactStateFixture
     </Provider>,
   );
   return { appStore, sendCommand };
+}
+
+afterEach(() => vi.unstubAllGlobals());
+
+function mockSettingsRequests(failSave = false) {
+  const commands: TorqueCommand[] = [];
+  const fetcher = vi.fn((_url: string, options?: RequestInit) => {
+    const command = JSON.parse(typeof options?.body === 'string' ? options.body : '{}' ) as TorqueCommand;
+    commands.push(command);
+    if (failSave && command.cmd === 'update_group_settings') return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: false, error: 'Group save refused' }) });
+    const frame = command.cmd === 'get_global_settings' ? { type: 'global_settings', settings: { xterm_scrollback: 5000, event_ingest_max_days: 14, mcp_call_log_args_capture: 'metadata' } }
+      : command.cmd === 'get_group_settings' ? { type: 'group_settings', group: 'Foundation', settings: { max_agents: 4, shell: '/bin/zsh', env_vars: {}, worktree_symlinks: [] }, engineer_settings: { default_worker_concurrency: 2, digest_verbosity: 'normal' }, architect_settings: { heartbeat_interval: 300 } }
+      : command.cmd === 'get_ai_settings' ? { type: 'ai_settings', settings: {} } : { type: 'ok' };
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: frame }) });
+  });
+  vi.stubGlobal('fetch', fetcher); return { commands, fetcher };
 }
 
 describe('workspace shell', () => {
@@ -270,6 +286,13 @@ describe('workspace shell', () => {
 
     expect(screen.getByText('tauri')).toBeVisible();
     expect(screen.getByRole('heading', { name: 'Board' })).toBeVisible();
+  });
+
+  it('keeps browser workspaces available when the shared profile has native detached windows', () => {
+    renderShell(browserHost, { ...compactStateFixture, detached_panels: { agents: { label: 'agents-native' } } });
+    fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
+    expect(screen.getByRole('tree', { name: 'Agent ownership hierarchy' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Reattach workspace' })).not.toBeInTheDocument();
   });
 
   it('uses icon-only workspace detach actions without a terminal detach row', () => {
@@ -717,7 +740,7 @@ describe('workspace shell', () => {
       ...compactStateFixture,
       initiatives: { 'initiative-1': { id: 'initiative-1', group_name: 'Foundation', title: 'Parity roadmap', summary: 'Close migration gaps', planning_status: 'now', links: [] } },
     };
-    const { sendCommand } = renderShell(browserHost, frame);
+    const { sendCommand, appStore } = renderShell(browserHost, frame);
     fireEvent.click(screen.getByRole('button', { name: /Planning/ }));
     fireEvent.click(await screen.findByRole('button', { name: /Parity roadmap/ }));
     const dialog = screen.getByRole('dialog', { name: 'Initiative' });
@@ -726,6 +749,16 @@ describe('workspace shell', () => {
     fireEvent.change(within(dialog).getByRole('combobox', { name: 'Linked record' }), { target: { value: 'task-1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Link' }));
     expect(sendCommand).toHaveBeenCalledWith({ cmd: 'initiative_link_task', id: 'initiative-1', task_id: 'task-1' });
+    sendCommand.mockClear();
+    act(() => { appStore.dispatch(connectionActions.auxiliaryFrameReceived({ type: 'initiative_task_linked', link: { initiative_id: 'initiative-1', target_id: 'task-1' } })); });
+    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'initiative_list', group: 'Foundation', include_archived: false });
+    act(() => { appStore.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: 11, ops: [{ op: 'initiative_link_upsert', id: 'link-1', initiative_id: 'initiative-1', link_type: 'task', target_id: 'task-1' }] })); });
+    expect(within(dialog).getByRole('button', { name: 'Unlink' })).toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'Why this matters' })).toHaveValue('Retire the classic UI safely');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Unlink' }));
+    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'initiative_unlink_task', id: 'initiative-1', task_id: 'task-1' });
+    act(() => { appStore.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: 12, ops: [{ op: 'initiative_link_remove', initiative_id: 'initiative-1', link_type: 'task', target_id: 'task-1' }] })); });
+    expect(within(dialog).queryByRole('button', { name: 'Unlink' })).not.toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
     expect(sendCommand).toHaveBeenCalledWith(expect.objectContaining({ cmd: 'initiative_update', id: 'initiative-1', why: 'Retire the classic UI safely' }));
   });
@@ -951,6 +984,21 @@ describe('workspace shell', () => {
     expect(screen.getAllByRole('button', { name: 'feature/implement' })).toHaveLength(1);
   });
 
+  it('keeps action preview scoped after unrelated responses', async () => {
+    const { appStore } = renderShell();
+    act(() => { appStore.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'actions', actions: [{ name: 'test/action' }] })); });
+    fireEvent.click(screen.getByRole('button', { name: /Control/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'test/action' }));
+    act(() => {
+      appStore.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'action_detail', name: 'test/action', action: { prompt: '{{ TASK }}' } }));
+      appStore.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'action_rendered', name: 'test/action', group: '', prompt: 'Rendered preview evidence' }));
+      appStore.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'ok' }));
+    });
+    expect(screen.getByText('Rendered preview evidence')).toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('test/action');
+  });
+
   it('reports invalid action JSON instead of silently ignoring Save', async () => {
     const { sendCommand } = renderShell();
     fireEvent.click(screen.getByRole('button', { name: /Control/ }));
@@ -1026,21 +1074,38 @@ describe('workspace shell', () => {
     expect(createdClass.acl).toEqual({ mode: 'allow', rules: [{ capability: 'self.read', scope: 'self' }] });
   });
 
-  it('coordinates dirty global, group, and AI settings saves', async () => {
-    const { sendCommand } = renderShell();
+  it('coordinates confirmed global, group, and AI saves without promoting inherited relay settings', async () => {
+    const { commands } = mockSettingsRequests();
+    renderShell();
     fireEvent.click(screen.getByRole('button', { name: /Control/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
-
-    const scrollback = screen.getByRole('spinbutton', { name: 'Terminal scrollback' });
+    const scrollback = await screen.findByRole('spinbutton', { name: 'Terminal scrollback' });
     fireEvent.change(scrollback, { target: { value: '9000' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(commands.some((command) => command.cmd === 'update_ai_settings')).toBe(true));
+    const global = commands.find((command) => command.cmd === 'update_global_settings')?.settings as Record<string, unknown>;
+    expect(global.xterm_scrollback).toBe(9000);
+    expect(global).not.toHaveProperty('relay_enabled');
+    expect(commands).toContainEqual(expect.objectContaining({ cmd: 'update_group_settings', group: 'Foundation' }));
+    expect(await screen.findByText('Saved', { exact: true })).toBeVisible();
+  });
 
-    expect(sendCommand.mock.calls.some(([command]) => command.cmd === 'update_global_settings'
-      && typeof command.settings === 'object'
-      && command.settings !== null
-      && (command.settings as Record<string, unknown>).xterm_scrollback === 9000)).toBe(true);
-    expect(sendCommand).toHaveBeenCalledWith(expect.objectContaining({ cmd: 'update_group_settings', group: 'Foundation' }));
-    expect(sendCommand).toHaveBeenCalledWith(expect.objectContaining({ cmd: 'update_ai_settings' }));
+  it('retains structured settings drafts and exposes a partial save failure', async () => {
+    mockSettingsRequests(true);
+    const { appStore } = renderShell();
+    fireEvent.click(screen.getByRole('button', { name: /Control/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    const scrollback = await screen.findByRole('spinbutton', { name: 'Terminal scrollback' });
+    fireEvent.change(scrollback, { target: { value: '9100' } });
+    act(() => { appStore.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'group_settings', group: 'Foundation', settings: { max_agents: 9 }, engineer_settings: {} })); });
+    expect(scrollback).toHaveValue(9100);
+    fireEvent.click(screen.getByText('Global defaults'));
+    expect(screen.getByLabelText('Event ingest max days')).toHaveValue(14);
+    expect(screen.queryByLabelText('Global settings (JSON)')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByText(/Group save refused/)).toBeVisible();
+    expect(scrollback).toHaveValue(9100);
+    expect(screen.getByText('Unsaved changes')).toBeVisible();
   });
 
   it('loads the durable Inbox and exposes the complete notice lifecycle', () => {
@@ -1060,6 +1125,8 @@ describe('workspace shell', () => {
   });
 
   it('operates Mission Control cards, health history, and supervisor sessions', async () => {
+    const requests: TorqueCommand[] = [];
+    vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => { const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}' ) as TorqueCommand; requests.push(command); return new Promise(() => undefined); }));
     const frame: StateFrame = {
       ...compactStateFixture,
       mission_control_summary: { group: 'Foundation', sections: { needs_operator_now: { items: [{ id: 'gate-1', title: 'Approve release', reason: 'Verification gate', primary_task_id: 'task-1' }] } } },
@@ -1071,7 +1138,7 @@ describe('workspace shell', () => {
     expect(await screen.findByText('Approve release')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
     expect(sendCommand).toHaveBeenCalledWith(expect.objectContaining({ cmd: 'mission_control_dismiss', id: 'gate-1' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Terminate' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Terminate UI Worker' }));
     expect(screen.getByRole('dialog', { name: 'Terminate PTY session?' })).toBeVisible();
     expect(sendCommand).not.toHaveBeenCalledWith({ cmd: 'supervisor_session_terminate', session_id: 'session-1' });
     fireEvent.click(screen.getByRole('button', { name: 'Terminate session' }));
@@ -1080,7 +1147,7 @@ describe('workspace shell', () => {
     expect(screen.getByRole('dialog', { name: 'Restart PTY supervisor?' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(sendCommand).not.toHaveBeenCalledWith({ cmd: 'supervisor_restart' });
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'get_metrics_history', group: 'Foundation', window: '24h' });
+    expect(requests).toContainEqual({ cmd: 'get_metrics_history', group: 'Foundation', window: '24h' });
   });
 
   it('searches maintained Help and opens a source-backed topic', async () => {
@@ -1097,6 +1164,7 @@ describe('workspace shell', () => {
   });
 
   it('bridges native menu actions into React-owned panels and dialogs', async () => {
+    mockSettingsRequests();
     renderShell();
     const nativeWindow = window as Window & {
       openGlobalSettings?: () => void;
@@ -1143,4 +1211,37 @@ describe('workspace shell', () => {
     );
     expect(sanitizeClientError('x'.repeat(900))).toHaveLength(512);
   });
+});
+
+
+it('preserves terminal parent when reordering and sends dedicated child commands', () => {
+  const { sendCommand } = renderShell(browserHost, { ...compactStateFixture, groups: { Foundation: ['e'] }, agents: { e: { id: 'e', name: 'Owner', group: 'Foundation', kind: 'engineer' }, t: { id: 't', name: 'Shell', group: 'Foundation', cell_type: 'terminal', parent_id: 'e' } }, children: { e: ['t'] }, selected_agent_id: 't' });
+  fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
+  fireEvent.click(screen.getByRole('treeitem', { name: /Shell, terminal/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Lifecycle actions for Shell' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Move or reorder…' }));
+  expect(screen.getByLabelText('Terminal parent')).toHaveValue('e');
+  fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+  expect(sendCommand).toHaveBeenCalledWith({ cmd: 'reorder_child', id: 't', parent_id: 'e', before: '' });
+  expect(sendCommand).toHaveBeenCalledWith({ cmd: 'resync' });
+  expect(sendCommand.mock.calls.some(([command]) => command.cmd === 'move_agent')).toBe(false);
+});
+
+it('offers arbitrary keyboard-accessible group ordering', () => {
+  const { sendCommand } = renderShell(browserHost, { ...compactStateFixture, groups: { Foundation: [], Middle: [], Last: [] } });
+  fireEvent.click(screen.getByRole('button', { name: 'Last group options' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Move group…' }));
+  fireEvent.change(screen.getByLabelText('Group position'), { target: { value: 'Middle' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Move group' }));
+  expect(sendCommand).toHaveBeenCalledWith({ cmd: 'move_group', group: 'Last', before: 'Middle' });
+});
+
+it('restores lane visibility and persists selected lane independently per group', () => {
+  const { sendCommand } = renderShell(browserHost, { ...compactStateFixture, board_hidden_wide_lanes_by_group: { Foundation: { Ready: true } } });
+  expect(screen.queryByRole('heading', { name: 'Ready' })).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('Visible lane'), { target: { value: 'Ready' } });
+  expect(sendCommand).toHaveBeenCalledWith({ cmd: 'board_set_selected_lanes', selected_lanes_by_group: { Foundation: 'Ready' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Show lanes' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Show Ready' }));
+  expect(sendCommand).toHaveBeenCalledWith({ cmd: 'board_set_hidden_wide_lanes', hidden_wide_lanes_by_group: { Foundation: { Ready: false } } });
 });

@@ -16,7 +16,10 @@ function JsonField({ label, value, onChange }: { label: string; value: string; o
 }
 
 function LinkRows({ links, onRemove }: { links: unknown; onRemove: (item: UnknownRecord) => void }) {
-  const items = records(links);
+  const grouped = links && typeof links === 'object' && !Array.isArray(links) ? links as UnknownRecord : {};
+  const items: (UnknownRecord & { id: string })[] = Array.isArray(grouped.tasks) || Array.isArray(grouped.decisions)
+    ? ['task', 'decision'].flatMap((kind) => ((grouped[`${kind}s`] as unknown[] | undefined) || []).map((id) => ({ id: `${kind}:${text(id)}`, link_type: kind, target_id: text(id) })))
+    : records(links);
   return items.length ? <div className={styles.linkRows}>{items.map((link) => <div key={link.id}>
     <span><b>{text(link.link_type, text(link.target_type, 'item'))}</b> {text(link.target_title, text(link.target_id, text(link.id)))}</span>
     <Button tone="quiet" onPress={() => onRemove(link)}>Unlink</Button>

@@ -298,7 +298,7 @@ function applyCommonOperation(
         : -1;
       if (index >= 0) events[index] = event;
       else events.push(event);
-      state.data.panel_events = events.slice(-500);
+      state.data.panel_events = events.slice(-Math.max(500, Math.min(5000, events.length)));
       break;
     }
     case 'perceived_empty_episode':
@@ -457,11 +457,25 @@ function applyCommonOperation(
       upsert(state, 'initiatives', operation, ['id']);
       break;
     case 'initiative_link_upsert':
-      upsert(state, 'initiative_links', operation, ['id']);
+    case 'initiative_link_remove': {
+      const initiatives = ensureRecord(state, 'initiatives');
+      const id = operationId(operation, 'initiative_id');
+      const item = cloneRecord(initiatives[id]);
+      const links = cloneRecord(item.links);
+      const kind = operation.link_type === 'decision' ? 'decisions' : 'tasks';
+      const target = operationId(operation, 'target_id');
+      const current = Array.isArray(links[kind]) ? links[kind] as unknown[] : [];
+      links[kind] = operation.op === 'initiative_link_upsert'
+        ? [...new Set([...current, target])] : current.filter((value) => value !== target);
+      if (id && initiatives[id]) initiatives[id] = { ...item, links };
+      const stored = ensureRecord(state, 'initiative_links');
+      if (operation.op === 'initiative_link_upsert') upsert(state, 'initiative_links', operation, ['id']);
+      else for (const [key, value] of Object.entries(stored)) {
+        const link = cloneRecord(value);
+        if (link.initiative_id === id && link.link_type === operation.link_type && link.target_id === target) delete stored[key];
+      }
       break;
-    case 'initiative_link_remove':
-      remove(state, 'initiative_links', operation, 'id');
-      break;
+    }
     case 'area_upsert':
     case 'planning_area_upsert':
       upsert(state, 'planning_areas', operation, ['id']);

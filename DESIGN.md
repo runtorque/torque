@@ -2446,6 +2446,83 @@ scope.
 - Verification: Component coverage protects explicit inbound/outbound semantics;
   the React production gate protects the CSS Modules and theme-token build.
 
+### D-076 — Parity is verified per behavior, not per panel
+
+- Date: 2026-09-21
+- Status: accepted
+- Decision: The [parity evidence ledger](docs/plans/react-ui-parity-matrix.md)
+  replaces the coarse Phase 4 map. Logs, aggregate peer Chat, pipeline discovery,
+  graph navigation, ordering, event resolution, supervisor controls, health
+  visualization, and each settings family have independent acceptance gates.
+- Rationale: A shared destination or raw JSON does not preserve an operator
+  workflow. The previous completion claim hid required functionality.
+- Scope: Classic-to-React migration, tests and retirement evidence.
+- Constraints: No required row passes from command-string presence alone.
+  D-072 keeps operator peer Chat read-only. D-074 keeps new terminal-only detach
+  initiation retired while preserving recovery of existing detached windows.
+  D-077 records the recommended retirement of canvas coordinates and arbitrary
+  docked/floating compositions; fixed workspaces do not reproduce those layouts.
+- Verification: Each ledger row states its acceptance scenario and records
+  actual test evidence separately. Classic retirement remains gated.
+
+### D-077 — Fixed workspaces and the ownership tree replace spatial layouts
+
+- Date: 2026-09-21
+- Status: accepted
+- Decision: Adopt the migration handoff's recommended direction: keep the ownership tree as the primary Agents navigation and retire the classic free-position canvas and arbitrary docked/floating panel compositions.
+- Rationale: Board, Agents, Planning and Control Center provide stable task-oriented locations. Resizable sidebar and terminal/DM regions plus whole-workspace detachment support focused inspection and separate displays.
+- Constraints: This does not preserve per-agent spatial coordinates, arbitrary panel docking, or multiple independently configured copies of a panel. Existing terminal-only detached windows remain recoverable; new initiation stays retired under D-074. Operator peer compose stays retired under D-072.
+- Verification: Ledger P-104–P-110 records the loss explicitly; native-window acceptance remains a separate release gate.
+
+### D-078 — Logs are a bounded operational surface
+
+- Date: 2026-09-21
+- Status: accepted
+- Decision: Control Center Logs reads `/logs` with daemon/supervisor selection, level and regex/literal filters, explicit follow, refresh, and a 2,000-line retention limit. Closing or changing target aborts old requests; rotation resets the cursor.
+- Rationale: Events and process logs answer different operator questions.
+- Constraints: Reveal-folder is host gated. Pause preserves the reading position; raw logs do not become Redux events.
+- Verification: Log component tests, isolated endpoint/browser QA, rendered screenshot inspection.
+
+### D-079 — Aggregate peer Chat remains read-only
+
+- Date: 2026-09-21
+- Status: accepted
+- Decision: Control Center Chat lists threads across groups, ordered by recent activity. It mounts recent messages progressively and preserves the reading anchor when older retained messages are revealed. Sender/recipient, context and copy remain available.
+- Constraints: No operator peer compose. Snapshot retention limits are labelled; progressive mounting must not imply unlimited server history.
+- Verification: Component update/selection/disclosure tests and cross-group browser coverage.
+
+### D-080 — Pipeline discovery opens a navigable graph
+
+- Date: 2026-09-21
+- Status: accepted
+- Decision: A dedicated Pipelines section renders discovered components, directed transitions and ask conditions, handles review cycles, and supports pan, zoom, fit and keyboard node activation into the existing action editor.
+- Constraints: Discovery replies are correlated to group and cancellable. Action details/previews use stable keyed response storage; unrelated replies must not clear the editor.
+- Verification: Cycle-layout, keyboard and response-isolation tests plus live discovery/editor browser flow.
+
+### D-081 — Organization controls preserve server semantics
+
+- Date: 2026-09-21
+- Status: accepted
+- Decision: The hierarchy uses persisted group and child ordering. Attached terminals use `reorder_child` and `reparent_terminal`; ordinary moves retain ownership. Groups support arbitrary drag ordering and a keyboard-accessible Move group dialog. Board selected and hidden lanes persist per group without replacing independent lane scroll containers.
+- Constraints: A group move does not reassign ownership or silently move owned Engineer/Worker descendants. The UI explains this; attached terminals follow the server's parent/group contract. Terminal organization resyncs the child-order projection.
+- Verification: Agent model ordering, App organization/group/lane regressions.
+
+### D-082 — Operational detail and settings require usable controls
+
+- Date: 2026-09-21
+- Status: accepted
+- Decision: Supervisor exposes sortable session facts, persisted selection/detail/auto-refresh/scroll. Health renders scoped historical charts with accessible sample tables and labels daemon-wide performance separately. Settings hydrate before editing and expose typed controls, descriptions, named maps and lists instead of raw JSON.
+- Constraints: Heavy readers abort on unmount. Settings report Saved only after all requested saves acknowledge; partial failure retains drafts and identifies uncertainty. Unchanged inherited relay settings must not become overrides. Schema-specific inheritance/discovery gaps remain in the ledger.
+- Verification: Focused supervisor, health, typed-settings, coordinated-save and partial-failure tests.
+
+### D-083 — Detached workspaces and Planning updates preserve local state
+
+- Date: 2026-09-21
+- Status: accepted
+- Decision: Main-window Agents keeps its draft-bearing frame while a detached workspace owns the PTY; the hidden terminal is inactive. Reattach explicitly restores ownership. Browser workspaces remain available when the shared profile contains native-window records. Planning editors consume current relationship data while keeping local field drafts; compact link replies rehydrate relationship records.
+- Constraints: Detached native-window lifecycle still requires real desktop QA. A data refresh must not key-remount an open editor.
+- Verification: Tauri adapter browser fixture; live Planning link/edit round trip and draft-preserving component link/unlink regression.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

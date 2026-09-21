@@ -109,3 +109,6 @@
   .legacyLink { display: none; }
   .statusBar > span:not(:last-child) { display: none; }
 }
+
+.agentWorkspaceHost { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+.agentWorkspaceHost[hidden] { display: none; }

@@ -805,7 +805,12 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPa
   const [laneRenderWindow, setLaneRenderWindow] = useState<{ context: string; limits: Record<string, number> }>({ context: '', limits: {} });
   const searchRef = useRef<HTMLInputElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
-  const lanes = showArchived ? ['Archived'] : rawLanes.filter((lane): lane is string => typeof lane === 'string' && lane !== 'Archived');
+  const activeLanes = rawLanes.filter((lane): lane is string => typeof lane === 'string' && lane !== 'Archived');
+  const selectedLane = textValue(persistedView.selectedLanes[group]);
+  const hiddenLanes = record(persistedView.hiddenWideLanes[group]);
+  const lanes = showArchived ? ['Archived'] : activeLanes.filter((lane) => selectedLane && activeLanes.includes(selectedLane) ? lane === selectedLane : !hiddenLanes[lane]);
+  const chooseLane = (lane: string) => sendOrNotify(sendCommand, { cmd: 'board_set_selected_lanes', selected_lanes_by_group: { ...persistedView.selectedLanes, [group]: lane } }, onCommandUnavailable);
+  const toggleLane = (lane: string) => sendOrNotify(sendCommand, { cmd: 'board_set_hidden_wide_lanes', hidden_wide_lanes_by_group: { ...persistedView.hiddenWideLanes, [group]: { ...hiddenLanes, [lane]: !hiddenLanes[lane] } } }, onCommandUnavailable);
   const archivedRecords = useMemo(() => Object.fromEntries(recordItems(archived[group]).map((item, index) => [textValue(item.id, `archived-${index}`), item])), [archived, group]);
   const allTasks = useMemo(() => normalizeTasks({ ...archivedRecords, ...records }), [records, archivedRecords]);
   const groupTasks = useMemo(() => allTasks.filter((task) => task.group === group), [allTasks, group]);
@@ -1073,6 +1078,7 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPa
         {['blocked', 'scheduled', 'unassigned'].map((view) => (
           <button key={view} aria-pressed={filters.quick_view === view} className={`${styles.filterChip} ${filters.quick_view === view ? styles.filterChipActive : ''}`} onClick={() => setFilters({ ...filters, quick_view: filters.quick_view === view ? '' : view })}>{view}</button>
         ))}
+        {!showArchived ? <><label>Visible lane<select aria-label="Visible lane" value={activeLanes.includes(selectedLane) ? selectedLane : ''} onChange={(event) => chooseLane(event.target.value)}><option value="">All visible lanes</option>{activeLanes.map((lane) => <option key={lane}>{lane}</option>)}</select></label><ActionMenu label="Lane visibility" trigger={<Button>Show lanes</Button>}>{activeLanes.map((lane) => <ActionMenuItem key={lane} onAction={() => toggleLane(lane)}>{hiddenLanes[lane] ? 'Show' : 'Hide'} {lane}</ActionMenuItem>)}</ActionMenu></> : null}
         <span className={styles.toolbarSpacer} />
         <ActionMenu label="Saved Board views" trigger={<Button>Views{savedViews.length ? ` · ${savedViews.length}` : ''}</Button>}>
           {savedViews.map((view) => <ActionMenuItem key={textValue(view.name)} onAction={() => setFilters(normalizeFilters(view))}>{textValue(view.name)}</ActionMenuItem>)}
@@ -1084,6 +1090,7 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPa
         <Button tone="quiet" onPress={() => setFilters(emptyBoardFilters)} isDisabled={JSON.stringify(filters) === JSON.stringify(emptyBoardFilters)}>Clear filters</Button>
       </div>
       {selectedTasks.length > 1 ? <div className={styles.selectionBar}><strong>{selectedTasks.length} selected</strong>{!showArchived ? <label>Move to<select defaultValue="" onChange={(event) => { if (event.target.value) bulkMove(event.target.value); }}><option value="" disabled>Choose lane…</option>{rawLanes.filter((lane): lane is string => typeof lane === 'string' && lane !== 'Archived').map((lane) => <option key={lane}>{lane}</option>)}</select></label> : null}<Button tone="quiet" onPress={() => setBatchOpen(true)}>Batch edit</Button><Button tone="quiet" onPress={bulkDispatch} isDisabled={showArchived}>Dispatch</Button><Button tone="quiet" onPress={bulkSync} isDisabled={showArchived || !selectedTasks.some((task) => task.externalId || task.externalUrl)}>Sync linked</Button><Button tone="quiet" onPress={bulkArchive}>{showArchived ? 'Restore' : 'Archive'}</Button><Button tone="danger" onPress={bulkDelete}>Delete</Button><Button tone="quiet" aria-label="Clear task selection" onPress={clearSelection}>×</Button></div> : null}
+      {!lanes.length ? <StateSurface title="All lanes hidden" description="Use Show lanes to restore a lane, or select one in Visible lane." /> : null}
       <div className={styles.boardViewport} ref={boardRef} onKeyDown={handleBoardKeyDown}>
         <DndContext
           sensors={sensors}

@@ -78,6 +78,7 @@ test('workspace keyboard entry points remain available', async ({ page }) => {
   await page.keyboard.press('ControlOrMeta+K');
   await expect(page.getByRole('dialog', { name: 'Command palette' })).toBeVisible();
   await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Command palette' })).toBeHidden();
   await page.keyboard.press('/');
   await expect(page.getByRole('searchbox', { name: 'Search board' })).toBeFocused();
 });

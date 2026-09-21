@@ -1,0 +1,49 @@
+.panel { display: flex; flex-direction: column; min-height: 0; height: 100%; gap: 12px; padding: 16px; overflow: hidden; }
+.toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; flex: 0 0 auto; }
+.toolbar h2 { margin: 0; font-size: 14px; }
+.toolbar label { display: flex; gap: 6px; align-items: center; font-size: 11px; }
+.toolbar input, .toolbar select { max-width: 240px; }
+.check { flex-direction: row; }
+.logLines { flex: 1; min-height: 0; overflow: auto; overflow-anchor: none; border: 1px solid var(--border); padding: 8px; font-size: 11px; }
+.logLines > div { display: grid; grid-template-columns: 85px 70px 1fr; gap: 8px; align-items: baseline; }
+.logLines pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font: inherit; }
+.logLines [data-level="ERROR"], .logLines [data-level="CRITICAL"] { color: var(--danger); }
+.logLines [data-level="WARNING"] { color: var(--warning); }
+.split { display: grid; grid-template-columns: minmax(180px, 30%) minmax(0, 1fr); flex: 1; min-height: 0; gap: 12px; }
+.threadList, .messages { overflow: auto; min-height: 0; overflow-anchor: none; }
+.threadList { display: flex; flex-direction: column; gap: 4px; }
+.threadList button { text-align: left; padding: 10px; display: flex; flex-direction: column; gap: 4px; }
+.threadList button[aria-pressed="true"] { border-color: var(--accent); }
+.threadList small { font-size: 10px; color: var(--text-muted); }
+.messageDetail { display: flex; flex-direction: column; min-height: 0; }
+.messageDetail h3 { font-size: 12px; }
+.messages article { border: 1px solid var(--border); padding: 12px; margin-bottom: 8px; font-size: 11px; }
+.messages header { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.messages p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.messages dl { display: grid; gap: 6px; }
+.messages dd { margin: 0; overflow-wrap: anywhere; }
+.graph { min-height: 260px; flex: 1; overflow: hidden; border: 1px solid var(--border); touch-action: none; }
+.graph svg { width: 100%; height: 100%; min-height: 320px; }
+.graph line, .graph path { stroke: var(--text-muted); fill: none; }
+.graph marker path { fill: var(--text-muted); }
+.graph text { fill: var(--text); font-size: 11px; }
+.graph rect { fill: var(--surface); stroke: var(--border); }
+.graph g[role="button"] { cursor: pointer; outline: none; }
+.graph g[role="button"]:focus rect, .graph g[aria-pressed="true"] rect { stroke: var(--accent); stroke-width: 3; }
+.graphDetails { max-height: 160px; overflow: auto; font-size: 11px; }
+.graphDetails li { margin-bottom: 6px; }
+@media (max-width: 700px) { .split { grid-template-columns: minmax(140px, 35%) minmax(0, 1fr); } }
+.supervisor { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.sessionList { max-height: 450px; overflow: auto; overflow-anchor: none; }
+.sessionList article { padding: 10px; border-bottom: 1px solid var(--border); }
+.sessionList article > button:first-child { text-align: left; width: 100%; margin-bottom: 8px; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; font-size: 11px; }
+.facts dt { color: var(--text-dim); }
+.facts dd { margin: 4px 0 0; overflow-wrap: anywhere; }
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 12px 0; }
+.metricChart { padding: 12px; border: 1px solid var(--border); }
+.metricChart h3 { font-size: 11px; margin: 0 0 6px; }
+.metricChart svg { display: block; width: 100%; height: 90px; }
+.metricChart path { stroke: var(--accent); fill: none; stroke-width: 2; }
+.metricChart small { font-size: 10px; }
+.metricChart table { font-size: 10px; width: 100%; text-align: left; }

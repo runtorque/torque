@@ -50,3 +50,16 @@ describe('agent hierarchy model', () => {
     expect(rows.every((row) => row.orphaned)).toBe(true);
   });
 });
+
+it('uses saved group order for ownership siblings and saved child order for terminals', () => {
+  const hierarchy = buildAgentHierarchy({
+    e: { name: 'Engineer', group: 'G', kind: 'engineer' },
+    a: { name: 'A', group: 'G', kind: 'worker', owner_engineer_id: 'e' },
+    z: { name: 'Z', group: 'G', kind: 'worker', owner_engineer_id: 'e' },
+    t1: { name: 'A shell', group: 'G', cell_type: 'terminal', parent_id: 'z' },
+    t2: { name: 'Z shell', group: 'G', cell_type: 'terminal', parent_id: 'z' },
+    root: { name: 'Other root', group: 'G', kind: 'worker' },
+  }, 'G');
+  const rows = visibleAgentTreeRows(buildAgentTree(hierarchy, ['root', 'e', 'z', 'a'], { z: ['t2', 't1'] }), new Set());
+  expect(rows.map((row) => row.agent.id)).toEqual(['root', 'e', 'z', 't2', 't1', 'a']);
+});

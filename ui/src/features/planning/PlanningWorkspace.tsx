@@ -72,6 +72,14 @@ export function PlanningWorkspace({ group, sendCommand, onCommandUnavailable }: 
     refresh();
   }, [group, connection.status, connection.reconnectCount, refresh]);
 
+  useEffect(() => {
+    const type = connection.lastAuxiliaryFrame?.type || '';
+    // Link command replies carry the mutation, while compact clients may not
+    // receive a relationship delta. Rehydrate without remounting the editor.
+    if (/^initiative_(task|decision)_(linked|unlinked)$/.test(type)) sendCommand({ cmd: 'initiative_list', group, include_archived: false });
+    if (/^area_.*_(linked|unlinked)$/.test(type)) sendCommand({ cmd: 'area_list', group, include_links: true, include_notes: true });
+  }, [connection.lastAuxiliaryFrame, group, sendCommand]);
+
   const initiatives = useMemo(() => groupInitiatives(planning.initiatives, group), [planning.initiatives, group]);
   const areas = useMemo(() => groupRecords(planning.areas, group), [planning.areas, group]);
   const briefs = useMemo(() => groupRecords(planning.ideaBriefs, group), [planning.ideaBriefs, group]);
@@ -151,7 +159,7 @@ export function PlanningWorkspace({ group, sendCommand, onCommandUnavailable }: 
         <footer><Button tone="quiet" onPress={() => setCreateKind(null)}>Cancel</Button><Button tone="primary" type="submit" isDisabled={!title.trim() || (createKind === 'decision' && !architectId)}>Create</Button></footer>
       </form>
     </ModalDialog>
-    {selected?.kind === 'initiative' ? <InitiativeEditor key={text(selected.item.id)} item={selected.item} tasks={taskItems} decisions={decisions} send={(command) => { if (!sendCommand(command)) onCommandUnavailable(); }} onClose={() => setSelected(null)} /> : null}
+    {selected?.kind === 'initiative' ? <InitiativeEditor key={text(selected.item.id)} item={records(planning.initiatives).find((item) => item.id === selected.item.id) ?? selected.item} tasks={taskItems} decisions={decisions} send={(command) => { if (!sendCommand(command)) onCommandUnavailable(); }} onClose={() => setSelected(null)} /> : null}
     {selected?.kind === 'area' ? <AreaEditor key={text(selected.item.id)} item={selected.item} targets={{ task: taskItems, decision: decisions, initiative: Object.values(initiatives).flat(), area: areas }} send={(command) => { if (!sendCommand(command)) onCommandUnavailable(); }} onClose={() => setSelected(null)} /> : null}
     {selected?.kind === 'note' || selected?.kind === 'brief' ? <ThinkingEditor key={text(selected.item.id)} kind={selected.kind} item={selected.item} send={(command) => { if (!sendCommand(command)) onCommandUnavailable(); }} onClose={() => setSelected(null)} /> : null}
     {selected?.kind === 'decision' ? <DecisionEditor key={text(selected.item.id)} item={selected.item} tasks={taskItems} engineers={engineers} send={(command) => { if (!sendCommand(command)) onCommandUnavailable(); }} onClose={() => setSelected(null)} /> : null}

@@ -133,3 +133,16 @@ describe('frame parsing', () => {
     });
   });
 });
+
+
+it('merges older event pages and retains them when new live events arrive', () => {
+  const store = createAppStore();
+  store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, panel_events: Array.from({ length: 500 }, (_, i) => ({ id: i + 100, message: 'live' })) }));
+  store.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'events_page', events: [{ id: 5, message: 'older' }, { id: 100, message: 'updated' }] }));
+  store.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: 11, ops: [{ op: 'event_append', id: 600, message: 'newest' }] }));
+  const events = store.getState().projection.data.panel_events as { id: number; message: string }[];
+  expect(events).toHaveLength(502);
+  expect(events[0]?.id).toBe(5);
+  expect(events.find((event) => event.id === 100)?.message).toBe('updated');
+  expect(events.at(-1)?.id).toBe(600);
+});

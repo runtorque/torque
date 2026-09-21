@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type ReactNode } from 'react';
 
+import type { TorqueCommand } from '../../protocol';
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import {
   selectAuxiliaryResponseState,
@@ -127,17 +128,32 @@ interface OrganizationFormProps {
 function OrganizationForm({ agent, agents, groups, sendCommand, onUnavailable, onClose }: OrganizationFormProps) {
   const groupNames = Object.keys(groups);
   const [targetGroup, setTargetGroup] = useState(agent.group || groupNames[0] || '');
+  const [parentId, setParentId] = useState(agent.parentId);
   const [before, setBefore] = useState('');
-  const candidates = agents.filter((item) => item.id !== agent.id && item.group === targetGroup && item.cellType === agent.cellType);
+  const parentChanged = agent.cellType === 'terminal' && parentId !== agent.parentId;
+  const ownerId = agent.kind === 'worker' ? agent.ownerEngineerId : agent.kind === 'engineer' ? agent.hiredByArchitectId : '';
+  const candidates = agents.filter((item) => item.id !== agent.id && (parentId
+    ? item.parentId === parentId
+    : item.group === targetGroup && !item.parentId && (!ownerId || (item.ownerEngineerId || item.hiredByArchitectId) === ownerId)));
+  const parents = agents.filter((item) => item.cellType === 'agent');
+  const issue = (command: TorqueCommand) => { const ok = sendCommand(command); if (!ok) onUnavailable(); return ok; };
 
   return <form className={styles.organizationForm} onSubmit={(event) => {
     event.preventDefault();
-    if (!sendCommand({ cmd: 'move_agent', id: agent.id, target_group: targetGroup, before })) onUnavailable();
-    else onClose();
+    if (parentChanged && !issue({ cmd: 'reparent_terminal', id: agent.id, parent_id: parentId })) return;
+    if (parentId) {
+      if (!issue({ cmd: 'reorder_child', id: agent.id, parent_id: parentId, before })) return;
+    } else if (!issue({ cmd: 'move_agent', id: agent.id, target_group: targetGroup, before })) return;
+    // Classic child-order commands emit the parent but not the children index.
+    // Rehydrate that index after the ordered command sequence completes.
+    if (agent.cellType === 'terminal') issue({ cmd: 'resync' });
+    onClose();
   }}>
-    <p>Move this {agent.kind} to another group or change its position inside the current group. Ownership is preserved.</p>
-    <label>Group<select value={targetGroup} onChange={(event) => { setTargetGroup(event.target.value); setBefore(''); }}>{groupNames.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
+    <p>Order follows the saved group and terminal-child lists. Ownership relationships remain unchanged; a group move may display an agent separately from its owner.</p>
+    {agent.cellType === 'terminal' ? <label>Terminal parent<select value={parentId} onChange={(event) => { const next = event.target.value; setParentId(next); setBefore(''); const parent = parents.find((item) => item.id === next); if (parent) setTargetGroup(parent.group); }}><option value="">Standalone terminal</option>{parents.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.group}</option>)}</select></label> : null}
+    <label>Group<select value={targetGroup} disabled={Boolean(parentId)} onChange={(event) => { setTargetGroup(event.target.value); setBefore(''); }}>{groupNames.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
     <label>Position<select value={before} onChange={(event) => setBefore(event.target.value)}><option value="">At end</option>{candidates.map((item) => <option key={item.id} value={item.id}>Before {item.name}</option>)}</select></label>
+    {ownerId ? <p>Owned by {agents.find((item) => item.id === ownerId)?.name || ownerId}. Reordering applies among siblings in the ownership tree.</p> : null}
     <footer><Button tone="quiet" type="button" onPress={onClose}>Cancel</Button><Button tone="primary" type="submit" isDisabled={!targetGroup}>Apply</Button></footer>
   </form>;
 }
@@ -365,9 +381,10 @@ export interface AgentWorkspaceProps {
   sendCommand: CommandSender;
   onCommandUnavailable: () => void;
   terminalOnly?: boolean;
+  active?: boolean;
 }
 
-export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable, terminalOnly = false }: AgentWorkspaceProps) {
+export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable, terminalOnly = false, active = true }: AgentWorkspaceProps) {
   const dispatch = useAppDispatch();
   const { records, settings, resolvedSettings, digestSettings, digestBufferStats, digestSentEvents, engineerBufferStats, engineerSentEvents } = useAppSelector(selectAgentsState);
   const groupsState = useAppSelector(selectGroupsState);
@@ -405,7 +422,7 @@ export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable,
   const [purgeTarget, setPurgeTarget] = useState<AgentViewModel | null>(null);
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set());
   const cardsRef = useRef<HTMLDivElement>(null);
-  const tree = useMemo(() => buildAgentTree(hierarchy), [hierarchy]);
+  const tree = useMemo(() => buildAgentTree(hierarchy, groupsState.records[group], groupsState.children), [hierarchy, groupsState.records, groupsState.children, group]);
   const visibleRows = useMemo(() => visibleAgentTreeRows(tree, collapsedIds), [tree, collapsedIds]);
   const orderedAgents = visibleRows.map((row) => row.agent);
 
@@ -498,7 +515,7 @@ export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable,
         <div className={styles.detailHost}>
           {selected ? <header className={styles.detailViewBar}><span>Agent view</span>{viewControl(selected)}</header> : null}
           <div className={`${styles.detailPane} ${workspaceUi.agentsViewMode === 'live' ? '' : styles.workspaceHidden}`} aria-hidden={workspaceUi.agentsViewMode !== 'live'}>
-            {selected ? <FocusPanel agent={selected} terminal={selected} detachedTerminal={terminalEntry} messages={messagesState.direct[selected.id]} rawSettings={settings[selected.id]} rawDigestSettings={digestSettings[selected.id]} resolvedSettings={resolvedSettings[selected.id]} host={host} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onDetachAgent={() => { void detachAgents(); }} onInspectWorktree={() => setWorktreeTarget(selected)} onOrganize={() => setOrganizationTarget(selected)} onRemove={() => setRemoveTarget(selected)} directMessagesHeight={Number(workspace.terminalDirectMessagesHeight) || 0} composeHeight={Number(workspace.terminalComposeHeight) || 0} active={workspaceUi.agentsViewMode === 'live'} /> : <StateSurface title="Select an agent" description="Choose an agent to inspect status, worktree, settings, messages, and terminal." />}
+            {selected ? <FocusPanel agent={selected} terminal={selected} detachedTerminal={terminalEntry} messages={messagesState.direct[selected.id]} rawSettings={settings[selected.id]} rawDigestSettings={digestSettings[selected.id]} resolvedSettings={resolvedSettings[selected.id]} host={host} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onDetachAgent={() => { void detachAgents(); }} onInspectWorktree={() => setWorktreeTarget(selected)} onOrganize={() => setOrganizationTarget(selected)} onRemove={() => setRemoveTarget(selected)} directMessagesHeight={Number(workspace.terminalDirectMessagesHeight) || 0} composeHeight={Number(workspace.terminalComposeHeight) || 0} active={active && workspaceUi.agentsViewMode === 'live'} /> : <StateSurface title="Select an agent" description="Choose an agent to inspect status, worktree, settings, messages, and terminal." />}
           </div>
           <div className={`${styles.detailPane} ${workspaceUi.agentsViewMode === 'activity' ? '' : styles.workspaceHidden}`} aria-hidden={workspaceUi.agentsViewMode !== 'activity'}>
             {workspaceUi.agentsViewMode === 'activity' ? selected?.cellType === 'agent' ? <AgentDetailWorkspace key={selected.id} agent={selected} group={group} catalog={catalog} responses={auxiliaryResponses} tasks={tasks} directMessages={messagesState.direct[selected.id]} peerThreads={messagesState.peerThreads} digestSettings={digestSettings[selected.id]} digestBufferStats={digestBufferStats[selected.id] ?? engineerBufferStats[group]} digestSentEvents={digestSentEvents[selected.id] ?? engineerSentEvents[group]} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} /> : <StateSurface title="Select an agent" description="Activity is available for Architects, Engineers, and Workers rather than standalone terminals." /> : null}

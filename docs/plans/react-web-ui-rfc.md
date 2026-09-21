@@ -1,6 +1,6 @@
 # RFC: React web UI architecture and migration
 
-Status: Accepted — Phases 1–6 implemented; React is the default
+Status: Accepted — React is the default; parity hardening and classic retirement remain open
 Date: 2026-08-11
 Owners: Torque product and frontend maintainers
 
@@ -675,34 +675,16 @@ Gate:
 
 - the parity matrix has no unexplained required gaps.
 
-Implementation checkpoint (2026-08-11): complete. The React workspace now
-adds Planning and Control Center as first-class product areas. Planning lazily
-hydrates Initiatives, Areas (including linked context), Thinking scratchpad
-and idea briefs, Decisions, pending hires, Engineer journals/streams, and
-schedules; it provides roadmap grouping plus lightweight create flows for
-Initiatives, Areas, and notes. Control Center combines Mission Control, health,
-Supervisor sessions, relay state/testing, event/log history, principal/chat
-summaries, the Action/pipeline editor, and the role/template/specialization/
-Agent Class/behavior-overlay catalogs. Global, Group, and non-secret AI
-settings share one dirty boundary and coordinated save action. Inbox and agent
-chat/context/history remain composed in the global shell and Agents workspace,
-while Help supplies onboarding and the keyboard cheatsheet. Every heavyweight
-surface requests its own data after open and after reconnect, and command
-responses normalize into stable projection keys rather than competing for a
-single last-response slot.
-
-Phase 4 parity map:
-
-| Required classic area | React owner |
-| --- | --- |
-| Actions and pipeline editor | Control Center / Actions |
-| Agent kinds, class, hierarchy, events, history | Agents + Control Center / Activity and Catalog |
-| Inbox, Chat, Context | Global Inbox + Agents direct messages/focus |
-| Health, Supervisor, Mission Control, logs, relay | Control Center / Mission Control and Activity |
-| Initiatives, Thinking, decisions, hires, journals, schedules | Planning tabs |
-| behavior overlays, AI, templates, remaining catalogs | Control Center / Catalog and Settings |
-| Global and Group Settings | Control Center / Settings |
-| onboarding and cheatsheet | Control Center / Help |
+Parity audit checkpoint (2026-09-21): **incomplete**. The previous coarse map
+conflated event feeds with real logs, selected-agent threads with aggregate
+Chat, action editing with pipeline visualization, and raw payloads with
+operational UX. It is superseded by the [granular parity evidence ledger](react-ui-parity-matrix.md).
+Each independent behavior and literal classic command has its own disposition
+and acceptance scenario. Presence in source is not passing evidence. Required
+repairs begin with logs, aggregate Chat, graph exploration, organization,
+operational depth, and settings. Canvas and multi-panel layout disposition must
+be explicit; D-072/D-074 already retire operator peer compose and terminal-only
+detach initiation. Classic remains available until the ledger is verified.
 
 ### Phase 5 — Desktop, extension, release, and quality hardening
 
@@ -1068,3 +1050,7 @@ host bridge, or the parallel migration strategy.
 - [Redux normalized state and selector guidance](https://redux.js.org/tutorials/essentials/part-6-performance-normalization)
 - [Vite backend integration](https://vite.dev/guide/backend-integration.html)
 - [Electron process model](https://www.electronjs.org/docs/latest/tutorial/process-model)
+
+### September parity repair checkpoint
+
+The granular [parity ledger](react-ui-parity-matrix.md) includes source, command, modal, shortcut and individual settings-field inventories, concrete acceptance scenarios, repair evidence, and unresolved gates. Dedicated Logs, aggregate Chat, visual Pipelines, persisted organization/lane controls, supervisor/health detail and typed settings are implemented. Expanded browser coverage found and repaired compact Planning relationship refresh and main-window detached PTY ownership. D-077–D-083 record the durable decisions. Phase 4 and classic retirement remain open until every required acceptance gate passes.

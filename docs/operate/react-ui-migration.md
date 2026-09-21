@@ -94,6 +94,20 @@ place; either renderer ignores keys it does not own.
   reported to the durable Inbox during burn-in. Preserve the notice and profile
   log when filing a regression.
 
+## Parity repair status and isolated QA
+
+The [behavior and field ledger](../plans/react-ui-parity-matrix.md) is the release authority for parity. Logs, aggregate read-only Chat and Pipelines now have dedicated Control Center sections. Organization, lane visibility, operational detail and typed settings have focused coverage; the remaining acceptance rows still block classic retirement.
+
+For source-only QA without Make's install prerequisite, use an unused port and a new disposable data directory from a non-worker shell:
+
+```bash
+TORQUE_DATA_DIR=/tmp/torque-react-qa TORQUE_PROFILE=react-qa TORQUE_PORT=18958 TORQUE_PROFILE_ENABLED=1 TORQUE_PROFILE_SKIP_PTY=1 python3 torque.py
+# In a second shell after make ui-check:
+TORQUE_UI_BASE_URL=http://127.0.0.1:18958 TORQUE_PLAYWRIGHT_CHANNEL=chrome npm --prefix ui run test:e2e -- --workers=1
+```
+
+The browser suite shares daemon state, so run it serially. This PTY-disabled harness validates UI and command workflows but does not certify actual terminal I/O or native Tauri windows. The expanded suite includes deterministic transport/host fixtures and live Board/Planning/pipeline/endpoint checks. Native release testing still follows the Tauri section above.
+
 ## Classic burn-in and retirement
 
 The Torque maintainers own the fallback. `/legacy/` and classic writes remain

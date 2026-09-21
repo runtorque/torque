@@ -8,6 +8,7 @@ import {
   selectConnection,
   selectGroupsState,
   selectOperationsState,
+  selectMessagesState,
   selectWorkspaceUi,
   workspaceUiActions,
 } from '../../app/store';
@@ -17,16 +18,26 @@ import type { CommandSender } from '../board/BoardPanel';
 import { records, text } from '../planning/model';
 import { AgentClassLibrary } from './AgentClassLibrary';
 import { BehaviorOverlayEditor, CatalogEditor } from './CatalogEditors';
+import { browserHost, type DesktopHost } from '../../host';
+import { readCommand } from '../../protocol/http';
+import { projectionActions } from '../../app/store';
+import { StructuredSettings } from './StructuredSettings';
+import { PeerChat } from './PeerChat';
+import { PipelineExplorer } from './PipelineExplorer';
+import { LogViewer } from './LogViewer';
 import { ContextPanel } from './ContextPanel';
 import { ActivityPanel, HelpPanel, MissionPanel } from './OperatorPanels';
 import { AppearancePreferencesPanel, ShortcutPreferencesPanel } from './WorkspacePreferences';
 import styles from './ControlCenter.module.css';
 
-type ControlTab = 'mission' | 'activity' | 'history' | 'context' | 'actions' | 'catalog' | 'settings' | 'help';
+type ControlTab = 'mission' | 'activity' | 'history' | 'context' | 'logs' | 'chat' | 'pipelines' | 'actions' | 'catalog' | 'settings' | 'help';
 
 const tabs: { id: ControlTab; label: string }[] = [
   { id: 'mission', label: 'Mission Control' },
   { id: 'activity', label: 'Activity' },
+  { id: 'logs', label: 'Logs' },
+  { id: 'chat', label: 'Chat' },
+  { id: 'pipelines', label: 'Pipelines' },
   { id: 'history', label: 'History' },
   { id: 'context', label: 'Context' },
   { id: 'actions', label: 'Actions' },
@@ -160,6 +171,8 @@ function SettingsPanel({ group, responses, send }: { group: string; responses: R
   const [aiSecrets, setAiSecrets] = useState({ anthropic: '', openai_compatible: '' });
   const [clearAiSecrets, setClearAiSecrets] = useState<string[]>([]);
   const [relayDraft, setRelayDraft] = useState(() => ({ relay_enabled: currentGlobal.relay_enabled === true, relay_url: text(currentGlobal.relay_url), relay_daemon_id: text(currentGlobal.relay_daemon_id), relay_credential_id: text(currentGlobal.relay_credential_id), relay_private_key_path: text(currentGlobal.relay_private_key_path) }));
+  const [relayTouched, setRelayTouched] = useState<string[]>([]);
+  const changeRelay = (patch: Partial<typeof relayDraft>) => { setRelayDraft((previous) => ({ ...previous, ...patch })); setRelayTouched((keys) => [...new Set([...keys, ...Object.keys(patch)])]); setDirty(true); setSaved(false); };
   const [pairingToken, setPairingToken] = useState('');
   const [advancedGlobal, setAdvancedGlobal] = useState(() => JSON.stringify(currentGlobal, null, 2));
   const [advancedGroup, setAdvancedGroup] = useState(() => JSON.stringify(currentGroup, null, 2));
@@ -168,20 +181,38 @@ function SettingsPanel({ group, responses, send }: { group: string; responses: R
   const [jsonError, setJsonError] = useState('');
   const [dirty, setDirty] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const saveController = useRef<AbortController | null>(null);
+  const settingsDispatch = useAppDispatch();
+  useEffect(() => () => saveController.current?.abort(), []);
 
   const change = <T extends object>(setter: React.Dispatch<React.SetStateAction<T>>, patch: Partial<T>) => {
     setter((value) => ({ ...value, ...patch })); setDirty(true); setSaved(false);
   };
-  const saveAi = (confirmEmbeddingRebuild = false) => send({ cmd: 'update_ai_settings', settings: aiDraft, secrets: Object.fromEntries(Object.entries(aiSecrets).filter(([, value]) => value.trim())), clear_secrets: clearAiSecrets, ...(confirmEmbeddingRebuild ? { confirm_embedding_rebuild: true } : {}) });
-  const save = () => {
+  const save = async (confirmEmbeddingRebuild = false) => {
     let fullGlobal: UnknownRecord; let fullGroup: UnknownRecord; let fullEngineer: UnknownRecord; let fullArchitect: UnknownRecord;
     try { fullGlobal = record(JSON.parse(advancedGlobal)); fullGroup = record(JSON.parse(advancedGroup)); fullEngineer = record(JSON.parse(advancedEngineer)); fullArchitect = record(JSON.parse(advancedArchitect)); } catch { setJsonError('Advanced settings must be valid JSON.'); return; }
-    send({ cmd: 'update_global_settings', settings: { ...fullGlobal, ...globalDraft, ...relayDraft } });
-    send({ cmd: 'update_group_settings', group, settings: { ...fullGroup, ...groupDraft } });
-    send({ cmd: 'engineer_update_settings', group, ...fullEngineer });
-    send({ cmd: 'update_architect_settings', group, settings: fullArchitect });
-    saveAi();
-    setJsonError(''); setDirty(false); setSaved(true);
+    setSaving(true); setJsonError(''); setSaved(false);
+    const controller = new AbortController(); saveController.current = controller;
+    const commands: TorqueCommand[] = [
+      { cmd: 'update_global_settings', settings: { ...Object.fromEntries(Object.entries(fullGlobal).filter(([key]) => !key.startsWith('relay_'))), ...globalDraft, ...Object.fromEntries(Object.entries(relayDraft).filter(([key]) => relayTouched.includes(key))) } },
+      { cmd: 'update_group_settings', group, settings: { ...fullGroup, ...groupDraft } },
+      { cmd: 'engineer_update_settings', group, ...fullEngineer },
+      { cmd: 'update_architect_settings', group, settings: fullArchitect },
+      { cmd: 'update_ai_settings', settings: aiDraft, secrets: Object.fromEntries(Object.entries(aiSecrets).filter(([, value]) => value.trim())), clear_secrets: clearAiSecrets, ...(confirmEmbeddingRebuild ? { confirm_embedding_rebuild: true } : {}) },
+    ];
+    try {
+      for (const command of commands) {
+        const response = await readCommand(command, controller.signal);
+        if (controller.signal.aborted) return;
+        if (response.type !== 'state') settingsDispatch(projectionActions.auxiliaryResourceReceived(response));
+        if (response.type === 'ai_settings_requires_confirmation') throw new Error('AI settings require embedding rebuild confirmation. Other settings were saved.');
+      }
+      setDirty(false); setSaved(true); setAiSecrets({ anthropic: '', openai_compatible: '' }); setClearAiSecrets([]);
+    } catch (cause) {
+      if (!controller.signal.aborted) setJsonError(`Some settings may already be saved. ${cause instanceof Error ? cause.message : 'Save failed'}. Your draft is retained; retry when ready.`);
+    } finally { if (!controller.signal.aborted) setSaving(false); }
+
   };
   const relayTest = record(responses['relay_test_result:_'] ?? responses['relay_test_result:latest']);
   const deviceLink = record(responses['relay_device_link:_'] ?? responses['relay_device_link:latest']);
@@ -189,11 +220,11 @@ function SettingsPanel({ group, responses, send }: { group: string; responses: R
   const aiConfirmation = record(responses['ai_settings_requires_confirmation:_'] ?? responses['ai_settings_requires_confirmation:latest']);
   const promptPreview = record(responses[`system_prompt_preview:${group}`] ?? responses['system_prompt_preview:latest']);
 
-  return <div className={styles.settings}>
-    <header><div><h2>Workspace settings</h2><p>Global, group, and AI changes save as one coordinated operation.</p></div><span>{dirty ? 'Unsaved changes' : saved ? 'Saved' : 'Up to date'}</span><Button tone="primary" onPress={save} isDisabled={!dirty}>Save changes</Button></header>
-    <section><h3>Global runtime</h3><div className={styles.formGrid}>
-      <Field label="Terminal scrollback"><input type="number" value={globalDraft.xterm_scrollback} onChange={(event) => change(setGlobalDraft, { xterm_scrollback: Number(event.target.value) })} /></Field>
-      <Field label="Pipeline depth"><input type="number" value={globalDraft.max_pipeline_depth} onChange={(event) => change(setGlobalDraft, { max_pipeline_depth: Number(event.target.value) })} /></Field>
+  return <form className={styles.settings} onSubmit={(event) => { event.preventDefault(); void save(); }}>
+    <header><div><h2>Workspace settings</h2><p>Global, group, and AI changes save as one coordinated operation.</p></div><span>{saving ? 'Saving…' : dirty ? 'Unsaved changes' : saved ? 'Saved' : 'Up to date'}</span><Button tone="primary" type="submit" isDisabled={!dirty || saving}>Save changes</Button></header>
+    <fieldset disabled={saving} className={styles.settingsFields}><section><h3>Global runtime</h3><div className={styles.formGrid}>
+      <Field label="Terminal scrollback"><input type="number" min="100" max="100000" value={globalDraft.xterm_scrollback} onChange={(event) => change(setGlobalDraft, { xterm_scrollback: Number(event.target.value) })} /></Field>
+      <Field label="Pipeline depth"><input type="number" min="0" value={globalDraft.max_pipeline_depth} onChange={(event) => change(setGlobalDraft, { max_pipeline_depth: Number(event.target.value) })} /></Field>
       <Field label="Event retention"><input type="number" value={globalDraft.max_event_log} onChange={(event) => change(setGlobalDraft, { max_event_log: Number(event.target.value) })} /></Field>
       <Field label="Metrics"><select value={globalDraft.metrics_enabled ? 'on' : 'off'} onChange={(event) => change(setGlobalDraft, { metrics_enabled: event.target.value === 'on' })}><option value="on">Enabled</option><option value="off">Disabled</option></select></Field>
     </div></section>
@@ -219,14 +250,29 @@ function SettingsPanel({ group, responses, send }: { group: string; responses: R
       <Field label="Boot summaries"><select value={aiDraft.ai_boot_summary_enabled ? 'on' : 'off'} onChange={(event) => change(setAiDraft, { ai_boot_summary_enabled: event.target.value === 'on' })}><option value="on">Enabled</option><option value="off">Disabled</option></select></Field>
       <Field label="Boot summary minimum interval"><input type="number" value={aiDraft.ai_boot_summary_min_interval_seconds} onChange={(event) => change(setAiDraft, { ai_boot_summary_min_interval_seconds: Number(event.target.value) })} /></Field>
       <Field label="Boot summary hourly limit"><input type="number" value={aiDraft.ai_boot_summary_max_refreshes_per_hour} onChange={(event) => change(setAiDraft, { ai_boot_summary_max_refreshes_per_hour: Number(event.target.value) })} /></Field>
-    </div><div className={styles.aiCorpus}><strong>Index corpus</strong>{Object.entries(aiDraft.ai_index_corpus).map(([key, enabled]) => <label key={key}><input type="checkbox" checked={enabled === true} onChange={(event) => change(setAiDraft, { ai_index_corpus: { ...aiDraft.ai_index_corpus, [key]: event.target.checked } })} />{key.replaceAll('_', ' ')}</label>)}</div>{Object.keys(aiConfirmation).length ? <div className={styles.secretResult}><strong>Embedding index rebuild required</strong><p>{text(aiConfirmation.message)}</p><Button tone="primary" onPress={() => saveAi(true)}>Confirm settings and rebuild</Button></div> : null}<div className={styles.settingsActions}>{record(aiAnthropic.key).configured === true ? <Button tone="danger" onPress={() => { setClearAiSecrets((value) => value.includes('anthropic') ? value.filter((item) => item !== 'anthropic') : [...value, 'anthropic']); setDirty(true); }}>{clearAiSecrets.includes('anthropic') ? 'Keep Anthropic key' : 'Clear Anthropic key'}</Button> : null}{record(aiOpenAi.key).configured === true ? <Button tone="danger" onPress={() => { setClearAiSecrets((value) => value.includes('openai_compatible') ? value.filter((item) => item !== 'openai_compatible') : [...value, 'openai_compatible']); setDirty(true); }}>{clearAiSecrets.includes('openai_compatible') ? 'Keep OpenAI key' : 'Clear OpenAI key'}</Button> : null}<Button tone="quiet" onPress={() => send({ cmd: 'ai_index_start', mode: Number(record(aiIndex.counts).indexed ?? 0) > 0 ? 'rebuild' : 'incremental', confirm: true })}>Build / rebuild index</Button></div><p className={styles.note}>Raw provider keys are write-only and never returned in snapshots or logs. Index: {text(aiIndex.status, 'disabled')} · {text(record(aiIndex.counts).indexed, '0')} indexed.</p></section>
-    <section><h3>Relay connector</h3><div className={styles.formGrid}><Field label="Relay"><select value={relayDraft.relay_enabled ? 'on' : 'off'} onChange={(event) => change(setRelayDraft, { relay_enabled: event.target.value === 'on' })}><option value="off">Disabled</option><option value="on">Enabled</option></select></Field><Field label="Relay URL"><input value={relayDraft.relay_url} onChange={(event) => change(setRelayDraft, { relay_url: event.target.value })} /></Field><Field label="Daemon ID"><input value={relayDraft.relay_daemon_id} onChange={(event) => change(setRelayDraft, { relay_daemon_id: event.target.value })} /></Field><Field label="Credential ID"><input value={relayDraft.relay_credential_id} onChange={(event) => change(setRelayDraft, { relay_credential_id: event.target.value })} /></Field><Field label="Private key path"><input value={relayDraft.relay_private_key_path} onChange={(event) => change(setRelayDraft, { relay_private_key_path: event.target.value })} /></Field><Field label="One-time pairing token"><input type="password" value={pairingToken} onChange={(event) => setPairingToken(event.target.value)} autoComplete="off" /></Field></div><div className={styles.settingsActions}><Button tone="quiet" onPress={() => send({ cmd: 'test_relay_connection' })}>Test connection</Button><Button tone="quiet" isDisabled={!pairingToken.trim()} onPress={() => { send({ cmd: 'generate_daemon_credential', pairing_token: pairingToken }); setPairingToken(''); }}>Pair daemon credential</Button><Button tone="primary" isDisabled={!relayDraft.relay_enabled} onPress={() => send({ cmd: 'generate_relay_device_link', confirm: true })}>Generate one-time device link</Button></div>{Object.keys(relayTest).length ? <p className={styles.note}>{text(relayTest.status)} · {text(relayTest.message)}</p> : null}{Object.keys(daemonCredential).length ? <p className={styles.note}>{text(daemonCredential.message, text(daemonCredential.error))}</p> : null}{deviceLink.ok === true ? <div className={styles.secretResult}><strong>Display once</strong><p>{text(deviceLink.establish_url, text(deviceLink.url))}</p><code>{text(deviceLink.code)}</code><small>Expires {text(deviceLink.expires_at, 'soon')}</small></div> : null}</section>
-    <section><h3>Advanced durable settings</h3><p className={styles.note}>Complete server-returned schemas are available here so new settings remain editable before a dedicated control is added.</p><div className={styles.advancedSettings}><Field label="Global settings (JSON)"><textarea value={advancedGlobal} onChange={(event) => { setAdvancedGlobal(event.target.value); setDirty(true); setSaved(false); }} spellCheck={false} /></Field><Field label={`${group} settings (JSON)`}><textarea value={advancedGroup} onChange={(event) => { setAdvancedGroup(event.target.value); setDirty(true); setSaved(false); }} spellCheck={false} /></Field><Field label="Engineer behavior defaults (JSON)"><textarea value={advancedEngineer} onChange={(event) => { setAdvancedEngineer(event.target.value); setDirty(true); setSaved(false); }} spellCheck={false} /></Field><Field label="Architect behavior defaults (JSON)"><textarea value={advancedArchitect} onChange={(event) => { setAdvancedArchitect(event.target.value); setDirty(true); setSaved(false); }} spellCheck={false} /></Field></div><div className={styles.settingsActions}><Button tone="quiet" onPress={() => { try { send({ cmd: 'preview_system_prompt', request_id: `react-engineer-${Date.now()}`, group, kind: 'engineer', group_settings: { ...record(JSON.parse(advancedGroup)), ...groupDraft }, settings: record(JSON.parse(advancedEngineer)) }); setJsonError(''); } catch { setJsonError('Advanced settings must be valid JSON.'); } }}>Preview Engineer system prompt</Button><Button tone="quiet" onPress={() => { try { send({ cmd: 'preview_system_prompt', request_id: `react-architect-${Date.now()}`, group, kind: 'architect', group_settings: { ...record(JSON.parse(advancedGroup)), ...groupDraft }, settings: record(JSON.parse(advancedArchitect)) }); setJsonError(''); } catch { setJsonError('Advanced settings must be valid JSON.'); } }}>Preview Architect system prompt</Button></div>{text(promptPreview.prompt) ? <details className={styles.promptPreview}><summary>{text(promptPreview.kind)} system prompt · {text(record(promptPreview.metadata).provider, 'inherited provider')}</summary><pre>{text(promptPreview.prompt)}</pre></details> : null}{jsonError ? <p className={styles.validation}>{jsonError}</p> : null}</section>
-  </div>;
+    </div><div className={styles.aiCorpus}><strong>Index corpus</strong>{Object.entries(aiDraft.ai_index_corpus).map(([key, enabled]) => <label key={key}><input type="checkbox" checked={enabled === true} onChange={(event) => change(setAiDraft, { ai_index_corpus: { ...aiDraft.ai_index_corpus, [key]: event.target.checked } })} />{key.replaceAll('_', ' ')}</label>)}</div>{Object.keys(aiConfirmation).length ? <div className={styles.secretResult}><strong>Embedding index rebuild required</strong><p>{text(aiConfirmation.message)}</p><Button tone="primary" onPress={() => { void save(true); }}>Confirm settings and rebuild</Button></div> : null}<div className={styles.settingsActions}>{record(aiAnthropic.key).configured === true ? <Button tone="danger" onPress={() => { setClearAiSecrets((value) => value.includes('anthropic') ? value.filter((item) => item !== 'anthropic') : [...value, 'anthropic']); setDirty(true); }}>{clearAiSecrets.includes('anthropic') ? 'Keep Anthropic key' : 'Clear Anthropic key'}</Button> : null}{record(aiOpenAi.key).configured === true ? <Button tone="danger" onPress={() => { setClearAiSecrets((value) => value.includes('openai_compatible') ? value.filter((item) => item !== 'openai_compatible') : [...value, 'openai_compatible']); setDirty(true); }}>{clearAiSecrets.includes('openai_compatible') ? 'Keep OpenAI key' : 'Clear OpenAI key'}</Button> : null}<Button tone="quiet" onPress={() => send({ cmd: 'ai_index_start', mode: Number(record(aiIndex.counts).indexed ?? 0) > 0 ? 'rebuild' : 'incremental', confirm: true })}>Build / rebuild index</Button></div><p className={styles.note}>Raw provider keys are write-only and never returned in snapshots or logs. Index: {text(aiIndex.status, 'disabled')} · {text(record(aiIndex.counts).indexed, '0')} indexed.</p></section>
+    <section><h3>Relay connector</h3><div className={styles.formGrid}><Field label="Relay"><select value={relayDraft.relay_enabled ? 'on' : 'off'} onChange={(event) => changeRelay({ relay_enabled: event.target.value === 'on' })}><option value="off">Disabled</option><option value="on">Enabled</option></select></Field><Field label="Relay URL"><input value={relayDraft.relay_url} onChange={(event) => changeRelay({ relay_url: event.target.value })} /></Field><Field label="Daemon ID"><input value={relayDraft.relay_daemon_id} onChange={(event) => changeRelay({ relay_daemon_id: event.target.value })} /></Field><Field label="Credential ID"><input value={relayDraft.relay_credential_id} onChange={(event) => changeRelay({ relay_credential_id: event.target.value })} /></Field><Field label="Private key path"><input value={relayDraft.relay_private_key_path} onChange={(event) => changeRelay({ relay_private_key_path: event.target.value })} /></Field><Field label="One-time pairing token"><input type="password" value={pairingToken} onChange={(event) => setPairingToken(event.target.value)} autoComplete="off" /></Field></div><div className={styles.settingsActions}><Button tone="quiet" onPress={() => send({ cmd: 'test_relay_connection' })}>Test connection</Button><Button tone="quiet" isDisabled={!pairingToken.trim()} onPress={() => { send({ cmd: 'generate_daemon_credential', pairing_token: pairingToken }); setPairingToken(''); }}>Pair daemon credential</Button><Button tone="primary" isDisabled={!relayDraft.relay_enabled} onPress={() => send({ cmd: 'generate_relay_device_link', confirm: true })}>Generate one-time device link</Button></div>{Object.keys(relayTest).length ? <p className={styles.note}>{text(relayTest.status)} · {text(relayTest.message)}</p> : null}{Object.keys(daemonCredential).length ? <p className={styles.note}>{text(daemonCredential.message, text(daemonCredential.error))}</p> : null}{deviceLink.ok === true ? <div className={styles.secretResult}><strong>Display once</strong><p>{text(deviceLink.establish_url, text(deviceLink.url))}</p><code>{text(deviceLink.code)}</code><small>Expires {text(deviceLink.expires_at, 'soon')}</small></div> : null}</section>
+    <section><h3>Runtime and behavior settings</h3><p className={styles.note}>Fields retain their daemon defaults and inheritance. Group-wide defaults apply to future launches; per-agent overrides remain in Agents.</p><details><summary>Global defaults</summary><StructuredSettings value={record(JSON.parse(advancedGlobal))} omit={[...Object.keys(globalDraft), ...Object.keys(relayDraft), ...Object.keys(aiDraft), 'default_lanes']} onChange={(next) => { setAdvancedGlobal(JSON.stringify(next)); setDirty(true); setSaved(false); }} /></details><details><summary>{group} execution, worktrees, notifications and sync</summary><StructuredSettings value={record(JSON.parse(advancedGroup))} omit={Object.keys(groupDraft)} onChange={(next) => { setAdvancedGroup(JSON.stringify(next)); setDirty(true); setSaved(false); }} /></details><details><summary>Engineer behavior defaults</summary><StructuredSettings value={record(JSON.parse(advancedEngineer))} onChange={(next) => { setAdvancedEngineer(JSON.stringify(next)); setDirty(true); setSaved(false); }} /></details><details><summary>Architect behavior defaults</summary><StructuredSettings value={record(JSON.parse(advancedArchitect))} onChange={(next) => { setAdvancedArchitect(JSON.stringify(next)); setDirty(true); setSaved(false); }} /></details><div className={styles.settingsActions}><Button tone="quiet" onPress={() => { try { send({ cmd: 'preview_system_prompt', request_id: `react-engineer-${Date.now()}`, group, kind: 'engineer', group_settings: { ...record(JSON.parse(advancedGroup)), ...groupDraft }, settings: record(JSON.parse(advancedEngineer)) }); setJsonError(''); } catch { setJsonError('Advanced settings must be valid JSON.'); } }}>Preview Engineer system prompt</Button><Button tone="quiet" onPress={() => { try { send({ cmd: 'preview_system_prompt', request_id: `react-architect-${Date.now()}`, group, kind: 'architect', group_settings: { ...record(JSON.parse(advancedGroup)), ...groupDraft }, settings: record(JSON.parse(advancedArchitect)) }); setJsonError(''); } catch { setJsonError('Advanced settings must be valid JSON.'); } }}>Preview Architect system prompt</Button></div>{text(promptPreview.prompt) ? <details className={styles.promptPreview}><summary>{text(promptPreview.kind)} system prompt · {text(record(promptPreview.metadata).provider, 'inherited provider')}</summary><pre>{text(promptPreview.prompt)}</pre></details> : null}{jsonError ? <p className={styles.validation}>{jsonError}</p> : null}</section>
+  </fieldset></form>;
 }
 
-export function ControlCenter({ group, sendCommand, onCommandUnavailable }: {
+function SettingsWorkspace({ group, responses, send }: { group: string; responses: Record<string, unknown>; send: (command: TorqueCommand) => void }) {
+  const dispatch = useAppDispatch();
+  const [ready, setReady] = useState(false); const [error, setError] = useState(''); const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    void Promise.all([{ cmd: 'get_global_settings' }, { cmd: 'get_group_settings', group }, { cmd: 'get_ai_settings' }].map((command) => readCommand(command, controller.signal))).then((frames) => {
+      if (controller.signal.aborted) return;
+      frames.forEach((frame) => dispatch(projectionActions.auxiliaryResourceReceived(frame))); setReady(true); setError('');
+    }).catch((cause: unknown) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Settings unavailable'); });
+    return () => controller.abort();
+  }, [group, dispatch, retry]);
+  return ready ? <SettingsPanel group={group} responses={responses} send={send} /> : error ? <StateSurface title="Settings unavailable" description={error} action={<Button onPress={() => setRetry((value) => value + 1)}>Retry settings</Button>} /> : <StateSurface title="Loading settings" description="Loading global, group and AI defaults before editing." />;
+}
+
+export function ControlCenter({ group, sendCommand, onCommandUnavailable, host = browserHost }: {
   group: string;
+  host?: DesktopHost;
   sendCommand: CommandSender;
   onCommandUnavailable: () => void;
 }) {
@@ -238,6 +284,7 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable }: {
   const groupState = useAppSelector(selectGroupsState);
   const catalog = useAppSelector(selectCatalogState);
   const agents = useAppSelector(selectAgentsState);
+  const messages = useAppSelector(selectMessagesState);
   const tab = workspaceUi.controlTab;
   const setTab = (next: ControlTab) => dispatch(workspaceUiActions.setControlTab(next));
   const [selectedAction, setSelectedAction] = useState('');
@@ -246,35 +293,28 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable }: {
   const [actionError, setActionError] = useState('');
   const requestKey = useRef('');
   const lastFrame = connection.lastAuxiliaryFrame;
+  const preview = record(auxiliaryResponses[`action_rendered:${selectedAction || actionDraft.name}`]);
   const baseDir = text(record(groupState.settings[group]).default_directory);
 
   const send = useCallback((command: TorqueCommand) => { if (!sendCommand(command)) onCommandUnavailable(); }, [onCommandUnavailable, sendCommand]);
   const refresh = useCallback(() => {
-    [
-      { cmd: 'get_mission_control', group },
-      { cmd: 'get_system_health_metrics', group, window: '24h' },
-      { cmd: 'get_metrics_history', group, window: '24h' },
-      { cmd: 'supervisor_sessions_list' },
-      { cmd: 'get_events', limit: 100 },
-      { cmd: 'list_actions', group },
-      { cmd: 'list_roles', group },
-      { cmd: 'list_templates', group },
-      { cmd: 'list_specializations', group },
-      { cmd: 'agent_class_list', ...(baseDir ? { base_dir: baseDir } : {}) },
-      { cmd: 'get_global_settings' },
-      { cmd: 'get_group_settings', group },
-      { cmd: 'get_ai_settings' },
-      { cmd: 'help_list', audience: 'user' },
-    ].forEach(send);
-  }, [baseDir, group, send]);
+    const requests: Partial<Record<ControlTab, TorqueCommand[]>> = {
+      mission: [{ cmd: 'get_mission_control', group }],
+      activity: [{ cmd: 'get_events', limit: 100 }],
+      actions: [{ cmd: 'list_actions', group }],
+      catalog: [{ cmd: 'list_roles', group }, { cmd: 'list_templates', group }, { cmd: 'list_specializations', group }, { cmd: 'agent_class_list', ...(baseDir ? { base_dir: baseDir } : {}) }],
+      help: [{ cmd: 'help_list', audience: 'user' }],
+    };
+    (requests[tab] || []).forEach(send);
+  }, [baseDir, group, send, tab]);
 
   useEffect(() => {
     if (!group || connection.status !== 'connected') return;
-    const key = `${group}:${connection.reconnectCount}`;
+    const key = `${group}:${tab}:${connection.reconnectCount}`;
     if (requestKey.current === key) return;
     requestKey.current = key;
     refresh();
-  }, [group, connection.status, connection.reconnectCount, refresh]);
+  }, [group, tab, connection.status, connection.reconnectCount, refresh]);
 
   const actionItems = useMemo(() => {
     const seen = new Set<string>();
@@ -289,10 +329,10 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable }: {
   const agentCount = agentItems.filter((item) => item.cell_type !== 'terminal').length;
   const terminalCount = agentItems.filter((item) => item.cell_type === 'terminal').length;
   const eventItems = useMemo(() => [...operations.events].reverse().map(record), [operations.events]);
-  const loadedAction = lastFrame?.type === 'action_detail'
-    && text(lastFrame.name) === selectedAction ? record(lastFrame.action) : null;
+  const actionFrame = record(auxiliaryResponses[`action_detail:${selectedAction}`]);
+  const loadedAction = text(actionFrame.name) === selectedAction ? record(actionFrame.action) : null;
   const editorDraft = !actionDirty && loadedAction ? {
-    name: text(lastFrame?.name),
+    name: text(actionFrame.name),
     description: text(loadedAction.description), scope: text(loadedAction.scope, 'project'),
     agent: typeof loadedAction.agent === 'string' ? loadedAction.agent : JSON.stringify(loadedAction.agent ?? ''), group: text(loadedAction.group),
     prompt: text(loadedAction.prompt),
@@ -324,16 +364,19 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable }: {
   };
 
   return <section className={styles.root} aria-label="Control Center">
-    <header className={styles.header}><div><p>Workspace / {group || 'No group'}</p><h1>Control Center</h1></div><span>{agentCount} {agentCount === 1 ? 'agent' : 'agents'}{terminalCount ? ` · ${terminalCount} ${terminalCount === 1 ? 'terminal' : 'terminals'}` : ''} · {eventItems.length} events</span><Button tone="quiet" onPress={refresh}>Refresh all</Button></header>
+    <header className={styles.header}><div><p>Workspace / {group || 'No group'}</p><h1>Control Center</h1></div><span>{agentCount} {agentCount === 1 ? 'agent' : 'agents'}{terminalCount ? ` · ${terminalCount} ${terminalCount === 1 ? 'terminal' : 'terminals'}` : ''} · {eventItems.length} events</span>{['mission', 'activity', 'actions', 'catalog', 'help'].includes(tab) ? <Button tone="quiet" onPress={refresh}>Refresh section</Button> : null}</header>
     <nav className={styles.tabs} aria-label="Control Center sections">{tabs.map((item) => <button key={item.id} aria-current={tab === item.id ? 'page' : undefined} onClick={() => setTab(item.id)}>{item.label}</button>)}</nav>
     {lastFrame?.type === 'error' ? <div className={styles.error} role="alert">{text(lastFrame.message, 'Request failed.')}</div> : null}
     <div className={styles.content}>
       {tab === 'mission' ? <MissionPanel group={group} agentCount={agentCount} mission={operations.missionControl} health={operations.health} supervisor={operations.supervisor} relay={operations.relayConnection} responses={auxiliaryResponses} send={send} onOpenTask={(id) => { dispatch(workspaceUiActions.setActivePanel('board')); dispatch(workspaceUiActions.setDetailTask(id)); }} onOpenAgent={(id) => { dispatch(workspaceUiActions.setActivePanel('agents')); dispatch(workspaceUiActions.setSelectedAgent(id)); }} /> : null}
+      {tab === 'chat' ? <PeerChat threads={messages.peerThreads} agents={agents.records} /> : null}
+      {tab === 'pipelines' ? <PipelineExplorer group={group} onEdit={(name) => { chooseAction(name); setTab('actions'); }} /> : null}
+      {tab === 'logs' ? <LogViewer host={host} /> : null}
       {tab === 'activity' ? <ActivityPanel events={eventItems} send={send} /> : null}
       {tab === 'history' ? <HistoryPanel group={group} responses={auxiliaryResponses} send={send} /> : null}
       {tab === 'context' ? <ContextPanel group={group} agents={agentItems} responses={auxiliaryResponses} send={send} /> : null}
       {tab === 'actions' ? <div className={styles.editor}>
-        <aside><header><h2>Actions</h2><Button tone="quiet" onPress={() => { setSelectedAction(''); setActionDraft({ name: '', description: '', scope: 'project', agent: '', group: '', prompt: '{{ TASK }}', labels: '', transitions: '[]', terminals: '[]', worktree: false, auto_close_on_done: false, disable_role_preamble: false, implementation_depth: false, review_required_above_loc: '' }); setActionDirty(true); setActionError(''); }}>＋</Button></header>{actionItems.length ? actionItems.map((item, index) => <button key={labelFor(item, String(index))} aria-current={selectedAction === labelFor(item, '') ? 'page' : undefined} onClick={() => chooseAction(item)}>{labelFor(item)}</button>) : <StateSurface title="No actions" description="Create the first project action." />}<hr /><Button tone="quiet" onPress={() => send({ cmd: 'discover_pipelines', group })}>Discover pipelines</Button></aside>
+        <aside><header><h2>Actions</h2><Button tone="quiet" onPress={() => { setSelectedAction(''); setActionDraft({ name: '', description: '', scope: 'project', agent: '', group: '', prompt: '{{ TASK }}', labels: '', transitions: '[]', terminals: '[]', worktree: false, auto_close_on_done: false, disable_role_preamble: false, implementation_depth: false, review_required_above_loc: '' }); setActionDirty(true); setActionError(''); }}>＋</Button></header>{actionItems.length ? actionItems.map((item, index) => <button key={labelFor(item, String(index))} aria-current={selectedAction === labelFor(item, '') ? 'page' : undefined} onClick={() => chooseAction(item)}>{labelFor(item)}</button>) : <StateSurface title="No actions" description="Create the first project action." />}<hr /><Button tone="quiet" onPress={() => setTab('pipelines')}>Discover pipelines</Button></aside>
         <form onSubmit={(event) => { event.preventDefault(); saveAction(); }}><header><div><h2>Pipeline editor</h2><p>Complete action, dispatch, and transition contract.</p></div><span>{actionDirty ? 'Unsaved' : 'Saved'}</span>{selectedAction ? <Button tone="danger" onPress={() => { send({ cmd: 'delete_action', group, name: selectedAction }); setSelectedAction(''); }}>Delete</Button> : null}<Button tone="quiet" onPress={() => send({ cmd: 'render_action', group, name: selectedAction || editorDraft.name, vars: { TASK: 'Preview task' } })}>Preview</Button><Button tone="primary" type="submit" isDisabled={!actionDirty || !editorDraft.name || !editorDraft.prompt.includes('{{ TASK }}')}>Save action</Button></header>
           <Field label="Name"><input value={editorDraft.name} onChange={(event) => { setActionDraft({ ...editorDraft, name: event.target.value }); setActionDirty(true); }} /></Field>
           <div className={styles.formGrid}><Field label="Description"><input value={editorDraft.description} onChange={(event) => { setActionDraft({ ...editorDraft, description: event.target.value }); setActionDirty(true); }} /></Field><Field label="Scope"><select value={editorDraft.scope} onChange={(event) => { setActionDraft({ ...editorDraft, scope: event.target.value }); setActionDirty(true); }}><option value="project">Project</option><option value="user">User</option></select></Field><Field label="Agent role/template or inline JSON"><input value={editorDraft.agent} onChange={(event) => { setActionDraft({ ...editorDraft, agent: event.target.value }); setActionDirty(true); }} /></Field><Field label="Target group"><input value={editorDraft.group} onChange={(event) => { setActionDraft({ ...editorDraft, group: event.target.value }); setActionDirty(true); }} /></Field><Field label="Labels"><input value={editorDraft.labels} onChange={(event) => { setActionDraft({ ...editorDraft, labels: event.target.value }); setActionDirty(true); }} placeholder="bug, review" /></Field><Field label="Review above LOC"><input type="number" min="0" value={editorDraft.review_required_above_loc} onChange={(event) => { setActionDraft({ ...editorDraft, review_required_above_loc: event.target.value }); setActionDirty(true); }} /></Field></div>
@@ -342,7 +385,7 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable }: {
           <Field label="Transitions (JSON)"><textarea className={styles.shortArea} value={editorDraft.transitions} onChange={(event) => { setActionDraft({ ...editorDraft, transitions: event.target.value }); setActionDirty(true); }} /></Field>
           <Field label="Companion terminals (JSON)"><textarea className={styles.shortArea} value={editorDraft.terminals} onChange={(event) => { setActionDraft({ ...editorDraft, terminals: event.target.value }); setActionDirty(true); }} /></Field>
           {actionError ? <p className={styles.validation} role="alert">{actionError}</p> : null}
-          {lastFrame?.type === 'action_rendered' ? <pre className={styles.json}>{text(lastFrame.prompt)}</pre> : null}
+          {preview.type === 'action_rendered' ? <pre className={styles.json}>{text(preview.prompt)}</pre> : null}
           {!editorDraft.prompt.includes('{{ TASK }}') ? <p className={styles.validation}>Prompt must include {'{{ TASK }}'}.</p> : null}
         </form>
       </div> : null}
@@ -353,7 +396,7 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable }: {
         <CatalogEditor title="Specializations" kind="specialization" items={catalog.specializations} group={group} send={send} />
         <BehaviorOverlayEditor group={group} active={catalog.behaviorOverlays} proposals={operations.behaviorOverlayProposals} responses={auxiliaryResponses} agents={agentItems} send={send} />
       </div> : null}
-      {tab === 'settings' ? <SettingsPanel key={`${group}:${Object.keys(record(auxiliaryResponses[`group_settings:${group}`])).length}`} group={group} responses={auxiliaryResponses} send={send} /> : null}
+      {tab === 'settings' ? <SettingsWorkspace key={group} group={group} responses={auxiliaryResponses} send={send} /> : null}
       {tab === 'help' ? <HelpPanel responses={auxiliaryResponses} send={send} /> : null}
     </div>
   </section>;

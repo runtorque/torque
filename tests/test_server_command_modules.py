@@ -438,6 +438,19 @@ class UIStateCommandModuleTests(unittest.TestCase):
             self.commands._UI_STATE_COMMAND_REGISTRY.route_names(),
         )
 
+    def test_supervisor_started_sort_survives_persistence(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+
+        state = SimpleNamespace(_emit=Mock(), _db_save_ui=Mock())
+        self.commands._handle_ui_state_command({
+            "cmd": "ui_set_supervisor_panel_state",
+            "state": {"sortKey": "started_at", "sortDirection": "desc"},
+        }, state)
+        self.assertEqual(state.supervisor_panel_state["sortKey"], "started_at")
+        self.assertEqual(state.supervisor_panel_state["sortDirection"], "desc")
+        state._db_save_ui.assert_called_once()
+
     def test_server_preserves_ui_state_compatibility_exports(self):
         self.assertIs(
             self.commands._handle_ui_state_command,

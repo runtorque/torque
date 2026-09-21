@@ -40,7 +40,7 @@ export interface ConnectionState {
 
 export interface WorkspaceUiState {
   activePanel: 'board' | 'agents' | 'planning' | 'control';
-  controlTab: 'mission' | 'activity' | 'history' | 'context' | 'actions' | 'catalog' | 'settings' | 'help';
+  controlTab: 'mission' | 'activity' | 'history' | 'context' | 'logs' | 'chat' | 'pipelines' | 'actions' | 'catalog' | 'settings' | 'help';
   commandPaletteOpen: boolean;
   detailTaskId: string | null;
   focusedTaskId: string | null;
@@ -93,7 +93,8 @@ function appendDiagnostic(state: ConnectionState, diagnostic: ProtocolDiagnostic
 }
 
 function auxiliaryResponseTarget(frame: AuxiliaryFrame): string {
-  for (const key of ['id', 'agent_id', 'cell_id', 'architect_id', 'engineer_id', 'task_id', 'topic_id', 'linked_target_ref', 'scope_ref', 'proposal_id', 'group', 'group_name']) {
+  if (['action_detail', 'action_rendered'].includes(frame.type) && typeof frame.name === 'string') return frame.name;
+  for (const key of ['id', 'agent_id', 'cell_id', 'architect_id', 'engineer_id', 'task_id', 'topic_id', 'linked_target_ref', 'scope_ref', 'proposal_id', 'group', 'group_name', 'name']) {
     const value = frame[key];
     if (typeof value === 'string' || typeof value === 'number') return String(value);
   }
@@ -399,9 +400,15 @@ const projectionSlice = createSlice({
           replace('agent_classes', frame.classes);
           replace('agent_class_issues', frame.registry_issues);
           break;
-        case 'events_page':
-          replace('panel_events', frame.events);
+        case 'events_page': {
+          const current: unknown[] = Array.isArray(state.data.panel_events) ? state.data.panel_events as unknown[] : [];
+          const merged = new Map<string, unknown>();
+          for (const item of [...current, ...(Array.isArray(frame.events) ? frame.events as unknown[] : [])]) {
+            if (item && typeof item === 'object') merged.set(String((item as Record<string, unknown>).id), item);
+          }
+          replace('panel_events', [...merged.values()].sort((a, b) => Number((a as Record<string, unknown>).id) - Number((b as Record<string, unknown>).id)).slice(-5000));
           break;
+        }
         case 'operator_notices': {
           const current = state.data.operator_notices;
           const notices = Number(frame.offset ?? 0) > 0 && current && typeof current === 'object' && !Array.isArray(current)
@@ -642,6 +649,7 @@ const selectAuxiliaryResponses = selectRecord('auxiliary_responses');
 // These memoized domain selectors are the public store boundary for feature
 // code. The flat projection remains private protocol-compatibility state.
 export const selectRuntime = selectRecord('runtime');
+export const selectSupervisorUiState = selectRecord('supervisor_panel_state');
 export const selectAgentsState = createSelector(
   [selectAgentRecords, selectAgentSettings, selectResolvedAgentSettings, selectAgentDigestSettings, selectDigestBufferStats, selectDigestSentEvents, selectEngineerBufferStats, selectEngineerSentEvents],
   (records, settings, resolvedSettings, digestSettings, digestBufferStats, digestSentEvents, engineerBufferStats, engineerSentEvents) => ({ records, settings, resolvedSettings, digestSettings, digestBufferStats, digestSentEvents, engineerBufferStats, engineerSentEvents }),

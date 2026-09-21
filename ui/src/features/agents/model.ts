@@ -170,7 +170,7 @@ function byTreeOrder(a: AgentTreeNode, b: AgentTreeNode): number {
  * A stale ownership reference never makes an agent disappear: that record is
  * promoted to a root and marked orphaned until the backend relationship heals.
  */
-export function buildAgentTree(hierarchy: AgentHierarchy): AgentTreeNode[] {
+export function buildAgentTree(hierarchy: AgentHierarchy, groupOrder: unknown = [], childOrders: Record<string, unknown> = {}): AgentTreeNode[] {
   const nodes = new Map<string, AgentTreeNode>(hierarchy.all.map((agent): [string, AgentTreeNode] => [agent.id, {
     agent,
     children: [],
@@ -199,9 +199,19 @@ export function buildAgentTree(hierarchy: AgentHierarchy): AgentTreeNode[] {
     }
   }
 
-  const sortNodes = (items: AgentTreeNode[]) => {
-    items.sort(byTreeOrder);
-    items.forEach((item) => sortNodes(item.children));
+  const rank = (order: unknown, id: string) => {
+    const index = Array.isArray(order) ? order.indexOf(id) : -1;
+    return index < 0 ? Number.MAX_SAFE_INTEGER : index;
+  };
+  const sortNodes = (items: AgentTreeNode[], parentId = '') => {
+    const terminalOrder = childOrders[parentId];
+    items.sort((a, b) => {
+      if (a.agent.parentId && b.agent.parentId && a.agent.parentId === b.agent.parentId) {
+        return rank(terminalOrder, a.agent.id) - rank(terminalOrder, b.agent.id) || byTreeOrder(a, b);
+      }
+      return rank(groupOrder, a.agent.id) - rank(groupOrder, b.agent.id) || byTreeOrder(a, b);
+    });
+    items.forEach((item) => sortNodes(item.children, item.agent.id));
   };
   sortNodes(roots);
   return roots;

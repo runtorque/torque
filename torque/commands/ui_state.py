@@ -378,7 +378,7 @@ def _handle_ui_state_command(data: dict, state: MatrixState):
             sort_key = str(raw.get("sortKey", "") or "")
             if sort_key not in {
                 "state", "owner", "session", "pid",
-                "command", "bytes", "tty", "path",
+                "command", "bytes", "tty", "path", "started_at",
             }:
                 sort_key = "owner"
             sort_direction = str(
