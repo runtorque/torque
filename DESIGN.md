@@ -2571,6 +2571,30 @@ scope.
 - Rationale: Treating a stored default-looking value as missing silently changed a valid setting after restart.
 - Verification: Single/bulk/restart regression, pre-heartbeat migration regression, and a 181-choice dropdown/boolean write/reload audit.
 
+### D-090 — Attention retries respect recorded delivery and reviewed proposals
+
+- Date: 2026-09-21
+- Status: accepted
+- Decision: Ask resolution is serialized per task in the daemon; closed/resolved asks cannot deliver another answer. Worker/Engineer retries reuse a recorded delivered reply without sending again. A retry whose text or target differs from its recorded reply is rejected explicitly, preserving the operator's draft; corrections use a new message. Operator approve and reject both validate the proposed hash and base when supplied, while approval also requires the proposal's base to remain active.
+- Constraints: This is concurrent-request and recorded-delivery protection, not an exactly-once guarantee across a process crash between PTY write and durable acknowledgement. Legacy callers may omit review preconditions. Rejecting a stale proposal withdraws it without changing the active overlay. Successful decisions update the displayed proposal status from the acknowledgement.
+- Verification: Backend concurrency, closed Architect, immutable retry, delivered-mirror and decision-precondition regressions; real-daemon browser delivery, reconnect, approve/stale/reject flows.
+
+### D-091 — Attention context refreshes without replacing the composer
+
+- Date: 2026-09-21
+- Status: accepted
+- Decision: A changed question or parent timestamp rehydrates full attention context, since compact task deltas omit descriptions. Accepted snapshots, reconnect and targeted refresh keep the mounted answer composer, its selection and caret. A behavior review preserves its note on reconnect and requires a fresh diff after a failed decision.
+- Constraints: Unrelated agent activity does not trigger question hydration. Delivery and decision errors retain drafts; an authoritative closed task leaves the open-attention list.
+- Verification: Compact question/parent component regression and real WebSocket browser checks for answer/review-note draft, focus and caret retention.
+
+### D-092 — Group navigation scrolls within its remaining sidebar space
+
+- Date: 2026-09-21
+- Status: accepted
+- Decision: The group list fills the space remaining below its header and above the connection footer. It scrolls independently; its last row stays fully reachable by pointer and keyboard regardless of group count.
+- Rationale: A list sized to 100% of the parent plus its header placed the final row behind the footer and blocked clicks in larger workspaces.
+- Verification: A 25-group browser regression asserts the last row is clickable and remains above the footer; repeated live suites exercise populated profiles.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

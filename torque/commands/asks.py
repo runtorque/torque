@@ -2,8 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any
+from weakref import WeakValueDictionary
+
+from torque.state import task_is_closed
+
+
+# Only active resolutions retain locks; unrelated tasks proceed independently.
+_ask_locks: WeakValueDictionary[tuple[Any, str], asyncio.Lock] = WeakValueDictionary()
 
 
 ASK_COMMAND_NAMES = frozenset({"resolve_ask"})
@@ -28,12 +36,24 @@ def _ask_command_response(data: dict, result: dict) -> dict:
 
 async def handle_ask_command(data: dict, runtime: AskCommandRuntime) -> dict:
     """Validate and resolve a tracked human-answer task."""
+    key = (runtime.state, str(data.get("id", "") or ""))
+    lock = _ask_locks.setdefault(key, asyncio.Lock())
+    async with lock:
+        return await _resolve_open_ask(data, runtime)
+
+
+async def _resolve_open_ask(data: dict, runtime: AskCommandRuntime) -> dict:
     task_id = data.get("id", "")
     answer = data.get("answer", "")
     task = runtime.state.board_tasks.get(task_id)
     if not task:
         return _ask_command_response(
             data, {"type": "error", "message": "Task not found"})
+    if task_is_closed(task) or "torque:ask-resolved" in (task.labels or []):
+        return _ask_command_response(data, {
+            "type": "error", "code": "ask_already_resolved",
+            "message": "This ask has already been resolved", "task_id": task_id,
+        })
     if "torque:human" not in (task.labels or []):
         return _ask_command_response(
             data, {"type": "error", "message": "Not an ask task"})

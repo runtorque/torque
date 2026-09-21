@@ -38,6 +38,9 @@ export function BehaviorReview({ proposalId, onClose }: { proposalId: string; on
       const result = await readCommand({ cmd: approve ? 'behavior_overlay_user_approve' : 'behavior_overlay_user_reject', proposal_id: proposalId, expected_proposed_text_sha256: text(proposal.proposed_text_sha256), expected_base_version_id: text(proposal.base_version_id), note: note.trim() }, new AbortController().signal);
       if (result.type !== 'behavior_overlay_proposal' || text(result.proposal_id) !== proposalId) throw new Error('Could not confirm the decision. Reload the diff to check the proposal.');
       dispatch(projectionActions.auxiliaryResourceReceived(result));
+      setLoaded((current) => current?.key === loadKey ? {
+        ...current, frame: { ...current.frame, proposal: { ...record(current.frame.proposal), ...record(result.proposal) } },
+      } : current);
       setOutcome(approve ? 'Behavior change approved.' : 'Behavior change rejected.');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not confirm the decision.');

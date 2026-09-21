@@ -9,6 +9,7 @@ import {
 
 export interface ServerProjectionState {
   hydrated: boolean;
+  snapshotVersion: number;
   seq: number;
   data: UnknownRecord;
   appliedOperationCount: number;
@@ -19,6 +20,7 @@ export interface ServerProjectionState {
 export function emptyServerProjection(): ServerProjectionState {
   return {
     hydrated: false,
+    snapshotVersion: 0,
     seq: 0,
     data: {},
     appliedOperationCount: 0,
@@ -586,6 +588,7 @@ export function hydrateProjection(frame: StateFrame): ServerProjectionState {
   }
   return {
     hydrated: true,
+    snapshotVersion: 0,
     seq: frame.seq,
     data,
     appliedOperationCount: 0,

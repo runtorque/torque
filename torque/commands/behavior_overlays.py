@@ -182,9 +182,32 @@ def _handle_behavior_overlay_architect_approve_command(
         return _behavior_overlay_error(exc)
 
 
+def _validate_operator_review(data: dict, proposal: dict) -> None:
+    # Legacy clients may omit these fields. When supplied, both decisions must
+    # refer to the exact proposal the operator reviewed (including an empty base).
+    for request_key, proposal_key, label in (
+        ("expected_proposed_text_sha256", "proposed_text_sha256", "proposed text hash"),
+        ("expected_base_version_id", "base_version_id", "base version"),
+    ):
+        expected = str(data.get(request_key, "") or "").strip()
+        # The CLI historically sends an empty optional hash when --expected-sha
+        # is omitted. Preserve that omission convention.
+        if request_key == "expected_proposed_text_sha256" and not expected:
+            continue
+        if request_key in data and expected != str(proposal.get(proposal_key, "") or ""):
+            raise ValueError(f"{label} does not match")
+
+
 def _handle_behavior_overlay_reject_command(
         data: dict, state: MatrixState, *, actor_kind: str) -> dict:
     try:
+        if actor_kind == "user":
+            reviewed = state.load_behavior_overlay_proposal(
+                str(data.get("proposal_id", "") or data.get("id", "") or "")
+            )
+            if not reviewed:
+                return {"type": "error", "message": "behavior overlay proposal not found"}
+            _validate_operator_review(data, reviewed)
         proposal = state.reject_behavior_overlay_proposal(
             str(data.get("proposal_id", "") or data.get("id", "") or ""),
             actor_kind=actor_kind,
@@ -209,9 +232,7 @@ def _handle_behavior_overlay_user_approve_command(
         )
         if not proposal:
             return {"type": "error", "message": "behavior overlay proposal not found"}
-        expected = str(data.get("expected_proposed_text_sha256", "") or "").strip()
-        if expected and expected != str(proposal.get("proposed_text_sha256", "") or ""):
-            return {"type": "error", "message": "proposed text hash does not match"}
+        _validate_operator_review(data, proposal)
         if str(proposal.get("next_actor_kind", "") or "") != "user":
             return {
                 "type": "error",

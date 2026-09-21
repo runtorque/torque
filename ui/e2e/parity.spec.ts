@@ -233,3 +233,15 @@ test('settings save sparse typed edits and stage daemon-default resets before pe
   expect(reset.engineer_settings).toMatchObject({ restrict_to_created_agents: false, push_interval: 60 });
   await page.screenshot({ path: test.info().outputPath('parity-settings.png'), fullPage: true });
 });
+
+test('sidebar overflow keeps the final group clickable above its footer', async ({ page }) => {
+  const names = Array.from({ length: 25 }, (_, index) => `Overflow ${String(index).padStart(2, '0')}`);
+  const sent = await fixtureWorkspace(page, false, { groups: Object.fromEntries(names.map((name) => [name, []])), group_order: names, active_group: names[0] });
+  const last = page.getByRole('button', { name: names.at(-1)!, exact: true });
+  await last.click({ timeout: 5000 });
+  await expect.poll(() => sent.some((command) => command.cmd === 'ui_select_group' && command.group === names.at(-1))).toBe(true);
+  const bounds = await last.boundingBox();
+  const footer = await page.getByText('connected', { exact: true }).boundingBox();
+  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(footer!.y);
+  await last.focus(); await last.press('Enter'); await expect(last).toBeFocused();
+});

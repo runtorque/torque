@@ -108,6 +108,20 @@ TORQUE_UI_BASE_URL=http://127.0.0.1:18958 TORQUE_PLAYWRIGHT_CHANNEL=chrome npm -
 
 The browser suite shares daemon state, so run it serially. This PTY-disabled harness validates UI and command workflows but does not certify actual terminal I/O or native Tauri windows. The expanded suite includes deterministic transport/host fixtures and live Board/Planning/pipeline/endpoint checks. Native release testing still follows the Tauri section above.
 
+### Real attention delivery regression
+
+Use a disposable profile with PTY spawning enabled and a non-default port. Do not set `TORQUE_PROFILE_SKIP_PTY` for this run. The browser and daemon must run on the same machine, because the test creates a temporary Python input receiver and inspects its input log. No model or provider service is invoked.
+
+```bash
+TORQUE_STANDALONE=1 TORQUE_DATA_DIR=/tmp/torque-attention-qa TORQUE_PROFILE=attention-qa TORQUE_PORT=18961 python3 torque.py
+# In a second shell after make ui-check:
+TORQUE_UI_BASE_URL=http://127.0.0.1:18961 TORQUE_PLAYWRIGHT_CHANNEL=chrome TORQUE_ATTENTION_PYTHON="$(command -v python3)" npm --prefix ui run test:e2e -- attention-live.spec.ts
+```
+
+The test refuses the default runtime/profile. It creates its own group, generic agent, temporary receiver directory, parent and ask; it removes the agent/session and temporary files afterward. Proposal records remain confined to newly created QA groups. Without `TORQUE_ATTENTION_PYTHON`, the PTY case skips; the live proposal test still runs. The receiver executable must be an absolute Python path available to the daemon. Shut down only the identity-verified QA daemon and its own supervisor after inspection.
+
+The checks cover an actual two-client HTTP race and PTY input, a transport failure before delivery, replay, compact context updates, real WebSocket reconnects, and real SQLite-backed behavior proposal decisions. They do not assert commercial provider comprehension or exactly-once delivery across a process crash.
+
 ## Classic burn-in and retirement
 
 The Torque maintainers own the fallback. `/legacy/` and classic writes remain

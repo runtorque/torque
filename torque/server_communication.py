@@ -1927,8 +1927,21 @@ async def _resolve_human_ask_task(
         created_at=time.time(),
         delivery_state="buffered",
     )
+    if reply_row and (
+            str(reply_row.get("message", "") or "").strip() != answer
+            or str(reply_row.get("recipient_id", "") or "") != target_id):
+        return {
+            "type": "error", "code": "ask_answer_conflict",
+            "message": (
+                "This ask already has a recorded reply. Retry the original "
+                "answer to its original target; use a new message for a correction."
+            ),
+            "task_id": task.id, "target_agent_id": target_id,
+        }
     delivery = None
-    if reply_row:
+    if reply_row and reply_row.get("delivery_state") == "delivered":
+        delivery = reply_row
+    elif reply_row:
         delivery = await _queue_user_direct_message_to_agent(
             state,
             agent,

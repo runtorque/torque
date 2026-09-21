@@ -174,8 +174,10 @@ const projectionSlice = createSlice({
   name: 'projection',
   initialState: emptyServerProjection(),
   reducers: {
-    snapshotReceived(_state, action: PayloadAction<StateFrame>) {
-      return hydrateProjection(action.payload);
+    snapshotReceived(state, action: PayloadAction<StateFrame>) {
+      // Compact snapshots replace hydrated details; consumers can refetch even
+      // when the new snapshot carries the same entity timestamps.
+      return { ...hydrateProjection(action.payload), snapshotVersion: state.snapshotVersion + 1 };
     },
     deltaReceived(state, action: PayloadAction<DeltaFrame>) {
       for (const operation of action.payload.ops) applyDeltaOperation(state, operation);

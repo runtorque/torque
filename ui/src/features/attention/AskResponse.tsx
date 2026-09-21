@@ -13,6 +13,7 @@ export function AskResponse({ taskId, send }: { taskId: string; send: (command: 
   const tasks = useAppSelector(selectTasksState).records;
   const agents = useAppSelector(selectAgentsState).records;
   const reconnect = useAppSelector(selectConnection).reconnectCount;
+  const snapshotVersion = useAppSelector((state) => state.projection.snapshotVersion);
   const task = record(tasks[taskId]);
   const parentId = text(task.parent_task_id);
   const parent = record(tasks[parentId]);
@@ -25,7 +26,7 @@ export function AskResponse({ taskId, send }: { taskId: string; send: (command: 
   const [resolved, setResolved] = useState(false);
   const [review, setReview] = useState(false);
   const busy = useRef(false);
-  const loadKey = `${taskId}:${parentId}:${reconnect}:${refresh}`;
+  const loadKey = `${taskId}:${text(task.updated_at)}:${parentId}:${text(parent.updated_at)}:${reconnect}:${snapshotVersion}:${refresh}`;
   const ready = hydrated === loadKey;
   useEffect(() => {
     const controller = new AbortController();

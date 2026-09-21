@@ -320,3 +320,88 @@ class WorkerAskResolutionTests(unittest.IsolatedAsyncioTestCase):
         ordinary_text = ordinary.payload["error"]["message"]
         self.assertIn("target is outside", ordinary_text)
         self.assertEqual(ordinary_task.lane, "Backlog")
+
+    def _command_runtime(self, *, architect=False, resolver=None):
+        from torque.commands.asks import AskCommandRuntime
+        return AskCommandRuntime(
+            is_architect_ask_task=lambda _task: architect, panel_event=None,
+            resolve_architect_ask_task=resolver,
+            resolve_human_ask_task=self.communication_mod._resolve_human_ask_task,
+            send_agent_prompt=self._send_prompt, bridge=None, state=self.state,
+        )
+
+    async def test_concurrent_command_replies_deliver_once(self):
+        from torque.commands.asks import handle_ask_command
+        runtime = self._command_runtime()
+        results = await asyncio.gather(*[
+            handle_ask_command(
+                {"id": self.ask.id, "answer": "Use review.", "request_id": str(i)},
+                runtime,
+            ) for i in range(2)
+        ])
+        self.assertEqual(len(self.sent_prompts), 1)
+        self.assertEqual(sorted(r["type"] for r in results), ["error", "ok"])
+        self.assertEqual([r["request_id"] for r in results], ["0", "1"])
+        self.assertEqual(len([m for m in self.ask.messages if m["action"] == "ask_reply"]), 1)
+
+    async def test_closed_architect_ask_never_redelivers(self):
+        from torque.commands.asks import handle_ask_command
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+        self.ask.labels.append("architect-ask")
+        self.ask.reply_agent_id = self.architect.id
+        self.architect.session_id = "architect-session"
+        self.architect.status = "idle"
+        bridge = SimpleNamespace(send_text=AsyncMock())
+        runtime = self._command_runtime(
+            architect=True, resolver=self.communication_mod._resolve_architect_ask_task,
+        )
+        runtime.bridge = bridge
+        payload = {"id": self.ask.id, "answer": "Approved."}
+        self.assertEqual((await handle_ask_command(payload, runtime))["type"], "ok")
+        self.assertEqual((await handle_ask_command(payload, runtime))["type"], "error")
+        bridge.send_text.assert_awaited_once()
+        self.assertEqual(self.ask.lane, "Done")
+
+    async def test_retry_does_not_silently_send_a_previous_answer(self):
+        async def fail(*_args, **_kwargs):
+            raise RuntimeError("delivery interrupted")
+        first = await self.communication_mod._resolve_human_ask_task(
+            self.state, self.ask, "Original answer", fail,
+        )
+        self.assertEqual(first["type"], "error")
+        self.engineer.session_id = "other-session"
+        self.engineer.status = "idle"
+        self.ask.reply_agent_id = self.engineer.id
+        changed_target = await self.communication_mod._resolve_human_ask_task(
+            self.state, self.ask, "Original answer", self._send_prompt,
+        )
+        self.assertEqual(changed_target["code"], "ask_answer_conflict")
+        self.assertEqual(self.sent_prompts, [])
+        self.ask.reply_agent_id = self.worker.id
+        changed = await self.communication_mod._resolve_human_ask_task(
+            self.state, self.ask, "Edited answer", self._send_prompt,
+        )
+        self.assertEqual(changed["type"], "error")
+        self.assertEqual(changed["code"], "ask_answer_conflict")
+        self.assertEqual(self.sent_prompts, [])
+        self.assertIn("torque:human", self.ask.labels)
+        retried = await self.communication_mod._resolve_human_ask_task(
+            self.state, self.ask, "Original answer", self._send_prompt,
+        )
+        self.assertEqual(retried["type"], "ok")
+        self.assertEqual(len(self.sent_prompts), 1)
+        self.assertEqual(self.ask.messages[-1]["message"], "Original answer")
+
+    async def test_delivered_mirror_finishes_open_ask_without_resending(self):
+        from torque.direct_message_mirrors import save_direct_ask_reply_mirror
+        save_direct_ask_reply_mirror(
+            self.state, self.worker, "Already delivered",
+            question=self.ask.task, source_task_id=self.ask.id, delivery_state="delivered",
+        )
+        result = await self.communication_mod._resolve_human_ask_task(
+            self.state, self.ask, "Already delivered", self._send_prompt,
+        )
+        self.assertEqual(result["type"], "ok")
+        self.assertEqual(self.sent_prompts, [])
+        self.assertEqual(self.ask.lane, "Done")

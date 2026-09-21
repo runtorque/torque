@@ -76,6 +76,37 @@ describe('attention contracts', () => {
     await act(async () => { await Promise.resolve(); delivery.resolve({ type: 'ok', command: 'resolve_ask', request_id: submitted[0]?.request_id }); });
     expect(screen.getByText('Answer delivered.')).toBeVisible(); expect(answer).toHaveValue('');
   });
+  it('rehydrates compact question and parent updates without replacing the answer or caret', async () => {
+    const store = setup(); let question = 'Original choices'; let context = 'Original parent';
+    requests((command) => ({ type: 'task_detail', id: command.id, task: command.id === 'ask' ? { ...ask, description: question } : { ...parent, description: context } }));
+    render(<Provider store={store}><AskResponse taskId="ask" send={vi.fn()} /></Provider>);
+    await screen.findByText('Original choices');
+    const answer = screen.getByRole('textbox', { name: 'Answer Choose release' });
+    fireEvent.change(answer, { target: { value: 'Keep this draft' } }); answer.focus(); (answer as HTMLTextAreaElement).setSelectionRange(2, 7);
+    question = 'Revised choices'; context = 'Revised parent';
+    act(() => { store.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: 11, ops: [{ op: 'task_upsert', id: 'ask', updated_at: '2026-09-21T12:00:00Z' }, { op: 'task_upsert', id: 'parent', updated_at: '2026-09-21T12:00:01Z' }] })); });
+    await screen.findByText('Revised choices');
+    expect(screen.getByText('Revised parent')).toBeInTheDocument();
+    expect(answer).toHaveValue('Keep this draft'); expect(answer).toHaveFocus();
+    expect((answer as HTMLTextAreaElement).selectionStart).toBe(2);
+    expect((answer as HTMLTextAreaElement).selectionEnd).toBe(7);
+  });
+  it('rehydrates a late compact snapshot even after reconnect detail already arrived', async () => {
+    const store = setup(); const calls = requests(detail);
+    render(<Provider store={store}><AskResponse taskId="ask" send={vi.fn()} /></Provider>);
+    const answer = screen.getByRole('textbox', { name: 'Answer Choose release' });
+    fireEvent.change(answer, { target: { value: 'Survive the snapshot' } }); answer.focus(); (answer as HTMLTextAreaElement).setSelectionRange(2, 7);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Resolve ask' })).toBeEnabled());
+    act(() => { store.dispatch(connectionActions.connected({ at: 2000, reconnect: true })); });
+    await waitFor(() => expect(calls.filter((c) => c.cmd === 'task_detail')).toHaveLength(4));
+    act(() => { store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, board_tasks: { ask: { ...ask, reply_agent_id: undefined }, parent }, agents: { worker } })); });
+    await waitFor(() => expect(calls.filter((c) => c.cmd === 'task_detail')).toHaveLength(6));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Resolve ask' })).toBeEnabled());
+    expect(screen.getByText(/Options: ship today/)).toBeVisible();
+    expect(answer).toHaveValue('Survive the snapshot'); expect(answer).toHaveFocus();
+    expect((answer as HTMLTextAreaElement).selectionStart).toBe(2);
+    expect((answer as HTMLTextAreaElement).selectionEnd).toBe(7);
+  });
   it('retains answers on rejection and rehydrates after reconnect without re-sending', async () => {
     const store = setup(); let failures = 0;
     const calls = requests((command) => command.cmd === 'task_detail' ? detail(command) : (++failures === 1 ? { type: 'error', message: 'Target session ended' } : { type: 'ok', command: 'resolve_ask', request_id: 'unrelated' }));
@@ -124,8 +155,8 @@ describe('behavior review', () => {
     fireEvent.click(approve); fireEvent.click(approve);
     expect(calls.filter((c) => c.cmd === 'behavior_overlay_user_approve')).toEqual([{ cmd: 'behavior_overlay_user_approve', proposal_id: 'proposal', expected_proposed_text_sha256: 'sha-reviewed', expected_base_version_id: 'base', note: 'Reviewed carefully' }]);
     expect(screen.getByRole('button', { name: 'Reject behavior change' })).toBeDisabled();
-    await act(async () => { decision.resolve({ type: 'behavior_overlay_proposal', proposal_id: 'proposal', proposal: { ...proposal, status: 'applied' } }); await decision.promise; });
-    expect(screen.getByText('Behavior change approved.')).toBeVisible(); expect(approve).toBeDisabled();
+    await act(async () => { decision.resolve({ type: 'behavior_overlay_proposal', proposal_id: 'proposal', proposal: { ...proposal, status: 'applied', next_actor_kind: '' } }); await decision.promise; });
+    expect(screen.getByText('Behavior change approved.')).toBeVisible(); expect(screen.getByText('applied · next none')).toBeVisible(); expect(approve).toBeDisabled();
   });
   it('requires a fresh review after stale rejection and retains the note through reload and reconnect', async () => {
     const store = setup(); let version = 0;
