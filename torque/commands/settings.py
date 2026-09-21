@@ -6,7 +6,7 @@ import inspect
 from dataclasses import asdict
 
 from ..dispatch_registry import AsyncHandlerRegistry
-from ..state import ArchitectSettings, MatrixState
+from ..state import ArchitectSettings, EngineerSettings, GlobalSettings, GroupSettings, MatrixState
 from ..state_settings import AgentSettings
 
 
@@ -52,6 +52,9 @@ async def _handle_settings_read_command(
             "type": "group_settings",
             "group": group,
             "settings": asdict(group_settings),
+            "defaults": asdict(GroupSettings()),
+            "engineer_defaults": asdict(EngineerSettings()),
+            "architect_defaults": asdict(ArchitectSettings()),
             "engineer_settings": asdict(state.get_engineer_settings(group)),
             "architect_settings": asdict(state.get_architect_settings(group)),
             "resolved_agent_defaults": template_mgr.resolve_agent_config(
@@ -97,6 +100,7 @@ async def _handle_settings_read_command(
         return {
             "type": "global_settings",
             "settings": asdict(state.global_settings),
+            "defaults": asdict(GlobalSettings()),
             "keybinding_defaults": {},
             "relay_config": resolve_relay_config(state.global_settings),
         }

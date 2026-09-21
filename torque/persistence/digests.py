@@ -387,9 +387,10 @@ class DigestPersistenceMixin:
                 "task_derived",
                 "task_health_alert",
             ]
+        # Missing-column backfill belongs to schema migration 0017. A stored
+        # 300 is an explicit cadence, even when max_interval differs.
         heartbeat_interval = row[3]
-        if heartbeat_interval is None or (
-                heartbeat_interval == 300 and row[2] != 300):
+        if heartbeat_interval is None:
             heartbeat_interval = row[2]
         return {
             "group": row[0],
@@ -449,8 +450,7 @@ class DigestPersistenceMixin:
                 "task_health_alert",
             ]
         heartbeat_interval = row[4]
-        if heartbeat_interval is None or (
-                heartbeat_interval == 300 and row[3] != 300):
+        if heartbeat_interval is None:
             heartbeat_interval = row[3]
         return {
             "agent_id": row[0],
@@ -573,8 +573,7 @@ class DigestPersistenceMixin:
                     "task_health_alert",
                 ]
             heartbeat_interval = row[3]
-            if heartbeat_interval is None or (
-                    heartbeat_interval == 300 and row[2] != 300):
+            if heartbeat_interval is None:
                 heartbeat_interval = row[2]
             result[row[0]] = {
                 "group": row[0],
@@ -634,8 +633,7 @@ class DigestPersistenceMixin:
                     "task_health_alert",
                 ]
             heartbeat_interval = row[4]
-            if heartbeat_interval is None or (
-                    heartbeat_interval == 300 and row[3] != 300):
+            if heartbeat_interval is None:
                 heartbeat_interval = row[3]
             result[row[0]] = {
                 "agent_id": row[0],

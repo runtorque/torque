@@ -2555,6 +2555,22 @@ scope.
 - Constraints: Browser clients never reconcile native ownership. Late close notifications cannot clear a newer owner. Legacy captures with a monitor identifier are treated as physical pixels. Native captures must not double in size on Retina displays.
 - Verification: UI ownership/reopen regressions, backend bounds round trip, Rust pixel-unit and off-screen clamping tests; macOS native QA is recorded separately in the parity ledger.
 
+### D-088 — Settings resets are staged and ordinary saves are sparse
+
+- Date: 2026-09-21
+- Status: accepted
+- Decision: Global, group, Engineer and Architect resets use defaults supplied by the daemon and remain in the local draft until Save. Individual structured fields reset to the same defaults. Ordinary saves submit only edited fields; an explicit section reset submits that section's editable values. Architect fields have one owner in the form. Runtime identity, pending-question/note state and hint-snooze records are not settings controls.
+- Constraints: Global reset covers runtime, shortcuts and status visibility; AI, relay credentials and appearance use their own controls. Empty group launch overrides restore the documented fallback, while concrete defaults remain concrete values. Numeric dropdowns preserve numeric values. Known GitHub options render typed controls even when the stored map is empty; untouched fallback keys remain absent. Reset and incoming data do not remount list editors or discard drafts.
+- Verification: Daemon default/schema fixture checks, all 166 editable scope-field default write/reload contracts (including Architect fields also stored under Group), typed-control coverage, sparse-save/reset/failure tests and an isolated browser settings lifecycle.
+
+### D-089 — Persisted heartbeat cadence is authoritative
+
+- Date: 2026-09-21
+- Status: accepted
+- Decision: Group Engineer and per-agent digest readers preserve an explicit 300-second heartbeat when the maximum interval differs. Single-record, bulk and restart reads use the same persisted value. Missing-column legacy backfill remains the responsibility of the versioned schema migration.
+- Rationale: Treating a stored default-looking value as missing silently changed a valid setting after restart.
+- Verification: Single/bulk/restart regression, pre-heartbeat migration regression, and a 181-choice dropdown/boolean write/reload audit.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

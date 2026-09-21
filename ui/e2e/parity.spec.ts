@@ -194,3 +194,42 @@ test('Area lifecycle, initiative/Area links and note edit/archive persist on the
   await modal.getByRole('button', { name: `Unlink area ${linkedAreaId}` }).click(); await expect(modal.getByRole('button', { name: `Unlink area ${linkedAreaId}` })).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath('parity-area.png'), fullPage: true });
 });
+
+test('settings save sparse typed edits and stage daemon-default resets before persistence', async ({ page, request }) => {
+  const group = `Settings ${Date.now()}`;
+  await command(request, { cmd: 'add_group', group });
+  await command(request, { cmd: 'ui_select_group', group });
+  await command(request, { cmd: 'update_group_settings', group, settings: { max_agents: 3, worker_provider: 'codex', board_sync_github: {} } });
+  await page.goto('/');
+  await page.getByRole('button', { name: /◎ Control/ }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const maximum = page.getByRole('spinbutton', { name: 'Maximum agents', exact: true });
+  await expect(maximum).toHaveValue('3');
+  await maximum.fill('7');
+  await page.getByText(`${group} execution, worktrees, notifications and sync`, { exact: true }).click();
+  await page.getByLabel('Board sync github: Github close issues via pr', { exact: true }).selectOption('false');
+  await page.getByText('Engineer behavior defaults', { exact: true }).click();
+  await page.getByLabel('Restrict to created agents', { exact: true }).selectOption('true');
+  await page.getByLabel('Push interval', { exact: true }).selectOption('120');
+  // An external update after hydration must survive an unrelated form save.
+  await command(request, { cmd: 'update_group_settings', group, settings: { agent_model: 'external-model' } });
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  const saved = await command(request, { cmd: 'get_group_settings', group });
+  expect(saved.settings).toMatchObject({ max_agents: 7, agent_model: 'external-model', worker_provider: 'codex', board_sync_github: { github_close_issues_via_pr: false } });
+  expect(saved.engineer_settings).toMatchObject({ restrict_to_created_agents: true, push_interval: 120 });
+  await page.getByRole('button', { name: 'Reset group defaults', exact: true }).click();
+  await page.getByRole('button', { name: 'Reset Engineer defaults', exact: true }).click();
+  await expect(maximum).toHaveValue('0');
+  expect((await command(request, { cmd: 'get_group_settings', group })).settings).toMatchObject({ max_agents: 7 });
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  await page.reload();
+  await page.getByRole('button', { name: /◎ Control/ }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(page.getByRole('spinbutton', { name: 'Maximum agents', exact: true })).toHaveValue('0');
+  const reset = await command(request, { cmd: 'get_group_settings', group });
+  expect(reset.settings).toMatchObject({ max_agents: 0, agent_model: '', worker_provider: '', board_sync_github: {} });
+  expect(reset.engineer_settings).toMatchObject({ restrict_to_created_agents: false, push_interval: 60 });
+  await page.screenshot({ path: test.info().outputPath('parity-settings.png'), fullPage: true });
+});

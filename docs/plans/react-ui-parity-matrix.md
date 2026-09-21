@@ -125,7 +125,6 @@ Sources below are relative to `static/js/`; React owners are under `ui/src/`. Al
 | P-113 | Shell/host: Continuity across rerenders | Required | `panel_manager.js; native_api.js; navigation/; keybindings.js; inbox.js; help.js` | App and host bridge | Inject unrelated deltas; assert scroll, selection, focus, caret, drafts and disclosures unchanged. |
 | P-114 | Shell/host: Snapshot/delta/resync | Required | `panel_manager.js; native_api.js; navigation/; keybindings.js; inbox.js; help.js` | App and host bridge | Replay all operations; sequence gap resyncs and malformed frames report bounded diagnostics. |
 | P-115 | Shell/host: Optional/community boundary | Required | `panel_manager.js; native_api.js; navigation/; keybindings.js; inbox.js; help.js` | App and host bridge | Build scan excludes private modules; empty extension registry fails closed. |
-
 | P-116 | Attention: reply target and delivery | Required | `render.js; events.js` | Board and Activity / shared AskResponse | Test explicit/Architect/parent precedence, inactive/deleted/dismissed targets, pending dedupe, failed/mismatched acknowledgement and retained focus/caret/draft across delta/reconnect. |
 | P-117 | Attention: behavior diff decision | Required | `behavior_overlay.js` | Shared BehaviorReview | No decision before exact proposal diff; show author/rationale/lint/base/hash, bind decision to reviewed hash, retain note on stale rejection, and never impersonate Architect approval. |
 | P-118 | Attention: group and blocked-agent scope | Required | `events.js` | Activity | Selected group includes open user asks plus blocked/error agents; excludes internal asks, closed tasks and deleted/dismissed agents. |
@@ -135,6 +134,11 @@ Sources below are relative to `static/js/`; React owners are under `ui/src/`. Al
 | P-122 | Area: complete relationships | Required | `context.js; initiatives.js` | Area editor | Render task, decision, initiative and Area links; Area relation is part of unlink identity. Test compact replies and composite-key deltas without a row ID. |
 | P-123 | Native: retained geometry and pixel units | Required | `panel_manager.js; native_api.js` | Host + daemon UI state | Resize real detached window, close/reopen, verify position and physical inner size; legacy monitor-tagged bounds and new captures do not double on Retina. |
 | P-124 | Native: stale ownership recovery | Required | `panel_manager.js; native_api.js` | Main App | Restart/crash app with detached record retained; native inventory releases missing label, preserves bounds, and main workspace becomes usable. A late old-window close cannot clear a new label. |
+| P-125 | Settings: staged section and field resets | Required | Classic settings defaults and keybinding resets | Control Center | Load daemon defaults; reset global/group/Engineer/Architect or a structured field; verify no write before Save, reset payload excludes runtime identity/attention and other sections. |
+| P-126 | Settings: sparse save and duplicate ownership | Required | Classic settings save | Control Center | Change one setting while an unrelated backend setting changes; only the local edit is sent. Architect fields appear only once. Failed coordinated saves retain drafts. |
+| P-127 | Settings: numeric and nested GitHub controls | Required | `modals/group-settings.js` | StructuredSettings | Numeric dropdown sends a number; empty GitHub map displays typed booleans/number/maps without promoting untouched fallbacks; list reset preserves the mounted editor and subsequent trailing newline. |
+| P-128 | Settings: schema/default persistence and Engineer visibility | Required | State dataclasses and Engineer command | Settings + daemon | Verify frontend fixture matches four daemon default records; render each editable field type; write/reload all 166 scope-field defaults; Engineer visibility mutation survives command dispatch and SQLite reload. |
+| P-129 | Settings: explicit heartbeat survives restart | Required | `persistence/digests.py` | Daemon | Save heartbeat 300 with a different maximum interval; single, bulk and restart reads return 300. A genuinely missing heartbeat column is backfilled once by schema migration. |
 
 ## Command inventory
 
@@ -477,7 +481,7 @@ Inventory includes every first-party classic module, inline modal and registered
 
 ## Settings field comparison
 
-Each row is a Required field contract, implemented by `StructuredSettings.tsx` or its explicit Settings panel control. Defaults are hydrated from the daemon; descriptions retain dataclass inheritance/unit notes. Opening the form waits for all settings responses. An unchanged inherited relay value is not promoted to an explicit override. Choices/min/max originate from the classic form and are server-validated on save. Daemon provider/model/reasoning choices and per-agent reset/override intent now have focused coverage. Global/group section reset affordances and exhaustive field-by-field round trips remain open; typed controls alone do not certify those workflows.
+Each row is a Required field contract, implemented by `StructuredSettings.tsx` or its explicit Settings panel control. Defaults are hydrated from the daemon; descriptions retain dataclass inheritance/unit notes. Opening the form waits for all settings responses. An unchanged inherited relay value is not promoted to an explicit override. Choices/min/max originate from the classic form and are server-validated on save. Daemon provider/model/reasoning choices and per-agent reset/override intent now have focused coverage. Daemon-backed section/field resets and sparse saves now have named coverage below. The original 163-row inventory includes runtime records and the classic `provider` alias; those are identified below rather than presented as editable defaults. Nested GitHub number/maps omitted by the original inventory are included. Exhaustive non-default boundary/enum and runtime-effect checks remain open; default write/reload and typed-control coverage do not certify those effects.
 
 Acceptance for **each field**: hydrate its server value, change it using the listed control, save, reopen and compare; exercise its boundary/enum validation and verify unrelated incoming data preserves draft/focus. Generic control and coordinated-save tests cover shared mechanics, not every field's backend effect.
 
@@ -493,7 +497,7 @@ Acceptance for **each field**: hydrate its server value, change it using the lis
 | `github_project_owner` | Classic settings | Text | Server value/default |
 | `github_project_status_field` | Classic settings | Text | Server value/default |
 | `board_sync_enabled` | Group | Enabled/Disabled | Server value/default |
-| `provider` | Classic settings | Select: none, github | Server value/default |
+| `provider` | Classic alias | Uses `board_sync_provider` | One group sync-provider control; not a CLI provider setting. |
 | `default_agent_template` | Group | Text | Server value/default |
 | `agent_provider` | Group | Text | adapter name ("claude-code", "codex", etc.) — empty = use default |
 | `agent_boot_command` | Group | Text | override default boot command (e.g. "codex") |
@@ -562,9 +566,12 @@ Acceptance for **each field**: hydrate its server value, change it using the lis
 | `board_default_lane` | Group | Text | default lane for new tasks (empty = first lane) |
 | `dispatch_lane` | Group | Text | lane for dispatched tasks |
 | `board_sync_provider` | Group | Select: none, github | none \| github (future providers reserved) |
-| `github_project_id` | Classic settings | Text | Server value/default |
-| `github_close_issues_via_pr` | Classic settings | Text | Server value/default |
-| `github_create_missing_labels` | Classic settings | Text | Server value/default |
+| `github_project_id` | Group `board_sync_github` | Text | Server value/default |
+| `github_project_number` | Group `board_sync_github` | Number | Nonnegative integer; stored as a number. |
+| `github_lane_status_map` | Group `board_sync_github` | Named text map | Lane to project-status mapping. |
+| `github_assignee_map` | Group `board_sync_github` | Named text map | Agent to GitHub-assignee mapping. |
+| `github_close_issues_via_pr` | Group `board_sync_github` | Enabled/Disabled | Missing value displays true; untouched fallback is not written. |
+| `github_create_missing_labels` | Group `board_sync_github` | Enabled/Disabled | Missing value displays true; untouched fallback is not written. |
 | `engineer_can_override_worker_provider` | Engineer | Enabled/Disabled | expose worker provider override in Engineer dispatch tools |
 | `default_worker_concurrency` | Engineer | Select: 1, 2, 3, 4, 5, 6, 8 | default max_concurrent for dispatch waves |
 | `architect_push_interval` | Group, Architect | Select: 60, 120, 300, 600, 900 | Server value/default |
@@ -584,7 +591,7 @@ Acceptance for **each field**: hydrate its server value, change it using the lis
 | `worktree_submodules` | Group | One value per line | repo-relative submodule paths to materialize as nested linked worktrees |
 | `guidance_hint_cadence` | Group | Number | 0=every time; otherwise 1st, then every N |
 | `context_default_ttl_days` | Group | Number | Shared Context entry lifetime, clamped to 1..60. |
-| `engineer_hint_snoozes` | Group | Nested named fields | hint fingerprint -> unix expiry |
+| `engineer_hint_snoozes` | Group | Runtime record · read-only in this inventory | Managed by group/agent identity, attention or hint workflows; excluded from reset/save. |
 | `terminal_name_prefix` | Group | Text | Server value/default |
 | `terminal_boot_command` | Group | Text | Server value/default |
 | `terminal_command_args` | Group | Text | Server value/default |
@@ -598,22 +605,22 @@ Acceptance for **each field**: hydrate its server value, change it using the lis
 | `terminal_always_custom_dialog` | Group | Enabled/Disabled | Server value/default |
 | `terminal_close_on_disconnect` | Group | Enabled/Disabled | remove terminal from Torque when tab closed |
 | `board_sync_github` | Group | Nested named fields | GitHub adapter settings |
-| `engineer_agent_id` | Group | Text | designated engineer agent for this group |
+| `engineer_agent_id` | Group | Runtime record · read-only in this inventory | Managed by group/agent identity, attention or hint workflows; excluded from reset/save. |
 | `default_engineer_specializations` | Group | One value per line | ordered, applied at engineer creation |
 | `architect_profile` | Group, Architect | Text | Server value/default |
 | `architect_tab_color` | Group, Architect | Text | Server value/default |
 | `architect_enabled_events` | Group, Architect | One value per line | Server value/default |
 | `architect_review_gate_thresholds` | Group, Architect | Nested named fields | Server value/default |
-| `group` | Architect, Engineer | Text | Server value/default |
+| `group` | Architect, Engineer | Runtime record · read-only in this inventory | Managed by group/agent identity, attention or hint workflows; excluded from reset/save. |
 | `paused` | Engineer | Enabled/Disabled | user paused event pushes |
 | `restrict_to_created_agents` | Engineer | Enabled/Disabled | limit Engineer agent visibility/control to its own created agents |
-| `pending_question` | Engineer | Text | question awaiting human reply (non-empty = awaiting input) |
-| `pending_question_set_at` | Engineer | Number | unix timestamp when pending_question was set |
-| `pending_question_actor_id` | Engineer | Text | engineer who set pending_question |
-| `pending_note` | Engineer | Text | non-blocking note/question for the human |
-| `pending_note_kind` | Engineer | Text | "note" \| "question" \| "" |
-| `pending_note_set_at` | Engineer | Number | unix timestamp when pending_note was set |
-| `pending_note_actor_id` | Engineer | Text | engineer who set pending_note |
+| `pending_question` | Engineer | Runtime record · read-only in this inventory | Managed by group/agent identity, attention or hint workflows; excluded from reset/save. |
+| `pending_question_set_at` | Engineer | Runtime record · read-only in this inventory | Managed by group/agent identity, attention or hint workflows; excluded from reset/save. |
+| `pending_question_actor_id` | Engineer | Runtime record · read-only in this inventory | Managed by group/agent identity, attention or hint workflows; excluded from reset/save. |
+| `pending_note` | Engineer | Runtime record · read-only in this inventory | Managed by group/agent identity, attention or hint workflows; excluded from reset/save. |
+| `pending_note_kind` | Engineer | Runtime record · read-only in this inventory | Managed by group/agent identity, attention or hint workflows; excluded from reset/save. |
+| `pending_note_set_at` | Engineer | Runtime record · read-only in this inventory | Managed by group/agent identity, attention or hint workflows; excluded from reset/save. |
+| `pending_note_actor_id` | Engineer | Runtime record · read-only in this inventory | Managed by group/agent identity, attention or hint workflows; excluded from reset/save. |
 | `engineer_profile` | Engineer | Text | iTerm profile override for the designated engineer |
 | `engineer_tab_color` | Engineer | Text | tab color override for the designated engineer |
 | `enabled_events` | Engineer | One value per line | optional events (mandatory always on) |
@@ -662,14 +669,14 @@ The original dirty stack was validated and checkpointed as `3e2f95b5` before fea
 | P-080, P-082 | Live Planning create/edit/link/reopen test; component link/unlink delta keeps draft; compact mutation replies rehydrate relationships. | Area component/projection and live browser lifecycle/link/note evidence is extended by P-121–P-122; other Planning lifecycles remain separately unverified. |
 | P-087–P-094 | Typed controls replace raw settings JSON; component bool/number/list/map edits, acknowledged coordinated save and partial-failure draft retention. | Server normalizers still own validation; each field contract above needs round-trip acceptance. |
 | P-106, P-108, P-110 | Browser Tauri adapter fixture checks detach, hidden source hierarchy, reattach commands; host unit tests remain in UI gate. Main detached Agents disables its PTY while retaining DM draft. | Separate macOS native QA verified Agents detach/close/reopen, Retina bounds, Reload and Show Logs. Other platforms, crash/sleep recovery and live PTY ownership transitions remain unverified. |
-
-
 | P-116–P-118 | `features/attention/attention.test.tsx`: reply precedence, inactive targets, group scope, correlated acknowledgement, failed delivery and draft/focus/caret retention; exact diff/hash/base, user-only approval, dedupe and stale failure. Browser fixture exercises failed reply and reviewed rejection. | Successful delivery to a live agent and a complete live approval cycle remain open; browser attention responses are fixtures. |
-| P-119–P-120 | Provider-choice model tests and App settings tests cover metadata discovery, model-specific reasoning, custom choices, sparse save/reset, explicit empty instructions, unrelated updates and failed save retention. | Global/group section resets and all 163 field round trips remain open. |
+| P-119–P-120 | Provider-choice model tests and App settings tests cover metadata discovery, model-specific reasoning, custom choices, sparse save/reset, explicit empty instructions, unrelated updates and failed save retention. | Section/field resets are covered by P-125–P-128. Exhaustive non-default boundary/enum checks remain open. |
 | P-121–P-122 | `features/planning/area.test.tsx` covers lifecycle enums, grouped links/composite removal, note updates/archive and draft retention. Live browser creates/edits/reopens an Area, links an initiative and Area, edits/archives a targeted note, and unlinks. Area screenshot inspected. | Every note type/target/relation combination and remaining Planning lifecycle flows still need acceptance. |
 | P-123–P-124 | Host/App tests cover retained bounds, stale close labels, startup snapshot ordering and missing native windows. Rust tests cover physical/legacy Retina sizing; backend test persists the physical marker. Native macOS resize/close/reopen preserved 2000×1360 physical inner pixels at x=828/y=246 with a new native label; Reload recovered stale ownership. | Fresh process restart after the final snapshot-order fix, cross-monitor moves, crash/sleep recovery and other platforms remain open. |
+| P-125–P-128 | `settings.test.tsx`, App settings tests, and `test_react_settings_contract.py`: staged resets, sparse edits, draft retention under updates/errors, runtime field exclusion, typed schema/default coverage and Engineer command persistence. Browser settings scenario verifies typed edits, unrelated external change, staged reset and reopen against an isolated daemon. | 166 scope-field default contracts include 19 Architect duplicates in Group storage. A separate 181-choice audit persisted/reloaded every offered fixed dropdown and boolean choice. Numeric/text boundaries and live runtime effects remain open. |
+| P-129 | `test_react_settings_contract.py` verifies Engineer and per-agent single/bulk/restart values plus missing-column migration. The final 181-choice SQLite audit passed after removing the repeated read-time heuristic. | Runtime heartbeat scheduling and external provider behavior are separate from value persistence. |
 
-**Still open:** command/modal inventory rows without named execution evidence; global/group section reset affordances and exhaustive settings round trips; complete attention live delivery/approval evidence; remaining Area/Planning targets and lifecycle combinations; remaining lazy-panel reconnect coverage; complete native lifecycle tests. The classic fallback and Phase 4 remain open. Canvas coordinates and arbitrary docked/floating compositions are explicitly retired under D-077; no other Missing row is waived.
+**Still open:** command/modal inventory rows without named execution evidence; settings numeric/text boundary and runtime-effect acceptance; complete attention live delivery/approval evidence; remaining Area/Planning targets and lifecycle combinations; remaining lazy-panel reconnect coverage; complete native lifecycle tests. The classic fallback and Phase 4 remain open. Canvas coordinates and arbitrary docked/floating compositions are explicitly retired under D-077; no other Missing row is waived.
 
 ## Context-menu and action-menu inventory
 
@@ -763,7 +770,7 @@ Each action below is an independent Required acceptance row. A replacement toolb
 | Whole-workspace native bounds | Required | Resize/move detached window, reopen it and verify restored bounds on each supported platform. |
 | Detached close/reattach ownership | Required | Source reclaims terminal only after native ownership returns; browser does not invoke native-only operations. |
 
-## Verification run — 2026-09-21
+## Previous checkpoint verification — 2026-09-21 (`79d90a8b`)
 
 - `make ui-check`: passed, 16 files / 138 component-model-protocol tests, lint, typecheck and production build. Existing xterm external-script/CSS and bundle-size warnings remain.
 - `make test`: passed, 3,113 Python/backend/packaging regressions with 82 skips (77 enterprise tests, 4 unavailable transcript fixtures, 1 opt-in native Tauri smoke). The final frontend snapshot-order repair was separately included in the passing UI gate.
@@ -774,3 +781,14 @@ Each action below is an independent Required acceptance row. A replacement toolb
 - Browser/native QA used profile `react-next-20260921`, disposable `/private/tmp/torque-react-next-20260921`, port 18958, with PTY spawning disabled. A temporary macOS app bundle attached to that daemon for real native detach/resize/close/reopen, Reload and Show Logs checks.
 - Separate real-PTY QA used profile `react-pty-next-20260921`, port 18959 and a disposable `/bin/cat` terminal. Browser keyboard input through React xterm returned `TORQUE_PTY_PARITY_20260921` from the actual PTY; the screenshot was visually inspected. Both isolated daemons, the native QA app and the isolated PTY supervisor were stopped after testing. The live daemon was not deployed, stopped or restarted.
 - Not run: enterprise-only suite, exhaustive individual settings round trips, complete live attention delivery/approval, every Area/Planning combination, other native platforms, cross-monitor/crash/sleep recovery, or detached PTY transfer under live output. Passing automated suites do not waive these gates or the other unverified inventory rows.
+
+## Settings checkpoint verification — 2026-09-21
+
+- `make ui-check`: passed, 17 files / 147 UI tests, lint, typecheck and production build; existing xterm/bundle warnings remain.
+- `python3 -m unittest tests.test_react_settings_contract tests.test_db tests.test_db_migrations tests.test_persistence_modules tests.test_per_agent_settings`: 184 passed. This includes all 166 editable scope-field default contracts, schema/default drift checks, Engineer command persistence and explicit-heartbeat/legacy-migration regressions.
+- Isolated Playwright suite on port 18960, profile `react-settings-20260921`: 11 passed. The settings scenario edits numeric/boolean fields, preserves an unrelated external update, stages resets without writing, saves and reopens. Screenshot inspected.
+- Additional SQLite audit: 181 offered fixed dropdown and boolean choices persisted/reloaded unchanged. Dynamic provider/model values and arbitrary text/numeric boundaries are not exhaustively covered by that audit.
+- A real restart of the isolated QA daemon plus a browser check confirmed heartbeat 300 with maximum 600 survives and is displayed correctly; screenshot inspected.
+- Final `make test`: 3,119 tests passed with 82 skips in 431.958 seconds, including the heartbeat persistence repair. The earlier run was interrupted when that repair was added; this complete run is the acceptance result. Documentation and whitespace checks passed.
+- The isolated QA daemon was stopped after testing. The live daemon was not deployed, stopped or restarted.
+- Not run in this checkpoint: native Rust/Tauri tests (no host changes), real agent/provider side effects, exhaustive free-text/numeric boundary cases, or remaining attention/Planning/native parity scenarios. Phase 4 and classic fallback retirement remain open.

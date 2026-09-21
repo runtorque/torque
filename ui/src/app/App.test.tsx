@@ -33,8 +33,8 @@ function mockSettingsRequests(failSave = false) {
     const command = JSON.parse(typeof options?.body === 'string' ? options.body : '{}' ) as TorqueCommand;
     commands.push(command);
     if (failSave && command.cmd === 'update_group_settings') return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: false, error: 'Group save refused' }) });
-    const frame = command.cmd === 'get_global_settings' ? { type: 'global_settings', settings: { xterm_scrollback: 5000, event_ingest_max_days: 14, mcp_call_log_args_capture: 'metadata' } }
-      : command.cmd === 'get_group_settings' ? { type: 'group_settings', group: 'Foundation', settings: { max_agents: 4, shell: '/bin/zsh', env_vars: {}, worktree_symlinks: [] }, engineer_settings: { default_worker_concurrency: 2, digest_verbosity: 'normal' }, architect_settings: { heartbeat_interval: 300 } }
+    const frame = command.cmd === 'get_global_settings' ? { type: 'global_settings', defaults: { xterm_scrollback: 5000, event_ingest_max_days: 14, mcp_call_log_args_capture: 'metadata' }, settings: { xterm_scrollback: 5000, event_ingest_max_days: 14, mcp_call_log_args_capture: 'metadata' } }
+      : command.cmd === 'get_group_settings' ? { type: 'group_settings', group: 'Foundation', defaults: { max_agents: 0, shell: '', env_vars: {}, worktree_symlinks: [] }, engineer_defaults: { default_worker_concurrency: 2 }, architect_defaults: { architect_heartbeat_interval: 300 }, settings: { max_agents: 4, shell: '/bin/zsh', env_vars: {}, worktree_symlinks: [], architect_heartbeat_interval: 300, engineer_agent_id: 'owned' }, engineer_settings: { group: 'Foundation', pending_question: 'Keep this question', default_worker_concurrency: 2, digest_verbosity: 'balanced' }, architect_settings: { group: 'Foundation', architect_heartbeat_interval: 300 } }
       : command.cmd === 'get_ai_settings' ? { type: 'ai_settings', settings: {} } : { type: 'ok' };
     return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: frame }) });
   });
@@ -1113,7 +1113,7 @@ describe('workspace shell', () => {
     expect(createdClass.acl).toEqual({ mode: 'allow', rules: [{ capability: 'self.read', scope: 'self' }] });
   });
 
-  it('coordinates confirmed global, group, and AI saves without promoting inherited relay settings', async () => {
+  it('saves only edited global fields without promoting inherited relay or unrelated settings', async () => {
     const { commands } = mockSettingsRequests();
     renderShell();
     fireEvent.click(screen.getByRole('button', { name: /Control/ }));
@@ -1121,11 +1121,12 @@ describe('workspace shell', () => {
     const scrollback = await screen.findByRole('spinbutton', { name: 'Terminal scrollback' });
     fireEvent.change(scrollback, { target: { value: '9000' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-    await waitFor(() => expect(commands.some((command) => command.cmd === 'update_ai_settings')).toBe(true));
+    await waitFor(() => expect(commands.some((command) => command.cmd === 'update_global_settings')).toBe(true));
     const global = commands.find((command) => command.cmd === 'update_global_settings')?.settings as Record<string, unknown>;
     expect(global.xterm_scrollback).toBe(9000);
     expect(global).not.toHaveProperty('relay_enabled');
-    expect(commands).toContainEqual(expect.objectContaining({ cmd: 'update_group_settings', group: 'Foundation' }));
+    expect(global).toEqual({ xterm_scrollback: 9000 });
+    expect(commands.filter((command) => /^(update_|engineer_update_)/.test(String(command.cmd)))).toHaveLength(1);
     expect(await screen.findByText('Saved', { exact: true })).toBeVisible();
   });
 
@@ -1136,6 +1137,7 @@ describe('workspace shell', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
     const scrollback = await screen.findByRole('spinbutton', { name: 'Terminal scrollback' });
     fireEvent.change(scrollback, { target: { value: '9100' } });
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Maximum agents' }), { target: { value: '7' } });
     act(() => { appStore.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'group_settings', group: 'Foundation', settings: { max_agents: 9 }, engineer_settings: {} })); });
     expect(scrollback).toHaveValue(9100);
     fireEvent.click(screen.getByText('Global defaults'));
@@ -1145,6 +1147,28 @@ describe('workspace shell', () => {
     expect(await screen.findByText(/Group save refused/)).toBeVisible();
     expect(scrollback).toHaveValue(9100);
     expect(screen.getByText('Unsaved changes')).toBeVisible();
+  });
+
+  it('stages section resets and preserves newer unrelated settings through a sparse save', async () => {
+    const { commands } = mockSettingsRequests(); const { appStore } = renderShell();
+    fireEvent.click(screen.getByRole('button', { name: /Control/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    await screen.findByRole('spinbutton', { name: 'Terminal scrollback' });
+    fireEvent.click(screen.getByRole('button', { name: 'Reset group defaults' }));
+    expect(screen.getByRole('spinbutton', { name: 'Maximum agents' })).toHaveValue(0);
+    expect(commands.every((command) => !/^(update_|engineer_update_)/.test(String(command.cmd)))).toBe(true);
+    act(() => { appStore.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'group_settings', group: 'Foundation', settings: { max_agents: 9, agent_model: 'new-external-model', architect_heartbeat_interval: 900 }, engineer_settings: { pending_question: 'Still waiting' }, architect_settings: { group: 'Foundation', architect_heartbeat_interval: 900 } })); });
+    expect(screen.getByRole('spinbutton', { name: 'Maximum agents' })).toHaveValue(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByText('Saved', { exact: true })).toBeVisible();
+    const mutations = commands.filter((command) => /^(update_|engineer_update_)/.test(String(command.cmd)));
+    expect(mutations).toHaveLength(1);
+    expect(mutations[0]).toMatchObject({ cmd: 'update_group_settings', group: 'Foundation', settings: { max_agents: 0, shell: '', env_vars: {}, worktree_symlinks: [] } });
+    expect(mutations[0]?.settings).not.toHaveProperty('engineer_agent_id');
+    expect(mutations[0]?.settings).not.toHaveProperty('architect_heartbeat_interval');
+    fireEvent.click(screen.getByText('Engineer behavior defaults'));
+    expect(screen.queryByLabelText('Pending question')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Group')).not.toBeInTheDocument();
   });
 
   it('loads the durable Inbox and exposes the complete notice lifecycle', () => {

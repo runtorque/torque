@@ -2,6 +2,9 @@
 // and state dataclasses. Values continue to come from the daemon.
 export interface SettingField { label: string; options?: { value: string; label: string }[]; min?: string; max?: string; step?: string; placeholder?: string; description?: string; kind?: string }
 export const settingFields: Record<string, SettingField> = {
+  github_project_number: { label: 'GitHub project number', kind: 'int', min: '0' },
+  github_lane_status_map: { label: 'GitHub lane status map', kind: 'dict' },
+  github_assignee_map: { label: 'GitHub assignee map', kind: 'dict' },
   "default_command": {
     "label": "Default command",
     "placeholder": "claude",

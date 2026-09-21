@@ -314,6 +314,7 @@ async def handle_engineer_operation_command(
                   "pending_note", "pending_note_kind",
                   "custom_instructions", "enabled_events",
                   "engineer_can_override_worker_provider",
+                  "restrict_to_created_agents",
                   "paused", "engineer_provider",
                   "engineer_boot_command", "engineer_model",
                   "engineer_reasoning_effort", "engineer_fast_mode",
