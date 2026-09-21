@@ -451,6 +451,32 @@ class UIStateCommandModuleTests(unittest.TestCase):
         self.assertEqual(state.supervisor_panel_state["sortDirection"], "desc")
         state._db_save_ui.assert_called_once()
 
+    def test_native_bounds_keep_pixel_units_and_geometry_after_release(self):
+        import json
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+
+        state = SimpleNamespace(window_bounds={}, detached_panels={},
+                                _emit=Mock(), _db_save_ui=Mock())
+        bounds = {"x": 924, "y": 420, "width": 1952, "height": 1308,
+                  "physical": True, "display_id": "Retina"}
+        self.commands._handle_ui_state_command({
+            "cmd": "ui_set_detached_panel_bounds", "panel": "agents",
+            "label": "native-1", "bounds": bounds,
+        }, state)
+        self.assertEqual(state.detached_panels["agents"]["bounds"], bounds)
+        self.commands._handle_ui_state_command({
+            "cmd": "ui_set_detached_panels", "detached_panels": {
+                "agents": {"label": "", "bounds": bounds},
+            },
+        }, state)
+        persisted = json.loads(state._db_save_ui.call_args.args[1])
+        self.assertEqual(persisted["agents"], {"label": "", "bounds": bounds})
+        self.commands._handle_ui_state_command({
+            "cmd": "ui_set_window_bounds", "window": "main", "bounds": bounds,
+        }, state)
+        self.assertTrue(state.window_bounds["main"]["physical"])
+
     def test_server_preserves_ui_state_compatibility_exports(self):
         self.assertIs(
             self.commands._handle_ui_state_command,

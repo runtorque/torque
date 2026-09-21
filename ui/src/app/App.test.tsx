@@ -295,6 +295,28 @@ describe('workspace shell', () => {
     expect(screen.queryByRole('button', { name: 'Reattach workspace' })).not.toBeInTheDocument();
   });
 
+  it('waits for the current connection snapshot before reconciling native windows', async () => {
+    const store = createAppStore(); const send = vi.fn(() => true);
+    const invoke = vi.fn((command: string) => Promise.resolve(command === 'list_detached' ? [] : null));
+    store.dispatch(connectionActions.connected({ at: 2000, reconnect: false }));
+    render(<Provider store={store}><WorkspaceShell host={createTauriHost(invoke)} sendCommand={send} /></Provider>);
+    expect(invoke).not.toHaveBeenCalledWith('list_detached', undefined);
+    const frame = { ...compactStateFixture, detached_panels: { agents: { label: 'stale', bounds: { width: 900, height: 640 } } } };
+    act(() => { store.dispatch(projectionActions.snapshotReceived(frame)); store.dispatch(connectionActions.snapshotAccepted(frame)); });
+    await waitFor(() => expect(send).toHaveBeenCalledWith({ cmd: 'ui_set_detached_panels', detached_panels: { agents: { label: '', bounds: { width: 900, height: 640 } } } }));
+  });
+
+  it('reclaims stale native ownership after restart and retains bounds for the next detach', async () => {
+    const bounds = { x: 100, y: 200, width: 1952, height: 1308, physical: true };
+    const invoke = vi.fn((command: string) => Promise.resolve(command === 'list_detached' ? [] : command === 'detach' ? 'fresh' : null));
+    const { sendCommand, appStore } = renderShell(createTauriHost(invoke), { ...compactStateFixture, detached_panels: { agents: { label: 'stale', bounds } } });
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith({ cmd: 'ui_set_detached_panels', detached_panels: { agents: { label: '', bounds } } }));
+    act(() => { appStore.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: 11, ops: [{ op: 'ui_update', key: 'detached_panels', value: { agents: { label: '', bounds } } }] })); });
+    fireEvent.click(screen.getByRole('button', { name: /Agents/ })); fireEvent.click(screen.getByRole('button', { name: 'Detach Agents workspace' }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('detach', { panel: 'agents', bounds }));
+    expect(invoke.mock.calls.filter(([command]) => command === 'list_detached')).toHaveLength(1);
+  });
+
   it('uses icon-only workspace detach actions without a terminal detach row', () => {
     const tauriHost = createTauriHost(vi.fn((command: string) => Promise.resolve(command === 'detach' ? 'agents-window' : null)));
     renderShell(tauriHost);
@@ -362,7 +384,7 @@ describe('workspace shell', () => {
     expect(screen.getByRole('textbox', { name: 'Description' })).toBeVisible();
     fireEvent.click(screen.getByRole('tab', { name: 'Integrations' }));
     expect(screen.getByRole('heading', { name: 'External ticket and sync' })).toBeVisible();
-    expect(screen.getByRole('heading', { name: 'Human response' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Resolve ask' })).toBeVisible();
     fireEvent.click(screen.getByRole('tab', { name: 'Evidence' }));
     expect(screen.getByRole('heading', { name: 'Artifacts and attachments' })).toBeVisible();
 
@@ -692,6 +714,23 @@ describe('workspace shell', () => {
     expect(screen.getAllByText('default')).toHaveLength(2);
     fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
     expect(sendCommand).not.toHaveBeenCalledWith(expect.objectContaining({ cmd: 'update_agent_settings' }));
+  });
+
+  it('retains per-agent overrides on failed save and explicitly restores inheritance', async () => {
+    const frame: StateFrame = { ...compactStateFixture, agents: { architect: { id: 'architect', name: 'Principal', group: 'Foundation', kind: 'architect', status: 'idle' } }, resolved_agent_settings: { architect: { model: { value: 'override', origin: 'per-agent', inherited: { value: 'group-model', origin: 'group' } }, custom_instructions: { value: 'Group instructions', origin: 'group' } } } };
+    let fail = true; const commands: TorqueCommand[] = [];
+    vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => { const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand; commands.push(command); return Promise.resolve({ ok: true, json: () => Promise.resolve(fail ? { ok: false, error: 'Save refused' } : { ok: true, data: { type: 'agent_settings', agent_id: 'architect', settings: command.settings } }) }); }));
+    const { appStore } = renderShell(browserHost, frame);
+    fireEvent.click(screen.getByRole('button', { name: /Agents/ })); fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Use inherited' }));
+    const model = screen.getByRole('textbox', { name: /^Model/ }); expect(model).toHaveValue('group-model');
+    const instructions = screen.getByRole('textbox', { name: /^Custom instructions/ }); fireEvent.change(instructions, { target: { value: '' } });
+    act(() => { appStore.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: 11, ops: [{ op: 'agent_settings_update', agent_id: 'architect', resolved: { provider: { value: 'new-provider', origin: 'group' } } }] })); });
+    fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Save refused'); expect(model).toHaveValue('group-model');
+    expect(commands[0]).toEqual({ cmd: 'update_agent_settings', agent_id: 'architect', settings: { model: null, custom_instructions: '' } });
+    fail = false; fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Agent settings' })).not.toBeInTheDocument());
   });
 
   it('opens Phase 4 Planning, lazy-loads its resources, and creates an initiative', async () => {

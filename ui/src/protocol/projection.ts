@@ -482,16 +482,46 @@ function applyCommonOperation(
       break;
     case 'area_link_upsert':
     case 'planning_area_link_upsert':
-      upsert(state, 'planning_area_links', operation, ['id']);
-      break;
     case 'area_link_remove':
-    case 'planning_area_link_remove':
-      remove(state, 'planning_area_links', operation, 'id');
+    case 'planning_area_link_remove': {
+      const stored = ensureRecord(state, 'planning_area_links');
+      const link = { ...cloneRecord(stored[operationId(operation, 'id')]), ...operation };
+      const removing = operation.op.endsWith('_remove');
+      const areaId = operationId(link, 'area_id');
+      const kind = operationId(link, 'link_type');
+      const target = operationId(link, 'target_id');
+      const relation = operationId(link, 'relation') || (kind === 'area' ? 'related' : '');
+      if (removing) {
+        for (const [key, value] of Object.entries(stored)) {
+          const current = cloneRecord(value);
+          if (key === operationId(operation, 'id') || (current.area_id === areaId && current.link_type === kind && current.target_id === target && (kind !== 'area' || current.relation === relation))) delete stored[key];
+        }
+      } else upsert(state, 'planning_area_links', operation, ['id']);
+      const areas = ensureRecord(state, 'planning_areas');
+      if (areas[areaId] && kind && target) {
+        const area = cloneRecord(areas[areaId]); const links = cloneRecord(area.links);
+        const current = Array.isArray(links[`${kind}s`]) ? links[`${kind}s`] as unknown[] : [];
+        const next = current.filter((value) => kind === 'area' ? !(cloneRecord(value).area_id === target && cloneRecord(value).relation === relation) : value !== target);
+        if (!removing) next.push(kind === 'area' ? { area_id: target, relation } : target);
+        areas[areaId] = { ...area, links: { ...links, [`${kind}s`]: next } };
+      }
       break;
+    }
     case 'area_note_upsert':
-    case 'planning_area_note_upsert':
+    case 'planning_area_note_upsert': {
       upsert(state, 'planning_area_notes', operation, ['id']);
+      const areas = ensureRecord(state, 'planning_areas'); const areaId = operationId(operation, 'area_id');
+      if (areas[areaId]) {
+        const area = cloneRecord(areas[areaId]); const notes: unknown[] = Array.isArray(area.notes) ? area.notes : [];
+        const id = operationId(operation, 'id');
+        const prior = notes.find((value) => operationId(cloneRecord(value), 'id') === id);
+        const note = { ...cloneRecord(prior), ...operationPayload(operation) };
+        const next = notes.filter((value) => operationId(cloneRecord(value), 'id') !== id);
+        if (!note.archived && !note.archived_at) next.unshift(note);
+        areas[areaId] = { ...area, notes: next.slice(0, 50) };
+      }
       break;
+    }
     case 'idea_brief_upsert':
       upsert(state, 'idea_briefs', operation, ['id']);
       break;

@@ -2,6 +2,7 @@ import { useId, useState } from 'react';
 
 import { Button } from '../../design/primitives';
 import type { UnknownRecord } from '../../protocol';
+import { providerChoices } from './providerChoices';
 import { settingFields } from './settingsFields';
 import styles from './ControlCenter.module.css';
 
@@ -21,21 +22,23 @@ function SettingObject({ value, onChange, label }: { value: UnknownRecord; onCha
   return <fieldset><legend>{label}</legend><StructuredSettings value={value} onChange={onChange} prefix={label} onRemove={(key) => { const next = { ...value }; delete next[key]; onChange(next); }} /><label>New {label.toLocaleLowerCase()} key<input value={newKey} onChange={(event) => setNewKey(event.target.value)} /></label><Button isDisabled={!newKey.trim() || newKey.trim() in value} onPress={() => { onChange({ ...value, [newKey.trim()]: '' }); setNewKey(''); }}>Add entry</Button></fieldset>;
 }
 
-export function StructuredSettings({ value, onChange, prefix = '', omit = [], onRemove }: { value: UnknownRecord; onChange: (next: UnknownRecord) => void; prefix?: string; omit?: string[]; onRemove?: (key: string) => void }) {
+export function StructuredSettings({ value, onChange, prefix = '', omit = [], onRemove, providers = [] }: { providers?: unknown[]; value: UnknownRecord; onChange: (next: UnknownRecord) => void; prefix?: string; omit?: string[]; onRemove?: (key: string) => void }) {
   const instance = useId();
   return <div className={styles.structuredSettings}>{Object.entries(value).filter(([key]) => !omit.includes(key)).map(([key, item]) => {
     const field = settingFields[key]; const label = `${prefix ? `${prefix}: ` : ''}${labelFor(key)}`;
     const descriptionId = field?.description ? `${instance}-${key}-help` : undefined;
     const set = (next: unknown) => onChange({ ...value, [key]: next });
     if (item && typeof item === 'object' && !Array.isArray(item)) return <SettingObject key={key} value={item as UnknownRecord} onChange={set} label={label} />;
-    const options = field?.options;
+    const suggestions = providerChoices(providers, key, value);
+    const choicesId = `${instance}-${key}-choices`;
+    const options = suggestions.length ? undefined : field?.options;
     const choice = options?.length ? [...options, ...(!options.some((option) => option.value === scalar(item)) ? [{ value: scalar(item), label: scalar(item) || 'Inherit' }] : [])] : null;
     return <div key={key}><label className={styles.field}><span>{label}</span>{typeof item === 'boolean' ? <select aria-label={label} aria-describedby={descriptionId} value={item ? 'true' : 'false'} onChange={(event) => set(event.target.value === 'true')}><option value="true">Enabled</option><option value="false">Disabled</option></select>
       : Array.isArray(item) ? <StringListSetting value={item as unknown[]} onChange={set} label={label} descriptionId={descriptionId} />
       : choice ? <select aria-label={label} aria-describedby={descriptionId} value={scalar(item)} onChange={(event) => set(event.target.value)}>{choice.map((option) => <option key={option.value} value={option.value}>{option.label || 'Inherit'}</option>)}</select>
       : typeof item === 'number' ? <input aria-label={label} aria-describedby={descriptionId} type="number" value={item} min={field?.min} max={field?.max} step={field?.step || 'any'} onChange={(event) => { if (Number.isFinite(event.target.valueAsNumber)) set(event.target.valueAsNumber); }} />
       : /instructions|nudge|prompt/.test(key) ? <textarea aria-label={label} aria-describedby={descriptionId} rows={4} value={scalar(item)} onChange={(event) => set(event.target.value)} />
-      : <input aria-label={label} aria-describedby={descriptionId} value={scalar(item)} placeholder={field?.placeholder || (scalar(item) === '' ? 'Inherit / default' : '')} onChange={(event) => set(event.target.value)} />}
-    </label>{field?.description ? <small id={descriptionId}>{field.description}</small> : null}{onRemove ? <Button tone="quiet" onPress={() => onRemove(key)}>Remove {label}</Button> : null}</div>;
+      : <input list={suggestions.length ? choicesId : undefined} aria-label={label} aria-describedby={descriptionId} value={scalar(item)} placeholder={field?.placeholder || (scalar(item) === '' ? 'Inherit / default' : '')} onChange={(event) => set(event.target.value)} />}
+    {suggestions.length ? <datalist id={choicesId}>{suggestions.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}</datalist> : null}</label>{field?.description ? <small id={descriptionId}>{field.description}</small> : null}{onRemove ? <Button tone="quiet" onPress={() => onRemove(key)}>Remove {label}</Button> : null}</div>;
   })}</div>;
 }

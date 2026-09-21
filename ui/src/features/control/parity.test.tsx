@@ -169,6 +169,8 @@ describe('typed settings and attention workflows', () => {
     const store = createAppStore(); const send = vi.fn(); const copy = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { value: { writeText: copy }, configurable: true });
     store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, agents: { worker: { id: 'worker', cell_type: 'agent', session_id: 'live', status: 'running' } }, board_tasks: { ask: { id: 'ask', task: 'Approve review', lane: 'Backlog', labels: ['torque:human'], reply_agent_id: 'worker' } } }));
+    const fetcher = vi.fn((_url: string, options: RequestInit) => { const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as Record<string, unknown>; return Promise.resolve({ ok: true, json: () => Promise.resolve(command.cmd === 'task_detail' ? { ok: true, data: { type: 'task_detail', id: 'ask', task: { id: 'ask', description: 'Complete question' } } } : { ok: false, error: 'Delivery unavailable' }) }); });
+    vi.stubGlobal('fetch', fetcher);
     const events = [{ id: 42, kind: 'error', message: 'Actual event body' }, { id: 43, kind: 'info', message: 'Informational' }];
     render(<Provider store={store}><ActivityPanel events={events} send={send} /></Provider>);
     fireEvent.change(screen.getByRole('textbox', { name: 'Answer Approve review' }), { target: { value: 'Proceed' } });
@@ -178,7 +180,8 @@ describe('typed settings and attention workflows', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Copy event' }));
     await screen.findByText('Event copied'); expect(copy).toHaveBeenCalledWith('Actual event body');
     fireEvent.click(screen.getByRole('button', { name: 'Resolve ask' }));
-    expect(send.mock.calls.at(-1)?.[0]).toMatchObject({ cmd: 'resolve_ask', id: 'ask', answer: 'Proceed' });
+    expect(await screen.findByRole('alert')).toHaveTextContent('Delivery unavailable');
+    expect(JSON.parse(fetcher.mock.calls.at(-1)?.[1].body as string)).toMatchObject({ cmd: 'resolve_ask', id: 'ask', answer: 'Proceed' });
     expect(screen.getByRole('textbox', { name: 'Answer Approve review' })).toHaveValue('Proceed');
     fireEvent.click(screen.getByRole('button', { name: 'Load older' }));
     expect(send).toHaveBeenCalledWith({ cmd: 'get_events', before_id: 42, limit: 200 });

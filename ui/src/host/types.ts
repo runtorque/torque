@@ -12,6 +12,9 @@ export type DesktopCapability =
   | 'runtime-config';
 
 export interface WindowBounds {
+  /** Native captures are physical pixels; initial UI sizes remain logical. */
+  physical?: boolean;
+  display_id?: string;
   x?: number;
   y?: number;
   width?: number;

@@ -157,6 +157,8 @@ def _handle_ui_state_command(data: dict, state: MatrixState):
                     normalized[key] = float(value)
                 except (TypeError, ValueError):
                     continue
+            if isinstance(bounds.get("physical"), bool):
+                normalized["physical"] = bounds["physical"]
             display_id = str(bounds.get("display_id", "") or "").strip()
             if display_id:
                 normalized["display_id"] = display_id
@@ -298,6 +300,8 @@ def _handle_ui_state_command(data: dict, state: MatrixState):
                     normalized_bounds[key] = float(value)
                 except (TypeError, ValueError):
                     continue
+            if isinstance(bounds.get("physical"), bool):
+                normalized_bounds["physical"] = bounds["physical"]
             display_id = str(bounds.get("display_id", "") or "").strip()
             if display_id:
                 normalized_bounds["display_id"] = display_id

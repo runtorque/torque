@@ -1,3 +1,4 @@
+import { AskResponse } from '../attention/AskResponse';
 import {
   DndContext,
   KeyboardSensor,
@@ -492,7 +493,6 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
   const [artifactContent, setArtifactContent] = useState('');
   const [externalStatus, setExternalStatus] = useState(task.status || task.lane);
   const [externalComment, setExternalComment] = useState('');
-  const [humanAnswer, setHumanAnswer] = useState('');
   const [formError, setFormError] = useState('');
   const [detailTab, setDetailTab] = useState<'execution' | 'verification' | 'integration' | 'evidence'>('execution');
   const [promptRequested, setPromptRequested] = useState(false);
@@ -607,7 +607,7 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
           </div>
         </aside>
       </div>
-      {task.labels.includes('torque:human') && task.lane !== 'Done' ? <section className={`${styles.detailSection} ${styles.detailHuman}`}><header><div><h3>Human response</h3><p>Answer the agent’s tracked question and resume its session.</p></div></header><div className={styles.resolveComposer}><textarea value={humanAnswer} onChange={(event) => setHumanAnswer(event.target.value)} rows={3} placeholder="Your answer" /><Button tone="primary" type="button" onPress={() => { sendOrNotify(sendCommand, { cmd: 'resolve_ask', id: task.id, answer: humanAnswer.trim(), request_id: `react-${Date.now()}` }, onCommandUnavailable); setHumanAnswer(''); }} isDisabled={!humanAnswer.trim()}>Resolve ask</Button></div></section> : null}
+      {task.labels.includes('torque:human') ? <AskResponse key={task.id} taskId={task.id} send={(command) => sendOrNotify(sendCommand, command, onCommandUnavailable)} /> : null}
       <div className={styles.detailSecondary}>
       <nav className={styles.detailTabs} role="tablist" aria-label="Task detail sections">
         {([['execution', 'Execution'], ['verification', 'Verification'], ['integration', 'Integrations'], ['evidence', 'Evidence']] as const).map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={detailTab === id} onClick={() => setDetailTab(id)}>{label}</button>)}

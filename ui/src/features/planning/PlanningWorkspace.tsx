@@ -1,3 +1,4 @@
+import { AreaEditor } from './AreaEditor';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useAppSelector } from '../../app/hooks';
@@ -5,7 +6,7 @@ import { selectAgentsState, selectConnection, selectPlanningState, selectTasksSt
 import { Button, ModalDialog, StateSurface } from '../../design/primitives';
 import type { CommandSender } from '../board/BoardPanel';
 import { groupInitiatives, groupRecords, records, text } from './model';
-import { AreaEditor, DecisionEditor, InitiativeEditor, ThinkingEditor } from './PlanningEditors';
+import { DecisionEditor, InitiativeEditor, ThinkingEditor } from './PlanningEditors';
 import styles from './PlanningWorkspace.module.css';
 
 type PlanningTab = 'roadmap' | 'areas' | 'thinking' | 'decisions' | 'team' | 'schedules';
@@ -77,7 +78,7 @@ export function PlanningWorkspace({ group, sendCommand, onCommandUnavailable }: 
     // Link command replies carry the mutation, while compact clients may not
     // receive a relationship delta. Rehydrate without remounting the editor.
     if (/^initiative_(task|decision)_(linked|unlinked)$/.test(type)) sendCommand({ cmd: 'initiative_list', group, include_archived: false });
-    if (/^area_.*_(linked|unlinked)$/.test(type)) sendCommand({ cmd: 'area_list', group, include_links: true, include_notes: true });
+    if (/^area_(linked|unlinked|note_(created|updated|archived))$/.test(type)) sendCommand({ cmd: 'area_list', group, include_links: true, include_notes: true });
   }, [connection.lastAuxiliaryFrame, group, sendCommand]);
 
   const initiatives = useMemo(() => groupInitiatives(planning.initiatives, group), [planning.initiatives, group]);
@@ -160,7 +161,7 @@ export function PlanningWorkspace({ group, sendCommand, onCommandUnavailable }: 
       </form>
     </ModalDialog>
     {selected?.kind === 'initiative' ? <InitiativeEditor key={text(selected.item.id)} item={records(planning.initiatives).find((item) => item.id === selected.item.id) ?? selected.item} tasks={taskItems} decisions={decisions} send={(command) => { if (!sendCommand(command)) onCommandUnavailable(); }} onClose={() => setSelected(null)} /> : null}
-    {selected?.kind === 'area' ? <AreaEditor key={text(selected.item.id)} item={selected.item} targets={{ task: taskItems, decision: decisions, initiative: Object.values(initiatives).flat(), area: areas }} send={(command) => { if (!sendCommand(command)) onCommandUnavailable(); }} onClose={() => setSelected(null)} /> : null}
+    {selected?.kind === 'area' ? <AreaEditor key={text(selected.item.id)} item={records(planning.areas).find((item) => item.id === selected.item.id) ?? selected.item} targets={{ task: taskItems, decision: decisions, initiative: Object.values(initiatives).flat(), area: areas }} onClose={() => setSelected(null)} /> : null}
     {selected?.kind === 'note' || selected?.kind === 'brief' ? <ThinkingEditor key={text(selected.item.id)} kind={selected.kind} item={selected.item} send={(command) => { if (!sendCommand(command)) onCommandUnavailable(); }} onClose={() => setSelected(null)} /> : null}
     {selected?.kind === 'decision' ? <DecisionEditor key={text(selected.item.id)} item={selected.item} tasks={taskItems} engineers={engineers} send={(command) => { if (!sendCommand(command)) onCommandUnavailable(); }} onClose={() => setSelected(null)} /> : null}
   </section>;

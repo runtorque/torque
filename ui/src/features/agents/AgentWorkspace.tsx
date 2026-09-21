@@ -1,9 +1,14 @@
-import { useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type ReactNode } from 'react';
+import { savedWindowBounds } from '../../host/windowState';
+import { providerChoices } from '../control/providerChoices';
+import { readCommand } from '../../protocol/http';
+import { useId, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type ReactNode } from 'react';
 
 import type { TorqueCommand } from '../../protocol';
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import {
   selectAuxiliaryResponseState,
+  selectProviders,
+  projectionActions,
   selectAgentsState,
   selectCatalogState,
   selectGroupsState,
@@ -202,10 +207,16 @@ function settingText(value: unknown): string {
   return text(value);
 }
 
-function SettingsForm({ agent, rawSettings, rawDigestSettings, resolvedSettings, sendCommand, onUnavailable, onClose }: SettingsFormProps) {
-  const settings = asRecord(rawSettings);
-  const digestSettings = asRecord(rawDigestSettings);
-  const resolved = asRecord(resolvedSettings);
+function SettingsForm({ agent, rawSettings, rawDigestSettings, resolvedSettings, onClose }: SettingsFormProps) {
+  const dispatch = useAppDispatch();
+  const providers = useAppSelector(selectProviders);
+  const instance = useId();
+  const [settings] = useState(() => asRecord(rawSettings));
+  const [digestSettings] = useState(() => asRecord(rawDigestSettings));
+  const [resolved] = useState(() => asRecord(resolvedSettings));
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const savingRef = useRef(false);
   const entry = (key: string) => asRecord(resolved[key]);
   const effective = (key: string, digest = false) => settingText(entry(key).value ?? (digest ? digestSettings[key] : settings[key]));
   const [name, setName] = useState(agent.name);
@@ -220,6 +231,7 @@ function SettingsForm({ agent, rawSettings, rawDigestSettings, resolvedSettings,
   const [specializations, setSpecializations] = useState(settingText(agent.raw.engineer_specializations));
   const [relaunch, setRelaunch] = useState(false);
   const [inheritFields, setInheritFields] = useState<string[]>([]);
+  const [editedFields, setEditedFields] = useState<string[]>([]);
   const resetToInherited = (key: string, digest = false) => {
     const inherited = asRecord(entry(key).inherited);
     const value = settingText(inherited.value);
@@ -228,23 +240,28 @@ function SettingsForm({ agent, rawSettings, rawDigestSettings, resolvedSettings,
     setInheritFields((current) => current.includes(key) ? current : [...current, key]);
   };
   const origin = (key: string) => Object.keys(entry(key)).length ? text(entry(key).origin, 'default') : 'inherit';
-  const originControl = (key: string, digest = false) => <span className={styles.settingOrigin}><span>{inheritFields.includes(key) ? 'inherited' : origin(key)}</span>{origin(key) === 'per-agent' && !inheritFields.includes(key) ? <button type="button" onClick={() => resetToInherited(key, digest)}>Use inherited</button> : null}</span>;
+  const originControl = (key: string, digest = false) => <span className={styles.settingOrigin}><span>{inheritFields.includes(key) ? 'inherited' : editedFields.includes(key) ? 'per-agent (unsaved)' : origin(key)}</span>{(origin(key) === 'per-agent' || editedFields.includes(key)) && !inheritFields.includes(key) ? <button type="button" onClick={() => resetToInherited(key, digest)}>Use inherited</button> : null}</span>;
   const updateValue = (key: string, value: string, digest = false) => {
+    setEditedFields((current) => current.includes(key) ? current : [...current, key]);
     if (digest) setDigestValues((current) => ({ ...current, [key]: value }));
     else setValues((current) => ({ ...current, [key]: value }));
     setInheritFields((current) => current.filter((item) => item !== key));
   };
   const control = (key: string, label: string, type: string, digest = false) => {
     const value = (digest ? digestValues : values)[key] ?? '';
-    const common = { value, onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => updateValue(key, event.target.value, digest) };
+    const common = { id: `${instance}-${key}`, 'aria-label': label, value, onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => updateValue(key, event.target.value, digest) };
+    const suggestions = providerChoices(providers, key, values);
+    const choicesId = `${instance}-${key}-choices`;
+    const options = key === 'autonomy_mode' ? (agent.kind === 'architect' ? ['dispatch_freely', 'dispatch_after_confirm', 'ask_always'] : ['suggest_only', 'dispatch_when_clear', 'aggressive_auto_continue']) : key === 'wave_size_preference' ? ['small', 'balanced', 'large'] : key === 'same_agent_follow_up_preference' ? ['balanced', 'prefer_same_agent', 'prefer_fresh_agent'] : key === 'escalation_style' ? ['ask_early', 'note_then_ask', 'keep_moving'] : key === 'digest_verbosity' ? (agent.kind === 'architect' ? ['terse', 'balanced', 'verbose'] : ['compact', 'balanced', 'detailed']) : null;
     let input: ReactNode;
     if (type === 'textarea' || type === 'list') input = <textarea {...common} rows={type === 'list' ? 3 : 7} />;
     else if (type === 'number') input = <input {...common} type="number" placeholder="inherit" />;
     else if (type === 'boolean') input = <select {...common}><option value="">Inherited</option><option value="true">Allowed</option><option value="false">Not allowed</option></select>;
     else if (type === 'paused') input = <select {...common}><option value="">Inherited</option><option value="false">Enabled</option><option value="true">Paused</option></select>;
     else if (type === 'fast') input = <select {...common}><option value="">Inherited</option><option value="on">Fast on</option><option value="off">Fast off</option></select>;
-    else input = <input {...common} placeholder="inherit" />;
-    return <label key={key}>{label}{originControl(key, digest)}{input}</label>;
+    else if (options) input = <select {...common}><option value="">Inherited</option>{[...new Set([...options, ...(value ? [value] : [])])].map((option) => <option key={option} value={option}>{option.replaceAll('_', ' ')}</option>)}</select>;
+    else input = <input {...common} list={suggestions.length ? choicesId : undefined} placeholder="inherit" />;
+    return <div className={styles.settingField} key={key}><label htmlFor={`${instance}-${key}`}>{label}</label>{originControl(key, digest)}{input}{suggestions.length ? <datalist id={choicesId}>{suggestions.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}</datalist> : null}</div>;
   };
 
   return (
@@ -254,38 +271,48 @@ function SettingsForm({ agent, rawSettings, rawDigestSettings, resolvedSettings,
       if (name.trim() !== agent.name) identityChanges.name = name.trim();
       if (icon.trim() !== text(agent.raw.icon)) identityChanges.icon = icon.trim();
       if (tabColor.trim() !== text(agent.raw.tab_color)) identityChanges.tab_color = tabColor.trim();
-      const identitySent = !Object.keys(identityChanges).length || sendCommand({ cmd: 'update_agent', id: agent.id, ...identityChanges });
+      if (savingRef.current) return;
+      const commands: TorqueCommand[] = [];
+      if (Object.keys(identityChanges).length) commands.push({ cmd: 'update_agent', id: agent.id, ...identityChanges });
       const changes: Record<string, string | number | boolean | null> = {};
       for (const [key, value] of Object.entries(values)) {
         if (inheritFields.includes(key)) changes[key] = null;
-        else if (value !== effective(key)) changes[key] = value || null;
+        else if (value !== effective(key) || (editedFields.includes(key) && origin(key) !== 'per-agent')) changes[key] = value;
       }
       ['default_worker_concurrency'].forEach((key) => { if (typeof changes[key] === 'string' && changes[key]) changes[key] = Number(changes[key]); });
       ['engineer_can_override_worker_provider', 'restrict_to_created_agents'].forEach((key) => { if (changes[key] === 'true') changes[key] = true; else if (changes[key] === 'false') changes[key] = false; });
       const digestChanges: Record<string, string | number | boolean | string[] | null> = {};
       for (const [key, value] of Object.entries(digestValues)) {
         if (inheritFields.includes(key)) digestChanges[key] = null;
-        else if (value !== effective(key, true)) digestChanges[key] = value || null;
+        else if (value !== effective(key, true) || (editedFields.includes(key) && origin(key) !== 'per-agent')) digestChanges[key] = value;
       }
       ['push_interval', 'max_interval', 'heartbeat_interval'].forEach((key) => { if (typeof digestChanges[key] === 'string' && digestChanges[key]) digestChanges[key] = Number(digestChanges[key]); });
       if (digestChanges.paused === 'true') digestChanges.paused = true;
       else if (digestChanges.paused === 'false') digestChanges.paused = false;
       if (typeof digestChanges.enabled_events === 'string') digestChanges.enabled_events = digestChanges.enabled_events.split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
-      const principalSent = !['architect', 'engineer'].includes(agent.kind)
-        || !Object.keys(changes).length
-        || sendCommand({ cmd: 'update_agent_settings', agent_id: agent.id, settings: changes });
-      const digestSent = !['architect', 'engineer'].includes(agent.kind)
-        || !Object.keys(digestChanges).length
-        || sendCommand({ cmd: 'update_agent_digest_settings', agent_id: agent.id, settings: digestChanges });
+      if (['architect', 'engineer'].includes(agent.kind)) {
+        if (Object.keys(changes).length) commands.push({ cmd: 'update_agent_settings', agent_id: agent.id, settings: changes });
+        if (Object.keys(digestChanges).length) commands.push({ cmd: 'update_agent_digest_settings', agent_id: agent.id, settings: digestChanges });
+      }
       const nextSpecs = specializations.split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
       const currentSpecs = Array.isArray(agent.raw.engineer_specializations) ? agent.raw.engineer_specializations.map(String) : [];
-      const specializationsSent = agent.kind !== 'engineer'
-        || JSON.stringify(nextSpecs) === JSON.stringify(currentSpecs)
-        || sendCommand({ cmd: 'set_engineer_specializations', engineer_id: agent.id, specializations: nextSpecs });
-      const relaunchSent = !relaunch || sendCommand({ cmd: 'relaunch_agent', id: agent.id });
-      if (!identitySent || !principalSent || !digestSent || !specializationsSent || !relaunchSent) onUnavailable();
-      else onClose();
+      if (agent.kind === 'engineer' && JSON.stringify(nextSpecs) !== JSON.stringify(currentSpecs)) commands.push({ cmd: 'set_engineer_specializations', engineer_id: agent.id, specializations: nextSpecs });
+      if (relaunch) commands.push({ cmd: 'relaunch_agent', id: agent.id });
+      if (!commands.length) { onClose(); return; }
+      savingRef.current = true; setSaving(true); setSaveError('');
+      void (async () => {
+        try {
+          for (const command of commands) {
+            const frame = await readCommand(command, new AbortController().signal);
+            if (frame.type !== 'state') dispatch(projectionActions.auxiliaryResourceReceived(frame));
+          }
+          onClose();
+        } catch (cause) { setSaveError(cause instanceof Error ? cause.message : 'Could not save settings. Your changes are retained.'); }
+        finally { savingRef.current = false; setSaving(false); }
+      })();
     }}>
+      {saveError ? <p role="alert">{saveError}</p> : null}
+      <fieldset disabled={saving} style={{ border: 0, margin: 0, padding: 0 }}>
       <section className={styles.settingsSection}><h3>Identity</h3><div className={styles.formGrid}><label>Name<input value={name} onChange={(event) => setName(event.target.value)} required /></label><label>Icon<input value={icon} onChange={(event) => setIcon(event.target.value)} placeholder="optional icon" /></label><label>Tab color<input value={tabColor} onChange={(event) => setTabColor(event.target.value)} placeholder="#6172f3" /></label></div></section>
       {['architect', 'engineer'].includes(agent.kind) ? <>
         <section className={styles.settingsSection}><h3>Launch and behavior</h3><div className={styles.formGrid}>{principalSettingFields.map(([key, label, type]) => control(key, label, type))}{agent.kind === 'engineer' ? engineerSettingFields.map(([key, label, type]) => control(key, label, type)) : null}</div></section>
@@ -293,7 +320,8 @@ function SettingsForm({ agent, rawSettings, rawDigestSettings, resolvedSettings,
         <section className={styles.settingsSection}><h3>Digest delivery</h3><div className={styles.formGrid}>{digestSettingFields.map(([key, label, type]) => control(key, label, type, true))}</div></section>
         <label className={styles.inlineCheck}><input type="checkbox" checked={relaunch} onChange={(event) => setRelaunch(event.target.checked)} />Relaunch after saving launch-bound changes</label>
       </> : <p className={styles.formHint}>Worker provider and launch settings are inherited from its role, Agent Class, and group defaults.</p>}
-      <footer><Button tone="quiet" type="button" onPress={onClose}>Cancel</Button><Button tone="primary" type="submit">Save settings</Button></footer>
+      <footer><Button tone="quiet" type="button" isDisabled={saving} onPress={onClose}>Cancel</Button><Button tone="primary" type="submit" isDisabled={saving}>{saving ? 'Saving settings…' : 'Save settings'}</Button></footer>
+      </fieldset>
     </form>
   );
 }
@@ -446,7 +474,7 @@ export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable,
       const panel = 'agents';
       const existing = asRecord(current[panel]);
       if (text(existing.label)) { await host.focusWindow(text(existing.label)); return; }
-      const bounds = { width: 1120, height: 760 };
+      const bounds = savedWindowBounds(existing, { width: 1120, height: 760 });
       const detached = await host.detachPanel({ panel, bounds });
       if (!sendCommand({ cmd: 'ui_set_detached_panels', detached_panels: { ...current, [panel]: { label: detached.label, bounds } } })) onCommandUnavailable();
     } catch { onCommandUnavailable(); }

@@ -15,10 +15,10 @@ async function command(request: APIRequestContext, payload: Record<string, unkno
   expect(result.ok, result.error).toBe(true); return result.data;
 }
 
-async function fixtureWorkspace(page: Page, desktop = false) {
+async function fixtureWorkspace(page: Page, desktop = false, extra: Record<string, unknown> = {}) {
   const sent: Record<string, unknown>[] = [];
   const messages = Array.from({ length: 65 }, (_, index) => ({ id: `m-${index}`, message: `Peer message ${index}`, sender_id: 'e', sender_name: 'Evan', recipient_id: 'other', recipient_name: 'Other Engineer', context: { summary: 'Review evidence', task_ids: ['task-1'] } }));
-  const frame = { ...compactStateFixture, active_group: 'Foundation', selected_agent_id: 'w', groups: { Foundation: ['a', 'e', 'w'] }, agents: { a: { id: 'a', name: 'Aria', kind: 'architect', group: 'Foundation', cell_type: 'agent' }, e: { id: 'e', name: 'Evan', kind: 'engineer', group: 'Foundation', hired_by_architect_id: 'a', cell_type: 'agent' }, w: { id: 'w', name: 'Wren', kind: 'worker', group: 'Foundation', owner_engineer_id: 'e', cell_type: 'agent' } }, agent_peer_threads: { recent: { thread_id: 'recent', title: 'Engineering review', messages, last_activity_at: 200 }, other: { thread_id: 'other', title: 'Other group discussion', messages: [], last_activity_at: 100 } } };
+  const frame = { ...compactStateFixture, active_group: 'Foundation', selected_agent_id: 'w', groups: { Foundation: ['a', 'e', 'w'] }, agents: { a: { id: 'a', name: 'Aria', kind: 'architect', group: 'Foundation', cell_type: 'agent' }, e: { id: 'e', name: 'Evan', kind: 'engineer', group: 'Foundation', hired_by_architect_id: 'a', cell_type: 'agent' }, w: { id: 'w', name: 'Wren', kind: 'worker', group: 'Foundation', owner_engineer_id: 'e', cell_type: 'agent' } }, agent_peer_threads: { recent: { thread_id: 'recent', title: 'Engineering review', messages, last_activity_at: 200 }, other: { thread_id: 'other', title: 'Other group discussion', messages: [], last_activity_at: 100 } }, ...extra };
   if (desktop) await page.addInitScript(() => {
     const target = window as Window & { __TAURI_INTERNALS__?: unknown; parityNativeCalls?: { command: string; args: unknown }[] };
     target.parityNativeCalls = [];
@@ -141,4 +141,56 @@ test('Tauri host boundary transfers detach ownership and reattaches through the 
   const calls = await page.evaluate(() => (window as Window & { parityNativeCalls?: { command: string; args: unknown }[] }).parityNativeCalls || []);
   expect(calls).toContainEqual({ command: 'reattach', args: { label: 'agents-parity' } });
   expect(sent.filter((item) => item.cmd === 'ui_set_detached_panels')).toHaveLength(2);
+});
+
+
+test('attention review gates approval on a fetched diff and retains a rejected reply', async ({ page }) => {
+  const ask = { id: 'ask', task: 'Choose release', group: 'Foundation', lane: 'Backlog', labels: ['torque:human'], reply_agent_id: 'w', parent_task_id: 'parent', description: 'Options: ship or wait. Recommended: wait.' };
+  const approval = { ...ask, id: 'approval', task: 'Behavior approval', labels: ['torque:human', 'behavior-overlay-approval', 'proposal:proposal'] };
+  const parent = { id: 'parent', task: 'Release parent', agent_id: 'w', description: 'Release context' };
+  const requests: Record<string, unknown>[] = [];
+  await page.route('**/api/cmd', async (route) => {
+    const command = route.request().postDataJSON() as Record<string, unknown>; requests.push(command);
+    if (command.cmd === 'resolve_ask') { await route.fulfill({ json: { ok: false, error: 'Synthetic delivery failure' } }); return; }
+    const data = command.cmd === 'task_detail' ? { type: 'task_detail', id: command.id, task: command.id === 'ask' ? ask : command.id === 'approval' ? approval : parent }
+      : command.cmd === 'behavior_overlay_diff' ? { type: 'behavior_overlay_diff', proposal: { id: 'proposal', status: 'approved', next_actor_kind: 'user', proposed_text_sha256: 'reviewed-hash', base_version_id: 'base', rationale: 'Bounded change' }, diff: '-old rule\n+new rule' }
+        : command.cmd === 'behavior_overlay_user_reject' ? { type: 'behavior_overlay_proposal', proposal_id: 'proposal', proposal: { id: 'proposal', status: 'rejected' } } : { type: 'ok' };
+    await route.fulfill({ json: { ok: true, data } });
+  });
+  await fixtureWorkspace(page, false, { agents: { w: { id: 'w', name: 'Wren', group: 'Foundation', kind: 'worker', cell_type: 'agent', session_id: 'fixture-session', status: 'running' } }, board_tasks: { ask, approval, parent } });
+  await page.getByRole('button', { name: /◎ Control/ }).click(); await page.getByRole('button', { name: 'Activity', exact: true }).click();
+  const answer = page.getByRole('textbox', { name: 'Answer Choose release' }); await answer.fill('Wait for review');
+  await page.getByRole('button', { name: 'Resolve ask' }).click(); await expect(page.getByRole('alert')).toContainText('Synthetic delivery failure'); await expect(answer).toHaveValue('Wait for review');
+  const review = page.getByRole('button', { name: 'Review behavior diff', exact: true }); await review.click();
+  const modal = page.getByRole('dialog', { name: 'Review behavior diff' }); await expect(modal.getByLabel('Behavior diff')).toContainText('+new rule');
+  await modal.getByLabel('Review note').fill('Needs revision'); await modal.getByRole('button', { name: 'Reject behavior change' }).click();
+  await expect(modal.getByText('Behavior change rejected.')).toBeVisible();
+  expect(requests.find((command) => command.cmd === 'behavior_overlay_user_reject')).toMatchObject({ expected_proposed_text_sha256: 'reviewed-hash', expected_base_version_id: 'base', note: 'Needs revision' });
+  await modal.getByRole('button', { name: 'Close review' }).click(); await expect(answer).toHaveValue('Wait for review');
+});
+
+test('Area lifecycle, initiative/Area links and note edit/archive persist on the daemon', async ({ page, request }) => {
+  const group = `Areas ${Date.now()}`; await command(request, { cmd: 'add_group', group });
+  const initiative = await command(request, { cmd: 'initiative_create', group, title: 'Area initiative' });
+  const linkedArea = await command(request, { cmd: 'area_create', group, title: 'Related Area' });
+  const initiativeId = (initiative.initiative as Record<string, unknown>).id as string;
+  const linkedAreaId = (linkedArea.area as Record<string, unknown>).id as string;
+  await page.goto('/'); await page.getByRole('button', { name: group, exact: true }).click(); await page.getByRole('button', { name: /◇ Planning/ }).click();
+  await page.getByRole('button', { name: 'Areas', exact: true }).click(); await page.getByRole('button', { name: '＋ New', exact: true }).click();
+  await page.getByLabel('Title', { exact: true }).fill('Area parity'); await page.getByRole('button', { name: 'Create', exact: true }).click();
+  await page.getByRole('button', { name: /Area parity/ }).click();
+  const modal = page.getByRole('dialog', { name: 'Area', exact: true }); await modal.getByLabel('Lifecycle').selectOption('stable');
+  await modal.getByLabel('Summary', { exact: true }).fill('Preserve this Area draft');
+  await modal.getByLabel('Relationship type').selectOption('initiative'); await modal.getByLabel('Relationship target').selectOption(initiativeId); await modal.getByRole('button', { name: 'Link', exact: true }).click();
+  await expect(modal.getByRole('button', { name: `Unlink initiative ${initiativeId}` })).toBeVisible();
+  await modal.getByLabel('Relationship type').selectOption('area'); await modal.getByLabel('Relationship target').selectOption(linkedAreaId); await modal.getByLabel('Relationship label').selectOption('depends_on'); await modal.getByRole('button', { name: 'Link', exact: true }).click();
+  await expect(modal.getByRole('button', { name: `Unlink area ${linkedAreaId}` })).toBeVisible();
+  await modal.getByLabel('Note title').fill('Constraint'); await modal.getByLabel('Note body').fill('Initial detail'); await modal.getByLabel('Note type').selectOption('invariant');
+  await modal.getByLabel('Note target type').selectOption('initiative'); await modal.getByLabel('Note target', { exact: true }).selectOption(initiativeId); await modal.getByRole('button', { name: 'Add note', exact: true }).click();
+  await modal.getByRole('button', { name: 'Edit note Constraint' }).click(); await modal.getByLabel('Note body').fill('Edited detail'); await modal.getByRole('button', { name: 'Save note', exact: true }).click(); await expect(modal.getByText('Edited detail', { exact: true })).toBeVisible();
+  await expect(modal.getByLabel('Summary', { exact: true })).toHaveValue('Preserve this Area draft'); await modal.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /Area parity/ }).click(); await expect(modal.getByLabel('Lifecycle')).toHaveValue('stable'); await expect(modal.getByText('Edited detail', { exact: true })).toBeVisible();
+  await modal.getByRole('button', { name: 'Archive note Constraint' }).click(); await expect(modal.getByRole('button', { name: 'Edit note Constraint' })).toHaveCount(0);
+  await modal.getByRole('button', { name: `Unlink area ${linkedAreaId}` }).click(); await expect(modal.getByRole('button', { name: `Unlink area ${linkedAreaId}` })).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath('parity-area.png'), fullPage: true });
 });

@@ -3,13 +3,19 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, LogicalPosition, LogicalSize, Manager, PhysicalPosition, PhysicalSize, Position,
+    Size, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+};
 
 use crate::daemon::DaemonSettings;
 use crate::menu;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct WindowBounds {
+    /// Native captures use physical pixels; omitted legacy/default sizes are logical.
+    #[serde(default)]
+    pub physical: Option<bool>,
     pub x: Option<f64>,
     pub y: Option<f64>,
     pub width: Option<f64>,
@@ -183,33 +189,42 @@ pub fn detach_panel(
 
     let label = make_detached_label(&panel);
     let url = detached_url(&settings.frontend_url(), &panel, &label)?;
+    let clamped = clamp_bounds(bounds.clone(), primary_monitor_frame(app)).or(bounds.clone());
     let mut builder = WebviewWindowBuilder::new(app, label.clone(), WebviewUrl::External(url))
         .title(format!("Torque — {}", panel_title(&panel)))
-        .inner_size(
-            bounds.as_ref().and_then(|b| b.width).unwrap_or(900.0),
-            bounds.as_ref().and_then(|b| b.height).unwrap_or(640.0),
-        )
+        .inner_size(900.0, 640.0)
         .min_inner_size(420.0, 300.0)
-        // Torque's frontend owns file drops with HTML5 drag/drop handlers
-        // (xterm, task attachments, and agent compose). Tauri's native drag
-        // handler consumes those DOM events before the page can see them.
+        // HTML5 drops belong to the frontend (terminal, attachments, compose).
         .disable_drag_drop_handler()
-        .visible(true);
-
-    if let Some(menu) = menu::build_detached_panel_menu(app)
-        .map_err(|error| error.to_string())
-        .ok()
-    {
+        .visible(false);
+    if let Ok(menu) = menu::build_detached_panel_menu(app) {
         builder = builder.menu(menu);
     }
-
-    if let Some(clamped) = clamp_bounds(bounds, primary_monitor_frame(app)) {
-        if let (Some(x), Some(y)) = (clamped.x, clamped.y) {
-            builder = builder.position(x, y);
+    let window = builder.build().map_err(|error| error.to_string())?;
+    if let Some(ref geometry) = clamped {
+        window
+            .set_size(requested_window_size(geometry))
+            .map_err(|error| error.to_string())?;
+        // With no requested position, let Tauri center in the correct monitor units.
+        if bounds
+            .as_ref()
+            .is_some_and(|b| b.x.is_some() && b.y.is_some())
+        {
+            if let (Some(x), Some(y)) = (geometry.x, geometry.y) {
+                let position = if geometry.physical.unwrap_or(geometry.display_id.is_some()) {
+                    Position::Physical(PhysicalPosition::new(x.round() as i32, y.round() as i32))
+                } else {
+                    Position::Logical(LogicalPosition::new(x, y))
+                };
+                window
+                    .set_position(position)
+                    .map_err(|error| error.to_string())?;
+            }
+        } else {
+            let _ = window.center();
         }
     }
-
-    let window = builder.build().map_err(|error| error.to_string())?;
+    window.show().map_err(|error| error.to_string())?;
     window_state.remember_detached(panel, label.clone());
     window_state.set_active_label(label.clone());
     let _ = window.set_focus();
@@ -229,6 +244,19 @@ pub fn reattach_label(
     Ok(())
 }
 
+fn requested_window_size(bounds: &WindowBounds) -> Size {
+    let width = bounds.width.unwrap_or(900.0);
+    let height = bounds.height.unwrap_or(640.0);
+    if bounds.physical.unwrap_or(bounds.display_id.is_some()) {
+        Size::Physical(PhysicalSize::new(
+            width.round() as u32,
+            height.round() as u32,
+        ))
+    } else {
+        Size::Logical(LogicalSize::new(width, height))
+    }
+}
+
 pub fn window_bounds(window: &WebviewWindow) -> Result<WindowBounds, String> {
     let position = window
         .outer_position()
@@ -241,6 +269,7 @@ pub fn window_bounds(window: &WebviewWindow) -> Result<WindowBounds, String> {
         .flatten()
         .and_then(|monitor| monitor.name().cloned());
     Ok(WindowBounds {
+        physical: Some(true),
         x: position.as_ref().map(|pos| pos.x as f64),
         y: position.as_ref().map(|pos| pos.y as f64),
         width: Some(size.width as f64),
@@ -380,6 +409,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn persisted_physical_sizes_do_not_double_on_retina() {
+        let mut bounds = WindowBounds {
+            width: Some(1952.0),
+            height: Some(1308.0),
+            physical: Some(true),
+            ..Default::default()
+        };
+        assert_eq!(
+            requested_window_size(&bounds).to_physical::<u32>(2.0),
+            PhysicalSize::new(1952, 1308)
+        );
+        bounds.physical = None;
+        assert_eq!(
+            requested_window_size(&bounds).to_physical::<u32>(2.0),
+            PhysicalSize::new(3904, 2616)
+        );
+        bounds.display_id = Some("Legacy monitor".into());
+        assert_eq!(
+            requested_window_size(&bounds).to_physical::<u32>(2.0),
+            PhysicalSize::new(1952, 1308)
+        );
+        let captured = serde_json::to_string(&WindowBounds {
+            physical: Some(true),
+            ..bounds
+        })
+        .unwrap();
+        let restored: WindowBounds = serde_json::from_str(&captured).unwrap();
+        assert_eq!(
+            requested_window_size(&restored).to_physical::<u32>(2.0),
+            PhysicalSize::new(1952, 1308)
+        );
+    }
+
+    #[test]
     fn panel_labels_round_trip() {
         let label = make_detached_label("engineer");
         assert!(label.starts_with("panel-engineer-"));
@@ -413,6 +476,7 @@ mod tests {
         };
         let clamped = clamp_bounds(
             Some(WindowBounds {
+                physical: None,
                 x: Some(5000.0),
                 y: Some(5000.0),
                 width: Some(600.0),

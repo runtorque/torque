@@ -66,35 +66,6 @@ export function InitiativeEditor({ item, tasks, decisions, send, onClose }: {
   </ModalDialog>;
 }
 
-export function AreaEditor({ item, targets, send, onClose }: {
-  item: UnknownRecord; targets: Record<'task' | 'decision' | 'initiative' | 'area', UnknownRecord[]>; send: Send; onClose: () => void;
-}) {
-  const [draft, setDraft] = useState(() => ({
-    title: text(item.title), area_type: text(item.area_type), lifecycle: text(item.lifecycle, 'planned'), summary: text(item.summary),
-    user_purpose: text(item.user_purpose), system_purpose: text(item.system_purpose), in_scope: text(item.in_scope), out_of_scope: text(item.out_of_scope),
-    owner_kind: text(item.owner_kind, 'user'), owner_id: text(item.owner_id),
-  }));
-  const [linkType, setLinkType] = useState<'task' | 'decision' | 'initiative' | 'area'>('task');
-  const [target, setTarget] = useState('');
-  const [relation, setRelation] = useState('');
-  const [note, setNote] = useState({ title: '', body: '', note_type: 'context' });
-  const update = (patch: Partial<typeof draft>) => setDraft((value) => ({ ...value, ...patch }));
-  const remove = (link: UnknownRecord) => {
-    const type = text(link.link_type, text(link.target_type)) as keyof typeof targets;
-    send({ cmd: `area_unlink_${type}`, id: text(item.id), target_id: text(link.target_id, text(link.id)), relation: text(link.relation) });
-  };
-  return <ModalDialog title="Area" description={text(item.id)} size="large" isOpen onOpenChange={(open) => { if (!open) onClose(); }}>
-    <form className={styles.detailForm} onSubmit={(event) => { event.preventDefault(); send({ cmd: 'area_update', id: text(item.id), ...draft }); onClose(); }}>
-      <div className={styles.formGrid}><Field label="Title"><input value={draft.title} onChange={(e) => update({ title: e.target.value })} /></Field><Field label="Type"><input value={draft.area_type} onChange={(e) => update({ area_type: e.target.value })} /></Field><Field label="Lifecycle"><select value={draft.lifecycle} onChange={(e) => update({ lifecycle: e.target.value })}>{['planned', 'active', 'maintained', 'deprecated', 'archived'].map((value) => <option key={value}>{value}</option>)}</select></Field><Field label="Owner kind"><select value={draft.owner_kind} onChange={(e) => update({ owner_kind: e.target.value })}>{['user', 'architect', 'engineer'].map((value) => <option key={value}>{value}</option>)}</select></Field><Field label="Owner ID"><input value={draft.owner_id} onChange={(e) => update({ owner_id: e.target.value })} /></Field></div>
-      <Field label="Summary"><textarea value={draft.summary} onChange={(e) => update({ summary: e.target.value })} /></Field>
-      <div className={styles.formGrid}><Field label="User purpose"><textarea value={draft.user_purpose} onChange={(e) => update({ user_purpose: e.target.value })} /></Field><Field label="System purpose"><textarea value={draft.system_purpose} onChange={(e) => update({ system_purpose: e.target.value })} /></Field><Field label="In scope"><textarea value={draft.in_scope} onChange={(e) => update({ in_scope: e.target.value })} /></Field><Field label="Out of scope"><textarea value={draft.out_of_scope} onChange={(e) => update({ out_of_scope: e.target.value })} /></Field></div>
-      <section className={styles.embeddedSection}><h3>Relationships</h3><LinkRows links={item.links} onRemove={remove} /><div className={styles.inlineComposer}><select aria-label="Relationship type" value={linkType} onChange={(e) => { setLinkType(e.target.value as typeof linkType); setTarget(''); }}><option>task</option><option>decision</option><option>initiative</option><option>area</option></select><select aria-label="Relationship target" value={target} onChange={(e) => setTarget(e.target.value)}><option value="">Choose…</option>{targets[linkType].filter((entry) => text(entry.id) !== text(item.id)).map((entry) => <option key={text(entry.id)} value={text(entry.id)}>{text(entry.title, text(entry.task, text(entry.id)))}</option>)}</select><input aria-label="Relationship label" placeholder="Relationship" value={relation} onChange={(e) => setRelation(e.target.value)} /><Button tone="quiet" isDisabled={!target} onPress={() => { send({ cmd: `area_link_${linkType}`, id: text(item.id), target_id: target, relation }); setTarget(''); }}>Link</Button></div></section>
-      <section className={styles.embeddedSection}><h3>Area notes</h3><div className={styles.noteRows}>{records(item.notes).map((entry) => <article key={entry.id}><div><b>{text(entry.title, text(entry.note_type, 'Note'))}</b><p>{text(entry.body)}</p></div><Button tone="quiet" onPress={() => send({ cmd: 'area_note_archive', id: text(item.id), note_id: entry.id })}>Archive</Button></article>)}</div><div className={styles.noteComposer}><input placeholder="Note title" value={note.title} onChange={(e) => setNote({ ...note, title: e.target.value })} /><select aria-label="Note type" value={note.note_type} onChange={(e) => setNote({ ...note, note_type: e.target.value })}><option>context</option><option>decision</option><option>risk</option><option>constraint</option></select><textarea placeholder="Durable context…" value={note.body} onChange={(e) => setNote({ ...note, body: e.target.value })} /><Button tone="quiet" isDisabled={!note.title.trim() && !note.body.trim()} onPress={() => { send({ cmd: 'area_note_create', id: text(item.id), ...note }); setNote({ title: '', body: '', note_type: 'context' }); }}>Add note</Button></div></section>
-      <footer className={styles.detailFooter}><Button tone="danger" onPress={() => { send({ cmd: 'area_archive', id: text(item.id) }); onClose(); }}>Archive</Button><span /><Button tone="quiet" onPress={onClose}>Cancel</Button><Button tone="primary" type="submit" isDisabled={!draft.title.trim()}>Save</Button></footer>
-    </form>
-  </ModalDialog>;
-}
-
 export function ThinkingEditor({ kind, item, send, onClose }: { kind: 'note' | 'brief'; item: UnknownRecord; send: Send; onClose: () => void }) {
   const [draft, setDraft] = useState(() => kind === 'note' ? {
     title: text(item.title), body: text(item.body), context: JSON.stringify(item.context ?? {}, null, 2), links: JSON.stringify(item.links ?? [], null, 2),

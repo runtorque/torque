@@ -120,6 +120,7 @@ const connectionSlice = createSlice({
     connected(state, action: PayloadAction<{ at: number; reconnect: boolean }>) {
       state.status = 'connected';
       state.lastConnectedAt = action.payload.at;
+      state.expectedSeq = null; // Wait for this connection’s snapshot before reconciling ownership.
       if (action.payload.reconnect) state.reconnectCount += 1;
     },
     disconnected(state, action: PayloadAction<{ at: number; reason?: string }>) {
@@ -288,6 +289,9 @@ const projectionSlice = createSlice({
           replace('planning_areas', records);
           break;
         }
+        case 'area':
+          upsertResource('planning_areas', frame);
+          break;
         case 'area_created':
         case 'area_updated':
         case 'area_archived':
@@ -612,6 +616,7 @@ const selectMessageLoops = selectRecord('agent_message_loops');
 const selectNotices = selectRecord('operator_notices');
 const selectNoticeSummary = selectRecord('operator_notice_summary');
 const selectInitiatives = selectRecord('initiatives');
+export const selectProviders = selectList('providers');
 const selectAreas = selectRecord('planning_areas');
 const selectDecisions = selectRecord('decisions');
 const selectPendingHires = selectRecord('pending_hires');

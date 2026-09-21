@@ -1,0 +1,12 @@
+.ask, .review { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.ask { border: 1px solid var(--border); padding: 12px; margin-bottom: 12px; }
+.ask h3, .review h3 { margin: 0; font-size: 12px; }
+.ask p, .review p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ask label, .review label { display: flex; flex-direction: column; gap: 6px; }
+.ask textarea, .review textarea { min-height: 80px; width: 100%; resize: vertical; }
+.ask > button { align-self: flex-start; }
+.review dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.review dt { color: var(--text-muted); }
+.review dd { margin: 4px 0 0; overflow-wrap: anywhere; }
+.diff { border: 1px solid var(--border); padding: 12px; overflow: auto; max-height: 45vh; white-space: pre; font: inherit; }
+.review footer { display: flex; gap: 8px; flex-wrap: wrap; }

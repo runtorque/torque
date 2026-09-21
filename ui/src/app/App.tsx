@@ -1,3 +1,4 @@
+import { releaseWindow, savedWindowBounds } from '../host/windowState';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Provider } from 'react-redux';
 import { Dialog, DialogTrigger, Heading, Popover } from 'react-aria-components';
@@ -185,7 +186,7 @@ export function WorkspaceShell({ host, sendCommand }: WorkspaceShellProps) {
   const reattachActive = async () => {
     try {
       await host.reattachWindow(activeDetachedLabel);
-      const next = { ...asRecord(workspace.detachedPanels) }; delete next[workspaceUi.activePanel];
+      const next = releaseWindow(asRecord(workspace.detachedPanels), workspaceUi.activePanel, activeDetachedLabel);
       if (!sendCommand({ cmd: 'ui_set_detached_panels', detached_panels: next })) commandUnavailable();
     } catch { commandUnavailable(); }
   };
@@ -349,12 +350,32 @@ export function WorkspaceShell({ host, sendCommand }: WorkspaceShellProps) {
       const current = asRecord(workspace.detachedPanels);
       const entry = asRecord(current[panel]);
       if (textValue(entry.label) && textValue(entry.label) !== label) return;
-      const next = { ...current };
-      delete next[panel];
+      const next = releaseWindow(current, panel, label);
       sendCommand({ cmd: 'ui_set_detached_panels', detached_panels: next });
     };
     return () => { delete target.torqueDetachedWindowClosed; };
   }, [sendCommand, workspace.detachedPanels]);
+
+  const reconciledWindows = useRef('');
+  useEffect(() => {
+    if (detachedPanel || host.kind !== 'tauri' || connection.status !== 'connected' || connection.expectedSeq === null || !hasHostCapability(host, 'list-detached-windows')) return;
+    const key = `${connection.lastConnectedAt}:${connection.reconnectCount}`;
+    if (reconciledWindows.current === key) return;
+    let cancelled = false;
+    const current = asRecord(workspace.detachedPanels);
+    void host.listDetachedWindows().then((windows) => {
+      if (cancelled || !Array.isArray(windows)) return;
+      const live = new Set(windows.map((item) => item.label));
+      let next = current;
+      for (const [panel, value] of Object.entries(current)) {
+        const label = textValue(asRecord(value).label);
+        if (label && !live.has(label)) next = releaseWindow(next, panel, label);
+      }
+      if (next !== current && !sendCommand({ cmd: 'ui_set_detached_panels', detached_panels: next })) return;
+      reconciledWindows.current = key;
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [connection.expectedSeq, connection.lastConnectedAt, connection.reconnectCount, connection.status, detachedPanel, host, sendCommand, workspace.detachedPanels]);
 
   const runCommand = useCallback((command: TorqueCommand) => {
     dispatch(workspaceUiActions.setCommandPaletteOpen(false));
@@ -429,7 +450,7 @@ export function WorkspaceShell({ host, sendCommand }: WorkspaceShellProps) {
         void host.focusWindow(textValue(existing.label));
         return;
       }
-      const bounds = panel === 'board' ? { width: 1180, height: 760 } : { width: 1080, height: 740 };
+      const bounds = savedWindowBounds(existing, panel === 'board' ? { width: 1180, height: 760 } : { width: 1080, height: 740 });
       void host.detachPanel({ panel, bounds }).then((detached) => {
         sendCommand({ cmd: 'ui_set_detached_panels', detached_panels: { ...current, [panel]: { label: detached.label, bounds } } });
       }).catch(commandUnavailable);

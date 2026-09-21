@@ -2523,6 +2523,38 @@ scope.
 - Constraints: Detached native-window lifecycle still requires real desktop QA. A data refresh must not key-remount an open editor.
 - Verification: Tauri adapter browser fixture; live Planning link/edit round trip and draft-preserving component link/unlink regression.
 
+### D-084 — Attention replies and behavior approvals require confirmation
+
+- Date: 2026-09-21
+- Status: accepted
+- Decision: Board and Activity share a hydrated question/parent context and reply composer. Explicit reply target precedes Architect author and parent worker; unavailable targets retain the question and draft. Enter sends, Shift+Enter adds a line. Drafts clear only after the matching delivery acknowledgement. Behavior approvals use a separate diff review with author, rationale, base, hash and advisory lint; operator actions require a proposal awaiting the user.
+- Constraints: Pending actions cannot be submitted twice. Failed or stale decisions retain the note and require a fresh diff. Question choices remain part of the full question text; the server has no separate reply-options field. HTTP acknowledgements and WebSocket state updates remain authoritative.
+- Verification: Attention component regressions plus browser review/rejection and retained-answer scenario.
+
+### D-085 — Settings preserve override intent and use discovered choices
+
+- Date: 2026-09-21
+- Status: accepted
+- Decision: Launch provider/model/reasoning fields offer choices from daemon metadata while retaining custom values. Per-agent forms preserve the opening baseline under updates, distinguish explicit empty text from inheritance, submit sparse edits, and keep the form open on save failure. Use inherited remains inside the save boundary.
+- Constraints: Choices do not infer group/default precedence. The server resolves origins and validates values. Per-agent relaunch follows successful saves. Untouched settings are not promoted to overrides by unrelated deltas.
+- Verification: Model-specific discovery tests, per-agent failed-save/reset/empty-override regressions, and unchanged-save coverage.
+
+### D-086 — Area workflows use durable domain values and acknowledged writes
+
+- Date: 2026-09-21
+- Status: accepted
+- Decision: Area lifecycle, note types and Area relations match the backend vocabulary. All four relationship kinds are visible. Notes support create, edit, archive and optional task/decision/initiative/Area targets. Full detail and reconnect hydration update untouched fields and relationships without replacing drafts.
+- Constraints: Write failures retain edits. Notes display the latest 50 active records supported by the detail contract. Area-to-Area unlink identifies both target and relation. Compact command replies and full-client deltas must both update the open editor.
+- Verification: Component and projection tests, plus isolated live browser lifecycle/link/note round trips.
+
+### D-087 — Native window ownership is separate from saved geometry
+
+- Date: 2026-09-21
+- Status: accepted
+- Decision: Reattach/close clears a window label while retaining its bounds for reopening. On main-window reconnect, native window inventory clears stale ownership left by an exited app. Captured bounds carry a physical-pixel marker through persistence; logical initial sizes retain their existing meaning.
+- Constraints: Browser clients never reconcile native ownership. Late close notifications cannot clear a newer owner. Legacy captures with a monitor identifier are treated as physical pixels. Native captures must not double in size on Retina displays.
+- Verification: UI ownership/reopen regressions, backend bounds round trip, Rust pixel-unit and off-screen clamping tests; macOS native QA is recorded separately in the parity ledger.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:
