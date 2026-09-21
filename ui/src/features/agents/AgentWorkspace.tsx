@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type ReactNode } from 'react';
 
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import {
@@ -25,11 +25,14 @@ import { TerminalWorkspace } from '../terminal/TerminalSurface';
 import {
   agentStatusLabel,
   buildAgentHierarchy,
+  buildAgentTree,
   toAgentViewModel,
+  visibleAgentTreeRows,
   type AgentViewModel,
+  type VisibleAgentTreeRow,
 } from './model';
+import { AgentDetailWorkspace } from './AgentDetailWorkspace';
 import { AgentCreateDialog } from './AgentCreateDialog';
-import { AgentInspector } from './AgentInspector';
 import styles from './AgentWorkspace.module.css';
 import { WorktreeInspector } from './WorktreeInspector';
 
@@ -50,68 +53,65 @@ function statusTone(agent: AgentViewModel): string {
   return 'muted';
 }
 
-function orderedAgentExists(agents: AgentViewModel[], id: string): boolean {
-  return agents.some((agent) => agent.cellType === 'agent' && agent.id === id);
-}
-
-interface AgentCardProps {
-  agent: AgentViewModel;
+interface AgentTreeRowProps {
+  row: VisibleAgentTreeRow;
   selected: boolean;
   focused: boolean;
   taskTitle: string;
+  collapsed: boolean;
+  onToggle: () => void;
   onSelect: () => void;
   onFocus: () => void;
   onRestart: () => void;
   onRelaunch: () => void;
   onClearContext: () => void;
   onInspectWorktree: () => void;
-  onInspect: () => void;
   onOrganize: () => void;
   onCopyId: () => void;
   onCopyName: () => void;
   onRemove: () => void;
 }
 
-function AgentCard({ agent, selected, focused, taskTitle, onSelect, onFocus, onRestart, onRelaunch, onClearContext, onInspectWorktree, onInspect, onOrganize, onCopyId, onCopyName, onRemove }: AgentCardProps) {
+function AgentTreeRow({ row, selected, focused, taskTitle, collapsed, onToggle, onSelect, onFocus, onRestart, onRelaunch, onClearContext, onInspectWorktree, onOrganize, onCopyId, onCopyName, onRemove }: AgentTreeRowProps) {
+  const { agent } = row;
   return (
-    <article
-      className={`${styles.agentCard} ${selected ? styles.agentSelected : ''} ${focused ? styles.agentFocused : ''}`}
+    <div
+      role="treeitem"
+      aria-level={row.depth + 1}
+      aria-expanded={row.childCount ? !collapsed : undefined}
+      className={`${styles.agentTreeRow} ${selected ? styles.agentSelected : ''} ${focused ? styles.agentFocused : ''}`}
       data-agent-id={agent.id}
       tabIndex={focused ? 0 : -1}
       onClick={onSelect}
       onDoubleClick={onFocus}
       onFocus={onFocus}
       aria-label={`${agent.name}, ${agent.kind}, ${agent.status}`}
+      style={{ '--tree-depth': row.depth } as CSSProperties}
     >
-      <header>
-        <span className={`${styles.statusDot} ${styles[`tone_${statusTone(agent)}`] ?? ''}`} />
-        <strong>{agent.name}</strong>
-        {agent.needsAttention ? <span className={styles.attention}>attention</span> : null}
-        <ActionMenu label={`Actions for ${agent.name}`}>
-          <ActionMenuItem onAction={onRestart} isDisabled={agent.cellType === 'terminal'}>Restart</ActionMenuItem>
-          <ActionMenuItem onAction={onRelaunch}>Relaunch</ActionMenuItem>
-          <ActionMenuItem onAction={onClearContext} isDisabled={agent.cellType === 'terminal'}>Clear context</ActionMenuItem>
-          <ActionMenuItem onAction={onInspect} isDisabled={agent.cellType === 'terminal'}>Inspect activity…</ActionMenuItem>
-          <ActionMenuItem onAction={onInspectWorktree} isDisabled={!agent.worktreePath}>Inspect worktree…</ActionMenuItem>
-          <ActionMenuItem onAction={onOrganize}>Move or reorder…</ActionMenuItem>
-          <ActionMenuItem onAction={onCopyId}>Copy ID</ActionMenuItem>
-          <ActionMenuItem onAction={onCopyName}>Copy name</ActionMenuItem>
-          <ActionMenuItem onAction={onRemove}>Delete…</ActionMenuItem>
-        </ActionMenu>
-      </header>
-      <div className={styles.agentIdentity}>
-        <span>{agent.kind}</span>
-        {agent.provider ? <span>{agent.provider}</span> : null}
-        {agent.role ? <span>{agent.role}</span> : null}
+      <span className={styles.treeGuide} aria-hidden="true" />
+      {row.childCount ? <button className={styles.treeToggle} type="button" aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${agent.name}`} onClick={(event) => { event.stopPropagation(); onToggle(); }}>{collapsed ? '›' : '⌄'}</button> : <span className={styles.treeToggleSpacer} />}
+      <span className={`${styles.statusDot} ${styles[`tone_${statusTone(agent)}`] ?? ''}`} />
+      <div className={styles.treeIdentity}>
+        <span><strong>{agent.name}</strong>{row.orphaned ? <small className={styles.orphanBadge}>missing owner</small> : null}</span>
+        <small>{agent.kind}{agent.role ? ` · ${agent.role}` : agent.provider ? ` · ${agent.provider}` : ''} · {agentStatusLabel(agent)}</small>
       </div>
-      <p className={styles.activity}>{agentStatusLabel(agent)}</p>
-      <dl>
-        <div><dt>Task</dt><dd title={taskTitle || agent.currentTaskId || 'No task'}>{taskTitle || agent.currentTaskId || '—'}</dd></div>
-        <div><dt>Branch</dt><dd title={agent.worktreeBranch || agent.currentBranch || 'No branch'}>{agent.worktreeBranch || agent.currentBranch || '—'}</dd></div>
-        <div><dt>Diff</dt><dd>{agent.worktreeDirty ? 'dirty' : 'clean'}{agent.worktreeAhead ? ` · ↑${agent.worktreeAhead}` : ''}</dd></div>
-        <div><dt>Context</dt><dd>{agent.contextPercent ? `${Math.round(agent.contextPercent)}%` : '—'}</dd></div>
-      </dl>
-    </article>
+      <div className={styles.treeMeta}>
+        {agent.currentTaskId ? <span title={taskTitle || agent.currentTaskId}>{taskTitle || agent.currentTaskId}</span> : null}
+        {row.descendantCount ? <span>{row.descendantCount} report{row.descendantCount === 1 ? '' : 's'}</span> : null}
+        {agent.contextPercent ? <span>{Math.round(agent.contextPercent)}% ctx</span> : null}
+        {agent.needsAttention ? <span className={styles.attention}>attention</span> : null}
+      </div>
+      <ActionMenu label={`Actions for ${agent.name}`}>
+        <ActionMenuItem onAction={onRestart} isDisabled={agent.cellType === 'terminal'}>Restart</ActionMenuItem>
+        <ActionMenuItem onAction={onRelaunch}>Relaunch</ActionMenuItem>
+        <ActionMenuItem onAction={onClearContext} isDisabled={agent.cellType === 'terminal'}>Clear context</ActionMenuItem>
+        <ActionMenuItem onAction={onInspectWorktree} isDisabled={!agent.worktreePath}>Inspect worktree…</ActionMenuItem>
+        <ActionMenuItem onAction={onOrganize}>Move or reorder…</ActionMenuItem>
+        <ActionMenuItem onAction={onCopyId}>Copy ID</ActionMenuItem>
+        <ActionMenuItem onAction={onCopyName}>Copy name</ActionMenuItem>
+        <ActionMenuItem onAction={onRemove}>Delete…</ActionMenuItem>
+      </ActionMenu>
+    </div>
   );
 }
 
@@ -284,8 +284,7 @@ function SettingsForm({ agent, rawSettings, rawDigestSettings, resolvedSettings,
 
 interface FocusPanelProps {
   agent: AgentViewModel;
-  terminals: AgentViewModel[];
-  selectedTerminalId: string;
+  terminal: AgentViewModel;
   detachedTerminal: Record<string, unknown> | null;
   messages: unknown;
   rawSettings: unknown;
@@ -294,20 +293,18 @@ interface FocusPanelProps {
   host: DesktopHost;
   sendCommand: CommandSender;
   onUnavailable: () => void;
-  onSelectTerminal: (id: string) => void;
-  onDetach: (panel: 'agents' | 'terminal') => void;
+  onDetachAgent: () => void;
   onInspectWorktree: () => void;
-  onInspect: () => void;
   onOrganize: () => void;
   onRemove: () => void;
+  active?: boolean;
   terminalOnly?: boolean;
   directMessagesHeight?: number;
   composeHeight?: number;
 }
 
-function FocusPanel({ agent, terminals, selectedTerminalId, detachedTerminal, messages, rawSettings, rawDigestSettings, resolvedSettings, host, sendCommand, onUnavailable, onSelectTerminal, onDetach, onInspectWorktree, onInspect, onOrganize, onRemove, terminalOnly = false, directMessagesHeight = 0, composeHeight = 0 }: FocusPanelProps) {
+function FocusPanel({ agent, terminal, detachedTerminal, messages, rawSettings, rawDigestSettings, resolvedSettings, host, sendCommand, onUnavailable, onDetachAgent, onInspectWorktree, onOrganize, onRemove, active = true, terminalOnly = false, directMessagesHeight = 0, composeHeight = 0 }: FocusPanelProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const terminal = terminals.find((item) => item.id === selectedTerminalId) ?? terminals[0] ?? agent;
   const run = (command: Record<string, unknown>) => { if (!sendCommand(command as { cmd: string })) onUnavailable(); };
   const focusDetached = () => {
     const label = text(detachedTerminal?.label);
@@ -319,9 +316,8 @@ function FocusPanel({ agent, terminals, selectedTerminalId, detachedTerminal, me
       {!terminalOnly ? <header className={styles.focusHeader}>
         <div><span className={`${styles.statusDot} ${styles[`tone_${statusTone(agent)}`] ?? ''}`} /><div><h2>{agent.name}</h2><p>{agent.kind} · {agent.status}{agent.provider ? ` · ${agent.provider}` : ''}</p></div></div>
         <div>
-          {agent.cellType === 'agent' ? <Button tone="quiet" onPress={onInspect}>Inspect</Button> : null}
           {agent.cellType === 'agent' ? <Button tone="quiet" onPress={() => setSettingsOpen(true)}>Settings</Button> : null}
-          {hasHostCapability(host, 'detach-panel') ? <Button tone="quiet" onPress={() => onDetach('agents')}>Detach agent</Button> : null}
+          {hasHostCapability(host, 'detach-panel') ? <span className={styles.detachIconWrap} title="Detach selected agent workspace"><Button className={styles.detachIcon ?? ''} tone="quiet" aria-label="Detach selected agent workspace" onPress={onDetachAgent}>↗</Button></span> : null}
           <ActionMenu label={`Lifecycle actions for ${agent.name}`}>
             <ActionMenuItem onAction={() => run({ cmd: 'clear_agent_context', id: agent.id })} isDisabled={agent.cellType === 'terminal'}>Clear context</ActionMenuItem>
             <ActionMenuItem onAction={() => run({ cmd: 'restart_agent', id: agent.id })} isDisabled={agent.cellType === 'terminal'}>Restart</ActionMenuItem>
@@ -350,15 +346,10 @@ function FocusPanel({ agent, terminals, selectedTerminalId, detachedTerminal, me
         <Button tone="quiet" onPress={() => run({ cmd: 'worktree_check_merge', id: agent.id })} isDisabled={!agent.worktreePath}>Preflight merge</Button>
       </div> : null}
 
-      <div className={styles.terminalTabs} role="tablist" aria-label="Agent terminals">
-        {terminals.map((item) => <button key={item.id} role="tab" aria-selected={item.id === terminal.id} onClick={() => onSelectTerminal(item.id)}><span className={`${styles.statusDot} ${styles[`tone_${statusTone(item)}`] ?? ''}`} />{item.id === agent.id ? (agent.cellType === 'terminal' ? 'Terminal' : 'Agent') : item.name}</button>)}
-        {hasHostCapability(host, 'detach-panel') && !terminalOnly ? <Button tone="quiet" onPress={() => detachedTerminal ? focusDetached() : onDetach('terminal')}>{detachedTerminal ? 'Open detached terminal' : 'Detach terminal'}</Button> : null}
-      </div>
-
       <div className={styles.terminalHost}>
         {detachedTerminal && !terminalOnly
           ? <StateSurface title="Terminal detached" description="The PTY is owned by its native window, preventing competing focus and resize events." action={<Button tone="primary" onPress={focusDetached}>Focus terminal window</Button>} />
-          : <TerminalWorkspace agent={agent} terminal={terminal} messages={messages} sendCommand={sendCommand} onUnavailable={onUnavailable} showConversation={!terminalOnly && agent.cellType === 'agent'} directMessagesHeight={directMessagesHeight} composeHeight={composeHeight} />}
+          : <TerminalWorkspace agent={agent} terminal={terminal} messages={messages} sendCommand={sendCommand} onUnavailable={onUnavailable} showConversation={!terminalOnly && agent.cellType === 'agent'} active={active} directMessagesHeight={directMessagesHeight} composeHeight={composeHeight} />}
       </div>
 
       <ModalDialog title="Agent settings" description={`${agent.kind} · ${agent.id}`} size="large" isOpen={settingsOpen} onOpenChange={setSettingsOpen}>
@@ -378,7 +369,7 @@ export interface AgentWorkspaceProps {
 
 export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable, terminalOnly = false }: AgentWorkspaceProps) {
   const dispatch = useAppDispatch();
-  const { records, settings, resolvedSettings, digestSettings } = useAppSelector(selectAgentsState);
+  const { records, settings, resolvedSettings, digestSettings, digestBufferStats, digestSentEvents, engineerBufferStats, engineerSentEvents } = useAppSelector(selectAgentsState);
   const groupsState = useAppSelector(selectGroupsState);
   const catalog = useAppSelector(selectCatalogState);
   const auxiliaryResponses = useAppSelector(selectAuxiliaryResponseState);
@@ -409,48 +400,62 @@ export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable,
   const [focusedId, setFocusedId] = useState(selected?.id ?? null);
   const [removeTarget, setRemoveTarget] = useState<AgentViewModel | null>(null);
   const [worktreeTarget, setWorktreeTarget] = useState<AgentViewModel | null>(null);
-  const [inspectTarget, setInspectTarget] = useState<AgentViewModel | null>(null);
   const [organizationTarget, setOrganizationTarget] = useState<AgentViewModel | null>(null);
   const [deletedOpen, setDeletedOpen] = useState(false);
   const [purgeTarget, setPurgeTarget] = useState<AgentViewModel | null>(null);
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set());
   const cardsRef = useRef<HTMLDivElement>(null);
+  const tree = useMemo(() => buildAgentTree(hierarchy), [hierarchy]);
+  const visibleRows = useMemo(() => visibleAgentTreeRows(tree, collapsedIds), [tree, collapsedIds]);
+  const orderedAgents = visibleRows.map((row) => row.agent);
 
-  const effectiveFocusedId = focusedId && orderedAgentExists(hierarchy.all, focusedId)
+  const effectiveFocusedId = focusedId && orderedAgents.some((agent) => agent.id === focusedId)
     ? focusedId
-    : selected?.id ?? null;
+    : orderedAgents.some((agent) => agent.id === selected?.id) ? selected?.id ?? null : orderedAgents[0]?.id ?? null;
 
   const selectAgent = (agent: AgentViewModel, focusPty = false) => {
     dispatch(workspaceUiActions.setSelectedAgent(agent.id));
+    if (agent.cellType === 'terminal' && workspaceUi.agentsViewMode === 'activity') {
+      dispatch(workspaceUiActions.setAgentsViewMode('live'));
+    }
     setFocusedId(agent.id);
     if (!sendCommand({ cmd: 'ui_select_agent', id: agent.id })) onCommandUnavailable();
     if (focusPty && !sendCommand({ cmd: 'focus_agent', id: agent.id })) onCommandUnavailable();
   };
 
-  const detach = async (panel: 'agents' | 'terminal') => {
+  const detachAgents = async () => {
     try {
       const current = asRecord(workspace.detachedPanels);
+      const panel = 'agents';
       const existing = asRecord(current[panel]);
       if (text(existing.label)) { await host.focusWindow(text(existing.label)); return; }
-      const bounds = panel === 'agents' ? { width: 1120, height: 760 } : { width: 980, height: 680 };
+      const bounds = { width: 1120, height: 760 };
       const detached = await host.detachPanel({ panel, bounds });
       if (!sendCommand({ cmd: 'ui_set_detached_panels', detached_panels: { ...current, [panel]: { label: detached.label, bounds } } })) onCommandUnavailable();
     } catch { onCommandUnavailable(); }
   };
 
-  const orderedCards = hierarchy.all.filter((agent) => agent.cellType === 'agent' || !agent.parentId);
   const agentCount = hierarchy.all.filter((agent) => agent.cellType === 'agent').length;
   const terminalCount = hierarchy.all.filter((agent) => agent.cellType === 'terminal').length;
   const focusStep = (direction: number) => {
-    if (!orderedCards.length) return;
-    const current = effectiveFocusedId ? orderedCards.findIndex((agent) => agent.id === effectiveFocusedId) : -1;
-    const next = orderedCards[(current + direction + orderedCards.length) % orderedCards.length];
+    if (!orderedAgents.length) return;
+    const current = effectiveFocusedId ? orderedAgents.findIndex((agent) => agent.id === effectiveFocusedId) : -1;
+    const next = orderedAgents[(current + direction + orderedAgents.length) % orderedAgents.length];
     if (!next) return;
     setFocusedId(next.id);
     requestAnimationFrame(() => cardsRef.current?.querySelector<HTMLElement>(`[data-agent-id="${CSS.escape(next.id)}"]`)?.focus());
   };
 
   const taskTitle = (agent: AgentViewModel) => text(asRecord(tasks[agent.currentTaskId]).task);
-  const renderCard = (agent: AgentViewModel) => <AgentCard key={agent.id} agent={agent} selected={selected?.id === agent.id} focused={effectiveFocusedId === agent.id} taskTitle={taskTitle(agent)} onSelect={() => selectAgent(agent)} onFocus={() => setFocusedId(agent.id)} onRestart={() => { if (!sendCommand({ cmd: 'restart_agent', id: agent.id })) onCommandUnavailable(); }} onRelaunch={() => { if (!sendCommand({ cmd: 'relaunch_agent', id: agent.id })) onCommandUnavailable(); }} onClearContext={() => { if (!sendCommand({ cmd: 'clear_agent_context', id: agent.id })) onCommandUnavailable(); }} onInspectWorktree={() => setWorktreeTarget(agent)} onInspect={() => setInspectTarget(agent)} onOrganize={() => setOrganizationTarget(agent)} onCopyId={() => { void navigator.clipboard.writeText(agent.id); }} onCopyName={() => { void navigator.clipboard.writeText(agent.name); }} onRemove={() => setRemoveTarget(agent)} />;
+  const renderTreeRow = (row: VisibleAgentTreeRow) => {
+    const { agent } = row;
+    return <AgentTreeRow key={agent.id} row={row} collapsed={collapsedIds.has(agent.id)} selected={selected?.id === agent.id} focused={effectiveFocusedId === agent.id} taskTitle={taskTitle(agent)} onToggle={() => setCollapsedIds((current) => { const next = new Set(current); if (next.has(agent.id)) next.delete(agent.id); else next.add(agent.id); return next; })} onSelect={() => selectAgent(agent)} onFocus={() => setFocusedId(agent.id)} onRestart={() => { if (!sendCommand({ cmd: 'restart_agent', id: agent.id })) onCommandUnavailable(); }} onRelaunch={() => { if (!sendCommand({ cmd: 'relaunch_agent', id: agent.id })) onCommandUnavailable(); }} onClearContext={() => { if (!sendCommand({ cmd: 'clear_agent_context', id: agent.id })) onCommandUnavailable(); }} onInspectWorktree={() => setWorktreeTarget(agent)} onOrganize={() => setOrganizationTarget(agent)} onCopyId={() => { void navigator.clipboard.writeText(agent.id); }} onCopyName={() => { void navigator.clipboard.writeText(agent.name); }} onRemove={() => setRemoveTarget(agent)} />;
+  };
+
+  const setViewMode = (mode: 'live' | 'activity') => {
+    dispatch(workspaceUiActions.setAgentsViewMode(mode));
+  };
+  const viewControl = (agent: AgentViewModel) => <div className={styles.viewSwitch} role="tablist" aria-label={`View for ${agent.name}`}><button role="tab" aria-selected={workspaceUi.agentsViewMode === 'live'} onClick={() => setViewMode('live')}>Live</button><button role="tab" aria-selected={workspaceUi.agentsViewMode === 'activity'} onClick={() => setViewMode('activity')} disabled={agent.cellType !== 'agent'}>Activity</button></div>;
 
   const openCreate = (kind: 'architect' | 'engineer' | 'worker' | 'terminal') => {
     [{ cmd: 'get_config', group }, { cmd: 'get_group_settings', group }, { cmd: 'list_roles', group }, { cmd: 'list_templates', group }, { cmd: 'list_specializations', group }, { cmd: 'agent_class_list' }].forEach((command) => {
@@ -461,40 +466,52 @@ export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable,
 
   if (!group) return <StateSurface title="Choose a group" description="Agents are scoped to the active Torque group." />;
   if (terminalOnly) {
-    return selected && terminalChoices.length ? <FocusPanel agent={selected} terminals={terminalChoices} selectedTerminalId={selectedTerminalId} detachedTerminal={null} messages={messagesState.direct[selected.id]} rawSettings={settings[selected.id]} rawDigestSettings={digestSettings[selected.id]} resolvedSettings={resolvedSettings[selected.id]} host={host} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onSelectTerminal={(id) => dispatch(workspaceUiActions.setSelectedTerminal(id))} onDetach={(panel) => { void detach(panel); }} onInspectWorktree={() => setWorktreeTarget(selected)} onInspect={() => setInspectTarget(selected)} onOrganize={() => setOrganizationTarget(selected)} onRemove={() => setRemoveTarget(selected)} directMessagesHeight={Number(workspace.terminalDirectMessagesHeight) || 0} composeHeight={Number(workspace.terminalComposeHeight) || 0} terminalOnly /> : <StateSurface title="No active terminal" description="Select or relaunch an agent in the main Torque window." />;
+    return selected && terminalChoices.length ? <FocusPanel agent={selected} terminal={terminalChoices.find((cell) => cell.id === selectedTerminalId) ?? terminalChoices[0] ?? selected} detachedTerminal={null} messages={messagesState.direct[selected.id]} rawSettings={settings[selected.id]} rawDigestSettings={digestSettings[selected.id]} resolvedSettings={resolvedSettings[selected.id]} host={host} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onDetachAgent={() => { void detachAgents(); }} onInspectWorktree={() => setWorktreeTarget(selected)} onOrganize={() => setOrganizationTarget(selected)} onRemove={() => setRemoveTarget(selected)} directMessagesHeight={Number(workspace.terminalDirectMessagesHeight) || 0} composeHeight={Number(workspace.terminalComposeHeight) || 0} terminalOnly /> : <StateSurface title="No active terminal" description="Select or relaunch an agent in the main Torque window." />;
   }
 
   return (
     <section className={styles.workspace} aria-labelledby="agents-heading">
-      <header className={styles.workspaceHeader}><div><p>Workspace / {group}</p><h1 id="agents-heading">Agents</h1></div><div><span>{agentCount} {agentCount === 1 ? 'agent' : 'agents'}{terminalCount ? ` · ${terminalCount} ${terminalCount === 1 ? 'terminal' : 'terminals'}` : ''}</span>{deletedAgents.length ? <Button tone="quiet" onPress={() => setDeletedOpen(true)}>Recently deleted · {deletedAgents.length}</Button> : null}<ActionMenu label="Create agent or terminal" trigger={<Button tone="primary" aria-label="Create agent or terminal">＋ New</Button>}><ActionMenuItem onAction={() => openCreate('architect')}>New Architect…</ActionMenuItem><ActionMenuItem onAction={() => openCreate('engineer')}>New Engineer…</ActionMenuItem><ActionMenuItem onAction={() => openCreate('worker')}>New Worker…</ActionMenuItem><ActionMenuItem onAction={() => openCreate('terminal')}>New Terminal…</ActionMenuItem></ActionMenu>{hasHostCapability(host, 'detach-panel') ? <Button tone="quiet" onPress={() => { void detach('agents'); }}>Detach workspace</Button> : null}</div></header>
+      <header className={styles.workspaceHeader}><div><p>Workspace / {group}</p><h1 id="agents-heading">Agents</h1></div><div><span>{agentCount} {agentCount === 1 ? 'agent' : 'agents'}{terminalCount ? ` · ${terminalCount} ${terminalCount === 1 ? 'terminal' : 'terminals'}` : ''}</span>{deletedAgents.length ? <Button tone="quiet" onPress={() => setDeletedOpen(true)}>Recently deleted · {deletedAgents.length}</Button> : null}<ActionMenu label="Create agent or terminal" trigger={<Button tone="primary" aria-label="Create agent or terminal">＋ New</Button>}><ActionMenuItem onAction={() => openCreate('architect')}>New Architect…</ActionMenuItem><ActionMenuItem onAction={() => openCreate('engineer')}>New Engineer…</ActionMenuItem><ActionMenuItem onAction={() => openCreate('worker')}>New Worker…</ActionMenuItem><ActionMenuItem onAction={() => openCreate('terminal')}>New Terminal…</ActionMenuItem></ActionMenu>{hasHostCapability(host, 'detach-panel') ? <span className={styles.detachIconWrap} title="Detach Agents workspace"><Button className={styles.detachIcon ?? ''} tone="quiet" aria-label="Detach Agents workspace" onPress={() => { void detachAgents(); }}>↗</Button></span> : null}</div></header>
       {!hierarchy.all.length ? <div className={styles.emptyAgents}>
         <StateSurface title="Start an agent workspace" description="Create an Architect or Engineer to lead work, a Worker for a focused task, or a standalone terminal for direct shell access." action={<div className={styles.emptyAgentActions}><Button tone="primary" onPress={() => openCreate('worker')}>Create Worker</Button><Button tone="quiet" onPress={() => openCreate('terminal')}>Open Terminal</Button></div>} />
       </div> : <div className={styles.split}>
         <div
           className={styles.hierarchy}
           ref={cardsRef}
+          role="tree"
+          aria-label="Agent ownership hierarchy"
           onKeyDown={(event) => {
             const target = event.target as HTMLElement;
             if (target.closest('button, input, textarea, [role="menuitem"]')) return;
-            if (event.key === 'ArrowDown' || event.key === 'ArrowRight') { event.preventDefault(); focusStep(1); }
-            if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') { event.preventDefault(); focusStep(-1); }
-            if (event.key === 'Enter') { const item = orderedCards.find((agent) => agent.id === effectiveFocusedId); if (item) { event.preventDefault(); selectAgent(item, true); } }
-            if ((event.key === 'Delete' || event.key === 'Backspace') && effectiveFocusedId) { const item = orderedCards.find((agent) => agent.id === effectiveFocusedId); if (item) { event.preventDefault(); setRemoveTarget(item); } }
+            const row = visibleRows.find((item) => item.agent.id === effectiveFocusedId);
+            if (event.key === 'ArrowDown') { event.preventDefault(); focusStep(1); }
+            if (event.key === 'ArrowUp') { event.preventDefault(); focusStep(-1); }
+            if (event.key === 'ArrowRight' && row?.childCount) { event.preventDefault(); if (collapsedIds.has(row.agent.id)) setCollapsedIds((current) => { const next = new Set(current); next.delete(row.agent.id); return next; }); else focusStep(1); }
+            if (event.key === 'ArrowLeft' && row?.childCount && !collapsedIds.has(row.agent.id)) { event.preventDefault(); setCollapsedIds((current) => new Set(current).add(row.agent.id)); }
+            if (event.key === 'Enter') { const item = orderedAgents.find((agent) => agent.id === effectiveFocusedId); if (item) { event.preventDefault(); selectAgent(item, true); } }
+            if ((event.key === 'Delete' || event.key === 'Backspace') && effectiveFocusedId) { const item = orderedAgents.find((agent) => agent.id === effectiveFocusedId); if (item) { event.preventDefault(); setRemoveTarget(item); } }
           }}
         >
-          {hierarchy.architects.map((architect) => <section key={architect.id} className={styles.principalSection}><h2>Architect</h2>{renderCard(architect)}{(hierarchy.engineersByArchitect[architect.id] ?? []).map((engineer) => <section key={engineer.id} className={styles.teamBand}><h3>{engineer.name} team</h3>{renderCard(engineer)}<div className={styles.workerGrid}>{(hierarchy.workersByEngineer[engineer.id] ?? []).length ? (hierarchy.workersByEngineer[engineer.id] ?? []).map(renderCard) : <p>No workers</p>}</div></section>)}</section>)}
-          {hierarchy.userEngineers.length || hierarchy.userWorkers.length ? <section className={styles.principalSection}><h2>User-owned</h2>{hierarchy.userEngineers.map((engineer) => <section key={engineer.id} className={styles.teamBand}><h3>{engineer.name} team</h3>{renderCard(engineer)}<div className={styles.workerGrid}>{(hierarchy.workersByEngineer[engineer.id] ?? []).length ? (hierarchy.workersByEngineer[engineer.id] ?? []).map(renderCard) : <p>No workers</p>}</div></section>)}<div className={styles.workerGrid}>{hierarchy.userWorkers.map(renderCard)}</div></section> : null}
-          {hierarchy.looseTerminals.length ? <section className={styles.principalSection}><h2>Terminals</h2><div className={styles.workerGrid}>{hierarchy.looseTerminals.map(renderCard)}</div></section> : null}
+          <header className={styles.hierarchyHeader}><div><strong>Ownership</strong><span>Architect → Engineer → Worker</span></div><Button tone="quiet" onPress={() => setCollapsedIds(new Set())}>Expand all</Button></header>
+          <div className={styles.treeRows}>{visibleRows.map(renderTreeRow)}</div>
         </div>
-        {selected ? <FocusPanel agent={selected} terminals={terminalChoices.length ? terminalChoices : [selected]} selectedTerminalId={selectedTerminalId || selected.id} detachedTerminal={terminalEntry} messages={messagesState.direct[selected.id]} rawSettings={settings[selected.id]} rawDigestSettings={digestSettings[selected.id]} resolvedSettings={resolvedSettings[selected.id]} host={host} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onSelectTerminal={(id) => dispatch(workspaceUiActions.setSelectedTerminal(id))} onDetach={(panel) => { void detach(panel); }} onInspectWorktree={() => setWorktreeTarget(selected)} onInspect={() => setInspectTarget(selected)} onOrganize={() => setOrganizationTarget(selected)} onRemove={() => setRemoveTarget(selected)} directMessagesHeight={Number(workspace.terminalDirectMessagesHeight) || 0} composeHeight={Number(workspace.terminalComposeHeight) || 0} /> : <StateSurface title="Select an agent" description="Choose an agent to inspect status, worktree, settings, messages, and terminal." />}
-      </div>}
+        <div className={styles.detailHost}>
+          {selected ? <header className={styles.detailViewBar}><span>Agent view</span>{viewControl(selected)}</header> : null}
+          <div className={`${styles.detailPane} ${workspaceUi.agentsViewMode === 'live' ? '' : styles.workspaceHidden}`} aria-hidden={workspaceUi.agentsViewMode !== 'live'}>
+            {selected ? <FocusPanel agent={selected} terminal={selected} detachedTerminal={terminalEntry} messages={messagesState.direct[selected.id]} rawSettings={settings[selected.id]} rawDigestSettings={digestSettings[selected.id]} resolvedSettings={resolvedSettings[selected.id]} host={host} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onDetachAgent={() => { void detachAgents(); }} onInspectWorktree={() => setWorktreeTarget(selected)} onOrganize={() => setOrganizationTarget(selected)} onRemove={() => setRemoveTarget(selected)} directMessagesHeight={Number(workspace.terminalDirectMessagesHeight) || 0} composeHeight={Number(workspace.terminalComposeHeight) || 0} active={workspaceUi.agentsViewMode === 'live'} /> : <StateSurface title="Select an agent" description="Choose an agent to inspect status, worktree, settings, messages, and terminal." />}
+          </div>
+          <div className={`${styles.detailPane} ${workspaceUi.agentsViewMode === 'activity' ? '' : styles.workspaceHidden}`} aria-hidden={workspaceUi.agentsViewMode !== 'activity'}>
+            {workspaceUi.agentsViewMode === 'activity' ? selected?.cellType === 'agent' ? <AgentDetailWorkspace key={selected.id} agent={selected} group={group} catalog={catalog} responses={auxiliaryResponses} tasks={tasks} directMessages={messagesState.direct[selected.id]} peerThreads={messagesState.peerThreads} digestSettings={digestSettings[selected.id]} digestBufferStats={digestBufferStats[selected.id] ?? engineerBufferStats[group]} digestSentEvents={digestSentEvents[selected.id] ?? engineerSentEvents[group]} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} /> : <StateSurface title="Select an agent" description="Activity is available for Architects, Engineers, and Workers rather than standalone terminals." /> : null}
+          </div>
+        </div>
+      </div>
+      }
 
       <ModalDialog title="Delete agent?" description={removeTarget ? `${removeTarget.name} · ${removeTarget.kind}` : ''} size="small" isOpen={Boolean(removeTarget)} onOpenChange={(open) => { if (!open) setRemoveTarget(null); }}>
         <div className={styles.removeDialog}><p>This stops the live session and moves supported principals into Torque’s restore window. Worktree safety rules still apply.</p><footer><Button tone="quiet" onPress={() => setRemoveTarget(null)}>Cancel</Button><Button tone="danger" onPress={() => { if (removeTarget && !sendCommand({ cmd: 'remove_agent', id: removeTarget.id })) onCommandUnavailable(); setRemoveTarget(null); }}>Delete agent</Button></footer></div>
       </ModalDialog>
       {workspaceUi.createAgentKind ? <AgentCreateDialog key={workspaceUi.createAgentKind} open initialKind={workspaceUi.createAgentKind} group={group} agents={hierarchy.all} catalog={catalog} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onClose={() => dispatch(workspaceUiActions.setCreateAgentKind(null))} /> : null}
       {worktreeTarget ? <WorktreeInspector key={worktreeTarget.id} agent={worktreeTarget} responses={auxiliaryResponses} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onClose={() => setWorktreeTarget(null)} /> : null}
-      {inspectTarget ? <AgentInspector key={inspectTarget.id} agent={inspectTarget} group={group} catalog={catalog} responses={auxiliaryResponses} messages={messagesState.peerThreads} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onClose={() => setInspectTarget(null)} /> : null}
       <ModalDialog title="Move or reorder agent" description={organizationTarget ? `${organizationTarget.name} · ${organizationTarget.kind}` : ''} size="small" isOpen={Boolean(organizationTarget)} onOpenChange={(open) => { if (!open) setOrganizationTarget(null); }}>
         {organizationTarget ? <OrganizationForm key={organizationTarget.id} agent={organizationTarget} agents={Object.entries(records).map(([id, value]) => toAgentViewModel(id, value)).filter((item) => Number(item.raw.deleted_at ?? 0) <= 0)} groups={groupsState.records} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onClose={() => setOrganizationTarget(null)} /> : null}
       </ModalDialog>

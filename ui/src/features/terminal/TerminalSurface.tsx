@@ -332,7 +332,8 @@ function Conversation({ agent, messages, sendCommand, onUnavailable, composeHeig
         {rows.length ? rows.slice(-30).map((row, index) => {
           const sender = text(row.sender_kind) || text(row.direction) || 'agent';
           const body = text(row.message) || text(row.text) || text(row.body);
-          return <article key={text(row.message_id) || text(row.id) || index} className={sender === 'user' || sender === 'outbound' ? styles.outbound : ''}><small>{sender}</small><p>{body}</p></article>;
+          const direction = sender === 'user' || sender === 'outbound' ? 'outbound' : 'inbound';
+          return <article key={text(row.message_id) || text(row.id) || index} className={direction === 'outbound' ? styles.outbound : styles.inbound} data-direction={direction}><small>{sender}</small><p>{body}</p></article>;
         }) : <p className={styles.noMessages}>No direct messages yet.</p>}
       </div>
       {attachments.length ? <div className={styles.attachments}>{attachments.map((entry, index) => <button key={`${entry.path}-${index}`} onClick={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} title="Remove attachment">◇ {entry.filename || entry.path.split('/').pop()} ×</button>)}</div> : null}
@@ -385,11 +386,12 @@ interface TerminalWorkspaceProps {
   sendCommand: CommandSender;
   onUnavailable: () => void;
   showConversation?: boolean;
+  active?: boolean;
   directMessagesHeight?: number;
   composeHeight?: number;
 }
 
-export function TerminalWorkspace({ agent, terminal, messages, sendCommand, onUnavailable, showConversation = true, directMessagesHeight = 0, composeHeight = 0 }: TerminalWorkspaceProps) {
+export function TerminalWorkspace({ agent, terminal, messages, sendCommand, onUnavailable, showConversation = true, active = true, directMessagesHeight = 0, composeHeight = 0 }: TerminalWorkspaceProps) {
   const workspace = useRef<HTMLDivElement>(null);
   const [workspaceHeight, setWorkspaceHeight] = useState(0);
   const [requestedConversationHeight, setRequestedConversationHeight] = useState<number | null>(null);
@@ -419,7 +421,7 @@ export function TerminalWorkspace({ agent, terminal, messages, sendCommand, onUn
 
   return (
     <div ref={workspace} className={`${styles.workspace} ${showConversation ? '' : styles.workspace_terminalOnly}`} style={workspaceStyle}>
-      <TerminalMount cell={terminal} active />
+      <TerminalMount cell={terminal} active={active} />
       {showConversation ? <>
         <VerticalResizeHandle
           label="Resize terminal and direct messages"

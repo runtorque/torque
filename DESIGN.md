@@ -2287,6 +2287,165 @@ scope.
   transforms. A live pointer drag between unequal-height cards verifies that the
   lifted card retains its width and height.
 
+### D-069 — Agents use an ownership tree and a dedicated context workspace
+
+- Date: 2026-08-22
+- Status: superseded by D-070
+- Decision: The Agents master surface is a compact, collapsible semantic tree
+  whose visual levels follow Architect → Engineer → Worker ownership, with
+  attached terminals nested under their parent. Agent-linked durable memory
+  fills the right-hand selected-agent pane when `Context` is selected instead
+  of `Live`; the ownership tree remains visible and does not move. Context does
+  not compete with the terminal and direct-message regions for space.
+- Rationale: Repeated cards obscured reporting lines and consumed most of the
+  available workspace before operators could scan a team. Context is a reading
+  and authoring task with its own list/detail rhythm, while terminal and direct
+  messages are a live-operation task; showing all three simultaneously weakens
+  each one.
+- Scope: React Agents hierarchy, keyboard navigation, selected-agent context
+  browsing and authoring, and terminal activation while the workspace is hidden.
+- Constraints: The selected agent and persistent ownership tree are shared
+  between `Live` and `Context`; the switch controls only the right detail pane.
+  Switching views preserves the mounted direct-message draft and layout, but a
+  hidden terminal relinquishes its controller. Stale ownership references never
+  hide a record: orphaned agents are promoted to roots and visibly marked.
+  Tree rows retain lifecycle and inspection actions without expanding into cards.
+- Verification: Model tests protect ownership order, collapse projection, and
+  orphan visibility. Component tests protect semantic levels, collapse controls,
+  context listing/publishing/pinning, and the production type/lint/build checks.
+
+### D-070 — Agent operations stay with Agents; shared context belongs to Control Center
+
+- Date: 2026-08-22
+- Status: accepted
+- Decision: The Agents ownership tree remains fixed on the left while the right
+  detail pane switches between `Live` and `Activity`. `Live` owns terminal and
+  direct-message interaction. `Activity` restores the classic role-specific
+  operational dossier: Architect Decisions, Journal, Messages, and Events;
+  Engineer Journal, Events, Queued, and Completed; and Worker Events, Messages,
+  and Worklog. Shared durable Context is a workspace-level Control Center tab.
+- Rationale: Journal, decisions, task queues, and message history describe the
+  selected agent and need the reporting hierarchy for navigation. Durable
+  memory crosses individual agents and scopes to groups, projects, tasks, and
+  pipelines, so locating it inside a selected-agent view misrepresented its
+  authority and made broader context harder to find.
+- Scope: React Agents detail switching and role-specific dossier; Control Center
+  Context browsing, filtering, pinning, and authoring; hidden PTY activation.
+- Constraints: The ownership tree and selected agent persist across `Live` and
+  `Activity`. Switching views preserves mounted terminal and DM state while a
+  hidden PTY relinquishes its controller. MCP, history, Agent Class, and
+  Architect peer-chat tooling live directly in Activity; there is no parallel
+  inspector modal or `Inspect activity` affordance.
+  Context supports group-wide browsing plus agent, task, pipeline, project,
+  type, search, and pinned filters.
+- Verification: Component tests protect Live/Activity draft preservation, each
+  role's tab contract, Architect journal/decision projection, Control Center
+  context publication/pinning, hierarchy semantics, and production checks.
+
+### D-071 — Activity collections are progressive and collapsed by default
+
+- Date: 2026-08-22
+- Status: accepted
+- Decision: Agent Activity collections initially request and mount at most 20
+  records. Reaching a collection tail requests or mounts the next page. Feed
+  records expose a compact summary row and keep their body collapsed until the
+  operator expands it. Architect decisions use the same disclosure pattern,
+  with active decisions shown by default and an explicit archived view.
+- Rationale: Journals, messages, runtime events, MCP calls, and history can grow
+  without bound. Fetching and mounting entire collections made the selected
+  agent surface slower and made individual records difficult to scan. A compact
+  summary preserves chronology while expansion keeps full evidence available.
+- Scope: React Agents Activity journals, messages, events, task history, MCP,
+  persisted history, Agent Class audit, peer chat, and Architect decisions.
+- Constraints: Scroll-tail loading retains a visible keyboard-accessible fallback
+  control. Sources with bounded backend reads increase the server limit only at
+  the tail; snapshot-only sources progressively mount locally. Decision actions
+  operate on the durable Architect lifecycle, archived decisions can be restored,
+  and expanded body copy uses the primary text color on dark surfaces while
+  timestamps and metadata remain muted.
+- Verification: Component tests protect the 20-record boundary, scroll-tail
+  expansion, collapsed bodies, archived filtering, and decision commands; the
+  normal React lint, typecheck, test, and production build gate remains required.
+
+### D-072 — Activity summaries orient operators without exposing agent controls
+
+- Date: 2026-08-22
+- Status: accepted
+- Decision: Collapsed journal and message records always expose their first
+  content line, while Architect decision headings wrap to show the complete
+  title. Peer chat is a read-only thread browser for operators, and digest
+  delivery state and controls live in Events for both Architects and Engineers.
+- Rationale: A title or event kind alone is insufficient to scan operational
+  history, but expanding every record defeats the compact Activity design.
+  Operators need to inspect agent-to-agent communication without impersonating
+  an agent, and digests are delivery events rather than journal authorship.
+- Scope: React Activity disclosure summaries, Architect decisions and peer
+  threads, Architect/Engineer digest delivery, and application viewport
+  containment.
+- Constraints: First-line previews remain single-line and do not replace the
+  expandable full body. Peer threads expose their complete progressively mounted
+  history but no compose or send affordance. The document root owns no scrolling;
+  the shell is fixed to the viewport and each intended panel owns its overflow.
+- Verification: Component tests protect collapsed previews, read-only clickable
+  peer threads, Architect digest commands and Events placement; browser QA checks
+  decision wrapping and that the shell cannot scroll beyond the canvas.
+
+### D-073 — Agent view switching belongs to the shared detail frame
+
+- Date: 2026-08-22
+- Status: accepted
+- Decision: The `Live` / `Activity` switch is rendered once by the selected
+  agent’s shared detail frame, above both view surfaces.
+- Rationale: Rendering a separate switch inside each view header changed its
+  position as the operator switched modes, making a repeated toggle feel
+  unstable and forcing unnecessary pointer travel.
+- Scope: React Agents selected-agent detail frame and its Live and Activity
+  headers.
+- Constraints: View-specific actions such as Settings and Refresh remain in
+  their respective headers. The shared switch persists as the same DOM control
+  across mode changes and disables Activity for standalone terminals.
+- Verification: Component coverage asserts that the same switch element remains
+  outside both view panels before and after switching modes.
+
+### D-074 — Detachment is a workspace-level icon action
+
+- Date: 2026-08-22
+- Status: accepted
+- Decision: Native Agents detachment actions use a compact open-in-window icon
+  with an accessible label and tooltip. The Live view does not expose a separate
+  terminal-only detach action or a terminal tab row.
+- Rationale: The text detach buttons consumed disproportionate header space, and
+  the terminal row commonly contained only a redundant `Agent` chip plus a
+  second detachment path. Agents and attached terminals are already selectable
+  through the ownership hierarchy.
+- Scope: React Agents workspace header, selected-agent header, and Live terminal
+  surface.
+- Constraints: Existing detached-terminal state remains recoverable through its
+  focused placeholder, but the React Agents UI cannot initiate new terminal-only
+  detachment. Icon-only actions retain explicit accessible names and titles.
+- Verification: Tauri-boundary component coverage protects both icon actions and
+  the absence of the terminal detach control, terminal selector row, and `Agent`
+  tab.
+
+### D-075 — Direct-message direction is visible before reading metadata
+
+- Date: 2026-08-24
+- Status: accepted
+- Decision: Live direct-message bodies and the composer use compact 11px type.
+  Incoming messages use a green-tinted surface with a leading edge accent;
+  outgoing messages use a stronger accent-tinted surface with a trailing edge
+  accent.
+- Rationale: Alignment and an 8px sender label alone made message direction too
+  easy to miss, while the inherited application font made short operational
+  exchanges consume unnecessary vertical space.
+- Scope: React Agents Live direct-message history and composer.
+- Constraints: Body text retains the primary text token and 1.45 line height for
+  readability. Direction colors derive from semantic tokens so high-contrast and
+  accent themes remain authoritative; sender metadata uses the same directional
+  family rather than color alone.
+- Verification: Component coverage protects explicit inbound/outbound semantics;
+  the React production gate protects the CSS Modules and theme-token build.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

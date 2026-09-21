@@ -17,16 +17,18 @@ import type { CommandSender } from '../board/BoardPanel';
 import { records, text } from '../planning/model';
 import { AgentClassLibrary } from './AgentClassLibrary';
 import { BehaviorOverlayEditor, CatalogEditor } from './CatalogEditors';
+import { ContextPanel } from './ContextPanel';
 import { ActivityPanel, HelpPanel, MissionPanel } from './OperatorPanels';
 import { AppearancePreferencesPanel, ShortcutPreferencesPanel } from './WorkspacePreferences';
 import styles from './ControlCenter.module.css';
 
-type ControlTab = 'mission' | 'activity' | 'history' | 'actions' | 'catalog' | 'settings' | 'help';
+type ControlTab = 'mission' | 'activity' | 'history' | 'context' | 'actions' | 'catalog' | 'settings' | 'help';
 
 const tabs: { id: ControlTab; label: string }[] = [
   { id: 'mission', label: 'Mission Control' },
   { id: 'activity', label: 'Activity' },
   { id: 'history', label: 'History' },
+  { id: 'context', label: 'Context' },
   { id: 'actions', label: 'Actions' },
   { id: 'catalog', label: 'Catalog' },
   { id: 'settings', label: 'Settings' },
@@ -329,6 +331,7 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable }: {
       {tab === 'mission' ? <MissionPanel group={group} agentCount={agentCount} mission={operations.missionControl} health={operations.health} supervisor={operations.supervisor} relay={operations.relayConnection} responses={auxiliaryResponses} send={send} onOpenTask={(id) => { dispatch(workspaceUiActions.setActivePanel('board')); dispatch(workspaceUiActions.setDetailTask(id)); }} onOpenAgent={(id) => { dispatch(workspaceUiActions.setActivePanel('agents')); dispatch(workspaceUiActions.setSelectedAgent(id)); }} /> : null}
       {tab === 'activity' ? <ActivityPanel events={eventItems} send={send} /> : null}
       {tab === 'history' ? <HistoryPanel group={group} responses={auxiliaryResponses} send={send} /> : null}
+      {tab === 'context' ? <ContextPanel group={group} agents={agentItems} responses={auxiliaryResponses} send={send} /> : null}
       {tab === 'actions' ? <div className={styles.editor}>
         <aside><header><h2>Actions</h2><Button tone="quiet" onPress={() => { setSelectedAction(''); setActionDraft({ name: '', description: '', scope: 'project', agent: '', group: '', prompt: '{{ TASK }}', labels: '', transitions: '[]', terminals: '[]', worktree: false, auto_close_on_done: false, disable_role_preamble: false, implementation_depth: false, review_required_above_loc: '' }); setActionDirty(true); setActionError(''); }}>＋</Button></header>{actionItems.length ? actionItems.map((item, index) => <button key={labelFor(item, String(index))} aria-current={selectedAction === labelFor(item, '') ? 'page' : undefined} onClick={() => chooseAction(item)}>{labelFor(item)}</button>) : <StateSurface title="No actions" description="Create the first project action." />}<hr /><Button tone="quiet" onPress={() => send({ cmd: 'discover_pipelines', group })}>Discover pipelines</Button></aside>
         <form onSubmit={(event) => { event.preventDefault(); saveAction(); }}><header><div><h2>Pipeline editor</h2><p>Complete action, dispatch, and transition contract.</p></div><span>{actionDirty ? 'Unsaved' : 'Saved'}</span>{selectedAction ? <Button tone="danger" onPress={() => { send({ cmd: 'delete_action', group, name: selectedAction }); setSelectedAction(''); }}>Delete</Button> : null}<Button tone="quiet" onPress={() => send({ cmd: 'render_action', group, name: selectedAction || editorDraft.name, vars: { TASK: 'Preview task' } })}>Preview</Button><Button tone="primary" type="submit" isDisabled={!actionDirty || !editorDraft.name || !editorDraft.prompt.includes('{{ TASK }}')}>Save action</Button></header>

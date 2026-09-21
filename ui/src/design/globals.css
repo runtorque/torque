@@ -5,14 +5,18 @@
 }
 
 html {
+  height: 100%;
   min-width: 320px;
-  min-height: 100%;
+  min-height: 0;
+  overflow: hidden;
   background: var(--background);
 }
 
 body {
+  height: 100%;
   min-width: 320px;
-  min-height: 100vh;
+  min-height: 0;
+  overflow: hidden;
   margin: 0;
   color: var(--text);
   background:
@@ -40,7 +44,9 @@ body {
 :root[data-torque-reduce-motion='true'] *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
 
 #root {
-  min-height: 100vh;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
 ::selection {

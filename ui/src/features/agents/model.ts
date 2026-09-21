@@ -39,6 +39,20 @@ export interface AgentHierarchy {
   all: AgentViewModel[];
 }
 
+export interface AgentTreeNode {
+  agent: AgentViewModel;
+  children: AgentTreeNode[];
+  orphaned: boolean;
+}
+
+export interface VisibleAgentTreeRow {
+  agent: AgentViewModel;
+  depth: number;
+  childCount: number;
+  descendantCount: number;
+  orphaned: boolean;
+}
+
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -138,6 +152,87 @@ export function buildAgentHierarchy(
     looseTerminals: terminals.filter((agent) => !agent.parentId),
     all,
   };
+}
+
+function kindRank(agent: AgentViewModel): number {
+  if (agent.kind === 'architect') return 0;
+  if (agent.kind === 'engineer') return 1;
+  if (agent.kind === 'worker') return 2;
+  return 3;
+}
+
+function byTreeOrder(a: AgentTreeNode, b: AgentTreeNode): number {
+  return kindRank(a.agent) - kindRank(b.agent) || byName(a.agent, b.agent);
+}
+
+/**
+ * Builds the operator-visible ownership tree without trusting record adjacency.
+ * A stale ownership reference never makes an agent disappear: that record is
+ * promoted to a root and marked orphaned until the backend relationship heals.
+ */
+export function buildAgentTree(hierarchy: AgentHierarchy): AgentTreeNode[] {
+  const nodes = new Map<string, AgentTreeNode>(hierarchy.all.map((agent): [string, AgentTreeNode] => [agent.id, {
+    agent,
+    children: [],
+    orphaned: false,
+  }]));
+  const roots: AgentTreeNode[] = [];
+
+  for (const node of nodes.values()) {
+    const { agent } = node;
+    const parentId = agent.kind === 'engineer'
+      ? agent.hiredByArchitectId
+      : agent.kind === 'worker'
+        ? agent.ownerEngineerId
+        : agent.kind === 'terminal'
+          ? agent.parentId
+          : '';
+    const parent = parentId ? nodes.get(parentId) : undefined;
+    const validParent = parent
+      && (agent.kind !== 'engineer' || parent.agent.kind === 'architect')
+      && (agent.kind !== 'worker' || parent.agent.kind === 'engineer')
+      && (agent.kind !== 'terminal' || parent.agent.cellType === 'agent');
+    if (validParent) parent.children.push(node);
+    else {
+      node.orphaned = Boolean(parentId);
+      roots.push(node);
+    }
+  }
+
+  const sortNodes = (items: AgentTreeNode[]) => {
+    items.sort(byTreeOrder);
+    items.forEach((item) => sortNodes(item.children));
+  };
+  sortNodes(roots);
+  return roots;
+}
+
+export function visibleAgentTreeRows(
+  roots: AgentTreeNode[],
+  collapsedIds: ReadonlySet<string>,
+): VisibleAgentTreeRow[] {
+  const rows: VisibleAgentTreeRow[] = [];
+  const descendantCounts = new Map<string, number>();
+  const countDescendants = (node: AgentTreeNode): number => {
+    const count = node.children.reduce((total, child) => total + 1 + countDescendants(child), 0);
+    descendantCounts.set(node.agent.id, count);
+    return count;
+  };
+  roots.forEach(countDescendants);
+  const visit = (node: AgentTreeNode, depth: number) => {
+    rows.push({
+      agent: node.agent,
+      depth,
+      childCount: node.children.length,
+      descendantCount: descendantCounts.get(node.agent.id) ?? 0,
+      orphaned: node.orphaned,
+    });
+    if (!collapsedIds.has(node.agent.id)) {
+      node.children.forEach((child) => visit(child, depth + 1));
+    }
+  };
+  roots.forEach((root) => visit(root, 0));
+  return rows;
 }
 
 export function agentStatusLabel(agent: AgentViewModel): string {

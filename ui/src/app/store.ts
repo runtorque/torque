@@ -40,7 +40,7 @@ export interface ConnectionState {
 
 export interface WorkspaceUiState {
   activePanel: 'board' | 'agents' | 'planning' | 'control';
-  controlTab: 'mission' | 'activity' | 'history' | 'actions' | 'catalog' | 'settings' | 'help';
+  controlTab: 'mission' | 'activity' | 'history' | 'context' | 'actions' | 'catalog' | 'settings' | 'help';
   commandPaletteOpen: boolean;
   detailTaskId: string | null;
   focusedTaskId: string | null;
@@ -50,6 +50,7 @@ export interface WorkspaceUiState {
   createTaskDialogOpen: boolean;
   selectedAgentId: string | null;
   selectedTerminalId: string | null;
+  agentsViewMode: 'live' | 'activity';
   createAgentKind: 'architect' | 'engineer' | 'worker' | 'terminal' | null;
 }
 
@@ -66,6 +67,7 @@ function initialWorkspaceUiState(): WorkspaceUiState {
     createTaskDialogOpen: false,
     selectedAgentId: null,
     selectedTerminalId: null,
+    agentsViewMode: 'live',
     createAgentKind: null,
   };
 }
@@ -522,6 +524,9 @@ const workspaceUiSlice = createSlice({
     setSelectedTerminal(state, action: PayloadAction<string | null>) {
       state.selectedTerminalId = action.payload;
     },
+    setAgentsViewMode(state, action: PayloadAction<WorkspaceUiState['agentsViewMode']>) {
+      state.agentsViewMode = action.payload;
+    },
     setCreateAgentKind(state, action: PayloadAction<WorkspaceUiState['createAgentKind']>) {
       state.createAgentKind = action.payload;
     },
@@ -583,6 +588,10 @@ const selectAgentRecords = selectRecord('agents');
 const selectAgentSettings = selectRecord('agent_settings');
 const selectResolvedAgentSettings = selectRecord('resolved_agent_settings');
 const selectAgentDigestSettings = selectRecord('agent_digest_settings');
+const selectDigestBufferStats = selectRecord('digest_buffer_stats');
+const selectDigestSentEvents = selectRecord('digest_sent_events');
+const selectEngineerBufferStats = selectRecord('engineer_buffer_stats');
+const selectEngineerSentEvents = selectRecord('engineer_sent_events');
 const selectGroupRecords = selectRecord('groups');
 const selectChildren = selectRecord('children');
 const selectGroupSettings = selectRecord('group_settings');
@@ -634,8 +643,8 @@ const selectAuxiliaryResponses = selectRecord('auxiliary_responses');
 // code. The flat projection remains private protocol-compatibility state.
 export const selectRuntime = selectRecord('runtime');
 export const selectAgentsState = createSelector(
-  [selectAgentRecords, selectAgentSettings, selectResolvedAgentSettings, selectAgentDigestSettings],
-  (records, settings, resolvedSettings, digestSettings) => ({ records, settings, resolvedSettings, digestSettings }),
+  [selectAgentRecords, selectAgentSettings, selectResolvedAgentSettings, selectAgentDigestSettings, selectDigestBufferStats, selectDigestSentEvents, selectEngineerBufferStats, selectEngineerSentEvents],
+  (records, settings, resolvedSettings, digestSettings, digestBufferStats, digestSentEvents, engineerBufferStats, engineerSentEvents) => ({ records, settings, resolvedSettings, digestSettings, digestBufferStats, digestSentEvents, engineerBufferStats, engineerSentEvents }),
 );
 export const selectGroupsState = createSelector(
   [selectGroupRecords, selectChildren, selectGroupSettings],

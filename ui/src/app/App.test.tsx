@@ -272,6 +272,22 @@ describe('workspace shell', () => {
     expect(screen.getByRole('heading', { name: 'Board' })).toBeVisible();
   });
 
+  it('uses icon-only workspace detach actions without a terminal detach row', () => {
+    const tauriHost = createTauriHost(vi.fn((command: string) => Promise.resolve(command === 'detach' ? 'agents-window' : null)));
+    renderShell(tauriHost);
+    fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
+
+    const workspaceDetach = screen.getByRole('button', { name: 'Detach Agents workspace' });
+    const selectedDetach = screen.getByRole('button', { name: 'Detach selected agent workspace' });
+    expect(workspaceDetach).toHaveTextContent('↗');
+    expect(selectedDetach).toHaveTextContent('↗');
+    expect(workspaceDetach).not.toHaveTextContent('Detach');
+    expect(selectedDetach).not.toHaveTextContent('Detach');
+    expect(screen.queryByRole('button', { name: /Detach terminal/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tablist', { name: 'Agent terminals' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Agent' })).not.toBeInTheDocument();
+  });
+
   it('routes card menu actions through the Board command contract', () => {
     const { sendCommand } = renderShell();
     fireEvent.click(screen.getByRole('button', { name: 'Actions for Build the foundation' }));
@@ -411,6 +427,45 @@ describe('workspace shell', () => {
     });
   });
 
+  it('marks sent and received chat messages with distinct directions', () => {
+    renderShell(browserHost, {
+      ...compactStateFixture,
+      direct_messages_by_agent: {
+        'agent-1': [
+          { id: 'received', sender_kind: 'agent', message: 'Received from the agent', created_at: 1 },
+          { id: 'sent', sender_kind: 'user', message: 'Sent by the operator', created_at: 2 },
+        ],
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
+
+    expect(screen.getByText('Received from the agent').closest('article')).toHaveAttribute('data-direction', 'inbound');
+    expect(screen.getByText('Sent by the operator').closest('article')).toHaveAttribute('data-direction', 'outbound');
+  });
+
+  it('preserves the direct-message draft while Activity owns the right pane', () => {
+    renderShell();
+    fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message Foundation Worker' }), { target: { value: 'Draft handoff' } });
+
+    const livePanel = screen.getByRole('region', { name: 'Focused agent Foundation Worker' });
+    const viewSwitch = screen.getByRole('tablist', { name: 'View for Foundation Worker' });
+    expect(livePanel).not.toContainElement(viewSwitch);
+    fireEvent.click(within(viewSwitch).getByRole('tab', { name: 'Activity' }));
+    const activityPanel = screen.getByRole('region', { name: 'Activity for Foundation Worker' });
+    expect(activityPanel).toBeVisible();
+    expect(screen.getByRole('tablist', { name: 'View for Foundation Worker' })).toBe(viewSwitch);
+    expect(activityPanel).not.toContainElement(viewSwitch);
+    expect(within(activityPanel).getByRole('tab', { name: 'Events' })).toBeVisible();
+    expect(within(activityPanel).getByRole('tab', { name: 'Messages' })).toBeVisible();
+    expect(within(activityPanel).getByRole('tab', { name: 'Worklog' })).toBeVisible();
+    expect(screen.getByRole('tree', { name: 'Agent ownership hierarchy' })).toBeVisible();
+    expect(screen.queryByRole('region', { name: 'Conversation with Foundation Worker' })).not.toBeInTheDocument();
+    fireEvent.click(within(viewSwitch).getByRole('tab', { name: 'Live' }));
+
+    expect(screen.getByRole('textbox', { name: 'Message Foundation Worker' })).toHaveValue('Draft handoff');
+  });
+
   it('uses one focused onboarding surface when an Agents group is empty', () => {
     renderShell(browserHost, { ...compactStateFixture, agents: {} });
     fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
@@ -438,7 +493,6 @@ describe('workspace shell', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
     expect(screen.getByText('1 agent · 1 terminal')).toBeVisible();
-    expect(screen.getByRole('heading', { name: 'Terminals' })).toBeVisible();
     expect(screen.getByLabelText('Audit Terminal, terminal, idle')).toBeVisible();
     fireEvent.click(screen.getByLabelText('Audit Terminal, terminal, idle'));
     expect(screen.getByRole('heading', { name: 'Audit Terminal' })).toBeVisible();
@@ -529,16 +583,16 @@ describe('workspace shell', () => {
     expect(screen.getByText('abcdef1 · now · +0 −0')).toBeVisible();
   });
 
-  it('inspects agent events, MCP calls, persisted history, and Agent Class state without response collisions', () => {
+  it('shows agent events, MCP calls, persisted history, and Agent Class state inside Activity', () => {
     const { appStore, sendCommand } = renderShell();
     fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Inspect' }));
+    fireEvent.click(within(screen.getByRole('tablist', { name: 'View for Foundation Worker' })).getByRole('tab', { name: 'Activity' }));
 
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'get_cell_events', cell_id: 'agent-1', limit: 200 });
+    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'get_cell_events', cell_id: 'agent-1', limit: 20 });
     expect(sendCommand).toHaveBeenCalledWith(expect.objectContaining({ cmd: 'mcp_calls', cell_id: 'agent-1' }));
     expect(sendCommand).toHaveBeenCalledWith({ cmd: 'agent_class_status', agent_id: 'agent-1' });
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'agent_class_audit', agent_id: 'agent-1', limit: 50 });
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'get_agent_history_detail', agent_id: 'agent-1', message_limit: 100 });
+    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'agent_class_audit', agent_id: 'agent-1', limit: 20 });
+    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'get_agent_history_detail', agent_id: 'agent-1', message_limit: 20 });
 
     act(() => {
       appStore.dispatch(projectionActions.auxiliaryResourceReceived({
@@ -570,14 +624,25 @@ describe('workspace shell', () => {
       }));
     });
 
-    expect(screen.getByText('Implemented inspector')).toBeVisible();
-    fireEvent.click(screen.getByRole('tab', { name: 'MCP 1' }));
-    expect(screen.getByText('mcp__torque__task_progress')).toBeVisible();
-    fireEvent.click(screen.getByRole('tab', { name: 'History' }));
-    expect(screen.getByText('History retained')).toBeVisible();
-    fireEvent.click(screen.getByRole('tab', { name: 'Agent Class' }));
-    expect(screen.getAllByText('Default Worker')).toHaveLength(2);
-    expect(screen.getByText('Desired class saved')).toBeVisible();
+    const activity = screen.getByRole('region', { name: 'Activity for Foundation Worker' });
+    expect(within(activity).getByText('Implemented inspector')).not.toBeVisible();
+    fireEvent.click(within(activity).getByText('task progress'));
+    expect(within(activity).getByText('Implemented inspector')).toBeVisible();
+    fireEvent.click(within(activity).getByRole('tab', { name: 'MCP' }));
+    expect(within(activity).getByText('mcp__torque__task_progress')).toBeVisible();
+    fireEvent.click(within(activity).getByRole('tab', { name: 'History' }));
+    const retainedMessages = within(activity).getAllByText('History retained');
+    expect(retainedMessages[0]).toBeVisible();
+    expect(retainedMessages[1]).not.toBeVisible();
+    fireEvent.click(within(activity).getByText('progress'));
+    expect(retainedMessages[1]).toBeVisible();
+    fireEvent.click(within(activity).getByRole('tab', { name: 'Agent Class' }));
+    expect(within(activity).getAllByText('Default Worker')).toHaveLength(2);
+    expect(within(activity).getByText('Desired class saved')).not.toBeVisible();
+    fireEvent.click(within(activity).getByText('assignment set'));
+    expect(within(activity).getByText('Desired class saved')).toBeVisible();
+    expect(screen.queryByRole('dialog', { name: /Inspect Foundation Worker/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Inspect activity/ })).not.toBeInTheDocument();
   });
 
   it('shows server-resolved per-agent setting origins without writing an unchanged form', () => {
@@ -678,23 +743,188 @@ describe('workspace shell', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it('publishes and pins shared memory from the agent Context inspector', () => {
+  it('publishes and pins shared memory from the Control Center Context panel', async () => {
     const { appStore, sendCommand } = renderShell();
-    fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Inspect' }));
-    expect(sendCommand).toHaveBeenCalledWith(expect.objectContaining({ cmd: 'memory_list', linked_target_ref: 'agent-1' }));
+    fireEvent.click(screen.getByRole('button', { name: /Control/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Context' }));
+    expect(sendCommand).toHaveBeenCalledWith(expect.objectContaining({ cmd: 'memory_list', group_name: 'Foundation' }));
     act(() => {
       appStore.dispatch(projectionActions.auxiliaryResourceReceived({
-        type: 'memory_entries', linked_target_ref: 'agent-1', entries: [{ id: 'memory-1', title: 'Release constraint', content: 'Never deploy from a worker.', entry_type: 'constraint', pinned: false }],
+        type: 'memory_entries', group_name: 'Foundation', entries: [{ id: 'memory-1', title: 'Release constraint', content: 'Never deploy from a worker.', entry_type: 'constraint', scope_kind: 'group', scope_ref: 'Foundation', pinned: false }],
       }));
     });
-    fireEvent.click(screen.getByRole('tab', { name: 'Context 1' }));
-    expect(screen.getByText('Never deploy from a worker.')).toBeVisible();
+    expect(screen.getAllByText('Never deploy from a worker.')).toHaveLength(2);
     fireEvent.click(screen.getByRole('button', { name: 'Pin' }));
     expect(sendCommand).toHaveBeenCalledWith({ cmd: 'memory_pin', entry_id: 'memory-1' });
+    fireEvent.click(screen.getByRole('button', { name: '＋ Add context' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Content' }), { target: { value: 'Keep the migration reversible.' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
-    expect(sendCommand).toHaveBeenCalledWith(expect.objectContaining({ cmd: 'memory_publish', content: 'Keep the migration reversible.', link_targets: [{ target_kind: 'agent', target_ref: 'agent-1' }] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Publish context' }));
+    expect(sendCommand).toHaveBeenCalledWith(expect.objectContaining({ cmd: 'memory_publish', content: 'Keep the migration reversible.', scope_kind: 'group', scope_ref: 'Foundation' }));
+    expect(sendCommand).toHaveBeenLastCalledWith(expect.objectContaining({ cmd: 'memory_list', group_name: 'Foundation' }));
+  });
+
+  it('restores the original role-specific Architect activity panel', () => {
+    const { appStore, sendCommand } = renderShell(browserHost, {
+      ...compactStateFixture,
+      agents: { architect: { id: 'architect', name: 'Aria', group: 'Foundation', kind: 'architect', status: 'idle' } },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
+    const viewTabs = screen.getByRole('tablist', { name: 'View for Aria' });
+    fireEvent.click(within(viewTabs).getByRole('tab', { name: 'Activity' }));
+    const panel = screen.getByRole('region', { name: 'Activity for Aria' });
+    expect(within(panel).getByRole('tab', { name: 'Decisions' })).toBeVisible();
+    expect(within(panel).getByRole('tab', { name: 'Journal' })).toBeVisible();
+    expect(within(panel).getByRole('tab', { name: 'Messages' })).toBeVisible();
+    expect(within(panel).getByRole('tab', { name: 'Events' })).toBeVisible();
+    expect(within(panel).getByRole('tab', { name: 'MCP' })).toBeVisible();
+    expect(within(panel).getByRole('tab', { name: 'History' })).toBeVisible();
+    expect(within(panel).getByRole('tab', { name: 'Agent Class' })).toBeVisible();
+    expect(within(panel).getByRole('tab', { name: 'Peer chat' })).toBeVisible();
+    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'decisions_snapshot', include_archived: true });
+    act(() => { appStore.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'decisions_snapshot', decisions: { 'decision-1': { id: 'decision-1', architect_id: 'architect', title: 'Keep Tauri', rationale: 'Electron remains an option.', status: 'accepted' } } })); });
+    expect(within(panel).getByText('Keep Tauri')).toBeVisible();
+    expect(within(panel).getByText('Electron remains an option.')).not.toBeVisible();
+    fireEvent.click(within(panel).getByText('Keep Tauri'));
+    expect(within(panel).getByText('Electron remains an option.')).toBeVisible();
+    fireEvent.click(within(panel).getByRole('tab', { name: 'Journal' }));
+    act(() => { appStore.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'architect_journal_entries', architect_id: 'architect', entries: [{ id: 'journal-1', type: 'checkpoint', entry: 'Reviewed the migration plan.\nThe second line stays collapsed.', timestamp: 1_000 }] })); });
+    expect(within(panel).getByText('Reviewed the migration plan.')).toBeVisible();
+    expect(within(panel).getByText(/The second line stays collapsed/)).not.toBeVisible();
+    fireEvent.click(within(panel).getByText('checkpoint'));
+    expect(within(panel).getByText(/The second line stays collapsed/)).toBeVisible();
+  });
+
+  it('keeps peer chat read-only and puts Architect digest delivery in Events', () => {
+    const { sendCommand } = renderShell(browserHost, {
+      ...compactStateFixture,
+      agents: { architect: { id: 'architect', name: 'Aria', group: 'Foundation', kind: 'architect', status: 'idle' } },
+      agent_digest_settings: { architect: { paused: false } },
+      digest_buffer_stats: { architect: { buffered_events: 1, queued_events: [{ id: 'queued-1', kind: 'task_progress', message: 'Queued digest headline\nQueued detail', timestamp: 1_000 }] } },
+      digest_sent_events: { architect: [{ id: 'sent-1', kind: 'task_complete', message: 'Sent digest headline\nSent detail', delivered_at: 900 }] },
+      agent_peer_threads: {
+        first: { thread_id: 'first', title: 'Migration coordination', participant_ids: ['architect', 'peer-a'], message_count: 1, last_activity_at: 1_000, messages: [{ id: 'peer-message-1', sender_architect_id: 'peer-a', sender_name: 'Ada', message: 'Keep the Tauri boundary clean.', created_at: 1_000 }] },
+        second: { thread_id: 'second', title: 'Release planning', participant_ids: ['architect', 'peer-b'], message_count: 1, last_activity_at: 900, messages: [{ id: 'peer-message-2', sender_architect_id: 'peer-b', sender_name: 'Ben', message: 'Sequence the release after verification.', created_at: 900 }] },
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
+    fireEvent.click(within(screen.getByRole('tablist', { name: 'View for Aria' })).getByRole('tab', { name: 'Activity' }));
+    const panel = screen.getByRole('region', { name: 'Activity for Aria' });
+
+    fireEvent.click(within(panel).getByRole('tab', { name: 'Events' }));
+    expect(within(panel).getByRole('heading', { name: 'Architect digest' })).toBeVisible();
+    expect(within(panel).getByText('Queued digest headline')).toBeVisible();
+    expect(within(panel).getByText('Sent digest headline')).toBeVisible();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Send digest now' }));
+    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'engineer_flush_now', agent_id: 'architect' });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Pause' }));
+    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'digest_pause', agent_id: 'architect' });
+    fireEvent.click(within(panel).getByRole('tab', { name: 'Journal' }));
+    expect(within(panel).queryByRole('heading', { name: 'Architect digest' })).not.toBeInTheDocument();
+
+    fireEvent.click(within(panel).getByRole('tab', { name: 'Peer chat' }));
+    expect(within(panel).queryByRole('heading', { name: 'Message peer' })).not.toBeInTheDocument();
+    expect(within(panel).queryByRole('textbox')).not.toBeInTheDocument();
+    expect(within(panel).getAllByText('Keep the Tauri boundary clean.')).toHaveLength(2);
+    fireEvent.click(within(panel).getByRole('button', { name: /Release planning/ }));
+    expect(within(panel).getByRole('heading', { name: 'Release planning' })).toBeVisible();
+    expect(within(panel).getAllByText('Sequence the release after verification.')).toHaveLength(2);
+    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'architect_peer_inbox', architect_id: 'architect', detail: true, limit: 100 });
+  });
+
+  it('moves the Engineer digest from Journal to Events with group-data fallback', () => {
+    renderShell(browserHost, {
+      ...compactStateFixture,
+      agents: { engineer: { id: 'engineer', name: 'Evan', group: 'Foundation', kind: 'engineer', status: 'idle' } },
+      agent_digest_settings: { engineer: { paused: false } },
+      engineer_buffer_stats: { Foundation: { buffered_events: 1, queued_events: [{ id: 'queued-1', kind: 'task_progress', message: 'Engineer digest event', timestamp: 1_000 }] } },
+      engineer_sent_events: { Foundation: [{ id: 'sent-1', kind: 'task_complete', message: 'Engineer digest delivered', delivered_at: 900 }] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
+    fireEvent.click(within(screen.getByRole('tablist', { name: 'View for Evan' })).getByRole('tab', { name: 'Activity' }));
+    const panel = screen.getByRole('region', { name: 'Activity for Evan' });
+
+    expect(within(panel).queryByRole('heading', { name: 'Engineer digest' })).not.toBeInTheDocument();
+    fireEvent.click(within(panel).getByRole('tab', { name: 'Events' }));
+    expect(within(panel).getByRole('heading', { name: 'Engineer digest' })).toBeVisible();
+    expect(within(panel).getAllByText('Engineer digest event')[0]).toBeVisible();
+    expect(within(panel).getAllByText('Engineer digest delivered')[0]).toBeVisible();
+  });
+
+  it('loads Activity pages at the scroll tail and manages active and archived decisions', () => {
+    let intersectionCallback: IntersectionObserverCallback | undefined;
+    vi.stubGlobal('IntersectionObserver', class {
+      root = null;
+      rootMargin = '';
+      thresholds = [];
+      constructor(callback: IntersectionObserverCallback) { intersectionCallback = callback; }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+      takeRecords() { return []; }
+    });
+    const { appStore, sendCommand } = renderShell(browserHost, {
+      ...compactStateFixture,
+      agents: { architect: { id: 'architect', name: 'Aria', group: 'Foundation', kind: 'architect', status: 'idle' } },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
+    fireEvent.click(within(screen.getByRole('tablist', { name: 'View for Aria' })).getByRole('tab', { name: 'Activity' }));
+    const panel = screen.getByRole('region', { name: 'Activity for Aria' });
+    const decisions: Record<string, Record<string, unknown>> = Object.fromEntries(Array.from({ length: 45 }, (_, index) => {
+      const id = `decision-${index + 1}`;
+      return [id, { id, architect_id: 'architect', title: `Decision ${index + 1}`, rationale: `Rationale ${index + 1}`, status: 'proposed', updated_at: 100 - index }];
+    }));
+    decisions.archived = { id: 'archived', architect_id: 'architect', title: 'Archived direction', rationale: 'Historical rationale', status: 'accepted', archived: true, updated_at: 1_000 };
+    act(() => { appStore.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'decisions_snapshot', decisions })); });
+
+    expect(within(panel).getByText('Decision 1')).toBeVisible();
+    expect(within(panel).queryByText('Decision 21')).not.toBeInTheDocument();
+    act(() => intersectionCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver));
+    expect(within(panel).getByText('Decision 21')).toBeVisible();
+    expect(within(panel).getByText('Rationale 1')).not.toBeVisible();
+    const decisionOne = within(panel).getByText('Decision 1').closest('details');
+    expect(decisionOne).not.toBeNull();
+    fireEvent.click(within(panel).getByText('Decision 1'));
+    expect(within(panel).getByText('Rationale 1')).toBeVisible();
+    fireEvent.click(within(decisionOne as HTMLElement).getByRole('button', { name: 'Accept' }));
+    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'architect_decision_update', architect_id: 'architect', id: 'decision-1', status: 'accepted' });
+    fireEvent.click(within(decisionOne as HTMLElement).getByRole('button', { name: 'Archive' }));
+    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'architect_decision_update', architect_id: 'architect', id: 'decision-1', archived: true });
+
+    expect(within(panel).queryByText('Archived direction')).not.toBeInTheDocument();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Show archived (1)' }));
+    const archivedDecision = within(panel).getByText('Archived direction').closest('details');
+    expect(archivedDecision).not.toBeNull();
+    fireEvent.click(within(panel).getByText('Archived direction'));
+    expect(within(panel).getByText('Historical rationale')).toBeVisible();
+    fireEvent.click(within(archivedDecision as HTMLElement).getByRole('button', { name: 'Restore' }));
+    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'architect_decision_update', architect_id: 'architect', id: 'archived', archived: false });
+
+    fireEvent.click(within(panel).getByRole('tab', { name: 'Journal' }));
+    const entries = Array.from({ length: 20 }, (_, index) => ({ id: `journal-${index}`, type: 'observation', entry: `Entry ${index}`, timestamp: 100 - index }));
+    act(() => { appStore.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'architect_journal_entries', architect_id: 'architect', entries })); });
+    act(() => intersectionCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver));
+    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'architect_journal_read', architect_id: 'architect', limit: 40 });
+    vi.unstubAllGlobals();
+  });
+
+  it('renders and collapses the Architect to Engineer to Worker ownership tree', () => {
+    renderShell(browserHost, {
+      ...compactStateFixture,
+      agents: {
+        architect: { id: 'architect', name: 'Aria', group: 'Foundation', kind: 'architect', status: 'idle' },
+        engineer: { id: 'engineer', name: 'Evan', group: 'Foundation', kind: 'engineer', status: 'running', hired_by_architect_id: 'architect' },
+        worker: { id: 'worker', name: 'Wren', group: 'Foundation', kind: 'worker', status: 'running', owner_engineer_id: 'engineer' },
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
+
+    expect(screen.getByRole('treeitem', { name: 'Aria, architect, idle' })).toHaveAttribute('aria-level', '1');
+    expect(screen.getByRole('treeitem', { name: 'Evan, engineer, running' })).toHaveAttribute('aria-level', '2');
+    expect(screen.getByRole('treeitem', { name: 'Wren, worker, running' })).toHaveAttribute('aria-level', '3');
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse Evan' }));
+    expect(screen.queryByRole('treeitem', { name: 'Wren, worker, running' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Evan' }));
+    expect(screen.getByRole('treeitem', { name: 'Wren, worker, running' })).toBeVisible();
   });
 
   it('authors complete role definitions through the React catalog', async () => {
