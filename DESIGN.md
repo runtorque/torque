@@ -2791,6 +2791,17 @@ scope.
 - Limits: Mounted drafts survive failures; explicit selection changes or dismissal do not promise draft recall. This does not certify atomic multi-file recovery after a crash, ambiguous lost acknowledgements, provider launch effects or native lifecycle.
 - Verification: Model/component tests, temporary-file backend regressions and isolated live browser tests exercise full-definition preservation, all three catalog kinds, reconnect, duplicate staging, delayed/refused saves and deletion retry.
 
+### D-118 — Actions use scoped authoring, typed transitions and draft previews
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: The Actions library keeps project/user identity separate, loads full definitions through correlated reads and refreshes active detail on reconnect. Untouched fields reconcile while edited fields, focus/caret, disclosures and scrolling remain mounted. Failed reads retain accepted data with retry; hidden editors cancel reads.
+- Authoring: Inline-agent fields, role choices, execution flags, labels, transition action/target/status/condition, human asks, LOC gates and companion terminals use typed controls. Explicit worktree false differs from inherited absence; optional numeric fields retain blank drafts and explicit zero. Unexposed durable fields, including deliverables and inline environment values, survive ordinary saves. Duplicate stages an editable local draft.
+- Preview: Variables are discovered from the current draft prompt with the daemon's parser. Preview renders the full unsaved definition with local example values and safe Torque context, without persistence. Only prompt text is templated. Changed inputs invalidate visible output; late or mismatched responses cannot become a current preview.
+- Persistence: Save and custom confirmed Delete wait for matching group/name/scope acknowledgements. Retry after a failed refresh does not repeat an acknowledged mutation. Explicit scopes never fall back to a different scope. Project creation never targets the user directory. Replacement writes complete before source removal; rename/scope changes remove only the resolved original file, preserving shadowed counterparts and existing filename extensions.
+- Limits: Single-file replacement is atomic; cross-file rename/move is not crash-atomic and lost acknowledgements are not deduplicated. Explicit navigation discards mounted drafts. Prompt syntax highlighting remains an independent parity gate. Native lifecycle and provider dispatch effects require separate acceptance.
+- Verification: Temporary-file backend regressions, model/component tests and isolated real-daemon browser acceptance cover scoped reads, failure retention, duplicate staging, persisted typed fields, unsaved preview and reconnect continuity.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

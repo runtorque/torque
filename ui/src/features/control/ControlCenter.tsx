@@ -27,6 +27,7 @@ import { StructuredSettings } from './StructuredSettings';
 import { aiSettingsDraft, primaryGlobalSettings, primaryGroupSettings, relaySettingsDraft, reconcileSettings, changedSettings, editableSettings, resetSettings, type SettingsSnapshot } from './settingsModel';
 import { PeerChat } from './PeerChat';
 import { PipelineExplorer } from './PipelineExplorer';
+import { ActionsWorkspace } from './ActionsWorkspace';
 import { LogViewer } from './LogViewer';
 import { HistoryPanel } from './HistoryPanel';
 import { ContextPanel } from './ContextPanel';
@@ -52,17 +53,6 @@ const tabs: { id: ControlTab; label: string }[] = [
 
 function record(value: unknown): UnknownRecord {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as UnknownRecord : {};
-}
-
-function list(value: unknown): unknown[] {
-  if (Array.isArray(value)) return value;
-  if (value && typeof value === 'object') return Object.values(value as UnknownRecord);
-  return [];
-}
-
-function labelFor(value: unknown, fallback = 'Untitled'): string {
-  const item = record(value);
-  return text(item.display_name, text(item.title, text(item.name, text(item.id, fallback))));
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -280,22 +270,19 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable, host =
   const tab = workspaceUi.controlTab;
   const setTab = (next: ControlTab) => dispatch(workspaceUiActions.setControlTab(next));
   const [selectedAction, setSelectedAction] = useState('');
-  const [actionDraft, setActionDraft] = useState({ name: '', description: '', scope: 'project', agent: '', group: '', prompt: '', labels: '', transitions: '', terminals: '', worktree: false, auto_close_on_done: false, disable_role_preamble: false, implementation_depth: false, review_required_above_loc: '' });
-  const [actionDirty, setActionDirty] = useState(false);
-  const [actionError, setActionError] = useState('');
+  const [actionRefreshVersion, setActionRefreshVersion] = useState(0);
   const requestKey = useRef('');
   const [classRefreshVersion, setClassRefreshVersion] = useState(0);
   const lastFrame = connection.lastAuxiliaryFrame;
-  const preview = record(auxiliaryResponses[`action_rendered:${selectedAction || actionDraft.name}`]);
   const baseDir = text(record(groupState.settings[group]).default_directory);
 
   const send = useCallback((command: TorqueCommand) => { if (!sendCommand(command)) onCommandUnavailable(); }, [onCommandUnavailable, sendCommand]);
   const refresh = useCallback(() => {
+    if (tab === 'actions') setActionRefreshVersion((value) => value + 1);
     if (tab === 'catalog') setClassRefreshVersion((value) => value + 1);
     const requests: Partial<Record<ControlTab, TorqueCommand[]>> = {
       mission: [{ cmd: 'get_mission_control', group }],
       activity: [{ cmd: 'get_events', limit: 100 }],
-      actions: [{ cmd: 'list_actions', group }],
       help: [{ cmd: 'help_list', audience: 'user' }],
     };
     (requests[tab] || []).forEach(send);
@@ -309,53 +296,10 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable, host =
     refresh();
   }, [group, tab, connection.status, connection.reconnectCount, refresh]);
 
-  const actionItems = useMemo(() => {
-    const seen = new Set<string>();
-    return list(catalog.actions).filter((item) => {
-      const name = labelFor(item, '');
-      if (!name || seen.has(name)) return false;
-      seen.add(name);
-      return true;
-    });
-  }, [catalog.actions]);
   const agentItems = useMemo(() => records(agents.records).filter((item) => !group || item.group === group), [agents.records, group]);
   const agentCount = agentItems.filter((item) => item.cell_type !== 'terminal').length;
   const terminalCount = agentItems.filter((item) => item.cell_type === 'terminal').length;
   const eventItems = useMemo(() => [...operations.events].reverse().map(record), [operations.events]);
-  const actionFrame = record(auxiliaryResponses[`action_detail:${selectedAction}`]);
-  const loadedAction = text(actionFrame.name) === selectedAction ? record(actionFrame.action) : null;
-  const editorDraft = !actionDirty && loadedAction ? {
-    name: text(actionFrame.name),
-    description: text(loadedAction.description), scope: text(loadedAction.scope, 'project'),
-    agent: typeof loadedAction.agent === 'string' ? loadedAction.agent : JSON.stringify(loadedAction.agent ?? ''), group: text(loadedAction.group),
-    prompt: text(loadedAction.prompt),
-    labels: Array.isArray(loadedAction.labels) ? loadedAction.labels.join(', ') : text(loadedAction.labels),
-    transitions: JSON.stringify(loadedAction.transitions ?? [], null, 2),
-    terminals: JSON.stringify(loadedAction.terminals ?? [], null, 2),
-    worktree: loadedAction.worktree === true, auto_close_on_done: loadedAction.auto_close_on_done === true,
-    disable_role_preamble: loadedAction.disable_role_preamble === true, implementation_depth: loadedAction.implementation_depth === true,
-    review_required_above_loc: text(loadedAction.review_required_above_loc),
-  } : actionDraft;
-
-  const chooseAction = (item: unknown) => {
-    const name = typeof item === 'string' ? item : labelFor(item, '');
-    setSelectedAction(name); setActionDirty(false); setActionError(''); send({ cmd: 'get_action', group, name });
-  };
-  const saveAction = () => {
-    let transitions: unknown; let terminals: unknown; let agent: unknown = actionDraft.agent;
-    try {
-      transitions = JSON.parse(actionDraft.transitions || '[]');
-      terminals = JSON.parse(actionDraft.terminals || '[]');
-      if (!Array.isArray(transitions) || !Array.isArray(terminals)) throw new Error('Expected arrays');
-      if (actionDraft.agent.trim().startsWith('{')) agent = JSON.parse(actionDraft.agent);
-    } catch {
-      setActionError('Transitions and companion terminals must be valid JSON arrays; inline agent JSON must be a valid object.');
-      return;
-    }
-    send({ cmd: 'save_action', group, name: actionDraft.name, old_name: selectedAction, scope: actionDraft.scope, action: { description: actionDraft.description, agent, group: actionDraft.group, prompt: actionDraft.prompt, labels: actionDraft.labels.split(',').map((value) => value.trim()).filter(Boolean), transitions, terminals, worktree: actionDraft.worktree, auto_close_on_done: actionDraft.auto_close_on_done, disable_role_preamble: actionDraft.disable_role_preamble, implementation_depth: actionDraft.implementation_depth, review_required_above_loc: actionDraft.review_required_above_loc ? Number(actionDraft.review_required_above_loc) : undefined } });
-    setSelectedAction(actionDraft.name); setActionDirty(false); setActionError('');
-  };
-
   return <section className={styles.root} aria-label="Control Center">
     <header className={styles.header}><div><p>Workspace / {group || 'No group'}</p><h1>Control Center</h1></div><span>{agentCount} {agentCount === 1 ? 'agent' : 'agents'}{terminalCount ? ` · ${terminalCount} ${terminalCount === 1 ? 'terminal' : 'terminals'}` : ''} · {eventItems.length} events</span>{['mission', 'activity', 'actions', 'catalog', 'help'].includes(tab) ? <Button tone="quiet" onPress={refresh}>Refresh section</Button> : null}</header>
     <nav className={styles.tabs} aria-label="Control Center sections">{tabs.map((item) => <button key={item.id} aria-current={tab === item.id ? 'page' : undefined} onClick={() => setTab(item.id)}>{item.label}</button>)}</nav>
@@ -363,25 +307,12 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable, host =
     <div className={styles.content}>
       {tab === 'mission' ? <MissionPanel group={group} agentCount={agentCount} mission={operations.missionControl} health={operations.health} supervisor={operations.supervisor} relay={operations.relayConnection} responses={auxiliaryResponses} send={send} onOpenTask={(id) => { dispatch(workspaceUiActions.setActivePanel('board')); dispatch(workspaceUiActions.setDetailTask(id)); }} onOpenAgent={(id) => { dispatch(workspaceUiActions.setActivePanel('agents')); dispatch(workspaceUiActions.setSelectedAgent(id)); }} /> : null}
       {tab === 'chat' ? <PeerChat threads={messages.peerThreads} agents={agents.records} /> : null}
-      {tab === 'pipelines' ? <PipelineExplorer group={group} onEdit={(name) => { chooseAction(name); setTab('actions'); }} /> : null}
+      {tab === 'pipelines' ? <PipelineExplorer group={group} onEdit={(name) => { setSelectedAction(name); setTab('actions'); }} /> : null}
       {tab === 'logs' ? <LogViewer host={host} /> : null}
       {tab === 'activity' ? <ActivityPanel events={eventItems} send={send} group={group} /> : null}
       {tab === 'history' ? <HistoryPanel key={group} group={group} send={send} /> : null}
       {tab === 'context' ? <ContextPanel key={group} group={group} agents={agentItems} onOpenTarget={(target) => { if (target.group && target.group !== group) send({ cmd: 'ui_select_group', group: target.group }); if (target.kind === 'agent') { dispatch(workspaceUiActions.setActivePanel('agents')); dispatch(workspaceUiActions.setSelectedAgent(target.id)); } else { dispatch(workspaceUiActions.setActivePanel('board')); dispatch(workspaceUiActions.setDetailTask(target.id)); } }} /> : null}
-      {tab === 'actions' ? <div className={styles.editor}>
-        <aside><header><h2>Actions</h2><Button tone="quiet" onPress={() => { setSelectedAction(''); setActionDraft({ name: '', description: '', scope: 'project', agent: '', group: '', prompt: '{{ TASK }}', labels: '', transitions: '[]', terminals: '[]', worktree: false, auto_close_on_done: false, disable_role_preamble: false, implementation_depth: false, review_required_above_loc: '' }); setActionDirty(true); setActionError(''); }}>＋</Button></header>{actionItems.length ? actionItems.map((item, index) => <button key={labelFor(item, String(index))} aria-current={selectedAction === labelFor(item, '') ? 'page' : undefined} onClick={() => chooseAction(item)}>{labelFor(item)}</button>) : <StateSurface title="No actions" description="Create the first project action." />}<hr /><Button tone="quiet" onPress={() => setTab('pipelines')}>Discover pipelines</Button></aside>
-        <form onSubmit={(event) => { event.preventDefault(); saveAction(); }}><header><div><h2>Pipeline editor</h2><p>Complete action, dispatch, and transition contract.</p></div><span>{actionDirty ? 'Unsaved' : 'Saved'}</span>{selectedAction ? <Button tone="danger" onPress={() => { send({ cmd: 'delete_action', group, name: selectedAction }); setSelectedAction(''); }}>Delete</Button> : null}<Button tone="quiet" onPress={() => send({ cmd: 'render_action', group, name: selectedAction || editorDraft.name, vars: { TASK: 'Preview task' } })}>Preview</Button><Button tone="primary" type="submit" isDisabled={!actionDirty || !editorDraft.name || !editorDraft.prompt.includes('{{ TASK }}')}>Save action</Button></header>
-          <Field label="Name"><input value={editorDraft.name} onChange={(event) => { setActionDraft({ ...editorDraft, name: event.target.value }); setActionDirty(true); }} /></Field>
-          <div className={styles.formGrid}><Field label="Description"><input value={editorDraft.description} onChange={(event) => { setActionDraft({ ...editorDraft, description: event.target.value }); setActionDirty(true); }} /></Field><Field label="Scope"><select value={editorDraft.scope} onChange={(event) => { setActionDraft({ ...editorDraft, scope: event.target.value }); setActionDirty(true); }}><option value="project">Project</option><option value="user">User</option></select></Field><Field label="Agent role/template or inline JSON"><input value={editorDraft.agent} onChange={(event) => { setActionDraft({ ...editorDraft, agent: event.target.value }); setActionDirty(true); }} /></Field><Field label="Target group"><input value={editorDraft.group} onChange={(event) => { setActionDraft({ ...editorDraft, group: event.target.value }); setActionDirty(true); }} /></Field><Field label="Labels"><input value={editorDraft.labels} onChange={(event) => { setActionDraft({ ...editorDraft, labels: event.target.value }); setActionDirty(true); }} placeholder="bug, review" /></Field><Field label="Review above LOC"><input type="number" min="0" value={editorDraft.review_required_above_loc} onChange={(event) => { setActionDraft({ ...editorDraft, review_required_above_loc: event.target.value }); setActionDirty(true); }} /></Field></div>
-          <div className={styles.checkRow}>{([['worktree', 'Create worktree'], ['auto_close_on_done', 'Auto-close on done'], ['disable_role_preamble', 'Disable role preamble'], ['implementation_depth', 'Implementation-depth gate']] as const).map(([key, label]) => <label key={key}><input type="checkbox" checked={editorDraft[key]} onChange={(event) => { setActionDraft({ ...editorDraft, [key]: event.target.checked }); setActionDirty(true); }} />{label}</label>)}</div>
-          <Field label="Prompt"><textarea value={editorDraft.prompt} onChange={(event) => { setActionDraft({ ...editorDraft, prompt: event.target.value }); setActionDirty(true); }} /></Field>
-          <Field label="Transitions (JSON)"><textarea className={styles.shortArea} value={editorDraft.transitions} onChange={(event) => { setActionDraft({ ...editorDraft, transitions: event.target.value }); setActionDirty(true); }} /></Field>
-          <Field label="Companion terminals (JSON)"><textarea className={styles.shortArea} value={editorDraft.terminals} onChange={(event) => { setActionDraft({ ...editorDraft, terminals: event.target.value }); setActionDirty(true); }} /></Field>
-          {actionError ? <p className={styles.validation} role="alert">{actionError}</p> : null}
-          {preview.type === 'action_rendered' ? <pre className={styles.json}>{text(preview.prompt)}</pre> : null}
-          {!editorDraft.prompt.includes('{{ TASK }}') ? <p className={styles.validation}>Prompt must include {'{{ TASK }}'}.</p> : null}
-        </form>
-      </div> : null}
+      {tab === 'actions' ? <ActionsWorkspace key={`${group}:${baseDir}`} group={group} initialName={selectedAction} refreshVersion={actionRefreshVersion} onPipelines={() => setTab('pipelines')} /> : null}
       {tab === 'catalog' ? <div className={styles.catalog}>
         <AgentClassLibrary key={baseDir || group} baseDir={baseDir} refreshVersion={classRefreshVersion} />
         <CatalogEditor key={`role:${group}:${baseDir}`} title="Roles" kind="role" group={group} refreshVersion={classRefreshVersion} onMutation={() => setClassRefreshVersion((value) => value + 1)} />

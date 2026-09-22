@@ -1017,42 +1017,25 @@ describe('workspace shell', () => {
     expect(commands.find((command) => command.cmd === 'save_role')?.data).not.toHaveProperty('path');
   });
 
-  it('deduplicates overlapping project and built-in actions in Control Center', async () => {
+  it('keeps project and user actions distinct and previews the current draft through correlated reads', async () => {
+    const calls: TorqueCommand[] = [];
+    vi.stubGlobal('fetch', vi.fn((_url: string, options?: RequestInit) => {
+      const command = JSON.parse(typeof options?.body === 'string' ? options.body : '{}') as TorqueCommand; calls.push(command);
+      const data = command.cmd === 'list_actions' ? { type: 'actions', group: 'Foundation', actions: [{ name: 'test/action', global: false }, { name: 'test/action', global: true, shadowed: true }] }
+        : command.cmd === 'list_roles' ? { type: 'roles', group: 'Foundation', roles: [] }
+        : command.cmd === 'get_action' ? { type: 'action_detail', group: 'Foundation', scope: command.scope, name: command.name, action: { prompt: '{{ TASK }}' } }
+        : { type: command.variables_only ? 'action_variables' : 'action_rendered', workspace_group: 'Foundation', name: command.name, scope: command.scope, vars: [{ name: 'TASK' }], prompt: 'Rendered current draft' };
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data }) });
+    }));
     const { appStore } = renderShell();
-    act(() => { appStore.dispatch(projectionActions.auxiliaryResourceReceived({
-      type: 'actions',
-      actions: [{ name: 'feature/implement' }, { name: 'feature/implement' }, { name: 'oneshot/fix' }],
-    })); });
-    fireEvent.click(screen.getByRole('button', { name: /Control/ }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Actions' }));
-    expect(screen.getAllByRole('button', { name: 'feature/implement' })).toHaveLength(1);
-  });
-
-  it('keeps action preview scoped after unrelated responses', async () => {
-    const { appStore } = renderShell();
-    act(() => { appStore.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'actions', actions: [{ name: 'test/action' }] })); });
-    fireEvent.click(screen.getByRole('button', { name: /Control/ }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Actions' }));
-    fireEvent.click(screen.getByRole('button', { name: 'test/action' }));
-    act(() => {
-      appStore.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'action_detail', name: 'test/action', action: { prompt: '{{ TASK }}' } }));
-      appStore.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'action_rendered', name: 'test/action', group: '', prompt: 'Rendered preview evidence' }));
-      appStore.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'ok' }));
-    });
-    expect(screen.getByText('Rendered preview evidence')).toBeVisible();
-    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('test/action');
-  });
-
-  it('reports invalid action JSON instead of silently ignoring Save', async () => {
-    const { sendCommand } = renderShell();
-    fireEvent.click(screen.getByRole('button', { name: /Control/ }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Actions' }));
-    fireEvent.click(screen.getByRole('button', { name: '＋' }));
-    fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), { target: { value: 'ui/audit' } });
-    fireEvent.change(screen.getByRole('textbox', { name: 'Transitions (JSON)' }), { target: { value: '{' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save action' }));
-    expect(screen.getByRole('alert')).toHaveTextContent('must be valid JSON arrays');
-    expect(sendCommand).not.toHaveBeenCalledWith(expect.objectContaining({ cmd: 'save_action' }));
+    fireEvent.click(screen.getByRole('button', { name: /Control/ })); fireEvent.click(await screen.findByRole('button', { name: 'Actions' }));
+    await screen.findByRole('button', { name: 'test/actionproject' }); fireEvent.click(screen.getByRole('button', { name: /test\/actionuser/ }));
+    const prompt = await screen.findByRole('textbox', { name: 'Prompt' }); fireEvent.change(prompt, { target: { value: 'Unsaved {{ TASK }}' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' })); await screen.findByText('Rendered current draft');
+    act(() => { appStore.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'action_rendered', name: 'other', prompt: 'Unrelated preview' })); });
+    expect(screen.getByText('Rendered current draft')).toBeVisible(); expect(screen.queryByText('Unrelated preview')).not.toBeInTheDocument();
+    expect(calls).toContainEqual(expect.objectContaining({ cmd: 'get_action', scope: 'user', name: 'test/action' }));
+    expect(calls.find((call) => call.cmd === 'render_action' && !call.variables_only)?.action).toMatchObject({ prompt: 'Unsaved {{ TASK }}' });
   });
 
   it('loads searchable agent-run history through correlated reads', async () => {

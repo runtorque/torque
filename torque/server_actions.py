@@ -13,7 +13,7 @@ _ACTION_KEY_ORDER = [
     "name", "description", "agent", "group", "worktree",
     "auto_close_on_done", "disable_role_preamble",
     "implementation_depth", "review_required_above_loc", "prompt",
-    "labels", "transitions", "terminals",
+    "labels", "transitions", "terminals", "max_depth", "deliverable",
 ]
 
 
@@ -67,7 +67,8 @@ def _clean_loc_gate(value):
 
 def _action_to_yaml(name: str, data: dict) -> str:
     """Convert an action data dict to YAML text."""
-    doc = {"name": name}
+    # Preserve durable fields the editor does not expose (including extensions).
+    doc = {**data, "name": name}
     if data.get("description"):
         doc["description"] = data["description"]
 
@@ -76,11 +77,7 @@ def _action_to_yaml(name: str, data: dict) -> str:
         if agent:
             doc["agent"] = agent
     else:
-        agent_keys = (
-            "name_prefix", "command", "directory", "profile",
-            "shell", "tab_color",
-        )
-        agent_block = {key: agent[key] for key in agent_keys if agent.get(key)}
+        agent_block = dict(agent)
         if agent_block:
             doc["agent"] = agent_block
 
@@ -128,12 +125,14 @@ def _action_to_yaml(name: str, data: dict) -> str:
         for transition in transitions:
             if isinstance(transition, dict):
                 if transition.get("ask"):
-                    entry = {"ask": True}
+                    entry = {**transition, "ask": True}
+                    for key in ("action", "target", "status", "loc_gate"):
+                        entry.pop(key, None)
                     if transition.get("when"):
                         entry["when"] = transition["when"]
                     clean.append(entry)
                 elif transition.get("action"):
-                    entry = {"action": transition["action"]}
+                    entry = {**transition, "action": transition["action"]}
                     if transition.get("when"):
                         entry["when"] = transition["when"]
                     if transition.get("status"):
@@ -151,13 +150,14 @@ def _action_to_yaml(name: str, data: dict) -> str:
     if terminals:
         clean = []
         for terminal in terminals:
-            entry = {"name": terminal.get("name", "shell")}
+            entry = {**terminal, "name": terminal.get("name", "shell")}
             if terminal.get("command"):
                 entry["command"] = terminal["command"]
             clean.append(entry)
         doc["terminals"] = clean
 
     ordered = {key: doc[key] for key in _ACTION_KEY_ORDER if key in doc}
+    ordered.update({key: value for key, value in doc.items() if key not in ordered})
     return yaml.dump(
         ordered,
         Dumper=_ActionDumper,
