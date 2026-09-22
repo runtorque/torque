@@ -12,20 +12,27 @@ let terminalDisposals = 0;
 let socketCreations = 0;
 let terminalOptions: Record<string, unknown> = {};
 const sockets: WebSocketLike[] = [];
+let tailCalls = 0;
 
 class FakeTerminal {
-  constructor(options: Record<string, unknown>) { terminalOptions = options; }
+  static current: FakeTerminal;
+  constructor(options: Record<string, unknown>) { terminalOptions = options; FakeTerminal.current = this; }
+  buffer = { active: { baseY: 100, viewportY: 60 } };
   cols = 100;
   rows = 30;
   loadAddon() {}
   open() {}
   onData() { return { dispose() {} }; }
+  wheel?: (event: WheelEvent) => boolean;
+  modes = { mouseTrackingMode: 'none' };
+  attachCustomWheelEventHandler(callback: (event: WheelEvent) => boolean) { this.wheel = callback; }
   attachCustomKeyEventHandler() {}
   focus() {}
   paste() {}
   reset() { writes.push('reset'); }
   write(data: string, callback?: () => void) { writes.push(data); callback?.(); }
-  scrollToBottom() {}
+  scrollToBottom() { tailCalls += 1; this.buffer.active.viewportY = this.buffer.active.baseY; }
+  scrollToLine(line: number) { this.buffer.active.viewportY = line; }
   dispose() { terminalDisposals += 1; }
 }
 
@@ -66,6 +73,7 @@ function surface() {
 
 beforeEach(() => {
   writes.length = 0;
+  tailCalls = 0;
   sent.length = 0;
   terminalDisposals = 0;
   socketCreations = 0;
@@ -104,6 +112,84 @@ describe('terminal controller', () => {
     expect(terminalOptions.screenReaderMode).toBe(true);
     controller.dispose();
     expect(terminalDisposals).toBe(1);
+  });
+
+  it('keeps scrollback reading in place under live output and only tails explicitly', () => {
+    const controller = new TerminalController({
+      cellId: 'reader', sessionId: 'reader-session', surface: surface(),
+      isActive: () => true, webSocketFactory: socketFactory,
+    });
+    sockets[0]?.onmessage?.({ data: JSON.stringify({ type: 'output', session_id: 'reader-session', data: 'new output' }) } as MessageEvent<string>);
+    expect(FakeTerminal.current.buffer.active.viewportY).toBe(60);
+    expect(tailCalls).toBe(0);
+    controller.scrollToTail();
+    expect(FakeTerminal.current.buffer.active.viewportY).toBe(100);
+    controller.dispose();
+  });
+
+  it('preserves the scrollback distance when a reconnect snapshot replaces the buffer', () => {
+    const controller = new TerminalController({
+      cellId: 'reader', sessionId: 'reader-session', surface: surface(),
+      isActive: () => true, webSocketFactory: socketFactory,
+    });
+    vi.spyOn(FakeTerminal.current, 'reset').mockImplementation(() => { FakeTerminal.current.buffer.active.baseY = 0; FakeTerminal.current.buffer.active.viewportY = 0; });
+    vi.spyOn(FakeTerminal.current, 'write').mockImplementation((_data, callback) => { FakeTerminal.current.buffer.active.baseY = 130; callback?.(); });
+    sockets[0]?.onmessage?.({ data: JSON.stringify({ type: 'snapshot', session_id: 'reader-session', data: 'replayed output' }) } as MessageEvent<string>);
+    expect(FakeTerminal.current.buffer.active.viewportY).toBe(90);
+    controller.dispose();
+  });
+
+  it('keeps a tail-pinned viewport pinned when fitting changes its scroll position', () => {
+    const controller = new TerminalController({
+      cellId: 'owner', sessionId: 'owner-session', surface: surface(),
+      isActive: () => true, webSocketFactory: socketFactory,
+    });
+    FakeTerminal.current.buffer.active.viewportY = 100;
+    const fit = vi.spyOn(FakeFitAddon.prototype, 'fit').mockImplementation(() => {
+      FakeTerminal.current.buffer.active.viewportY = 90;
+    });
+    sockets[0]?.onopen?.(); vi.advanceTimersByTime(20);
+    expect(FakeTerminal.current.buffer.active.viewportY).toBe(100);
+    fit.mockRestore();
+    controller.dispose();
+  });
+
+  it('restores the owning surface dimensions after reconnect even when its geometry is unchanged', () => {
+    const controller = new TerminalController({
+      cellId: 'owner', sessionId: 'owner-session', surface: surface(),
+      isActive: () => true, webSocketFactory: socketFactory, reconnectDelayMs: 25,
+    });
+    sockets[0]?.onopen?.(); vi.advanceTimersByTime(20);
+    expect(sent.map((frame) => JSON.parse(frame) as { type: string }).filter((frame) => frame.type === 'resize')).toHaveLength(1);
+    sockets[0]?.onclose?.(); vi.advanceTimersByTime(25);
+    sockets[1]?.onopen?.(); vi.advanceTimersByTime(20);
+    expect(sent.map((frame) => JSON.parse(frame) as { type: string }).filter((frame) => frame.type === 'resize')).toHaveLength(2);
+    controller.dispose();
+  });
+
+  it('applies wheel intent to scrollback before output can overwrite the DOM scroll position', () => {
+    const target = surface();
+    const screen = document.createElement('div'); screen.className = 'xterm-screen';
+    screen.getBoundingClientRect = () => ({ height: 420 } as DOMRect);
+    target.append(screen);
+    const controller = new TerminalController({ cellId: 'wheel', sessionId: 's', surface: target, isActive: () => true, webSocketFactory: socketFactory });
+    const terminal = FakeTerminal.current;
+    const event = new WheelEvent('wheel', { deltaY: -140, cancelable: true });
+    expect(terminal.wheel?.(event)).toBe(false);
+    expect(event.defaultPrevented).toBe(true);
+    expect(terminal.buffer.active.viewportY).toBe(50);
+    sockets[0]?.onmessage?.({ data: JSON.stringify({ type: 'output', data: 'tick' }) } as MessageEvent<string>);
+    expect(terminal.buffer.active.viewportY).toBe(50);
+    terminal.wheel?.(new WheelEvent('wheel', { deltaY: 1, deltaMode: 1 }));
+    expect(terminal.buffer.active.viewportY).toBe(51);
+    terminal.wheel?.(new WheelEvent('wheel', { deltaY: -1, deltaMode: 2 }));
+    expect(terminal.buffer.active.viewportY).toBe(21);
+    terminal.modes.mouseTrackingMode = 'vt200';
+    expect(terminal.wheel?.(event)).toBe(true);
+    expect(terminal.buffer.active.viewportY).toBe(21);
+    terminal.modes.mouseTrackingMode = 'none';
+    expect(terminal.wheel?.(new WheelEvent('wheel', { deltaY: -140, ctrlKey: true }))).toBe(true);
+    controller.dispose();
   });
 
   it('shares one controller across Strict Mode lease churn', () => {

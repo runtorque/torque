@@ -122,6 +122,16 @@ The test refuses the default runtime/profile. It creates its own group, generic 
 
 The checks cover an actual two-client HTTP race and PTY input, a transport failure before delivery, replay, compact context updates, real WebSocket reconnects, and real SQLite-backed behavior proposal decisions. They do not assert commercial provider comprehension or exactly-once delivery across a process crash.
 
+### Real terminal viewport regression
+
+Use the same disposable PTY-enabled daemon recipe above. Set `TORQUE_PTY_PYTHON` to an absolute Python executable on the daemon host:
+
+```bash
+TORQUE_UI_BASE_URL=http://127.0.0.1:18961 TORQUE_PLAYWRIGHT_CHANNEL=chrome TORQUE_PTY_PYTHON="$(command -v python3)" npm --prefix ui run test:e2e -- terminal-live.spec.ts
+```
+
+This opt-in test refuses the default port/profile, launches `ui/e2e/fixtures/streaming_receiver.py` as a generic agent and inspects the actual xterm buffer and terminal WebSocket. It checks scrolling during output, Tail, resizing and reconnect without replacing the terminal. Set both `TORQUE_PTY_PYTHON` and `TORQUE_ATTENTION_PYTHON` for the complete real-PTY browser suite. Native ownership still requires the separate detach/type/resize/close check; browser success does not certify native crash recovery.
+
 ## Classic burn-in and retirement
 
 The Torque maintainers own the fallback. `/legacy/` and classic writes remain

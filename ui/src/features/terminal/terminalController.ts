@@ -5,15 +5,19 @@ interface DisposableLike { dispose(): void }
 interface TerminalLike {
   cols: number;
   rows: number;
+  buffer?: { active: { baseY: number; viewportY: number; type?: string } };
+  modes?: { mouseTrackingMode: string };
   loadAddon(addon: unknown): void;
   open(element: HTMLElement): void;
   onData(callback: (data: string) => void): DisposableLike;
+  attachCustomWheelEventHandler?(callback: (event: WheelEvent) => boolean): void;
   attachCustomKeyEventHandler?(callback: (event: KeyboardEvent) => boolean): void;
   focus(): void;
   paste(data: string): void;
   reset(): void;
   write(data: string, callback?: () => void): void;
   scrollToBottom(): void;
+  scrollToLine?(line: number): void;
   dispose(): void;
 }
 
@@ -82,6 +86,7 @@ export class TerminalController {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectCount = 0;
   private disposed = false;
+  private wheelRemainder = 0;
   private lastColumns = 0;
   private lastRows = 0;
 
@@ -122,6 +127,24 @@ export class TerminalController {
         return false;
       }
       return true;
+    });
+    this.terminal.attachCustomWheelEventHandler?.((event) => {
+      const buffer = this.terminal.buffer?.active;
+      if (!buffer || buffer.type === 'alternate' || !buffer.baseY || !this.terminal.scrollToLine
+        || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey
+        || (this.terminal.modes && this.terminal.modes.mouseTrackingMode !== 'none')) return true;
+      const screen = options.surface.querySelector('.xterm-screen');
+      const rowHeight = (screen?.getBoundingClientRect().height || 0) / this.terminal.rows;
+      if (!rowHeight || !event.deltaY) return true;
+      // Update the public buffer position synchronously. The bundled xterm's
+      // DOM scroll suppression can otherwise consume a wheel event when an
+      // output-driven scrollTop write and user input land in the same frame.
+      this.wheelRemainder += event.deltaY * (event.deltaMode === 1 ? 1 : event.deltaMode === 2 ? this.terminal.rows : 1 / rowHeight);
+      const lines = Math.trunc(this.wheelRemainder);
+      this.wheelRemainder -= lines;
+      this.terminal.scrollToLine(Math.max(0, Math.min(buffer.baseY, buffer.viewportY + lines)));
+      event.preventDefault();
+      return false;
     });
     this.resizeObserver = new ResizeObserver(() => this.scheduleFit());
     this.resizeObserver.observe(options.surface);
@@ -183,6 +206,8 @@ export class TerminalController {
       if (this.socket !== socket || this.disposed) return;
       this.reconnectCount = 0;
       this.options.onStatus?.('connected');
+      this.lastColumns = 0;
+      this.lastRows = 0;
       this.scheduleFit();
     };
     socket.onmessage = (event) => {
@@ -190,11 +215,20 @@ export class TerminalController {
       let frame: Record<string, unknown>;
       try { frame = JSON.parse(String(event.data)) as Record<string, unknown>; } catch { return; }
       if (typeof frame.session_id === 'string' && frame.session_id !== this.options.sessionId) return;
-      if (frame.type === 'snapshot') this.terminal.reset();
-      if ((frame.type === 'snapshot' || frame.type === 'output') && typeof frame.data === 'string') {
+      if (frame.type === 'snapshot' && typeof frame.data === 'string') {
+        const buffer = this.terminal.buffer?.active;
+        const distanceFromTail = buffer ? Math.max(0, buffer.baseY - buffer.viewportY) : 0;
+        this.terminal.reset();
         this.terminal.write(frame.data, () => {
-          if (this.canOwnPty()) this.terminal.scrollToBottom();
+          if (this.disposed) return;
+          if (distanceFromTail > 0 && this.terminal.buffer) {
+            this.terminal.scrollToLine?.(Math.max(0, this.terminal.buffer.active.baseY - distanceFromTail));
+          } else if (this.canOwnPty()) this.terminal.scrollToBottom();
         });
+      } else if (frame.type === 'output' && typeof frame.data === 'string') {
+        // xterm follows output only while pinned. Forcing the tail here
+        // interrupts an operator reading or selecting earlier output.
+        this.terminal.write(frame.data);
       }
       if (frame.type === 'error') this.options.onStatus?.('unavailable');
     };
@@ -218,7 +252,12 @@ export class TerminalController {
     this.resizeFrame = this.targetWindow.requestAnimationFrame(() => {
       this.resizeFrame = 0;
       if (!this.canOwnPty()) return;
+      const buffer = this.terminal.buffer?.active;
+      const distanceFromTail = buffer ? Math.max(0, buffer.baseY - buffer.viewportY) : 0;
       this.fitAddon.fit();
+      if (distanceFromTail > 0 && this.terminal.buffer) {
+        this.terminal.scrollToLine?.(Math.max(0, this.terminal.buffer.active.baseY - distanceFromTail));
+      } else this.terminal.scrollToBottom();
       const columns = Math.max(1, this.terminal.cols);
       const rows = Math.max(1, this.terminal.rows);
       if (columns === this.lastColumns && rows === this.lastRows) return;

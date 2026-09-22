@@ -145,6 +145,9 @@ Sources below are relative to `static/js/`; React owners are under `ui/src/`. Al
 | P-133 | Attention: compact context refresh | Required | `state.py compact task contract` | Shared AskResponse | Question/parent updates and late compact reconnect snapshots rehydrate full descriptions while preserving the mounted answer, selection, focus and caret; unrelated agent events do not refetch. |
 | P-134 | Shell: group overflow reachability | Required | Classic group navigation | App sidebar | With 25 groups, scroll/click the last row, verify it stays above the footer, and activate it from the keyboard. |
 
+| P-135 | Terminal: live scrollback and Tail | Required | `terminal/xterm-runtime.js` | TerminalController | Wheel into scrollback during real PTY output; keep the visible line while output advances; Tail resumes following; normal-buffer wheel must not lose intent to output-driven DOM scrolling. |
+| P-136 | Terminal: fit and snapshot viewport | Required | `terminal/xterm-runtime.js` | TerminalController | Resize while pinned and remain pinned; reconnect while scrolled up and restore distance from tail without remounting xterm; send dimensions again even when unchanged. |
+| P-137 | Native: live PTY ownership handoff | Required | `panel_manager.js; terminal/xterm-runtime.js` | Agents + Tauri host | Type in main, detach, type and resize detached, close and type in main again: each marker arrives once in the same session, geometry follows only the owner, and the main DM draft survives. |
 
 ## Command inventory
 
@@ -810,3 +813,12 @@ Each action below is an independent Required acceptance row. A replacement toolb
 - Repeated QA exposed a sidebar footer covering the last group. The 25-group regression reproduced the intercepted click before the CSS repair and passes afterward. This extends P-134.
 - `make lint-docs-contract` and `git diff --check`: passed. The isolated daemon, its PTY supervisor and temporary receiver directories were cleaned up after verification. The live daemon was not deployed, stopped or restarted.
 - Not run: real commercial-provider inference/comprehension, crash-window exactly-once delivery, native Rust/Tauri or cross-platform host tests in this checkpoint, enterprise-only tests, or the remaining Planning/native acceptance combinations. A generic PTY receiver proves transport delivery, not provider comprehension. Phase 4 and classic retirement remain open; detached PTY ownership under live output is the next checkpoint.
+
+
+## Terminal checkpoint verification — 2026-09-22
+
+- `terminalController.test.ts` covers output/read position, explicit Tail, snapshot distance, fit pinning, reconnect geometry, wheel units/reporting bypass, hidden surfaces and a 10,000-frame burst. `terminal-live.spec.ts` uses the shipped xterm and a generic Python PTY receiver; it checks wheel reading during continuous output, Tail, resize, socket reconnect, geometry resend and a single xterm mount. Three consecutive live runs passed after reproducing and repairing the bundled-runtime wheel/output race.
+- Native macOS QA on isolated profile `react-terminal-20260922`, port 18962: receiver session `449ad940d6f641a5ad890974dbc17991` remained the same across main → detached Agents → close/return. Input markers `MAIN_BEFORE_DETACH`, `DETACHED_INPUT_ONCE`, `MAIN_AFTER_REATTACH` each appeared exactly once. SIGWINCH evidence followed 95×16 → 97×18 → 151×34 → 95×16; the hidden main window did not override detached geometry. The unsent main DM draft survived. Closing retained physical bounds and cleared the detached label. The attach-mode native app then quit without stopping the QA daemon.
+- `make ui-check`: lint, typecheck, 154 tests and production build passed. Full isolated browser suite: 15 passed, including both real-PTY opt-ins. `make lint-docs-contract` and `git diff --check` passed; terminal screenshot inspected.
+- Native Rust checks: 22 unit and 2 integration tests passed with `cargo test --manifest-path src-tauri/Cargo.toml --offline`. Native handoff predates the final wheel/fit repair; those repairs have controller and real-browser coverage, not a repeated native pass.
+- Not certified: native crash/sleep recovery, cross-monitor/cross-platform behavior, alternate-screen live application mouse interaction, commercial provider behavior, or remaining Planning lifecycles. No backend/protocol code changed in this checkpoint, so full `make test` was not repeated. Phase 4 remains open.

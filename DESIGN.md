@@ -2595,6 +2595,14 @@ scope.
 - Rationale: A list sized to 100% of the parent plus its header placed the final row behind the footer and blocked clicks in larger workspaces.
 - Verification: A 25-group browser regression asserts the last row is clickable and remains above the footer; repeated live suites exercise populated profiles.
 
+### D-093 — Terminal scroll intent survives output, fit and reconnect
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: Streaming output preserves the operator's scrollback position; Tail explicitly resumes following output. Fit preserves tail pinning or the distance from the tail, and reconnect restores that distance in the replacement snapshot. A reconnected owner always resends its dimensions.
+- Constraints: Normal-buffer wheel input uses xterm's public scroll API to avoid a bundled-runtime DOM scroll suppression race. Alternate screens, application mouse reporting and modified wheel events retain xterm handling. Output remains outside React state; hidden surfaces do not send focus or geometry.
+- Verification: Controller regressions and a repeated real-xterm/PTY browser scenario. Native macOS detach/resize/close confirms exclusive geometry ownership, one input marker per window and retained main-window DM draft; cross-platform and crash/sleep recovery remain release gates.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:
