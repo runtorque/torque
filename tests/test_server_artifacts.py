@@ -312,6 +312,28 @@ class ServerArtifactHelperTests(unittest.TestCase):
         self.assertIn("/TORQUE:7/", new_artifacts[0]["path"])
         self.assertEqual(new_artifacts[0]["provenance"]["task_id"], "TORQUE:7")
 
+    def test_finalize_preserves_external_references_alongside_draft_uploads(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_dir = self.helper.ATTACHMENTS_DIR
+            self.helper.ATTACHMENTS_DIR = Path(tmpdir)
+            try:
+                uploaded = self.helper.store_task_upload(
+                    task_id="draft-mixed", filename="evidence.txt", content_text="evidence")
+                references = [
+                    {"id": "artifact-external", "type": "file_ref", "path": "/repo/spec.md",
+                     "storage": {"kind": "file_ref", "path": "/repo/spec.md"}},
+                    {"id": "artifact-relative", "type": "file_ref", "path": "docs/spec.md"},
+                ]
+                _, artifacts = self.helper.finalize_task_attachments(
+                    [], [uploaded, *references], draft_task_id="draft-mixed", task_id="TORQUE:8")
+                self.assertEqual(Path(artifacts[0]["path"]).read_text(), "evidence")
+                self.assertFalse((Path(tmpdir) / "draft-mixed").exists())
+                self.assertEqual(artifacts[1]["path"], "/repo/spec.md")
+                self.assertEqual(artifacts[1]["storage"]["path"], "/repo/spec.md")
+                self.assertEqual(artifacts[2]["path"], "docs/spec.md")
+            finally:
+                self.helper.ATTACHMENTS_DIR = original_dir
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -554,10 +554,13 @@ def finalize_task_attachments(attachments, artifacts, *,
         path = str(path_value or "").strip()
         if not path:
             return path
+        # Only uploaded draft files move. External references may coexist with
+        # uploads and must retain their original absolute or repository path.
         try:
-            return str(new_dir / Path(path).name)
-        except Exception:
-            return path.replace(str(old_dir), str(new_dir))
+            relative = Path(path).relative_to(old_dir)
+        except ValueError:
+            return path
+        return str(new_dir / relative)
 
     attachments_out = []
     for attachment in normalized_attachments:
