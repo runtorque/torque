@@ -2831,6 +2831,15 @@ scope.
 - Limits: This is not an atomic transaction across identity, launch, digest and specialization commands. Broader per-agent settings refresh, numeric validation and non-identity partial-save recovery remain separate acceptance gates. Server conflict detection and process-crash/lost-acknowledgement recovery are not claimed.
 - Verification: Component tests cover blank/duplicate refusal, matching acknowledgement, pending dismissal, identity retry and explicit reversal; isolated browser acceptance exercises real duplicate validation, reconnect continuity and retained settings after a partial save. Executed evidence is recorded in the parity ledger.
 
+### D-122 — Done offers an acknowledged stale-task archive batch
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: The active Done lane offers one archive action for completed tasks inactive for at least seven days. Eligibility uses the last-update timestamp, falling back to creation only when the update value is absent, and orders oldest first. Missing/invalid timestamps, other groups, non-Done tasks and legacy `torque:archived` records are excluded. The suggestion includes filtered tasks in the current group, matching Classic; the visible scope note states this explicitly.
+- Interaction: The suggestion belongs to Done and is absent in Archive or when Done is hidden. A minute timer updates the cutoff while mounted and is removed on unmount. Keyboard and pointer invoke one `board_archive_tasks` request. Pending requests disable repeated submission; refusals remain beside the action and retry recomputes candidates from current state. Success requires the existing success-toast acknowledgement and uses WebSocket state as the task projection. Other lane drafts, selection and reading positions are retained.
+- Limits: Eligibility reflects the latest client projection. The existing backend batch is atomic but has no age or Done-only precondition; a concurrent server mutation after selection is not a new guarantee. Crash/lost-acknowledgement recovery remains separate acceptance. No scheduler or automatic archival is added.
+- Verification: Model/component tests cover cutoff/order/exclusions, pending/error/retry, expected acknowledgement and idle timer cleanup. Isolated browser QA advances only its clock and exercises real task creation, batch persistence, filtered scope, keyboard activation, failure retention, unrelated Board state and reload/reconnect. Executed evidence appears in the parity ledger.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

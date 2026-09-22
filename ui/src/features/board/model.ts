@@ -116,6 +116,15 @@ export function normalizeTasks(records: Record<string, unknown>): BoardTask[] {
     .filter((task): task is BoardTask => task !== null);
 }
 
+/** Classic uses updated_at (created_at fallback), at an inclusive seven-day cutoff. */
+export function staleCompletedTasks(tasks: BoardTask[], group: string, now: number): BoardTask[] {
+  const cutoff = now - 7 * 24 * 60 * 60 * 1000;
+  return tasks.filter((task) => {
+    const timestamp = Date.parse(task.updatedAt);
+    return task.group === group && task.lane === 'Done' && !task.labels.includes('torque:archived') && Number.isFinite(timestamp) && timestamp !== 0 && timestamp <= cutoff;
+  }).sort((a, b) => Date.parse(a.updatedAt) - Date.parse(b.updatedAt));
+}
+
 export function normalizeFilters(value: unknown): BoardFilterState {
   const raw = recordValue(value);
   return {

@@ -202,3 +202,7 @@ Prompt-editor acceptance: `prompt-editor-live.spec.ts` runs against the disposab
 ### Engineer identity regression
 
 `engineer-rename-live.spec.ts` uses two generic Engineers in a disposable profile. It checks actual duplicate rejection, blank validation, failed-draft reconnect, pending acknowledgement/dismissal, history naming, partial-save retry and an external identity change. `TORQUE_PROFILE_SKIP_PTY=1` skips the supervisor; explicit generic Engineer creation still opens local sessions. It removes its Engineers afterward. Run after `make ui-check`; no commercial provider or native Tauri window is exercised.
+
+### Stale completed-task archive regression
+
+`stale-archive-live.spec.ts` advances only the browser clock to compare six-day and eight-day eligibility. It creates real tasks in two disposable groups, verifies filtered scope and hidden/Archive behavior, injects one batch refusal, then archives through the actual daemon command. Keyboard submission, unrelated draft/caret/selection/scroll, reload/reconnect and persisted task lanes are checked. Test teardown removes its task records. No daemon clock, production data, provider or native window is changed.

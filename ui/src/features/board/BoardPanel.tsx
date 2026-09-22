@@ -1,3 +1,4 @@
+import { StaleDoneArchive } from './StaleDoneArchive';
 import { TaskActivity } from './TaskActivity';
 import { TaskEvidenceEditor } from './TaskEvidenceEditor';
 import { evidenceFilename, uploadedEvidence } from './taskEvidenceModel';
@@ -1124,6 +1125,7 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPa
                   </header>}
                 >
                   {(laneScrollRootRef) => <SortableContext id={`lane:${lane}`} items={hierarchy.map(({ task }) => task.id)} strategy={verticalListSortingStrategy}>
+                    {!showArchived && lane === 'Done' ? <StaleDoneArchive key={group} tasks={groupTasks} group={group} onArchived={(frame) => dispatch(projectionActions.auxiliaryResourceReceived(frame))} /> : null}
                     {!showArchived ? (workspaceUi.createLane === lane
                       ? <InlineCreate lane={lane} group={group} sendCommand={sendCommand} onCommandUnavailable={onCommandUnavailable} onClose={() => dispatch(workspaceUiActions.setCreateLane(null))} />
                       : <Button tone="quiet" className={styles.addTaskButton ?? ''} onPress={() => dispatch(workspaceUiActions.setCreateLane(lane))}>＋ Add task</Button>) : null}
