@@ -22,6 +22,8 @@ class FakeTerminal {
   rows = 30;
   loadAddon() {}
   open() {}
+  scrolled?: () => void;
+  onScroll(callback: () => void) { this.scrolled = callback; return { dispose() {} }; }
   onData() { return { dispose() {} }; }
   wheel?: (event: WheelEvent) => boolean;
   modes = { mouseTrackingMode: 'none' };
@@ -132,9 +134,11 @@ describe('terminal controller', () => {
       cellId: 'reader', sessionId: 'reader-session', surface: surface(),
       isActive: () => true, webSocketFactory: socketFactory,
     });
-    vi.spyOn(FakeTerminal.current, 'reset').mockImplementation(() => { FakeTerminal.current.buffer.active.baseY = 0; FakeTerminal.current.buffer.active.viewportY = 0; });
+    vi.spyOn(FakeTerminal.current, 'reset').mockImplementation(() => { FakeTerminal.current.buffer.active.baseY = 0; FakeTerminal.current.buffer.active.viewportY = 0; FakeTerminal.current.scrolled?.(); });
     vi.spyOn(FakeTerminal.current, 'write').mockImplementation((_data, callback) => { FakeTerminal.current.buffer.active.baseY = 130; callback?.(); });
     sockets[0]?.onmessage?.({ data: JSON.stringify({ type: 'snapshot', session_id: 'reader-session', data: 'replayed output' }) } as MessageEvent<string>);
+    expect(FakeTerminal.current.buffer.active.viewportY).toBe(90);
+    sockets[0]?.onmessage?.({ data: JSON.stringify({ type: 'output', data: 'resumed output' }) } as MessageEvent<string>);
     expect(FakeTerminal.current.buffer.active.viewportY).toBe(90);
     controller.dispose();
   });
@@ -144,13 +148,40 @@ describe('terminal controller', () => {
       cellId: 'owner', sessionId: 'owner-session', surface: surface(),
       isActive: () => true, webSocketFactory: socketFactory,
     });
-    FakeTerminal.current.buffer.active.viewportY = 100;
+    controller.scrollToTail();
     const fit = vi.spyOn(FakeFitAddon.prototype, 'fit').mockImplementation(() => {
       FakeTerminal.current.buffer.active.viewportY = 90;
     });
     sockets[0]?.onopen?.(); vi.advanceTimersByTime(20);
     expect(FakeTerminal.current.buffer.active.viewportY).toBe(100);
     fit.mockRestore();
+    controller.dispose();
+  });
+
+  it('honors scrollbar reading intent and resumes when the operator returns to the tail', () => {
+    const target = surface();
+    const controller = new TerminalController({ cellId: 'scrollbar', sessionId: 's', surface: target, isActive: () => true, webSocketFactory: socketFactory });
+    controller.scrollToTail();
+    target.dispatchEvent(new Event('pointerdown'));
+    FakeTerminal.current.buffer.active.viewportY = 50; FakeTerminal.current.scrolled?.();
+    document.dispatchEvent(new Event('pointerup'));
+    sockets[0]?.onmessage?.({ data: JSON.stringify({ type: 'output', data: 'tick' }) } as MessageEvent<string>);
+    expect(FakeTerminal.current.buffer.active.viewportY).toBe(50);
+    FakeTerminal.current.buffer.active.viewportY = 100; FakeTerminal.current.scrolled?.();
+    vi.advanceTimersByTime(600);
+    FakeTerminal.current.buffer.active.viewportY = 90; FakeTerminal.current.scrolled?.();
+    sockets[0]?.onmessage?.({ data: JSON.stringify({ type: 'output', data: 'tick' }) } as MessageEvent<string>);
+    expect(FakeTerminal.current.buffer.active.viewportY).toBe(100);
+    controller.dispose();
+  });
+
+  it('continues following after a delayed viewport event following fit', () => {
+    const controller = new TerminalController({ cellId: 'fit', sessionId: 's', surface: surface(), isActive: () => true, webSocketFactory: socketFactory });
+    controller.scrollToTail();
+    sockets[0]?.onopen?.(); vi.advanceTimersByTime(20);
+    FakeTerminal.current.buffer.active.viewportY = 80;
+    sockets[0]?.onmessage?.({ data: JSON.stringify({ type: 'output', data: 'tick' }) } as MessageEvent<string>);
+    expect(FakeTerminal.current.buffer.active.viewportY).toBe(100);
     controller.dispose();
   });
 

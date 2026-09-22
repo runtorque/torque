@@ -9,6 +9,7 @@ interface TerminalLike {
   modes?: { mouseTrackingMode: string };
   loadAddon(addon: unknown): void;
   open(element: HTMLElement): void;
+  onScroll?(callback: () => void): DisposableLike;
   onData(callback: (data: string) => void): DisposableLike;
   attachCustomWheelEventHandler?(callback: (event: WheelEvent) => boolean): void;
   attachCustomKeyEventHandler?(callback: (event: KeyboardEvent) => boolean): void;
@@ -79,6 +80,10 @@ export class TerminalController {
   private readonly terminal: TerminalLike;
   private readonly fitAddon: FitAddonLike;
   private readonly dataDisposable: DisposableLike;
+  private readonly scrollDisposable: DisposableLike | undefined;
+  private tailPinned = true;
+  private scrollIntentUntil = 0;
+  private scrollPointerDown = false;
   private readonly resizeObserver: ResizeObserver;
   private readonly webSocketFactory: (url: string) => WebSocketLike;
   private socket: WebSocketLike | null = null;
@@ -120,8 +125,21 @@ export class TerminalController {
     this.fitAddon = new FitClass();
     this.terminal.loadAddon(this.fitAddon);
     this.terminal.open(options.surface);
+    const initialBuffer = this.terminal.buffer?.active;
+    this.tailPinned = !initialBuffer || initialBuffer.viewportY === initialBuffer.baseY;
+    this.scrollDisposable = this.terminal.onScroll?.(() => {
+      const buffer = this.terminal.buffer?.active;
+      if (!buffer) return;
+      if (buffer.viewportY === buffer.baseY) this.tailPinned = true;
+      else if (this.scrollPointerDown || Date.now() < this.scrollIntentUntil) this.tailPinned = false;
+    });
+    options.surface.addEventListener('pointerdown', this.handleScrollPointerDown, true);
+    options.surface.addEventListener('touchstart', this.handleScrollIntent, { passive: true });
+    this.targetWindow.document.addEventListener('pointerup', this.handleScrollPointerUp);
+    this.targetWindow.document.addEventListener('pointercancel', this.handleScrollPointerUp);
     this.dataDisposable = this.terminal.onData((data) => this.send({ type: 'input', data }));
     this.terminal.attachCustomKeyEventHandler?.((event) => {
+      if (['PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) this.handleScrollIntent();
       if (event.key === 'Enter' && event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey) {
         if (event.type === 'keydown') this.send({ type: 'input', data: '\n' });
         return false;
@@ -142,7 +160,9 @@ export class TerminalController {
       this.wheelRemainder += event.deltaY * (event.deltaMode === 1 ? 1 : event.deltaMode === 2 ? this.terminal.rows : 1 / rowHeight);
       const lines = Math.trunc(this.wheelRemainder);
       this.wheelRemainder -= lines;
-      this.terminal.scrollToLine(Math.max(0, Math.min(buffer.baseY, buffer.viewportY + lines)));
+      const nextLine = Math.max(0, Math.min(buffer.baseY, buffer.viewportY + lines));
+      this.tailPinned = nextLine === buffer.baseY;
+      this.terminal.scrollToLine(nextLine);
       event.preventDefault();
       return false;
     });
@@ -166,6 +186,8 @@ export class TerminalController {
   }
 
   scrollToTail(): void {
+    this.tailPinned = true;
+    this.scrollIntentUntil = 0;
     this.terminal.scrollToBottom();
   }
 
@@ -176,6 +198,11 @@ export class TerminalController {
     this.targetWindow.document.removeEventListener('visibilitychange', this.handleVisibility);
     this.resizeObserver.disconnect();
     this.dataDisposable.dispose();
+    this.scrollDisposable?.dispose();
+    this.options.surface.removeEventListener('pointerdown', this.handleScrollPointerDown, true);
+    this.options.surface.removeEventListener('touchstart', this.handleScrollIntent);
+    this.targetWindow.document.removeEventListener('pointerup', this.handleScrollPointerUp);
+    this.targetWindow.document.removeEventListener('pointercancel', this.handleScrollPointerUp);
     if (this.resizeFrame) this.targetWindow.cancelAnimationFrame(this.resizeFrame);
     if (this.reconnectTimer) this.targetWindow.clearTimeout(this.reconnectTimer);
     this.socket?.close();
@@ -183,6 +210,10 @@ export class TerminalController {
     this.fitAddon.dispose?.();
     this.terminal.dispose();
   }
+
+  private readonly handleScrollIntent = () => { this.scrollIntentUntil = Date.now() + 500; };
+  private readonly handleScrollPointerDown = () => { this.scrollPointerDown = true; this.handleScrollIntent(); };
+  private readonly handleScrollPointerUp = () => { this.scrollPointerDown = false; };
 
   private readonly handleVisibility = () => {
     if (this.canOwnPty()) {
@@ -217,18 +248,21 @@ export class TerminalController {
       if (typeof frame.session_id === 'string' && frame.session_id !== this.options.sessionId) return;
       if (frame.type === 'snapshot' && typeof frame.data === 'string') {
         const buffer = this.terminal.buffer?.active;
-        const distanceFromTail = buffer ? Math.max(0, buffer.baseY - buffer.viewportY) : 0;
+        const distanceFromTail = !this.tailPinned && buffer ? Math.max(0, buffer.baseY - buffer.viewportY) : 0;
         this.terminal.reset();
         this.terminal.write(frame.data, () => {
           if (this.disposed) return;
+          this.tailPinned = distanceFromTail === 0;
           if (distanceFromTail > 0 && this.terminal.buffer) {
             this.terminal.scrollToLine?.(Math.max(0, this.terminal.buffer.active.baseY - distanceFromTail));
           } else if (this.canOwnPty()) this.terminal.scrollToBottom();
         });
       } else if (frame.type === 'output' && typeof frame.data === 'string') {
-        // xterm follows output only while pinned. Forcing the tail here
-        // interrupts an operator reading or selecting earlier output.
-        this.terminal.write(frame.data);
+        this.terminal.write(frame.data, () => {
+          // A delayed DOM scroll after fit can move xterm off the tail without
+          // operator input. Follow the recorded intent, not that transient row.
+          if (this.tailPinned && this.canOwnPty()) this.terminal.scrollToBottom();
+        });
       }
       if (frame.type === 'error') this.options.onStatus?.('unavailable');
     };
@@ -253,8 +287,9 @@ export class TerminalController {
       this.resizeFrame = 0;
       if (!this.canOwnPty()) return;
       const buffer = this.terminal.buffer?.active;
-      const distanceFromTail = buffer ? Math.max(0, buffer.baseY - buffer.viewportY) : 0;
+      const distanceFromTail = !this.tailPinned && buffer ? Math.max(0, buffer.baseY - buffer.viewportY) : 0;
       this.fitAddon.fit();
+      this.tailPinned = distanceFromTail === 0;
       if (distanceFromTail > 0 && this.terminal.buffer) {
         this.terminal.scrollToLine?.(Math.max(0, this.terminal.buffer.active.baseY - distanceFromTail));
       } else this.terminal.scrollToBottom();

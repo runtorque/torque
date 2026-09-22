@@ -34,6 +34,7 @@ test('real xterm preserves scrollback and tail pinning across live output, fit a
   const group = `Terminal parity ${Date.now()}`;
   let agentId = '';
   let terminalSocket: WebSocketRoute | undefined;
+  let inputToPty: ((data: string) => void) | undefined;
   let connections = 0;
   let snapshots = 0;
   const frames: Row[] = [];
@@ -47,6 +48,7 @@ test('real xterm preserves scrollback and tail pinning across live output, fit a
     await page.routeWebSocket(/\/ws\/terminal\//, (socket) => {
       connections += 1; terminalSocket = socket;
       const server = socket.connectToServer();
+      inputToPty = (data) => server.send(JSON.stringify({ type: 'input', data }));
       socket.onMessage((raw) => { frames.push(JSON.parse(String(raw)) as Row); server.send(raw); });
       server.onMessage((raw) => {
         if ((JSON.parse(String(raw)) as Row).type === 'snapshot') snapshots += 1;
@@ -103,6 +105,12 @@ test('real xterm preserves scrollback and tail pinning across live output, fit a
     await expect.poll(() => frames.filter((frame) => frame.type === 'resize').length).toBeGreaterThan(beforeFrames);
     await expect.poll(async () => { const value = await viewport(); return value.base - value.y; }).toBe(beforeReconnect.base - beforeReconnect.y);
     expect(await page.evaluate(() => (window as unknown as QaWindow).qaTerminalMounts)).toBe(1);
+    const reconnected = await viewport();
+    // Resume upstream without xterm's intentional scroll-on-local-input behavior.
+    inputToPty!('resume\r');
+    await expect.poll(async () => (await viewport()).base).toBeGreaterThan(reconnected.base + 10);
+    expect((await viewport()).y).toBe(reconnected.y);
+
     await page.screenshot({ path: test.info().outputPath('terminal-scrollback.png'), fullPage: true });
   } finally {
     if (agentId) await command({ cmd: 'remove_agent', id: agentId });
