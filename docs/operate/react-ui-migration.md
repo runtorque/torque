@@ -198,3 +198,7 @@ Help acceptance: `help-live.spec.ts` reads the actual maintained documentation o
 
 
 Prompt-editor acceptance: `prompt-editor-live.spec.ts` runs against the disposable PTY-disabled daemon and a temporary project action. It checks native insertion/undo, typed syntax colors, wide/compact wrap and scroll geometry, pointer resize, reconnect/caret retention, forced-colors fallback, rejected saves, unmodified save payloads and actual backend preview. The backend's existing trailing-newline normalization is checked separately from editing fidelity. Inspect `prompt-wide.png` and `prompt-compact.png`; this test does not certify native IME/device behavior. Empty action collections and serializer-quoted multiline/Unicode text have daemon/CLI round-trip regressions in `test_action_authoring.py` and `test_action_yaml_collections.py`.
+
+### Engineer identity regression
+
+`engineer-rename-live.spec.ts` uses two generic Engineers in a disposable profile. It checks actual duplicate rejection, blank validation, failed-draft reconnect, pending acknowledgement/dismissal, history naming, partial-save retry and an external identity change. `TORQUE_PROFILE_SKIP_PTY=1` skips the supervisor; explicit generic Engineer creation still opens local sessions. It removes its Engineers afterward. Run after `make ui-check`; no commercial provider or native Tauri window is exercised.

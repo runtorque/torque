@@ -755,6 +755,63 @@ describe('workspace shell', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Agent settings' })).not.toBeInTheDocument());
   });
 
+  it('rejects whitespace names before writes and retains refused Engineer renames', async () => {
+    const frame: StateFrame = { ...compactStateFixture, agents: { engineer: { id: 'engineer', name: 'Original', group: 'Foundation', kind: 'engineer', status: 'idle' } } };
+    const commands: TorqueCommand[] = []; let refuse = true;
+    vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => {
+      const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand; commands.push(command);
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(refuse ? { ok: false, error: "Engineer 'Taken' already exists" } : { ok: true, data: command.cmd === 'rename_engineer' ? { id: 'engineer', kind: 'engineer', name: command.new_name } : { type: 'ok' } }) });
+    }));
+    renderShell(browserHost, frame); fireEvent.click(screen.getByRole('button', { name: /Agents/ })); fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    const name = screen.getByRole('textbox', { name: 'Name' });
+    fireEvent.change(name, { target: { value: '   ' } }); fireEvent.change(screen.getByLabelText('Icon'), { target: { value: 'gear' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Name is required.'); expect(name).toHaveFocus(); expect(commands).toHaveLength(0);
+    fireEvent.change(name, { target: { value: 'Taken' } }); fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent("Engineer 'Taken' already exists"); await waitFor(() => expect(screen.getByRole('alert')).toHaveFocus()); expect(name).toHaveValue('Taken'); expect(screen.getByLabelText('Icon')).toHaveValue('gear');
+    expect(commands).toEqual([{ cmd: 'rename_engineer', id: 'engineer', new_name: 'Taken' }]);
+    refuse = false; fireEvent.change(name, { target: { value: '  Available  ' } }); fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Agent settings' })).not.toBeInTheDocument());
+    expect(commands.slice(1)).toEqual([{ cmd: 'rename_engineer', id: 'engineer', new_name: 'Available' }, { cmd: 'update_agent', id: 'engineer', icon: 'gear' }]);
+  });
+
+  it('waits for a matching Engineer rename acknowledgement before closing or saving other fields', async () => {
+    const frame: StateFrame = { ...compactStateFixture, agents: { engineer: { id: 'engineer', name: 'Original', group: 'Foundation', kind: 'engineer', status: 'idle' } } };
+    const commands: TorqueCommand[] = []; let release: (frame: UnknownRecord) => void = () => { throw new Error('Rename not pending'); };
+    vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => {
+      const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand; commands.push(command);
+      return new Promise((resolve) => { release = (data) => resolve({ ok: true, json: () => Promise.resolve({ ok: true, data }) }); });
+    }));
+    renderShell(browserHost, frame); fireEvent.click(screen.getByRole('button', { name: /Agents/ })); fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    const name = screen.getByRole('textbox', { name: 'Name' }); fireEvent.change(name, { target: { value: 'Renamed' } }); fireEvent.change(screen.getByLabelText('Icon'), { target: { value: 'gear' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+    expect(screen.getByRole('button', { name: 'Saving settings…' })).toBeDisabled(); expect(name).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Close dialog' })); fireEvent.keyDown(screen.getByRole('dialog', { name: 'Agent settings' }), { key: 'Escape' }); fireEvent.submit(name.closest('form')!);
+    expect(screen.getByRole('dialog', { name: 'Agent settings' })).toBeInTheDocument(); expect(commands).toHaveLength(1);
+    await act(async () => { release({ id: 'different-engineer', kind: 'engineer', name: 'Renamed' }); await Promise.resolve(); });
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not confirm the Engineer rename'); expect(name).toHaveValue('Renamed'); expect(name).not.toBeDisabled(); expect(commands).toHaveLength(1);
+  });
+
+  it('retries unfinished settings without replaying acknowledged identity edits and permits an explicit rename back', async () => {
+    const frame: StateFrame = { ...compactStateFixture, agents: { engineer: { id: 'engineer', name: 'Original', group: 'Foundation', kind: 'engineer', status: 'idle' } } };
+    const commands: TorqueCommand[] = []; let refuseSettings = true;
+    vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => {
+      const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand; commands.push(command);
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(command.cmd === 'update_agent_settings' && refuseSettings ? { ok: false, error: 'Settings refused' } : { ok: true, data: command.cmd === 'rename_engineer' ? { id: 'engineer', kind: 'engineer', name: command.new_name } : { type: 'ok' } }) });
+    }));
+    const { appStore } = renderShell(browserHost, frame); fireEvent.click(screen.getByRole('button', { name: /Agents/ })); fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    const name = screen.getByRole('textbox', { name: 'Name' }); fireEvent.change(name, { target: { value: 'Renamed' } }); fireEvent.change(screen.getByLabelText('Icon'), { target: { value: 'gear' } }); fireEvent.change(screen.getByLabelText('Model'), { target: { value: 'new-model' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save settings' })); expect(await screen.findByRole('alert')).toHaveTextContent('Identity changes were saved. Settings refused');
+    act(() => { appStore.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: 11, ops: [{ op: 'agent_upsert', id: 'engineer', name: 'External name', icon: 'external', kind: 'engineer', group: 'Foundation', status: 'idle' }] })); });
+    expect(screen.getByRole('heading', { name: 'External name', hidden: true })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Save settings' })); await waitFor(() => expect(commands.filter((command) => command.cmd === 'update_agent_settings')).toHaveLength(2));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Settings refused'); expect(commands.filter((command) => command.cmd === 'rename_engineer')).toHaveLength(1); expect(commands.filter((command) => command.cmd === 'update_agent')).toHaveLength(1);
+    refuseSettings = false; fireEvent.change(name, { target: { value: 'Original' } }); fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Agent settings' })).not.toBeInTheDocument());
+    expect(commands.filter((command) => command.cmd === 'rename_engineer')).toEqual([{ cmd: 'rename_engineer', id: 'engineer', new_name: 'Renamed' }, { cmd: 'rename_engineer', id: 'engineer', new_name: 'Original' }]);
+    expect(commands.filter((command) => command.cmd === 'update_agent')).toHaveLength(1);
+  });
+
   it('opens Phase 4 Planning, lazy-loads its resources, and creates an initiative', async () => {
     const writes: TorqueCommand[] = [];
     vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => {

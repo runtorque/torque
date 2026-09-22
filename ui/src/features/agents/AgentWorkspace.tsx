@@ -1,7 +1,7 @@
 import { savedWindowBounds } from '../../host/windowState';
 import { providerChoices } from '../control/providerChoices';
 import { readCommand } from '../../protocol/http';
-import { useId, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type ReactNode } from 'react';
 
 import type { TorqueCommand } from '../../protocol';
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
@@ -166,6 +166,7 @@ function OrganizationForm({ agent, agents, groups, sendCommand, onUnavailable, o
 
 interface SettingsFormProps {
   agent: AgentViewModel;
+  onSavingChange: (saving: boolean) => void;
   rawSettings: unknown;
   rawDigestSettings: unknown;
   resolvedSettings: unknown;
@@ -208,7 +209,7 @@ function settingText(value: unknown): string {
   return text(value);
 }
 
-function SettingsForm({ agent, rawSettings, rawDigestSettings, resolvedSettings, onClose }: SettingsFormProps) {
+function SettingsForm({ agent, rawSettings, rawDigestSettings, resolvedSettings, onClose, onSavingChange }: SettingsFormProps) {
   const dispatch = useAppDispatch();
   const providers = useAppSelector(selectProviders);
   const instance = useId();
@@ -217,10 +218,16 @@ function SettingsForm({ agent, rawSettings, rawDigestSettings, resolvedSettings,
   const [resolved] = useState(() => asRecord(resolvedSettings));
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const saveErrorElement = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (saveError && saveError !== 'Name is required.' && !saving) saveErrorElement.current?.focus();
+  }, [saveError, saving]);
   const savingRef = useRef(false);
   const entry = (key: string) => asRecord(resolved[key]);
   const effective = (key: string, digest = false) => settingText(entry(key).value ?? (digest ? digestSettings[key] : settings[key]));
   const [name, setName] = useState(agent.name);
+  const nameInput = useRef<HTMLInputElement>(null);
+  const identityBaseline = useRef({ name: agent.name, icon: text(agent.raw.icon), tab_color: text(agent.raw.tab_color) });
   const [icon, setIcon] = useState(text(agent.raw.icon));
   const [tabColor, setTabColor] = useState(text(agent.raw.tab_color));
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(
@@ -268,12 +275,17 @@ function SettingsForm({ agent, rawSettings, rawDigestSettings, resolvedSettings,
   return (
     <form className={styles.settingsForm} onSubmit={(event) => {
       event.preventDefault();
-      const identityChanges: Record<string, unknown> = {};
-      if (name.trim() !== agent.name) identityChanges.name = name.trim();
-      if (icon.trim() !== text(agent.raw.icon)) identityChanges.icon = icon.trim();
-      if (tabColor.trim() !== text(agent.raw.tab_color)) identityChanges.tab_color = tabColor.trim();
       if (savingRef.current) return;
+      const nextName = name.trim();
+      if (!nextName) { setSaveError('Name is required.'); nameInput.current?.focus(); return; }
+      const identityChanges: Record<string, string> = {};
       const commands: TorqueCommand[] = [];
+      if (nextName !== identityBaseline.current.name) {
+        if (agent.kind === 'engineer') commands.push({ cmd: 'rename_engineer', id: agent.id, new_name: nextName });
+        else identityChanges.name = nextName;
+      }
+      if (icon.trim() !== identityBaseline.current.icon) identityChanges.icon = icon.trim();
+      if (tabColor.trim() !== identityBaseline.current.tab_color) identityChanges.tab_color = tabColor.trim();
       if (Object.keys(identityChanges).length) commands.push({ cmd: 'update_agent', id: agent.id, ...identityChanges });
       const changes: Record<string, string | number | boolean | null> = {};
       for (const [key, value] of Object.entries(values)) {
@@ -300,21 +312,32 @@ function SettingsForm({ agent, rawSettings, rawDigestSettings, resolvedSettings,
       if (agent.kind === 'engineer' && JSON.stringify(nextSpecs) !== JSON.stringify(currentSpecs)) commands.push({ cmd: 'set_engineer_specializations', engineer_id: agent.id, specializations: nextSpecs });
       if (relaunch) commands.push({ cmd: 'relaunch_agent', id: agent.id });
       if (!commands.length) { onClose(); return; }
-      savingRef.current = true; setSaving(true); setSaveError('');
+      savingRef.current = true; setSaving(true); onSavingChange(true); setSaveError('');
       void (async () => {
+        let identitySaved = false;
         try {
           for (const command of commands) {
             const frame = await readCommand(command, new AbortController().signal);
+            if (command.cmd === 'rename_engineer') {
+              if (frame.id !== agent.id || frame.name !== command.new_name || frame.kind !== 'engineer') throw new Error('Could not confirm the Engineer rename. Your changes are retained.');
+              identityBaseline.current.name = nextName;
+              identitySaved = true;
+            } else if (command.cmd === 'update_agent') {
+              Object.assign(identityBaseline.current, identityChanges);
+              identitySaved = true;
+            }
             if (frame.type !== 'state') dispatch(projectionActions.auxiliaryResourceReceived(frame));
           }
           onClose();
-        } catch (cause) { setSaveError(cause instanceof Error ? cause.message : 'Could not save settings. Your changes are retained.'); }
-        finally { savingRef.current = false; setSaving(false); }
+        } catch (cause) {
+          const message = cause instanceof Error ? cause.message : 'Could not save settings. Your changes are retained.';
+          setSaveError(`${identitySaved ? 'Identity changes were saved. ' : ''}${message}`);
+        } finally { savingRef.current = false; setSaving(false); onSavingChange(false); }
       })();
     }}>
-      {saveError ? <p role="alert">{saveError}</p> : null}
+      {saveError ? <p role="alert" ref={saveErrorElement} tabIndex={-1}>{saveError}</p> : null}
       <fieldset disabled={saving} style={{ border: 0, margin: 0, padding: 0 }}>
-      <section className={styles.settingsSection}><h3>Identity</h3><div className={styles.formGrid}><label>Name<input value={name} onChange={(event) => setName(event.target.value)} required /></label><label>Icon<input value={icon} onChange={(event) => setIcon(event.target.value)} placeholder="optional icon" /></label><label>Tab color<input value={tabColor} onChange={(event) => setTabColor(event.target.value)} placeholder="#6172f3" /></label></div></section>
+      <section className={styles.settingsSection}><h3>Identity</h3><div className={styles.formGrid}><label>Name<input ref={nameInput} aria-invalid={saveError === 'Name is required.'} value={name} onChange={(event) => setName(event.target.value)} required /></label><label>Icon<input value={icon} onChange={(event) => setIcon(event.target.value)} placeholder="optional icon" /></label><label>Tab color<input value={tabColor} onChange={(event) => setTabColor(event.target.value)} placeholder="#6172f3" /></label></div></section>
       {['architect', 'engineer'].includes(agent.kind) ? <>
         <section className={styles.settingsSection}><h3>Launch and behavior</h3><div className={styles.formGrid}>{principalSettingFields.map(([key, label, type]) => control(key, label, type))}{agent.kind === 'engineer' ? engineerSettingFields.map(([key, label, type]) => control(key, label, type)) : null}</div></section>
         {agent.kind === 'engineer' ? <section className={styles.settingsSection}><h3>Specializations</h3><label>Ordered specialization slugs<textarea value={specializations} onChange={(event) => setSpecializations(event.target.value)} rows={3} placeholder="ui-ux, frontend" /></label></section> : null}
@@ -350,6 +373,7 @@ interface FocusPanelProps {
 
 function FocusPanel({ agent, terminal, detachedTerminal, messages, rawSettings, rawDigestSettings, resolvedSettings, host, sendCommand, onUnavailable, onDetachAgent, onInspectWorktree, onOrganize, onRemove, active = true, terminalOnly = false, directMessagesHeight = 0, composeHeight = 0 }: FocusPanelProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsSaving = useRef(false);
   const run = (command: Record<string, unknown>) => { if (!sendCommand(command as { cmd: string })) onUnavailable(); };
   const focusDetached = () => {
     const label = text(detachedTerminal?.label);
@@ -397,8 +421,8 @@ function FocusPanel({ agent, terminal, detachedTerminal, messages, rawSettings, 
           : <TerminalWorkspace agent={agent} terminal={terminal} messages={messages} sendCommand={sendCommand} onUnavailable={onUnavailable} showConversation={!terminalOnly && agent.cellType === 'agent'} active={active} directMessagesHeight={directMessagesHeight} composeHeight={composeHeight} />}
       </div>
 
-      <ModalDialog title="Agent settings" description={`${agent.kind} · ${agent.id}`} size="large" isOpen={settingsOpen} onOpenChange={setSettingsOpen}>
-        <SettingsForm agent={agent} rawSettings={rawSettings} rawDigestSettings={rawDigestSettings} resolvedSettings={resolvedSettings} sendCommand={sendCommand} onUnavailable={onUnavailable} onClose={() => setSettingsOpen(false)} />
+      <ModalDialog title="Agent settings" description={`${agent.kind} · ${agent.id}`} size="large" isOpen={settingsOpen} onOpenChange={(open) => { if (!settingsSaving.current) setSettingsOpen(open); }}>
+        <SettingsForm onSavingChange={(saving) => { settingsSaving.current = saving; }} agent={agent} rawSettings={rawSettings} rawDigestSettings={rawDigestSettings} resolvedSettings={resolvedSettings} sendCommand={sendCommand} onUnavailable={onUnavailable} onClose={() => setSettingsOpen(false)} />
       </ModalDialog>
     </section>
   );

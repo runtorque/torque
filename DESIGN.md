@@ -2822,6 +2822,15 @@ scope.
 - Persistence: Existing server newline normalization remains authoritative on reload. The minimal daemon/CLI YAML readers recognize serializer-produced empty lists/maps, so clearing transitions/terminals or using an empty inline agent does not make the saved definition unreadable. Quoted collection text remains text. Serializer-generated quoted scalars stay on one physical line, and both readers decode YAML escapes, preserving multiline prompts with emoji/trailing spaces and multiline non-prompt strings.
 - Verification: Token/component tests cover exact text, inert markup, composition event forwarding and input continuity. Isolated browser acceptance covers native insertion/undo, wide/compact wrapping, pointer resize, scroll geometry, reconnect, forced colors, failed saves, unchanged save payloads and preview. Temporary-file backend tests cover empty-collection save/read/preview and offline parser agreement. Full native IME/device and provider-effect acceptance remain separate gates.
 
+### D-121 — Engineer identity edits use validated, acknowledged commands
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: Agent Settings rejects trimmed-empty names before any write. Engineer names use `rename_engineer`, preserving its duplicate-name validation, slug, history and session behavior. Presentation edits remain sparse `update_agent` writes without an Engineer name field. A rename must acknowledge the intended ID, name and kind before later settings are submitted.
+- Recovery: Failed renames retain the entire draft. Successfully acknowledged name/icon/color edits establish the mounted editor's new baseline, so retrying later failed settings does not replay them or overwrite another operator's subsequent identity changes. Explicitly editing the name back to its original value remains a new rename. Partial success is reported. Request failures focus and reveal the error in the long form; blank-name validation focuses the Name field. Close, Escape, outside dismissal and duplicate submission cannot discard a pending save.
+- Limits: This is not an atomic transaction across identity, launch, digest and specialization commands. Broader per-agent settings refresh, numeric validation and non-identity partial-save recovery remain separate acceptance gates. Server conflict detection and process-crash/lost-acknowledgement recovery are not claimed.
+- Verification: Component tests cover blank/duplicate refusal, matching acknowledgement, pending dismissal, identity retry and explicit reversal; isolated browser acceptance exercises real duplicate validation, reconnect continuity and retained settings after a partial save. Executed evidence is recorded in the parity ledger.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:
