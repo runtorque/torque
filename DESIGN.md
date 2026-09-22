@@ -2738,6 +2738,14 @@ scope.
 - Constraints: Reads pause during writes; aborted or late reads cannot replace acknowledged settings. A failed refresh retains the previous form and offers retry. Hidden Settings issues no refresh reads. Arrays are reconciled as whole values. This does not provide server-side conflict detection, persistence after dismissal or crash recovery.
 - Verification: Component tests cover reconciliation, refreshed defaults, pending resets, failed reads, hidden tabs and a late read after Save. Isolated browser acceptance reconnects the real WebSocket, checks form identity/caret and persists merged values through the daemon.
 
+### D-111 — Context refresh and writes preserve the active editor
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: Active Context uses correlated list requests on entry, Apply and reconnect. Reconnect reuses applied filters; typing does not change the current query. Incoming records refresh untouched editor fields without replacing local changes, focus or caret. Publishing, editing and pinning wait for a matching entry acknowledgement. Existing-entry writes include only changed fields; failures retain the draft and selection for retry. Entry types match the backend: finding, decision, warning, handoff and note. Title/content inputs respect the 200/4000-character limits. Detail shows expiry, and pinning is described as ranking rather than extending retention.
+- Constraints: Hidden Context aborts reads. Reads pause while a mutation is pending. A failed list refresh after a successful publish retries only the list, preserving the acknowledged entry. New-entry agent links are captured when editing begins. Group changes reset the workspace to prevent cross-group drafts. This does not provide crash/lost-acknowledgement recovery or server-side conflict detection; task/pipeline attachment controls remain a separate parity gap.
+- Verification: Component coverage checks targets, applied filters, draft reconciliation, failed and mismatched acknowledgements, pin retry and hidden cancellation. Real-daemon browser acceptance checks WebSocket reconnect, sparse persistence, failed reads/writes and a successful publish followed by failed refresh.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

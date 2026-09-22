@@ -144,6 +144,10 @@ This opt-in test refuses the default port/profile, launches `ui/e2e/fixtures/str
 
 `settings-reconnect-live.spec.ts` and `settings-validation-live.spec.ts` run against the disposable PTY-disabled profile after `make ui-check`. The reconnect scenario changes server settings while local edits and a section reset are pending, closes the real WebSocket, and checks untouched values, nested map additions/removals, input identity, focus and caret. It injects a refresh failure, retries in place, saves and verifies the merged values through backend reads; hidden Settings must issue no refresh reads. The validation scenario checks numeric boundaries and retry after a partial save. These checks do not certify provider runtime effects or recovery after a process crash.
 
+### Shared Context acknowledgement and reconnect regression
+
+`context-live.spec.ts` uses the disposable PTY-disabled profile. It changes an entry through a second client, reconnects the real WebSocket, and checks that untouched fields refresh while local content, focus, caret and unapplied search remain intact. It injects list, edit, publish and pin failures; verifies sparse persisted edits; and checks that retrying a failed list after successful publication creates no duplicate. Hidden Context must issue no reads. Optional task/pipeline links and History reconnect remain separate acceptance rows.
+
 ## Classic burn-in and retirement
 
 The Torque maintainers own the fallback. `/legacy/` and classic writes remain

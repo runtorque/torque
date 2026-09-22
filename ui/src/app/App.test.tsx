@@ -802,24 +802,17 @@ describe('workspace shell', () => {
     expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();
   });
 
-  it('publishes and pins shared memory from the Control Center Context panel', async () => {
-    const { appStore, sendCommand } = renderShell();
+  it('loads shared memory through the active Control Center Context panel', async () => {
+    const fetcher = vi.fn<(url: string, options?: RequestInit) => Promise<{ ok: boolean; json: () => Promise<UnknownRecord> }>>(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: 'memory_entries', group_name: 'Foundation', entries: [{ id: 'memory-1', title: 'Release constraint', content: 'Never deploy from a worker.', entry_type: 'warning', scope_kind: 'group', scope_ref: 'Foundation', pinned: false }] } }) }));
+    vi.stubGlobal('fetch', fetcher); const { appStore } = renderShell();
     fireEvent.click(screen.getByRole('button', { name: /Control/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Context' }));
-    expect(sendCommand).toHaveBeenCalledWith(expect.objectContaining({ cmd: 'memory_list', group_name: 'Foundation' }));
-    act(() => {
-      appStore.dispatch(projectionActions.auxiliaryResourceReceived({
-        type: 'memory_entries', group_name: 'Foundation', entries: [{ id: 'memory-1', title: 'Release constraint', content: 'Never deploy from a worker.', entry_type: 'constraint', scope_kind: 'group', scope_ref: 'Foundation', pinned: false }],
-      }));
-    });
-    expect(screen.getAllByText('Never deploy from a worker.')).toHaveLength(2);
-    fireEvent.click(screen.getByRole('button', { name: 'Pin' }));
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'memory_pin', entry_id: 'memory-1' });
-    fireEvent.click(screen.getByRole('button', { name: '＋ Add context' }));
-    fireEvent.change(screen.getByRole('textbox', { name: 'Content' }), { target: { value: 'Keep the migration reversible.' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Publish context' }));
-    expect(sendCommand).toHaveBeenCalledWith(expect.objectContaining({ cmd: 'memory_publish', content: 'Keep the migration reversible.', scope_kind: 'group', scope_ref: 'Foundation' }));
-    expect(sendCommand).toHaveBeenLastCalledWith(expect.objectContaining({ cmd: 'memory_list', group_name: 'Foundation' }));
+    expect(await screen.findAllByText('Never deploy from a worker.')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Mission Control' }));
+    const memoryReads = () => fetcher.mock.calls.filter(([, options]) => typeof options?.body === 'string' && options.body.includes('memory_list')).length;
+    const reads = memoryReads();
+    await act(async () => { appStore.dispatch(connectionActions.connected({ at: 3_000, reconnect: true })); await Promise.resolve(); });
+    expect(memoryReads()).toBe(reads);
   });
 
   it('restores the original role-specific Architect activity panel', () => {

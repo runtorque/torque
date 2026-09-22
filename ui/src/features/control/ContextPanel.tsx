@@ -1,17 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+
+import { useAppSelector } from '../../app/hooks';
+import { selectConnection } from '../../app/store';
+import { readCommand } from '../../protocol/http';
 
 import { Button, StateSurface } from '../../design/primitives';
 import type { TorqueCommand, UnknownRecord } from '../../protocol';
 import styles from './ControlCenter.module.css';
 
-const MEMORY_TYPES = ['note', 'decision', 'constraint', 'finding', 'summary', 'handoff'] as const;
+const MEMORY_TYPES = ['finding', 'decision', 'warning', 'handoff', 'note'] as const;
 type ContextFocus = 'all' | 'group' | 'agent' | 'task' | 'pipeline' | 'project';
 
 interface ContextPanelProps {
   group: string;
   agents: UnknownRecord[];
-  responses: Record<string, unknown>;
-  send: (command: TorqueCommand) => void;
 }
 
 interface MemoryDraft {
@@ -51,7 +53,12 @@ function emptyDraft(group: string): MemoryDraft {
   return { entryId: '', title: '', content: '', entryType: 'note', scopeKind: 'group', scopeRef: group, pinned: false };
 }
 
-export function ContextPanel({ group, agents, responses, send }: ContextPanelProps) {
+function memoryDraft(entry: UnknownRecord, group: string): MemoryDraft {
+  return { entryId: text(entry.id), title: text(entry.title), content: text(entry.content), entryType: text(entry.entry_type, 'note'), scopeKind: text(entry.scope_kind, 'group'), scopeRef: text(entry.scope_ref, group), pinned: bool(entry.pinned) };
+}
+
+export function ContextPanel({ group, agents }: ContextPanelProps) {
+  const connection = useAppSelector(selectConnection);
   const [search, setSearch] = useState('');
   const [entryType, setEntryType] = useState('');
   const [focus, setFocus] = useState<ContextFocus>('all');
@@ -60,63 +67,103 @@ export function ContextPanel({ group, agents, responses, send }: ContextPanelPro
   const [selectedId, setSelectedId] = useState('');
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<MemoryDraft>(() => emptyDraft(group));
-
-  const queryTarget = focus === 'agent' ? scopeRef : focus === 'all' ? group : focus === 'group' ? group : scopeRef;
-  const refresh = () => {
-    const command: TorqueCommand = { cmd: 'memory_list', group_name: group, search, entry_type: entryType, pinned_only: pinnedOnly, limit: 100 };
-    if (focus === 'agent' && scopeRef) Object.assign(command, { linked_target_kind: 'agent', linked_target_ref: scopeRef });
-    else if (focus === 'group') Object.assign(command, { scope_kind: 'group', scope_ref: group });
-    else if (focus !== 'all' && scopeRef) Object.assign(command, { scope_kind: focus, scope_ref: scopeRef });
-    send(command);
+  const [baseline, setBaseline] = useState<MemoryDraft | null>(null);
+  const [agentLink, setAgentLink] = useState('');
+  const [applied, setApplied] = useState({ search: '', entryType: '', focus: 'all' as ContextFocus, scopeRef: '', pinnedOnly: false });
+  const [entries, setEntries] = useState<UnknownRecord[]>([]);
+  const [previousEntries, setPreviousEntries] = useState(entries);
+  const [loaded, setLoaded] = useState(false);
+  const [readError, setReadError] = useState('');
+  const [writeError, setWriteError] = useState('');
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const mutation = useRef<AbortController | null>(null);
+  const activeRead = useRef<AbortController | null>(null);
+  useEffect(() => () => mutation.current?.abort(), []);
+  if (previousEntries !== entries) {
+    setPreviousEntries(entries);
+    const latest = baseline && entries.find((entry) => text(entry.id) === baseline.entryId);
+    if (editing && latest && baseline) {
+      const next = memoryDraft(latest, group);
+      setDraft({ ...next, ...Object.fromEntries(Object.entries(draft).filter(([key, value]) => value !== baseline[key as keyof MemoryDraft])) });
+      setBaseline(next);
+    }
+  }
+  const query = useMemo(() => {
+    const command: TorqueCommand = { cmd: 'memory_list', group_name: group, search: applied.search, entry_type: applied.entryType, pinned_only: applied.pinnedOnly, limit: 100 };
+    if (applied.focus === 'agent' && applied.scopeRef) Object.assign(command, { linked_target_kind: 'agent', linked_target_ref: applied.scopeRef });
+    else if (applied.focus === 'group') Object.assign(command, { scope_kind: 'group', scope_ref: group });
+    else if (applied.focus !== 'all' && applied.scopeRef) Object.assign(command, { scope_kind: applied.focus, scope_ref: applied.scopeRef });
+    return command;
+  }, [group, applied]);
+  const refresh = () => setRefreshVersion((value) => value + 1);
+  useEffect(() => {
+    if (connection.status !== 'connected' || busy) return;
+    const controller = new AbortController(); activeRead.current = controller;
+    void readCommand(query, controller.signal).then((frame) => {
+      if (controller.signal.aborted || mutation.current) return;
+      if (frame.type !== 'memory_entries' || !Array.isArray(frame.entries) || frame.group_name !== group) throw new Error(text(frame.message, 'Could not load matching shared context.'));
+      setEntries(list(frame.entries)); setLoaded(true); setReadError('');
+    }).catch((cause: unknown) => { if (!controller.signal.aborted) setReadError(cause instanceof Error ? cause.message : 'Context refresh failed.'); });
+    return () => controller.abort();
+  }, [query, group, connection.status, connection.reconnectCount, refreshVersion, busy]);
+  const applyFilters = () => { setApplied({ search, entryType, focus, scopeRef, pinnedOnly }); refresh(); };
+  const mutate = async (command: TorqueCommand, editingEntry = false) => {
+    if (mutation.current) return;
+    activeRead.current?.abort();
+    const controller = new AbortController(); mutation.current = controller; setBusy(true); setWriteError('');
+    try {
+      const frame = await readCommand(command, controller.signal);
+      if (controller.signal.aborted) return;
+      const entry = record(frame.entry);
+      if (frame.type !== 'memory_entry' || !text(entry.id) || (command.entry_id && entry.id !== command.entry_id)) throw new Error(text(frame.message, 'The context update was not acknowledged.'));
+      setEntries((current) => [entry, ...current.filter((item) => item.id !== entry.id)]); setSelectedId(text(entry.id));
+      if (editingEntry) { setEditing(false); setBaseline(null); setDraft(emptyDraft(group)); }
+    } catch (cause: unknown) {
+      if (!controller.signal.aborted) setWriteError(cause instanceof Error ? cause.message : 'Context update failed.');
+    } finally { mutation.current = null; if (!controller.signal.aborted) { setBusy(false); refresh(); } }
+  };
+  const publish = () => {
+    const values = { title: draft.title, content: draft.content, entry_type: draft.entryType, scope_kind: draft.scopeKind, scope_ref: draft.scopeRef, pinned: draft.pinned };
+    const before = baseline ? { title: baseline.title, content: baseline.content, entry_type: baseline.entryType, scope_kind: baseline.scopeKind, scope_ref: baseline.scopeRef, pinned: baseline.pinned } : null;
+    const changes = before ? Object.fromEntries(Object.entries(values).filter(([key, value]) => value !== before[key as keyof typeof before])) : values;
+    void mutate({ cmd: 'memory_publish', ...changes, ...(draft.entryId ? { entry_id: draft.entryId } : { source_kind: 'manual', ...(agentLink ? { link_targets: [{ target_kind: 'agent', target_ref: agentLink }] } : {}) }) }, true);
   };
 
-  useEffect(() => {
-    refresh();
-    // Filters are applied explicitly to avoid issuing a request per keystroke.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [group]);
-
-  const frame = record(responses[`memory_entries:${queryTarget || group}`] ?? responses['memory_entries:latest']);
-  const entries = list(frame.entries);
   const selected = entries.find((entry) => text(entry.id) === selectedId) ?? entries[0] ?? null;
   const selectedVisibleId = selected ? text(selected.id) : '';
-  const resetEditor = () => { setDraft(emptyDraft(group)); setEditing(false); };
-  const edit = (entry: UnknownRecord) => {
-    setDraft({
-      entryId: text(entry.id), title: text(entry.title), content: text(entry.content),
-      entryType: text(entry.entry_type, 'note'), scopeKind: text(entry.scope_kind, 'group'),
-      scopeRef: text(entry.scope_ref, group), pinned: bool(entry.pinned),
-    });
-    setEditing(true);
-  };
+  const resetEditor = () => { setDraft(emptyDraft(group)); setBaseline(null); setEditing(false); setWriteError(''); };
+  const edit = (entry: UnknownRecord) => { const value = memoryDraft(entry, group); setDraft(value); setBaseline(value); setEditing(true); setWriteError(''); };
+  const create = () => { setDraft({ ...emptyDraft(group), scopeKind: focus === 'all' || focus === 'agent' ? 'group' : focus, scopeRef: focus === 'all' || focus === 'agent' || focus === 'group' ? group : scopeRef }); setBaseline(null); setAgentLink(focus === 'agent' ? scopeRef : ''); setEditing(true); setWriteError(''); };
 
   return <div className={styles.contextPanel}>
-    <header className={styles.contextToolbar}>
+    <div><header className={styles.contextToolbar}>
       <label>Search<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search shared context" /></label>
       <label>Focus<select value={focus} onChange={(event) => { const next = event.target.value as ContextFocus; setFocus(next); setScopeRef(next === 'group' ? group : ''); }}><option value="all">All group context</option><option value="group">Group</option><option value="agent">Agent</option><option value="task">Task</option><option value="pipeline">Pipeline</option><option value="project">Project</option></select></label>
       {focus === 'agent' ? <label>Agent<select value={scopeRef} onChange={(event) => setScopeRef(event.target.value)}><option value="">Choose an agent…</option>{agents.filter((agent) => text(agent.cell_type, 'agent') !== 'terminal').map((agent) => <option key={text(agent.id)} value={text(agent.id)}>{text(agent.name, text(agent.id))}</option>)}</select></label> : focus !== 'all' && focus !== 'group' ? <label>{focus[0]?.toUpperCase()}{focus.slice(1)} reference<input value={scopeRef} onChange={(event) => setScopeRef(event.target.value)} placeholder={`${focus} ID or reference`} /></label> : null}
       <label>Type<select value={entryType} onChange={(event) => setEntryType(event.target.value)}><option value="">All types</option>{MEMORY_TYPES.map((value) => <option key={value}>{value}</option>)}</select></label>
       <label className={styles.contextCheck}><input type="checkbox" checked={pinnedOnly} onChange={(event) => setPinnedOnly(event.target.checked)} />Pinned only</label>
-      <Button onPress={refresh}>Apply</Button>
-      <Button tone="primary" onPress={() => { setDraft({ ...emptyDraft(group), scopeKind: focus === 'all' || focus === 'agent' ? 'group' : focus, scopeRef: focus === 'all' || focus === 'agent' || focus === 'group' ? group : scopeRef }); setEditing(true); }}>＋ Add context</Button>
+      <Button onPress={applyFilters}>Apply</Button>
+      <Button tone="primary" isDisabled={busy} onPress={create}>＋ Add context</Button>
     </header>
-    <div className={styles.contextSplit}>
+    {readError ? <p role="alert">Context refresh failed. Your current view and draft are retained. {readError} <Button onPress={refresh}>Retry context</Button></p> : null}
+    {writeError ? <p role="alert">{writeError} Your draft and selection are retained; retry when ready.</p> : null}
+    </div><div className={styles.contextSplit}>
       <aside className={styles.contextList} aria-label="Shared context entries">
-        <header><div><h2>Shared context</h2><p>{focus === 'all' ? group : focus}</p></div><span>{entries.length}</span></header>
-        {entries.length ? entries.map((entry) => { const id = text(entry.id); return <button key={id} aria-current={!editing && selectedVisibleId === id ? 'page' : undefined} onClick={() => { setSelectedId(id); setEditing(false); }}><span><strong>{text(entry.title, text(entry.entry_type, 'Memory'))}</strong>{bool(entry.pinned) ? <small>pinned</small> : null}</span><p>{text(entry.content, 'No content')}</p><footer><span>{text(entry.entry_type, 'note')} · {text(entry.scope_kind, 'group')}</span><time>{timestamp(entry.updated_at ?? entry.created_at)}</time></footer></button>; }) : <StateSurface title="No shared context" description="Publish a decision, constraint, finding, handoff, summary, or note for future work." />}
+        <header><div><h2>Shared context</h2><p>{applied.focus === 'all' ? group : applied.focus}</p></div><span>{entries.length}</span></header>
+        {entries.length ? entries.map((entry) => { const id = text(entry.id); return <button key={id} aria-current={!editing && selectedVisibleId === id ? 'page' : undefined} disabled={busy} onClick={() => { setSelectedId(id); resetEditor(); }}><span><strong>{text(entry.title, text(entry.entry_type, 'Memory'))}</strong>{bool(entry.pinned) ? <small>pinned</small> : null}</span><p>{text(entry.content, 'No content')}</p><footer><span>{text(entry.entry_type, 'note')} · {text(entry.scope_kind, 'group')}</span><time>{timestamp(entry.updated_at ?? entry.created_at)}</time></footer></button>; }) : <StateSurface title={loaded ? "No shared context" : readError ? "Context unavailable" : "Loading shared context"} description="Publish a finding, decision, warning, handoff, or note for future work." />}
       </aside>
       <main className={styles.contextDetail}>
         {editing ? <form className={styles.contextEditor} onSubmit={(event) => {
           event.preventDefault();
-          send({ cmd: 'memory_publish', ...(draft.entryId ? { entry_id: draft.entryId } : {}), title: draft.title, content: draft.content, entry_type: draft.entryType, scope_kind: draft.scopeKind, scope_ref: draft.scopeRef, pinned: draft.pinned, source_kind: 'manual', ...(!draft.entryId && focus === 'agent' && scopeRef ? { link_targets: [{ target_kind: 'agent', target_ref: scopeRef }] } : {}) });
-          refresh(); resetEditor();
+          publish();
         }}>
-          <header><div><span>{draft.entryId ? 'Edit shared context' : 'New shared context'}</span><h2>{draft.entryId ? draft.title || 'Untitled context' : 'Publish durable memory'}</h2></div><Button tone="quiet" type="button" onPress={resetEditor}>Cancel</Button></header>
-          <div className={styles.contextEditorGrid}><label>Title<input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="A short, scannable title" /></label><label>Type<select value={draft.entryType} onChange={(event) => setDraft({ ...draft, entryType: event.target.value })}>{MEMORY_TYPES.map((value) => <option key={value}>{value}</option>)}</select></label><label>Scope<select value={draft.scopeKind} onChange={(event) => setDraft({ ...draft, scopeKind: event.target.value, scopeRef: event.target.value === 'group' ? group : '' })}><option value="group">Group</option><option value="project">Project</option><option value="task">Task</option><option value="pipeline">Pipeline</option></select></label><label>Scope reference<input value={draft.scopeRef} onChange={(event) => setDraft({ ...draft, scopeRef: event.target.value })} required /></label><label className={styles.contextEditorContent}>Content<textarea value={draft.content} onChange={(event) => setDraft({ ...draft, content: event.target.value })} placeholder="What should future work know?" /></label><label className={styles.contextCheck}><input type="checkbox" checked={draft.pinned} onChange={(event) => setDraft({ ...draft, pinned: event.target.checked })} />Pin for ranking</label></div>
-          <footer><span>Context remains durable and available to authorized agents.</span><Button tone="primary" type="submit" isDisabled={!draft.content.trim() || !draft.scopeRef.trim()}>{draft.entryId ? 'Save context' : 'Publish context'}</Button></footer>
+          <header><div><span>{draft.entryId ? 'Edit shared context' : 'New shared context'}</span><h2>{draft.entryId ? draft.title || 'Untitled context' : 'Publish shared context'}</h2></div><Button tone="quiet" type="button" isDisabled={busy} onPress={resetEditor}>Cancel</Button></header>
+          <fieldset disabled={busy} className={styles.contextEditorGrid}><label>Title<input maxLength={200} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="A short, scannable title" /></label><label>Type<select value={draft.entryType} onChange={(event) => setDraft({ ...draft, entryType: event.target.value })}>{MEMORY_TYPES.map((value) => <option key={value}>{value}</option>)}</select></label><label>Scope<select value={draft.scopeKind} onChange={(event) => setDraft({ ...draft, scopeKind: event.target.value, scopeRef: event.target.value === 'group' ? group : '' })}><option value="group">Group</option><option value="project">Project</option><option value="task">Task</option><option value="pipeline">Pipeline</option></select></label><label>Scope reference<input value={draft.scopeRef} onChange={(event) => setDraft({ ...draft, scopeRef: event.target.value })} required /></label><label className={styles.contextEditorContent}>Content<textarea maxLength={4000} value={draft.content} onChange={(event) => setDraft({ ...draft, content: event.target.value })} placeholder="What should future work know?" /></label><label className={styles.contextCheck}><input type="checkbox" checked={draft.pinned} onChange={(event) => setDraft({ ...draft, pinned: event.target.checked })} />Pin for ranking</label></fieldset>
+          <footer><span>Context expires according to group retention. Pinning affects ranking only.</span><Button tone="primary" type="submit" isDisabled={busy || !draft.content.trim() || !draft.scopeRef.trim()}>{busy ? 'Saving…' : draft.entryId ? 'Save context' : 'Publish context'}</Button></footer>
         </form> : selected ? <article className={styles.contextEntry}>
-          <header><div><span>{text(selected.entry_type, 'note')}{bool(selected.pinned) ? ' · pinned' : ''}</span><h2>{text(selected.title, 'Untitled context')}</h2></div><div><Button tone="quiet" onPress={() => { send({ cmd: bool(selected.pinned) ? 'memory_unpin' : 'memory_pin', entry_id: text(selected.id) }); refresh(); }}>{bool(selected.pinned) ? 'Unpin' : 'Pin'}</Button><Button onPress={() => edit(selected)}>Edit</Button></div></header><p>{text(selected.content, 'No content')}</p><dl><div><dt>Source</dt><dd>{text(selected.source_name, text(selected.source_kind, 'manual'))}</dd></div><div><dt>Updated</dt><dd>{timestamp(selected.updated_at ?? selected.created_at)}</dd></div><div><dt>Scope</dt><dd>{text(selected.scope_kind, 'group')} · {text(selected.scope_ref, group)}</dd></div><div><dt>Retention</dt><dd>{text(selected.retention_kind, 'durable')}</dd></div></dl>
-        </article> : <StateSurface title="Select or add context" description="Shared context now lives in Control Center, separate from an individual agent’s operational panel." action={<Button tone="primary" onPress={() => setEditing(true)}>Add context</Button>} />}
+          <header><div><span>{text(selected.entry_type, 'note')}{bool(selected.pinned) ? ' · pinned' : ''}</span><h2>{text(selected.title, 'Untitled context')}</h2></div><div><Button tone="quiet" isDisabled={busy} onPress={() => { void mutate({ cmd: bool(selected.pinned) ? 'memory_unpin' : 'memory_pin', entry_id: text(selected.id) }); }}>{bool(selected.pinned) ? 'Unpin' : 'Pin'}</Button><Button isDisabled={busy} onPress={() => edit(selected)}>Edit</Button></div></header><p>{text(selected.content, 'No content')}</p><dl><div><dt>Source</dt><dd>{text(selected.source_name) || text(selected.source_kind, 'manual')}</dd></div><div><dt>Updated</dt><dd>{timestamp(selected.updated_at ?? selected.created_at)}</dd></div><div><dt>Scope</dt><dd>{text(selected.scope_kind, 'group')} · {text(selected.scope_ref, group)}</dd></div><div><dt>Expires</dt><dd>{selected.expires_at ? timestamp(selected.expires_at) : 'Not recorded'}</dd></div></dl>
+        </article> : <StateSurface title="Select or add context" description="Shared context now lives in Control Center, separate from an individual agent’s operational panel." action={<Button tone="primary" onPress={create}>Add context</Button>} />}
       </main>
     </div>
   </div>;
