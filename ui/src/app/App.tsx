@@ -26,6 +26,7 @@ import {
   type AppStore,
 } from './store';
 import { useWorkspaceNavigation } from './useWorkspaceNavigation';
+import { RenderTelemetry } from './RenderTelemetry';
 import { sanitizeClientError } from './clientDiagnostics';
 import { effectiveBinding, eventMatchesBinding } from './preferences';
 import styles from './App.module.css';
@@ -169,8 +170,6 @@ export function WorkspaceShell({ host, sendCommand }: WorkspaceShellProps) {
   const boundsTimer = useRef<number | null>(null);
   const sidebarResize = useRef<{ startX: number; startWidth: number } | null>(null);
   const reportedClientErrors = useRef<string[]>([]);
-  const renderSamples = useRef<number[]>([]);
-  const renderReportAt = useRef(0);
   const lastAuxiliary = connection.lastAuxiliaryFrame;
   const summary = asRecord(notices.summary);
   const unread = Number(summary.unread_total ?? summary.unread ?? 0);
@@ -230,28 +229,6 @@ export function WorkspaceShell({ host, sendCommand }: WorkspaceShellProps) {
     if (!sent) return;
     reportedClientErrors.current = [...reportedClientErrors.current.slice(-19), key];
   }, [sendCommand]);
-
-  useEffect(() => {
-    const startedAt = performance.now();
-    const frame = window.requestAnimationFrame((paintedAt) => {
-      renderSamples.current.push(Math.max(0, paintedAt - startedAt));
-      if (renderSamples.current.length > 300) renderSamples.current.shift();
-    });
-    return () => window.cancelAnimationFrame(frame);
-  });
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      if (document.hidden || connection.status !== 'connected' || !renderSamples.current.length) return;
-      const sorted = [...renderSamples.current].sort((left, right) => left - right);
-      const now = performance.now();
-      const elapsedSeconds = Math.max(1, renderReportAt.current ? (now - renderReportAt.current) / 1_000 : 30);
-      sendCommand({ cmd: 'report_frontend_render', render_per_s: renderSamples.current.length / elapsedSeconds, render_ms_p95: sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))] ?? 0 });
-      renderSamples.current = [];
-      renderReportAt.current = now;
-    }, 30_000);
-    return () => window.clearInterval(timer);
-  }, [connection.status, sendCommand]);
 
   useEffect(() => {
     if (connection.status !== 'connected') return;
@@ -671,7 +648,7 @@ export function App({ appStore, host, clientFactory }: AppProps) {
 
   return (
     <Provider store={resolvedStore}>
-      <WorkspaceShell host={resolvedHost} sendCommand={(command) => client.sendCommand(command)} />
+      <RenderTelemetry><WorkspaceShell host={resolvedHost} sendCommand={(command) => client.sendCommand(command)} /></RenderTelemetry>
     </Provider>
   );
 }

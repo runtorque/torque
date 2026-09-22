@@ -12,7 +12,7 @@ const PROXY_PATHS = [
   '/static',
 ] as const;
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, process.cwd(), 'TORQUE_');
   const daemonOrigin =
     env.TORQUE_UI_DAEMON_ORIGIN ||
@@ -22,6 +22,8 @@ export default defineConfig(({ mode }) => {
   return {
     base: './',
     plugins: [react()],
+    // Default production React omits Profiler callbacks; health requires real render timings.
+    resolve: { alias: command === 'build' ? [{ find: /^react-dom\/client$/, replacement: 'react-dom/profiling' }] : [] },
     server: {
       host: '127.0.0.1',
       port: 5173,

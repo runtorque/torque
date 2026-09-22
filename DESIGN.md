@@ -2938,6 +2938,16 @@ scope.
 - Detached windows: The panel query pins their content. They neither restore nor write the main-window preference; their existing geometry/reattachment rules remain separate.
 - Verification: Cover validation, profile isolation, full/compact snapshots, offline SQLite reads, delayed/failed durable writes, migration, multiple windows, reconnect, save ordering, retry and actual reload in the isolated browser suite. Native window lifecycle remains a separate acceptance gate.
 
+### D-133 — Report actual React render work without measurement feedback
+
+- Date: 2026-09-22
+- Status: accepted; model, production-browser and daemon-ingestion acceptance recorded under P-220/P-221.
+- Decision: A single root Profiler records committed React render work for the visible workspace subtree, including independently updating children. Production builds use React DOM's profiling renderer; development retains its normal renderer. `actualDuration` measures React render work, not animation-frame wait time, browser paint, or imperative xterm rendering. React's [Profiler contract](https://react.dev/reference/react/Profiler) defines the measurement; installed React DOM source and production-browser acceptance verify the build behavior.
+- Aggregation: Match Classic's five-second, newest-240-sample window, nearest-rank p95 and two-second report cadence. Report zero after previously observed work expires. Disconnected windows stop reporting; reconnect restarts the cadence. Collectors are local to each window and remain outside React/Redux state.
+- Transport: Use the existing HTTP command endpoint so telemetry acknowledgements do not create UI renders. Allow one outstanding report, abort stalled requests after ten seconds, discard failures, and cancel requests/timers on unmount. Reporting must never interrupt operator work.
+- Cost: Profiling adds CPU and bundle overhead. Keep one root observer and a bounded collector; verify production child updates and idle behavior instead of extrapolating from development callbacks. This is render-work telemetry, not a new long-task or paint observer.
+- Verification: Controlled rate/p95/window/cap tests, child-only component updates, failure/stall/disconnect/reconnect/cleanup tests, and production Chrome reports with an otherwise quiet WebSocket fixture and real daemon ingestion.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:
