@@ -1082,3 +1082,6 @@ Agent Settings now reads current resolved values on open/reconnect and relevant 
 ### Agent creation checkpoint
 
 Worker creation displays server-resolved role/group launch fields while retaining explicit edits. All four creation kinds now wait for matching acknowledgements, preserve failed drafts and select the returned target. Terminal creation returns an explicit ID/parent response. Identical retries reuse the existing API idempotency key; Architect hiring remains a pending approval request. P-199/P-200 and D-124 define acceptance and recovery limits; remaining parity gates still block Classic retirement.
+
+
+Agent creation now discovers classes in the pinned group's project through an owned, correlated read. Reconnect retains drafts and selection while checking availability; stale, archived or invalid explicit choices block launch until corrected. P-201 and D-125 preserve explicit-path/legacy discovery compatibility and leave backend launch validation authoritative.

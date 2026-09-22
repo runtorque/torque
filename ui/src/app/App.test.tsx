@@ -578,7 +578,7 @@ describe('workspace shell', () => {
     const commands: TorqueCommand[] = [];
     vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => {
       const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand; commands.push(command);
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: command.cmd === 'render_template' ? { type: 'template_rendered', name: '', group: 'Foundation', config: {} } : { id: 'created-worker', name: 'UI Worker', kind: 'worker' } }) });
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: command.cmd === 'agent_class_list' ? { type: 'agent_classes', group: 'Foundation', classes: [], issues: [] } : command.cmd === 'render_template' ? { type: 'template_rendered', name: '', group: 'Foundation', config: {} } : { id: 'created-worker', name: 'UI Worker', kind: 'worker' } }) });
     }));
     const { sendCommand } = renderShell();
     fireEvent.click(screen.getByRole('button', { name: /Agents/ }));

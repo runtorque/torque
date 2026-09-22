@@ -214,3 +214,6 @@ Prompt-editor acceptance: `prompt-editor-live.spec.ts` runs against the disposab
 ### Agent creation regression
 
 `ui/e2e/agent-create-live.spec.ts` creates disposable generic agents and terminals in an isolated profile. It verifies real role/group resolution, reconnect draft preservation, refused reads/writes, pending close guards and replay of a cached creation result after simulated acknowledgement loss. Its second case checks Architect/Engineer/attached-terminal creation and reload. Temporary project files and created agents are cleaned up; run only against an isolated non-default profile.
+
+
+The Agent creation browser suite also creates two temporary projects with the same Agent Class ID and different identities. It checks scoped discovery, failed-read retry with retained caret, archive-on-reconnect refusal, a matching real launch from the second project and persisted identity after reload. Use a disposable profile; the test removes its generated agents and project files.

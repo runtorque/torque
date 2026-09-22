@@ -8,6 +8,7 @@ import { useAppSelector } from '../../app/hooks';
 import { selectConnection } from '../../app/store';
 import { createdTarget, initialLaunchDraft, resolvedLaunchDraft, validateTemplateResponse, type LaunchDraft } from './agentCreationModel';
 import type { AgentViewModel } from './model';
+import { creationClassDisabledReason, creationClassLabel, useCreationClasses } from './useCreationClasses';
 import styles from './AgentWorkspace.module.css';
 
 type CreateKind = 'architect' | 'engineer' | 'worker' | 'terminal';
@@ -105,7 +106,7 @@ export function AgentCreateDialog({
 
   useEffect(() => {
     if (!open || connection.status !== 'connected') return;
-    for (const cmd of ['list_roles', 'list_templates', 'list_specializations', 'agent_class_list']) sendCommand({ cmd, group });
+    for (const cmd of ['list_roles', 'list_templates', 'list_specializations']) sendCommand({ cmd, group });
   }, [open, group, connection.status, connection.reconnectCount, sendCommand]);
 
   const [launch, setLaunch] = useState(initialLaunchDraft);
@@ -154,8 +155,12 @@ export function AgentCreateDialog({
   useEffect(() => { if (error && !saving) errorElement.current?.focus(); }, [error, saving]);
   const requestClose = () => { if (!savingRef.current) onClose(); };
 
-  const classes = useMemo(() => optionList(catalog.agentClasses)
-    .filter((item) => !item.kind || item.kind === kind), [catalog.agentClasses, kind]);
+  const classPickerActive = kind !== 'terminal' && !(kind === 'engineer' && hiringArchitectId);
+  const classCatalog = useCreationClasses(open && classPickerActive, group, saving);
+  const classes = classCatalog.classes.filter((item) => item.base_kind === kind);
+  const selectedClass = classes.find((item) => item.id === agentClassId);
+  const registryError = classCatalog.issues.some((issue) => issue.severity === 'error') ? 'Fix the project Agent Class catalog errors before launching a class.' : '';
+  const classError = classPickerActive && agentClassId ? classCatalog.unavailable || registryError || (selectedClass ? creationClassDisabledReason(selectedClass, kind) : 'The selected Agent Class is no longer available. Choose another class or the default.') : '';
   const roleOptions = useMemo(() => {
     const byId = new Map<string, NamedOption>();
     [...optionList(catalog.roles), ...optionList(catalog.templates)].forEach((item) => { if (!byId.has(item.id)) byId.set(item.id, item); });
@@ -182,7 +187,7 @@ export function AgentCreateDialog({
 
   const submit = () => {
     const identity = name.trim();
-    if (savingRef.current || resolving || resolutionError || !identity || !group) return;
+    if (savingRef.current || resolving || resolutionError || classError || !identity || !group) return;
     const agentSettings: Record<string, unknown> = {};
     const settingValues: Record<string, unknown> = {
       provider: provider.trim(),
@@ -280,7 +285,7 @@ export function AgentCreateDialog({
         <div className={styles.formGrid}>
           <label>Kind<select aria-label="Agent kind" value={kind} onChange={(event) => { setKind(event.target.value as CreateKind); setAgentClassId(''); }}><option value="architect">Architect</option><option value="engineer">Engineer</option><option value="worker">Worker</option><option value="terminal">Terminal</option></select></label>
           <label>Name<input autoFocus value={name} onChange={(event) => setName(event.target.value)} required /></label>
-          {kind !== 'terminal' ? <label>Agent Class<select value={agentClassId} onChange={(event) => setAgentClassId(event.target.value)}><option value="">Group default</option>{agentClassId && !classes.some((item) => item.id === agentClassId) ? <option value={agentClassId}>{agentClassId}</option> : null}{classes.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label> : null}
+          {classPickerActive ? <label>Agent Class<select value={agentClassId} aria-describedby="creation-class-status" onChange={(event) => setAgentClassId(event.target.value)}><option value="">Default (no explicit Agent Class)</option>{agentClassId && !selectedClass ? <option value={agentClassId} disabled>Previously selected: {agentClassId}</option> : null}{classes.map((item) => <option key={text(item.id)} value={text(item.id)} disabled={Boolean(classCatalog.unavailable || registryError || creationClassDisabledReason(item, kind))}>{creationClassLabel(item)} · {text(item.version) || '1'} · {item.builtin ? 'built-in' : 'project'}{creationClassDisabledReason(item, kind) ? ' (unavailable)' : ''}</option>)}</select></label> : null}
           {kind === 'worker' ? <label>Role / template<select value={template} onChange={(event) => setTemplate(event.target.value)}><option value="">Group default</option>{template && !roleOptions.some((item) => item.id === template) ? <option value={template}>{template}</option> : null}{roleOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label> : null}
           {kind === 'engineer' && architects.length ? <label>Hiring Architect<select value={hiringArchitectId} onChange={(event) => setHiringArchitectId(event.target.value)}><option value="">User-owned Engineer</option>{architects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label> : null}
           {kind === 'terminal' ? <label>Parent agent<select value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">Unattached</option>{parents.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label> : null}
@@ -288,6 +293,12 @@ export function AgentCreateDialog({
         </div>
       </section>
 
+      {classPickerActive ? <section aria-label="Agent Class discovery">
+        <div className={styles.settingsStatus}><span id="creation-class-status" aria-live="polite">{classCatalog.loading ? 'Loading project Agent Classes…' : agentClassId ? 'The selected class is frozen at launch.' : 'The default launch freezes the default class for this agent kind.'}</span><Button type="button" tone="quiet" isDisabled={saving || classCatalog.loading} onPress={classCatalog.refresh}>Refresh Agent Classes</Button></div>
+        {classCatalog.error ? <p role="alert">Class discovery failed. {classCatalog.error} <Button type="button" tone="quiet" onPress={classCatalog.refresh}>Retry Agent Classes</Button></p> : null}
+        {classError && !classCatalog.error ? <p role="alert">{classError}</p> : null}
+        {classCatalog.issues.length ? <details><summary>Agent Class catalog issues ({classCatalog.issues.length})</summary>{classCatalog.issues.map((issue, index) => <p key={index}>{text(issue.message)} <small>{text(issue.path)}</small></p>)}</details> : null}
+      </section> : null}
       {kind === 'engineer' && hiringArchitectId ? <section><h3>Hire request</h3><p>The Engineer is created after approval in Planning.</p><label>Specializations<input value={specializations} onChange={(event) => setSpecializations(event.target.value)} placeholder="ordered, comma separated" /></label></section> : null}
       {!(kind === 'engineer' && hiringArchitectId) ? <section>
         <h3>Launch</h3>
@@ -336,7 +347,7 @@ export function AgentCreateDialog({
         </> : null}
       </section> : null}
 
-      <footer><Button tone="quiet" type="button" isDisabled={saving} onPress={requestClose}>Cancel</Button><Button tone="primary" type="submit" isDisabled={saving || resolving || Boolean(resolutionError) || !name.trim()}>{saving ? 'Creating…' : kind === 'engineer' && hiringArchitectId ? 'Request hire' : `Create ${kind}`}</Button></footer>
+      <footer><Button tone="quiet" type="button" isDisabled={saving} onPress={requestClose}>Cancel</Button><Button tone="primary" type="submit" isDisabled={saving || resolving || Boolean(resolutionError) || Boolean(classError) || !name.trim()}>{saving ? 'Creating…' : kind === 'engineer' && hiringArchitectId ? 'Request hire' : `Create ${kind}`}</Button></footer>
       </fieldset>
     </form>
   </ModalDialog>;

@@ -14,6 +14,7 @@ except ModuleNotFoundError:
 
 from torque.commands.agent_operations import AgentOperationRuntime, handle_agent_operation_command
 from torque.commands.catalog import CatalogCommandRuntime, handle_catalog_command
+from torque.commands.agent_classes import _handle_agent_class_command
 from torque.roles import RoleManager
 from torque.state import GroupSettings
 
@@ -59,3 +60,35 @@ class CreationParityTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(empty['config']['model'], 'group-model')
                 missing = await handle_catalog_command({'cmd': 'render_template', 'group': 'g', 'name': 'missing'}, runtime)
                 self.assertEqual(missing['type'], 'error')
+
+    async def test_class_discovery_resolves_group_and_keeps_explicit_path_compatibility(self):
+        import json
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            projects = {name: root / name for name in ('alpha', 'beta')}
+            for name, project in projects.items():
+                catalog = project / '.torque' / 'agent_classes'
+                catalog.mkdir(parents=True)
+                (catalog / 'local-worker.yaml').write_text(json.dumps({
+                    'agent_class_schema_version': 5, 'id': 'local-worker',
+                    'version': '1', 'base_kind': 'worker',
+                    'display_name': name + ' worker',
+                    'acl': {'mode': 'deny', 'rules': []},
+                }))
+            resolve = AsyncMock(side_effect=lambda group: str(projects[group]))
+            for name in projects:
+                frame = await _handle_agent_class_command({'cmd': 'agent_class_list', 'group': name}, None, None, resolve)
+                self.assertEqual(frame['group'], name)
+                self.assertEqual(frame['base_dir'], str(projects[name]))
+                local = next(item for item in frame['classes'] if item['id'] == 'local-worker')
+                self.assertEqual(local['display_name'], name + ' worker')
+                self.assertTrue(local['launchable'])
+            self.assertEqual(resolve.await_count, 2)
+            explicit = await _handle_agent_class_command({'cmd': 'agent_class_list', 'group': 'alpha', 'base_dir': str(projects['beta'])}, None, None, resolve)
+            self.assertEqual(explicit['base_dir'], str(projects['beta']))
+            self.assertEqual(resolve.await_count, 2)
+            with patch('torque.commands.agent_classes.os.getcwd', return_value=str(projects['alpha'])):
+                legacy = await _handle_agent_class_command({'cmd': 'agent_class_list'}, None, None, resolve)
+            self.assertEqual(legacy['group'], '')
+            self.assertEqual(legacy['base_dir'], str(projects['alpha']))
+            self.assertEqual(resolve.await_count, 2)

@@ -2860,6 +2860,15 @@ scope.
 - Hiring: Choosing a hiring Architect changes the action to Request hire, shows ordered specializations and explains Planning approval. A matching pending-hire acknowledgement closes the request; the UI does not invent an Engineer ID before approval.
 - Verification: Component tests cover all four kinds, nested Agent Class acknowledgement, hire requests, pending guards, refused/mismatched replies, retry keys, resolved fields, explicit overrides, cancellation and reconnect. Backend tests cover terminal acknowledgement/session failures and group-correlated role resolution. Executed browser/full-suite evidence is recorded in the parity ledger.
 
+### D-125 — Agent creation owns project-scoped class discovery
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: The creation dialog reads its Agent Class catalog over a cancellable HTTP request for its pinned group. `agent_class_list` resolves that group's project with the same resolver used by class launch, returns group/base-directory provenance and preserves explicit `base_dir` compatibility. Unscoped legacy requests retain cwd behavior. Catalog projections from other panels cannot replace the creation options.
+- Interaction: Open, reconnect and explicit refresh reread the catalog without remounting identity/configuration fields or clearing the selected class. Options show identity, version and project/built-in provenance. A selected class blocks submission while disconnected, refreshing, unavailable, archived/disabled, invalid or incompatible with the chosen kind. Catalog errors that prevent backend class resolution are shown and block explicit class launch. Failures retain data and offer Retry. Selecting Default explicitly removes the class selection and keeps the existing default launch behavior available; catalog failures do not require an explicit class for ordinary creation. Terminal creation and pending hire requests do not request a class catalog.
+- Limits: This revalidates discovery; the backend remains authoritative at launch if a file changes after the read. It does not add a frozen catalog transaction or guarantee crash recovery. Authoring and runtime-effect acceptance remain separate from discovery.
+- Verification: Real temporary-project backend fixtures cover same-ID project isolation, explicit-path precedence and legacy cwd fallback. Component tests cover response correlation, cancellation, failed reads, selection/caret preservation, availability and registry errors. Browser acceptance and executed results are recorded in the parity ledger.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

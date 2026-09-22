@@ -60,11 +60,16 @@ async def _handle_agent_class_command(
 
     cmd = str(data.get("cmd", "") or "").strip()
     if cmd == "agent_class_list":
-        base_dir = str(data.get("base_dir", "") or os.getcwd())
+        group = str(data.get("group", "") or "").strip()
+        base_dir = str(data.get("base_dir", "") or "").strip()
+        if not base_dir:
+            base_dir = (await resolve_base_dir(group) if group else "") or os.getcwd()
         classes, issues = load_agent_classes(base_dir=base_dir)
         authoring_contract = agent_class_authoring_contract()
         return {
             "type": "agent_classes",
+            "group": group,
+            "base_dir": base_dir,
             "schema_version": AGENT_CLASS_SCHEMA_VERSION,
             "classes": [
                 enriched_agent_class_preview(definition, base_dir=base_dir)

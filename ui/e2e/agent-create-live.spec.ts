@@ -68,3 +68,46 @@ test('Architect, Engineer and terminal creation acknowledge actual targets and p
   }
   expect(writes.map((data) => data.cmd)).toEqual(['add_architect', 'add_engineer', 'add_terminal']); await page.reload(); await page.getByRole('button', { name: /⌁ Agents/ }).click(); for (const id of created) await expect(page.locator(`[role="treeitem"][data-agent-id="${id}"]`)).toBeVisible();
 });
+
+test('Agent Class creation discovers the selected project and revalidates retained choices after reconnect', async ({ page, request }) => {
+  test.setTimeout(60_000); await assertIsolated(request);
+  const root = mkdtempSync(join(tmpdir(), 'torque-class-create-')); const groups = ['Alpha', 'Beta'].map((label) => `${label} class creation ${Date.now()}`);
+  const projects = ['alpha', 'beta'].map((label) => join(root, label)); const classId = 'same-local-class';
+  const definition = (label: string): Row => ({ agent_class_schema_version: 5, id: classId, version: '1', base_kind: 'engineer', display_name: `${label} Project Engineer`, acl: { mode: 'deny', rules: [] } });
+  try {
+    for (const [index, group] of groups.entries()) {
+      const project = projects[index]!; mkdirSync(join(project, '.torque', 'agent_classes'), { recursive: true });
+      await command(request, { cmd: 'add_group', group }); await command(request, { cmd: 'update_group_settings', group, settings: { default_directory: project, git_worktree: false } });
+      const saved = await command(request, { cmd: 'agent_class_create', base_dir: project, agent_class: definition(index ? 'Beta' : 'Alpha') }); expect(saved.ok).toBe(true);
+    }
+    await command(request, { cmd: 'ui_select_group', group: groups[0] });
+    let socket: WebSocketRoute | undefined; let connections = 0; let refuse = false; const discoveries: Row[] = []; const launches: Row[] = [];
+    await page.routeWebSocket(/\/ws\?/, (connection) => { connection.connectToServer(); socket = connection; connections++; });
+    const reconnect = async () => { const before = connections; await socket!.close({ code: 1012, reason: 'Class selection revalidation' }); await expect.poll(() => connections).toBeGreaterThan(before); };
+    await page.route('**/api/cmd', async (route) => {
+      const data = route.request().postDataJSON() as Row;
+      if (data.cmd === 'agent_class_list') { discoveries.push(data); if (refuse) { await route.fulfill({ json: { ok: false, error: 'Injected class discovery refusal' } }); return; } }
+      if (data.cmd === 'create_agent_from_class') {
+        launches.push(data); const result = await route.fetch(); const body = await result.json() as { ok: boolean; data: Row };
+        if (body.ok && body.data.agent) created.push(String((body.data.agent as Row).id)); await route.fulfill({ response: result }); return;
+      }
+      await route.continue();
+    });
+    const open = async () => { await page.getByRole('button', { name: 'Create agent or terminal' }).click(); await page.getByRole('menuitem', { name: 'New Engineer…' }).click(); return page.getByRole('dialog', { name: 'New engineer' }); };
+    await page.goto('/'); await page.getByRole('button', { name: /⌁ Agents/ }).click(); let dialog = await open();
+    const picker = dialog.getByRole('combobox', { name: 'Agent Class', exact: true });
+    await expect(picker.locator('option').filter({ hasText: 'Alpha Project Engineer' })).toHaveCount(1); await expect(picker.locator('option').filter({ hasText: 'Beta Project Engineer' })).toHaveCount(0); await picker.selectOption(classId);
+    const name = dialog.getByLabel('Name', { exact: true }); await name.fill('Retained Alpha draft'); await name.evaluate((node: HTMLInputElement) => node.setSelectionRange(2, 8));
+    refuse = true; await reconnect(); await expect(dialog.getByRole('alert')).toContainText('Injected class discovery refusal'); await expect(picker).toHaveValue(classId); await expect(name).toBeFocused(); expect(await name.evaluate((node: HTMLInputElement) => [node.selectionStart, node.selectionEnd])).toEqual([2, 8]); await expect(dialog.getByRole('button', { name: 'Create engineer' })).toBeDisabled();
+    refuse = false; await dialog.getByRole('button', { name: 'Retry Agent Classes' }).click(); await expect(dialog.getByRole('button', { name: 'Create engineer' })).toBeEnabled();
+    await command(request, { cmd: 'agent_class_archive', base_dir: projects[0], class_id: classId }); await reconnect(); await expect(dialog.getByRole('alert')).toContainText('Archived or disabled'); await expect(picker).toHaveValue(classId); await expect(dialog.getByRole('button', { name: 'Create engineer' })).toBeDisabled(); expect(launches).toHaveLength(0);
+    await page.screenshot({ animations: 'disabled', path: test.info().outputPath('class-selection-unavailable.png') });
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click(); await command(request, { cmd: 'ui_select_group', group: groups[1] }); await page.reload(); await page.getByRole('button', { name: /⌁ Agents/ }).click(); dialog = await open();
+    const betaPicker = dialog.getByRole('combobox', { name: 'Agent Class', exact: true }); await expect(betaPicker.locator('option').filter({ hasText: 'Beta Project Engineer' })).toHaveCount(1); await expect(betaPicker.locator('option').filter({ hasText: 'Alpha Project Engineer' })).toHaveCount(0); await betaPicker.selectOption(classId);
+    await dialog.getByLabel('Name', { exact: true }).fill('Created Beta class engineer'); await dialog.getByLabel('Provider', { exact: true }).fill('generic'); await dialog.getByLabel('Boot command').fill('/bin/cat');
+    await dialog.getByRole('button', { name: 'Create engineer' }).click(); await expect(dialog).toHaveCount(0); expect(launches).toHaveLength(1); expect(launches[0]).toMatchObject({ group: groups[1], class_id: classId });
+    const id = created.at(-1)!; await expect(page.locator(`[role="treeitem"][data-agent-id="${id}"]`)).toHaveAttribute('aria-selected', 'true');
+    const status = (await command(request, { cmd: 'agent_class_status', agent_id: id })).status as Row; expect(status).toMatchObject({ assigned_class_id: classId, effective_class_id: classId, primary_identity_label: 'Beta Project Engineer' });
+    await page.reload(); await page.getByRole('button', { name: /⌁ Agents/ }).click(); await expect(page.locator(`[role="treeitem"][data-agent-id="${id}"]`)).toBeVisible(); expect(discoveries.map((data) => data.group)).toContain(groups[0]); expect(discoveries.map((data) => data.group)).toContain(groups[1]);
+  } finally { for (const id of created.splice(0).reverse()) await command(request, { cmd: 'remove_agent', id }); rmSync(root, { recursive: true, force: true }); }
+});
