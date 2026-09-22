@@ -574,24 +574,24 @@ describe('workspace shell', () => {
     expect(screen.queryByRole('region', { name: 'Conversation with Audit Terminal' })).not.toBeInTheDocument();
   });
 
-  it('creates every agent kind from the React workspace without returning to Classic', () => {
+  it('creates a worker after matched backend acknowledgement and selects its returned ID', async () => {
+    const commands: TorqueCommand[] = [];
+    vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => {
+      const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand; commands.push(command);
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: command.cmd === 'render_template' ? { type: 'template_rendered', name: '', group: 'Foundation', config: {} } : { id: 'created-worker', name: 'UI Worker', kind: 'worker' } }) });
+    }));
     const { sendCommand } = renderShell();
     fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Create agent or terminal' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'New Worker…' }));
-
     expect(screen.getByRole('dialog', { name: 'New worker' })).toBeVisible();
     fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), { target: { value: 'UI Worker' } });
     fireEvent.change(screen.getByRole('textbox', { name: 'Provider' }), { target: { value: 'codex' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Create worker' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'Create worker' }));
-
-    expect(sendCommand).toHaveBeenCalledWith(expect.objectContaining({
-      cmd: 'add_worker',
-      name: 'UI Worker',
-      group: 'Foundation',
-      provider: 'codex',
-      worktree: false,
-    }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New worker' })).not.toBeInTheDocument());
+    expect(commands).toContainEqual(expect.objectContaining({ cmd: 'add_worker', name: 'UI Worker', group: 'Foundation', provider: 'codex', worktree: false, idempotency_key: expect.any(String) as unknown }));
+    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'ui_select_agent', id: 'created-worker' });
   });
 
   it('restores or explicitly purges agents during the seven-day deletion window', () => {

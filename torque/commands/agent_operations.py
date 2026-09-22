@@ -542,12 +542,19 @@ async def handle_agent_operation_command(
             directory=directory, tab_color=tab_color,
             parent_id=parent_id,
         )
-        if cell:
+        if not cell:
+            result = {"type": "error", "message": "Failed to create terminal"}
+        else:
             await bridge.create_session(
                 cell, env_vars=env,
                 env_file=env_file,
                 init_script=init_script,
                 shell=shell)
+            result = {
+                "type": "terminal_created", "id": cell.id,
+                "name": cell.name, "kind": "terminal", "group": cell.group,
+                "parent_id": cell.parent_id,
+            }
 
     elif cmd == "remove_agent":
         result = await _handle_remove_agent_command(

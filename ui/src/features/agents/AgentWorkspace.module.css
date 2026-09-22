@@ -124,14 +124,14 @@
 .removeDialog { display: grid; gap: 14px; }
 .removeDialog p { margin: 0; color: var(--text-dim); }
 .removeDialog footer { display: flex; justify-content: flex-end; gap: 6px; }
-.creationForm { display: grid; gap: 12px; }
+.creationForm, .creationForm > fieldset { display: grid; gap: 12px; }
 .creationForm section { display: grid; gap: 9px; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
 .creationForm section h3 { margin: 0; color: var(--text); font-size: 11px; }
 .creationForm label { display: grid; gap: 4px; min-width: 0; color: var(--text-dim); font-size: 9px; }
 .creationForm input,
 .creationForm select,
 .creationForm textarea { width: 100%; min-width: 0; }
-.creationForm > footer { position: sticky; bottom: -1px; display: flex; justify-content: flex-end; gap: 6px; padding: 9px 0 1px; background: linear-gradient(transparent, var(--background) 35%); }
+.creationForm footer { position: sticky; bottom: -1px; display: flex; justify-content: flex-end; gap: 6px; padding: 9px 0 1px; background: linear-gradient(transparent, var(--background) 35%); }
 .inlineCheck { display: flex !important; align-items: center; grid-template-columns: auto 1fr; }
 .inlineCheck input { width: auto; }
 .checkGrid { display: flex; flex-wrap: wrap; gap: 14px; }

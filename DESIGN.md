@@ -2850,6 +2850,16 @@ scope.
 - Limits: This extends D-121's identity recovery to the remaining scopes. It is not an atomic multi-command transaction, server conflict detection or crash/lost-acknowledgement recovery. Provider-specific runtime effects and exhaustive settings-field acceptance remain separate gates.
 - Verification: Model/component coverage includes cancellation, response validation, reconciliation, dirty dismissal, failed reads, explicit values and scope retries. Isolated browser acceptance and its results are recorded in the parity ledger.
 
+### D-124 — Creation resolves launch defaults and waits for target acknowledgement
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: Worker creation reads `render_template` for the current group and selected role/template, including the group default selection. The server returns the group/name with resolved configuration and refuses a missing named role. The form populates provider/command/model/effort, environment, directory/shell and worktree fields from that response; later selection/reconnect/explicit refresh updates only untouched fields. Project definitions take precedence over shadowed global names, matching launch resolution.
+- Interaction: Resolving or failed launch reads block Worker creation, retain the form and offer retry. Creation pins its group, keeps fields mounted and disabled while pending, and rejects Close/Cancel/Escape/outside dismissal and repeat submissions during that request. Failures retain values and focus the error. Architect, Engineer and Worker acknowledgements must match the requested name/kind and return an ID; Agent Class launches use their nested agent response; terminals have an explicit `terminal_created` response including ID/parent. The workspace selects the acknowledged target.
+- Recovery: Identical mounted creation payloads reuse an idempotency key. After the existing API caches a successful response, retry can retrieve that response without creating another target. Editing the payload starts a distinct attempt. This does not make server operations atomic or recover a daemon crash or a failure after partial side effects but before success caching.
+- Hiring: Choosing a hiring Architect changes the action to Request hire, shows ordered specializations and explains Planning approval. A matching pending-hire acknowledgement closes the request; the UI does not invent an Engineer ID before approval.
+- Verification: Component tests cover all four kinds, nested Agent Class acknowledgement, hire requests, pending guards, refused/mismatched replies, retry keys, resolved fields, explicit overrides, cancellation and reconnect. Backend tests cover terminal acknowledgement/session failures and group-correlated role resolution. Executed browser/full-suite evidence is recorded in the parity ledger.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

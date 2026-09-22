@@ -1,7 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Button, ModalDialog } from '../../design/primitives';
 import type { CommandSender } from '../board/BoardPanel';
+import { readCommand } from '../../protocol/http';
+import type { TorqueCommand } from '../../protocol';
+import { useAppSelector } from '../../app/hooks';
+import { selectConnection } from '../../app/store';
+import { createdTarget, initialLaunchDraft, resolvedLaunchDraft, validateTemplateResponse, type LaunchDraft } from './agentCreationModel';
 import type { AgentViewModel } from './model';
 import styles from './AgentWorkspace.module.css';
 
@@ -21,7 +26,7 @@ interface AgentCreateDialogProps {
   agents: AgentViewModel[];
   catalog: CatalogBundle;
   sendCommand: CommandSender;
-  onUnavailable: () => void;
+  onCreated: (id: string) => void;
   onClose: () => void;
 }
 
@@ -74,24 +79,21 @@ function csv(value: string): string[] {
 export function AgentCreateDialog({
   open,
   initialKind = 'worker',
-  group,
+  group: initialGroup,
   agents,
   catalog,
   sendCommand,
-  onUnavailable,
+  onCreated,
   onClose,
 }: AgentCreateDialogProps) {
+  const [group] = useState(initialGroup);
+  const connection = useAppSelector(selectConnection);
   const [kind, setKind] = useState<CreateKind>(initialKind);
   const [name, setName] = useState('');
   const [agentClassId, setAgentClassId] = useState('');
   const [template, setTemplate] = useState('');
   const [hiringArchitectId, setHiringArchitectId] = useState('');
   const [parentId, setParentId] = useState('');
-  const [provider, setProvider] = useState('');
-  const [bootCommand, setBootCommand] = useState('');
-  const [model, setModel] = useState('');
-  const [reasoningEffort, setReasoningEffort] = useState('');
-  const [fastMode, setFastMode] = useState('inherit');
   const [customInstructions, setCustomInstructions] = useState('');
   const [autonomyMode, setAutonomyMode] = useState('');
   const [specializations, setSpecializations] = useState('');
@@ -100,42 +102,87 @@ export function AgentCreateDialog({
   const [maxInterval, setMaxInterval] = useState('');
   const [heartbeatInterval, setHeartbeatInterval] = useState('');
   const [enabledEvents, setEnabledEvents] = useState('');
-  const [directory, setDirectory] = useState('');
-  const [shell, setShell] = useState('');
-  const [environment, setEnvironment] = useState('');
-  const [commandArgs, setCommandArgs] = useState('');
-  const [initScript, setInitScript] = useState('');
-  const [icon, setIcon] = useState('');
-  const [worktree, setWorktree] = useState(false);
-  const [worktreeBaseDir, setWorktreeBaseDir] = useState('');
-  const [worktreeBaseBranch, setWorktreeBaseBranch] = useState('');
-  const [worktreeName, setWorktreeName] = useState('');
-  const [autoCheckpoint, setAutoCheckpoint] = useState(true);
-  const [checkpointOnProgress, setCheckpointOnProgress] = useState(false);
-  const [mergeSquash, setMergeSquash] = useState(true);
+
+  useEffect(() => {
+    if (!open || connection.status !== 'connected') return;
+    for (const cmd of ['list_roles', 'list_templates', 'list_specializations', 'agent_class_list']) sendCommand({ cmd, group });
+  }, [open, group, connection.status, connection.reconnectCount, sendCommand]);
+
+  const [launch, setLaunch] = useState(initialLaunchDraft);
+  const editedLaunch = useRef(new Set<keyof LaunchDraft>());
+  const updateLaunch = <K extends keyof LaunchDraft>(key: K, value: LaunchDraft[K]) => {
+    editedLaunch.current.add(key); setLaunch((current) => ({ ...current, [key]: value }));
+  };
+  const { provider, bootCommand, model, reasoningEffort, fastMode, directory, shell, environment, commandArgs, initScript, icon, worktree, worktreeBaseDir, worktreeBaseBranch, worktreeName, autoCheckpoint, checkpointOnProgress, mergeSquash } = launch;
+  const setProvider = (value: LaunchDraft['provider']) => updateLaunch('provider', value);
+  const setBootCommand = (value: LaunchDraft['bootCommand']) => updateLaunch('bootCommand', value);
+  const setModel = (value: LaunchDraft['model']) => updateLaunch('model', value);
+  const setReasoningEffort = (value: LaunchDraft['reasoningEffort']) => updateLaunch('reasoningEffort', value);
+  const setFastMode = (value: LaunchDraft['fastMode']) => updateLaunch('fastMode', value);
+  const setDirectory = (value: LaunchDraft['directory']) => updateLaunch('directory', value);
+  const setShell = (value: LaunchDraft['shell']) => updateLaunch('shell', value);
+  const setEnvironment = (value: LaunchDraft['environment']) => updateLaunch('environment', value);
+  const setCommandArgs = (value: LaunchDraft['commandArgs']) => updateLaunch('commandArgs', value);
+  const setInitScript = (value: LaunchDraft['initScript']) => updateLaunch('initScript', value);
+  const setIcon = (value: LaunchDraft['icon']) => updateLaunch('icon', value);
+  const setWorktree = (value: LaunchDraft['worktree']) => updateLaunch('worktree', value);
+  const setWorktreeBaseDir = (value: LaunchDraft['worktreeBaseDir']) => updateLaunch('worktreeBaseDir', value);
+  const setWorktreeBaseBranch = (value: LaunchDraft['worktreeBaseBranch']) => updateLaunch('worktreeBaseBranch', value);
+  const setWorktreeName = (value: LaunchDraft['worktreeName']) => updateLaunch('worktreeName', value);
+  const setAutoCheckpoint = (value: LaunchDraft['autoCheckpoint']) => updateLaunch('autoCheckpoint', value);
+  const setCheckpointOnProgress = (value: LaunchDraft['checkpointOnProgress']) => updateLaunch('checkpointOnProgress', value);
+  const setMergeSquash = (value: LaunchDraft['mergeSquash']) => updateLaunch('mergeSquash', value);
+  const [saving, setSaving] = useState(false); const savingRef = useRef(false);
+  const [error, setError] = useState(''); const errorElement = useRef<HTMLParagraphElement>(null);
+  const creationAttempt = useRef({ fingerprint: '', key: '' });
+  const [readRetry, setReadRetry] = useState(0);
+  const [resolvedRead, setResolvedRead] = useState({ key: '', error: '' });
+  const resolutionKey = JSON.stringify([group, template, kind, connection.reconnectCount, readRetry]);
+  const resolving = kind === 'worker' && resolvedRead.key !== resolutionKey;
+  const resolutionError = resolvedRead.key === resolutionKey ? resolvedRead.error : '';
+  useEffect(() => {
+    if (!open || kind !== 'worker' || saving || resolvedRead.key === resolutionKey) return;
+    const controller = new AbortController();
+    void readCommand({ cmd: 'render_template', group, name: template }, controller.signal).then((frame) => {
+      if (controller.signal.aborted || savingRef.current) return;
+      const next = resolvedLaunchDraft(validateTemplateResponse(frame, group, template));
+      setLaunch((current) => Object.fromEntries(Object.entries(next).map(([key, value]) => [key, editedLaunch.current.has(key as keyof LaunchDraft) ? current[key as keyof LaunchDraft] : value])) as LaunchDraft);
+      setResolvedRead({ key: resolutionKey, error: '' });
+    }).catch((cause: unknown) => { if (!controller.signal.aborted) setResolvedRead({ key: resolutionKey, error: cause instanceof Error ? cause.message : 'Could not resolve launch settings.' }); });
+    return () => controller.abort();
+  }, [open, kind, group, template, resolutionKey, resolvedRead.key, saving]);
+  useEffect(() => { if (error && !saving) errorElement.current?.focus(); }, [error, saving]);
+  const requestClose = () => { if (!savingRef.current) onClose(); };
 
   const classes = useMemo(() => optionList(catalog.agentClasses)
     .filter((item) => !item.kind || item.kind === kind), [catalog.agentClasses, kind]);
   const roleOptions = useMemo(() => {
     const byId = new Map<string, NamedOption>();
-    [...optionList(catalog.roles), ...optionList(catalog.templates)].forEach((item) => byId.set(item.id, item));
+    [...optionList(catalog.roles), ...optionList(catalog.templates)].forEach((item) => { if (!byId.has(item.id)) byId.set(item.id, item); });
     return [...byId.values()];
   }, [catalog.roles, catalog.templates]);
   const specializationOptions = useMemo(() => optionList(catalog.specializations), [catalog.specializations]);
   const architects = agents.filter((agent) => agent.kind === 'architect');
   const parents = agents.filter((agent) => agent.cellType === 'agent');
 
-  const send = (command: Record<string, unknown>) => {
-    if (!sendCommand(command as { cmd: string })) {
-      onUnavailable();
-      return false;
-    }
-    return true;
+  const create = (payload: TorqueCommand) => {
+    if (savingRef.current) return;
+    const fingerprint = JSON.stringify(payload);
+    if (creationAttempt.current.fingerprint !== fingerprint) creationAttempt.current = { fingerprint, key: `react-create-${crypto.randomUUID()}` };
+    const command = { ...payload, idempotency_key: creationAttempt.current.key };
+    savingRef.current = true; setSaving(true); setError('');
+    void readCommand(command, new AbortController().signal).then((frame) => {
+      if (frame.type === 'error') throw new Error(text(frame.message) || 'Creation refused.');
+      const id = createdTarget(frame, command, kind);
+      if (id) onCreated(id);
+      onClose();
+    }).catch((cause: unknown) => { setError(cause instanceof Error ? cause.message : 'Could not create this target. The draft is retained.'); })
+      .finally(() => { savingRef.current = false; setSaving(false); });
   };
 
   const submit = () => {
     const identity = name.trim();
-    if (!identity || !group) return;
+    if (savingRef.current || resolving || resolutionError || !identity || !group) return;
     const agentSettings: Record<string, unknown> = {};
     const settingValues: Record<string, unknown> = {
       provider: provider.trim(),
@@ -155,20 +202,23 @@ export function AgentCreateDialog({
       heartbeat_interval: heartbeatInterval ? Number(heartbeatInterval) : '',
       enabled_events: enabledEvents.trim() ? csv(enabledEvents) : '',
     };
+    for (const [key, value] of Object.entries(digestValues)) {
+      if (typeof value === 'number' && (!Number.isSafeInteger(value) || value < 0)) { setError(`${key.replaceAll('_', ' ')} must be a non-negative whole number.`); return; }
+    }
     Object.entries(digestValues).forEach(([key, value]) => { if (value !== '') digestSettings[key] = value; });
 
     if (kind === 'engineer' && hiringArchitectId) {
-      if (send({
+      create({
         cmd: 'architect_engineer_hire',
         architect_id: hiringArchitectId,
         name: identity,
         specializations: csv(specializations),
-      })) onClose();
+      });
       return;
     }
 
     if (kind === 'terminal') {
-      const payload: Record<string, unknown> = { cmd: 'add_terminal', name: identity, group };
+      const payload: TorqueCommand = { cmd: 'add_terminal', name: identity, group };
       if (parentId) payload.parent_id = parentId;
       if (directory.trim()) payload.directory = directory.trim();
       if (shell) payload.shell = shell;
@@ -177,11 +227,11 @@ export function AgentCreateDialog({
       if (initScript.trim()) payload.init_script = initScript.trim();
       const env = parseEnvironment(environment);
       if (Object.keys(env).length) payload.env_vars = env;
-      if (send(payload)) onClose();
+      create(payload);
       return;
     }
 
-    const payload: Record<string, unknown> = agentClassId
+    const payload: TorqueCommand = agentClassId
       ? { cmd: 'create_agent_from_class', class_id: agentClassId, kind, name: identity, group }
       : { cmd: kind === 'architect' ? 'add_architect' : kind === 'engineer' ? 'add_engineer' : 'add_worker', name: identity, group };
     if (Object.keys(agentSettings).length) payload.agent_settings = agentSettings;
@@ -209,7 +259,7 @@ export function AgentCreateDialog({
       payload.checkpoint_on_progress = checkpointOnProgress;
       payload.worktree_merge_squash = mergeSquash;
     }
-    if (send(payload)) onClose();
+    create(payload);
   };
 
   const principal = kind === 'architect' || kind === 'engineer';
@@ -218,23 +268,28 @@ export function AgentCreateDialog({
     description={`Create in ${group}. Launch and worktree values override the group defaults.`}
     size="large"
     isOpen={open}
-    onOpenChange={(value) => { if (!value) onClose(); }}
+    onOpenChange={(value) => { if (!value) requestClose(); }}
   >
+    {error ? <p role="alert" tabIndex={-1} ref={errorElement}>{error}</p> : null}
+    {kind === 'worker' ? <div className={styles.settingsStatus}><span aria-live="polite">{resolving ? 'Resolving launch settings…' : resolutionError ? 'Launch settings unavailable' : 'Resolved role and group settings; edited fields are retained.'}</span><Button tone="quiet" isDisabled={saving || resolving} onPress={() => setReadRetry((value) => value + 1)}>Refresh launch settings</Button></div> : null}
+    {resolutionError ? <p role="alert">{resolutionError} <Button tone="quiet" onPress={() => setReadRetry((value) => value + 1)}>Retry launch settings</Button></p> : null}
     <form className={styles.creationForm} onSubmit={(event) => { event.preventDefault(); submit(); }}>
+      <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0 }}>
       <section>
         <h3>Identity</h3>
         <div className={styles.formGrid}>
           <label>Kind<select aria-label="Agent kind" value={kind} onChange={(event) => { setKind(event.target.value as CreateKind); setAgentClassId(''); }}><option value="architect">Architect</option><option value="engineer">Engineer</option><option value="worker">Worker</option><option value="terminal">Terminal</option></select></label>
           <label>Name<input autoFocus value={name} onChange={(event) => setName(event.target.value)} required /></label>
-          {kind !== 'terminal' ? <label>Agent Class<select value={agentClassId} onChange={(event) => setAgentClassId(event.target.value)}><option value="">Group default</option>{classes.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label> : null}
-          {kind === 'worker' ? <label>Role / template<select value={template} onChange={(event) => setTemplate(event.target.value)}><option value="">Group default</option>{roleOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label> : null}
+          {kind !== 'terminal' ? <label>Agent Class<select value={agentClassId} onChange={(event) => setAgentClassId(event.target.value)}><option value="">Group default</option>{agentClassId && !classes.some((item) => item.id === agentClassId) ? <option value={agentClassId}>{agentClassId}</option> : null}{classes.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label> : null}
+          {kind === 'worker' ? <label>Role / template<select value={template} onChange={(event) => setTemplate(event.target.value)}><option value="">Group default</option>{template && !roleOptions.some((item) => item.id === template) ? <option value={template}>{template}</option> : null}{roleOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label> : null}
           {kind === 'engineer' && architects.length ? <label>Hiring Architect<select value={hiringArchitectId} onChange={(event) => setHiringArchitectId(event.target.value)}><option value="">User-owned Engineer</option>{architects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label> : null}
           {kind === 'terminal' ? <label>Parent agent<select value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">Unattached</option>{parents.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label> : null}
           <label>Icon<input value={icon} onChange={(event) => setIcon(event.target.value)} placeholder="optional icon" /></label>
         </div>
       </section>
 
-      {!hiringArchitectId ? <section>
+      {kind === 'engineer' && hiringArchitectId ? <section><h3>Hire request</h3><p>The Engineer is created after approval in Planning.</p><label>Specializations<input value={specializations} onChange={(event) => setSpecializations(event.target.value)} placeholder="ordered, comma separated" /></label></section> : null}
+      {!(kind === 'engineer' && hiringArchitectId) ? <section>
         <h3>Launch</h3>
         <div className={styles.formGrid}>
           {kind !== 'terminal' ? <label>Provider<input value={provider} onChange={(event) => setProvider(event.target.value)} placeholder="inherit" /></label> : null}
@@ -250,7 +305,7 @@ export function AgentCreateDialog({
         <label>Initialization script<textarea value={initScript} onChange={(event) => setInitScript(event.target.value)} rows={3} /></label>
       </section> : null}
 
-      {principal && !hiringArchitectId ? <section>
+      {principal && !(kind === 'engineer' && hiringArchitectId) ? <section>
         <h3>Behavior and delivery</h3>
         <div className={styles.formGrid}>
           <label>Autonomy mode<input value={autonomyMode} onChange={(event) => setAutonomyMode(event.target.value)} placeholder="inherit" /></label>
@@ -264,7 +319,7 @@ export function AgentCreateDialog({
         <label>Custom instructions<textarea value={customInstructions} onChange={(event) => setCustomInstructions(event.target.value)} rows={5} /></label>
       </section> : null}
 
-      {kind !== 'terminal' && !hiringArchitectId ? <section>
+      {kind !== 'terminal' && !(kind === 'engineer' && hiringArchitectId) ? <section>
         <h3>Worktree</h3>
         <label className={styles.inlineCheck}><input type="checkbox" checked={worktree} onChange={(event) => setWorktree(event.target.checked)} />Create an isolated worktree</label>
         {worktree ? <>
@@ -281,7 +336,8 @@ export function AgentCreateDialog({
         </> : null}
       </section> : null}
 
-      <footer><Button tone="quiet" type="button" onPress={onClose}>Cancel</Button><Button tone="primary" type="submit" isDisabled={!name.trim()}>Create {kind}</Button></footer>
+      <footer><Button tone="quiet" type="button" isDisabled={saving} onPress={requestClose}>Cancel</Button><Button tone="primary" type="submit" isDisabled={saving || resolving || Boolean(resolutionError) || !name.trim()}>{saving ? 'Creating…' : kind === 'engineer' && hiringArchitectId ? 'Request hire' : `Create ${kind}`}</Button></footer>
+      </fieldset>
     </form>
   </ModalDialog>;
 }

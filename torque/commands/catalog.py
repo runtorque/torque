@@ -301,14 +301,15 @@ async def handle_catalog_command(
     if cmd == "render_template":
         base_dir = await _resolve_base_dir(data.get("group", ""))
         group = data.get("group", "")
+        name = str(data.get("name", "") or "").strip()
+        if name and not template_mgr.load_template(name, base_dir):
+            return {"type": "error", "message": f'Role "{name}" not found'}
         gs = state.get_group_settings(group)
         rendered = template_mgr.resolve_agent_config(
-            data.get("name", ""), gs, data.get("overrides", {}),
-            base_dir=base_dir)
+            name, gs, data.get("overrides", {}), base_dir=base_dir)
         return {
-            "type": "template_rendered",
-            "name": data.get("name", ""),
-            "config": rendered,
+            "type": "template_rendered", "group": group,
+            "name": name, "config": rendered,
         }
 
     if cmd in ACTION_AUTHORING_COMMANDS:

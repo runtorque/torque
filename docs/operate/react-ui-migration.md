@@ -210,3 +210,7 @@ Prompt-editor acceptance: `prompt-editor-live.spec.ts` runs against the disposab
 ### Per-agent settings refresh and recovery regression
 
 `ui/e2e/agent-settings-live.spec.ts` uses a disposable generic Engineer in an isolated profile to verify changed defaults, reconnect, retained reset/draft/caret, dirty dismissal, failed-read retry and launch-success/digest-failure recovery. The test verifies persisted values after external updates and reload, checks compact discard layout and removes its own Engineer. Run against the isolated browser QA daemon using the same Playwright environment as the other live regressions; never target the default profile.
+
+### Agent creation regression
+
+`ui/e2e/agent-create-live.spec.ts` creates disposable generic agents and terminals in an isolated profile. It verifies real role/group resolution, reconnect draft preservation, refused reads/writes, pending close guards and replay of a cached creation result after simulated acknowledgement loss. Its second case checks Architect/Engineer/attached-terminal creation and reload. Temporary project files and created agents are cleaned up; run only against an isolated non-default profile.
