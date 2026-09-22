@@ -1,4 +1,5 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
+import type { UnknownRecord } from '../../protocol';
 export interface ComposerAttachment { path: string; filename: string; mime_type?: string; size_bytes?: number }
 export interface ReplyTarget { id: string; agentId: string; preview: string }
 export interface SentMessage { id: string; message: string; at: number }
@@ -12,12 +13,19 @@ export interface ComposerDraft {
   recall: { original: string; selection: [number, number]; index: number } | null;
 }
 export interface MessageReading { count: number; pinned: boolean; anchorId: string; offset: number; scrollTop: number; selectedId: string }
+export interface LoopCancellation { agentId: string; loop: UnknownRecord; key: string; pending: boolean; error: string; notice: string }
 export interface SubmittedTurn { key: string; sessionId: string; pending: boolean; cancelKey: string; error: string; notice: string }
 export const emptyComposerDraft: ComposerDraft = { text: '', attachments: [], reply: null, selection: [0, 0], scrollTop: 0, undo: [''], undoIndex: 0, pending: false, uploading: false, error: '', notice: '', attempt: null, sent: [], recall: null };
-const initialState: { drafts: Record<string, ComposerDraft>; turns: Record<string, SubmittedTurn>; readings: Record<string, MessageReading> } = { drafts: {}, turns: {}, readings: {} };
+const initialState: { drafts: Record<string, ComposerDraft>; turns: Record<string, SubmittedTurn>; readings: Record<string, MessageReading>; loopCancellations: Record<string, LoopCancellation> } = { drafts: {}, turns: {}, readings: {}, loopCancellations: {} };
 export const composerSlice = createSlice({
   name: 'composer', initialState,
   reducers: {
+    loopCancellation(state, { payload }: PayloadAction<{ loopId: string; operation: LoopCancellation }>) { state.loopCancellations[payload.loopId] = payload.operation; },
+    settleLoopCancellation(state, { payload }: PayloadAction<{ loopId: string; key: string; error?: string; notice?: string }>) {
+      const operation = state.loopCancellations[payload.loopId]; if (!operation || operation.key !== payload.key) return;
+      operation.pending = false; operation.error = payload.error ?? ''; operation.notice = payload.notice ?? '';
+    },
+    dismissLoopCancellation(state, { payload }: PayloadAction<string>) { if (!state.loopCancellations[payload]?.pending) delete state.loopCancellations[payload]; },
     reading(state, { payload }: PayloadAction<{ agentId: string; reading: MessageReading }>) { state.readings[payload.agentId] = payload.reading; },
     patch(state, { payload }: PayloadAction<{ cellId: string; changes: Partial<ComposerDraft> }>) {
       state.drafts[payload.cellId] = { ...(state.drafts[payload.cellId] ?? emptyComposerDraft), ...payload.changes };

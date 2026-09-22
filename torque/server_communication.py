@@ -996,6 +996,12 @@ def _handle_user_agent_loop_command(
     action = parsed.get("action")
     if action == "cancel":
         loop = state.active_agent_message_loop_for_agent(target.id)
+        expected_loop_id = str(data.get("expected_loop_id", "") or "").strip()
+        if expected_loop_id and (not loop or loop.id != expected_loop_id):
+            return {
+                "type": "error",
+                "message": "The displayed /loop is no longer active. Refresh before cancelling another loop.",
+            }
         if not loop:
             return {
                 "type": "error",

@@ -8,6 +8,9 @@ import type { AgentViewModel } from '../agents/model';
 import { composerActions, emptyComposerDraft, type ComposerAttachment } from './composerState';
 import { acknowledgedMessage, cancellationLabels, composerCommand, recallMessages, rows, text } from './composerModel';
 import { DirectMessages } from './DirectMessages';
+import { AgentMessageLoop } from './AgentMessageLoop';
+import { messageLoopPanel } from './messageLoopModel';
+import { selectMessagesState } from '../../app/store';
 import { useComposerCompletion } from './useComposerCompletion';
 import { ComposerSuggestions } from './ComposerSuggestions';
 import { VerticalResizeHandle } from './VerticalResizeHandle';
@@ -33,7 +36,8 @@ export function Conversation({ cell, target, messages, messageHistory, sendComma
   const history = recallMessages(messageHistory, messages, draft.sent);
   const pending = draft.pending; const busy = pending || draft.uploading;
   const name = target?.name ?? cell.name;
-  const maximumHeight = Math.max(38, Math.min(240, (conversationHeight || 300) - (draft.attachments.length ? 132 : 107) - (draft.reply ? 28 : 0) - (draft.error || draft.notice ? 24 : 0)));
+  const hasLoop = useAppSelector((state) => Boolean(messageLoopPanel(selectMessagesState(state).loops, state.composer.loopCancellations, target?.id ?? '')));
+  const maximumHeight = Math.max(38, Math.min(240, (conversationHeight || 300) - (hasLoop ? 64 : 0) - (draft.attachments.length ? 132 : 107) - (draft.reply ? 28 : 0) - (draft.error || draft.notice ? 24 : 0)));
   const height = Math.max(38, Math.min(maximumHeight, requestedHeight ?? (composeHeight > 0 ? composeHeight : 54)));
   const focusComposer = () => { const node = composer.current; if (!node) return; node.focus({ preventScroll: true }); const latest = currentDraft(); node.setSelectionRange(...latest.selection); node.scrollTop = latest.scrollTop; };
   useEffect(() => {
@@ -117,8 +121,9 @@ export function Conversation({ cell, target, messages, messageHistory, sendComma
     finally { change({ pending: false }); }
   };
   const sessionChanged = Boolean(turn && turn.sessionId !== target?.sessionId);
-  return <section ref={conversation} className={styles.conversation} aria-label={target ? `Conversation with ${name}` : `Buffered input for ${name}`}>
+  return <section ref={conversation} className={styles.conversation} data-has-loop={hasLoop} aria-label={target ? `Conversation with ${name}` : `Buffered input for ${name}`}>
     <header><strong>{target ? 'Direct messages' : 'Terminal input'}</strong><span>{target ? messageCount : 'Multiline input'}</span>{target ? <Button tone="quiet" isDisabled={busy || !turn || turn.pending || sessionChanged || Boolean(turn.notice)} onPress={() => { void cancelTurn(); }}>{turn?.pending ? 'Cancelling…' : 'Cancel turn'}</Button> : null}</header>
+    {target ? <AgentMessageLoop key={`loop-${target.id}`} agentId={target.id} disabled={busy} /> : null}
     {target ? <DirectMessages key={target.id} agent={target} messages={messages} pending={pending} active={active} onReply={(id, body) => { patch({ reply: { id, agentId: target.id, preview: body.replace(/\s+/g, ' ').slice(0, 120) } }); focusComposer(); }} /> : <div className={styles.messageList}><p className={styles.noMessages}>{cell.sessionId ? 'Send the composed text to this terminal session.' : 'Relaunch this terminal before sending input.'}</p></div>}
     <form className={styles.composer} onSubmit={(event) => { event.preventDefault(); void submit(); }}>
       <VerticalResizeHandle className={styles.composerResize ?? ''} label="Resize message text box" value={height} minimum={38} maximum={maximumHeight} onChange={setRequestedHeight} onCommit={(value) => { if (!sendCommand({ cmd: 'ui_set_terminal_compose_height', height: Math.round(value) })) onUnavailable(); }} />

@@ -2901,6 +2901,15 @@ scope.
 - Layout: A bounded scrollable listbox sits above or below the composer within the viewport, outside clipped terminal/composer containers. Accessible option names include the command/task label and explanatory text; the textarea identifies its active option.
 - Verification: Model, component and isolated browser evidence is recorded in the parity ledger. Selecting a suggestion does not execute it. Native IME device acceptance and provider runtime effects remain separate gates.
 
+### D-129 — Message-loop cancellation belongs to the displayed loop
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: Agent conversations show their active recurring message, interval and next run, or its deferred-until-idle state. Attached terminals show their parent recipient's loop; standalone terminal input has no loop control. A bounded status region preserves space for history and composition and allows longer messages/feedback to scroll.
+- Cancellation: The explicit Cancel loop action sends the existing `/loop cancel` command with the displayed `expected_loop_id` and a stable request key. The backend refuses a mismatched or no-longer-active loop before mutating state. Plain slash-command cancellation keeps its existing active-agent behavior.
+- Acknowledgement: The UI confirms the matching agent, loop ID, cancelled status and audit message before reporting success. Pending/error/result state stays with that loop across reconnect and cell changes. A lost-response retry repeats the same request and key; an updated cancelled snapshot does not erase pending/error feedback. A replacement loop receives its own operation key. Unrelated draft text, selection, attachments and reply state remain intact.
+- Verification: Component, backend and isolated browser acceptance are recorded in the parity ledger. Existing API idempotency protects acknowledged retries; crash/partial-side-effect recovery remains a separate gate.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

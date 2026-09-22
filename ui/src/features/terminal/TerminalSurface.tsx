@@ -16,6 +16,8 @@ import {
 } from './terminalController';
 import styles from './TerminalSurface.module.css';
 import { Conversation } from './Conversation';
+import { messageLoopPanel } from './messageLoopModel';
+import { selectMessagesState } from '../../app/store';
 import { VerticalResizeHandle } from './VerticalResizeHandle';
 
 interface UploadedAttachment {
@@ -159,7 +161,8 @@ export function TerminalWorkspace({ agent, terminal, messages, messageHistory, m
     const targetId = agent.cellType === 'agent' ? agent.id : messageTarget?.id;
     const turn = targetId ? state.composer.turns[targetId] : undefined;
     return (draft?.reply ? 28 : 0) + (draft?.attachments.length ? 30 : 0)
-      + (draft?.error || draft?.notice ? 44 : 0) + (turn?.error || turn?.notice ? 44 : 0);
+      + (draft?.error || draft?.notice ? 44 : 0) + (turn?.error || turn?.notice ? 44 : 0)
+      + (messageLoopPanel(selectMessagesState(state).loops, state.composer.loopCancellations, targetId ?? '') ? 64 : 0);
   });
   const minimumConversationHeight = Math.min(conversationHeightLimit(workspaceHeight), MIN_CONVERSATION_HEIGHT + extraComposerHeight);
   const conversationHeight = clampConversationHeight(
