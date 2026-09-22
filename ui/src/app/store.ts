@@ -632,6 +632,7 @@ const selectDirectMessages = selectRecord('direct_messages_by_agent');
 const selectPeerThreads = selectRecord('agent_peer_threads');
 const selectMessageHistory = selectRecord('agent_message_history');
 const selectMessageLoops = selectRecord('agent_message_loops');
+export const selectComposerCommands = selectList('user_dm_commands');
 const selectNotices = selectRecord('operator_notices');
 const selectNoticeSummary = selectRecord('operator_notice_summary');
 const selectInitiatives = selectRecord('initiatives');

@@ -8,6 +8,8 @@ import type { AgentViewModel } from '../agents/model';
 import { composerActions, emptyComposerDraft, type ComposerAttachment } from './composerState';
 import { acknowledgedMessage, cancellationLabels, composerCommand, recallMessages, rows, text } from './composerModel';
 import { DirectMessages } from './DirectMessages';
+import { useComposerCompletion } from './useComposerCompletion';
+import { ComposerSuggestions } from './ComposerSuggestions';
 import { VerticalResizeHandle } from './VerticalResizeHandle';
 import styles from './TerminalSurface.module.css';
 
@@ -23,6 +25,7 @@ export function Conversation({ cell, target, messages, messageHistory, sendComma
   const currentDraft = () => store.getState().composer.drafts[cell.id] ?? emptyComposerDraft;
   const composer = useRef<HTMLTextAreaElement>(null); const conversation = useRef<HTMLElement>(null); const fileInput = useRef<HTMLInputElement>(null);
   const wasPending = useRef(false);
+  const completionCaret = useRef<{ text: string; selection: [number, number] } | null>(null);
   const initialPosition = useRef({ selection: draft.selection, scrollTop: draft.scrollTop });
   const [conversationHeight, setConversationHeight] = useState(0); const [requestedHeight, setRequestedHeight] = useState<number | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -55,6 +58,16 @@ export function Conversation({ cell, target, messages, messageHistory, sendComma
     const observer = new ResizeObserver(measure); observer.observe(node); return () => observer.disconnect();
   }, []);
   const edit = (value: string, selection?: [number, number]) => { dispatch(composerActions.edit({ cellId: cell.id, text: value, selection: selection ?? [value.length, value.length] })); patch({ recall: null }); };
+  const completion = useComposerCompletion(cell, target, draft.text, draft.selection, active && !busy, (text, selection) => { completionCaret.current = { text, selection }; edit(text, selection); });
+  useLayoutEffect(() => {
+    const desired = completionCaret.current; const node = composer.current;
+    if (!desired || !node || desired.text !== draft.text) return;
+    completionCaret.current = null;
+    // Apply selection after React commits the new value; an earlier microtask
+    // can clamp it to the old text length and reopen the just-picked suggestion.
+    node.focus({ preventScroll: true }); node.setSelectionRange(...desired.selection);
+    dispatch(composerActions.patch({ cellId: cell.id, changes: { selection: desired.selection } }));
+  }, [cell.id, dispatch, draft.text, draft.selection]);
   const restoreDraft = () => {
     const recall = currentDraft().recall; if (!recall) return;
     dispatch(composerActions.edit({ cellId: cell.id, text: recall.original, selection: recall.selection })); patch({ recall: null }); queueMicrotask(focusComposer);
@@ -114,13 +127,16 @@ export function Conversation({ cell, target, messages, messageHistory, sendComma
       {draft.reply ? <div className={styles.replyContext}><span>Replying to: {draft.reply.preview || draft.reply.id}</span><Button tone="quiet" aria-label="Cancel reply" isDisabled={pending} onPress={() => { patch({ reply: null }); focusComposer(); }}>×</Button></div> : null}
       {draft.attachments.length ? <div className={styles.attachments}>{draft.attachments.map((entry, index) => <button type="button" disabled={pending} key={`${entry.path}-${index}`} onClick={() => patch({ attachments: draft.attachments.filter((_, i) => i !== index) })} title="Remove attachment">◇ {entry.filename || entry.path.split('/').pop()} ×</button>)}</div> : null}
       <textarea ref={composer} value={draft.text} disabled={pending}
+        aria-autocomplete="list" aria-haspopup="listbox" aria-controls={completion.completion ? completion.id : undefined} aria-expanded={Boolean(completion.completion)} aria-activedescendant={completion.completion && completion.index >= 0 ? `${completion.id}-${completion.index}` : undefined}
+        onFocus={() => completion.setFocused(true)} onCompositionStart={() => completion.setComposing(true)} onCompositionEnd={() => completion.setComposing(false)}
         onChange={(event) => edit(event.target.value, [event.target.selectionStart, event.target.selectionEnd])}
         onSelect={(event) => { const node = event.currentTarget; patch({ selection: [node.selectionStart, node.selectionEnd] }); }}
-        onBlur={(event) => { const node = event.currentTarget; patch({ selection: [node.selectionStart, node.selectionEnd], scrollTop: node.scrollTop }); }}
+        onBlur={(event) => { completion.setFocused(false); const node = event.currentTarget; patch({ selection: [node.selectionStart, node.selectionEnd], scrollTop: node.scrollTop }); }}
         onScroll={(event) => patch({ scrollTop: event.currentTarget.scrollTop })}
         onPaste={(event) => { const files = [...event.clipboardData.files]; if (files.length) { event.preventDefault(); void uploadFiles(files); } }}
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing) return;
+          if (completion.handleKey(event)) return;
           if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); dispatch(composerActions.undo({ cellId: cell.id, direction: event.shiftKey ? 1 : -1 })); patch({ recall: null }); queueMicrotask(focusComposer); return; }
           if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
             const node = event.currentTarget; const up = event.key === 'ArrowUp'; const atEdge = node.selectionStart === node.selectionEnd && !(up ? node.value.slice(0, node.selectionStart) : node.value.slice(node.selectionEnd)).includes('\n');
@@ -131,6 +147,7 @@ export function Conversation({ cell, target, messages, messageHistory, sendComma
       <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden onChange={(event) => { void uploadFiles([...(event.target.files ?? [])]); event.target.value = ''; }} />
       <footer><Button tone="quiet" type="button" onPress={() => fileInput.current?.click()} isDisabled={busy}>{draft.uploading ? 'Uploading…' : 'Attach'}</Button><Button tone="quiet" type="button" aria-label="Message history" isDisabled={busy} onPress={() => setHistoryOpen(true)}>History</Button>{draft.recall ? <Button tone="quiet" type="button" isDisabled={busy} onPress={restoreDraft}>Restore draft</Button> : null}<span>Enter send · Shift+Enter newline</span><Button tone="primary" type="submit" isDisabled={busy || (!draft.text.trim() && !draft.attachments.length) || (!target && !cell.sessionId)}>{pending ? 'Sending…' : 'Send'}</Button></footer>
     </form>
+    {completion.completion ? <ComposerSuggestions id={completion.id} input={composer} completion={completion.completion} index={completion.index} onPick={completion.pick} onChoose={completion.choose} /> : null}
     <ModalDialog title="Recent messages" description={`Recall a message for ${name}. Your unsent draft remains available.`} isOpen={historyOpen} onOpenChange={setHistoryOpen} size="small"><div className={styles.historyList}>{history.length ? history.map((entry, index) => <button key={entry.id || index} onClick={() => recallAt(index)}>{entry.message}</button>) : <p>No sent messages yet.</p>}</div></ModalDialog>
   </section>;
 }

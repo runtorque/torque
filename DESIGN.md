@@ -2891,6 +2891,16 @@ scope.
 - Interaction: Explicit Reply does not compete with text selection or links. Copy message writes the exact original source; Copy code writes the rendered fence contents. Both support keyboard access. A custom message context menu offers copy/reply, arrow-key traversal, Escape and focus restoration. Clipboard failure retains content, selection, draft and reading state and offers visible feedback. Copy feedback occupies its own row so it cannot cover message actions. No native blocking dialogs are used.
 - Verification: Focused model/component tests cover progressive windows, reading anchors, hidden panes, target switching, metadata, safe rendering, exact copying, selection retention, context actions and failures. Browser evidence, including actual clipboard and reconnect behavior, is recorded in the parity ledger. Provider effects and native application lifecycle remain separate gates.
 
+### D-128 — Composer suggestions use current server scope and remain editable drafts
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: Agent direct-message composers offer slash commands exclusively from the server's `user_dm_commands` catalog, filtered for the actual recipient's provider. Attached terminals use their parent recipient; standalone terminal input has no agent command menu. Labels, usage, help and inserted templates come from the catalog. The backend remains the command grammar authority; arbitrary slash-like prose is sent unchanged.
+- Task references: A colon at the start of text or after whitespace opens up to eight matching non-archived tasks from the cell's group, falling back to its parent/current group only when necessary. Search matches IDs and titles. Selection replaces only the trigger through the caret, retains surrounding text and inserts the task ID followed by a space.
+- Interaction: Suggestions require a collapsed caret and focused, active composer. Pointer selection preserves input focus; arrows navigate, Enter/Tab selects and Escape dismisses without editing or sending. Shift+Enter retains multiline editing. Selection is one undoable draft edit with an explicit caret. IME composition, pending sends, uploads and hidden panes suppress the popup. Reconnect refreshes suggestions without replacing the draft.
+- Layout: A bounded scrollable listbox sits above or below the composer within the viewport, outside clipped terminal/composer containers. Accessible option names include the command/task label and explanatory text; the textarea identifies its active option.
+- Verification: Model, component and isolated browser evidence is recorded in the parity ledger. Selecting a suggestion does not execute it. Native IME device acceptance and provider runtime effects remain separate gates.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

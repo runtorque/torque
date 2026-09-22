@@ -1,0 +1,4 @@
+.suggestions { position: fixed; z-index: 1000; overflow-y: auto; padding: 4px; border: 1px solid var(--border-emphasis); border-radius: var(--radius); background: var(--surface-raised); box-shadow: 0 8px 24px #0008; }
+.suggestions button { display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 7px 9px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); text-align: left; font: 11px var(--font-mono); cursor: pointer; overflow-wrap: anywhere; }
+.suggestions button[aria-selected='true'], .suggestions button:hover { background: var(--surface-hover); }
+.suggestions strong { font-weight: 600; }.suggestions span { color: var(--text-muted); font-size: 10px; }
