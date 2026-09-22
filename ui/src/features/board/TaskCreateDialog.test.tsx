@@ -7,9 +7,9 @@ import type { TorqueCommand } from '../../protocol';
 import { TaskCreateDialog } from './TaskCreateDialog';
 
 afterEach(() => vi.unstubAllGlobals());
-function setup() {
+function setup(actions: unknown = [], defaultAction = '') {
   const store = createAppStore();
-  store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, board_tasks: { prerequisite: { id: 'prerequisite', task: 'Cross-group prerequisite', group: 'Other', lane: 'Backlog' } } }));
+  store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, group_settings: { Foundation: { board_default_action: defaultAction } }, board_tasks: { prerequisite: { id: 'prerequisite', task: 'Cross-group prerequisite', group: 'Other', lane: 'Backlog' } } }));
   const calls: TorqueCommand[] = []; const uploads: string[] = []; const cleanups: string[] = []; let fail = '';
   const onClose = vi.fn();
   vi.stubGlobal('fetch', vi.fn((url: string, options: RequestInit) => {
@@ -21,12 +21,57 @@ function setup() {
     }
     if (url === '/api/upload/cleanup') { cleanups.push(typeof options.body === 'string' ? options.body : '{}' ); return response(fail === 'cleanup' ? { ok: false, error: 'Cleanup failed' } : { ok: true }); }
     const cmd = JSON.parse(typeof options.body === 'string' ? options.body : '{}' ) as TorqueCommand; calls.push(cmd);
+    if (cmd.cmd === 'preview_prompt' && !fail) return response({ ok: true, data: { type: 'prompt_preview', prompt: 'Rendered unsaved prompt', warning: 'Preview warning' } });
     return response(fail === cmd.cmd ? { ok: false, error: 'Write rejected' } : { ok: true, data: { type: cmd.cmd === 'board_add_task' ? 'board_task_added' : 'ok', task_id: 'created' } });
   }));
-  render(<Provider store={store}><TaskCreateDialog group="Foundation" lanes={['Backlog']} actions={[]} roles={[]} onClose={onClose} /></Provider>);
-  return { calls, uploads, cleanups, onClose, fail: (cmd: string) => { fail = cmd; } };
+  const view = (catalog: unknown) => <Provider store={store}><TaskCreateDialog group="Foundation" lanes={['Backlog']} actions={catalog} roles={[]} onClose={onClose} /></Provider>;
+  const rendered = render(view(actions));
+  return { calls, uploads, cleanups, onClose, store, refresh: (catalog: unknown) => rendered.rerender(view(catalog)), fail: (cmd: string) => { fail = cmd; } };
 }
 describe('reviewed task creation', () => {
+  it('uses named defaults, isolates action drafts and retains focus and explicit values across catalog and state refreshes', async () => {
+    const actions = [{ name: 'build', vars: [{ name: 'TASK' }, { name: 'SCOPE', default: 'all' }, { name: 'COUNT', default: 0 }, { name: 'ENABLED', default: false }] }, { name: 'review', vars: [{ name: 'SCOPE', default: 'review' }] }];
+    const { calls, refresh, store, onClose } = setup(actions, 'build');
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Named variables' } });
+    expect(screen.queryByLabelText('TASK')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('COUNT')).toHaveValue(0);
+    expect(screen.getByLabelText('ENABLED')).not.toBeChecked();
+    fireEvent.change(screen.getByLabelText('SCOPE'), { target: { value: 'edited scope' } });
+    const input = screen.getByLabelText<HTMLTextAreaElement>('SCOPE'); input.focus(); input.setSelectionRange(2, 6);
+    act(() => { store.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'actions', actions })); });
+    refresh(structuredClone(actions));
+    expect(screen.getByLabelText('SCOPE')).toBe(input); expect(input).toHaveFocus(); expect(input.selectionStart).toBe(2); expect(input.selectionEnd).toBe(6);
+    fireEvent.change(screen.getByLabelText('Action'), { target: { value: 'review' } });
+    expect(screen.getByLabelText('SCOPE')).toHaveValue('review');
+    fireEvent.change(screen.getByLabelText('SCOPE'), { target: { value: 'other scope' } });
+    fireEvent.change(screen.getByLabelText('Action'), { target: { value: '' } });
+    expect(screen.getByLabelText('SCOPE')).toHaveValue('edited scope');
+    fireEvent.change(screen.getByLabelText('SCOPE'), { target: { value: '' } });
+    refresh(structuredClone(actions)); expect(screen.getByLabelText('SCOPE')).toHaveValue('');
+    fireEvent.click(screen.getByText('External ticket'));
+    fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'github' } });
+    fireEvent.change(screen.getByLabelText('External ID'), { target: { value: 'owner/repo#7' } });
+    fireEvent.change(screen.getByLabelText('External URL'), { target: { value: 'https://github.com/owner/repo/issues/7' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create task' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(calls.at(-1)).toMatchObject({ action_name: '', action_vars: { SCOPE: '', COUNT: 0, ENABLED: false }, provider: 'github', external_id: 'owner/repo#7', external_url: 'https://github.com/owner/repo/issues/7' });
+  });
+  it('previews the unsaved default action without creating a task and retains drafts after failure', async () => {
+    const { calls, fail, onClose } = setup([{ name: 'build', vars: [{ name: 'SCOPE', default: 'all' }] }], 'build');
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Draft title' } });
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Draft scope' } });
+    fireEvent.change(screen.getByLabelText('SCOPE'), { target: { value: 'named scope' } });
+    fail('preview_prompt'); fireEvent.click(screen.getByRole('button', { name: 'Preview prompt' }));
+    await screen.findByText('Write rejected'); expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Description')).toHaveValue('Draft scope');
+    fail(''); fireEvent.click(screen.getByRole('button', { name: 'Preview prompt' }));
+    await screen.findByText('Rendered unsaved prompt'); expect(screen.getByText('Preview warning')).toBeVisible();
+    expect(calls).toHaveLength(2);
+    expect(calls.at(-1)).toEqual({ cmd: 'preview_prompt', task: 'Draft title', description: 'Draft scope', action_name: 'build', agent_template: '', action_vars: { SCOPE: 'named scope' }, group: 'Foundation', attachments: [], artifacts: [] });
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'New scope' } });
+    expect(screen.queryByText('Rendered unsaved prompt')).not.toBeInTheDocument();
+    expect(screen.getByText('Draft changed. Preview again to see the current prompt.')).toBeVisible();
+  });
   it('retains dependencies, all verification fields and structured evidence after rejected creation', async () => {
     const { calls, onClose, fail } = setup();
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Reviewed work' } });

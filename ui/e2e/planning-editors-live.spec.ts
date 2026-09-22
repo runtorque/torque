@@ -119,6 +119,7 @@ test('Initiative task creation reviews unsaved scope and recovers a failed link 
   await dialog.getByLabel('Title', { exact: true }).fill('Reviewed child task');
   await dialog.getByRole('combobox', { name: 'Lane', exact: true }).selectOption('Backlog');
   await dialog.getByLabel('Labels', { exact: true }).fill('reviewed, scope');
+  await dialog.getByText('Advanced variables', { exact: true }).click();
   await dialog.getByLabel('Action variables (JSON)').fill('{"reviewed":true}');
   await page.screenshot({ path: test.info().outputPath('initiative-task-review.png'), animations: 'disabled', fullPage: true });
   let createAttempts = 0; let linkAttempts = 0;

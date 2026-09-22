@@ -2649,6 +2649,31 @@ scope.
 - Decision: Note and brief detail/mutation responses retain archived records in the projection. The Planning archive filter controls visibility; deletion still removes notes. A late HTTP archive acknowledgement must not erase records received through a list or WebSocket update.
 - Verification: Deterministic regressions apply an archived list followed by archive acknowledgement and detail read for both notes and briefs. Live Thinking archive/read/delete coverage verifies the resulting operator flow.
 
+### D-100 — Named action variables preserve the catalog and operator values
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: Task creation and editing expose the selected action's named variables, excluding reserved TASK/torque. TASK comes from the title. Catalog defaults fill absent values; explicit empty strings, zero, false, unknown keys and structured values remain intact. Advanced JSON is a disclosure for structured/custom values, not the primary editor.
+- Constraints: Action changes retain separate drafts for each action for the lifetime of the editor. Catalog refreshes do not overwrite operator edits. Creation resolves the group's default action for fields and preview. Defaults retain the types supplied by the daemon; the current Jinja catalog serializes literal defaults as strings, so the UI does not guess new types.
+- Verification: Component coverage exercises defaults, switching, advanced values, refresh focus/caret and submission. Live acceptance checks named creation and editing against a project action.
+
+### D-101 — Preview unsaved task creation without creating work
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: Board and Initiative creation can preview the current title, description, effective action, worker role, variables and saved draft evidence. A correlated HTTP read owns its response; failures retain the form and warnings remain visible. Previewing never creates or dispatches a task.
+- Constraints: Changed inputs invalidate displayed output, including changes made while a request is pending. Unmount aborts the read. Preview waits for an artifact editor to be saved or cancelled. External ticket fields are available before creation and use the existing backend normalization and group sync policy.
+- Verification: Focused tests cover failure, warning, stale responses and unmount; live acceptance verifies actual rendering, evidence and external-link persistence with provider sync disabled.
+
+### D-102 — Task drafts survive refreshes and discard on explicit close
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: An open task editor owns its draft until save or explicit close. A later task-detail response may update the projection without remounting the editor, replacing its draft, resetting its selected tab or stealing focus/caret. Creation retains the existing acknowledged cleanup boundary on close.
+- Rationale: Classic `taskPersistDraft` retains active modal state, but `modals/core.js::closeModals` explicitly clears it on dismissal. The earlier P-155 reopen-recall requirement misread that boundary. Cancel/close discards; ordinary refresh and failed requests preserve.
+- Constraints: Reload/crash persistence is not implied. New task IDs still mount distinct editors; compact records wait for initial detail hydration.
+- Verification: Component tests apply late detail/catalog responses to edited fields and assert DOM identity, draft, focus and selection. Live acceptance cancels creation and confirms a fresh blank form on reopen.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

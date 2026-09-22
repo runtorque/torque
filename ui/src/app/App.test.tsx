@@ -225,6 +225,7 @@ describe('workspace shell', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), {
       target: { value: 'Ship Phase 2' },
     });
+    fireEvent.click(screen.getByText('Advanced variables'));
     fireEvent.change(screen.getByRole('textbox', { name: 'Action variables (JSON)' }), { target: { value: '[]' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create task' }));
     await screen.findByText('Action variables must be a JSON object.');
@@ -395,7 +396,15 @@ describe('workspace shell', () => {
 
     fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), { target: { value: 'Complete parity coverage' } });
     fireEvent.click(screen.getByRole('tab', { name: 'Execution' }));
+    fireEvent.click(screen.getByText('Advanced variables'));
     fireEvent.change(screen.getByRole('textbox', { name: 'Action variables (JSON)' }), { target: { value: '{"scope":"board"}' } });
+    const draftDescription = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Description' });
+    draftDescription.focus(); draftDescription.setSelectionRange(3, 8);
+    act(() => { appStore.dispatch(projectionActions.taskDetailReceived({ type: 'task_detail', id: 'task-1', task: { description: 'Another server detail response', action_vars: { scope: 'server' } } })); });
+    expect(screen.getByRole('textbox', { name: 'Description' })).toBe(draftDescription);
+    expect(draftDescription).toHaveValue('Complete parity coverage'); expect(draftDescription).toHaveFocus();
+    expect(draftDescription.selectionStart).toBe(3); expect(draftDescription.selectionEnd).toBe(8);
+    expect(screen.getByRole('textbox', { name: 'Action variables (JSON)' })).toHaveValue('{"scope":"board"}');
     fireEvent.click(screen.getByRole('button', { name: 'Save task' }));
     expect(sendCommand).toHaveBeenCalledWith(expect.objectContaining({
       cmd: 'board_update_task', id: 'task-1', description: 'Complete parity coverage',

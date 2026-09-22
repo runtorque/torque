@@ -1,3 +1,5 @@
+import { ActionVariableFields } from './ActionVariableFields';
+import { actionVariableDefinitions, resolveActionVariables, useActionVariables } from './actionVariables';
 import { AskResponse } from '../attention/AskResponse';
 import { TaskCreateDialog } from './TaskCreateDialog';
 import { VerificationFields, type VerificationDraft } from './VerificationFields';
@@ -404,7 +406,8 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
   const [targetGroup, setTargetGroup] = useState(task.group);
   const [actionName, setActionName] = useState(task.actionName);
   const [role, setRole] = useState(task.agentTemplate);
-  const [actionVars, setActionVars] = useState(() => JSON.stringify(record(task.raw.action_vars), null, 2));
+  const [actionVars, setActionVars] = useActionVariables(actionName, record(task.raw.action_vars));
+  const definitions = actionVariableDefinitions(actions, actionName);
   const [dependsOn, setDependsOn] = useState(task.dependsOn.join(', '));
   const [agentId, setAgentId] = useState(task.agentId);
   const [provider, setProvider] = useState(task.provider);
@@ -459,7 +462,7 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
   const submit = (event: FormEvent) => {
     event.preventDefault();
     let parsedVars: Record<string, unknown>;
-    try { parsedVars = parseJsonObject(actionVars); }
+    try { parsedVars = resolveActionVariables(actionVars, definitions); }
     catch { setFormError('Action variables must be a valid JSON object.'); return; }
     sendOrNotify(sendCommand, {
       cmd: 'board_update_task',
@@ -497,7 +500,7 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
   };
   const previewPrompt = () => {
     try {
-      const parsedVars = parseJsonObject(actionVars);
+      const parsedVars = resolveActionVariables(actionVars, definitions);
       setFormError('');
       setPromptBaseline(promptResponse);
       setPromptRequested(true);
@@ -548,7 +551,7 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
           <label>Worker role<select title={role || 'Action/default role'} value={role} onChange={(event) => setRole(event.target.value)}><option value="">Action/default role</option>{roleOptions.map((item) => <option key={textValue(item.slug, textValue(item.name))} value={textValue(item.slug, textValue(item.name))}>{textValue(item.name, textValue(item.slug))}</option>)}</select></label>
           <label>Dependencies<input title={dependsOn} value={dependsOn} onChange={(event) => setDependsOn(event.target.value)} list={`task-dependencies-${task.id}`} placeholder="task IDs, comma separated" /><datalist id={`task-dependencies-${task.id}`}>{tasks.filter((item) => item.id !== task.id).map((item) => <option key={item.id} value={item.id}>{item.task}</option>)}</datalist></label>
         </div>
-        <label>Action variables (JSON)<textarea value={actionVars} onChange={(event) => setActionVars(event.target.value)} rows={4} spellCheck={false} /></label>
+        <ActionVariableFields definitions={definitions} value={actionVars} onChange={setActionVars} />
         {textValue(promptPreview.prompt) ? <details className={styles.promptPreview} open><summary>Rendered prompt preview</summary><pre>{textValue(promptPreview.prompt)}</pre></details> : null}
       </section> : null}
       {detailTab === 'verification' ? <section className={styles.detailSection} role="tabpanel" aria-label="Verification"><header><div><h3>Verification</h3><p>Record release gates and human checks for this task.</p></div><Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'board_verify_task', id: task.id, actor_name: 'Operator', verification_state: 'passed', manual_smoke_done: true, human_validation_pending: '', deploy_needed: false }, onCommandUnavailable)}>Mark verified</Button></header><VerificationFields value={verification} onChange={setVerification} />{Object.keys(record(task.raw.completion_evidence)).length ? <details><summary>Completion evidence</summary><pre>{JSON.stringify(task.raw.completion_evidence, null, 2)}</pre></details> : null}</section> : null}
@@ -1100,7 +1103,7 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPa
 
       <ModalDialog title={detailTask?.task ?? 'Task details'} description={detailTask?.id ?? ''} size="wide" bodyLayout="fit" isOpen={Boolean(detailTask)} onOpenChange={(open) => { if (!open) dispatch(workspaceUiActions.setDetailTask(null)); }}>
         {detailTask && detailIsHydrated
-          ? <TaskDetail key={`${detailTask.id}:${detailVersion}`} task={detailTask} tasks={groupTasks} groups={groupsState.records} agents={agents} actions={catalog.actions} roles={catalog.roles} responses={auxiliaryResponses} sendCommand={sendCommand} onCommandUnavailable={onCommandUnavailable} onClose={() => dispatch(workspaceUiActions.setDetailTask(null))} onRemove={() => setRemoveTaskId(detailTask.id)} />
+          ? <TaskDetail key={detailTask.id} task={detailTask} tasks={groupTasks} groups={groupsState.records} agents={agents} actions={catalog.actions} roles={catalog.roles} responses={auxiliaryResponses} sendCommand={sendCommand} onCommandUnavailable={onCommandUnavailable} onClose={() => dispatch(workspaceUiActions.setDetailTask(null))} onRemove={() => setRemoveTaskId(detailTask.id)} />
           : detailTask ? <StateSurface title="Loading task" description="Retrieving complete task fields." /> : null}
       </ModalDialog>
       {workspaceUi.createTaskDialogOpen ? <TaskCreateDialog group={group} lanes={lanes} actions={catalog.actions} roles={catalog.roles} onClose={() => dispatch(workspaceUiActions.setCreateTaskDialogOpen(false))} /> : null}

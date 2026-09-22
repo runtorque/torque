@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { expect, test, type APIRequestContext } from '@playwright/test';
 type Row = Record<string, unknown>;
 async function command(request: APIRequestContext, data: Row) {
@@ -26,7 +29,7 @@ test('task creation persists dependencies, verification and mixed evidence and c
   await page.getByRole('button', { name: '＋ New task', exact: true }).click();
   dialog = page.getByRole('dialog', { name: 'Create task', exact: true });
   await dialog.getByLabel('Title', { exact: true }).fill('Complete creation contract');
-  await dialog.getByLabel('Description', { exact: true }).fill('Keep this draft through a failed save.');
+  await dialog.getByRole('textbox', { name: 'Description', exact: true }).fill('Keep this draft through a failed save.');
   await dialog.getByLabel('Schedule', { exact: true }).fill('2026-10-01T09:30');
   const scheduledAt = await page.evaluate(() => new Date('2026-10-01T09:30').toISOString());
   await dialog.getByText('Dependencies · 0', { exact: true }).click();
@@ -99,4 +102,80 @@ test('task creation persists dependencies, verification and mixed evidence and c
   await page.getByRole('button', { name: 'Save task', exact: true }).click({ timeout: 5000 });
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect.poll(async () => ((await command(request, { cmd: 'task_detail', id })).task as Row).verification_summary).toMatchObject({ deploy_attempted: false, tests_run: 'Component and live checks', human_validation_pending: 'Review screenshot' });
+});
+
+test('task authoring previews unsaved defaults and evidence, preserves drafts, and creates an external reference', async ({ page, request }) => {
+  test.setTimeout(60_000);
+  const runtime = await (await request.get('/api/runtime')).json() as { data: { runtime: { port: number; profile: string } } };
+  expect(runtime.data.runtime.port).not.toBe(18932); expect(runtime.data.runtime.profile).not.toBe('default');
+  const directory = await mkdtemp(join(tmpdir(), 'torque-authoring-e2e-'));
+  try {
+  const group = `Authoring ${Date.now()}`;
+  await command(request, { cmd: 'add_group', group });
+  await command(request, { cmd: 'update_group_settings', group, settings: { default_directory: directory, board_default_action: 'authoring/build', board_sync_enabled: false } });
+  await command(request, { cmd: 'save_action', group, name: 'authoring/build', scope: 'project', action: { prompt: 'TITLE={{ TASK }}\nSCOPE={{ SCOPE | default("all") }}\nCOUNT={{ COUNT | default(0) }}\nENABLED={{ ENABLED | default(false) }}\nDESCRIPTION={{ torque.task.description }}', description: 'Authoring QA' } });
+  await command(request, { cmd: 'save_action', group, name: 'authoring/review', scope: 'project', action: { prompt: '{{ TASK }} {{ SCOPE | default("review") }}' } });
+  await page.goto('/'); await page.getByRole('button', { name: group, exact: true }).click();
+  await page.getByRole('button', { name: '＋ New task', exact: true }).click();
+  let dialog = page.getByRole('dialog', { name: 'Create task', exact: true });
+  await dialog.getByLabel('Title', { exact: true }).fill('Discard this draft');
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.getByRole('button', { name: '＋ New task', exact: true }).click();
+  dialog = page.getByRole('dialog', { name: 'Create task', exact: true });
+  await expect(dialog.getByLabel('Title', { exact: true })).toHaveValue('');
+  await dialog.getByLabel('Title', { exact: true }).fill('Previewed authoring task');
+  await dialog.getByRole('textbox', { name: 'Description', exact: true }).fill('Unsaved description');
+  await expect(dialog.getByRole('textbox', { name: 'SCOPE', exact: true })).toHaveValue('all');
+  await expect(dialog.getByRole('textbox', { name: 'COUNT', exact: true })).toHaveValue('0');
+  await expect(dialog.getByRole('textbox', { name: 'ENABLED', exact: true })).toHaveValue('False');
+  await dialog.getByRole('textbox', { name: 'SCOPE', exact: true }).fill('Focused scope');
+  await dialog.getByRole('combobox', { name: 'Action', exact: true }).selectOption('authoring/review');
+  await expect(dialog.getByRole('textbox', { name: 'SCOPE', exact: true })).toHaveValue('review');
+  await dialog.getByRole('combobox', { name: 'Action', exact: true }).selectOption('');
+  await expect(dialog.getByRole('textbox', { name: 'SCOPE', exact: true })).toHaveValue('Focused scope');
+  await dialog.getByText('Attachments and artifacts · 0', { exact: true }).click();
+  await dialog.getByRole('button', { name: 'Add structured artifact', exact: true }).click();
+  await expect(dialog.getByRole('button', { name: 'Preview prompt', exact: true })).toBeDisabled();
+  await dialog.getByLabel('Artifact title', { exact: true }).fill('Preview evidence');
+  await dialog.getByLabel('Artifact content', { exact: true }).fill('Evidence visible before creation');
+  await dialog.getByRole('button', { name: 'Save artifact', exact: true }).click();
+  let reject = true; const authoringCommands: Row[] = [];
+  await page.route('**/api/cmd', async (route) => {
+    const data = route.request().postDataJSON() as Row; authoringCommands.push(data);
+    if (reject && data.cmd === 'preview_prompt') { reject = false; await route.fulfill({ json: { ok: false, error: 'Injected preview failure' } }); }
+    else await route.continue();
+  });
+  await dialog.getByRole('button', { name: 'Preview prompt', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toHaveText('Injected preview failure');
+  await expect(dialog.getByRole('textbox', { name: 'Description', exact: true })).toHaveValue('Unsaved description');
+  await dialog.getByRole('button', { name: 'Preview prompt', exact: true }).click();
+  const preview = dialog.locator('details').filter({ has: page.getByText('Rendered prompt preview', { exact: true }) }).locator('pre');
+  await expect(preview).toContainText('TITLE=Previewed authoring task');
+  await expect(preview).toContainText('SCOPE=Focused scope'); await expect(preview).toContainText('COUNT=0');
+  await expect(preview).toContainText('DESCRIPTION=Unsaved description');
+  await expect(preview).toContainText('Evidence visible before creation');
+  expect(authoringCommands.some((item) => item.cmd === 'board_add_task' || item.cmd === 'dispatch_task')).toBe(false);
+  await dialog.getByRole('textbox', { name: 'Description', exact: true }).fill('Revised before creation');
+  await expect(preview).toHaveCount(0);
+  await expect(dialog.getByText('Draft changed. Preview again to see the current prompt.')).toBeVisible();
+  await dialog.getByText('External ticket', { exact: true }).click();
+  await dialog.getByLabel('Provider', { exact: true }).fill('GitHub');
+  await dialog.getByLabel('External ID', { exact: true }).fill('torque-parity/fixture#17');
+  await page.screenshot({ path: test.info().outputPath('task-authoring.png'), animations: 'disabled', fullPage: true });
+  const added = page.waitForResponse((response) => response.url().endsWith('/api/cmd') && (response.request().postDataJSON() as Row).cmd === 'board_add_task');
+  await dialog.getByRole('button', { name: 'Create task', exact: true }).click(); await expect(dialog).toHaveCount(0);
+  const result = await (await added).json() as { data: Row }; expect(result.data.type).toBe('external_imported');
+  const id = String(result.data.task_id);
+  const task = (await command(request, { cmd: 'task_detail', id })).task as Row;
+  expect(task).toMatchObject({ task: 'Previewed authoring task', description: 'Revised before creation', action_name: 'authoring/build', action_vars: { SCOPE: 'Focused scope', COUNT: '0', ENABLED: 'False' }, provider: 'github', external_id: 'torque-parity/fixture#17', external_url: 'https://github.com/torque-parity/fixture/issues/17' });
+  expect((task.board_sync as Row).enabled).not.toBe(true);
+  await page.getByText('Previewed authoring task', { exact: true }).dblclick();
+  await expect(page.getByRole('textbox', { name: 'SCOPE', exact: true })).toHaveValue('Focused scope');
+  await page.getByRole('textbox', { name: 'SCOPE', exact: true }).fill('Edited named variable');
+  await page.getByRole('tab', { name: 'Verification', exact: true }).click();
+  await page.getByRole('tab', { name: 'Execution', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'SCOPE', exact: true })).toHaveValue('Edited named variable');
+  await page.getByRole('button', { name: 'Save task', exact: true }).click();
+  await expect.poll(async () => ((await command(request, { cmd: 'task_detail', id })).task as Row).action_vars).toMatchObject({ SCOPE: 'Edited named variable', COUNT: '0', ENABLED: 'False' });
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });

@@ -1,12 +1,15 @@
 import { useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
-import { projectionActions, selectTasksState } from '../../app/store';
+import { projectionActions, selectGroupsState, selectTasksState } from '../../app/store';
 import { Button, ModalDialog } from '../../design/primitives';
 import type { TorqueCommand, UnknownRecord } from '../../protocol';
 import { readCommand } from '../../protocol/http';
 import { VerificationFields, type VerificationDraft } from './VerificationFields';
 import { TaskEvidenceEditor } from './TaskEvidenceEditor';
 import { defaultPrompt, uploadType, taskText } from './taskCreationModel';
+import { ActionVariableFields } from './ActionVariableFields';
+import { actionVariableDefinitions, resolveActionVariables, useActionVariables } from './actionVariables';
+import { TaskPromptPreview } from './TaskPromptPreview';
 import styles from './BoardPanel.module.css';
 
 function record(value: unknown): UnknownRecord { return value && typeof value === 'object' ? value as UnknownRecord : {}; }
@@ -30,7 +33,12 @@ export function TaskCreateDialog({ group, lanes, actions, roles, onClose, initia
   const [lane, setLane] = useState(initialValues ? '' : lanes[0] ?? '');
   const [labels, setLabels] = useState('');
   const [actionName, setActionName] = useState(''); const [role, setRole] = useState('');
-  const [scheduledAt, setScheduledAt] = useState(''); const [actionVars, setActionVars] = useState('{}');
+  const [scheduledAt, setScheduledAt] = useState('');
+  const { settings } = useAppSelector(selectGroupsState);
+  const effectiveAction = actionName || taskText(record(settings[group]).board_default_action);
+  const definitions = actionVariableDefinitions(actions, effectiveAction);
+  const [actionVars, setActionVars] = useActionVariables(effectiveAction);
+  const [provider, setProvider] = useState(''); const [externalId, setExternalId] = useState(''); const [externalUrl, setExternalUrl] = useState('');
   const [dependsOn, setDependsOn] = useState<string[]>([]); const [search, setSearch] = useState(''); const [dependency, setDependency] = useState('');
   const [verification, setVerification] = useState<VerificationDraft>({ mode: '', state: '', notes: '', summary: {} });
   const [attachments, setAttachments] = useState<UnknownRecord[]>([]); const [artifacts, setArtifacts] = useState<UnknownRecord[]>([]);
@@ -84,10 +92,8 @@ export function TaskCreateDialog({ group, lanes, actions, roles, onClose, initia
     if (busy.current || artifactEditing || (!created.current && !title.trim())) return;
     void run(async () => {
       if (!created.current) {
-        let parsed: unknown;
-        try { parsed = JSON.parse(actionVars); } catch { throw new Error('Action variables must be a JSON object.'); }
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Action variables must be a JSON object.');
-        const result = await request({ cmd: 'board_add_task', id: draftId, task: title.trim(), description: description.trim(), group, lane, labels: labels.split(',').map((value) => value.trim()).filter(Boolean), action_name: actionName, agent_template: role, action_vars: parsed, scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : '', depends_on: dependsOn, verification_mode: verification.mode, verification_state: verification.state, verification_notes: verification.notes, verification_summary: verification.summary, attachments, artifacts });
+        const parsed = resolveActionVariables(actionVars, definitions);
+        const result = await request({ cmd: 'board_add_task', id: draftId, task: title.trim(), description: description.trim(), group, lane, labels: labels.split(',').map((value) => value.trim()).filter(Boolean), action_name: actionName, agent_template: role, action_vars: parsed, provider: provider.trim(), external_id: externalId.trim(), external_url: externalUrl.trim(), scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : '', depends_on: dependsOn, verification_mode: verification.mode, verification_state: verification.state, verification_notes: verification.notes, verification_summary: verification.summary, attachments, artifacts });
         const id = typeof result.task_id === 'string' ? result.task_id : '';
         if (!id) throw new Error('Task creation returned no ID. Check the Board before retrying.');
         created.current = id; setCreatedId(id); onCreated?.(id);
@@ -111,7 +117,8 @@ export function TaskCreateDialog({ group, lanes, actions, roles, onClose, initia
           <label>Worker role<select value={role} onChange={(event) => setRole(event.target.value)}><option value="">Action/default role</option>{options(roles, true).map(([name, item]) => <option key={name} value={name}>{taskText(item.name || name)}</option>)}</select></label>
           <label>Schedule<input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} /></label>
         </div>
-        <label>Action variables (JSON)<textarea value={actionVars} onChange={(event) => setActionVars(event.target.value)} rows={3} /></label>
+        <ActionVariableFields definitions={definitions} value={actionVars} onChange={setActionVars} />
+        <details><summary>External ticket</summary><div className={styles.formGrid}><label>Provider<input value={provider} onChange={(event) => setProvider(event.target.value)} placeholder="github" /></label><label>External ID<input value={externalId} onChange={(event) => setExternalId(event.target.value)} placeholder="owner/repo#123" /></label><label>External URL<input value={externalUrl} onChange={(event) => setExternalUrl(event.target.value)} /></label></div></details>
         <details><summary>Dependencies · {dependsOn.length}</summary><div className={styles.detailSection}>
           <ul>{dependsOn.map((id) => <li key={id}>{taskText(record(taskRecords[id]).task || id)} · {id} <Button onPress={() => setDependsOn((current) => current.filter((value) => value !== id))}>Remove dependency {id}</Button></li>)}</ul>
           <label>Search dependencies<input value={search} onChange={(event) => { setSearch(event.target.value); setDependency(''); }} /></label>
@@ -121,6 +128,7 @@ export function TaskCreateDialog({ group, lanes, actions, roles, onClose, initia
         <details><summary>Verification</summary><div className={styles.detailSection}><VerificationFields value={verification} onChange={setVerification} /></div></details>
         <details><summary>Attachments and artifacts · {attachments.length + artifacts.length}</summary><TaskEvidenceEditor artifacts={artifacts} attachments={attachments} draftId={createdId || draftId} onChange={setArtifacts} onRemove={remove} onUpload={upload} onEditingChange={setArtifactEditing} /></details>
       </fieldset>
+      {!createdId ? <TaskPromptPreview disabled={pending || artifactEditing || !title.trim()} inputsKey={JSON.stringify([title, description, effectiveAction, role, actionVars, definitions, group, attachments, artifacts])} command={() => ({ cmd: 'preview_prompt', task: title.trim(), description: description.trim(), action_name: effectiveAction, agent_template: role, action_vars: resolveActionVariables(actionVars, definitions), group, attachments, artifacts })} /> : null}
       {error ? <p role="alert" className={styles.formError}>{error}</p> : null}
       <footer className={styles.detailFooter}><span /><Button isDisabled={pending} onPress={close}>{createdId ? 'Close' : 'Cancel'}</Button><Button tone="primary" type="submit" isDisabled={pending || artifactEditing || (!createdId && !title.trim())}>{createdId ? 'Retry link' : 'Create task'}</Button></footer>
     </form>
