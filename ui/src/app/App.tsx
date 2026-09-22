@@ -25,6 +25,7 @@ import {
   workspaceUiActions,
   type AppStore,
 } from './store';
+import { useWorkspaceNavigation } from './useWorkspaceNavigation';
 import { sanitizeClientError } from './clientDiagnostics';
 import { effectiveBinding, eventMatchesBinding } from './preferences';
 import styles from './App.module.css';
@@ -180,6 +181,7 @@ export function WorkspaceShell({ host, sendCommand }: WorkspaceShellProps) {
     .filter((notice) => inboxArchived || !Number(notice.archived_at ?? 0));
   const legacyUrl = new URL('/legacy/', window.location.origin).toString();
   const detachedPanel = query.get('panel');
+  const navigation = useWorkspaceNavigation(Boolean(detachedPanel));
   const detachedWindowLabel = query.get('window') ?? '';
   const activeDetachedWindow = asRecord(asRecord(workspace.detachedPanels)[workspaceUi.activePanel]);
   const activeDetachedLabel = !detachedPanel && hasHostCapability(host, 'detach-panel') ? textValue(activeDetachedWindow.label) : '';
@@ -587,6 +589,7 @@ export function WorkspaceShell({ host, sendCommand }: WorkspaceShellProps) {
           </DialogTrigger>
         </header>
 
+        {navigation.error ? <div className={styles.connectionBanner} role="alert">Last workspace could not be saved: {navigation.error} <Button tone="quiet" onPress={navigation.retry}>Retry workspace save</Button></div> : null}
         {connection.status === 'disconnected' ? <div className={styles.connectionBanner}>Connection lost. Torque will reconnect automatically.</div> : null}
         {workspaceUi.activePanel === 'board' && !activeDetachedLabel ? <BoardPanel group={activeGroup} sendCommand={sendCommand} onCommandUnavailable={commandUnavailable} /> : null}
         {activeDetachedLabel ? <StateSurface title={`${workspaceUi.activePanel[0]?.toUpperCase()}${workspaceUi.activePanel.slice(1)} workspace detached`} description="This workspace is open in its native window." action={<><Button onPress={() => { void host.focusWindow(activeDetachedLabel).catch(commandUnavailable); }}>Focus detached workspace</Button><Button onPress={() => { void reattachActive(); }}>Reattach workspace</Button></>} /> : null}

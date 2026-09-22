@@ -17,6 +17,7 @@ import type {
   StateFrame,
 } from '../protocol/types';
 
+import type { WorkspaceNavigation } from './workspaceNavigation';
 import { composerSlice } from '../features/terminal/composerState';
 import { installComposerPreviewCleanup } from '../features/terminal/composerPreviewCleanup';
 
@@ -42,8 +43,9 @@ export interface ConnectionState {
 }
 
 export interface WorkspaceUiState {
-  activePanel: 'board' | 'agents' | 'planning' | 'control';
-  controlTab: 'mission' | 'activity' | 'history' | 'context' | 'logs' | 'chat' | 'pipelines' | 'actions' | 'catalog' | 'settings' | 'help';
+  activePanel: WorkspaceNavigation['activePanel'];
+  controlTab: WorkspaceNavigation['controlTab'];
+  navigationRevision: number;
   commandPaletteOpen: boolean;
   detailTaskId: string | null;
   focusedTaskId: string | null;
@@ -61,6 +63,7 @@ function initialWorkspaceUiState(): WorkspaceUiState {
   return {
     activePanel: 'board',
     controlTab: 'mission',
+    navigationRevision: 0,
     commandPaletteOpen: false,
     detailTaskId: null,
     focusedTaskId: null,
@@ -506,11 +509,14 @@ const workspaceUiSlice = createSlice({
   name: 'workspaceUi',
   initialState: initialWorkspaceUiState(),
   reducers: {
+    restoreNavigation(state, action: PayloadAction<WorkspaceNavigation>) {
+      if (state.navigationRevision === 0) { state.activePanel = action.payload.activePanel; state.controlTab = action.payload.controlTab; }
+    },
     setActivePanel(state, action: PayloadAction<WorkspaceUiState['activePanel']>) {
-      state.activePanel = action.payload;
+      state.activePanel = action.payload; state.navigationRevision++;
     },
     setControlTab(state, action: PayloadAction<WorkspaceUiState['controlTab']>) {
-      state.controlTab = action.payload;
+      state.controlTab = action.payload; state.navigationRevision++;
     },
     setCommandPaletteOpen(state, action: PayloadAction<boolean>) {
       state.commandPaletteOpen = action.payload;

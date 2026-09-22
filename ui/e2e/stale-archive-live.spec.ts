@@ -20,7 +20,7 @@ test('stale Done suggestion respects age and group, archives one batch and prese
   for (let i = 0; i < 24; i++) await add(`Keep ready task ${i}`, 'To Do');
   await page.setViewportSize({ width: 1600, height: 900 });
   // Real tasks and batch persistence; only the browser's clock advances.
-  await page.clock.setFixedTime(baseline + 6 * 86400000); await page.goto('/'); await expect(page.getByText('connected', { exact: true })).toBeVisible(); await expect(page.getByRole('region', { name: 'Inactive completed tasks' })).toHaveCount(0);
+  await page.clock.setFixedTime(baseline + 6 * 86400000); await page.goto('/'); await page.getByRole('button', { name: /▦ Board/ }).click(); await expect(page.getByText('connected', { exact: true })).toBeVisible(); await expect(page.getByRole('region', { name: 'Inactive completed tasks' })).toHaveCount(0);
   await page.clock.setFixedTime(baseline + 8 * 86400000); await page.reload();
   const suggestion = page.getByRole('region', { name: 'Inactive completed tasks' }); const archive = suggestion.getByRole('button', { name: 'Archive 2 completed tasks inactive for 7+ days', exact: true }); await expect(archive).toBeVisible();
   await page.getByRole('searchbox', { name: 'Search board' }).fill('Second completed'); await expect(page.getByRole('heading', { name: 'First completed task', exact: true })).toHaveCount(0); await expect(archive).toBeVisible(); await expect(suggestion.getByText('Includes filtered tasks in this group.')).toBeVisible(); await page.getByRole('button', { name: 'Clear filters', exact: true }).click();

@@ -15,7 +15,7 @@ test('task creation persists dependencies, verification and mixed evidence and c
   const group = `Create contract ${Date.now()}`; const other = `${group} dependency`;
   for (const name of [group, other]) await command(request, { cmd: 'add_group', group: name });
   const prerequisite = await command(request, { cmd: 'board_add_task', task: 'Cross-group prerequisite', group: other });
-  await page.goto('/'); await page.getByRole('button', { name: group, exact: true }).click();
+  await page.goto('/'); await page.getByRole('button', { name: /▦ Board/ }).click(); await page.getByRole('button', { name: group, exact: true }).click();
   await page.getByRole('button', { name: '＋ New task', exact: true }).click();
   let dialog = page.getByRole('dialog', { name: 'Create task', exact: true });
   await dialog.getByText('Attachments and artifacts · 0', { exact: true }).click();
@@ -115,7 +115,7 @@ test('task authoring previews unsaved defaults and evidence, preserves drafts, a
   await command(request, { cmd: 'update_group_settings', group, settings: { default_directory: directory, board_default_action: 'authoring/build', board_sync_enabled: false } });
   await command(request, { cmd: 'save_action', group, name: 'authoring/build', scope: 'project', action: { prompt: 'TITLE={{ TASK }}\nSCOPE={{ SCOPE | default("all") }}\nCOUNT={{ COUNT | default(0) }}\nENABLED={{ ENABLED | default(false) }}\nDESCRIPTION={{ torque.task.description }}', description: 'Authoring QA' } });
   await command(request, { cmd: 'save_action', group, name: 'authoring/review', scope: 'project', action: { prompt: '{{ TASK }} {{ SCOPE | default("review") }}' } });
-  await page.goto('/'); await page.getByRole('button', { name: group, exact: true }).click();
+  await page.goto('/'); await page.getByRole('button', { name: /▦ Board/ }).click(); await page.getByRole('button', { name: group, exact: true }).click();
   await page.getByRole('button', { name: '＋ New task', exact: true }).click();
   let dialog = page.getByRole('dialog', { name: 'Create task', exact: true });
   await dialog.getByLabel('Title', { exact: true }).fill('Discard this draft');

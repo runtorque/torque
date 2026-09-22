@@ -19,6 +19,7 @@ async function sendSetupCommand(page: Page, command: Record<string, unknown>) {
 }
 
 async function ensureGroup(page: Page) {
+  await page.getByRole('button', { name: /▦ Board/ }).click();
   if (await page.getByText('Choose a group').isVisible()) {
     await sendSetupCommand(page, { cmd: 'add_group', group: 'Phase 2 E2E' });
   }

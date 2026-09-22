@@ -23,7 +23,7 @@ test('existing-task preview uses the draft and rejected saves retain it until ac
     expect(synthetic.ok).toBe(true); const agentId = synthetic.data.agent_ids[0]!;
     const created = await command(request, { cmd: 'board_add_task', group, task: 'Saved edit fixture', description: 'Saved description must disappear', action_name: 'edit/build', agent_template: 'saved-reviewer', action_vars: { SCOPE: 'saved' }, agent_id: agentId, dispatch_state: 'live', lane: 'Backlog', scheduled_at: '2026-10-01T12:30:45Z', labels: ['original'] });
     const id = String(created.task_id);
-    await page.goto('/'); await page.getByRole('button', { name: group, exact: true }).click();
+    await page.goto('/'); await page.getByRole('button', { name: /▦ Board/ }).click(); await page.getByRole('button', { name: group, exact: true }).click();
     await page.getByText('Saved edit fixture', { exact: true }).dblclick();
     const dialog = page.getByRole('dialog');
     await expect(dialog.getByLabel('Scheduled for', { exact: true })).toHaveValue('2026-10-01T09:30');
@@ -84,7 +84,7 @@ test('attachment cleanup follows acknowledged editing and can retry without repe
   expect(uploaded.ok).toBe(true);
   await command(request, { cmd: 'board_update_task', id, attachments: uploaded.data });
   const url = `/attachments/${encodeURIComponent(id)}/${encodeURIComponent(String(uploaded.data[0]!.filename))}`;
-  await page.goto('/'); await page.getByRole('button', { name: group, exact: true }).click();
+  await page.goto('/'); await page.getByRole('button', { name: /▦ Board/ }).click(); await page.getByRole('button', { name: group, exact: true }).click();
   await page.getByText('Attachment cleanup fixture', { exact: true }).dblclick();
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('tab', { name: 'Evidence', exact: true }).click();

@@ -84,6 +84,7 @@ EXPECTED_UI_STATE_COMMANDS = {
     "ui_set_engineer_panel_split",
     "ui_set_context_panel_split",
     "ui_set_supervisor_panel_state",
+    "ui_set_react_workspace_state",
     "events_dismiss",
     "mission_control_dismiss",
     "board_set_filters",

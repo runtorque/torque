@@ -2928,6 +2928,16 @@ scope.
 - Navigation: Home/End targets logical line boundaries; Ctrl/Meta targets document boundaries. Shift retains the anchor, including backward selections; image tokens each occupy one editor position. Alt-modified shortcuts, combined Ctrl+Meta undo chords and composing key events are not intercepted.
 - Verification: Native textarea and rich-editor browser input must verify grouping, caret movement, paste, selection, reconnect/cell isolation, clear/restore and actual cancellation. Simulated browser composition does not certify device-level IME.
 
+### D-132 — Restore profile navigation once and save acknowledged local choices
+
+- Date: 2026-09-22
+- Status: accepted; browser and persistence acceptance recorded under P-204.
+- Decision: The main React window remembers its fixed workspace and Control Center section in a bounded, versioned SQLite preference for the active Torque profile. Browser and native main windows share that profile preference. The last successfully saved choice supplies new windows; existing windows keep their local navigation.
+- Migration: Before a React preference exists, map Classic's saved active panel to the equivalent fixed workspace/section. Embedded terminal mode prefers the saved standalone layout's last active panel, then its active side/bottom tabs. Preserve Classic's own keys and layout. Unknown/invalid values fall back to Board and Mission Control.
+- Lifecycle: Restore once from the first snapshot. User navigation before hydration wins. Snapshot/delta updates and reconnect never redirect an open window. Offline local navigation queues until a connected snapshot; saves serialize and coalesce to the latest local choice. A write acknowledgement requires SQLite commit and matching preference values. Failures preserve navigation and expose Retry; reconnect retries unfinished local saves. Unacknowledged choices are not promised to survive closing the window.
+- Detached windows: The panel query pins their content. They neither restore nor write the main-window preference; their existing geometry/reattachment rules remain separate.
+- Verification: Cover validation, profile isolation, full/compact snapshots, offline SQLite reads, delayed/failed durable writes, migration, multiple windows, reconnect, save ordering, retry and actual reload in the isolated browser suite. Native window lifecycle remains a separate acceptance gate.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
+import sqlite3
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 from ..dispatch_registry import AsyncHandlerRegistry
 from ..state import MatrixState
+from ..ui_preferences import normalize_react_workspace_state
 
 
 UI_STATE_COMMAND_NAMES = frozenset({
@@ -32,6 +35,7 @@ UI_STATE_COMMAND_NAMES = frozenset({
     "ui_set_engineer_panel_split",
     "ui_set_context_panel_split",
     "ui_set_supervisor_panel_state",
+    "ui_set_react_workspace_state",
     "events_dismiss",
     "mission_control_dismiss",
     "board_set_filters",
@@ -564,9 +568,31 @@ def _handle_ui_state_command(data: dict, state: MatrixState):
     return result
 
 
+async def _handle_react_workspace_state_command(data: dict, state: MatrixState):
+    preference = normalize_react_workspace_state(data.get("state"))
+    if not preference:
+        return {"type": "error", "message": "Invalid React workspace preference"}
+    if not state.db:
+        return {"type": "error", "message": "Workspace preference storage is unavailable"}
+    try:
+        await state.db.save_ui_state_durable("react_workspace_state", json.dumps(preference))
+    except (sqlite3.Error, OSError, RuntimeError):
+        logging.getLogger(__name__).exception("Failed to persist React workspace preference")
+        return {"type": "error", "message": "Workspace preference could not be saved"}
+    state.react_workspace_state = preference
+    state._emit("ui_update", key="react_workspace_state", value=preference)
+    return {"type": "react_workspace_state", "state": preference}
+
+
 _UI_STATE_COMMAND_REGISTRY = AsyncHandlerRegistry()
 _UI_STATE_COMMAND_REGISTRY.register_many(
-    UI_STATE_COMMAND_NAMES,
+    UI_STATE_COMMAND_NAMES - {"ui_set_react_workspace_state"},
     _handle_ui_state_command,
     label="ui_state",
+)
+
+_UI_STATE_COMMAND_REGISTRY.register_many(
+    {"ui_set_react_workspace_state"},
+    _handle_react_workspace_state_command,
+    label="react_workspace_state",
 )

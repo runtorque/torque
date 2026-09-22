@@ -14,7 +14,7 @@ async function fixture(request: APIRequestContext, title: string) {
 test('structured evidence stages edits, survives nested preview and persists only on successful task save', async ({ page, request }) => {
   const { group, id } = await fixture(request, 'Structured evidence');
   await command(request, { cmd: 'board_update_task', id, artifacts: [{ id: 'source', type: 'snippet', title: 'Source', content: 'saved text', prompt: { mode: 'inline' } }, { id: 'external', type: 'file_ref', title: 'External source', path: '/project/source.ts', lifecycle: { owner: 'agent' } }] });
-  await page.goto('/'); await page.getByRole('button', { name: group, exact: true }).click();
+  await page.goto('/'); await page.getByRole('button', { name: /▦ Board/ }).click(); await page.getByRole('button', { name: group, exact: true }).click();
   await page.getByText('Structured evidence', { exact: true }).dblclick();
   const dialog = page.getByRole('dialog', { name: 'Structured evidence', exact: true });
   await dialog.getByRole('tab', { name: 'Evidence', exact: true }).click();
@@ -69,7 +69,7 @@ test('structured evidence stages edits, survives nested preview and persists onl
 
 test('uploaded logs are artifacts, images preview in place and Cancel deletes only unsaved uploads', async ({ page, request }) => {
   const { group, id } = await fixture(request, 'Upload evidence');
-  await page.goto('/'); await page.getByRole('button', { name: group, exact: true }).click(); await page.getByText('Upload evidence', { exact: true }).dblclick();
+  await page.goto('/'); await page.getByRole('button', { name: /▦ Board/ }).click(); await page.getByRole('button', { name: group, exact: true }).click(); await page.getByText('Upload evidence', { exact: true }).dblclick();
   const dialog = page.getByRole('dialog', { name: 'Upload evidence', exact: true });
   await dialog.getByRole('tab', { name: 'Evidence', exact: true }).click();
   await dialog.getByLabel('Upload evidence files', { exact: true }).setInputFiles([{ name: 'worker.log', mimeType: 'text/plain', buffer: Buffer.from('real log content') }, { name: 'image.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jGzQAAAAASUVORK5CYII=', 'base64') }]);
@@ -91,7 +91,7 @@ test('activity card entry hydrates messages with actor and dates and holds the r
   const { group, id } = await fixture(request, 'Activity evidence');
   const messages = Array.from({ length: 85 }, (_, index) => ({ action: 'progress', agent: 'Worker QA', message: `Activity message ${index + 1}`, timestamp: 1700000000 + index }));
   await command(request, { cmd: 'board_update_task', id, messages });
-  await page.goto('/'); await page.getByRole('button', { name: group, exact: true }).click();
+  await page.goto('/'); await page.getByRole('button', { name: /▦ Board/ }).click(); await page.getByRole('button', { name: group, exact: true }).click();
   await page.getByRole('button', { name: 'Actions for Activity evidence', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Task activity', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Activity evidence', exact: true });

@@ -10,6 +10,7 @@ from torque.db_board import (
     decode_board_task_row,
 )
 from torque import profiling
+from torque.ui_preferences import normalize_react_workspace_state
 from torque.persistence.common import (
     GROUP_SETTINGS_BOOL_FIELDS as _GS_BOOL_FIELDS,
     GROUP_SETTINGS_JSON_FIELDS as _GS_JSON_FIELDS,
@@ -21,6 +22,26 @@ from torque.persistence.common import (
 
 class SnapshotPersistenceMixin:
     """Save and restore complete state snapshots at migration/startup boundaries."""
+
+    def save_ui_state(self, key: str, value):
+        self._conn.execute(
+            "INSERT OR REPLACE INTO ui_state (key, value) VALUES (?,?)",
+            (key, str(value)))
+        self._conn.commit()
+
+    def load_ui_state_value(self, key: str) -> str | None:
+        """Return one ui_state value, or None when the key is unset."""
+        row = self._conn.execute(
+            "SELECT value FROM ui_state WHERE key=?",
+            (key,),
+        ).fetchone()
+        return row[0] if row else None
+
+    async def save_ui_state_durable(self, key: str, value):
+        """Acknowledge a UI preference only after its queued write commits."""
+        return await self._enqueue_async_write(
+            "ui_state", "save_ui_state", key, value,
+        )
 
     def save_task_and_agents(self, task, agents) -> None:
         """Atomically persist one task and its linked worker snapshots."""
@@ -203,6 +224,7 @@ class SnapshotPersistenceMixin:
                 "engineer_panel_split_fraction",
                 "context_panel_split_ratio",
                 "supervisor_panel_state",
+                "react_workspace_state",
             ):
                 val = state_dict.get(key)
                 if val is not None:
@@ -211,6 +233,7 @@ class SnapshotPersistenceMixin:
                         "detached_panels",
                         "window_bounds",
                         "supervisor_panel_state",
+                        "react_workspace_state",
                     }:
                         val = json.dumps(val)
                     c.execute(
@@ -565,6 +588,13 @@ class SnapshotPersistenceMixin:
         except Exception:
             supervisor_panel_state = {}
 
+        try:
+            react_workspace_state = normalize_react_workspace_state(
+                json.loads(ui.get("react_workspace_state", "{}") or "{}")
+            )
+        except (ValueError, TypeError):
+            react_workspace_state = {}
+
         # Global settings
         global_settings = {}
         for row in c.execute("SELECT key, value FROM global_settings"):
@@ -652,6 +682,7 @@ class SnapshotPersistenceMixin:
             "engineer_panel_split_fraction": engineer_panel_split_fraction,
             "context_panel_split_ratio": context_panel_split_ratio,
             "supervisor_panel_state": supervisor_panel_state,
+            "react_workspace_state": react_workspace_state,
             "events_dismissed_attention": (
                 json.loads(ui.get("events_dismissed_attention", "{}"))
                 if ui.get("events_dismissed_attention") else {}

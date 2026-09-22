@@ -11,6 +11,12 @@ import { sanitizeClientError } from './clientDiagnostics';
 import { connectionActions, createAppStore, projectionActions, workspaceUiActions } from './store';
 
 function renderShell(host = browserHost, frame: StateFrame = compactStateFixture) {
+  const featureFetch = globalThis.fetch;
+  vi.stubGlobal('fetch', (input: RequestInfo | URL, options?: RequestInit) => {
+    const command = JSON.parse(typeof options?.body === 'string' ? options.body : '{}') as TorqueCommand;
+    if (command.cmd === 'ui_set_react_workspace_state') return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: 'react_workspace_state', state: command.state } }) });
+    return featureFetch(input, options);
+  });
   const appStore = createAppStore();
   appStore.dispatch(projectionActions.snapshotReceived(frame));
   appStore.dispatch(connectionActions.connected({ at: 1_000, reconnect: false }));

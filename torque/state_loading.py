@@ -22,6 +22,7 @@ from .state import (
     normalize_guidance_hint_cadence, normalize_worktree_merge_cleanup,
 )
 from .state_settings import AgentSettings
+from .ui_preferences import normalize_react_workspace_state
 
 
 class StateLoadingMixin:
@@ -305,6 +306,9 @@ class StateLoadingMixin:
                 )
             except (TypeError, ValueError):
                 self.context_panel_split_ratio = 0.38
+            self.react_workspace_state = normalize_react_workspace_state(
+                data.get("react_workspace_state")
+            )
             self.supervisor_panel_state = data.get(
                 "supervisor_panel_state", {}
             ) or {}

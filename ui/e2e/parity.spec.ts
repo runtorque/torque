@@ -152,7 +152,8 @@ test('attention review gates approval on a fetched diff and retains a rejected r
   await page.route('**/api/cmd', async (route) => {
     const command = route.request().postDataJSON() as Record<string, unknown>; requests.push(command);
     if (command.cmd === 'resolve_ask') { await route.fulfill({ json: { ok: false, error: 'Synthetic delivery failure' } }); return; }
-    const data = command.cmd === 'task_detail' ? { type: 'task_detail', id: command.id, task: command.id === 'ask' ? ask : command.id === 'approval' ? approval : parent }
+    const data = command.cmd === 'ui_set_react_workspace_state' ? { type: 'react_workspace_state', state: command.state }
+      : command.cmd === 'task_detail' ? { type: 'task_detail', id: command.id, task: command.id === 'ask' ? ask : command.id === 'approval' ? approval : parent }
       : command.cmd === 'behavior_overlay_diff' ? { type: 'behavior_overlay_diff', proposal: { id: 'proposal', status: 'approved', next_actor_kind: 'user', proposed_text_sha256: 'reviewed-hash', base_version_id: 'base', rationale: 'Bounded change' }, diff: '-old rule\n+new rule' }
         : command.cmd === 'behavior_overlay_user_reject' ? { type: 'behavior_overlay_proposal', proposal_id: 'proposal', proposal: { id: 'proposal', status: 'rejected' } } : { type: 'ok' };
     await route.fulfill({ json: { ok: true, data } });
