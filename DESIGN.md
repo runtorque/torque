@@ -2730,6 +2730,14 @@ scope.
 - Constraints: An explicit error response cannot count as success. Embedding rebuild confirmation leaves AI pending. This is retry behavior within the mounted editor; crash recovery and ambiguous lost acknowledgements remain separate gates.
 - Verification: Component and real-daemon browser checks reject a group write after global success, then retry without resending global fields. A concurrent external update to the completed global scope survives retry.
 
+### D-110 — Refresh active Settings without replacing operator drafts
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: Active Settings rereads global, group and AI sources after reconnect and after a save settles. A complete, matching response set refreshes untouched values and defaults in the mounted form. Three-way reconciliation retains edited fields and nested map removals while adopting remote additions. Pending section resets, secret drafts, relay edits, focus, caret and expanded sections survive refresh.
+- Constraints: Reads pause during writes; aborted or late reads cannot replace acknowledged settings. A failed refresh retains the previous form and offers retry. Hidden Settings issues no refresh reads. Arrays are reconciled as whole values. This does not provide server-side conflict detection, persistence after dismissal or crash recovery.
+- Verification: Component tests cover reconciliation, refreshed defaults, pending resets, failed reads, hidden tabs and a late read after Save. Isolated browser acceptance reconnects the real WebSocket, checks form identity/caret and persists merged values through the daemon.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

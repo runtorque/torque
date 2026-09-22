@@ -5,7 +5,7 @@ import defaults from './settingsContract.fixture.json';
 import { settingFields } from './settingsFields';
 import { StructuredSettings } from './StructuredSettings';
 import { NumericSettingInput, type NumericDraft } from './NumericSettingInput';
-import { changedSettings, editableSettings, resetSettings } from './settingsModel';
+import { reconcileSettings, changedSettings, editableSettings, resetSettings } from './settingsModel';
 
 describe('settings reset contracts', () => {
   it('filters runtime identities, preserves nested value types and ignores object key ordering', () => {
@@ -71,4 +71,11 @@ it('treats user map keys as literal strings even when their names match numeric 
   const change = vi.fn(); render(<StructuredSettings value={{ env_vars: { max_agents: 'arbitrary' } }} onChange={change} />);
   fireEvent.change(screen.getByRole('textbox', { name: 'Env vars: max_agents' }), { target: { value: '009' } });
   expect(change).toHaveBeenCalledWith({ env_vars: { max_agents: '009' } });
+});
+
+it('reconciles nested local edits and removals without dropping remote additions', () => {
+  const before = { number: 1, map: { edited: 'old', untouched: 'old', removed: 'old' }, list: ['old'] };
+  const draft: Record<string, unknown> = { number: '', map: { edited: 'draft', untouched: 'old' }, list: ['old'] };
+  const latest = { number: 9, map: { edited: 'remote', untouched: 'fresh', removed: 'remote', added: 'new' }, list: ['fresh'] };
+  expect(reconcileSettings(before, draft, latest)).toEqual({ number: '', map: { edited: 'draft', untouched: 'fresh', added: 'new' }, list: ['fresh'] });
 });

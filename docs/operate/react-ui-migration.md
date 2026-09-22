@@ -140,6 +140,10 @@ This opt-in test refuses the default port/profile, launches `ui/e2e/fixtures/str
 
 `planning-editors-live.spec.ts` creates its own groups and generic Architect/Engineer records on an isolated daemon. It validates every offered status through backend reads, typed relationships, sparse scope/rationale saves, failure retention, archive and restore. It can run in the PTY-disabled profile harness; no commercial provider is used. Generic agents are removed afterward, while Planning evidence remains in the disposable profile. A separate scenario reviews an unsaved Initiative task prefill, cancels without mutation, injects create/link failures, resumes the acknowledged task link, and verifies task fields and unchanged Initiative scope through backend reads. It does not certify reload/crash recovery or existing-task save/preview failure handling. `task-create-live.spec.ts` separately covers external references, named variables, pre-creation prompt rendering and explicit cancellation; project actions live in a disposable directory, with provider sync disabled.
 
+### Settings reconnect and validation regression
+
+`settings-reconnect-live.spec.ts` and `settings-validation-live.spec.ts` run against the disposable PTY-disabled profile after `make ui-check`. The reconnect scenario changes server settings while local edits and a section reset are pending, closes the real WebSocket, and checks untouched values, nested map additions/removals, input identity, focus and caret. It injects a refresh failure, retries in place, saves and verifies the merged values through backend reads; hidden Settings must issue no refresh reads. The validation scenario checks numeric boundaries and retry after a partial save. These checks do not certify provider runtime effects or recovery after a process crash.
+
 ## Classic burn-in and retirement
 
 The Torque maintainers own the fallback. `/legacy/` and classic writes remain

@@ -22,9 +22,9 @@ import { BehaviorOverlayEditor, CatalogEditor } from './CatalogEditors';
 import { browserHost, type DesktopHost } from '../../host';
 import { readCommand } from '../../protocol/http';
 import { projectionActions } from '../../app/store';
-import { NumericSettingInput, type NumericDraft } from './NumericSettingInput';
+import { NumericSettingInput } from './NumericSettingInput';
 import { StructuredSettings } from './StructuredSettings';
-import { changedSettings, editableSettings, resetSettings } from './settingsModel';
+import { aiSettingsDraft, primaryGlobalSettings, primaryGroupSettings, relaySettingsDraft, reconcileSettings, changedSettings, editableSettings, resetSettings, type SettingsSnapshot } from './settingsModel';
 import { PeerChat } from './PeerChat';
 import { PipelineExplorer } from './PipelineExplorer';
 import { LogViewer } from './LogViewer';
@@ -125,62 +125,28 @@ function HistoryPanel({ group, responses, send }: {
   </div>;
 }
 
-function numericDraft(value: unknown): NumericDraft { return Number(value); }
-
-function SettingsPanel({ group, responses, send }: { group: string; responses: Record<string, unknown>; send: (command: TorqueCommand) => void }) {
+function SettingsPanel({ group, responses, send, snapshot, onSavingChange }: { group: string; responses: Record<string, unknown>; send: (command: TorqueCommand) => void; snapshot: SettingsSnapshot; onSavingChange: (busy: boolean) => void }) {
   const operations = useAppSelector(selectOperationsState);
-  const groups = useAppSelector(selectGroupsState);
   const providers = useAppSelector(selectProviders);
-  const currentGlobal = operations.globalSettings;
-  const [globalDefaults] = useState(() => record(record(responses['global_settings:_'] ?? responses['global_settings:latest']).defaults));
-  const currentGroup = record(groups.settings[group]);
-  const groupSettingsFrame = record(responses[`group_settings:${group}`] ?? responses['group_settings:latest']);
-  const currentEngineer = record(groupSettingsFrame.engineer_settings);
-  const [currentArchitect] = useState(() => record(groupSettingsFrame.architect_settings));
-  const [groupDefaults] = useState(() => record(groupSettingsFrame.defaults));
-  const [engineerDefaults] = useState(() => record(groupSettingsFrame.engineer_defaults));
-  const [architectDefaults] = useState(() => record(groupSettingsFrame.architect_defaults));
+  const currentGlobal = record(snapshot.global.settings);
+  const globalDefaults = record(snapshot.global.defaults);
+  const currentGroup = record(snapshot.group.settings);
+  const currentEngineer = record(snapshot.group.engineer_settings);
+  const currentArchitect = record(snapshot.group.architect_settings);
+  const groupDefaults = record(snapshot.group.defaults);
+  const engineerDefaults = record(snapshot.group.engineer_defaults);
+  const architectDefaults = record(snapshot.group.architect_defaults);
   const currentAi = operations.aiSettings;
   const aiGeneration = record(currentAi.generation);
   const aiAnthropic = record(aiGeneration.anthropic);
   const aiOpenAi = record(aiGeneration.openai_compatible);
-  const aiEmbeddings = record(currentAi.embeddings);
   const aiIndex = record(currentAi.index);
-  const aiBoot = record(currentAi.boot_summary);
-  const [globalDraft, setGlobalDraft] = useState(() => ({
-    xterm_scrollback: numericDraft(currentGlobal.xterm_scrollback ?? 5000),
-    max_pipeline_depth: numericDraft(currentGlobal.max_pipeline_depth ?? 10),
-    max_event_log: numericDraft(currentGlobal.max_event_log ?? 500),
-    metrics_enabled: currentGlobal.metrics_enabled !== false,
-    keybindings: record(currentGlobal.keybindings),
-    status_bar_visibility: {
-      daemon_status: false, claude_usage: false, codex_usage: false, deploy: true,
-      health: false, workload: false, tasks: true, attention: true,
-      ...record(currentGlobal.status_bar_visibility),
-    },
-  }));
-  const [groupDraft, setGroupDraft] = useState(() => ({
-    default_directory: text(currentGroup.default_directory),
-    max_agents: numericDraft(currentGroup.max_agents ?? 0),
-    git_worktree: currentGroup.git_worktree === true,
-    engineer_merge_mode: text(currentGroup.engineer_merge_mode, 'pr'),
-  }));
-  const [aiDraft, setAiDraft] = useState(() => ({
-    ai_enabled: currentAi.enabled === true || currentGlobal.ai_enabled === true,
-    ai_generation_provider: text(aiGeneration.provider, text(currentGlobal.ai_generation_provider, 'anthropic')),
-    ai_anthropic_model: text(aiAnthropic.model, text(currentGlobal.ai_anthropic_model)),
-    ai_openai_compatible_base_url: text(aiOpenAi.base_url, text(currentGlobal.ai_openai_compatible_base_url)),
-    ai_openai_compatible_model: text(aiOpenAi.model, text(currentGlobal.ai_openai_compatible_model)),
-    ai_embedding_model: text(aiEmbeddings.model_id, text(currentGlobal.ai_embedding_model)),
-    ai_embedding_runtime: text(aiEmbeddings.runtime, text(currentGlobal.ai_embedding_runtime, 'sentence_transformers')),
-    ai_index_corpus: record(aiIndex.corpus),
-    ai_boot_summary_enabled: aiBoot.enabled !== false,
-    ai_boot_summary_min_interval_seconds: numericDraft(aiBoot.min_interval_seconds ?? currentGlobal.ai_boot_summary_min_interval_seconds ?? 300),
-    ai_boot_summary_max_refreshes_per_hour: numericDraft(aiBoot.max_refreshes_per_hour ?? currentGlobal.ai_boot_summary_max_refreshes_per_hour ?? 6),
-  }));
+  const [globalDraft, setGlobalDraft] = useState(() => primaryGlobalSettings(currentGlobal));
+  const [groupDraft, setGroupDraft] = useState(() => primaryGroupSettings(currentGroup));
+  const [aiDraft, setAiDraft] = useState(() => aiSettingsDraft(record(snapshot.ai.settings), currentGlobal));
   const [aiSecrets, setAiSecrets] = useState({ anthropic: '', openai_compatible: '' });
   const [clearAiSecrets, setClearAiSecrets] = useState<string[]>([]);
-  const [relayDraft, setRelayDraft] = useState(() => ({ relay_enabled: currentGlobal.relay_enabled === true, relay_url: text(currentGlobal.relay_url), relay_daemon_id: text(currentGlobal.relay_daemon_id), relay_credential_id: text(currentGlobal.relay_credential_id), relay_private_key_path: text(currentGlobal.relay_private_key_path) }));
+  const [relayDraft, setRelayDraft] = useState(() => relaySettingsDraft(currentGlobal));
   const [relayTouched, setRelayTouched] = useState<string[]>([]);
   const changeRelay = (patch: Partial<typeof relayDraft>) => { setRelayDraft((previous) => ({ ...previous, ...patch })); setRelayTouched((keys) => [...new Set([...keys, ...Object.keys(patch)])]); setDirty(true); setSaved(false); };
   const [pairingToken, setPairingToken] = useState('');
@@ -192,12 +158,38 @@ function SettingsPanel({ group, responses, send }: { group: string; responses: R
   const [dirty, setDirty] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
-  const baseline = useRef({ global: { ...record(JSON.parse(advancedGlobal)), ...globalDraft }, group: { ...record(JSON.parse(advancedGroup)), ...groupDraft }, engineer: record(JSON.parse(advancedEngineer)), architect: record(JSON.parse(advancedArchitect)), ai: { ...aiDraft } });
+  const [baseline, setBaseline] = useState(() => ({ global: { ...record(JSON.parse(advancedGlobal)), ...globalDraft }, group: { ...record(JSON.parse(advancedGroup)), ...groupDraft }, engineer: record(JSON.parse(advancedEngineer)), architect: record(JSON.parse(advancedArchitect)), ai: { ...aiDraft } }));
   const form = useRef<HTMLFormElement>(null);
   const saveController = useRef<AbortController | null>(null);
-  const resetScopes = useRef(new Set<string>());
+  const [resetScopes, setResetScopes] = useState(() => new Set<string>());
+  const [appliedSnapshot, setAppliedSnapshot] = useState(snapshot);
+  if (appliedSnapshot !== snapshot) {
+    setAppliedSnapshot(snapshot);
+    // A read that began before an in-flight write cannot replace its draft or
+    // acknowledgement baseline. The workspace rereads after the write settles.
+    if (!saving) {
+      const global = { ...editableSettings(currentGlobal), ...primaryGlobalSettings(currentGlobal) };
+      const groupValues = { ...editableSettings(currentGroup, Object.keys(currentArchitect)), ...primaryGroupSettings(currentGroup) };
+      const engineer = editableSettings(currentEngineer); const architect = editableSettings(currentArchitect);
+      const ai = aiSettingsDraft(record(snapshot.ai.settings), currentGlobal);
+      if (!resetScopes.has('global')) {
+        setGlobalDraft(reconcileSettings(baseline.global, globalDraft, primaryGlobalSettings(currentGlobal)));
+        setAdvancedGlobal(JSON.stringify(reconcileSettings(baseline.global, record(JSON.parse(advancedGlobal)), global)));
+      }
+      if (!resetScopes.has('group')) {
+        setGroupDraft(reconcileSettings(baseline.group, groupDraft, primaryGroupSettings(currentGroup)));
+        setAdvancedGroup(JSON.stringify(reconcileSettings(baseline.group, record(JSON.parse(advancedGroup)), groupValues)));
+      }
+      if (!resetScopes.has('engineer')) setAdvancedEngineer(JSON.stringify(reconcileSettings(baseline.engineer, record(JSON.parse(advancedEngineer)), engineer)));
+      if (!resetScopes.has('architect')) setAdvancedArchitect(JSON.stringify(reconcileSettings(baseline.architect, record(JSON.parse(advancedArchitect)), architect)));
+      setAiDraft(reconcileSettings(baseline.ai, aiDraft, ai));
+      setRelayDraft({ ...relaySettingsDraft(currentGlobal), ...Object.fromEntries(Object.entries(relayDraft).filter(([key]) => relayTouched.includes(key))) });
+      setBaseline({ global, group: groupValues, engineer, architect, ai });
+    }
+  }
+
   const resetSection = (scope: 'global' | 'group' | 'engineer' | 'architect') => {
-    resetScopes.current.add(scope);
+    setResetScopes((current) => new Set([...current, scope]));
     if (scope === 'global') {
       const defaults = editableSettings(globalDefaults, [...Object.keys(relayDraft), ...Object.keys(aiDraft)]);
       setAdvancedGlobal(JSON.stringify(resetSettings(record(JSON.parse(advancedGlobal)), defaults)));
@@ -227,16 +219,16 @@ function SettingsPanel({ group, responses, send }: { group: string; responses: R
     let fullGlobal: UnknownRecord; let fullGroup: UnknownRecord; let fullEngineer: UnknownRecord; let fullArchitect: UnknownRecord;
     try { fullGlobal = record(JSON.parse(advancedGlobal)); fullGroup = record(JSON.parse(advancedGroup)); fullEngineer = record(JSON.parse(advancedEngineer)); fullArchitect = record(JSON.parse(advancedArchitect)); } catch { setJsonError('Advanced settings must be valid JSON.'); return; }
     if (saveController.current) return;
-    setSaving(true); setJsonError(''); setSaved(false);
+    onSavingChange(true); setSaving(true); setJsonError(''); setSaved(false);
     const controller = new AbortController(); saveController.current = controller;
     const next = { global: { ...fullGlobal, ...globalDraft }, group: { ...fullGroup, ...groupDraft }, engineer: fullEngineer, architect: fullArchitect, ai: { ...aiDraft } };
-    const delta = (scope: keyof typeof next) => resetScopes.current.has(scope) ? editableSettings(next[scope]) : changedSettings(baseline.current[scope], next[scope]);
+    const delta = (scope: keyof typeof next) => resetScopes.has(scope) ? editableSettings(next[scope]) : changedSettings(baseline[scope], next[scope]);
     const globalChanges = editableSettings(delta('global'), [...Object.keys(aiDraft), ...Object.keys(relayDraft)]);
     Object.assign(globalChanges, Object.fromEntries(Object.entries(relayDraft).filter(([key]) => relayTouched.includes(key))));
     const groupChanges = editableSettings(delta('group'), Object.keys(currentArchitect));
     const engineerChanges = delta('engineer');
     const architectChanges = delta('architect');
-    const aiChanges = changedSettings(baseline.current.ai, next.ai);
+    const aiChanges = changedSettings(baseline.ai, next.ai);
     const commands: { scope: keyof typeof next; command: TorqueCommand }[] = [];
     if (Object.keys(globalChanges).length) commands.push({ scope: 'global', command: { cmd: 'update_global_settings', settings: globalChanges } });
     if (Object.keys(groupChanges).length) commands.push({ scope: 'group', command: { cmd: 'update_group_settings', group, settings: groupChanges } });
@@ -250,15 +242,15 @@ function SettingsPanel({ group, responses, send }: { group: string; responses: R
         if (response.type === 'error') throw new Error(text(response.message, 'Settings save failed.'));
         if (response.type !== 'state') settingsDispatch(projectionActions.auxiliaryResourceReceived(response));
         if (response.type === 'ai_settings_requires_confirmation') throw new Error('AI settings require embedding rebuild confirmation.');
-        baseline.current = { ...baseline.current, [scope]: next[scope] }; resetScopes.current.delete(scope);
+        setBaseline((current) => ({ ...current, [scope]: next[scope] })); setResetScopes((current) => { const pending = new Set(current); pending.delete(scope); return pending; });
         if (scope === 'global') setRelayTouched([]);
         if (scope === 'ai') { setAiSecrets({ anthropic: '', openai_compatible: '' }); setClearAiSecrets([]); }
       }
-      baseline.current = next; resetScopes.current.clear(); setRelayTouched([]);
+      setBaseline(next); setResetScopes(new Set()); setRelayTouched([]);
       setDirty(false); setSaved(true); setAiSecrets({ anthropic: '', openai_compatible: '' }); setClearAiSecrets([]);
     } catch (cause) {
       if (!controller.signal.aborted) setJsonError(`Some settings may already be saved. ${cause instanceof Error ? cause.message : 'Save failed'}. Your draft is retained; retry when ready.`);
-    } finally { saveController.current = null; if (!controller.signal.aborted) setSaving(false); }
+    } finally { saveController.current = null; if (!controller.signal.aborted) { setSaving(false); onSavingChange(false); } }
 
   };
   const relayTest = record(responses['relay_test_result:_'] ?? responses['relay_test_result:latest']);
@@ -305,17 +297,25 @@ function SettingsPanel({ group, responses, send }: { group: string; responses: R
 }
 
 function SettingsWorkspace({ group, responses, send }: { group: string; responses: Record<string, unknown>; send: (command: TorqueCommand) => void }) {
-  const dispatch = useAppDispatch();
-  const [ready, setReady] = useState(false); const [error, setError] = useState(''); const [retry, setRetry] = useState(0);
+  const dispatch = useAppDispatch(); const connection = useAppSelector(selectConnection);
+  const [snapshot, setSnapshot] = useState<SettingsSnapshot | null>(null);
+  const [error, setError] = useState(''); const [retry, setRetry] = useState(0);
+  const [busy, setBusy] = useState(false); const busyRef = useRef(false);
+  const savingChanged = useCallback((value: boolean) => { busyRef.current = value; setBusy(value); }, []);
   useEffect(() => {
+    if (busy || connection.status !== 'connected') return;
     const controller = new AbortController();
     void Promise.all([{ cmd: 'get_global_settings' }, { cmd: 'get_group_settings', group }, { cmd: 'get_ai_settings' }].map((command) => readCommand(command, controller.signal))).then((frames) => {
-      if (controller.signal.aborted) return;
-      frames.forEach((frame) => dispatch(projectionActions.auxiliaryResourceReceived(frame))); setReady(true); setError('');
+      if (controller.signal.aborted || busyRef.current) return;
+      const [global, groupFrame, ai] = frames;
+      if (global?.type !== 'global_settings' || groupFrame?.type !== 'group_settings' || ai?.type !== 'ai_settings' || groupFrame.group !== group) throw new Error('Could not load matching settings. Retry the refresh.');
+      frames.forEach((frame) => dispatch(projectionActions.auxiliaryResourceReceived(frame)));
+      setSnapshot({ global, group: groupFrame, ai }); setError('');
     }).catch((cause: unknown) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Settings unavailable'); });
     return () => controller.abort();
-  }, [group, dispatch, retry]);
-  return ready ? <SettingsPanel group={group} responses={responses} send={send} /> : error ? <StateSurface title="Settings unavailable" description={error} action={<Button onPress={() => setRetry((value) => value + 1)}>Retry settings</Button>} /> : <StateSurface title="Loading settings" description="Loading global, group and AI defaults before editing." />;
+  }, [group, dispatch, retry, connection.status, connection.reconnectCount, busy]);
+  const retryButton = <Button onPress={() => { setError(''); setRetry((value) => value + 1); }}>Retry settings</Button>;
+  return snapshot ? <>{error ? <div role="alert">Settings refresh failed. Your draft is retained. {error} {retryButton}</div> : null}<SettingsPanel group={group} responses={responses} send={send} snapshot={snapshot} onSavingChange={savingChanged} /></> : error ? <StateSurface title="Settings unavailable" description={error} action={retryButton} /> : <StateSurface title="Loading settings" description="Loading global, group and AI defaults before editing." />;
 }
 
 export function ControlCenter({ group, sendCommand, onCommandUnavailable, host = browserHost }: {

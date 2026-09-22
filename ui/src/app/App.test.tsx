@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { browserHost, createTauriHost } from '../host';
 import { compactStateFixture } from '../protocol/fixtures';
 import type { TorqueCommand } from '../protocol/commands';
-import type { StateFrame } from '../protocol/types';
+import type { StateFrame, UnknownRecord } from '../protocol/types';
 import { WorkspaceShell } from './App';
 import { sanitizeClientError } from './clientDiagnostics';
 import { connectionActions, createAppStore, projectionActions } from './store';
@@ -27,17 +27,24 @@ function renderShell(host = browserHost, frame: StateFrame = compactStateFixture
 afterEach(() => vi.unstubAllGlobals());
 
 function mockSettingsRequests(failSave = false) {
-  const commands: TorqueCommand[] = [];
-  const fetcher = vi.fn((_url: string, options?: RequestInit) => {
-    const command = JSON.parse(typeof options?.body === 'string' ? options.body : '{}' ) as TorqueCommand;
-    commands.push(command);
-    if (failSave && command.cmd === 'update_group_settings') return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: false, error: 'Group save refused' }) });
-    const frame = command.cmd === 'get_global_settings' ? { type: 'global_settings', defaults: { xterm_scrollback: 5000, event_ingest_max_days: 14, mcp_call_log_args_capture: 'metadata' }, settings: { xterm_scrollback: 5000, event_ingest_max_days: 14, mcp_call_log_args_capture: 'metadata' } }
-      : command.cmd === 'get_group_settings' ? { type: 'group_settings', group: 'Foundation', defaults: { max_agents: 0, shell: '', env_vars: {}, worktree_symlinks: [] }, engineer_defaults: { default_worker_concurrency: 2 }, architect_defaults: { architect_heartbeat_interval: 300 }, settings: { max_agents: 4, shell: '/bin/zsh', env_vars: {}, worktree_symlinks: [], architect_heartbeat_interval: 300, engineer_agent_id: 'owned' }, engineer_settings: { group: 'Foundation', pending_question: 'Keep this question', default_worker_concurrency: 2, digest_verbosity: 'balanced' }, architect_settings: { group: 'Foundation', architect_heartbeat_interval: 300 } }
-      : command.cmd === 'get_ai_settings' ? { type: 'ai_settings', settings: {} } : { type: 'ok' };
+  const commands: TorqueCommand[] = []; let failedRead = '';
+  const snapshots: Record<string, UnknownRecord> = {
+    get_global_settings: { type: 'global_settings', defaults: { xterm_scrollback: 5000, event_ingest_max_days: 14, mcp_call_log_args_capture: 'metadata' }, settings: { xterm_scrollback: 5000, event_ingest_max_days: 14, mcp_call_log_args_capture: 'metadata' } },
+    get_group_settings: { type: 'group_settings', group: 'Foundation', defaults: { max_agents: 0, shell: '', env_vars: {}, worktree_symlinks: [] }, engineer_defaults: { default_worker_concurrency: 2 }, architect_defaults: { architect_heartbeat_interval: 300 }, settings: { max_agents: 4, shell: '/bin/zsh', env_vars: {}, worktree_symlinks: [], architect_heartbeat_interval: 300, engineer_agent_id: 'owned' }, engineer_settings: { group: 'Foundation', pending_question: 'Keep this question', default_worker_concurrency: 2, digest_verbosity: 'balanced' }, architect_settings: { group: 'Foundation', architect_heartbeat_interval: 300 } },
+    get_ai_settings: { type: 'ai_settings', settings: {} },
+  };
+  const fetcher = vi.fn((_url: string, options?: RequestInit): Promise<{ ok: boolean; json: () => Promise<{ ok: boolean; error?: string; data?: UnknownRecord }> }> => {
+    const command = JSON.parse(typeof options?.body === 'string' ? options.body : '{}' ) as TorqueCommand; commands.push(command);
+    if (command.cmd === failedRead || (failSave && command.cmd === 'update_group_settings')) return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: false, error: command.cmd === failedRead ? 'Refresh refused' : 'Group save refused' }) });
+    const update = (scope: string, key: string, patch: unknown) => { const frame = snapshots[scope]!; frame[key] = { ...(frame[key] as UnknownRecord), ...(patch as UnknownRecord) }; };
+    if (command.cmd === 'update_global_settings' || command.cmd === 'update_ai_settings') update('get_global_settings', 'settings', command.settings);
+    if (command.cmd === 'update_group_settings') update('get_group_settings', 'settings', command.settings);
+    if (command.cmd === 'engineer_update_settings') update('get_group_settings', 'engineer_settings', Object.fromEntries(Object.entries(command).filter(([key]) => key !== 'cmd' && key !== 'group')));
+    if (command.cmd === 'update_architect_settings') update('get_group_settings', 'architect_settings', command.settings);
+    const frame = structuredClone(snapshots[String(command.cmd)] ?? { type: 'ok' });
     return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: frame }) });
   });
-  vi.stubGlobal('fetch', fetcher); return { commands, fetcher, setFailure: (value: boolean) => { failSave = value; } };
+  vi.stubGlobal('fetch', fetcher); return { commands, fetcher, setFailure: (value: boolean) => { failSave = value; }, failRead: (command: string) => { failedRead = command; }, refresh: (command: string, patch: UnknownRecord) => { snapshots[command] = { ...snapshots[command], ...patch }; } };
 }
 
 describe('workspace shell', () => {
@@ -1156,6 +1163,59 @@ describe('workspace shell', () => {
     setFailure(false); fireEvent.click(screen.getByRole('button', { name: 'Save changes' })); await screen.findByText('Saved', { exact: true });
     expect(commands.filter((command) => command.cmd === 'update_global_settings')).toHaveLength(1);
     expect(commands.filter((command) => command.cmd === 'update_group_settings')).toHaveLength(2);
+  });
+
+  it('reconciles active Settings after reconnect while preserving draft identity, focus, caret and secrets', async () => {
+    const { refresh } = mockSettingsRequests(); const { appStore } = renderShell();
+    fireEvent.click(screen.getByRole('button', { name: /Control/ })); fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    fireEvent.change(await screen.findByRole('spinbutton', { name: 'Terminal scrollback' }), { target: { value: '9100' } });
+    const secret = screen.getByLabelText('Anthropic key'); fireEvent.change(secret, { target: { value: 'unsaved-test-key' } });
+    const directory = screen.getByRole<HTMLInputElement>('textbox', { name: 'Default directory' }); fireEvent.change(directory, { target: { value: '/draft/path' } }); directory.focus(); directory.setSelectionRange(2, 6);
+    refresh('get_global_settings', { settings: { xterm_scrollback: 8000, event_ingest_max_days: 30 }, defaults: { event_ingest_max_days: 21 } });
+    refresh('get_group_settings', { settings: { max_agents: 9, default_directory: '/server/path' }, engineer_settings: { default_worker_concurrency: 6 }, architect_settings: { architect_heartbeat_interval: 900 } });
+    refresh('get_ai_settings', { settings: { enabled: false, generation: { anthropic: { model: 'refreshed-model' } } } });
+    act(() => { appStore.dispatch(connectionActions.disconnected({ at: 2_000 })); appStore.dispatch(projectionActions.snapshotReceived(compactStateFixture)); appStore.dispatch(connectionActions.connected({ at: 3_000, reconnect: true })); });
+    await waitFor(() => expect(screen.getByRole('spinbutton', { name: 'Maximum agents' })).toHaveValue(9));
+    expect(screen.getByRole('textbox', { name: 'Default directory' })).toBe(directory); expect(directory).toHaveValue('/draft/path'); expect(directory).toHaveFocus(); expect(directory.selectionStart).toBe(2); expect(directory.selectionEnd).toBe(6);
+    expect(screen.getByRole('spinbutton', { name: 'Terminal scrollback' })).toHaveValue(9100); expect(secret).toHaveValue('unsaved-test-key'); expect(screen.getByRole('textbox', { name: 'Anthropic model' })).toHaveValue('refreshed-model');
+    fireEvent.click(screen.getByText('Global defaults')); expect(screen.getByRole('spinbutton', { name: 'Event ingest max days' })).toHaveValue(30);
+    fireEvent.click(screen.getByRole('button', { name: 'Reset Event ingest max days' })); expect(screen.getByRole('spinbutton', { name: 'Event ingest max days' })).toHaveValue(21);
+  });
+
+  it('retains staged resets through failed reconnect reads, retries in place and reads nothing while hidden', async () => {
+    const { commands, failRead, refresh } = mockSettingsRequests(); const { appStore } = renderShell();
+    fireEvent.click(screen.getByRole('button', { name: /Control/ })); fireEvent.click(await screen.findByRole('button', { name: 'Settings' })); await screen.findByRole('spinbutton', { name: 'Maximum agents' });
+    fireEvent.click(screen.getByText('Engineer behavior defaults')); fireEvent.click(screen.getByRole('button', { name: 'Reset Engineer defaults' }));
+    const concurrency = screen.getByRole('combobox', { name: 'Default worker concurrency' });
+    refresh('get_group_settings', { engineer_settings: { default_worker_concurrency: 6 }, engineer_defaults: { default_worker_concurrency: 7 } });
+    failRead('get_group_settings'); act(() => { appStore.dispatch(connectionActions.connected({ at: 2_000, reconnect: true })); });
+    await screen.findByText(/Settings refresh failed/); expect(concurrency).toHaveValue('2');
+    failRead(''); fireEvent.click(screen.getByRole('button', { name: 'Retry settings' }));
+    await waitFor(() => expect(screen.queryByText(/Settings refresh failed/)).not.toBeInTheDocument()); expect(screen.getByRole('combobox', { name: 'Default worker concurrency' })).toBe(concurrency); expect(concurrency).toHaveValue('2');
+    fireEvent.click(screen.getByRole('button', { name: 'Reset Engineer defaults' })); expect(concurrency).toHaveValue('7');
+    fireEvent.click(screen.getByRole('button', { name: 'Mission Control' }));
+    const reads = commands.filter((command) => ['get_global_settings', 'get_group_settings', 'get_ai_settings'].includes(String(command.cmd))).length;
+    await act(async () => { appStore.dispatch(connectionActions.connected({ at: 3_000, reconnect: true })); await Promise.resolve(); });
+    expect(commands.filter((command) => ['get_global_settings', 'get_group_settings', 'get_ai_settings'].includes(String(command.cmd)))).toHaveLength(reads);
+  });
+
+  it('aborts a reconnect read before saving and ignores its late response after acknowledgement', async () => {
+    const { fetcher } = mockSettingsRequests(); const { appStore } = renderShell();
+    fireEvent.click(screen.getByRole('button', { name: /Control/ })); fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    const input = await screen.findByRole('spinbutton', { name: 'Terminal scrollback' }); fireEvent.change(input, { target: { value: '9200' } });
+    const original = fetcher.getMockImplementation()!; let hold = true;
+    let release: ((response: Awaited<ReturnType<typeof original>>) => void) | undefined; let signal: AbortSignal | null | undefined;
+    fetcher.mockImplementation((url, options) => {
+      const cmd = JSON.parse(typeof options?.body === 'string' ? options.body : '{}') as TorqueCommand;
+      if (hold && cmd.cmd === 'get_global_settings') { hold = false; signal = options?.signal; return new Promise((resolve) => { release = resolve; }); }
+      return original(url, options);
+    });
+    act(() => { appStore.dispatch(connectionActions.connected({ at: 2_000, reconnect: true })); });
+    await waitFor(() => expect(release).toBeDefined());
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' })); await screen.findByText('Saved', { exact: true });
+    expect(signal?.aborted).toBe(true);
+    await act(async () => { release!({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: 'global_settings', settings: { xterm_scrollback: 1234 } } }) }); await Promise.resolve(); });
+    expect(input).toHaveValue(9200); expect(screen.getByRole('spinbutton', { name: 'Terminal scrollback' })).toBe(input);
   });
 
   it('stages section resets and preserves newer unrelated settings through a sparse save', async () => {
