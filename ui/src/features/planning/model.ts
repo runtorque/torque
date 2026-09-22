@@ -1,6 +1,8 @@
 import type { UnknownRecord } from '../../protocol';
 
-export type PlanningStatus = 'triage' | 'now' | 'next' | 'later' | 'done';
+export const planningStatuses = ['triage', 'now', 'next', 'later', 'parked', 'shipped'] as const;
+export type PlanningStatus = typeof planningStatuses[number];
+export const decisionStatuses = ['proposed', 'accepted', 'revised', 'rejected'] as const;
 
 export function records(value: unknown): (UnknownRecord & { id: string })[] {
   if (Array.isArray(value)) {
@@ -24,16 +26,16 @@ export function groupRecords(value: unknown, group: string): (UnknownRecord & { 
 
 export function initiativeStatus(item: UnknownRecord): PlanningStatus {
   const status = text(item.planning_status, text(item.status, 'triage')).toLowerCase();
-  return ['triage', 'now', 'next', 'later', 'done'].includes(status)
+  return (planningStatuses as readonly string[]).includes(status)
     ? status as PlanningStatus
     : 'triage';
 }
 
 export function groupInitiatives(value: unknown, group: string) {
   const grouped: Record<PlanningStatus, (UnknownRecord & { id: string })[]> = {
-    triage: [], now: [], next: [], later: [], done: [],
+    triage: [], now: [], next: [], later: [], parked: [], shipped: [],
   };
-  for (const item of groupRecords(value, group)) grouped[initiativeStatus(item)].push(item);
+  for (const item of groupRecords(value, group).filter((entry) => !entry.archived && !entry.archived_at)) grouped[initiativeStatus(item)].push(item);
   return grouped;
 }
 

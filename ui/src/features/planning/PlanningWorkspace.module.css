@@ -8,7 +8,7 @@
 .tabs button { min-height: 27px; padding: 0 9px; border: 0; border-radius: var(--radius-sm); color: var(--text-muted); background: transparent; white-space: nowrap; }
 .tabs button[aria-current='page'] { color: var(--text); background: var(--surface-raised); box-shadow: inset 0 -2px var(--accent); }
 .content { min-height: 0; flex: 1; overflow: auto; padding: 10px; }
-.roadmap { display: grid; min-width: 880px; grid-template-columns: repeat(5, minmax(168px, 1fr)); gap: 8px; }
+.roadmap { display: grid; min-width: 1060px; grid-template-columns: repeat(6, minmax(168px, 1fr)); gap: 8px; }
 .column, .split > section { min-width: 0; padding: 7px; border: 1px solid var(--border); border-radius: var(--radius); background: color-mix(in srgb, var(--surface) 74%, transparent); }
 .column > header, .split > section > header { display: flex; align-items: center; justify-content: space-between; padding: 1px 2px 7px; }
 .column h2, .split h2 { margin: 0; font-size: 10px; text-transform: capitalize; }

@@ -13,7 +13,9 @@ export function usePlanningMutation() {
   const request = async (command: TorqueCommand) => {
     const frame = await readCommand(command, new AbortController().signal);
     if (frame.type === 'error') throw new Error(typeof frame.message === 'string' ? frame.message : 'The request failed.');
-    dispatch(projectionActions.auxiliaryResourceReceived(frame));
+    if (/^architect_decision_(create|update|link)$/.test(command.cmd) && typeof frame.id === 'string') {
+      dispatch(projectionActions.auxiliaryResourceReceived({ ...command, ...frame, type: 'decision' }));
+    } else dispatch(projectionActions.auxiliaryResourceReceived(frame));
     return frame;
   };
   const run = async (operation: (request: (command: TorqueCommand) => Promise<AuxiliaryFrame>) => Promise<void>) => {

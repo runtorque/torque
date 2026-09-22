@@ -2611,6 +2611,14 @@ scope.
 - Constraints: Every Planning creation waits for acknowledgement. Thinking saves and lifecycle writes serialize and retain failed drafts. Park/propose first save local edits; a failed save prevents the lifecycle command. Proposal is product review only and creates no task or assignment. Archived Thinking is discoverable and read only; scratchpad deletion has an inline confirmation. The backend has no unarchive command for these records.
 - Verification: Component tests cover failed create/save, full hydration, draft/caret retention, sparse metadata preservation and proposal ordering. Live isolated browser QA exercises all seven brief fields, linking, refinement, proposal, park/return-to-draft, reload, archive and scratchpad edit/archive/delete.
 
+### D-095 — Planning editors use domain statuses and acknowledged sparse writes
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: The Initiative roadmap has six durable states: triage, now, next, later, parked and shipped. Decision states are proposed, accepted, revised and rejected; supersession is a separate relationship. Both editors hydrate complete records, retain local edits across incoming records/reconnects, and close only after the required writes succeed. Linked records display persisted IDs with names and support acknowledged add/remove actions.
+- Constraints: Initiative archive preserves edited scope before archiving. Decision archive saves its edits atomically in the existing update command; restore changes only archive state. Archived decisions remain in the projection and appear through an explicit filter. Decision creation requires an Architect, title and rationale. Decisions, hire requests and journals are filtered to the selected group; Engineer link choices respect the Architect's visible peers.
+- Verification: Component tests cover sparse saves, failed link/update retention, reconnect caret, scoped collections and archived projections. Isolated live QA writes every status, all Initiative scope fields, decision rationale/supersedes, task/Engineer/Decision links and archive/restore. Initiative-to-Board task creation remains a separate open parity row.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

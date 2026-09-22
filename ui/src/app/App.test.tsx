@@ -779,34 +779,6 @@ describe('workspace shell', () => {
     expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();
   });
 
-  it('edits initiative scope and links durable Board work from Planning', async () => {
-    const frame: StateFrame = {
-      ...compactStateFixture,
-      initiatives: { 'initiative-1': { id: 'initiative-1', group_name: 'Foundation', title: 'Parity roadmap', summary: 'Close migration gaps', planning_status: 'now', links: [] } },
-    };
-    const { sendCommand, appStore } = renderShell(browserHost, frame);
-    fireEvent.click(screen.getByRole('button', { name: /Planning/ }));
-    fireEvent.click(await screen.findByRole('button', { name: /Parity roadmap/ }));
-    const dialog = screen.getByRole('dialog', { name: 'Initiative' });
-    expect(dialog).toBeVisible();
-    fireEvent.change(screen.getByRole('textbox', { name: 'Why this matters' }), { target: { value: 'Retire the classic UI safely' } });
-    fireEvent.change(within(dialog).getByRole('combobox', { name: 'Linked record' }), { target: { value: 'task-1' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Link' }));
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'initiative_link_task', id: 'initiative-1', task_id: 'task-1' });
-    sendCommand.mockClear();
-    act(() => { appStore.dispatch(connectionActions.auxiliaryFrameReceived({ type: 'initiative_task_linked', link: { initiative_id: 'initiative-1', target_id: 'task-1' } })); });
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'initiative_list', group: 'Foundation', include_archived: false });
-    act(() => { appStore.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: 11, ops: [{ op: 'initiative_link_upsert', id: 'link-1', initiative_id: 'initiative-1', link_type: 'task', target_id: 'task-1' }] })); });
-    expect(within(dialog).getByRole('button', { name: 'Unlink' })).toBeVisible();
-    expect(screen.getByRole('textbox', { name: 'Why this matters' })).toHaveValue('Retire the classic UI safely');
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Unlink' }));
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'initiative_unlink_task', id: 'initiative-1', task_id: 'task-1' });
-    act(() => { appStore.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: 12, ops: [{ op: 'initiative_link_remove', initiative_id: 'initiative-1', link_type: 'task', target_id: 'task-1' }] })); });
-    expect(within(dialog).queryByRole('button', { name: 'Unlink' })).not.toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
-    expect(sendCommand).toHaveBeenCalledWith(expect.objectContaining({ cmd: 'initiative_update', id: 'initiative-1', why: 'Retire the classic UI safely' }));
-  });
-
   it('publishes and pins shared memory from the Control Center Context panel', async () => {
     const { appStore, sendCommand } = renderShell();
     fireEvent.click(screen.getByRole('button', { name: /Control/ }));

@@ -229,7 +229,7 @@ const projectionSlice = createSlice({
         });
         replace(key, collection);
       };
-      const upsertResource = (key: string, value: unknown) => {
+      const upsertResource = (key: string, value: unknown, keepArchived = false) => {
         if (!value || typeof value !== 'object' || Array.isArray(value)) return;
         const payload = value as Record<string, unknown>;
         const id = typeof payload.id === 'string' ? payload.id : '';
@@ -237,7 +237,7 @@ const projectionSlice = createSlice({
         const current = state.data[key];
         const collection = current && typeof current === 'object' && !Array.isArray(current)
           ? current as Record<string, unknown> : {};
-        if (payload.archived || payload.deleted) delete collection[id];
+        if ((!keepArchived && payload.archived) || payload.deleted) delete collection[id];
         else {
           const existing = collection[id];
           collection[id] = {
@@ -275,6 +275,9 @@ const projectionSlice = createSlice({
           replace('initiatives', records);
           break;
         }
+        case 'initiative':
+          upsertResource('initiatives', frame);
+          break;
         case 'initiative_created':
         case 'initiative_updated':
         case 'initiative_archived':
@@ -324,6 +327,9 @@ const projectionSlice = createSlice({
         case 'idea_brief_parked':
         case 'idea_brief_archived':
           upsertResource('idea_briefs', frame.idea_brief);
+          break;
+        case 'decision':
+          upsertResource('decisions', frame, true);
           break;
         case 'decisions_snapshot':
           replace('decisions', frame.decisions);
