@@ -132,6 +132,10 @@ TORQUE_UI_BASE_URL=http://127.0.0.1:18961 TORQUE_PLAYWRIGHT_CHANNEL=chrome TORQU
 
 This opt-in test refuses the default port/profile, launches `ui/e2e/fixtures/streaming_receiver.py` as a generic agent and inspects the actual xterm buffer and terminal WebSocket. It checks scrolling during output, Tail, resizing and reconnect without replacing the terminal. Set both `TORQUE_PTY_PYTHON` and `TORQUE_ATTENTION_PYTHON` for the complete real-PTY browser suite. Native ownership still requires the separate detach/type/resize/close check; browser success does not certify native crash recovery.
 
+### Thinking contract and lifecycle regression
+
+`thinking-live.spec.ts` runs against the same isolated daemon without a provider. It creates a dedicated group and leaves its Planning evidence in the disposable profile. It covers failed creation retention, every persisted brief text field, scratchpad links, refinement, product-only proposal, park/return to draft, reload and archived read-only discovery, plus scratchpad editing and confirmed deletion. Run it after `make ui-check`; a PTY opt-in is unnecessary for this file.
+
 ## Classic burn-in and retirement
 
 The Torque maintainers own the fallback. `/legacy/` and classic writes remain

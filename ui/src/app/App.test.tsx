@@ -6,7 +6,6 @@ import { browserHost, createTauriHost } from '../host';
 import { compactStateFixture } from '../protocol/fixtures';
 import type { TorqueCommand } from '../protocol/commands';
 import type { StateFrame } from '../protocol/types';
-import { ThinkingEditor } from '../features/planning/PlanningEditors';
 import { WorkspaceShell } from './App';
 import { sanitizeClientError } from './clientDiagnostics';
 import { connectionActions, createAppStore, projectionActions } from './store';
@@ -734,6 +733,11 @@ describe('workspace shell', () => {
   });
 
   it('opens Phase 4 Planning, lazy-loads its resources, and creates an initiative', async () => {
+    const writes: TorqueCommand[] = [];
+    vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => {
+      const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand; writes.push(command);
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: 'initiative_created', initiative: { id: 'new-initiative', ...command } } }) });
+    }));
     const { sendCommand } = renderShell();
     fireEvent.click(screen.getByRole('button', { name: /Planning/ }));
 
@@ -744,7 +748,8 @@ describe('workspace shell', () => {
     fireEvent.click(screen.getByRole('button', { name: '＋ New' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), { target: { value: 'Ship Phase 4' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
-    expect(sendCommand).toHaveBeenCalledWith({
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(writes).toContainEqual({
       cmd: 'initiative_create',
       group: 'Foundation',
       title: 'Ship Phase 4',
@@ -800,19 +805,6 @@ describe('workspace shell', () => {
     expect(within(dialog).queryByRole('button', { name: 'Unlink' })).not.toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
     expect(sendCommand).toHaveBeenCalledWith(expect.objectContaining({ cmd: 'initiative_update', id: 'initiative-1', why: 'Retire the classic UI safely' }));
-  });
-
-  it('keeps Planning thinking records open when a structured field contains invalid JSON', () => {
-    const send = vi.fn();
-    const onClose = vi.fn();
-    render(<ThinkingEditor kind="note" item={{ id: 'note-1', title: 'Audit note', body: 'Body', context: {}, links: [] }} send={send} onClose={onClose} />);
-
-    fireEvent.change(screen.getByRole('textbox', { name: 'context' }), { target: { value: '{broken' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-
-    expect(screen.getByRole('alert')).toHaveTextContent('Context and link fields must contain valid JSON.');
-    expect(send).not.toHaveBeenCalled();
-    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('publishes and pins shared memory from the Control Center Context panel', async () => {

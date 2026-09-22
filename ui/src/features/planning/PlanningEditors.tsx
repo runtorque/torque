@@ -11,10 +11,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return <label className={styles.field}><span>{label}</span>{children}</label>;
 }
 
-function JsonField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  return <Field label={label}><textarea value={value} onChange={(event) => onChange(event.target.value)} spellCheck={false} /></Field>;
-}
-
 function LinkRows({ links, onRemove }: { links: unknown; onRemove: (item: UnknownRecord) => void }) {
   const grouped = links && typeof links === 'object' && !Array.isArray(links) ? links as UnknownRecord : {};
   const items: (UnknownRecord & { id: string })[] = Array.isArray(grouped.tasks) || Array.isArray(grouped.decisions)
@@ -64,46 +60,6 @@ export function InitiativeEditor({ item, tasks, decisions, send, onClose }: {
       <footer className={styles.detailFooter}><Button tone="danger" onPress={() => { send({ cmd: 'initiative_archive', id: text(item.id) }); onClose(); }}>Archive</Button><span /><Button tone="quiet" onPress={onClose}>Cancel</Button><Button tone="primary" type="submit" isDisabled={!draft.title.trim()}>Save</Button></footer>
     </form>
   </ModalDialog>;
-}
-
-export function ThinkingEditor({ kind, item, send, onClose }: { kind: 'note' | 'brief'; item: UnknownRecord; send: Send; onClose: () => void }) {
-  const [draft, setDraft] = useState(() => kind === 'note' ? {
-    title: text(item.title), body: text(item.body), context: JSON.stringify(item.context ?? {}, null, 2), links: JSON.stringify(item.links ?? [], null, 2),
-  } : {
-    title: text(item.title), summary: text(item.summary), problem: text(item.problem), opportunity: text(item.opportunity), hypothesis: text(item.hypothesis),
-    user_value: text(item.user_value), product_fit: text(item.product_fit), scope: text(item.scope), risks: text(item.risks), open_questions: text(item.open_questions),
-    status: text(item.status, 'draft'), thinking_links: JSON.stringify(item.thinking_links ?? [], null, 2), source_context: JSON.stringify(item.source_context ?? {}, null, 2),
-  });
-  const fields = Object.entries(draft);
-  const [refinementNote, setRefinementNote] = useState('');
-  const [jsonError, setJsonError] = useState('');
-  const patch = (key: string, value: string) => setDraft((current) => ({ ...current, [key]: value }));
-  const payload = () => {
-    try {
-      const result = Object.fromEntries(Object.entries(draft).map(([key, value]) => {
-        if (['context', 'links', 'thinking_links', 'source_context'].includes(key)) return [key, JSON.parse(value)];
-        return [key, value];
-      }));
-      setJsonError('');
-      return result;
-    } catch {
-      setJsonError('Context and link fields must contain valid JSON.');
-      return null;
-    }
-  };
-  const sendWithPayload = (command: TorqueCommand) => {
-    const parsed = payload();
-    if (!parsed) return false;
-    send({ ...command, ...parsed });
-    return true;
-  };
-  return <ModalDialog title={kind === 'note' ? 'Scratchpad note' : 'Idea Brief'} description={text(item.id)} size="large" isOpen onOpenChange={(open) => { if (!open) onClose(); }}><form className={styles.detailForm} onSubmit={(event) => { event.preventDefault(); if (sendWithPayload({ cmd: kind === 'note' ? 'scratchpad_note_update' : 'idea_brief_update', id: text(item.id) })) onClose(); }}>
-    <div className={styles.formGrid}>{fields.map(([key, value]) => key === 'status' ? <Field key={key} label="Status"><select value={value} onChange={(e) => patch(key, e.target.value)}>{['draft', 'exploring', 'parked', 'proposed', 'archived'].map((entry) => <option key={entry}>{entry}</option>)}</select></Field> : ['title'].includes(key) ? <Field key={key} label="Title"><input value={value} onChange={(e) => patch(key, e.target.value)} /></Field> : null)}</div>
-    {fields.filter(([key]) => !['title', 'status'].includes(key)).map(([key, value]) => <JsonField key={key} label={key.replaceAll('_', ' ')} value={value} onChange={(next) => patch(key, next)} />)}
-    {kind === 'brief' ? <section className={styles.embeddedSection}><h3>Refinement & review</h3><Field label="Refinement note"><textarea value={refinementNote} onChange={(e) => setRefinementNote(e.target.value)} /></Field><div className={styles.actionRow}><Button tone="quiet" onPress={() => sendWithPayload({ cmd: 'idea_brief_refine', id: text(item.id), refinement_note: refinementNote })}>Record refinement</Button><Button tone="quiet" onPress={() => send({ cmd: 'idea_brief_park', id: text(item.id), reason: refinementNote })}>Park</Button><Button tone="primary" onPress={() => send({ cmd: 'idea_brief_propose', id: text(item.id), note: refinementNote, review_target: 'user' })}>Propose for review</Button></div></section> : null}
-    {jsonError ? <p className={styles.validation} role="alert">{jsonError}</p> : null}
-    <footer className={styles.detailFooter}><Button tone="danger" onPress={() => { send({ cmd: kind === 'note' ? 'scratchpad_note_archive' : 'idea_brief_archive', id: text(item.id) }); onClose(); }}>{kind === 'note' ? 'Archive' : 'Archive brief'}</Button>{kind === 'note' ? <Button tone="danger" onPress={() => { send({ cmd: 'scratchpad_note_delete', id: text(item.id) }); onClose(); }}>Delete</Button> : null}<span /><Button tone="quiet" onPress={onClose}>Cancel</Button><Button tone="primary" type="submit">Save</Button></footer>
-  </form></ModalDialog>;
 }
 
 export function DecisionEditor({ item, tasks, engineers, send, onClose }: { item: UnknownRecord; tasks: UnknownRecord[]; engineers: UnknownRecord[]; send: Send; onClose: () => void }) {

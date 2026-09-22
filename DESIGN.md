@@ -2603,6 +2603,14 @@ scope.
 - Constraints: Normal-buffer wheel input uses xterm's public scroll API to avoid a bundled-runtime DOM scroll suppression race. Alternate screens, application mouse reporting and modified wheel events retain xterm handling. Output remains outside React state; hidden surfaces do not send focus or geometry.
 - Verification: Controller regressions and a repeated real-xterm/PTY browser scenario. Native macOS detach/resize/close confirms exclusive geometry ownership, one input marker per window and retained main-window DM draft; cross-platform and crash/sleep recovery remain release gates.
 
+### D-094 — Thinking follows the persisted brief contract and keeps failed drafts
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: Idea Briefs edit Title, Problem or opportunity, Why it matters, Proposed shape, Smallest useful version, Risks and tradeoffs, and Open questions. Full detail loads before any write; reconnect refreshes untouched fields without replacing local edits. Scratchpad links use a note picker, context text and readable source preview. Hidden source metadata is preserved through sparse writes.
+- Constraints: Every Planning creation waits for acknowledgement. Thinking saves and lifecycle writes serialize and retain failed drafts. Park/propose first save local edits; a failed save prevents the lifecycle command. Proposal is product review only and creates no task or assignment. Archived Thinking is discoverable and read only; scratchpad deletion has an inline confirmation. The backend has no unarchive command for these records.
+- Verification: Component tests cover failed create/save, full hydration, draft/caret retention, sparse metadata preservation and proposal ordering. Live isolated browser QA exercises all seven brief fields, linking, refinement, proposal, park/return-to-draft, reload, archive and scratchpad edit/archive/delete.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

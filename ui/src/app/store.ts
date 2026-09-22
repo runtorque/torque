@@ -302,6 +302,10 @@ const projectionSlice = createSlice({
         case 'scratchpad_note_list':
           replaceCollection('thinking_scratchpad_notes', frame.notes ?? frame.scratchpad_notes);
           break;
+        case 'scratchpad_note':
+          upsertResource('thinking_scratchpad_notes', frame);
+          break;
+        case 'scratchpad_note_deleted':
         case 'scratchpad_note_created':
         case 'scratchpad_note_updated':
         case 'scratchpad_note_archived':
@@ -310,6 +314,10 @@ const projectionSlice = createSlice({
         case 'idea_brief_list':
           replaceCollection('idea_briefs', frame.idea_briefs);
           break;
+        case 'idea_brief':
+          upsertResource('idea_briefs', frame);
+          break;
+        case 'idea_brief_proposed':
         case 'idea_brief_created':
         case 'idea_brief_updated':
         case 'idea_brief_refined':
