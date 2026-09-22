@@ -21,9 +21,12 @@ function setup(kind: 'initiative' | 'decision') {
     if (command.cmd === fail) return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: false, error: 'Write rejected' }) });
     let data: UnknownRecord;
     if (command.cmd === 'initiative_show') data = { ...record, type: 'initiative' };
+    else if (command.cmd === 'list_actions') data = { type: 'actions', actions: [] };
+    else if (command.cmd === 'list_roles') data = { type: 'roles', roles: [] };
+    else if (command.cmd === 'board_add_task') data = { type: 'board_task_added', task_id: 'new-task' };
     else if (command.cmd === 'decisions_snapshot') data = { type: 'decisions_snapshot', decisions: { d: record } };
     else if (command.cmd === 'initiative_link_task' || command.cmd === 'initiative_unlink_task') {
-      record = { ...record, links: { tasks: command.cmd === 'initiative_link_task' ? ['t'] : [], decisions: [] } };
+      record = { ...record, links: { tasks: command.cmd === 'initiative_link_task' ? [command.task_id] : [], decisions: [] } };
       data = { type: 'initiative_task_linked' };
     } else {
       record = { ...record, ...command, ...(command.cmd === 'initiative_archive' ? { archived: true } : {}) };
@@ -59,6 +62,42 @@ describe('Planning editor acknowledgements and contracts', () => {
     await screen.findByText('Write rejected'); expect(onClose).not.toHaveBeenCalled();
     fail(''); fireEvent.click(screen.getByRole('button', { name: 'Save' })); await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
     expect(calls.find((call) => call.cmd === 'initiative_update')).toEqual({ cmd: 'initiative_update', id: 'i', why: 'Keep draft' });
+  });
+  it('reviews the current Initiative draft and retries a failed task link without creating twice', async () => {
+    const { calls, fail, onClose } = setup('initiative');
+    await waitFor(() => expect(screen.getByLabelText('Summary')).toHaveValue('Full summary'));
+    fireEvent.change(screen.getByLabelText('Why this matters'), { target: { value: 'Unsaved rationale' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create Board task' }));
+    let dialog = within(screen.getByRole('dialog', { name: 'Create Board task' }));
+    expect(dialog.getByLabelText('Title')).toHaveValue('Roadmap');
+    expect(dialog.getByLabelText('Description')).toHaveValue('Source initiative: i — Roadmap\n\nSummary\nFull summary\n\nWhy\nUnsaved rationale');
+    expect(dialog.getByLabelText('Lane')).toHaveValue('');
+    fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByLabelText('Why this matters')).toHaveValue('Unsaved rationale');
+    expect(calls.some((call) => call.cmd === 'board_add_task')).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Create Board task' }));
+    dialog = within(screen.getByRole('dialog', { name: 'Create Board task' }));
+    fireEvent.change(dialog.getByLabelText('Title'), { target: { value: 'Reviewed task' } });
+    fail('board_add_task'); fireEvent.click(dialog.getByRole('button', { name: 'Create task' }));
+    await dialog.findByText('Write rejected'); expect(dialog.getByLabelText('Title')).toHaveValue('Reviewed task');
+    expect(calls.some((call) => call.cmd === 'initiative_link_task')).toBe(false);
+    fail('initiative_link_task'); fireEvent.click(dialog.getByRole('button', { name: 'Create task' }));
+    await dialog.findByRole('button', { name: 'Retry link' });
+    expect(dialog.getByLabelText('Title')).toBeDisabled();
+    fireEvent.click(dialog.getByRole('button', { name: 'Close' }));
+    expect(screen.getByLabelText('Why this matters')).toHaveValue('Unsaved rationale');
+    fireEvent.click(screen.getByRole('button', { name: 'Resume task link' }));
+    dialog = within(screen.getByRole('dialog', { name: 'Create Board task' }));
+    fail(''); fireEvent.click(dialog.getByRole('button', { name: 'Retry link' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Create Board task' })).not.toBeInTheDocument());
+    await screen.findByRole('button', { name: 'Unlink' });
+    expect(screen.getByLabelText('Why this matters')).toHaveValue('Unsaved rationale');
+    expect(calls.filter((call) => call.cmd === 'board_add_task')).toHaveLength(2); // one rejected, one acknowledged
+    expect(calls.filter((call) => call.cmd === 'initiative_link_task')).toEqual([
+      { cmd: 'initiative_link_task', id: 'i', task_id: 'new-task' }, { cmd: 'initiative_link_task', id: 'i', task_id: 'new-task' },
+    ]);
+    expect(calls.some((call) => call.cmd === 'initiative_update')).toBe(false);
+    expect(onClose).not.toHaveBeenCalled();
   });
   it('renders persisted decision links, retains failed unlink, and projects the acknowledged record', async () => {
     const { calls, fail, store, onClose } = setup('decision');

@@ -380,26 +380,32 @@ function InlineCreate({ lane, group, onClose, sendCommand, onCommandUnavailable 
   );
 }
 
-function CreateTaskDialog({
+export function CreateTaskDialog({
   group,
   lanes,
   actions,
   roles,
-  sendCommand,
-  onCommandUnavailable,
   onClose,
+  initialValues,
+  onCreate,
+  pending = false,
+  createdTaskId = '',
+  requestError = '',
 }: {
+  initialValues?: { title: string; description: string };
+  onCreate: (command: TorqueCommand) => void;
+  pending?: boolean;
+  createdTaskId?: string;
+  requestError?: string;
   group: string;
   lanes: string[];
   actions: unknown;
   roles: unknown;
-  sendCommand: CommandSender;
-  onCommandUnavailable: () => void;
   onClose: () => void;
 }) {
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [lane, setLane] = useState(lanes[0] ?? 'Backlog');
+  const [title, setTitle] = useState(initialValues?.title ?? '');
+  const [description, setDescription] = useState(initialValues?.description ?? '');
+  const [lane, setLane] = useState(initialValues ? '' : lanes[0] ?? 'Backlog');
   const [labels, setLabels] = useState('');
   const [actionName, setActionName] = useState('');
   const [role, setRole] = useState('');
@@ -409,10 +415,11 @@ function CreateTaskDialog({
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (!title.trim()) return;
+    event.stopPropagation();
+    if (pending || !title.trim()) return;
     try {
       const parsedVars = parseJsonObject(actionVars);
-      sendOrNotify(sendCommand, {
+      const command: TorqueCommand = {
         cmd: 'board_add_task',
         task: title.trim(),
         group,
@@ -423,8 +430,8 @@ function CreateTaskDialog({
         agent_template: role,
         action_vars: parsedVars,
         scheduled_at: scheduledAt,
-      }, onCommandUnavailable);
-      onClose();
+      };
+      onCreate(command);
     } catch {
       setError('Action variables must be a JSON object.');
     }
@@ -432,18 +439,21 @@ function CreateTaskDialog({
 
   return (
     <form className={styles.detailForm} onSubmit={submit}>
+      {createdTaskId ? <p role="status">Task {createdTaskId} was created. Retry linking this task to the Initiative.</p> : null}
+      <fieldset disabled={pending || Boolean(createdTaskId)} className={styles.createFields}>
       <label>Title<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} /></label>
       <label>Description<textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={4} /></label>
       <div className={styles.formGrid}>
-        <label>Lane<select value={lane} onChange={(event) => setLane(event.target.value)}>{lanes.map((value) => <option key={value}>{value}</option>)}</select></label>
+        <label>Lane<select value={lane} onChange={(event) => setLane(event.target.value)}><option value="">Group default</option>{lanes.map((value) => <option key={value}>{value}</option>)}</select></label>
         <label>Labels<input value={labels} onChange={(event) => setLabels(event.target.value)} placeholder="labels, comma separated" /></label>
         <label>Action<select value={actionName} onChange={(event) => setActionName(event.target.value)}><option value="">Group default</option>{actionItems(actions).map((item) => <option key={textValue(item.name)} value={textValue(item.name)}>{textValue(item.name)}</option>)}</select></label>
         <label>Worker role<select value={role} onChange={(event) => setRole(event.target.value)}><option value="">Action/default role</option>{roleItems(roles).map((item) => <option key={textValue(item.slug, textValue(item.name))} value={textValue(item.slug, textValue(item.name))}>{textValue(item.name, textValue(item.slug))}</option>)}</select></label>
         <label>Schedule<input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} /></label>
       </div>
       <label>Action variables (JSON)<textarea value={actionVars} onChange={(event) => { setActionVars(event.target.value); setError(''); }} rows={4} spellCheck={false} /></label>
-      {error ? <p className={styles.formError}>{error}</p> : null}
-      <footer className={styles.detailFooter}><span /><Button tone="quiet" type="button" onPress={onClose}>Cancel</Button><Button tone="primary" type="submit" isDisabled={!title.trim()}>Create task</Button></footer>
+      </fieldset>
+      {error || requestError ? <p role="alert" className={styles.formError}>{error || requestError}</p> : null}
+      <footer className={styles.detailFooter}><span /><Button tone="quiet" type="button" isDisabled={pending} onPress={onClose}>{createdTaskId ? 'Close' : 'Cancel'}</Button><Button tone="primary" type="submit" isDisabled={pending || !title.trim()}>{createdTaskId ? 'Retry link' : 'Create task'}</Button></footer>
     </form>
   );
 }
@@ -1176,7 +1186,7 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPa
           : detailTask ? <StateSurface title="Loading task" description="Retrieving complete task fields." /> : null}
       </ModalDialog>
       <ModalDialog title="Create task" description={`Add work to ${group}`} size="large" isOpen={workspaceUi.createTaskDialogOpen} onOpenChange={(open) => dispatch(workspaceUiActions.setCreateTaskDialogOpen(open))}>
-        <CreateTaskDialog group={group} lanes={lanes} actions={catalog.actions} roles={catalog.roles} sendCommand={sendCommand} onCommandUnavailable={onCommandUnavailable} onClose={() => dispatch(workspaceUiActions.setCreateTaskDialogOpen(false))} />
+        <CreateTaskDialog group={group} lanes={lanes} actions={catalog.actions} roles={catalog.roles} onCreate={(command) => { if (sendCommand(command)) dispatch(workspaceUiActions.setCreateTaskDialogOpen(false)); else onCommandUnavailable(); }} onClose={() => dispatch(workspaceUiActions.setCreateTaskDialogOpen(false))} />
       </ModalDialog>
       <ModalDialog title="Schedules" description={`Automated task dispatches for ${group}`} size="large" isOpen={schedulesOpen} onOpenChange={setSchedulesOpen}>
         <SchedulesPanel group={group} schedules={schedules} actions={catalog.actions} roles={catalog.roles} sendCommand={sendCommand} onCommandUnavailable={onCommandUnavailable} onClose={() => setSchedulesOpen(false)} />

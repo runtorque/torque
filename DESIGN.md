@@ -2619,6 +2619,14 @@ scope.
 - Constraints: Initiative archive preserves edited scope before archiving. Decision archive saves its edits atomically in the existing update command; restore changes only archive state. Archived decisions remain in the projection and appear through an explicit filter. Decision creation requires an Architect, title and rationale. Decisions, hire requests and journals are filtered to the selected group; Engineer link choices respect the Architect's visible peers.
 - Verification: Component tests cover sparse saves, failed link/update retention, reconnect caret, scoped collections and archived projections. Isolated live QA writes every status, all Initiative scope fields, decision rationale/supersedes, task/Engineer/Decision links and archive/restore. Initiative-to-Board task creation remains a separate open parity row.
 
+### D-096 — Initiative task creation reviews the draft and retains link recovery
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: Create Board task opens the shared Board creation form with title, source Initiative, summary, why, scope and done definition taken from the current unsaved Initiative draft. The operator reviews task fields before creation. Creating or cancelling the task does not save or discard the Initiative draft.
+- Constraints: Creation waits for acknowledgement before linking. Once a task ID is acknowledged, failed linking retains that ID and offers Retry link; closing the child dialog exposes Resume task link in the Initiative editor. Retrying does not create another task. Group default lane remains selectable. Pending writes prevent closing the child dialog. This does not certify persistence of local drafts across page reloads or ambiguous lost creation responses.
+- Verification: Focused component and isolated browser tests exercise cancellation, rejected creation, acknowledged creation with failed linking, close/resume, same-ID retry and unchanged Initiative scope until explicit Save. Broader task-form parity is tracked separately in P-150–P-152.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

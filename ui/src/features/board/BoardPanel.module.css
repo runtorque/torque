@@ -75,6 +75,7 @@
 .inlineCreate input { height: 28px; padding: 0 7px; }
 .inlineCreate > div { display: flex; gap: 5px; }
 .boardFooter { display: flex; min-height: 27px; align-items: center; justify-content: flex-end; gap: 16px; padding: 0 12px; border-top: 1px solid var(--border); color: var(--text-muted); background: var(--surface); font-size: 9px; }
+.createFields { display: contents; }
 .detailForm, .scheduleForm { display: grid; gap: 12px; }
 .taskDetailForm { height: 100%; min-height: 0; grid-template-rows: auto auto minmax(180px, 1fr) auto auto; overflow: hidden; }
 .detailForm label, .scheduleForm label { display: grid; gap: 5px; color: var(--text-dim); font-size: 10px; font-weight: 600; }

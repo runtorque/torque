@@ -138,7 +138,7 @@ This opt-in test refuses the default port/profile, launches `ui/e2e/fixtures/str
 
 ### Initiative and Decision lifecycle regression
 
-`planning-editors-live.spec.ts` creates its own groups and generic Architect/Engineer records on an isolated daemon. It validates every offered status through backend reads, typed relationships, sparse scope/rationale saves, failure retention, archive and restore. It can run in the PTY-disabled profile harness; no commercial provider is used. Generic agents are removed afterward, while Planning evidence remains in the disposable profile. This test does not cover Initiative-to-Board task creation yet.
+`planning-editors-live.spec.ts` creates its own groups and generic Architect/Engineer records on an isolated daemon. It validates every offered status through backend reads, typed relationships, sparse scope/rationale saves, failure retention, archive and restore. It can run in the PTY-disabled profile harness; no commercial provider is used. Generic agents are removed afterward, while Planning evidence remains in the disposable profile. A separate scenario reviews an unsaved Initiative task prefill, cancels without mutation, injects create/link failures, resumes the acknowledged task link, and verifies task fields and unchanged Initiative scope through backend reads. It does not certify reload/crash recovery or the remaining task-creation dependency, verification and evidence controls.
 
 ## Classic burn-in and retirement
 

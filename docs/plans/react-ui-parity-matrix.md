@@ -161,7 +161,10 @@ Sources below are relative to `static/js/`; React owners are under `ui/src/`. Al
 | P-146 | Decisions: status and supersession | Required | `agent-panel/legacy-engineer.js` | DecisionEditor | Persist proposed/accepted/revised/rejected; choose a prior same-Architect decision through supersedes, independently of status; failed save keeps rationale and dialog open. |
 | P-147 | Decisions: links and archive lifecycle | Required | `agent-panel/legacy-engineer.js` | DecisionEditor | Render linked_task_ids and linked_engineer_ids; add/remove scoped records; archive hides the card, archive filter exposes read-only detail, restore preserves fields and links. |
 | P-148 | Planning: group-scoped collections | Required | Classic group/Architect panels | PlanningWorkspace | With records from two groups, show only current-group decisions, hires and author-keyed journals; hire cards display requested_name. |
-| P-149 | Initiatives: create prefilled Board task | Missing | `initiatives.js::_initiativeBoardTaskPrefill; initiativesCreateBoardTask` | No React equivalent yet | Open a reviewable task form prefilled from the current Initiative draft; create and link once, retain recovery information if linking fails, and preserve the Initiative draft. |
+| P-149 | Initiatives: create prefilled Board task | Required | `initiatives.js::_initiativeBoardTaskPrefill; initiativesCreateBoardTask` | Shared Board creation form + `InitiativeTaskCreator`; D-096 | Open a reviewable task form prefilled from the current Initiative draft; create and link once, retain recovery information if linking fails, and preserve the Initiative draft. |
+| P-150 | Board: dependencies during task creation | Missing | `modals/task-modal.js::_taskOpenModal` | Dependencies currently editable only after creation | Set dependencies before creating; verify stored IDs and cross-group rules, retain selection on failure. |
+| P-151 | Board: verification during task creation | Missing | `modals/task-modal.js::_taskOpenModal` | Verification currently editable only after creation | Review verification mode, state and notes before creating and verify the persisted task. |
+| P-152 | Board: attachments/artifacts during task creation | Missing | `modals/task-modal.js; modals/task-artifacts.js` | Evidence currently editable only after creation | Upload to a draft, create and finalize canonical task paths; cancel cleans unused draft uploads; failures retain evidence. |
 
 ## Command inventory
 
@@ -858,3 +861,13 @@ Each action below is an independent Required acceptance row. A replacement toolb
 
 - Final checks: `make ui-check` passed lint, typecheck, 19 files / 163 tests and production build; `make lint-docs-contract` passed (72 files); `git diff --check` passed. The isolated browser suite on port 18963, profile `react-planning-20260922`, passed 15 scenarios with two real-PTY opt-ins skipped. The Initiative screenshot was inspected.
 - Not rerun for this frontend-only checkpoint: full backend suite, native Rust/Tauri tests, native handoff or real-PTY scenarios. Their previous evidence does not certify the remaining Planning gaps. The live default daemon was not changed.
+
+
+## Initiative task creation checkpoint — 2026-09-22
+
+- P-149 reuses the Board task form for review and an acknowledged create → link sequence. It prefills the current unsaved Initiative scope and honors group lane defaults. Failed creation retains the form; failed linking retains the acknowledged task ID through child-dialog close/resume. Successful linking refreshes detail without saving or discarding the Initiative draft.
+- The audit also split out P-150–P-152: the shared React creation form still lacks Classic's pre-creation dependency, verification and evidence controls. Existing post-creation editing does not satisfy those workflows.
+- Recovery evidence covers known server rejection after acknowledged creation. Reload/crash draft persistence and a lost creation acknowledgement are not certified by this frontend change; no backend idempotency semantics changed.
+
+- Final checks: `make ui-check` passed lint, typecheck, 19 files / 164 tests and production build. Final browser-test changes also passed lint/typecheck. The full isolated browser suite passed 16 scenarios with two real-PTY opt-ins skipped (34.4 seconds). Task review and linked-task screenshots were inspected. `make lint-docs-contract` passed (72 files); `git diff --check` passed.
+- No backend/protocol changes: full backend, native Rust/Tauri and real-PTY tests were not rerun. The verified isolated daemon on port 18963 and its remaining event-ingest process were stopped after verification; the live default daemon was untouched. Parity and Classic retirement remain open.

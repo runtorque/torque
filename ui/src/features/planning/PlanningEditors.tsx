@@ -4,6 +4,7 @@ import type { TorqueCommand, UnknownRecord } from '../../protocol';
 import { decisionStatuses, planningStatuses, records, text } from './model';
 import { usePlanningEditor } from './usePlanningEditor';
 import { usePlanningMutation } from './usePlanningMutation';
+import { InitiativeTaskCreator } from './InitiativeTaskCreator';
 import styles from './PlanningWorkspace.module.css';
 
 const initiativeFields = { title: '', summary: '', why: '', in_scope: '', out_of_scope: '', done_definition: '', planning_status: 'triage', priority: '', owner_kind: 'user', owner_id: '' };
@@ -51,6 +52,7 @@ export function InitiativeEditor({ item, tasks, decisions, onClose }: {
         </div>
         {Object.entries({ summary: 'Summary', why: 'Why this matters', in_scope: 'In scope', out_of_scope: 'Out of scope', done_definition: 'Definition of done' }).map(([key, label]) => <Field key={key} label={label}><textarea aria-label={label} value={draft[key]} onChange={(event) => change({ [key]: event.target.value })} /></Field>)}
         <section className={styles.embeddedSection}><h3>Linked work</h3>
+          <InitiativeTaskCreator initiative={{ ...detail, ...draft, id }} disabled={!editor.loaded || mutation.pending || archived} onLinked={editor.reload} />
           <div className={styles.linkRows}>{links.map((link) => {
             const kind = text(link.link_type); const targetId = text(link.target_id);
             const targetItem = (kind === 'task' ? tasks : decisions).find((entry) => entry.id === targetId);
