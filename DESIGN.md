@@ -2801,3 +2801,9 @@ new decision so the design history remains understandable.
   group/default precedence.
 - Verification: Frontend regressions cover unchanged save, override origin, and
   returning a field to inheritance.
+
+### D-114 — History refreshes without replacing the reading workspace
+
+History uses cancellable correlated reads for its current status list and selected run. Reconnect and explicit Refresh reload both independently; selecting a run loads only its detail. Failed reads retain the last accepted data with a specific retry control. A mismatched run ID never replaces the selected record, and hidden History cancels all reads. Search, selection, input focus/caret, independent pane scroll and open message disclosures remain on their existing DOM nodes during refresh. Group changes start a fresh workspace. Wide layouts constrain both panes to the available height; compact layouts stack bounded panes.
+
+History renders the persisted contract: role/template, input/output token counts, task title/outcome/start time, and message timestamps/content. Long messages use a keyboard-operable disclosure. Task and message links open known Board tasks through shared selection, changing group when necessary; unavailable targets retain their text with disabled navigation. Focus live agent selects its Agents workspace as well as sending the existing focus command. The server's bounded history/message window remains unchanged; absent archived task discovery and native lifecycle acceptance remain separate gates.

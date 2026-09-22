@@ -1047,31 +1047,22 @@ describe('workspace shell', () => {
     expect(sendCommand).not.toHaveBeenCalledWith(expect.objectContaining({ cmd: 'save_action' }));
   });
 
-  it('loads searchable agent-run history and preserves detail responses by agent', async () => {
-    const { appStore, sendCommand } = renderShell();
+  it('loads searchable agent-run history through correlated reads', async () => {
+    const commands: TorqueCommand[] = [];
+    vi.stubGlobal('fetch', vi.fn((_url: string, options?: RequestInit) => {
+      const command = JSON.parse(typeof options?.body === 'string' ? options.body : '{}') as TorqueCommand; commands.push(command);
+      const data = command.cmd === 'get_agent_history'
+        ? { type: 'agent_history_list', records: [{ id: 'old-agent', name: 'Release Worker', group: 'Foundation', status: 'merged' }] }
+        : { type: 'agent_history_detail', record: { id: 'old-agent', name: 'Release Worker', status: 'merged' }, tasks: [{ task_id: 'release-task', task_title: 'Cut release' }], messages: [{ id: 'release-message', message: 'Release verified' }] };
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data }) });
+    }));
+    renderShell();
     fireEvent.click(screen.getByRole('button', { name: /Control/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'History' }));
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'get_agent_history', status: 'merged', limit: 100 });
-
-    act(() => {
-      appStore.dispatch(projectionActions.auxiliaryResourceReceived({
-        type: 'agent_history_list',
-        records: [{ id: 'old-agent', name: 'Release Worker', group: 'Foundation', kind: 'worker', provider: 'codex', status: 'merged', completed_at: 100 }],
-      }));
-    });
-    fireEvent.click(screen.getByRole('button', { name: /Release Worker/ }));
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'get_agent_history_detail', agent_id: 'old-agent', message_limit: 100 });
-
-    act(() => {
-      appStore.dispatch(projectionActions.auxiliaryResourceReceived({
-        type: 'agent_history_detail',
-        record: { id: 'old-agent', name: 'Release Worker', status: 'merged', model: 'gpt-5.6-sol', outcome: 'done' },
-        tasks: [{ task_id: 'release-task', task: 'Cut release', lane: 'Done' }],
-        messages: [{ id: 'release-message', action: 'done', message: 'Release verified' }],
-      }));
-    });
+    fireEvent.click(await screen.findByRole('button', { name: /Release Worker/ }));
+    await screen.findByText('Release verified');
+    expect(commands.filter((command) => command.cmd.startsWith('get_agent_history'))).toEqual([{ cmd: 'get_agent_history', status: 'merged', limit: 100 }, { cmd: 'get_agent_history_detail', agent_id: 'old-agent', message_limit: 100 }]);
     expect(screen.getByText('Cut release')).toBeVisible();
-    expect(screen.getByText('Release verified')).toBeVisible();
     fireEvent.change(screen.getByRole('textbox', { name: 'Search history' }), { target: { value: 'no match' } });
     expect(screen.getByText('No historical runs')).toBeVisible();
   });

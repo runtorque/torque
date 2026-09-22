@@ -28,6 +28,7 @@ import { aiSettingsDraft, primaryGlobalSettings, primaryGroupSettings, relaySett
 import { PeerChat } from './PeerChat';
 import { PipelineExplorer } from './PipelineExplorer';
 import { LogViewer } from './LogViewer';
+import { HistoryPanel } from './HistoryPanel';
 import { ContextPanel } from './ContextPanel';
 import { ActivityPanel, HelpPanel, MissionPanel } from './OperatorPanels';
 import { AppearancePreferencesPanel, ShortcutPreferencesPanel } from './WorkspacePreferences';
@@ -66,63 +67,6 @@ function labelFor(value: unknown, fallback = 'Untitled'): string {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <label className={styles.field}><span>{label}</span>{children}</label>;
-}
-
-function formatTime(value: unknown): string {
-  const numeric = Number(value ?? 0);
-  if (!numeric) return '—';
-  const date = new Date(numeric < 1_000_000_000_000 ? numeric * 1_000 : numeric);
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
-}
-
-function HistoryPanel({ group, responses, send }: {
-  group: string;
-  responses: Record<string, unknown>;
-  send: (command: TorqueCommand) => void;
-}) {
-  const [status, setStatus] = useState('merged');
-  const [search, setSearch] = useState('');
-  const [selectedId, setSelectedId] = useState('');
-  useEffect(() => { send({ cmd: 'get_agent_history', status, limit: 100 }); }, [send, status]);
-  const listFrame = record(responses['agent_history_list:_']);
-  const history = list(listFrame.records).map(record).filter((item) => !group || text(item.group) === group).filter((item) => {
-    const query = search.trim().toLocaleLowerCase();
-    if (!query) return true;
-    return [item.name, item.id, item.kind, item.agent_type, item.provider]
-      .some((value) => text(value).toLocaleLowerCase().includes(query));
-  });
-  const detail = selectedId ? record(responses[`agent_history_detail:${selectedId}`]) : {};
-  const detailRecord = record(detail.record);
-  const detailTasks = list(detail.tasks).map(record);
-  const detailMessages = list(detail.messages).map(record);
-
-  return <div className={styles.historyPanel}>
-    <header className={styles.historyToolbar}>
-      <Field label="Search history"><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Agent name, ID, kind, provider" /></Field>
-      <div className={styles.historyFilters} role="group" aria-label="History status">{([['', 'All'], ['active', 'Active'], ['removed', 'Removed'], ['merged', 'Merged']] as const).map(([id, label]) => <button key={id} aria-pressed={status === id} onClick={() => setStatus(id)}>{label}</button>)}</div>
-      <Button tone="quiet" onPress={() => send({ cmd: 'get_agent_history', status, limit: 100 })}>Refresh</Button>
-    </header>
-    <div className={styles.historySplit}>
-      <section className={styles.historyList}>
-        <header><h2>Agent runs</h2><span>{history.length}</span></header>
-        {history.length ? history.map((item, index) => {
-          const id = text(item.id, text(item.agent_id));
-          return <button key={id || String(index)} aria-current={selectedId === id ? 'true' : undefined} onClick={() => { setSelectedId(id); send({ cmd: 'get_agent_history_detail', agent_id: id, message_limit: 100 }); }}>
-            <span><strong>{text(item.name, id || 'Agent run')}</strong><small>{text(item.kind, text(item.agent_type, 'agent'))} · {text(item.provider, 'unknown provider')}</small></span>
-            <span><b>{text(item.status, 'unknown')}</b><time>{formatTime(item.removed_at ?? item.completed_at ?? item.updated_at ?? item.created_at)}</time></span>
-          </button>;
-        }) : <StateSurface title="No historical runs" description="No agent runs match this group, status, and search." />}
-      </section>
-      <section className={styles.historyDetail}>{selectedId ? Object.keys(detailRecord).length ? <>
-        <header><div><h2>{text(detailRecord.name, selectedId)}</h2><p>{text(detailRecord.id, selectedId)} · {text(detailRecord.status, 'unknown')}</p></div>{text(detailRecord.status) === 'active' ? <Button tone="quiet" onPress={() => send({ cmd: 'focus_agent', id: selectedId })}>Focus live agent</Button> : null}</header>
-        <dl><div><dt>Started</dt><dd>{formatTime(detailRecord.started_at ?? detailRecord.created_at)}</dd></div><div><dt>Finished</dt><dd>{formatTime(detailRecord.removed_at ?? detailRecord.completed_at)}</dd></div><div><dt>Model</dt><dd>{text(detailRecord.model, '—')}</dd></div><div><dt>Tokens</dt><dd>{text(detailRecord.total_tokens ?? detailRecord.token_count, '—')}</dd></div><div><dt>Branch</dt><dd>{text(detailRecord.worktree_branch ?? detailRecord.branch, '—')}</dd></div><div><dt>Outcome</dt><dd>{text(detailRecord.outcome, '—')}</dd></div></dl>
-        <div className={styles.historyDetailColumns}>
-          <section><h3>Tasks <span>{detailTasks.length}</span></h3>{detailTasks.length ? detailTasks.map((task, index) => <article key={text(task.task_id, text(task.id, String(index)))}><strong>{text(task.task, text(task.title, text(task.task_id, 'Task')))}</strong><span>{text(task.lane, text(task.status))}</span><p>{text(task.result, text(task.summary))}</p></article>) : <p>No recorded tasks.</p>}</section>
-          <section><h3>Messages <span>{detailMessages.length}</span></h3>{detailMessages.length ? detailMessages.map((message, index) => <article key={text(message.id, String(index))}><strong>{text(message.action, text(message.role, 'message'))}</strong><time>{formatTime(message.timestamp ?? message.created_at)}</time><p>{text(message.message, text(message.content, text(message.text)))}</p></article>) : <p>No recorded messages.</p>}</section>
-        </div>
-      </> : <StateSurface title="Loading run detail" description="Torque is loading persisted tasks, messages, and lifecycle metadata." /> : <StateSurface title="Select an agent run" description="Inspect its lifecycle, tasks, messages, provider, model, tokens, branch, and outcome." />}</section>
-    </div>
-  </div>;
 }
 
 function SettingsPanel({ group, responses, send, snapshot, onSavingChange }: { group: string; responses: Record<string, unknown>; send: (command: TorqueCommand) => void; snapshot: SettingsSnapshot; onSavingChange: (busy: boolean) => void }) {
@@ -421,7 +365,7 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable, host =
       {tab === 'pipelines' ? <PipelineExplorer group={group} onEdit={(name) => { chooseAction(name); setTab('actions'); }} /> : null}
       {tab === 'logs' ? <LogViewer host={host} /> : null}
       {tab === 'activity' ? <ActivityPanel events={eventItems} send={send} group={group} /> : null}
-      {tab === 'history' ? <HistoryPanel group={group} responses={auxiliaryResponses} send={send} /> : null}
+      {tab === 'history' ? <HistoryPanel key={group} group={group} send={send} /> : null}
       {tab === 'context' ? <ContextPanel key={group} group={group} agents={agentItems} onOpenTarget={(target) => { if (target.group && target.group !== group) send({ cmd: 'ui_select_group', group: target.group }); if (target.kind === 'agent') { dispatch(workspaceUiActions.setActivePanel('agents')); dispatch(workspaceUiActions.setSelectedAgent(target.id)); } else { dispatch(workspaceUiActions.setActivePanel('board')); dispatch(workspaceUiActions.setDetailTask(target.id)); } }} /> : null}
       {tab === 'actions' ? <div className={styles.editor}>
         <aside><header><h2>Actions</h2><Button tone="quiet" onPress={() => { setSelectedAction(''); setActionDraft({ name: '', description: '', scope: 'project', agent: '', group: '', prompt: '{{ TASK }}', labels: '', transitions: '[]', terminals: '[]', worktree: false, auto_close_on_done: false, disable_role_preamble: false, implementation_depth: false, review_required_above_loc: '' }); setActionDirty(true); setActionError(''); }}>＋</Button></header>{actionItems.length ? actionItems.map((item, index) => <button key={labelFor(item, String(index))} aria-current={selectedAction === labelFor(item, '') ? 'page' : undefined} onClick={() => chooseAction(item)}>{labelFor(item)}</button>) : <StateSurface title="No actions" description="Create the first project action." />}<hr /><Button tone="quiet" onPress={() => setTab('pipelines')}>Discover pipelines</Button></aside>
