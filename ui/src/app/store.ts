@@ -46,6 +46,8 @@ export interface WorkspaceUiState {
   activePanel: WorkspaceNavigation['activePanel'];
   controlTab: WorkspaceNavigation['controlTab'];
   navigationRevision: number;
+  healthScope: 'active' | 'all';
+  healthWindow: '24h' | '7d' | '30d';
   commandPaletteOpen: boolean;
   detailTaskId: string | null;
   focusedTaskId: string | null;
@@ -64,6 +66,8 @@ function initialWorkspaceUiState(): WorkspaceUiState {
     activePanel: 'board',
     controlTab: 'mission',
     navigationRevision: 0,
+    healthScope: 'active',
+    healthWindow: '24h',
     commandPaletteOpen: false,
     detailTaskId: null,
     focusedTaskId: null,
@@ -518,6 +522,8 @@ const workspaceUiSlice = createSlice({
     setControlTab(state, action: PayloadAction<WorkspaceUiState['controlTab']>) {
       state.controlTab = action.payload; state.navigationRevision++;
     },
+    setHealthScope(state, action: PayloadAction<WorkspaceUiState['healthScope']>) { state.healthScope = action.payload; },
+    setHealthWindow(state, action: PayloadAction<WorkspaceUiState['healthWindow']>) { state.healthWindow = action.payload; },
     setCommandPaletteOpen(state, action: PayloadAction<boolean>) {
       state.commandPaletteOpen = action.payload;
     },

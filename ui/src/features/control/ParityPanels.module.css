@@ -47,3 +47,9 @@
 .metricChart path { stroke: var(--accent); fill: none; stroke-width: 2; }
 .metricChart small { font-size: 10px; }
 .metricChart table { font-size: 10px; width: 100%; text-align: left; }
+
+.healthNote { font-size: 11px; color: var(--text-muted); }
+.liveFacts { display: grid; gap: 5px; font-size: 11px; margin: 8px 0 0; }
+.liveFacts > div { display: flex; gap: 8px; justify-content: space-between; }
+.liveFacts dt { color: var(--text-muted); }
+.liveFacts dd { margin: 0; }

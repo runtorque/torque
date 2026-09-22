@@ -2948,6 +2948,15 @@ scope.
 - Cost: Profiling adds CPU and bundle overhead. Keep one root observer and a bounded collector; verify production child updates and idle behavior instead of extrapolating from development callbacks. This is render-work telemetry, not a new long-task or paint observer.
 - Verification: Controlled rate/p95/window/cap tests, child-only component updates, failure/stall/disconnect/reconnect/cleanup tests, and production Chrome reports with an otherwise quiet WebSocket fixture and real daemon ingestion.
 
+### D-134 — Health shows live measurements and refreshes its reading workspace
+
+- Date: 2026-09-22
+- Status: accepted; component and production browser acceptance recorded under P-223–P-225.
+- Decision: Health presents current daemon-wide performance measurements separately from persisted history. Render every Classic live metric and collection status from the existing metrics ticks. Preserve zero values, distinguish unknown/disabled/offline data, and show when frontend windows are not reporting. Only the five history series provided by the daemon are graphed; frontend history is not retained.
+- Refresh: While visible and synchronized, read workflow health and history together, refresh sixty seconds after each attempt, and refresh after reconnect or an explicit request. Abort obsolete requests and time out stalled reads. Reject mismatched scopes/windows, retain accepted data on failure, and preserve focused controls and expanded sample disclosures across refreshes. Hidden surfaces issue no reads.
+- Continuity: Health scope and history window remain local to each window across Control Center tab changes. They do not change the durable workspace navigation preference. Scope changes never display the previous scope's data; performance history remains daemon-wide while workflow health follows the chosen group scope.
+- Verification: Component coverage exercises tick fields, unknown/disabled/offline states, polling, cancellation, failures, timeouts, reconnect, hidden cleanup and filter restoration. Production browser acceptance compares displayed frontend values with actual daemon ticks and waits through the real minute timer.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

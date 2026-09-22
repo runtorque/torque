@@ -2,8 +2,9 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { Provider } from 'react-redux';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createAppStore, projectionActions } from '../../app/store';
+import { connectionActions, createAppStore, projectionActions } from '../../app/store';
 import { browserHost } from '../../host';
+import { compactStateFixture } from '../../protocol/fixtures';
 import { LogViewer } from './LogViewer';
 import { matchesLog } from './logModel';
 import { PeerChat } from './PeerChat';
@@ -132,8 +133,10 @@ describe('operational depth', () => {
   it('uses supported health windows and scoped workflow series with accessible samples', async () => {
     const { HealthDetails } = await import('./OperationalDetails');
     const commands: Record<string, unknown>[] = [];
-    vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => { const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}' ) as Record<string, unknown>; commands.push(command); return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: command.cmd === 'get_metrics_history' ? { type: 'metrics_history', bucket_seconds: 3600, buckets: [{ label: '01:00' }, { label: '02:00' }], perf: { rss_mb: [100, 110] } } : { type: 'system_health_metrics', group: command.group, scope: command.group ? 'group' : 'all_groups', buckets: [{ label: '01:00' }, { label: '02:00' }], series: { dispatches: [1, 2] } } }) }); }));
-    render(<Provider store={createAppStore()}><HealthDetails group="A" runtime={{ supervisor: { status: 'connected', sessions: 2 } }} /></Provider>);
+    vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => { const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}' ) as Record<string, unknown>; commands.push(command); return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: command.cmd === 'get_metrics_history' ? { type: 'metrics_history', group: command.group, window: command.window, bucket_seconds: 3600, buckets: [{ label: '01:00' }, { label: '02:00' }], perf: { rss_mb: [100, 110] } } : { type: 'system_health_metrics', group: command.group, window: command.window, scope: command.group ? 'group' : 'all_groups', buckets: [{ label: '01:00' }, { label: '02:00' }], series: { dispatches: [1, 2] } } }) }); }));
+    const healthStore = createAppStore();
+    healthStore.dispatch(connectionActions.connected({ at: 1, reconnect: false })); healthStore.dispatch(connectionActions.snapshotAccepted(compactStateFixture));
+    render(<Provider store={healthStore}><HealthDetails group="A" runtime={{ supervisor: { status: 'connected', sessions: 2 } }} /></Provider>);
     expect(await screen.findByRole('img', { name: /Process memory history/ })).toBeVisible();
     expect(screen.getByRole('img', { name: /dispatches history/ })).toBeVisible();
     fireEvent.change(screen.getByLabelText('Health scope'), { target: { value: 'all' } });

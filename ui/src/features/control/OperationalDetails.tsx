@@ -1,11 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
-import { useAppSelector } from '../../app/hooks';
-import { selectSupervisorUiState, selectConnection } from '../../app/store';
+import { useAppDispatch, useAppSelector } from '../../app/hooks';
+import { selectSupervisorUiState, workspaceUiActions, type WorkspaceUiState } from '../../app/store';
 import { Button } from '../../design/primitives';
 import type { TorqueCommand, UnknownRecord } from '../../protocol';
 import { readCommand } from '../../protocol/http';
 import styles from './ParityPanels.module.css';
+import { HealthLiveMetrics } from './HealthLiveMetrics';
+import { useHealthHistory } from './useHealthHistory';
 
 function record(value: unknown): UnknownRecord { return value && typeof value === 'object' && !Array.isArray(value) ? value as UnknownRecord : {}; }
 function text(value: unknown, fallback = '—'): string { return typeof value === 'string' || typeof value === 'number' ? String(value) : typeof value === 'boolean' ? (value ? 'Yes' : 'No') : fallback; }
@@ -86,23 +88,18 @@ function MetricChart({ label, values, buckets, unit = '' }: { label: string; val
 }
 
 export function HealthDetails({ group, runtime }: { group: string; runtime: UnknownRecord }) {
-  const connection = useAppSelector(selectConnection);
-  const [scope, setScope] = useState('active'); const [windowSize, setWindowSize] = useState('24h');
-  const [data, setData] = useState<{ key: string; health: UnknownRecord; history: UnknownRecord } | null>(null);
-  const [error, setError] = useState(''); const [refresh, setRefresh] = useState(0);
-  const key = `${group}:${scope}:${windowSize}`;
-  useEffect(() => {
-    const controller = new AbortController();
-    void Promise.all([readCommand({ cmd: 'get_system_health_metrics', group: scope === 'all' ? '' : group, window: windowSize }, controller.signal), readCommand({ cmd: 'get_metrics_history', group: scope === 'all' ? '' : group, window: windowSize }, controller.signal)]).then(([health, history]) => { if (!controller.signal.aborted) { setData({ key, health, history }); setError(''); } }).catch((cause: unknown) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Health unavailable'); });
-    return () => controller.abort();
-  }, [group, scope, windowSize, refresh, key, connection.reconnectCount]);
-  const current = data?.key === key ? data : null;
+  const dispatch = useAppDispatch();
+  const scope = useAppSelector((state) => state.workspaceUi.healthScope);
+  const windowSize = useAppSelector((state) => state.workspaceUi.healthWindow);
+  const [refresh, setRefresh] = useState(0);
+  const { current, error, ready } = useHealthHistory(scope === 'all' ? '' : group, windowSize, refresh);
   const perf = record(current?.history.perf); const workflow = record(current?.health.series); const buckets = list(current?.history.buckets);
   const supervisor = record(runtime.supervisor ?? runtime.pty_supervisor);
   const series = (value: unknown): unknown[] => Array.isArray(value) ? value as unknown[] : [];
-  const telemetry = [['Event-loop lag', 'event_loop_lag_p95_ms', 'ms'], ['WebSocket throughput', 'ws_deltas_per_s', '/s'], ['DB write latency', 'db_write_latency_p95_ms', 'ms'], ['Process memory', 'rss_mb', 'MB'], ['Process CPU', 'cpu_pct', '%'], ['Frontend renders', 'frontend_render_per_s', '/s'], ['Frontend render duration', 'frontend_render_ms_p95', 'ms']] as const;
-  return <section aria-label="Health history"><header className={styles.toolbar}><h2>System health history</h2><label>Health scope<select value={scope} onChange={(event) => setScope(event.target.value)}><option value="active">Active group</option><option value="all">All groups</option></select></label><label>Health history window<select value={windowSize} onChange={(event) => setWindowSize(event.target.value)}><option value="24h">24 hours</option><option value="7d">7 days</option><option value="30d">30 days</option></select></label><Button onPress={() => setRefresh((value) => value + 1)}>Refresh health</Button></header>
-    {error ? <p role="alert">{error}</p> : null}{!current && !error ? <p>Loading health history…</p> : null}
+  const telemetry = [['Event-loop lag', 'event_loop_lag_p95_ms', 'ms'], ['WebSocket throughput', 'ws_deltas_per_s', '/s'], ['DB write latency', 'db_write_latency_p95_ms', 'ms'], ['Process memory', 'rss_mb', 'MB'], ['Process CPU', 'cpu_pct', '%']] as const;
+  return <section aria-label="Health history"><HealthLiveMetrics /><header className={styles.toolbar}><h2>System health history</h2><label>Health scope<select value={scope} onChange={(event) => dispatch(workspaceUiActions.setHealthScope(event.target.value as WorkspaceUiState['healthScope']))}><option value="active">Active group</option><option value="all">All groups</option></select></label><label>Health history window<select value={windowSize} onChange={(event) => dispatch(workspaceUiActions.setHealthWindow(event.target.value as WorkspaceUiState['healthWindow']))}><option value="24h">24 hours</option><option value="7d">7 days</option><option value="30d">30 days</option></select></label><Button onPress={() => setRefresh((value) => value + 1)}>Refresh health</Button></header>
+    {!ready ? <p>Health history is offline. Previously loaded data remains available.</p> : <p className={styles.healthNote}>History refreshes every minute while this section is open.</p>}
+    {error ? <p role="alert">{error}</p> : null}{ready && !current && !error ? <p>Loading health history…</p> : null}
     {current ? <><p>Workflow scope: {text(current.health.scope)} {text(current.health.group, '')} · Performance: daemon-wide · {text(current.history.bucket_seconds)} second buckets</p><div className={styles.charts}>{telemetry.map(([label, field, unit]) => <MetricChart key={field} label={label} values={series(perf[field])} buckets={buckets} unit={unit} />)}{Object.entries(workflow).filter(([, value]) => Array.isArray(value)).map(([label, values]) => <MetricChart key={label} label={label.replaceAll('_', ' ')} values={series(values)} buckets={list(current.health.buckets)} />)}</div><details><summary>Metric coverage and caveats</summary><ul>{[...series(current.health.notes), ...series(current.history.notes)].map((note, index) => <li key={index}>{text(note)}</li>)}</ul></details></> : null}
     <h3>Supervisor health</h3><dl className={styles.facts}>{Object.keys(supervisor).length ? Object.entries(supervisor).filter(([, value]) => value === null || typeof value !== 'object').map(([field, value]) => <div key={field}><dt>{field.replaceAll('_', ' ')}</dt><dd>{text(value)}</dd></div>) : <div><dt>Status</dt><dd>No runtime supervisor health reported.</dd></div>}</dl>
   </section>;
