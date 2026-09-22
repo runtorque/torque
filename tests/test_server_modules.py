@@ -3302,6 +3302,31 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent, [('session-1', 'line one\nline two')])
         self.assertEqual(len(state.agent_message_history_read(worker.id)), 1)
 
+    async def test_send_user_message_session_replacement_during_broadcast_never_receives_draft(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(id='agent-1', name='Worker', group='g',
+                                         cell_type='agent', session_id='session-1', status='idle')
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+        sent = []
+
+        async def replace_session():
+            worker.session_id = 'session-2'
+            worker.status = 'idle'
+
+        class Bridge:
+            async def send_text(self, session_id, text):
+                sent.append((session_id, text))
+
+        state.broadcast = replace_session
+        with self.assertRaisesRegex(RuntimeError, 'session changed'):
+            await self.server_mod._handle_send_user_message_command(
+                {'cell_id': worker.id, 'session_id': 'session-1', 'text': 'private draft'}, state, Bridge())
+        self.assertEqual(sent, [])
+        self.assertEqual(state.agent_message_history_read(worker.id), [])
+        self.assertEqual(worker.status, 'idle')
+        self.assertEqual(worker.session_id, 'session-2')
+
     async def test_send_user_message_failure_restores_progress_clocks(self):
         state = self._make_state()
         worker = self.state_mod.AgentCell(

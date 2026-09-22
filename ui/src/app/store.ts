@@ -17,6 +17,8 @@ import type {
   StateFrame,
 } from '../protocol/types';
 
+import { composerSlice } from '../features/terminal/composerState';
+
 export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected';
 
 export interface ProtocolDiagnostic {
@@ -570,6 +572,7 @@ export function createAppStore() {
       connection: connectionSlice.reducer,
       projection: projectionSlice.reducer,
       workspaceUi: workspaceUiSlice.reducer,
+      composer: composerSlice.reducer,
     },
     middleware: (getDefaultMiddleware) =>
       getDefaultMiddleware({

@@ -572,6 +572,8 @@ describe('workspace shell', () => {
     expect(screen.queryByRole('button', { name: 'Inspect' })).not.toBeInTheDocument();
     expect(screen.queryByText('Worktree controls')).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Conversation with Audit Terminal' })).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Buffered input for Audit Terminal' })).toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'Message Audit Terminal' })).toBeVisible();
   });
 
   it('creates a worker after matched backend acknowledgement and selects its returned ID', async () => {

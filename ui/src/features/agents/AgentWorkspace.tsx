@@ -166,6 +166,8 @@ interface FocusPanelProps {
   terminal: AgentViewModel;
   detachedTerminal: Record<string, unknown> | null;
   messages: unknown;
+  messageTarget?: AgentViewModel | null;
+  messageHistory?: unknown;
   host: DesktopHost;
   sendCommand: CommandSender;
   onUnavailable: () => void;
@@ -179,7 +181,7 @@ interface FocusPanelProps {
   composeHeight?: number;
 }
 
-function FocusPanel({ agent, terminal, detachedTerminal, messages, host, sendCommand, onUnavailable, onDetachAgent, onInspectWorktree, onOrganize, onRemove, active = true, terminalOnly = false, directMessagesHeight = 0, composeHeight = 0 }: FocusPanelProps) {
+function FocusPanel({ agent, terminal, detachedTerminal, messages, messageTarget = null, messageHistory, host, sendCommand, onUnavailable, onDetachAgent, onInspectWorktree, onOrganize, onRemove, active = true, terminalOnly = false, directMessagesHeight = 0, composeHeight = 0 }: FocusPanelProps) {
   const [settingsTarget, setSettingsTarget] = useState<AgentViewModel | null>(null);
   const run = (command: Record<string, unknown>) => { if (!sendCommand(command as { cmd: string })) onUnavailable(); };
   const focusDetached = () => {
@@ -188,7 +190,7 @@ function FocusPanel({ agent, terminal, detachedTerminal, messages, host, sendCom
   };
 
   return (
-    <section className={`${styles.focusPanel} ${terminalOnly ? styles.terminalOnly : ''}`} aria-label={`Focused ${agent.cellType} ${agent.name}`}>
+    <section className={`${styles.focusPanel} ${agent.cellType === 'terminal' ? styles.focusTerminal : ''} ${terminalOnly ? styles.terminalOnly : ''}`} aria-label={`Focused ${agent.cellType} ${agent.name}`}>
       {!terminalOnly ? <header className={styles.focusHeader}>
         <div><span className={`${styles.statusDot} ${styles[`tone_${statusTone(agent)}`] ?? ''}`} /><div><h2>{agent.name}</h2><p>{agent.kind} · {agent.status}{agent.provider ? ` · ${agent.provider}` : ''}</p></div></div>
         <div>
@@ -225,7 +227,7 @@ function FocusPanel({ agent, terminal, detachedTerminal, messages, host, sendCom
       <div className={styles.terminalHost}>
         {detachedTerminal && !terminalOnly
           ? <StateSurface title="Terminal detached" description="The PTY is owned by its native window, preventing competing focus and resize events." action={<Button tone="primary" onPress={focusDetached}>Focus terminal window</Button>} />
-          : <TerminalWorkspace agent={agent} terminal={terminal} messages={messages} sendCommand={sendCommand} onUnavailable={onUnavailable} showConversation={!terminalOnly && agent.cellType === 'agent'} active={active} directMessagesHeight={directMessagesHeight} composeHeight={composeHeight} />}
+          : <TerminalWorkspace agent={agent} terminal={terminal} messages={messages} messageTarget={messageTarget} messageHistory={messageHistory} sendCommand={sendCommand} onUnavailable={onUnavailable} showConversation={!terminalOnly} active={active} directMessagesHeight={directMessagesHeight} composeHeight={composeHeight} />}
       </div>
 
       {settingsTarget ? <AgentSettingsDialog target={settingsTarget} onClose={() => setSettingsTarget(null)} /> : null}
@@ -262,6 +264,7 @@ export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable,
     ?? hierarchy.all.find((agent) => agent.cellType === 'agent')
     ?? hierarchy.looseTerminals[0]
     ?? null;
+  const messageTarget = selected?.cellType === 'agent' ? selected : selected?.parentId && records[selected.parentId] ? toAgentViewModel(selected.parentId, records[selected.parentId]) : null;
   const terminalChoices = selected
     ? [selected, ...(hierarchy.terminalsByParent[selected.id] ?? [])].filter((cell) => Boolean(cell.sessionId))
     : [];
@@ -341,7 +344,7 @@ export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable,
 
   if (!group) return <StateSurface title="Choose a group" description="Agents are scoped to the active Torque group." />;
   if (terminalOnly) {
-    return selected && terminalChoices.length ? <FocusPanel agent={selected} terminal={terminalChoices.find((cell) => cell.id === selectedTerminalId) ?? terminalChoices[0] ?? selected} detachedTerminal={null} messages={messagesState.direct[selected.id]} host={host} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onDetachAgent={() => { void detachAgents(); }} onInspectWorktree={() => setWorktreeTarget(selected)} onOrganize={() => setOrganizationTarget(selected)} onRemove={() => setRemoveTarget(selected)} directMessagesHeight={Number(workspace.terminalDirectMessagesHeight) || 0} composeHeight={Number(workspace.terminalComposeHeight) || 0} terminalOnly /> : <StateSurface title="No active terminal" description="Select or relaunch an agent in the main Torque window." />;
+    return selected && terminalChoices.length ? <FocusPanel agent={selected} terminal={terminalChoices.find((cell) => cell.id === selectedTerminalId) ?? terminalChoices[0] ?? selected} detachedTerminal={null} messages={messageTarget ? messagesState.direct[messageTarget.id] : []} messageTarget={messageTarget} messageHistory={messagesState.history[selected.id]} host={host} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onDetachAgent={() => { void detachAgents(); }} onInspectWorktree={() => setWorktreeTarget(selected)} onOrganize={() => setOrganizationTarget(selected)} onRemove={() => setRemoveTarget(selected)} directMessagesHeight={Number(workspace.terminalDirectMessagesHeight) || 0} composeHeight={Number(workspace.terminalComposeHeight) || 0} terminalOnly /> : <StateSurface title="No active terminal" description="Select or relaunch an agent in the main Torque window." />;
   }
 
   return (
@@ -373,7 +376,7 @@ export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable,
         <div className={styles.detailHost}>
           {selected ? <header className={styles.detailViewBar}><span>Agent view</span>{viewControl(selected)}</header> : null}
           <div className={`${styles.detailPane} ${workspaceUi.agentsViewMode === 'live' ? '' : styles.workspaceHidden}`} aria-hidden={workspaceUi.agentsViewMode !== 'live'}>
-            {selected ? <FocusPanel agent={selected} terminal={selected} detachedTerminal={terminalEntry} messages={messagesState.direct[selected.id]} host={host} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onDetachAgent={() => { void detachAgents(); }} onInspectWorktree={() => setWorktreeTarget(selected)} onOrganize={() => setOrganizationTarget(selected)} onRemove={() => setRemoveTarget(selected)} directMessagesHeight={Number(workspace.terminalDirectMessagesHeight) || 0} composeHeight={Number(workspace.terminalComposeHeight) || 0} active={active && workspaceUi.agentsViewMode === 'live'} /> : <StateSurface title="Select an agent" description="Choose an agent to inspect status, worktree, settings, messages, and terminal." />}
+            {selected ? <FocusPanel agent={selected} terminal={selected} detachedTerminal={terminalEntry} messages={messageTarget ? messagesState.direct[messageTarget.id] : []} messageTarget={messageTarget} messageHistory={messagesState.history[selected.id]} host={host} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onDetachAgent={() => { void detachAgents(); }} onInspectWorktree={() => setWorktreeTarget(selected)} onOrganize={() => setOrganizationTarget(selected)} onRemove={() => setRemoveTarget(selected)} directMessagesHeight={Number(workspace.terminalDirectMessagesHeight) || 0} composeHeight={Number(workspace.terminalComposeHeight) || 0} active={active && workspaceUi.agentsViewMode === 'live'} /> : <StateSurface title="Select an agent" description="Choose an agent to inspect status, worktree, settings, messages, and terminal." />}
           </div>
           <div className={`${styles.detailPane} ${workspaceUi.agentsViewMode === 'activity' ? '' : styles.workspaceHidden}`} aria-hidden={workspaceUi.agentsViewMode !== 'activity'}>
             {workspaceUi.agentsViewMode === 'activity' ? selected?.cellType === 'agent' ? <AgentDetailWorkspace key={selected.id} agent={selected} group={group} catalog={catalog} responses={auxiliaryResponses} tasks={tasks} directMessages={messagesState.direct[selected.id]} peerThreads={messagesState.peerThreads} digestSettings={digestSettings[selected.id]} digestBufferStats={digestBufferStats[selected.id] ?? engineerBufferStats[group]} digestSentEvents={digestSentEvents[selected.id] ?? engineerSentEvents[group]} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} /> : <StateSurface title="Select an agent" description="Activity is available for Architects, Engineers, and Workers rather than standalone terminals." /> : null}

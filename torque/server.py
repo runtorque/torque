@@ -1955,6 +1955,10 @@ async def _handle_send_user_message_command(data, state: MatrixState,
     cell = state.agents.get(cell_id)
     if not cell or not getattr(cell, "session_id", ""):
         return False
+    session_id = cell.session_id
+    expected_session = str(data.get("session_id", "") or "")
+    if expected_session and expected_session != session_id:
+        return False
     optimistic_baseline = state.snapshot_agent_optimistic_state(cell)
     optimistic_at = time.time()
     optimistic_marked = state.mark_agent_optimistic_running(
@@ -1966,10 +1970,14 @@ async def _handle_send_user_message_command(data, state: MatrixState,
     if optimistic_marked:
         await state.broadcast()
     try:
-        await bridge.send_text(cell.session_id, text)
+        if state.agents.get(cell_id) is not cell or cell.session_id != session_id:
+            raise RuntimeError("The terminal session changed before delivery. Review the draft before retrying.")
+        await bridge.send_text(session_id, text)
     except Exception:
         if (
             optimistic_marked
+            and state.agents.get(cell_id) is cell
+            and cell.session_id == session_id
             and getattr(cell, "status", "") == "running"
             and not getattr(cell, "activity", "")
             and float(getattr(cell, "last_progress_at", 0) or 0) <= optimistic_at

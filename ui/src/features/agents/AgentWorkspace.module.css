@@ -99,6 +99,7 @@
 .agentTaskPanel article p { overflow: hidden; margin: 0; color: var(--text-dim); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .agentTaskPanel article time { text-align: right; }
 .focusPanel { display: grid; min-width: 0; min-height: 0; grid-template-rows: auto auto auto minmax(0, 1fr); overflow: hidden; background: var(--background); }
+.focusPanel.focusTerminal { grid-template-rows: auto auto minmax(0, 1fr); }
 .focusPanel.terminalOnly { height: 100vh; grid-template-rows: minmax(0, 1fr); }
 .focusHeader { display: flex; min-height: 53px; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 9px; border-bottom: 1px solid var(--border); background: var(--surface); }
 .focusHeader > div { display: flex; min-width: 0; align-items: center; gap: 7px; }
@@ -328,8 +329,9 @@
 
 @media (max-width: 760px) {
   .split { display: flex; flex-direction: column; overflow: auto; }
-  .hierarchy { max-height: 42vh; border-right: 0; border-bottom: 1px solid var(--border); }
-  .focusPanel { min-height: 620px; }
+  .hierarchy { flex: 0 0 170px; max-height: 42vh; border-right: 0; border-bottom: 1px solid var(--border); }
+  .detailHost { flex: 0 0 660px; }
+  .focusPanel { min-height: 0; }
   .workspaceHeader { align-items: flex-start; flex-direction: column; }
   .workspaceHeader > div:last-child { width: 100%; flex-wrap: wrap; }
   .agentDetailHeader { align-items: stretch; flex-direction: column; }
