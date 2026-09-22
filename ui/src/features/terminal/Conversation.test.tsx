@@ -94,6 +94,34 @@ describe('buffered terminal and agent composition', () => {
     fireEvent.change(container.querySelector('input[type=file]')!, { target: { files: [new File(['bad'], 'bad.png')] } });
     await act(async () => { finish({ ok: false, json: () => Promise.resolve({ ok: false, error: 'Image refused' }) }); await Promise.resolve(); }); expect(await screen.findByRole('alert')).toHaveTextContent('Image refused'); expect(screen.getByRole('button', { name: /test.png/ })).toBeVisible();
   });
+  it('uses Escape to restore recall, cancel reply, clear undoably, then cancel a submitted turn once', async () => {
+    const { calls, reply } = harness(agent, agent, [{ id: 'question', sender_kind: 'worker', message: 'Question' }], [{ id: 'old', message: 'Earlier', sent_at: 1 }]);
+    const input = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Message Worker' });
+    fireEvent.change(input, { target: { value: 'Submitted' } }); fireEvent.keyDown(input, { key: 'Enter' }); await reply(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Reply' })); fireEvent.change(input, { target: { value: 'Draft' } });
+    input.setSelectionRange(0, 0); fireEvent.select(input); fireEvent.keyDown(input, { key: 'ArrowUp' }); expect(input).not.toHaveValue('Draft');
+    fireEvent.keyDown(input, { key: 'Escape' }); expect(input).toHaveValue('Draft'); expect(screen.getByText('Replying to: Question')).toBeVisible();
+    fireEvent.keyDown(input, { key: 'Escape' }); expect(input).toHaveValue('Draft'); expect(screen.queryByText('Replying to: Question')).not.toBeInTheDocument();
+    fireEvent.keyDown(input, { key: 'Escape' }); expect(input).toHaveValue(''); expect(calls).toHaveLength(1);
+    fireEvent.keyDown(input, { key: 'z', ctrlKey: true }); expect(input).toHaveValue('Draft');
+    fireEvent.keyDown(input, { key: 'Escape' }); fireEvent.keyDown(input, { key: 'Escape', repeat: true }); expect(calls).toHaveLength(1);
+    fireEvent.keyDown(input, { key: 'Escape' }); fireEvent.keyDown(input, { key: 'Escape' }); expect(calls).toHaveLength(2);
+    expect(calls[1]!.command).toMatchObject({ cmd: 'user_agent_turn_cancel', turn_idempotency_key: calls[0]!.command.idempotency_key });
+    await reply(1, { type: 'ok', message_id: 'cancel', outcome: 'cancelled_queued' });
+  });
+  it('moves Home/End by logical line or whole document, preserves the selection anchor, and ignores Alt and IME', () => {
+    harness(terminal, null); const input = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Message Shell' });
+    fireEvent.change(input, { target: { value: 'first\nsecond\nthird' } }); input.setSelectionRange(9, 9); fireEvent.select(input);
+    fireEvent.keyDown(input, { key: 'Home' }); expect(editorSelection(input, [])).toEqual([6, 6]);
+    fireEvent.keyDown(input, { key: 'End', shiftKey: true }); expect(editorSelection(input, [])).toEqual([6, 12]);
+    fireEvent.keyDown(input, { key: 'Home', ctrlKey: true, shiftKey: true }); expect(editorSelection(input, [])).toEqual([6, 0]);
+    fireEvent.keyDown(input, { key: 'End', metaKey: true }); expect(editorSelection(input, [])).toEqual([18, 18]);
+    fireEvent.keyDown(input, { key: 'Home', altKey: true }); expect(editorSelection(input, [])).toEqual([18, 18]);
+    fireEvent.keyDown(input, { key: 'z', ctrlKey: true, altKey: true }); expect(input).toHaveValue('first\nsecond\nthird');
+    expect(fireEvent.keyDown(input, { key: 'z', ctrlKey: true, metaKey: true })).toBe(true); expect(input).toHaveValue('first\nsecond\nthird');
+    fireEvent.compositionStart(input); fireEvent.keyDown(input, { key: 'Escape' }); fireEvent.keyDown(input, { key: 'Home' }); fireEvent.keyDown(input, { key: 'z', ctrlKey: true });
+    expect(input).toHaveValue('first\nsecond\nthird'); expect(editorSelection(input, [])).toEqual([18, 18]); fireEvent.compositionEnd(input);
+  });
   it('does not send on composition Enter or allow an inactive standalone session', () => {
     const { calls, show } = harness(terminal, null); const input = screen.getByRole('textbox', { name: 'Message Shell' }); fireEvent.change(input, { target: { value: 'Draft' } }); fireEvent.keyDown(input, { key: 'Enter', isComposing: true }); expect(calls).toHaveLength(0);
     show({ ...terminal, sessionId: '' }, null); expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled(); expect(input).toHaveValue('Draft');

@@ -2919,6 +2919,15 @@ scope.
 - Uploads: Completion belongs to the originating cell and request. Edits move the pending insertion anchor; edits over an originally selected upload range collapse the replacement so the completion cannot erase newer text. Refusals retain the existing document. Paste, file selection and file drop share this contract.
 - Constraints: Routine deltas, selection changes and reconnect must not rewrite an actively edited DOM or interfere with IME composition. Inline editing, keyboard deletion, preview focus, async upload, compact layout and actual send paths require live-browser acceptance; model tests alone do not close P-216.
 
+### D-131 — Composer keyboard actions preserve semantic edit boundaries
+
+- Date: 2026-09-22
+- Status: accepted; React implementation verified under P-217–P-219.
+- Decision: Both text-only and image-bearing composers group consecutive typing/newlines and deletions into undo transactions. A caret/selection move or edit-kind change starts a new transaction. Paste, completion, image changes, recalled messages, IME composition and explicit clear stay separate. Undo/redo ends the current group; sending resets history only after acknowledgement.
+- Escape: Dismiss suggestions first, restore a recalled draft next, cancel reply context next, then clear text/images as an undoable edit. Only a fresh, non-repeating Escape on an empty composer requests cancellation of the acknowledged turn. Pending sends/uploads and IME retain the document.
+- Navigation: Home/End targets logical line boundaries; Ctrl/Meta targets document boundaries. Shift retains the anchor, including backward selections; image tokens each occupy one editor position. Alt-modified shortcuts, combined Ctrl+Meta undo chords and composing key events are not intercepted.
+- Verification: Native textarea and rich-editor browser input must verify grouping, caret movement, paste, selection, reconnect/cell isolation, clear/restore and actual cancellation. Simulated browser composition does not certify device-level IME.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:
