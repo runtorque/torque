@@ -2762,6 +2762,15 @@ scope.
 - Constraints: During compact reconnect hydration, the Board retains the selected task's last full record so the mounted editor and its draft/caret survive until fresh detail arrives. Task detail still uses the existing WebSocket protocol and projection. Correlated read-failure recovery and archived-target discovery are not certified by this change.
 - Verification: App tests open a compact task through shared selection, accept its full detail, reconnect with local edits and reopen. Live Context-link acceptance navigates both a child task and its pipeline root into hydrated editors.
 
+### D-115 — Context pane width is persisted without replacing its editor
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: Wide Context workspaces expose a labelled vertical separator. Pointer movement previews width; release saves once through the existing `ui_set_context_panel_split` contract. Left/Right resize by two percentage points; Home/End reach the server's 28–62% bounds. Pointer cancellation restores the starting width. The default remains 38%.
+- Constraints: Saves are correlated and serialized; rapid commits retain only the latest queued width. An acknowledgement validates the returned ratio without applying its full snapshot. Failure retains the chosen width and offers retry. Unrelated snapshots cannot overwrite an unsaved width. Successful external width changes are reflected without replacing selection, editor DOM, draft, focus or caret. Unmount cancels pending transport; crash/lost-acknowledgement recovery is not implied.
+- Compact equivalent: At 900px of available pane width or less, the separator hides and list/detail stack with independent scrolling. Both remain mounted; the saved wide ratio and editor survive compact/wide transitions. Keeping both panes available replaces Classic's compact Back-to-list navigation. Context uses its available workspace height, keeping toolbar controls outside the pane scroll regions.
+- Verification: Component regressions cover keyboard/pointer bounds, cancellation, serial saves, mismatched acknowledgements, retry, external updates, compact transitions and unmount. Browser acceptance checks actual geometry, draft/caret/scroll retention, persistence refusal/retry, reconnect and reload restoration.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

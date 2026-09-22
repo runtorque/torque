@@ -6,6 +6,7 @@ import { readCommand } from '../../protocol/http';
 
 import { Button, StateSurface } from '../../design/primitives';
 import type { TorqueCommand, UnknownRecord } from '../../protocol';
+import { ContextSplit } from './ContextSplit';
 import { ContextLinkEditor, ContextLinkList } from './ContextLinks';
 import { contextTargets, contextLinkTarget, savedContextLinks, type ContextLink, type ContextTarget } from './contextLinksModel';
 import styles from './ControlCenter.module.css';
@@ -155,12 +156,12 @@ export function ContextPanel({ group, agents, onOpenTarget }: ContextPanelProps)
     </header>
     {readError ? <p role="alert">Context refresh failed. Your current view and draft are retained. {readError} <Button onPress={refresh}>Retry context</Button></p> : null}
     {writeError ? <p role="alert">{writeError} Your draft and selection are retained; retry when ready.</p> : null}
-    </div><div className={styles.contextSplit}>
+    </div><ContextSplit list={
       <aside className={styles.contextList} aria-label="Shared context entries">
         <header><div><h2>Shared context</h2><p>{applied.focus === 'all' ? group : applied.focus}</p></div><span>{entries.length}</span></header>
         {entries.length ? entries.map((entry) => { const id = text(entry.id); return <button key={id} aria-current={!editing && selectedVisibleId === id ? 'page' : undefined} disabled={busy} onClick={() => { setSelectedId(id); resetEditor(); }}><span><strong>{text(entry.title, text(entry.entry_type, 'Memory'))}</strong>{bool(entry.pinned) ? <small>pinned</small> : null}</span><p>{text(entry.content, 'No content')}</p><footer><span>{text(entry.entry_type, 'note')} · {text(entry.scope_kind, 'group')}</span><time>{timestamp(entry.updated_at ?? entry.created_at)}</time></footer></button>; }) : <StateSurface title={loaded ? "No shared context" : readError ? "Context unavailable" : "Loading shared context"} description="Publish a finding, decision, warning, handoff, or note for future work." />}
       </aside>
-      <main className={styles.contextDetail}>
+    } detail={<main className={styles.contextDetail}>
         {editing ? <form className={styles.contextEditor} onSubmit={(event) => {
           event.preventDefault();
           publish();
@@ -171,7 +172,6 @@ export function ContextPanel({ group, agents, onOpenTarget }: ContextPanelProps)
         </form> : selected ? <article className={styles.contextEntry}>
           <header><div><span>{text(selected.entry_type, 'note')}{bool(selected.pinned) ? ' · pinned' : ''}</span><h2>{text(selected.title, 'Untitled context')}</h2></div><div><Button tone="quiet" isDisabled={busy} onPress={() => { void mutate({ cmd: bool(selected.pinned) ? 'memory_unpin' : 'memory_pin', entry_id: text(selected.id) }); }}>{bool(selected.pinned) ? 'Unpin' : 'Pin'}</Button><Button isDisabled={busy} onPress={() => edit(selected)}>Edit</Button></div></header><p>{text(selected.content, 'No content')}</p><dl><div><dt>Source</dt><dd>{text(selected.source_name) || text(selected.source_kind, 'manual')}</dd></div><div><dt>Updated</dt><dd>{timestamp(selected.updated_at ?? selected.created_at)}</dd></div><div><dt>Scope</dt><dd>{text(selected.scope_kind, 'group')} · {text(selected.scope_ref, group)}</dd></div><div><dt>Expires</dt><dd>{selected.expires_at ? timestamp(selected.expires_at) : 'Not recorded'}</dd></div></dl><ContextLinkList links={savedContextLinks(selected.links)} targets={targets} onOpen={onOpenTarget} />
         </article> : <StateSurface title="Select or add context" description="Shared context now lives in Control Center, separate from an individual agent’s operational panel." action={<Button tone="primary" onPress={create}>Add context</Button>} />}
-      </main>
-    </div>
+      </main>} />
   </div>;
 }

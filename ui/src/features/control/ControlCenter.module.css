@@ -3,12 +3,12 @@
 .header > div { margin-right: auto; }.header p { margin: 0 0 2px; color: var(--text-muted); font-size: 8px; text-transform: uppercase; }.header h1 { margin: 0; font-size: 18px; }.header > span { color: var(--text-muted); font-size: 9px; }
 .tabs { display: flex; gap: 2px; padding: 5px 10px; overflow-x: auto; border-bottom: 1px solid var(--border); background: var(--surface); }.tabs button { min-height: 27px; padding: 0 9px; border: 0; border-radius: var(--radius-sm); color: var(--text-muted); background: transparent; white-space: nowrap; }.tabs button[aria-current='page'] { color: var(--text); background: var(--surface-raised); box-shadow: inset 0 -2px var(--accent); }
 .content { min-height: 0; flex: 1; overflow: auto; padding: 10px; }.error { padding: 6px 12px; color: var(--danger); border-bottom: 1px solid var(--border); font-size: 9px; }
-.contextPanel { display: grid; min-height: calc(100vh - 150px); grid-template-rows: auto minmax(0, 1fr); gap: 9px; }
+.contextPanel { display: grid; height: 100%; min-height: 0; grid-template-rows: auto minmax(0, 1fr); gap: 9px; }
 .contextToolbar { display: flex; align-items: end; gap: 7px; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
 .contextToolbar > label:not(.contextCheck) { display: grid; min-width: 130px; flex: 1; gap: 4px; color: var(--text-muted); font-size: 8px; }
 .contextToolbar input, .contextToolbar select, .contextEditor input, .contextEditor select, .contextEditor textarea { min-height: 30px; padding: 5px 7px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); background: var(--background); }
 .contextCheck { display: flex; min-height: 30px; align-items: center; gap: 5px; color: var(--text-dim); font-size: 8px; white-space: nowrap; }
-.contextSplit { display: grid; min-width: 0; min-height: 0; grid-template-columns: minmax(270px, .72fr) minmax(430px, 1.55fr); gap: 9px; }
+.contextSplit { display: grid; min-width: 0; min-height: 0; grid-template-columns: minmax(0, var(--context-split, .38fr)) 9px minmax(0, var(--context-detail-split, .62fr)); gap: 0; }
 .contextList, .contextDetail { min-width: 0; min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
 .contextList > header { position: sticky; z-index: 2; top: 0; display: flex; align-items: center; justify-content: space-between; padding: 8px; border-bottom: 1px solid var(--border); background: var(--surface); }
 .contextList h2 { margin: 0; font-size: 10px; }.contextList header p { margin: 2px 0 0; color: var(--text-muted); font-size: 8px; }.contextList header > span { color: var(--text-muted); font-size: 9px; }
@@ -250,3 +250,8 @@
 @media (max-width: 850px) { .historyPanel { height: auto; }.historyList { max-height: 32vh; }.historyDetail { max-height: 65vh; } }
 
 .historyDetailColumns article details { grid-column: 1 / -1; min-width: 0; font-size: 9px; color: var(--text-dim); overflow-wrap: anywhere; }.historyDetailColumns article summary { cursor: pointer; }.historyDetailColumns article details p { margin-top: 6px; }
+
+.contextSplitFrame { display: grid; min-height: 0; grid-template-rows: auto minmax(0, 1fr); }.contextSplitFrame > .contextSplit:only-child { grid-row: 1 / -1; }.contextSplitFrame > p { margin: 0 0 8px; }
+.contextResize { display: grid; place-items: center; cursor: col-resize; touch-action: none; user-select: none; outline-offset: -2px; }.contextResize > span { width: 2px; height: 38px; border-radius: 2px; background: var(--border); }.contextResize:hover > span, .contextResize:focus-visible > span { background: var(--accent); }.contextResize[hidden] { display: none; }
+.contextSplit[data-compact='true'] { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(100px, .45fr) minmax(240px, 1fr); min-height: 349px; gap: 9px; }.contextSplit[data-compact='true'] .contextList { max-height: none; }
+.contextEditorGrid > label, .contextEditorGrid input, .contextEditorGrid select, .contextEditorGrid textarea { min-width: 0; }
