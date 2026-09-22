@@ -1263,17 +1263,21 @@ describe('workspace shell', () => {
     expect(requests).toContainEqual({ cmd: 'get_metrics_history', group: 'Foundation', window: '24h' });
   });
 
-  it('searches maintained Help and opens a source-backed topic', async () => {
-    const { appStore, sendCommand } = renderShell();
+  it('opens maintained Help through correlated HTTP and refreshes the active document', async () => {
+    const calls: TorqueCommand[] = [];
+    vi.stubGlobal('fetch', vi.fn((_url: string, options?: RequestInit) => {
+      const command = JSON.parse(typeof options?.body === 'string' ? options.body : '{}') as TorqueCommand; calls.push(command);
+      const data = command.cmd === 'help_list' ? { type: 'help_topics', topics: [{ topic_id: 'operate', title: 'Operating Torque', source_path: 'docs/operate/index.md' }] } : { type: 'help_topic', path_anchor: command.topic, title: 'Operating Torque', body_excerpt: 'Use Mission Control to supervise by exception.' };
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data }) });
+    }));
+    const { sendCommand } = renderShell();
     fireEvent.click(screen.getByRole('button', { name: /Control/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Help' }));
-    act(() => {
-      appStore.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'help_topics', topics: [{ topic_id: 'operate', title: 'Operating Torque', summary: 'Run and supervise Torque.', source_path: 'docs/operate/index.md' }] }));
-    });
-    fireEvent.click(screen.getByRole('button', { name: /Operating Torque/ }));
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'help_show', topic: 'operate', max_chars: 16000 });
-    act(() => { appStore.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'help_topic', topic_id: 'operate', title: 'Operating Torque', path_anchor: 'docs/operate/index.md', body_excerpt: 'Use Mission Control to supervise by exception.' })); });
-    expect(screen.getByText('Use Mission Control to supervise by exception.')).toBeVisible();
+    expect(await screen.findByText('Use Mission Control to supervise by exception.')).toBeVisible();
+    expect(calls).toContainEqual({ cmd: 'help_show', topic: 'docs/operate/index.md', max_chars: 16000 });
+    expect(sendCommand).not.toHaveBeenCalledWith(expect.objectContaining({ cmd: 'help_list' }));
+    const count = calls.length; fireEvent.click(screen.getByRole('button', { name: 'Refresh section' }));
+    await waitFor(() => expect(calls.length).toBeGreaterThan(count));
   });
 
   it('bridges native menu actions into React-owned panels and dialogs', async () => {

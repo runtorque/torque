@@ -686,6 +686,12 @@ operational depth, and settings. Canvas and multi-panel layout disposition must
 be explicit; D-072/D-074 already retire operator peer compose and terminal-only
 detach initiation. Classic remains available until the ledger is verified.
 
+Help checkpoint (2026-09-22): D-119 and P-185–P-192 restore correlated active
+reads, explicit search/reset and audience modes, section/source navigation,
+examples, provenance and readable safe Markdown. Component and isolated browser
+acceptance are recorded in the ledger. This closes those browser Help repairs;
+Phase 4 remains incomplete until the other independent rows are verified.
+
 ### Phase 5 — Desktop, extension, release, and quality hardening
 
 Deliverables:

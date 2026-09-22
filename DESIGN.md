@@ -2802,6 +2802,17 @@ scope.
 - Limits: Single-file replacement is atomic; cross-file rename/move is not crash-atomic and lost acknowledgements are not deduplicated. Explicit navigation discards mounted drafts. Prompt syntax highlighting remains an independent parity gate. Native lifecycle and provider dispatch effects require separate acceptance.
 - Verification: Temporary-file backend regressions, model/component tests and isolated real-daemon browser acceptance cover scoped reads, failure retention, duplicate staging, persisted typed fields, unsaved preview and reconnect continuity.
 
+### D-119 — Help is a correlated, source-backed reading workspace
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: Help owns independent cancellable reads for topics, the selected document, applied search and the submitted question. Reconnect and Refresh reread those accepted targets without submitting unfinished input. Explicit search mode retains zero-result searches; All topics and Escape clear it. New questions cannot show answers from a different question, and late or mismatched responses cannot replace current content. Failed refreshes keep matching accepted content with targeted retry. Hidden Help cancels its reads.
+- Navigation: All eight Classic audience choices are available for the topic list. Section disclosures show source references and line ranges; answer sources and indexed Markdown links open the referenced document or section. Whole-topic navigation is explicit. Selection survives reordered topic refreshes. Deliberate navigation focuses the article; routine refresh preserves input DOM, focus/caret, pane scroll and disclosures.
+- Reading: React nodes render headings, nested lists, quotes, fenced/inline code, tables, emphasis and safe links without executing source HTML. Image references remain descriptive text, as in the escape-first Classic renderer. Code and wide tables scroll locally. Examples, source/update/index hashes, index/cache metadata and bounded-excerpt disclosure remain inspectable.
+- Layout: The permanent topic/document workspace replaces Classic's additional topic-browser modal. Wide panes scroll independently; compact panes stack with bounded independent scrolling and both remain available. Search and question drafts are independent; the answer is labelled with its submitted question.
+- Limits: This is maintained-document lookup, not workspace data or AI retrieval. It does not claim full CommonMark support, native external-link lifecycle acceptance, persistence after dismissal or process-crash recovery.
+- Verification: Focused component and real-daemon browser tests cover request cancellation/correlation, explicit empty modes, source/section navigation, freshness/examples, reconnect continuity and wide/compact geometry. The parity ledger records executed runs.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

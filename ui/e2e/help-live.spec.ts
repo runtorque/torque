@@ -1,0 +1,43 @@
+import { expect, test, type APIRequestContext, type WebSocketRoute } from '@playwright/test';
+type Row = Record<string, unknown>;
+async function command(request: APIRequestContext, data: Row) {
+  const response = await (await request.post('/api/cmd', { data })).json() as { ok: boolean; error?: string; data: Row };
+  expect(response.ok, response.error).toBe(true); return response.data;
+}
+test('Help reads maintained docs with search reset, source navigation, reconnect continuity and compact browsing', async ({ page, request }) => {
+  const runtime = (await (await request.get('/api/runtime')).json() as { data: { runtime: { port: number; profile: string } } }).data.runtime;
+  expect(runtime.port).not.toBe(18932); expect(runtime.profile).not.toBe('default');
+  const group = `Help ${Date.now()}`; await command(request, { cmd: 'add_group', group }); await command(request, { cmd: 'ui_select_group', group });
+  const topics = (await command(request, { cmd: 'help_list', audience: '' })).topics as Row[];
+  const topic = topics.find((item) => item.source_path === 'README.md')!; expect(topic).toBeTruthy();
+  const detail = await command(request, { cmd: 'help_show', topic: 'README.md', max_chars: 16000 }); const section = (detail.sections as Row[]).find((item) => Number(item.level) === 2)!; expect(section).toBeTruthy();
+  let socket: WebSocketRoute | undefined; let connections = 0; let refusal = ''; const calls: Row[] = [];
+  await page.routeWebSocket(/\/ws\?/, (connection) => { connection.connectToServer(); socket = connection; connections++; });
+  await page.route('**/api/cmd', async (route) => { const data = route.request().postDataJSON() as Row; calls.push(data); if (data.cmd === refusal) await route.fulfill({ json: { ok: false, error: 'Injected Help refusal' } }); else await route.continue(); });
+  const reconnect = async () => { const before = connections; await socket!.close({ code: 1012, reason: 'Help reconnect' }); await expect.poll(() => connections).toBeGreaterThan(before); };
+  await page.goto('/'); await page.getByRole('button', { name: /◎ Control/ }).click(); await page.getByRole('button', { name: 'Help', exact: true }).click();
+  const help = page.getByRole('region', { name: 'Torque Help', exact: true }); const list = help.getByRole('complementary', { name: 'Help topics' }); const article = help.getByRole('article', { name: 'Help document' });
+  await list.getByRole('button').filter({ has: page.getByText('README.md', { exact: true }) }).click(); await expect(article.getByRole('heading', { name: 'Torque', exact: true }).first()).toBeVisible();
+  await article.getByText('Source and freshness', { exact: true }).click(); await expect(article.getByText(String(detail.source_hash), { exact: true })).toBeVisible(); await expect(article.getByText(String(detail.updated_at), { exact: true })).toBeVisible();
+  await article.getByText('Extracted examples', { exact: true }).click(); await expect(article.locator('details').filter({ has: page.getByText('Extracted examples', { exact: true }) }).locator('pre').first()).toContainText(String((detail.examples as string[])[0]));
+  await article.getByText(`Sections · ${(detail.sections as Row[]).length}`, { exact: true }).click(); await article.getByText(`${String(section.title)} · lines ${String(section.line_start)}–${String(section.line_end)}`, { exact: true }).click(); await article.getByRole('button', { name: `Open section: ${String(section.title)}`, exact: true }).click(); await expect(article.getByRole('button', { name: 'Open whole topic' })).toBeVisible(); await expect(article).toBeFocused();
+  await article.getByRole('button', { name: 'Open whole topic' }).click(); await expect(article.getByRole('button', { name: 'Open whole topic' })).toHaveCount(0);
+  const search = help.getByLabel('Search documentation', { exact: true }); await search.fill('zzzxqvnohelpresult'); await search.press('Enter'); await expect(list.getByText('No matching documentation for “zzzxqvnohelpresult”.', { exact: true })).toBeVisible(); await expect(list.getByRole('button')).toHaveCount(0);
+  await help.getByRole('button', { name: 'All topics', exact: true }).click(); await expect(search).toHaveValue(''); await expect(list.getByRole('button')).toHaveCount(topics.length);
+  await search.fill('worktree'); await search.press('Enter'); await expect(list.getByText('Results for “worktree”', { exact: true })).toBeVisible();
+  const question = help.getByLabel('Question for the docs', { exact: true }); await question.fill('How do worktrees merge?'); await question.press('Enter'); const sources = article.getByRole('navigation', { name: 'Answer sources' }); await expect(sources.getByRole('button').first()).toBeVisible(); await sources.getByRole('button').first().click(); await expect(article.getByText('Refreshing document…', { exact: true })).toHaveCount(0);
+  const selectedRef = String(calls.filter((call) => call.cmd === 'help_show').at(-1)!.topic);
+  await article.getByText('Source and freshness', { exact: true }).click(); const freshness = article.locator('details').filter({ has: page.getByText('Source and freshness', { exact: true }) });
+  await search.fill('Unsubmitted search'); await question.fill('Unsubmitted question'); await question.evaluate((node: HTMLInputElement) => { node.setSelectionRange(2, 7); node.dataset.helpAnchor = 'original'; });
+  await article.evaluate((node) => { node.scrollTop = Math.min(150, node.scrollHeight - node.clientHeight); }); const scroll = await article.evaluate((node) => node.scrollTop);
+  const reads = calls.filter((call) => call.cmd === 'help_show').length; await reconnect(); await expect.poll(() => calls.filter((call) => call.cmd === 'help_show').length).toBeGreaterThan(reads); await expect(article.getByText('Refreshing document…', { exact: true })).toHaveCount(0);
+  await expect(question).toHaveValue('Unsubmitted question'); await expect(question).toBeFocused(); await expect(question).toHaveAttribute('data-help-anchor', 'original'); expect(await question.evaluate((node: HTMLInputElement) => [node.selectionStart, node.selectionEnd])).toEqual([2, 7]); await expect(search).toHaveValue('Unsubmitted search'); await expect(freshness).toHaveAttribute('open', ''); expect(await article.evaluate((node) => node.scrollTop)).toBeCloseTo(scroll, 0);
+  expect(calls.filter((call) => call.cmd === 'help_show').at(-1)).toMatchObject({ topic: selectedRef }); expect(calls.filter((call) => call.cmd === 'help_search').at(-1)).toMatchObject({ query: 'worktree' }); expect(calls.filter((call) => call.cmd === 'help_query').at(-1)).toMatchObject({ question: 'How do worktrees merge?' });
+  refusal = 'help_show'; await reconnect(); await expect(article.getByRole('alert')).toContainText('Injected Help refusal'); refusal = ''; await article.getByRole('button', { name: 'Retry detail', exact: true }).click(); await expect(article.getByRole('alert')).toHaveCount(0);
+  await help.getByRole('button', { name: 'Clear answer', exact: true }).click(); await help.getByRole('button', { name: 'All topics', exact: true }).click();
+  const audience = help.getByLabel('Audience for topics'); expect(await audience.locator('option').count()).toBe(8); await audience.selectOption('maintainer'); await expect.poll(() => calls.filter((call) => call.cmd === 'help_list').at(-1)?.audience).toBe('maintainer'); await audience.selectOption('');
+  await expect(list.getByRole('button')).toHaveCount(topics.length); await list.getByRole('button').filter({ has: page.getByText('README.md', { exact: true }) }).click(); await expect(article.getByText('Refreshing document…', { exact: true })).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath('help-wide.png') }); const panes = await list.evaluate((node) => ({ scrollable: node.scrollHeight > node.clientHeight, height: node.clientHeight })); expect(panes.scrollable).toBe(true); expect(panes.height).toBeGreaterThan(100);
+  await page.setViewportSize({ width: 680, height: 850 }); await article.scrollIntoViewIfNeeded(); await expect(article).toBeInViewport(); await expect(list).toBeVisible(); await page.screenshot({ path: test.info().outputPath('help-compact.png') }); expect(await article.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+  await page.getByRole('button', { name: 'Mission Control', exact: true }).click(); const hidden = calls.filter((call) => String(call.cmd).startsWith('help_')).length; await reconnect(); expect(calls.filter((call) => String(call.cmd).startsWith('help_'))).toHaveLength(hidden);
+});

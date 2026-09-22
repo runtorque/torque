@@ -31,7 +31,8 @@ import { ActionsWorkspace } from './ActionsWorkspace';
 import { LogViewer } from './LogViewer';
 import { HistoryPanel } from './HistoryPanel';
 import { ContextPanel } from './ContextPanel';
-import { ActivityPanel, HelpPanel, MissionPanel } from './OperatorPanels';
+import { ActivityPanel, MissionPanel } from './OperatorPanels';
+import { HelpPanel } from './HelpPanel';
 import { AppearancePreferencesPanel, ShortcutPreferencesPanel } from './WorkspacePreferences';
 import styles from './ControlCenter.module.css';
 
@@ -270,6 +271,7 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable, host =
   const tab = workspaceUi.controlTab;
   const setTab = (next: ControlTab) => dispatch(workspaceUiActions.setControlTab(next));
   const [selectedAction, setSelectedAction] = useState('');
+  const [helpRefreshVersion, setHelpRefreshVersion] = useState(0);
   const [actionRefreshVersion, setActionRefreshVersion] = useState(0);
   const requestKey = useRef('');
   const [classRefreshVersion, setClassRefreshVersion] = useState(0);
@@ -278,12 +280,12 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable, host =
 
   const send = useCallback((command: TorqueCommand) => { if (!sendCommand(command)) onCommandUnavailable(); }, [onCommandUnavailable, sendCommand]);
   const refresh = useCallback(() => {
+    if (tab === 'help') setHelpRefreshVersion((value) => value + 1);
     if (tab === 'actions') setActionRefreshVersion((value) => value + 1);
     if (tab === 'catalog') setClassRefreshVersion((value) => value + 1);
     const requests: Partial<Record<ControlTab, TorqueCommand[]>> = {
       mission: [{ cmd: 'get_mission_control', group }],
       activity: [{ cmd: 'get_events', limit: 100 }],
-      help: [{ cmd: 'help_list', audience: 'user' }],
     };
     (requests[tab] || []).forEach(send);
   }, [group, send, tab]);
@@ -293,8 +295,9 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable, host =
     const key = `${group}:${tab}:${connection.reconnectCount}`;
     if (requestKey.current === key) return;
     requestKey.current = key;
-    refresh();
-  }, [group, tab, connection.status, connection.reconnectCount, refresh]);
+    if (tab === 'mission') send({ cmd: 'get_mission_control', group });
+    if (tab === 'activity') send({ cmd: 'get_events', limit: 100 });
+  }, [group, tab, connection.status, connection.reconnectCount, send]);
 
   const agentItems = useMemo(() => records(agents.records).filter((item) => !group || item.group === group), [agents.records, group]);
   const agentCount = agentItems.filter((item) => item.cell_type !== 'terminal').length;
@@ -321,7 +324,7 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable, host =
         <BehaviorOverlayEditor group={group} active={catalog.behaviorOverlays} proposals={operations.behaviorOverlayProposals} responses={auxiliaryResponses} agents={agentItems} send={send} />
       </div> : null}
       {tab === 'settings' ? <SettingsWorkspace key={group} group={group} responses={auxiliaryResponses} send={send} /> : null}
-      {tab === 'help' ? <HelpPanel responses={auxiliaryResponses} send={send} /> : null}
+      {tab === 'help' ? <HelpPanel refreshVersion={helpRefreshVersion} /> : null}
     </div>
   </section>;
 }
