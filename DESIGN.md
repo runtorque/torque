@@ -2881,6 +2881,16 @@ scope.
 - Limits: Existing API caching and durable direct-message idempotency provide retry behavior; this does not guarantee exactly-once raw PTY input after daemon crash or partial side effects. Durable failed-message replay reports the original failure; it is not automatic redelivery. Rich message history, slash/task completion, loop controls and attachment insertion/preview details have separate parity gates.
 - Verification: Component tests cover source-cell isolation, delayed/mismatched acknowledgements, retries, reply context, history, uploads, IME Enter and bounded cancellation. Backend tests cover acknowledgement ordering, refusal, compatibility and session replacement during broadcast. Executed browser and full regression evidence is recorded in the parity ledger.
 
+### D-127 — Direct messages preserve reading position and expose delivery meaning
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: Direct messages initially mount the newest 30 retained rows. An accessible Load older action and scrolling to the top reveal more of the daemon's bounded snapshot; the view labels shown/retained counts without claiming an unlimited archive. Latest messages explicitly resumes following. Per-agent reading state retains the visible window, anchor offset, follow intent and selected row through normal updates, reconnect, Live/Activity switching and selected-cell changes. Hidden panes do not replace that state with zero-size geometry.
+- Content: Rows identify the actual sender, timestamp, message type, blocking asks, replies and durable delivery state/reason. Buffered persistence is labelled Waiting for delivery; failed/cancelled rows remain visibly distinct. System and reminder cards use a neutral style. Replies show the retained source preview or its ID when unavailable.
+- Rendering: Help and direct messages share a React-node Markdown renderer. Raw HTML stays text; external links allow only validated HTTP(S)/mailto destinations. Help additionally resolves its indexed internal source links. Images remain descriptive text. Headings, lists, emphasis, quotes, tables and code fit within the reading pane; code can scroll horizontally without widening the workspace.
+- Interaction: Explicit Reply does not compete with text selection or links. Copy message writes the exact original source; Copy code writes the rendered fence contents. Both support keyboard access. A custom message context menu offers copy/reply, arrow-key traversal, Escape and focus restoration. Clipboard failure retains content, selection, draft and reading state and offers visible feedback. Copy feedback occupies its own row so it cannot cover message actions. No native blocking dialogs are used.
+- Verification: Focused model/component tests cover progressive windows, reading anchors, hidden panes, target switching, metadata, safe rendering, exact copying, selection retention, context actions and failures. Browser evidence, including actual clipboard and reconnect behavior, is recorded in the parity ledger. Provider effects and native application lifecycle remain separate gates.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

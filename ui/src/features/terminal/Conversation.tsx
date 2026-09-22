@@ -6,7 +6,8 @@ import { readCommand } from '../../protocol/http';
 import type { CommandSender } from '../board/BoardPanel';
 import type { AgentViewModel } from '../agents/model';
 import { composerActions, emptyComposerDraft, type ComposerAttachment } from './composerState';
-import { acknowledgedMessage, cancellationLabels, composerCommand, messageTime, recallMessages, rows, text } from './composerModel';
+import { acknowledgedMessage, cancellationLabels, composerCommand, recallMessages, rows, text } from './composerModel';
+import { DirectMessages } from './DirectMessages';
 import { VerticalResizeHandle } from './VerticalResizeHandle';
 import styles from './TerminalSurface.module.css';
 
@@ -25,7 +26,7 @@ export function Conversation({ cell, target, messages, messageHistory, sendComma
   const initialPosition = useRef({ selection: draft.selection, scrollTop: draft.scrollTop });
   const [conversationHeight, setConversationHeight] = useState(0); const [requestedHeight, setRequestedHeight] = useState<number | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const messageRows = rows(messages).sort((a, b) => messageTime(a.created_at ?? a.timestamp) - messageTime(b.created_at ?? b.timestamp));
+  const messageCount = rows(messages).length;
   const history = recallMessages(messageHistory, messages, draft.sent);
   const pending = draft.pending; const busy = pending || draft.uploading;
   const name = target?.name ?? cell.name;
@@ -104,14 +105,8 @@ export function Conversation({ cell, target, messages, messageHistory, sendComma
   };
   const sessionChanged = Boolean(turn && turn.sessionId !== target?.sessionId);
   return <section ref={conversation} className={styles.conversation} aria-label={target ? `Conversation with ${name}` : `Buffered input for ${name}`}>
-    <header><strong>{target ? 'Direct messages' : 'Terminal input'}</strong><span>{target ? messageRows.length : 'Multiline input'}</span>{target ? <Button tone="quiet" isDisabled={busy || !turn || turn.pending || sessionChanged || Boolean(turn.notice)} onPress={() => { void cancelTurn(); }}>{turn?.pending ? 'Cancelling…' : 'Cancel turn'}</Button> : null}</header>
-    <div className={styles.messageList}>
-      {target ? messageRows.length ? messageRows.slice(-30).map((row, index) => {
-        const sender = text(row.sender_kind) || text(row.direction) || 'agent'; const body = text(row.message) || text(row.text) || text(row.body); const id = text(row.id ?? row.message_id);
-        const direction = sender === 'user' || sender === 'outbound' ? 'outbound' : 'inbound';
-        return <article key={id || index} className={direction === 'outbound' ? styles.outbound : styles.inbound} data-direction={direction} data-message-id={id}><small>{sender}</small><p>{body}</p>{id ? <Button tone="quiet" isDisabled={pending} onPress={() => { patch({ reply: { id, agentId: target.id, preview: body.replace(/\s+/g, ' ').slice(0, 120) } }); focusComposer(); }}>Reply</Button> : null}</article>;
-      }) : <p className={styles.noMessages}>No direct messages yet.</p> : <p className={styles.noMessages}>{cell.sessionId ? 'Send the composed text to this terminal session.' : 'Relaunch this terminal before sending input.'}</p>}
-    </div>
+    <header><strong>{target ? 'Direct messages' : 'Terminal input'}</strong><span>{target ? messageCount : 'Multiline input'}</span>{target ? <Button tone="quiet" isDisabled={busy || !turn || turn.pending || sessionChanged || Boolean(turn.notice)} onPress={() => { void cancelTurn(); }}>{turn?.pending ? 'Cancelling…' : 'Cancel turn'}</Button> : null}</header>
+    {target ? <DirectMessages key={target.id} agent={target} messages={messages} pending={pending} active={active} onReply={(id, body) => { patch({ reply: { id, agentId: target.id, preview: body.replace(/\s+/g, ' ').slice(0, 120) } }); focusComposer(); }} /> : <div className={styles.messageList}><p className={styles.noMessages}>{cell.sessionId ? 'Send the composed text to this terminal session.' : 'Relaunch this terminal before sending input.'}</p></div>}
     <form className={styles.composer} onSubmit={(event) => { event.preventDefault(); void submit(); }}>
       <VerticalResizeHandle className={styles.composerResize ?? ''} label="Resize message text box" value={height} minimum={38} maximum={maximumHeight} onChange={setRequestedHeight} onCommit={(value) => { if (!sendCommand({ cmd: 'ui_set_terminal_compose_height', height: Math.round(value) })) onUnavailable(); }} />
       {draft.error ? <p className={styles.composerFeedback} role="alert">{draft.error}</p> : draft.notice ? <p className={styles.composerFeedback} role="status">{draft.notice}</p> : null}

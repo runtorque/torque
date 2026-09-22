@@ -11,12 +11,14 @@ export interface ComposerDraft {
   sent: SentMessage[];
   recall: { original: string; selection: [number, number]; index: number } | null;
 }
+export interface MessageReading { count: number; pinned: boolean; anchorId: string; offset: number; scrollTop: number; selectedId: string }
 export interface SubmittedTurn { key: string; sessionId: string; pending: boolean; cancelKey: string; error: string; notice: string }
 export const emptyComposerDraft: ComposerDraft = { text: '', attachments: [], reply: null, selection: [0, 0], scrollTop: 0, undo: [''], undoIndex: 0, pending: false, uploading: false, error: '', notice: '', attempt: null, sent: [], recall: null };
-const initialState: { drafts: Record<string, ComposerDraft>; turns: Record<string, SubmittedTurn> } = { drafts: {}, turns: {} };
+const initialState: { drafts: Record<string, ComposerDraft>; turns: Record<string, SubmittedTurn>; readings: Record<string, MessageReading> } = { drafts: {}, turns: {}, readings: {} };
 export const composerSlice = createSlice({
   name: 'composer', initialState,
   reducers: {
+    reading(state, { payload }: PayloadAction<{ agentId: string; reading: MessageReading }>) { state.readings[payload.agentId] = payload.reading; },
     patch(state, { payload }: PayloadAction<{ cellId: string; changes: Partial<ComposerDraft> }>) {
       state.drafts[payload.cellId] = { ...(state.drafts[payload.cellId] ?? emptyComposerDraft), ...payload.changes };
     },

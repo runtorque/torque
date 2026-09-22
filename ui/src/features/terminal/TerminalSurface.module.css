@@ -31,7 +31,7 @@
 .noMessages { margin: auto; color: var(--text-muted); font-size: 10px; }
 .attachments { display: flex; gap: 5px; overflow-x: auto; padding: 5px 8px 0; }
 .attachments button { padding: 3px 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-dim); background: var(--surface-raised); font-size: 9px; }
-.composer { display: grid; grid-auto-rows: max-content; flex: 0 0 auto; max-height: calc(100% - 54px); min-height: 0; overflow-y: auto; gap: 5px; padding: 0 8px 8px; }
+.composer { display: grid; grid-auto-rows: max-content; flex: 0 0 auto; max-height: calc(100% - 84px); min-height: 0; overflow-y: auto; gap: 5px; padding: 0 8px 8px; }
 .composerResize { margin-inline: -8px; }
 .composer textarea { min-height: 38px; max-height: 240px; resize: none; font-size: 11px; line-height: 1.45; }
 .composer footer { display: flex; align-items: center; gap: 7px; }
