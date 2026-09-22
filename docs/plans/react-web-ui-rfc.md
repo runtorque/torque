@@ -692,6 +692,12 @@ examples, provenance and readable safe Markdown. Component and isolated browser
 acceptance are recorded in the ledger. This closes those browser Help repairs;
 Phase 4 remains incomplete until the other independent rows are verified.
 
+Actions highlighting checkpoint (2026-09-22): D-120 and P-184 retain native
+textarea editing with a hidden syntax layer, backed by component and browser
+acceptance. A discovered empty-collection YAML round-trip failure is repaired in
+both daemon and offline CLI readers. The ledger records final regression gates;
+this does not certify the remaining settings, command or native lifecycle rows.
+
 ### Phase 5 — Desktop, extension, release, and quality hardening
 
 Deliverables:

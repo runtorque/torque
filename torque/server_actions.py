@@ -29,6 +29,15 @@ _ActionDumper.add_representer(
 )
 
 
+_ActionDumper.add_representer(
+    str,
+    lambda dumper, value: dumper.represent_scalar(
+        "tag:yaml.org,2002:str", value,
+        style='"' if any(char in value for char in "\n\r\x85\u2028\u2029") else None,
+    ),
+)
+
+
 def _coerce_bool(value) -> bool:
     """Return a conservative boolean for editor-provided action metadata."""
     if isinstance(value, bool):
@@ -164,4 +173,7 @@ def _action_to_yaml(name: str, data: dict) -> str:
         default_flow_style=False,
         sort_keys=False,
         allow_unicode=True,
+        # Keep quoted prompts on one physical line for the stdlib action/CLI
+        # readers. PyYAML quotes literal blocks with trailing spaces or emoji.
+        width=2**31 - 1,
     )

@@ -170,3 +170,29 @@ class ActionAuthoringTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(frame['saved'], 'build')
         self.assertEqual(parse_yaml(original.read_text())['description'], 'cwd sentinel')
         self.assertTrue((missing / '.torque' / 'actions' / 'build.yaml').exists())
+
+
+    async def test_empty_authoring_collections_reload_and_preview(self):
+        self.seed('project', transitions=[{'action': 'review'}],
+                  terminals=[{'name': 'watch', 'command': 'echo watch'}])
+        values = {'prompt': '{{ TASK }}', 'agent': {}, 'transitions': [],
+                  'terminals': [], 'labels': [], 'custom_metadata': {}}
+        saved = await self.command('save_action', scope='project', action=values)
+        self.assertEqual(saved['saved'], 'build')
+        loaded = await self.command('get_action', scope='project')
+        self.assertEqual(loaded['type'], 'action_detail')
+        for key, value in values.items():
+            self.assertEqual(loaded['action'][key], value, key)
+        preview = await self.command('render_action', scope='project', vars={'TASK': 'sample'})
+        self.assertEqual(preview['prompt'].strip(), 'sample')
+        self.assertEqual(self.manager.load_action_raw('build', str(self.project))['transitions'], [])
+
+
+    async def test_multiline_prompt_with_unicode_and_line_end_spaces_reloads(self):
+        prompt = ('{{ TASK }} — Olá 👋 ' + 'long text ' * 20 + '\n') * 3
+        saved = await self.command('save_action', scope='project', action={'prompt': prompt, 'transitions': [], 'terminals': []})
+        self.assertEqual(saved['saved'], 'build')
+        loaded = await self.command('get_action', scope='project')
+        self.assertEqual(loaded['action']['prompt'], prompt)
+        preview = await self.command('render_action', scope='project', vars={'TASK': 'sample'})
+        self.assertIn('sample — Olá 👋', preview['prompt'])

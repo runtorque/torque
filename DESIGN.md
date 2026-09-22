@@ -2813,6 +2813,15 @@ scope.
 - Limits: This is maintained-document lookup, not workspace data or AI retrieval. It does not claim full CommonMark support, native external-link lifecycle acceptance, persistence after dismissal or process-crash recovery.
 - Verification: Focused component and real-daemon browser tests cover request cancellation/correlation, explicit empty modes, source/section navigation, freshness/examples, reconnect continuity and wide/compact geometry. The parity ledger records executed runs.
 
+### D-120 — Prompt highlighting preserves native editing
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: Actions prompts retain one labelled native textarea. An inert, accessibility-hidden backdrop distinguishes Jinja expressions/statements/comments, quoted strings, filters and parentheses. Tokens preserve every authored character, including incomplete expressions, Unicode and trailing newlines; highlighting does not render templates or rewrite the draft/save payload.
+- Interaction: Textarea and backdrop share font, wrapping, padding and scrollbar geometry. Native vertical resizing remains available and scrolling is synchronized. Parent refreshes retain the same input node, focus, caret and viewport. Forced-colors and print modes use plain visible textarea text. Source markup is rendered as text, never HTML.
+- Persistence: Existing server newline normalization remains authoritative on reload. The minimal daemon/CLI YAML readers recognize serializer-produced empty lists/maps, so clearing transitions/terminals or using an empty inline agent does not make the saved definition unreadable. Quoted collection text remains text. Serializer-generated quoted scalars stay on one physical line, and both readers decode YAML escapes, preserving multiline prompts with emoji/trailing spaces and multiline non-prompt strings.
+- Verification: Token/component tests cover exact text, inert markup, composition event forwarding and input continuity. Isolated browser acceptance covers native insertion/undo, wide/compact wrapping, pointer resize, scroll geometry, reconnect, forced colors, failed saves, unchanged save payloads and preview. Temporary-file backend tests cover empty-collection save/read/preview and offline parser agreement. Full native IME/device and provider-effect acceptance remain separate gates.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:
