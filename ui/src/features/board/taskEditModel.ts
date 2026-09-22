@@ -1,4 +1,5 @@
 import type { UnknownRecord } from '../../protocol';
+import { mergeEvidenceChanges } from './taskEvidenceModel';
 import { resolveActionVariables } from './actionVariables';
 
 export function localSchedule(value: string) {
@@ -23,6 +24,9 @@ export function taskEditChanges(baseline: UnknownRecord, draft: UnknownRecord, d
     const before = baseline[key] as UnknownRecord; const after = draft[key] as UnknownRecord;
     const changed = Object.fromEntries(Object.entries(after).filter(([name, value]) => JSON.stringify(value) !== JSON.stringify(before[name])));
     fields[key] = { ...(latest[key] ?? {}), ...changed };
+  }
+  for (const key of ['attachments', 'artifacts']) {
+    if (key in fields) fields[key] = mergeEvidenceChanges(baseline[key] as UnknownRecord[], draft[key] as UnknownRecord[], (latest[key] ?? []) as UnknownRecord[]);
   }
   return fields;
 }

@@ -14,6 +14,7 @@ function setup(extra: UnknownRecord = {}) {
   store.dispatch(workspaceUiActions.setDetailTask('task'));
   const calls: TorqueCommand[] = []; let failure = ''; let deferred: ((command: TorqueCommand) => Promise<unknown>) | null = null;
   vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => {
+    if (_url === '/api/upload') { const file = (options.body as FormData).get('file') as File; return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: [{ filename: file.name, path: `/attachments/task/${file.name}`, mime_type: file.type }] }) }); }
     const command = JSON.parse(options.body as string) as TorqueCommand; calls.push(command);
     if (deferred) return deferred(command);
     return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: command.cmd === failure ? { type: 'error', message: 'Task has active work in its assigned worker. Stop or complete that worker before editing.' } : command.cmd === 'preview_prompt' ? { type: 'prompt_preview', task_id: 'task', prompt: 'Correct draft preview' } : { type: 'state', seq: 10, board_tasks: {} } }) });
@@ -51,7 +52,7 @@ it('blocks duplicate saves, close and mutation controls until acknowledgement', 
 it('cleans removed files only after a successful save and retries cleanup without repeating the edit', async () => {
   const { calls, fail } = setup({ attachments: [{ filename: 'evidence.png', path: '/evidence.png' }] });
   fireEvent.click(screen.getByRole('tab', { name: 'Evidence' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Remove attachment evidence.png' }));
   fail('board_update_task'); fireEvent.click(screen.getByRole('button', { name: 'Save task' }));
   await screen.findByRole('alert'); expect(calls.some((cmd) => cmd.cmd === 'remove_attachment')).toBe(false);
   fail('remove_attachment'); fireEvent.click(screen.getByRole('button', { name: 'Save task' }));
@@ -80,4 +81,67 @@ it('keeps unchanged schedule seconds and unrelated verification metadata out of 
   const baseline = { action_vars: '{}', scheduled_at: schedule, verification_summary: { tests_run: 'old', manual_smoke_done: false }, description: 'old' };
   expect(taskEditChanges(baseline, { ...baseline, description: 'new' }, [], {})).toEqual({ description: 'new' });
   expect(taskEditChanges(baseline, { ...baseline, verification_summary: { tests_run: 'new', manual_smoke_done: false } }, [], { verification_summary: { tests_run: 'old', manual_smoke_done: true, provider_evidence: 'retained' } })).toEqual({ verification_summary: { tests_run: 'new', manual_smoke_done: true, provider_evidence: 'retained' } });
+});
+
+it('stages structured edits, preserves the composer across tabs and merges concurrent evidence on acknowledged save', async () => {
+  const original = { id: 'report', type: 'snippet', title: 'Original', content: 'old', prompt: { mode: 'inline' }, metadata: { source: 'worker' } };
+  const { calls, fail, store } = setup({ artifacts: [original] });
+  fireEvent.click(screen.getByRole('tab', { name: 'Evidence' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit artifact Original' }));
+  fireEvent.change(screen.getByLabelText('Artifact title'), { target: { value: 'Edited report' } });
+  fireEvent.change(screen.getByLabelText('Artifact content'), { target: { value: 'draft evidence' } });
+  fireEvent.click(screen.getByRole('tab', { name: 'Execution' }));
+  expect(screen.getByRole('button', { name: 'Save task' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('tab', { name: 'Evidence' }));
+  expect(screen.getByLabelText('Artifact title')).toHaveValue('Edited report');
+  fireEvent.click(screen.getByRole('button', { name: 'Save artifact' }));
+  expect(calls).toHaveLength(0);
+  act(() => { store.dispatch(projectionActions.taskDetailReceived({ type: 'task_detail', id: 'task', task: { artifacts: [{ ...original, metadata: { source: 'updated worker' } }, { id: 'remote', title: 'Remote evidence' }] } })); });
+  fireEvent.click(screen.getByRole('tab', { name: 'Execution' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Preview prompt' }));
+  await screen.findByText('Correct draft preview');
+  expect(calls[0]).toMatchObject({ artifacts: [expect.objectContaining({ title: 'Edited report', content: 'draft evidence' })] });
+  fail('board_update_task'); fireEvent.click(screen.getByRole('button', { name: 'Save task' })); await screen.findByRole('alert');
+  expect(calls[1]).toMatchObject({ artifacts: [expect.objectContaining({ title: 'Edited report', metadata: { source: 'updated worker' } }), { id: 'remote', title: 'Remote evidence' }] });
+  fireEvent.click(screen.getByRole('tab', { name: 'Evidence' }));
+  expect(screen.getByRole('button', { name: 'Edit artifact Edited report' })).toBeVisible();
+  fail(''); fireEvent.click(screen.getByRole('button', { name: 'Save task' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+});
+it('Cancel preserves original evidence and retries cleanup of only new uploads', async () => {
+  const { calls, fail } = setup({ attachments: [{ filename: 'original.png' }], artifacts: [{ id: 'external', title: 'External', filename: 'external.log', lifecycle: { owner: 'agent' } }] });
+  fireEvent.click(screen.getByRole('tab', { name: 'Evidence' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Remove attachment original.png' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Remove artifact External' }));
+  fireEvent.change(screen.getByLabelText('Upload evidence files'), { target: { files: [new File(['png'], 'new.png', { type: 'image/png' })] } });
+  await screen.findByRole('button', { name: 'Remove attachment new.png' });
+  fail('remove_attachment'); fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  await screen.findByText(/Could not discard new uploads/);
+  expect(calls).toEqual([{ cmd: 'remove_attachment', task_id: 'task', filename: 'new.png' }]);
+  fail(''); fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(calls).toHaveLength(2); expect(calls[1]).toEqual(calls[0]);
+});
+it('keeps files still referenced by another artifact after removing their attachment', async () => {
+  const { calls } = setup({ attachments: [{ filename: 'shared.png' }], artifacts: [{ id: 'other', title: 'Shared', filename: 'shared.png' }] });
+  fireEvent.click(screen.getByRole('tab', { name: 'Evidence' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Remove attachment shared.png' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save task' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(calls).toEqual([{ cmd: 'board_update_task', id: 'task', attachments: [], enforce_dispatch_edit_gate: true }]);
+});
+it('opens activity from a compact card after hydration and normal detail returns to Execution', async () => {
+  const { store, send } = setup();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  act(() => { store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, board_tasks: { task: { id: 'task', task: 'Compact task', group: 'Foundation', lane: 'Backlog' } } })); });
+  fireEvent.click(screen.getByRole('button', { name: 'Actions for Compact task' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'Task activity' }));
+  expect(send).toHaveBeenCalledWith({ cmd: 'task_detail', id: 'task' });
+  expect(screen.getByText('Retrieving complete task fields.')).toBeVisible();
+  act(() => { store.dispatch(projectionActions.taskDetailReceived({ type: 'task_detail', id: 'task', task: { description: '', messages: [{ action: 'progress', agent: 'Worker A', timestamp: 1700000000, message: 'Hydrated activity' }] } })); });
+  expect(screen.getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByText('Hydrated activity')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  fireEvent.doubleClick(screen.getByLabelText('Compact task, Backlog'));
+  expect(screen.getByRole('tab', { name: 'Execution' })).toHaveAttribute('aria-selected', 'true');
 });

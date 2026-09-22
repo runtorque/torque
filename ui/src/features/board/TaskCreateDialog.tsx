@@ -6,7 +6,8 @@ import type { TorqueCommand, UnknownRecord } from '../../protocol';
 import { readCommand } from '../../protocol/http';
 import { VerificationFields, type VerificationDraft } from './VerificationFields';
 import { TaskEvidenceEditor } from './TaskEvidenceEditor';
-import { defaultPrompt, uploadType, taskText } from './taskCreationModel';
+import { taskText } from './taskCreationModel';
+import { uploadedEvidence } from './taskEvidenceModel';
 import { ActionVariableFields } from './ActionVariableFields';
 import { actionVariableDefinitions, resolveActionVariables, useActionVariables } from './actionVariables';
 import { TaskPromptPreview } from './TaskPromptPreview';
@@ -72,12 +73,9 @@ export function TaskCreateDialog({ group, lanes, actions, roles, onClose, initia
       const result = await response.json() as { ok?: boolean; error?: string; data?: UnknownRecord[] };
       if (!response.ok || !result.ok || !result.data?.length) throw new Error(result.error || `Could not upload ${file.name}.`);
       for (const entry of result.data) {
-        const type = uploadType(taskText(entry.filename), taskText(entry.mime_type || file.type));
-        if (type === 'image') setAttachments((current) => [...current, entry]);
-        else {
-          const content = type !== 'file_ref' && file.size <= 262144 ? await file.text().catch(() => '') : '';
-          setArtifacts((current) => [...current, { ...entry, id: `artifact-${crypto.randomUUID()}`, type, title: taskText(entry.filename), summary: `${file.size} bytes`, content, prompt: { mode: defaultPrompt(type) }, storage: { kind: type === 'file_ref' ? 'file_ref' : 'path', path: entry.path, content }, lifecycle: { owner: 'task', cleanup: 'delete_with_task' }, metadata: { size_bytes: file.size } }]);
-        }
+        const prepared = await uploadedEvidence(entry, file);
+        if (prepared.kind === 'attachment') setAttachments((current) => [...current, prepared.item]);
+        else setArtifacts((current) => [...current, prepared.item]);
       }
     }
   }); };

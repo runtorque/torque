@@ -2690,6 +2690,30 @@ scope.
 - Constraints: Omitted fields retain persisted values for ID-only callers. Explicit empty fields clear the preview instead of falling back to saved data. No preview modifies the task, assigned agent, database or dispatch state. The UI ignores unrelated global preview responses and aborts reads on unmount.
 - Verification: Backend tests cover omitted-versus-empty fields, assigned/unassigned drafts, role/context consistency, preserved ancestry and unchanged source objects. Component tests cover unrelated response frames and invalidation; live acceptance renders the changed role preamble and explicitly cleared description while backend reads prove the original task remains unchanged.
 
+### D-105 — Existing-task evidence stays inside the task save boundary
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: Creation and existing-task editing share the structured evidence editor. Type, title, summary, path, content, line range and prompt mode remain local until Save task succeeds. An unfinished artifact edit remains mounted across section changes and blocks task Save with an explicit explanation. Evidence and Activity reserve more vertical space for reading/editing, with primary task fields independently scrollable and Save kept visible. Opening the artifact editor focuses its title.
+- Constraints: Cancel preserves original evidence and removes only new uploads or cleanup already authorized by an acknowledged save. Failed cleanup retains the editor for retry. Removal never deletes externally owned references. Local evidence edits merge onto the latest known collection so unrelated additions and unchanged metadata survive; this is not server-side conflict detection.
+- Verification: Component and isolated browser regressions cover staging, failed writes, retry, concurrent additions, retained composer state and cleanup ordering.
+
+### D-106 — Evidence preview uses actual content and storage
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: Evidence opens a nested preview without leaving the task draft. Images display in place; inline draft text takes precedence over lazy file reads. Text remains escaped, with explicit loading/error states and abort on close. Previews expose path, line range and downloads only when a file URL exists.
+- Constraints: A filename inferred from an external path is not an uploaded file. External references keep editable paths and no fabricated attachment URL. New uploads use the same image/log/diff/report/document/file classification in create and edit. Large-file performance is not certified by these checks.
+- Verification: Component tests cover inline precedence, read failure/abort, image sources and external references. Browser checks exercise nested Escape, actual image decoding, log content and draft-upload cleanup.
+
+### D-107 — Task activity preserves the current reading window
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: Board cards expose Task activity and the editor has a dedicated Activity section. Entries show newest sequence first, with action, actor and timestamps normalized from Unix seconds, milliseconds or ISO values. Forty entries mount initially, with explicit older-message paging.
+- Constraints: Compact count summaries are not activity rows. An active Activity section refreshes full messages through a correlated task-detail read while retaining the previous rows; hidden sections issue no refresh reads. New arrivals have an explicit reveal control so they do not replace the current reading window. Section switches retain paging and task drafts. This surface is task message history, not agent execution history.
+- Verification: Component tests cover ordering, date units, paging, compact refresh failures/retry and inactive sections. Browser acceptance covers compact card hydration, live append and draft continuity.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

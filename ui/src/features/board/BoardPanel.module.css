@@ -105,9 +105,12 @@
 .artifacts header p, .detailSection header p { margin: 3px 0 0; padding: 0; border: 0; color: var(--text-muted); font-size: 9px; }
 .artifacts p { margin: 0; padding: 10px; border: 1px dashed var(--border); color: var(--text-muted); font-size: 10px; }
 .artifacts ul { display: grid; gap: 1px; margin: 0; padding: 0; border: 1px solid var(--border); background: var(--border); list-style: none; }
-.artifacts li { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; padding: 7px 8px; background: var(--surface); }
+.artifacts li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; padding: 7px 8px; background: var(--surface); }
 .artifacts li a { overflow: hidden; color: var(--accent); text-overflow: ellipsis; white-space: nowrap; }
-.artifacts li button { border: 0; color: var(--danger); background: transparent; font-size: 9px; }
+.artifacts li button { border: 0; background: transparent; font-size: 9px; }
+.evidenceActions { display: flex; flex-wrap: wrap; gap: 4px; }
+.artifacts li code, .artifacts li pre { overflow-wrap: anywhere; white-space: pre-wrap; }
+.artifacts li small, .artifacts li code { display: block; }
 .artifacts small { color: var(--text-muted); }
 .detailSection { display: grid; gap: 10px; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius); background: color-mix(in srgb, var(--surface) 62%, transparent); }
 .detailSection details > pre, .promptPreview pre { max-height: 300px; overflow: auto; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-dim); background: var(--background); font: 9px/1.45 var(--font-mono); white-space: pre-wrap; }
@@ -127,9 +130,8 @@
 .messageHistory article p { grid-column: 1 / -1; margin: 0; color: var(--text-dim); }
 .messageHistory time { color: var(--text-muted); font-size: 8px; }
 .resolveComposer { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 7px; }
-.artifactComposer { display: grid; grid-template-columns: 120px 1fr 1fr; align-items: end; gap: 7px; }
-.artifactComposer label:nth-of-type(4) { grid-column: 1 / -1; }
-.artifactComposer button { grid-column: 3; }
+.artifactComposer { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 7px; }
+.artifactComposer label:nth-of-type(3), .artifactComposer label:nth-of-type(5), .artifactComposer label:nth-of-type(8) { grid-column: 1 / -1; }
 .formError { margin: 0; padding: 8px; border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border)); border-radius: var(--radius-sm); color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
 .taskDetailForm > .formError { grid-row: 4; }
 .detailFooter { display: flex; align-items: center; gap: 6px; padding: 10px 0 0; border-top: 1px solid var(--border); background: linear-gradient(transparent, var(--surface-raised) 24%); }
@@ -192,3 +194,17 @@
   .detailTabs { overflow-x: auto; }
 
 }
+
+.detailSecondary > [hidden] { display: none; }
+.formHint { grid-row: 4; margin: 0; color: var(--text-dim); font-size: 11px; }
+.artifactPreview { display: grid; gap: 12px; min-width: 0; }
+.artifactPreview img { max-width: 100%; max-height: 65vh; object-fit: contain; }
+.artifactPreview pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; line-height: 1.5; }
+.artifactPreview code { overflow-wrap: anywhere; }
+
+.messageHistory > header, .messageHistory article > header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px; background: var(--surface); }
+.messageHistory h3 { margin: 0; font-size: 11px; }
+.messageHistory article { grid-template-columns: minmax(0, 1fr); }
+.messageHistory article p { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.taskDetailForm.detailReading { grid-template-rows: minmax(90px, .5fr) auto minmax(180px, 1fr) auto auto; }

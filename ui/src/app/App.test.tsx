@@ -393,7 +393,7 @@ describe('workspace shell', () => {
     expect(screen.getByRole('heading', { name: 'External ticket and sync' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Resolve ask' })).toBeVisible();
     fireEvent.click(screen.getByRole('tab', { name: 'Evidence' }));
-    expect(screen.getByRole('heading', { name: 'Artifacts and attachments' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Attachments and artifacts' })).toBeVisible();
 
     fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), { target: { value: 'Complete parity coverage' } });
     fireEvent.click(screen.getByRole('tab', { name: 'Execution' }));

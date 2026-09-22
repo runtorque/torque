@@ -1,3 +1,6 @@
+import { TaskActivity } from './TaskActivity';
+import { TaskEvidenceEditor } from './TaskEvidenceEditor';
+import { evidenceFilename, uploadedEvidence } from './taskEvidenceModel';
 import { TaskPromptPreview } from './TaskPromptPreview';
 import { localSchedule, taskEditChanges } from './taskEditModel';
 import { readCommand } from '../../protocol/http';
@@ -188,6 +191,7 @@ interface SortableTaskCardProps {
   attribution: TaskAttribution;
   onSelect: (additive: boolean) => void;
   onOpen: () => void;
+  onActivity: () => void;
   onCollapse: () => void;
   onDispatch: () => void;
   onDone: () => void;
@@ -256,6 +260,7 @@ function SortableTaskCard({
   attribution,
   onSelect,
   onOpen,
+  onActivity,
   onCollapse,
   onDispatch,
   onDone,
@@ -301,6 +306,7 @@ function SortableTaskCard({
         <span className={`${styles.health} ${styles[`health_${task.healthState}`] ?? ''}`} title={`Health: ${task.healthState}`} />
         <ActionMenu label={`Actions for ${task.task}`}>
           <ActionMenuItem onAction={onOpen}>Open details</ActionMenuItem>
+          <ActionMenuItem onAction={onActivity}>Task activity</ActionMenuItem>
           <ActionMenuItem onAction={onDuplicate}>Duplicate</ActionMenuItem>
           <ActionMenuItem onAction={onDispatch} isDisabled={dispatchLabel === 'Dispatched' || task.lane === 'Archived'}>{dispatchLabel}</ActionMenuItem>
           <ActionMenuItem onAction={onDone} isDisabled={task.lane === 'Done' || task.lane === 'Archived'}>Move to Done</ActionMenuItem>
@@ -340,6 +346,7 @@ function SortableTaskCard({
         {task.scheduledAt ? <span className={styles.due} data-board-text>◷ {displayTime(task.scheduledAt)}</span> : null}
         {task.dependsOn.length ? <span data-board-text>↳ {task.dependsOn.length} dep</span> : null}
         {task.artifacts.length ? <span data-board-text>◇ {task.artifacts.length}</span> : null}
+        {task.messages.length ? <button type="button" aria-label={`View activity for ${task.task}`} onClick={(event) => { event.stopPropagation(); onActivity(); }}>Activity</button> : null}
         {task.externalId ? <span data-board-text>{task.provider || 'external'} · {task.externalId}</span> : null}
       </div>
       {density !== 'compact' && task.labels.length ? (
@@ -401,9 +408,11 @@ interface TaskDetailProps {
   onClose: () => void;
   onRemove: () => void;
   busyRef: { current: boolean };
+  closeRef: { current: (() => void) | null };
+  initialTab: 'execution' | 'activity';
 }
 
-function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, sendCommand, onCommandUnavailable, onClose, onRemove, busyRef }: TaskDetailProps) {
+function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, sendCommand, onCommandUnavailable, onClose, onRemove, busyRef, closeRef, initialTab }: TaskDetailProps) {
   const [title, setTitle] = useState(task.task);
   const [description, setDescription] = useState(task.description);
   const [labels, setLabels] = useState(task.labels.join(', '));
@@ -424,17 +433,16 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
   const [attachments, setAttachments] = useState(task.attachments);
   const [removedAttachments, setRemovedAttachments] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [artifactType, setArtifactType] = useState('snippet');
-  const [artifactTitle, setArtifactTitle] = useState('');
-  const [artifactSummary, setArtifactSummary] = useState('');
-  const [artifactContent, setArtifactContent] = useState('');
+  const [artifacts, setArtifacts] = useState(task.artifacts);
+  const [artifactEditing, setArtifactEditing] = useState(false);
+  const uncommittedUploads = useRef(new Set<string>());
   const [externalStatus, setExternalStatus] = useState(task.status || task.lane);
   const [externalComment, setExternalComment] = useState('');
   const [formError, setFormError] = useState('');
-  const [detailTab, setDetailTab] = useState<'execution' | 'verification' | 'integration' | 'evidence'>('execution');
+  const [detailTab, setDetailTab] = useState<'execution' | 'verification' | 'integration' | 'evidence' | 'activity'>(initialTab);
+  const [activityVisited, setActivityVisited] = useState(initialTab === 'activity');
   const [pullRequested, setPullRequested] = useState(false);
   const [pullBaseline, setPullBaseline] = useState<unknown>(responses[`board_pull_preview:${task.id}`] ?? responses['board_pull_preview:latest']);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const actionOptions = actionItems(actions);
   const roleOptions = roleItems(roles);
   const liveAgents = Object.entries(agents).map<Record<string, unknown> & { id: string }>(([id, value]) => ({ id, ...record(value) })).filter((item) => item.group === targetGroup && !Number(item.deleted_at ?? 0));
@@ -449,12 +457,13 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
     labels: labels.split(',').map((label) => label.trim()).filter(Boolean),
     scheduled_at: scheduledAt, action_name: actionName, agent_template: role,
     action_vars: actionVars, depends_on: dependsOn.split(',').map((id) => id.trim()).filter(Boolean),
-    agent_id: agentId, attachments, provider, external_id: externalId, external_url: externalUrl,
+    agent_id: agentId, attachments, artifacts, provider, external_id: externalId, external_url: externalUrl,
     board_sync: { ...syncBaseline, version: Number(syncBaseline.version ?? 1), enabled: syncEnabled, provider: provider || textValue(syncBaseline.provider, 'github') },
     verification_mode: verification.mode, verification_state: verification.state,
     verification_notes: verification.notes, verification_summary: verification.summary,
   });
   const baseline = useRef(draftFields());
+  const savedEvidence = useRef({ attachments: task.attachments, artifacts: task.artifacts });
   useEffect(() => () => { busyRef.current = false; }, [busyRef]);
   const request = async (command: TorqueCommand) => {
     const frame = await readCommand(command, new AbortController().signal);
@@ -467,7 +476,7 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
 
 
   const upload = async (files: File[]) => {
-    if (!files.length || busyRef.current) return;
+    if (!files.length || busyRef.current || artifactEditing) return;
     busyRef.current = true;
     setUploading(true);
     setFormError('');
@@ -479,7 +488,12 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
         const response = await fetch('/api/upload', { method: 'POST', body });
         const payload = await response.json() as { ok?: boolean; error?: string; data?: unknown[] };
         if (!response.ok || !payload.ok) throw new Error(payload.error || 'Upload failed');
-        setAttachments((current) => [...current, ...(payload.data ?? []).map(record)]);
+        for (const entry of (payload.data ?? []).map(record)) {
+          if (entry.filename) uncommittedUploads.current.add(textValue(entry.filename));
+          const prepared = await uploadedEvidence(entry, file);
+          if (prepared.kind === 'attachment') setAttachments((current) => [...current, prepared.item]);
+          else setArtifacts((current) => [...current, prepared.item]);
+        }
       }
     } catch (error) { setFormError(error instanceof Error ? error.message : 'Upload failed'); }
     finally { busyRef.current = false; setUploading(false); }
@@ -487,7 +501,7 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (busyRef.current || !title.trim()) return;
+    if (busyRef.current || artifactEditing || !title.trim()) return;
     busyRef.current = true; setSaving(true); setFormError('');
     void (async () => {
       let saved = false;
@@ -497,10 +511,16 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
         if (Object.keys(fields).length) {
           await request({ cmd: 'board_update_task', id: task.id, ...fields, enforce_dispatch_edit_gate: true });
           baseline.current = draft;
+          for (const key of ['attachments', 'artifacts'] as const) {
+            if (key in fields) savedEvidence.current[key] = fields[key] as typeof artifacts;
+          }
+          for (const item of [...savedEvidence.current.attachments, ...savedEvidence.current.artifacts]) uncommittedUploads.current.delete(evidenceFilename(item));
           saved = true;
         }
-        for (const filename of removedAttachments) {
+        const kept = new Set([...savedEvidence.current.attachments, ...savedEvidence.current.artifacts].map(evidenceFilename));
+        for (const filename of removedAttachments.filter((name) => !kept.has(name))) {
           await request({ cmd: 'remove_attachment', task_id: task.id, filename });
+          uncommittedUploads.current.delete(filename);
           setRemovedAttachments((current) => current.filter((name) => name !== filename));
         }
         sendOrNotify(sendCommand, { cmd: 'task_detail', id: task.id }, onCommandUnavailable);
@@ -512,14 +532,37 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
     })();
   };
 
-  const addArtifact = () => {
-    if (!artifactTitle.trim() && !artifactContent.trim()) return;
-    sendOrNotify(sendCommand, { cmd: 'task_upload_artifact', task_id: task.id, artifact_type: artifactType, title: artifactTitle.trim(), summary: artifactSummary.trim(), content_text: artifactContent }, onCommandUnavailable);
-    setArtifactTitle(''); setArtifactSummary(''); setArtifactContent('');
+  const removeEvidence = (kind: 'artifact' | 'attachment', index: number) => {
+    const item = (kind === 'artifact' ? artifacts : attachments)[index];
+    if (!item) return;
+    const filename = evidenceFilename(item);
+    if (filename) setRemovedAttachments((current) => [...new Set([...current, filename])]);
+    if (kind === 'artifact') setArtifacts((current) => current.filter((_, i) => i !== index));
+    else setAttachments((current) => current.filter((_, i) => i !== index));
   };
+  const close = () => {
+    if (busyRef.current) return;
+    busyRef.current = true; setSaving(true); setFormError('');
+    void (async () => {
+      try {
+        const kept = new Set([...savedEvidence.current.attachments, ...savedEvidence.current.artifacts].map(evidenceFilename));
+        const discarded = new Set([...uncommittedUploads.current, ...removedAttachments.filter((name) => !kept.has(name))]);
+        for (const filename of discarded) {
+          await request({ cmd: 'remove_attachment', task_id: task.id, filename });
+          uncommittedUploads.current.delete(filename);
+          setRemovedAttachments((current) => current.filter((name) => name !== filename));
+          setAttachments((current) => current.filter((item) => evidenceFilename(item) !== filename));
+          setArtifacts((current) => current.filter((item) => evidenceFilename(item) !== filename));
+        }
+        onClose();
+      } catch (cause) { setFormError(`Could not discard new uploads. ${cause instanceof Error ? cause.message : 'Retry closing.'}`); }
+      finally { busyRef.current = false; setSaving(false); }
+    })();
+  };
+  useEffect(() => { closeRef.current = close; return () => { closeRef.current = null; }; });
 
   return (
-    <form className={`${styles.detailForm} ${styles.taskDetailForm}`} onSubmit={submit}>
+    <form className={`${styles.detailForm} ${styles.taskDetailForm} ${detailTab === 'evidence' || detailTab === 'activity' ? styles.detailReading : ''}`} onSubmit={submit} onPaste={(event) => { if (event.clipboardData.files.length) { event.preventDefault(); void upload([...event.clipboardData.files]); } }}>
       <fieldset className={styles.createFields} disabled={saving || uploading}>
       <div className={styles.detailOverview}>
         <section className={styles.detailPrimary} aria-label="Primary task fields">
@@ -552,7 +595,7 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
       {task.labels.includes('torque:human') ? <AskResponse key={task.id} taskId={task.id} send={(command) => sendOrNotify(sendCommand, command, onCommandUnavailable)} /> : null}
       <div className={styles.detailSecondary}>
       <nav className={styles.detailTabs} role="tablist" aria-label="Task detail sections">
-        {([['execution', 'Execution'], ['verification', 'Verification'], ['integration', 'Integrations'], ['evidence', 'Evidence']] as const).map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={detailTab === id} onClick={() => setDetailTab(id)}>{label}</button>)}
+        {([['execution', 'Execution'], ['verification', 'Verification'], ['integration', 'Integrations'], ['evidence', 'Evidence'], ['activity', 'Activity']] as const).map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={detailTab === id} onClick={() => { setDetailTab(id); if (id === 'activity') setActivityVisited(true); }}>{label}</button>)}
       </nav>
       {detailTab === 'execution' ? <section className={styles.detailSection} role="tabpanel" aria-label="Execution">
         <header><div><h3>Execution</h3><p>Configure scheduling, dispatch behavior, role, and dependencies.</p></div></header>
@@ -563,31 +606,22 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
           <label>Dependencies<input title={dependsOn} value={dependsOn} onChange={(event) => setDependsOn(event.target.value)} list={`task-dependencies-${task.id}`} placeholder="task IDs, comma separated" /><datalist id={`task-dependencies-${task.id}`}>{tasks.filter((item) => item.id !== task.id).map((item) => <option key={item.id} value={item.id}>{item.task}</option>)}</datalist></label>
         </div>
         <ActionVariableFields definitions={definitions} value={actionVars} onChange={setActionVars} />
-        <TaskPromptPreview disabled={saving || uploading} inputsKey={JSON.stringify([title, description, targetGroup, actionName, role, agentId, actionVars, definitions, attachments, task.artifacts, labels, verification])} command={() => ({ cmd: 'preview_prompt', id: task.id, task: title.trim(), description, group: targetGroup, action_name: actionName, agent_template: role, agent_id: agentId, action_vars: resolveActionVariables(actionVars, definitions), attachments, artifacts: task.artifacts, labels: labels.split(',').map((label) => label.trim()).filter(Boolean), verification_mode: verification.mode, verification_state: verification.state, verification_notes: verification.notes, verification_summary: verification.summary })} />
+        <TaskPromptPreview disabled={saving || uploading || artifactEditing} inputsKey={JSON.stringify([title, description, targetGroup, actionName, role, agentId, actionVars, definitions, attachments, artifacts, labels, verification])} command={() => ({ cmd: 'preview_prompt', id: task.id, task: title.trim(), description, group: targetGroup, action_name: actionName, agent_template: role, agent_id: agentId, action_vars: resolveActionVariables(actionVars, definitions), attachments, artifacts, labels: labels.split(',').map((label) => label.trim()).filter(Boolean), verification_mode: verification.mode, verification_state: verification.state, verification_notes: verification.notes, verification_summary: verification.summary })} />
       </section> : null}
       {detailTab === 'verification' ? <section className={styles.detailSection} role="tabpanel" aria-label="Verification"><header><div><h3>Verification</h3><p>Record release gates and human checks for this task.</p></div><Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'board_verify_task', id: task.id, actor_name: 'Operator', verification_state: 'passed', manual_smoke_done: true, human_validation_pending: '', deploy_needed: false }, onCommandUnavailable)}>Mark verified</Button></header><VerificationFields value={verification} onChange={setVerification} />{Object.keys(record(task.raw.completion_evidence)).length ? <details><summary>Completion evidence</summary><pre>{JSON.stringify(task.raw.completion_evidence, null, 2)}</pre></details> : null}</section> : null}
-      {detailTab === 'integration' ? <section className={styles.detailSection} role="tabpanel" aria-label="Integrations"><header><div><h3>External ticket and sync</h3><p>Link, synchronize, or communicate with the provider ticket.</p></div>{task.externalUrl ? <Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'external_open_task', id: task.id }, onCommandUnavailable)}>Open ticket</Button> : null}</header><div className={styles.formGrid}><label>Provider<input value={provider} onChange={(event) => setProvider(event.target.value)} placeholder="github" /></label><label>External ID<input value={externalId} onChange={(event) => setExternalId(event.target.value)} placeholder="owner/repo#123" /></label><label>External URL<input value={externalUrl} onChange={(event) => setExternalUrl(event.target.value)} /></label><label className={styles.checkField}><input type="checkbox" checked={syncEnabled} onChange={(event) => setSyncEnabled(event.target.checked)} />Track with Board sync</label></div><div className={styles.taskActionRow}><Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'board_sync_task', task: task.id }, onCommandUnavailable)} isDisabled={!externalId && !externalUrl}>Sync now</Button><Button tone="quiet" type="button" onPress={() => { setPullBaseline(pullResponse); setPullRequested(true); sendOrNotify(sendCommand, { cmd: 'board_pull_preview', task: task.id }, onCommandUnavailable); }} isDisabled={!externalId && !externalUrl}>Pull preview</Button><Button tone="quiet" type="button" onPress={() => { setProvider(''); setExternalId(''); setExternalUrl(''); setSyncEnabled(false); sendOrNotify(sendCommand, { cmd: 'external_link_task', id: task.id, ref: '', provider: '', external_id: '', external_url: '', board_sync: { version: 1, enabled: false } }, onCommandUnavailable); }} isDisabled={!externalId && !externalUrl}>Unlink</Button></div>{Object.keys(pullChanges).length ? <div className={styles.pullPreview}><h4>Inbound changes</h4>{Object.entries(pullChanges).map(([field, value]) => <div key={field}><strong>{field}</strong><span>Local: {textValue(record(value).local)}</span><span>Remote: {textValue(record(value).remote)}</span></div>)}<Button tone="primary" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'board_pull_apply', task: task.id, fields: Object.keys(pullChanges) }, onCommandUnavailable)}>Apply all changes</Button></div> : null}<div className={styles.externalComposer}><label>Push status<input value={externalStatus} onChange={(event) => setExternalStatus(event.target.value)} /></label><Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'external_push_task_status', id: task.id, status: externalStatus, note: '' }, onCommandUnavailable)} isDisabled={!externalStatus.trim() || (!externalId && !externalUrl)}>Push</Button><label>Post comment<textarea value={externalComment} onChange={(event) => setExternalComment(event.target.value)} rows={2} /></label><Button tone="quiet" type="button" onPress={() => { sendOrNotify(sendCommand, { cmd: 'external_post_task_comment', id: task.id, comment: externalComment.trim() }, onCommandUnavailable); setExternalComment(''); }} isDisabled={!externalComment.trim() || (!externalId && !externalUrl)}>Post</Button></div>{task.messages.length ? <details><summary>External activity · {task.messages.length}</summary><div className={styles.messageHistory}>{task.messages.map((message, index) => <article key={textValue(message.id, String(index))}><strong>{textValue(message.action, 'update')}</strong><time>{displayTime(textValue(message.timestamp))}</time><p>{textValue(message.message, textValue(message.comment, textValue(message.status)))}</p></article>)}</div></details> : null}</section> : null}
-      {detailTab === 'evidence' ? <section className={styles.artifacts} role="tabpanel" aria-labelledby="task-artifacts-heading">
-        <header><div><h3 id="task-artifacts-heading">Artifacts and attachments</h3><p>Persist evidence, logs, reports, diffs, and operator-provided files.</p></div><><input ref={fileInputRef} type="file" multiple hidden onChange={(event) => { void upload([...(event.target.files ?? [])]); event.target.value = ''; }} /><Button tone="quiet" type="button" onPress={() => fileInputRef.current?.click()} isDisabled={uploading}>{uploading ? 'Uploading…' : 'Upload files'}</Button></></header>
-        {task.artifacts.length || attachments.length ? (
-          <ul>{[...task.artifacts, ...attachments].map((artifact, index) => (
-            <li key={`${textValue(artifact.filename, textValue(artifact.title, 'artifact'))}-${index}`}>
-              <a href={textValue(artifact.url, textValue(artifact.filename) ? `/attachments/${encodeURIComponent(task.id)}/${encodeURIComponent(textValue(artifact.filename))}` : '#')} target="_blank" rel="noreferrer">{textValue(artifact.title, textValue(artifact.filename, `Artifact ${index + 1}`))}</a>
-              <small>{textValue(artifact.kind, textValue(artifact.mime_type))}</small>
-              {index >= task.artifacts.length ? <button type="button" onClick={() => { const filename = textValue(artifact.filename); if (filename) setRemovedAttachments((current) => [...current, filename]); setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index - task.artifacts.length)); }}>Remove</button> : null}
-            </li>
-          ))}</ul>
-        ) : <p>No artifacts have been uploaded for this task.</p>}
-        <div className={styles.artifactComposer}><label>Type<select value={artifactType} onChange={(event) => setArtifactType(event.target.value)}>{['snippet', 'diff', 'log', 'test_report', 'generated_doc', 'file_ref'].map((value) => <option key={value}>{value}</option>)}</select></label><label>Title<input value={artifactTitle} onChange={(event) => setArtifactTitle(event.target.value)} /></label><label>Summary<input value={artifactSummary} onChange={(event) => setArtifactSummary(event.target.value)} /></label><label>Content<textarea value={artifactContent} onChange={(event) => setArtifactContent(event.target.value)} rows={4} /></label><Button tone="quiet" type="button" onPress={addArtifact} isDisabled={!artifactTitle.trim() && !artifactContent.trim()}>Add structured artifact</Button></div>
-      </section> : null}
+      {detailTab === 'integration' ? <section className={styles.detailSection} role="tabpanel" aria-label="Integrations"><header><div><h3>External ticket and sync</h3><p>Link, synchronize, or communicate with the provider ticket.</p></div>{task.externalUrl ? <Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'external_open_task', id: task.id }, onCommandUnavailable)}>Open ticket</Button> : null}</header><div className={styles.formGrid}><label>Provider<input value={provider} onChange={(event) => setProvider(event.target.value)} placeholder="github" /></label><label>External ID<input value={externalId} onChange={(event) => setExternalId(event.target.value)} placeholder="owner/repo#123" /></label><label>External URL<input value={externalUrl} onChange={(event) => setExternalUrl(event.target.value)} /></label><label className={styles.checkField}><input type="checkbox" checked={syncEnabled} onChange={(event) => setSyncEnabled(event.target.checked)} />Track with Board sync</label></div><div className={styles.taskActionRow}><Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'board_sync_task', task: task.id }, onCommandUnavailable)} isDisabled={!externalId && !externalUrl}>Sync now</Button><Button tone="quiet" type="button" onPress={() => { setPullBaseline(pullResponse); setPullRequested(true); sendOrNotify(sendCommand, { cmd: 'board_pull_preview', task: task.id }, onCommandUnavailable); }} isDisabled={!externalId && !externalUrl}>Pull preview</Button><Button tone="quiet" type="button" onPress={() => { setProvider(''); setExternalId(''); setExternalUrl(''); setSyncEnabled(false); sendOrNotify(sendCommand, { cmd: 'external_link_task', id: task.id, ref: '', provider: '', external_id: '', external_url: '', board_sync: { version: 1, enabled: false } }, onCommandUnavailable); }} isDisabled={!externalId && !externalUrl}>Unlink</Button></div>{Object.keys(pullChanges).length ? <div className={styles.pullPreview}><h4>Inbound changes</h4>{Object.entries(pullChanges).map(([field, value]) => <div key={field}><strong>{field}</strong><span>Local: {textValue(record(value).local)}</span><span>Remote: {textValue(record(value).remote)}</span></div>)}<Button tone="primary" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'board_pull_apply', task: task.id, fields: Object.keys(pullChanges) }, onCommandUnavailable)}>Apply all changes</Button></div> : null}<div className={styles.externalComposer}><label>Push status<input value={externalStatus} onChange={(event) => setExternalStatus(event.target.value)} /></label><Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'external_push_task_status', id: task.id, status: externalStatus, note: '' }, onCommandUnavailable)} isDisabled={!externalStatus.trim() || (!externalId && !externalUrl)}>Push</Button><label>Post comment<textarea value={externalComment} onChange={(event) => setExternalComment(event.target.value)} rows={2} /></label><Button tone="quiet" type="button" onPress={() => { sendOrNotify(sendCommand, { cmd: 'external_post_task_comment', id: task.id, comment: externalComment.trim() }, onCommandUnavailable); setExternalComment(''); }} isDisabled={!externalComment.trim() || (!externalId && !externalUrl)}>Post</Button></div></section> : null}
+      {activityVisited ? <section role="tabpanel" aria-label="Activity" hidden={detailTab !== 'activity'}><TaskActivity messages={task.messages} taskId={task.id} active={detailTab === 'activity'} /></section> : null}
+      <section className={styles.artifacts} role="tabpanel" aria-label="Evidence" hidden={detailTab !== 'evidence'}>
+        <TaskEvidenceEditor artifacts={artifacts} attachments={attachments} draftId={task.id} onChange={setArtifacts} onRemove={removeEvidence} onUpload={(files) => { void upload(files); }} onEditingChange={setArtifactEditing} />
+      </section>
       </div>
       </fieldset>
-      {formError ? <p className={styles.formError} role="alert">{formError}</p> : null}
+      {formError ? <p className={styles.formError} role="alert">{formError}</p> : artifactEditing ? <p className={styles.formHint} role="status">Save or cancel the artifact edit in Evidence before saving the task.</p> : null}
       <footer className={styles.detailFooter}>
         <Button tone="danger" type="button" isDisabled={saving || uploading} onPress={onRemove}>Remove…</Button>
         <span />
-        <Button tone="quiet" type="button" isDisabled={saving || uploading} onPress={onClose}>Cancel</Button>
-        <Button tone="primary" type="submit" isDisabled={saving || uploading}>{saving ? 'Saving task…' : 'Save task'}</Button>
+        <Button tone="quiet" type="button" isDisabled={saving || uploading} onPress={close}>Cancel</Button>
+        <Button tone="primary" type="submit" isDisabled={saving || uploading || artifactEditing}>{saving ? 'Saving task…' : 'Save task'}</Button>
       </footer>
     </form>
   );
@@ -723,7 +757,9 @@ function SchedulesPanel({ group, schedules, actions, roles, sendCommand, onComma
 }
 
 export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPanelProps) {
+  const [initialTaskTab, setInitialTaskTab] = useState<'execution' | 'activity'>('execution');
   const taskEditBusy = useRef(false);
+  const taskEditClose = useRef<(() => void) | null>(null);
   const dispatch = useAppDispatch();
   const { records, lanes: rawLanes, schedules, archived } = useAppSelector(selectTasksState);
   const connection = useAppSelector(selectConnection);
@@ -882,7 +918,8 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPa
   const bulkSync = () => { selectedTasks.filter((task) => task.externalId || task.externalUrl).forEach((task) => sendOrNotify(sendCommand, { cmd: 'board_sync_task', task: task.id }, onCommandUnavailable)); clearSelection(); };
   const bulkDelete = () => { selectedTasks.forEach((task) => sendOrNotify(sendCommand, { cmd: 'board_remove_task', id: task.id }, onCommandUnavailable)); clearSelection(); };
 
-  const openTask = (taskId: string) => {
+  const openTask = (taskId: string, tab: 'execution' | 'activity' = 'execution') => {
+    setInitialTaskTab(tab);
     sendOrNotify(sendCommand, { cmd: 'task_detail', id: taskId }, onCommandUnavailable);
     sendOrNotify(sendCommand, { cmd: 'list_actions', group }, onCommandUnavailable);
     sendOrNotify(sendCommand, { cmd: 'list_roles', group }, onCommandUnavailable);
@@ -1087,6 +1124,7 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPa
                           attribution={taskAttribution(task, agents)}
                           onSelect={(additive) => { dispatch(workspaceUiActions.setFocusedTask(task.id)); dispatch(workspaceUiActions.toggleSelectedTask({ id: task.id, additive })); }}
                           onOpen={() => openTask(task.id)}
+                          onActivity={() => openTask(task.id, 'activity')}
                           onCollapse={() => dispatch(workspaceUiActions.toggleTaskCollapsed(task.id))}
                           onDispatch={() => setDispatchTargetId(task.id)}
                           onDone={() => moveTask(task, 'Done')}
@@ -1114,9 +1152,9 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPa
         <span>↑↓ navigate · Space select · Enter open · N create · / search</span>
       </footer>
 
-      <ModalDialog title={detailTask?.task ?? 'Task details'} description={detailTask?.id ?? ''} size="wide" bodyLayout="fit" isOpen={Boolean(detailTask)} onOpenChange={(open) => { if (!open && !taskEditBusy.current) dispatch(workspaceUiActions.setDetailTask(null)); }}>
+      <ModalDialog title={detailTask?.task ?? 'Task details'} description={detailTask?.id ?? ''} size="wide" bodyLayout="fit" isOpen={Boolean(detailTask)} onOpenChange={(open) => { if (!open && !taskEditBusy.current) { if (taskEditClose.current) taskEditClose.current(); else dispatch(workspaceUiActions.setDetailTask(null)); } }}>
         {detailTask && detailIsHydrated
-          ? <TaskDetail key={detailTask.id} busyRef={taskEditBusy} task={detailTask} tasks={groupTasks} groups={groupsState.records} agents={agents} actions={catalog.actions} roles={catalog.roles} responses={auxiliaryResponses} sendCommand={sendCommand} onCommandUnavailable={onCommandUnavailable} onClose={() => dispatch(workspaceUiActions.setDetailTask(null))} onRemove={() => setRemoveTaskId(detailTask.id)} />
+          ? <TaskDetail key={detailTask.id} busyRef={taskEditBusy} closeRef={taskEditClose} initialTab={initialTaskTab} task={detailTask} tasks={groupTasks} groups={groupsState.records} agents={agents} actions={catalog.actions} roles={catalog.roles} responses={auxiliaryResponses} sendCommand={sendCommand} onCommandUnavailable={onCommandUnavailable} onClose={() => { setInitialTaskTab('execution'); dispatch(workspaceUiActions.setDetailTask(null)); }} onRemove={() => setRemoveTaskId(detailTask.id)} />
           : detailTask ? <StateSurface title="Loading task" description="Retrieving complete task fields." /> : null}
       </ModalDialog>
       {workspaceUi.createTaskDialogOpen ? <TaskCreateDialog group={group} lanes={lanes} actions={catalog.actions} roles={catalog.roles} onClose={() => dispatch(workspaceUiActions.setCreateTaskDialogOpen(false))} /> : null}

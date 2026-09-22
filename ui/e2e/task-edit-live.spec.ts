@@ -88,7 +88,7 @@ test('attachment cleanup follows acknowledged editing and can retry without repe
   await page.getByText('Attachment cleanup fixture', { exact: true }).dblclick();
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('tab', { name: 'Evidence', exact: true }).click();
-  await dialog.getByRole('button', { name: 'Remove', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Remove attachment keep-until-saved.png', exact: true }).click();
   let failure = 'board_update_task'; const calls: string[] = [];
   await page.route('**/api/cmd', async (route) => {
     const data = route.request().postDataJSON() as Row; calls.push(String(data.cmd));
