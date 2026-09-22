@@ -352,7 +352,8 @@ describe('workspace shell', () => {
     });
   });
 
-  it('edits the complete task contract and exposes external, verification, artifact, and human workflows', () => {
+  it('edits the complete task contract and exposes external, verification, artifact, and human workflows', async () => {
+    const { commands } = mockSettingsRequests();
     const frame: StateFrame = {
       ...compactStateFixture,
       board_tasks: {
@@ -406,11 +407,11 @@ describe('workspace shell', () => {
     expect(draftDescription.selectionStart).toBe(3); expect(draftDescription.selectionEnd).toBe(8);
     expect(screen.getByRole('textbox', { name: 'Action variables (JSON)' })).toHaveValue('{"scope":"board"}');
     fireEvent.click(screen.getByRole('button', { name: 'Save task' }));
-    expect(sendCommand).toHaveBeenCalledWith(expect.objectContaining({
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(commands).toContainEqual({
       cmd: 'board_update_task', id: 'task-1', description: 'Complete parity coverage',
-      action_vars: { scope: 'board' }, depends_on: ['task-2'], provider: 'github',
-      external_id: 'owner/repo#12',
-    }));
+      action_vars: { scope: 'board' }, enforce_dispatch_edit_gate: true,
+    });
   });
 
   it('supports multi-select batch operations, archived loading, and external import', () => {

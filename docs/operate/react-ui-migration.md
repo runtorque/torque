@@ -106,7 +106,7 @@ TORQUE_DATA_DIR=/tmp/torque-react-qa TORQUE_PROFILE=react-qa TORQUE_PORT=18958 T
 TORQUE_UI_BASE_URL=http://127.0.0.1:18958 TORQUE_PLAYWRIGHT_CHANNEL=chrome npm --prefix ui run test:e2e -- --workers=1
 ```
 
-The browser suite shares daemon state, so run it serially. This PTY-disabled harness validates UI and command workflows but does not certify actual terminal I/O or native Tauri windows. The expanded suite includes deterministic transport/host fixtures and live Board/Planning/pipeline/endpoint checks. Native release testing still follows the Tauri section above.
+The browser suite shares daemon state, so run it serially. Finish `make test` and any UI builds before starting browser QA: the backend packaging checks rebuild `ui/dist`, which can briefly make the shared QA daemon return a missing-build 503. This PTY-disabled harness validates UI and command workflows but does not certify actual terminal I/O or native Tauri windows. The expanded suite includes deterministic transport/host fixtures and live Board/Planning/pipeline/endpoint checks. Native release testing still follows the Tauri section above.
 
 ### Real attention delivery regression
 
@@ -164,3 +164,7 @@ the required safe release rehearsal; see [Releasing Torque](releasing.md).
 
 
 `task-create-live.spec.ts` uses its own disposable groups and a cross-group dependency. It uploads an image and report, removes a staged file, adds an external path reference and an inline artifact, injects one rejected create, then reads the persisted task and canonical attachment URLs. A cancelled draft must return 404 for its former upload; successful creation must preserve the external reference and remove the draft URL. The scenario reopens verification to inspect the persisted state. It requires an isolated daemon and does not dispatch a provider.
+
+### Existing-task edit and prompt-preview regression
+
+`task-edit-live.spec.ts` requires the isolated profiling harness (`TORQUE_PROFILE_ENABLED=1`), with PTY spawning disabled. It creates/removes only its own synthetic worker and temporary project actions/roles. It checks actual active-dispatch rejection, preserved drafts, role/context preview without persistence, delayed save acknowledgement, sparse updates and schedule preservation in an America/Sao_Paulo browser. A second scenario proves a rejected edit retains the file, a failed cleanup retains a retryable dialog, and retry removes the file without repeating the save. These tests do not dispatch a provider or test native windows.

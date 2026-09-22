@@ -2674,6 +2674,22 @@ scope.
 - Constraints: Reload/crash persistence is not implied. New task IDs still mount distinct editors; compact records wait for initial detail hydration.
 - Verification: Component tests apply late detail/catalog responses to edited fields and assert DOM identity, draft, focus and selection. Live acceptance cancels creation and confirms a fresh blank form on reopen.
 
+### D-103 — Task edits wait for acknowledgement and send only edited fields
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: Saving an existing task uses a correlated HTTP acknowledgement. Failures, including the active-worker edit gate, retain the draft. Save, upload, close and competing mutation controls cannot overlap a pending save/upload. Only changed fields are submitted; an untouched assignee cannot accidentally dispatch work, and unrelated refreshed metadata is not overwritten.
+- Constraints: External link fields travel as a complete provider/ID/URL tuple because backend normalization consumes them together. Edited verification/sync keys merge with current metadata. Attachment files are removed only after the task edit succeeds; failed cleanup stays retryable without repeating an already acknowledged edit. The editor does not replace newer projections with a mutation's full snapshot. Scheduled values display in local time; unchanged timestamps, including their seconds, are omitted from updates.
+- Verification: Focused UI tests cover rejection, close/deduplication, sparse payloads, metadata preservation and partial cleanup. Isolated browser acceptance uses a real active-dispatch gate with a synthetic worker, delays the success acknowledgement, checks unchanged schedule seconds in a non-UTC browser, and verifies actual file retention/deletion across failures.
+
+### D-104 — Existing-task prompt previews render a temporary draft
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: Existing-task preview uses the same correlated read and stale-output invalidation as creation. The backend overlays explicitly supplied draft fields onto temporary task/agent copies. Title, cleared description, action variables, role, group, evidence and verification reach the rendered prompt, context and postscript consistently; task identity and ancestry remain available.
+- Constraints: Omitted fields retain persisted values for ID-only callers. Explicit empty fields clear the preview instead of falling back to saved data. No preview modifies the task, assigned agent, database or dispatch state. The UI ignores unrelated global preview responses and aborts reads on unmount.
+- Verification: Backend tests cover omitted-versus-empty fields, assigned/unassigned drafts, role/context consistency, preserved ancestry and unchanged source objects. Component tests cover unrelated response frames and invalidation; live acceptance renders the changed role preamble and explicitly cleared description while backend reads prove the original task remains unchanged.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

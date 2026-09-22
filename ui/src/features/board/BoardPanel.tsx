@@ -1,3 +1,6 @@
+import { TaskPromptPreview } from './TaskPromptPreview';
+import { localSchedule, taskEditChanges } from './taskEditModel';
+import { readCommand } from '../../protocol/http';
 import { ActionVariableFields } from './ActionVariableFields';
 import { actionVariableDefinitions, resolveActionVariables, useActionVariables } from './actionVariables';
 import { AskResponse } from '../attention/AskResponse';
@@ -25,6 +28,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEven
 
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import {
+  projectionActions,
   selectAgentsState,
   selectAuxiliaryResponseState,
   selectBoardViewState,
@@ -396,13 +400,14 @@ interface TaskDetailProps {
   onCommandUnavailable: () => void;
   onClose: () => void;
   onRemove: () => void;
+  busyRef: { current: boolean };
 }
 
-function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, sendCommand, onCommandUnavailable, onClose, onRemove }: TaskDetailProps) {
+function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, sendCommand, onCommandUnavailable, onClose, onRemove, busyRef }: TaskDetailProps) {
   const [title, setTitle] = useState(task.task);
   const [description, setDescription] = useState(task.description);
   const [labels, setLabels] = useState(task.labels.join(', '));
-  const [scheduledAt, setScheduledAt] = useState(task.scheduledAt ? task.scheduledAt.slice(0, 16) : '');
+  const [scheduledAt, setScheduledAt] = useState(() => localSchedule(task.scheduledAt));
   const [targetGroup, setTargetGroup] = useState(task.group);
   const [actionName, setActionName] = useState(task.actionName);
   const [role, setRole] = useState(task.agentTemplate);
@@ -413,6 +418,7 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
   const [provider, setProvider] = useState(task.provider);
   const [externalId, setExternalId] = useState(task.externalId);
   const [externalUrl, setExternalUrl] = useState(task.externalUrl);
+  const [syncBaseline] = useState(task.boardSync);
   const [syncEnabled, setSyncEnabled] = useState(task.boardSync.enabled !== false && (Boolean(task.boardSync.enabled) || Boolean(task.boardSync.provider)));
   const [verification, setVerification] = useState<VerificationDraft>({ mode: textValue(task.raw.verification_mode), state: task.verificationState, notes: textValue(task.raw.verification_notes), summary: record(task.raw.verification_summary) });
   const [attachments, setAttachments] = useState(task.attachments);
@@ -426,23 +432,43 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
   const [externalComment, setExternalComment] = useState('');
   const [formError, setFormError] = useState('');
   const [detailTab, setDetailTab] = useState<'execution' | 'verification' | 'integration' | 'evidence'>('execution');
-  const [promptRequested, setPromptRequested] = useState(false);
   const [pullRequested, setPullRequested] = useState(false);
-  const [promptBaseline, setPromptBaseline] = useState<unknown>(responses['prompt_preview:latest']);
   const [pullBaseline, setPullBaseline] = useState<unknown>(responses[`board_pull_preview:${task.id}`] ?? responses['board_pull_preview:latest']);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const actionOptions = actionItems(actions);
   const roleOptions = roleItems(roles);
   const liveAgents = Object.entries(agents).map<Record<string, unknown> & { id: string }>(([id, value]) => ({ id, ...record(value) })).filter((item) => item.group === targetGroup && !Number(item.deleted_at ?? 0));
-  const promptResponse = responses['prompt_preview:latest'];
   const pullResponse = responses[`board_pull_preview:${task.id}`] ?? responses['board_pull_preview:latest'];
-  const promptPreview = promptRequested && promptResponse !== promptBaseline ? record(promptResponse) : {};
   const pullPreview = pullRequested && pullResponse !== pullBaseline ? record(pullResponse) : {};
   const pullChanges = record(pullPreview.changes ?? record(pullPreview.preview).changes);
   const attribution = taskAttribution(task, agents);
+  const dispatch = useAppDispatch();
+  const [saving, setSaving] = useState(false);
+  const draftFields = () => ({
+    task: title.trim(), group: targetGroup, description,
+    labels: labels.split(',').map((label) => label.trim()).filter(Boolean),
+    scheduled_at: scheduledAt, action_name: actionName, agent_template: role,
+    action_vars: actionVars, depends_on: dependsOn.split(',').map((id) => id.trim()).filter(Boolean),
+    agent_id: agentId, attachments, provider, external_id: externalId, external_url: externalUrl,
+    board_sync: { ...syncBaseline, version: Number(syncBaseline.version ?? 1), enabled: syncEnabled, provider: provider || textValue(syncBaseline.provider, 'github') },
+    verification_mode: verification.mode, verification_state: verification.state,
+    verification_notes: verification.notes, verification_summary: verification.summary,
+  });
+  const baseline = useRef(draftFields());
+  useEffect(() => () => { busyRef.current = false; }, [busyRef]);
+  const request = async (command: TorqueCommand) => {
+    const frame = await readCommand(command, new AbortController().signal);
+    if (frame.type === 'error' || frame.type === 'finalization_blocked') throw new Error(textValue(frame.message, frame.type === 'finalization_blocked' ? 'Task changes are blocked by unfinished finalization gates.' : 'The request failed.'));
+    // Mutation acknowledgements may contain a full snapshot. Live deltas remain
+    // authoritative; a targeted detail refresh avoids replacing newer projections.
+    if (frame.type !== 'state') dispatch(projectionActions.auxiliaryResourceReceived(frame));
+    return frame;
+  };
+
 
   const upload = async (files: File[]) => {
-    if (!files.length) return;
+    if (!files.length || busyRef.current) return;
+    busyRef.current = true;
     setUploading(true);
     setFormError('');
     try {
@@ -456,41 +482,34 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
         setAttachments((current) => [...current, ...(payload.data ?? []).map(record)]);
       }
     } catch (error) { setFormError(error instanceof Error ? error.message : 'Upload failed'); }
-    finally { setUploading(false); }
+    finally { busyRef.current = false; setUploading(false); }
   };
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    let parsedVars: Record<string, unknown>;
-    try { parsedVars = resolveActionVariables(actionVars, definitions); }
-    catch { setFormError('Action variables must be a valid JSON object.'); return; }
-    sendOrNotify(sendCommand, {
-      cmd: 'board_update_task',
-      id: task.id,
-      task: title.trim(),
-      group: targetGroup,
-      description,
-      labels: labels.split(',').map((label) => label.trim()).filter(Boolean),
-      scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : '',
-      action_name: actionName,
-      agent_template: role,
-      action_vars: parsedVars,
-      depends_on: dependsOn.split(',').map((item) => item.trim()).filter(Boolean),
-      agent_id: agentId,
-      attachments,
-      artifacts: task.artifacts,
-      provider,
-      external_id: externalId,
-      external_url: externalUrl,
-      board_sync: { ...task.boardSync, version: Number(task.boardSync.version ?? 1), enabled: syncEnabled, provider: provider || textValue(task.boardSync.provider, 'github') },
-      verification_mode: verification.mode,
-      verification_state: verification.state,
-      verification_notes: verification.notes,
-      verification_summary: verification.summary,
-      enforce_dispatch_edit_gate: true,
-    }, onCommandUnavailable);
-    removedAttachments.forEach((filename) => sendOrNotify(sendCommand, { cmd: 'remove_attachment', task_id: task.id, filename }, onCommandUnavailable));
-    onClose();
+    if (busyRef.current || !title.trim()) return;
+    busyRef.current = true; setSaving(true); setFormError('');
+    void (async () => {
+      let saved = false;
+      try {
+        const draft = draftFields();
+        const fields = taskEditChanges(baseline.current, draft, definitions, task.raw);
+        if (Object.keys(fields).length) {
+          await request({ cmd: 'board_update_task', id: task.id, ...fields, enforce_dispatch_edit_gate: true });
+          baseline.current = draft;
+          saved = true;
+        }
+        for (const filename of removedAttachments) {
+          await request({ cmd: 'remove_attachment', task_id: task.id, filename });
+          setRemovedAttachments((current) => current.filter((name) => name !== filename));
+        }
+        sendOrNotify(sendCommand, { cmd: 'task_detail', id: task.id }, onCommandUnavailable);
+        onClose();
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : 'The request failed.';
+        setFormError(`${saved ? 'Task changes saved, but attachment cleanup failed. ' : ''}${message}`);
+      } finally { busyRef.current = false; setSaving(false); }
+    })();
   };
 
   const addArtifact = () => {
@@ -498,18 +517,10 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
     sendOrNotify(sendCommand, { cmd: 'task_upload_artifact', task_id: task.id, artifact_type: artifactType, title: artifactTitle.trim(), summary: artifactSummary.trim(), content_text: artifactContent }, onCommandUnavailable);
     setArtifactTitle(''); setArtifactSummary(''); setArtifactContent('');
   };
-  const previewPrompt = () => {
-    try {
-      const parsedVars = resolveActionVariables(actionVars, definitions);
-      setFormError('');
-      setPromptBaseline(promptResponse);
-      setPromptRequested(true);
-      sendOrNotify(sendCommand, { cmd: 'preview_prompt', id: task.id, task: title.trim(), description, action_name: actionName, agent_template: role, action_vars: parsedVars, group: targetGroup, attachments, artifacts: task.artifacts }, onCommandUnavailable);
-    } catch { setFormError('Action variables must be valid JSON before previewing.'); }
-  };
 
   return (
     <form className={`${styles.detailForm} ${styles.taskDetailForm}`} onSubmit={submit}>
+      <fieldset className={styles.createFields} disabled={saving || uploading}>
       <div className={styles.detailOverview}>
         <section className={styles.detailPrimary} aria-label="Primary task fields">
           <label>Title<input value={title} onChange={(event) => setTitle(event.target.value)} required /></label>
@@ -544,7 +555,7 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
         {([['execution', 'Execution'], ['verification', 'Verification'], ['integration', 'Integrations'], ['evidence', 'Evidence']] as const).map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={detailTab === id} onClick={() => setDetailTab(id)}>{label}</button>)}
       </nav>
       {detailTab === 'execution' ? <section className={styles.detailSection} role="tabpanel" aria-label="Execution">
-        <header><div><h3>Execution</h3><p>Configure scheduling, dispatch behavior, role, and dependencies.</p></div><Button tone="quiet" type="button" onPress={previewPrompt}>Preview prompt</Button></header>
+        <header><div><h3>Execution</h3><p>Configure scheduling, dispatch behavior, role, and dependencies.</p></div></header>
         <div className={styles.formGrid}>
           <label>Scheduled for<input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} /></label>
           <label>Action<select title={actionName || 'Group default'} value={actionName} onChange={(event) => setActionName(event.target.value)}><option value="">Group default</option>{actionOptions.map((action) => <option key={textValue(action.name)} value={textValue(action.name)}>{textValue(action.name)}</option>)}</select></label>
@@ -552,7 +563,7 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
           <label>Dependencies<input title={dependsOn} value={dependsOn} onChange={(event) => setDependsOn(event.target.value)} list={`task-dependencies-${task.id}`} placeholder="task IDs, comma separated" /><datalist id={`task-dependencies-${task.id}`}>{tasks.filter((item) => item.id !== task.id).map((item) => <option key={item.id} value={item.id}>{item.task}</option>)}</datalist></label>
         </div>
         <ActionVariableFields definitions={definitions} value={actionVars} onChange={setActionVars} />
-        {textValue(promptPreview.prompt) ? <details className={styles.promptPreview} open><summary>Rendered prompt preview</summary><pre>{textValue(promptPreview.prompt)}</pre></details> : null}
+        <TaskPromptPreview disabled={saving || uploading} inputsKey={JSON.stringify([title, description, targetGroup, actionName, role, agentId, actionVars, definitions, attachments, task.artifacts, labels, verification])} command={() => ({ cmd: 'preview_prompt', id: task.id, task: title.trim(), description, group: targetGroup, action_name: actionName, agent_template: role, agent_id: agentId, action_vars: resolveActionVariables(actionVars, definitions), attachments, artifacts: task.artifacts, labels: labels.split(',').map((label) => label.trim()).filter(Boolean), verification_mode: verification.mode, verification_state: verification.state, verification_notes: verification.notes, verification_summary: verification.summary })} />
       </section> : null}
       {detailTab === 'verification' ? <section className={styles.detailSection} role="tabpanel" aria-label="Verification"><header><div><h3>Verification</h3><p>Record release gates and human checks for this task.</p></div><Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'board_verify_task', id: task.id, actor_name: 'Operator', verification_state: 'passed', manual_smoke_done: true, human_validation_pending: '', deploy_needed: false }, onCommandUnavailable)}>Mark verified</Button></header><VerificationFields value={verification} onChange={setVerification} />{Object.keys(record(task.raw.completion_evidence)).length ? <details><summary>Completion evidence</summary><pre>{JSON.stringify(task.raw.completion_evidence, null, 2)}</pre></details> : null}</section> : null}
       {detailTab === 'integration' ? <section className={styles.detailSection} role="tabpanel" aria-label="Integrations"><header><div><h3>External ticket and sync</h3><p>Link, synchronize, or communicate with the provider ticket.</p></div>{task.externalUrl ? <Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'external_open_task', id: task.id }, onCommandUnavailable)}>Open ticket</Button> : null}</header><div className={styles.formGrid}><label>Provider<input value={provider} onChange={(event) => setProvider(event.target.value)} placeholder="github" /></label><label>External ID<input value={externalId} onChange={(event) => setExternalId(event.target.value)} placeholder="owner/repo#123" /></label><label>External URL<input value={externalUrl} onChange={(event) => setExternalUrl(event.target.value)} /></label><label className={styles.checkField}><input type="checkbox" checked={syncEnabled} onChange={(event) => setSyncEnabled(event.target.checked)} />Track with Board sync</label></div><div className={styles.taskActionRow}><Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'board_sync_task', task: task.id }, onCommandUnavailable)} isDisabled={!externalId && !externalUrl}>Sync now</Button><Button tone="quiet" type="button" onPress={() => { setPullBaseline(pullResponse); setPullRequested(true); sendOrNotify(sendCommand, { cmd: 'board_pull_preview', task: task.id }, onCommandUnavailable); }} isDisabled={!externalId && !externalUrl}>Pull preview</Button><Button tone="quiet" type="button" onPress={() => { setProvider(''); setExternalId(''); setExternalUrl(''); setSyncEnabled(false); sendOrNotify(sendCommand, { cmd: 'external_link_task', id: task.id, ref: '', provider: '', external_id: '', external_url: '', board_sync: { version: 1, enabled: false } }, onCommandUnavailable); }} isDisabled={!externalId && !externalUrl}>Unlink</Button></div>{Object.keys(pullChanges).length ? <div className={styles.pullPreview}><h4>Inbound changes</h4>{Object.entries(pullChanges).map(([field, value]) => <div key={field}><strong>{field}</strong><span>Local: {textValue(record(value).local)}</span><span>Remote: {textValue(record(value).remote)}</span></div>)}<Button tone="primary" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'board_pull_apply', task: task.id, fields: Object.keys(pullChanges) }, onCommandUnavailable)}>Apply all changes</Button></div> : null}<div className={styles.externalComposer}><label>Push status<input value={externalStatus} onChange={(event) => setExternalStatus(event.target.value)} /></label><Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'external_push_task_status', id: task.id, status: externalStatus, note: '' }, onCommandUnavailable)} isDisabled={!externalStatus.trim() || (!externalId && !externalUrl)}>Push</Button><label>Post comment<textarea value={externalComment} onChange={(event) => setExternalComment(event.target.value)} rows={2} /></label><Button tone="quiet" type="button" onPress={() => { sendOrNotify(sendCommand, { cmd: 'external_post_task_comment', id: task.id, comment: externalComment.trim() }, onCommandUnavailable); setExternalComment(''); }} isDisabled={!externalComment.trim() || (!externalId && !externalUrl)}>Post</Button></div>{task.messages.length ? <details><summary>External activity · {task.messages.length}</summary><div className={styles.messageHistory}>{task.messages.map((message, index) => <article key={textValue(message.id, String(index))}><strong>{textValue(message.action, 'update')}</strong><time>{displayTime(textValue(message.timestamp))}</time><p>{textValue(message.message, textValue(message.comment, textValue(message.status)))}</p></article>)}</div></details> : null}</section> : null}
@@ -570,12 +581,13 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
         <div className={styles.artifactComposer}><label>Type<select value={artifactType} onChange={(event) => setArtifactType(event.target.value)}>{['snippet', 'diff', 'log', 'test_report', 'generated_doc', 'file_ref'].map((value) => <option key={value}>{value}</option>)}</select></label><label>Title<input value={artifactTitle} onChange={(event) => setArtifactTitle(event.target.value)} /></label><label>Summary<input value={artifactSummary} onChange={(event) => setArtifactSummary(event.target.value)} /></label><label>Content<textarea value={artifactContent} onChange={(event) => setArtifactContent(event.target.value)} rows={4} /></label><Button tone="quiet" type="button" onPress={addArtifact} isDisabled={!artifactTitle.trim() && !artifactContent.trim()}>Add structured artifact</Button></div>
       </section> : null}
       </div>
+      </fieldset>
       {formError ? <p className={styles.formError} role="alert">{formError}</p> : null}
       <footer className={styles.detailFooter}>
-        <Button tone="danger" type="button" onPress={onRemove}>Remove…</Button>
+        <Button tone="danger" type="button" isDisabled={saving || uploading} onPress={onRemove}>Remove…</Button>
         <span />
-        <Button tone="quiet" type="button" onPress={onClose}>Cancel</Button>
-        <Button tone="primary" type="submit">Save task</Button>
+        <Button tone="quiet" type="button" isDisabled={saving || uploading} onPress={onClose}>Cancel</Button>
+        <Button tone="primary" type="submit" isDisabled={saving || uploading}>{saving ? 'Saving task…' : 'Save task'}</Button>
       </footer>
     </form>
   );
@@ -711,6 +723,7 @@ function SchedulesPanel({ group, schedules, actions, roles, sendCommand, onComma
 }
 
 export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPanelProps) {
+  const taskEditBusy = useRef(false);
   const dispatch = useAppDispatch();
   const { records, lanes: rawLanes, schedules, archived } = useAppSelector(selectTasksState);
   const connection = useAppSelector(selectConnection);
@@ -1101,9 +1114,9 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPa
         <span>↑↓ navigate · Space select · Enter open · N create · / search</span>
       </footer>
 
-      <ModalDialog title={detailTask?.task ?? 'Task details'} description={detailTask?.id ?? ''} size="wide" bodyLayout="fit" isOpen={Boolean(detailTask)} onOpenChange={(open) => { if (!open) dispatch(workspaceUiActions.setDetailTask(null)); }}>
+      <ModalDialog title={detailTask?.task ?? 'Task details'} description={detailTask?.id ?? ''} size="wide" bodyLayout="fit" isOpen={Boolean(detailTask)} onOpenChange={(open) => { if (!open && !taskEditBusy.current) dispatch(workspaceUiActions.setDetailTask(null)); }}>
         {detailTask && detailIsHydrated
-          ? <TaskDetail key={detailTask.id} task={detailTask} tasks={groupTasks} groups={groupsState.records} agents={agents} actions={catalog.actions} roles={catalog.roles} responses={auxiliaryResponses} sendCommand={sendCommand} onCommandUnavailable={onCommandUnavailable} onClose={() => dispatch(workspaceUiActions.setDetailTask(null))} onRemove={() => setRemoveTaskId(detailTask.id)} />
+          ? <TaskDetail key={detailTask.id} busyRef={taskEditBusy} task={detailTask} tasks={groupTasks} groups={groupsState.records} agents={agents} actions={catalog.actions} roles={catalog.roles} responses={auxiliaryResponses} sendCommand={sendCommand} onCommandUnavailable={onCommandUnavailable} onClose={() => dispatch(workspaceUiActions.setDetailTask(null))} onRemove={() => setRemoveTaskId(detailTask.id)} />
           : detailTask ? <StateSurface title="Loading task" description="Retrieving complete task fields." /> : null}
       </ModalDialog>
       {workspaceUi.createTaskDialogOpen ? <TaskCreateDialog group={group} lanes={lanes} actions={catalog.actions} roles={catalog.roles} onClose={() => dispatch(workspaceUiActions.setCreateTaskDialogOpen(false))} /> : null}
