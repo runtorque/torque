@@ -2771,6 +2771,15 @@ scope.
 - Compact equivalent: At 900px of available pane width or less, the separator hides and list/detail stack with independent scrolling. Both remain mounted; the saved wide ratio and editor survive compact/wide transitions. Keeping both panes available replaces Classic's compact Back-to-list navigation. Context uses its available workspace height, keeping toolbar controls outside the pane scroll regions.
 - Verification: Component regressions cover keyboard/pointer bounds, cancellation, serial saves, mismatched acknowledgements, retry, external updates, compact transitions and unmount. Browser acceptance checks actual geometry, draft/caret/scroll retention, persistence refusal/retry, reconnect and reload restoration.
 
+### D-116 — Agent Class editing preserves authored authority and waits for acknowledgement
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: The catalog shows resolved permissions, scopes, warnings, launch availability and next-launch applicability. Editing uses the authored definition supplied separately from the resolved authority projection; deny rules must never be reconstructed from granted capabilities. Saves preserve prompt sections, metadata, runtime and authored warnings that the form does not expose. Lifecycle choices match the backend's stable/draft vocabulary: stable omits draft metadata, and draft is scratch-only. Changing either control updates both values.
+- Interaction: Active catalog reads are correlated, cancellable and refreshed on selection, reconnect and Refresh. Three-way reconciliation adopts untouched fields while retaining local edits, input focus and caret. Validation belongs to the exact current definition and is discarded after edits. Duplicate stages a local, editable project draft. Create/update/archive/delete change selection and dismiss confirmation only after a matching acknowledgement; failures retain the draft or confirmation for retry. A failed post-save list refresh retries only the read.
+- Constraints: Existing deny definitions without the authored payload remain read-only until refreshed. Built-ins and archived definitions remain read-only. Reads pause during mutation and hidden Catalog cancels them. This does not certify provider launch effects, server conflict detection or recovery after a lost acknowledgement or process crash.
+- Verification: Model, component and backend regressions cover authored deny-rule preservation, unexposed fields, current-draft validation, reconnect and acknowledged lifecycle. The isolated browser scenario verifies the same paths through real YAML persistence and WebSocket reconnect.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

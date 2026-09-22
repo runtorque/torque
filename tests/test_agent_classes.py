@@ -130,6 +130,36 @@ class AgentClassRegistryTests(unittest.TestCase):
         path.write_text(text, encoding="utf-8")
         return path
 
+    def test_preview_authoring_definition_preserves_deny_rules_and_unedited_fields(self):
+        draft = {
+            "agent_class_schema_version": 5,
+            "id": "authoring-roundtrip",
+            "version": "1",
+            "base_kind": "engineer",
+            "display_name": "Authoring round trip",
+            "lifecycle": "stable",
+            "acl": {"mode": "deny", "rules": []},
+            "prompt": {"identity": "Specialist identity", "job": "Do the job", "boot_checklist": ["Read context"]},
+            "metadata": {"custom_marker": "keep", "ui": {"badge": "special"}},
+            "operator_summary": {"purpose": "Keep this summary"},
+        }
+        saved = save_custom_agent_class(draft, base_dir=str(self.project), mode="create")
+        self.assertTrue(saved["ok"], saved)
+        preview = saved["agent_class"]
+        authored = preview["authoring_definition"]
+        self.assertEqual(authored["acl"], draft["acl"])
+        self.assertTrue(preview["effective_authority"]["capabilities"])
+        self.assertEqual(authored["prompt"], draft["prompt"])
+        self.assertEqual(authored["metadata"], draft["metadata"])
+        self.assertNotIn("effective_authority", authored)
+        authored["description"] = "Only change the description"
+        updated = save_custom_agent_class(authored, base_dir=str(self.project), mode="update")
+        self.assertTrue(updated["ok"], updated)
+        self.assertEqual(updated["agent_class"]["effective_authority"], preview["effective_authority"])
+        self.assertEqual(updated["normalized"]["acl"], draft["acl"])
+        self.assertEqual(updated["normalized"]["prompt"], draft["prompt"])
+        self.assertEqual(updated["normalized"]["metadata"], draft["metadata"])
+
     def test_builtin_classes_use_schema_v5_capability_acls(self):
         classes, issues = load_agent_classes(base_dir=str(self.project))
 

@@ -1067,38 +1067,27 @@ describe('workspace shell', () => {
     expect(screen.getByText('No historical runs')).toBeVisible();
   });
 
-  it('authors and validates project Agent Classes from the React catalog', async () => {
-    const { appStore, sendCommand } = renderShell();
-    act(() => {
-      appStore.dispatch(projectionActions.auxiliaryResourceReceived({
-        type: 'agent_classes',
-        classes: [{ id: 'default-worker', display_name: 'Default Worker', base_kind: 'worker', version: '1', builtin: true, source: 'builtin', acl: { mode: 'allow', rules: [] } }],
-        issues: [],
-        authoring_contract: { schema_version: 5, scope_vocabulary: ['self', 'children', 'group', 'global'] },
-        capability_catalog: [{ id: 'self.read', label: 'Read own context', description: 'Read caller identity and own context.', risk: 'normal', scoped: true, scopes: ['self'], base_kinds: ['worker', 'engineer', 'architect'], maximum_scopes: { worker: 'self' } }],
-      }));
-    });
-    fireEvent.click(screen.getByRole('button', { name: /Control/ }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Catalog' }));
-    expect(screen.getByText('Built-in classes cannot be edited. Duplicate this definition into the project to customize it.')).toBeVisible();
-
+  it('authors and validates project Agent Classes with acknowledged catalog requests', async () => {
+    const commands: TorqueCommand[] = []; let classes: UnknownRecord[] = [{ id: 'default-worker', display_name: 'Default Worker', base_kind: 'worker', version: '1', builtin: true, source: 'builtin', acl: { mode: 'allow', rules: [] } }];
+    const capabilities = [{ id: 'self.read', label: 'Read own context', scopes: ['self'], base_kinds: ['worker'], maximum_scopes: { worker: 'self' } }];
+    vi.stubGlobal('fetch', vi.fn((_url: string, options?: RequestInit) => {
+      const command = JSON.parse(typeof options?.body === 'string' ? options.body : '{}') as TorqueCommand; commands.push(command);
+      let data: UnknownRecord = { type: 'ok' };
+      if (command.cmd === 'agent_class_list') data = { type: 'agent_classes', classes, capability_catalog: capabilities };
+      if (command.cmd === 'agent_class_validate') data = { type: 'agent_class_validation', valid: true, agent_class: command.agent_class };
+      if (command.cmd === 'agent_class_create') { const item = command.agent_class as UnknownRecord; classes = [...classes, item]; data = { type: 'agent_class_save', ok: true, agent_class: item, classes }; }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data }) });
+    }));
+    renderShell(); fireEvent.click(screen.getByRole('button', { name: /Control/ })); fireEvent.click(await screen.findByRole('button', { name: 'Catalog' }));
+    await screen.findByText('Built-in classes cannot be edited. Duplicate this definition into the project to customize it.');
     fireEvent.click(screen.getByRole('button', { name: '＋ New' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'ID' }), { target: { value: 'release-worker' } });
     fireEvent.change(screen.getByRole('textbox', { name: 'Display name' }), { target: { value: 'Release Worker' } });
     fireEvent.change(screen.getByRole('textbox', { name: 'Class job prompt' }), { target: { value: 'Prepare and verify releases.' } });
-    fireEvent.click(screen.getByRole('checkbox', { name: /Read own context/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Validate' }));
-    expect(sendCommand.mock.calls.some(([command]) => command.cmd === 'agent_class_validate'
-      && (command.agent_class as Record<string, unknown>)?.id === 'release-worker'
-      && (command.agent_class as Record<string, unknown>)?.base_kind === 'worker')).toBe(true);
-    const classLibrary = screen.getByRole('heading', { name: 'Agent Classes' }).closest('section');
-    expect(classLibrary).not.toBeNull();
-    fireEvent.click(within(classLibrary as HTMLElement).getByRole('button', { name: 'Save' }));
-    const createClassCommand = sendCommand.mock.calls.map(([command]) => command).find((command) => command.cmd === 'agent_class_create');
-    const createdClass = createClassCommand?.agent_class as Record<string, unknown>;
-    expect(createdClass.id).toBe('release-worker');
-    expect(createdClass.display_name).toBe('Release Worker');
-    expect(createdClass.acl).toEqual({ mode: 'allow', rules: [{ capability: 'self.read', scope: 'self' }] });
+    fireEvent.click(screen.getByRole('checkbox', { name: /Read own context/ })); fireEvent.click(screen.getByRole('button', { name: 'Validate' })); await screen.findByText('Validation passed');
+    const library = screen.getByRole('heading', { name: 'Agent Classes' }).closest('section')!;
+    fireEvent.click(within(library).getByRole('button', { name: 'Save' })); await screen.findByRole('heading', { name: 'Edit project Agent Class' });
+    expect(commands.find((command) => command.cmd === 'agent_class_create')?.agent_class).toMatchObject({ id: 'release-worker', display_name: 'Release Worker', acl: { mode: 'allow', rules: [{ capability: 'self.read', scope: 'self' }] } });
   });
 
   it('saves only edited global fields without promoting inherited relay or unrelated settings', async () => {

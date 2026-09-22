@@ -284,21 +284,23 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable, host =
   const [actionDirty, setActionDirty] = useState(false);
   const [actionError, setActionError] = useState('');
   const requestKey = useRef('');
+  const [classRefreshVersion, setClassRefreshVersion] = useState(0);
   const lastFrame = connection.lastAuxiliaryFrame;
   const preview = record(auxiliaryResponses[`action_rendered:${selectedAction || actionDraft.name}`]);
   const baseDir = text(record(groupState.settings[group]).default_directory);
 
   const send = useCallback((command: TorqueCommand) => { if (!sendCommand(command)) onCommandUnavailable(); }, [onCommandUnavailable, sendCommand]);
   const refresh = useCallback(() => {
+    if (tab === 'catalog') setClassRefreshVersion((value) => value + 1);
     const requests: Partial<Record<ControlTab, TorqueCommand[]>> = {
       mission: [{ cmd: 'get_mission_control', group }],
       activity: [{ cmd: 'get_events', limit: 100 }],
       actions: [{ cmd: 'list_actions', group }],
-      catalog: [{ cmd: 'list_roles', group }, { cmd: 'list_templates', group }, { cmd: 'list_specializations', group }, { cmd: 'agent_class_list', ...(baseDir ? { base_dir: baseDir } : {}) }],
+      catalog: [{ cmd: 'list_roles', group }, { cmd: 'list_templates', group }, { cmd: 'list_specializations', group }],
       help: [{ cmd: 'help_list', audience: 'user' }],
     };
     (requests[tab] || []).forEach(send);
-  }, [baseDir, group, send, tab]);
+  }, [group, send, tab]);
 
   useEffect(() => {
     if (!group || connection.status !== 'connected') return;
@@ -382,7 +384,7 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable, host =
         </form>
       </div> : null}
       {tab === 'catalog' ? <div className={styles.catalog}>
-        <AgentClassLibrary classes={catalog.agentClasses} contract={catalog.agentClassAuthoringContract} capabilityCatalog={catalog.agentClassCapabilityCatalog} responses={auxiliaryResponses} baseDir={baseDir} send={send} />
+        <AgentClassLibrary key={baseDir || group} baseDir={baseDir} refreshVersion={classRefreshVersion} />
         <CatalogEditor title="Roles" kind="role" items={catalog.roles} group={group} send={send} />
         <CatalogEditor title="Templates" kind="template" items={catalog.templates} group={group} send={send} />
         <CatalogEditor title="Specializations" kind="specialization" items={catalog.specializations} group={group} send={send} />
