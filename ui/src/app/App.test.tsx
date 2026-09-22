@@ -37,7 +37,7 @@ function mockSettingsRequests(failSave = false) {
       : command.cmd === 'get_ai_settings' ? { type: 'ai_settings', settings: {} } : { type: 'ok' };
     return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: frame }) });
   });
-  vi.stubGlobal('fetch', fetcher); return { commands, fetcher };
+  vi.stubGlobal('fetch', fetcher); return { commands, fetcher, setFailure: (value: boolean) => { failSave = value; } };
 }
 
 describe('workspace shell', () => {
@@ -1127,6 +1127,35 @@ describe('workspace shell', () => {
     expect(await screen.findByText(/Group save refused/)).toBeVisible();
     expect(scrollback).toHaveValue(9100);
     expect(screen.getByText('Unsaved changes')).toBeVisible();
+  });
+
+  it('blocks blank and out-of-range numeric settings before sending any mutation and focuses hidden invalid fields', async () => {
+    const { commands } = mockSettingsRequests(); renderShell();
+    fireEvent.click(screen.getByRole('button', { name: /Control/ })); fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    const input = await screen.findByRole('spinbutton', { name: 'Maximum agents' });
+    for (const value of ['', '-1', '101', '1.5']) {
+      fireEvent.change(input, { target: { value } }); fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+      expect(screen.getByRole('alert')).toHaveTextContent('Correct the highlighted setting'); expect(input).toHaveFocus();
+      expect(commands.some((command) => String(command.cmd).startsWith('update_'))).toBe(false);
+    }
+    fireEvent.change(input, { target: { value: '0' } });
+    fireEvent.click(screen.getByText('Global defaults'));
+    const days = screen.getByRole('spinbutton', { name: 'Event ingest max days' }); fireEvent.change(days, { target: { value: '' } }); fireEvent.click(screen.getByText('Global defaults'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' })); expect(days).toHaveFocus(); expect(days.closest('details')).toHaveAttribute('open');
+    fireEvent.change(days, { target: { value: '0' } }); fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await screen.findByText('Saved', { exact: true });
+    expect(commands).toContainEqual({ cmd: 'update_group_settings', group: 'Foundation', settings: { max_agents: 0 } });
+  });
+
+  it('retries only unacknowledged scopes after a partial settings save', async () => {
+    const { commands, setFailure } = mockSettingsRequests(true); renderShell();
+    fireEvent.click(screen.getByRole('button', { name: /Control/ })); fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    fireEvent.change(await screen.findByRole('spinbutton', { name: 'Terminal scrollback' }), { target: { value: '6000' } });
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Maximum agents' }), { target: { value: '8' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' })); await screen.findByText(/Group save refused/);
+    setFailure(false); fireEvent.click(screen.getByRole('button', { name: 'Save changes' })); await screen.findByText('Saved', { exact: true });
+    expect(commands.filter((command) => command.cmd === 'update_global_settings')).toHaveLength(1);
+    expect(commands.filter((command) => command.cmd === 'update_group_settings')).toHaveLength(2);
   });
 
   it('stages section resets and preserves newer unrelated settings through a sparse save', async () => {

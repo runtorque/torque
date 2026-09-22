@@ -1103,6 +1103,7 @@ export const settingFields: Record<string, SettingField> = {
     "kind": "list[str]"
   },
   "xterm_scrollback": {
+    "min": "100", "max": "100000",
     "label": "Xterm scrollback",
     "description": "embedded xterm.js history lines",
     "kind": "int"
@@ -1214,10 +1215,12 @@ export const settingFields: Record<string, SettingField> = {
     "kind": "bool"
   },
   "ai_boot_summary_min_interval_seconds": {
+    "min": "0",
     "label": "Ai boot summary min interval seconds",
     "kind": "int"
   },
   "ai_boot_summary_max_refreshes_per_hour": {
+    "min": "0",
     "label": "Ai boot summary max refreshes per hour",
     "kind": "int"
   }

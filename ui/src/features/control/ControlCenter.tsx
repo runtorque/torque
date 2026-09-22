@@ -22,6 +22,7 @@ import { BehaviorOverlayEditor, CatalogEditor } from './CatalogEditors';
 import { browserHost, type DesktopHost } from '../../host';
 import { readCommand } from '../../protocol/http';
 import { projectionActions } from '../../app/store';
+import { NumericSettingInput, type NumericDraft } from './NumericSettingInput';
 import { StructuredSettings } from './StructuredSettings';
 import { changedSettings, editableSettings, resetSettings } from './settingsModel';
 import { PeerChat } from './PeerChat';
@@ -124,6 +125,8 @@ function HistoryPanel({ group, responses, send }: {
   </div>;
 }
 
+function numericDraft(value: unknown): NumericDraft { return Number(value); }
+
 function SettingsPanel({ group, responses, send }: { group: string; responses: Record<string, unknown>; send: (command: TorqueCommand) => void }) {
   const operations = useAppSelector(selectOperationsState);
   const groups = useAppSelector(selectGroupsState);
@@ -145,9 +148,9 @@ function SettingsPanel({ group, responses, send }: { group: string; responses: R
   const aiIndex = record(currentAi.index);
   const aiBoot = record(currentAi.boot_summary);
   const [globalDraft, setGlobalDraft] = useState(() => ({
-    xterm_scrollback: Number(currentGlobal.xterm_scrollback ?? 5000),
-    max_pipeline_depth: Number(currentGlobal.max_pipeline_depth ?? 10),
-    max_event_log: Number(currentGlobal.max_event_log ?? 500),
+    xterm_scrollback: numericDraft(currentGlobal.xterm_scrollback ?? 5000),
+    max_pipeline_depth: numericDraft(currentGlobal.max_pipeline_depth ?? 10),
+    max_event_log: numericDraft(currentGlobal.max_event_log ?? 500),
     metrics_enabled: currentGlobal.metrics_enabled !== false,
     keybindings: record(currentGlobal.keybindings),
     status_bar_visibility: {
@@ -158,7 +161,7 @@ function SettingsPanel({ group, responses, send }: { group: string; responses: R
   }));
   const [groupDraft, setGroupDraft] = useState(() => ({
     default_directory: text(currentGroup.default_directory),
-    max_agents: Number(currentGroup.max_agents ?? 0),
+    max_agents: numericDraft(currentGroup.max_agents ?? 0),
     git_worktree: currentGroup.git_worktree === true,
     engineer_merge_mode: text(currentGroup.engineer_merge_mode, 'pr'),
   }));
@@ -172,8 +175,8 @@ function SettingsPanel({ group, responses, send }: { group: string; responses: R
     ai_embedding_runtime: text(aiEmbeddings.runtime, text(currentGlobal.ai_embedding_runtime, 'sentence_transformers')),
     ai_index_corpus: record(aiIndex.corpus),
     ai_boot_summary_enabled: aiBoot.enabled !== false,
-    ai_boot_summary_min_interval_seconds: Number(aiBoot.min_interval_seconds ?? currentGlobal.ai_boot_summary_min_interval_seconds ?? 300),
-    ai_boot_summary_max_refreshes_per_hour: Number(aiBoot.max_refreshes_per_hour ?? currentGlobal.ai_boot_summary_max_refreshes_per_hour ?? 6),
+    ai_boot_summary_min_interval_seconds: numericDraft(aiBoot.min_interval_seconds ?? currentGlobal.ai_boot_summary_min_interval_seconds ?? 300),
+    ai_boot_summary_max_refreshes_per_hour: numericDraft(aiBoot.max_refreshes_per_hour ?? currentGlobal.ai_boot_summary_max_refreshes_per_hour ?? 6),
   }));
   const [aiSecrets, setAiSecrets] = useState({ anthropic: '', openai_compatible: '' });
   const [clearAiSecrets, setClearAiSecrets] = useState<string[]>([]);
@@ -190,6 +193,7 @@ function SettingsPanel({ group, responses, send }: { group: string; responses: R
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const baseline = useRef({ global: { ...record(JSON.parse(advancedGlobal)), ...globalDraft }, group: { ...record(JSON.parse(advancedGroup)), ...groupDraft }, engineer: record(JSON.parse(advancedEngineer)), architect: record(JSON.parse(advancedArchitect)), ai: { ...aiDraft } });
+  const form = useRef<HTMLFormElement>(null);
   const saveController = useRef<AbortController | null>(null);
   const resetScopes = useRef(new Set<string>());
   const resetSection = (scope: 'global' | 'group' | 'engineer' | 'architect') => {
@@ -213,6 +217,13 @@ function SettingsPanel({ group, responses, send }: { group: string; responses: R
     setter((value) => ({ ...value, ...patch })); setDirty(true); setSaved(false);
   };
   const save = async (confirmEmbeddingRebuild = false) => {
+    if (form.current && !form.current.checkValidity()) {
+      const invalid = form.current.querySelector<HTMLInputElement>('input:invalid, select:invalid, textarea:invalid');
+      let ancestor = invalid?.parentElement;
+      while (ancestor) { if (ancestor instanceof HTMLDetailsElement) ancestor.open = true; ancestor = ancestor.parentElement; }
+      setJsonError('Correct the highlighted setting before saving.');
+      invalid?.focus(); invalid?.reportValidity(); return;
+    }
     let fullGlobal: UnknownRecord; let fullGroup: UnknownRecord; let fullEngineer: UnknownRecord; let fullArchitect: UnknownRecord;
     try { fullGlobal = record(JSON.parse(advancedGlobal)); fullGroup = record(JSON.parse(advancedGroup)); fullEngineer = record(JSON.parse(advancedEngineer)); fullArchitect = record(JSON.parse(advancedArchitect)); } catch { setJsonError('Advanced settings must be valid JSON.'); return; }
     if (saveController.current) return;
@@ -226,18 +237,22 @@ function SettingsPanel({ group, responses, send }: { group: string; responses: R
     const engineerChanges = delta('engineer');
     const architectChanges = delta('architect');
     const aiChanges = changedSettings(baseline.current.ai, next.ai);
-    const commands: TorqueCommand[] = [];
-    if (Object.keys(globalChanges).length) commands.push({ cmd: 'update_global_settings', settings: globalChanges });
-    if (Object.keys(groupChanges).length) commands.push({ cmd: 'update_group_settings', group, settings: groupChanges });
-    if (Object.keys(engineerChanges).length) commands.push({ cmd: 'engineer_update_settings', group, ...engineerChanges });
-    if (Object.keys(architectChanges).length) commands.push({ cmd: 'update_architect_settings', group, settings: architectChanges });
-    if (Object.keys(aiChanges).length || Object.values(aiSecrets).some((value) => value.trim()) || clearAiSecrets.length) commands.push({ cmd: 'update_ai_settings', settings: aiChanges, secrets: Object.fromEntries(Object.entries(aiSecrets).filter(([, value]) => value.trim())), clear_secrets: clearAiSecrets, ...(confirmEmbeddingRebuild ? { confirm_embedding_rebuild: true } : {}) });
+    const commands: { scope: keyof typeof next; command: TorqueCommand }[] = [];
+    if (Object.keys(globalChanges).length) commands.push({ scope: 'global', command: { cmd: 'update_global_settings', settings: globalChanges } });
+    if (Object.keys(groupChanges).length) commands.push({ scope: 'group', command: { cmd: 'update_group_settings', group, settings: groupChanges } });
+    if (Object.keys(engineerChanges).length) commands.push({ scope: 'engineer', command: { cmd: 'engineer_update_settings', group, ...engineerChanges } });
+    if (Object.keys(architectChanges).length) commands.push({ scope: 'architect', command: { cmd: 'update_architect_settings', group, settings: architectChanges } });
+    if (Object.keys(aiChanges).length || Object.values(aiSecrets).some((value) => value.trim()) || clearAiSecrets.length) commands.push({ scope: 'ai', command: { cmd: 'update_ai_settings', settings: aiChanges, secrets: Object.fromEntries(Object.entries(aiSecrets).filter(([, value]) => value.trim())), clear_secrets: clearAiSecrets, ...(confirmEmbeddingRebuild ? { confirm_embedding_rebuild: true } : {}) } });
     try {
-      for (const command of commands) {
+      for (const { scope, command } of commands) {
         const response = await readCommand(command, controller.signal);
         if (controller.signal.aborted) return;
+        if (response.type === 'error') throw new Error(text(response.message, 'Settings save failed.'));
         if (response.type !== 'state') settingsDispatch(projectionActions.auxiliaryResourceReceived(response));
-        if (response.type === 'ai_settings_requires_confirmation') throw new Error('AI settings require embedding rebuild confirmation. Other settings were saved.');
+        if (response.type === 'ai_settings_requires_confirmation') throw new Error('AI settings require embedding rebuild confirmation.');
+        baseline.current = { ...baseline.current, [scope]: next[scope] }; resetScopes.current.delete(scope);
+        if (scope === 'global') setRelayTouched([]);
+        if (scope === 'ai') { setAiSecrets({ anthropic: '', openai_compatible: '' }); setClearAiSecrets([]); }
       }
       baseline.current = next; resetScopes.current.clear(); setRelayTouched([]);
       setDirty(false); setSaved(true); setAiSecrets({ anthropic: '', openai_compatible: '' }); setClearAiSecrets([]);
@@ -252,12 +267,13 @@ function SettingsPanel({ group, responses, send }: { group: string; responses: R
   const aiConfirmation = record(responses['ai_settings_requires_confirmation:_'] ?? responses['ai_settings_requires_confirmation:latest']);
   const promptPreview = record(responses[`system_prompt_preview:${group}`] ?? responses['system_prompt_preview:latest']);
 
-  return <form className={styles.settings} onSubmit={(event) => { event.preventDefault(); void save(); }}>
+  return <form ref={form} noValidate className={styles.settings} onSubmit={(event) => { event.preventDefault(); void save(); }}>
     <header><div><h2>Workspace settings</h2><p>Global, group, and AI changes save as one coordinated operation.</p></div><span>{saving ? 'Saving…' : dirty ? 'Unsaved changes' : saved ? 'Saved' : 'Up to date'}</span><Button tone="primary" type="submit" isDisabled={!dirty || saving}>Save changes</Button></header>
+    {jsonError ? <p role="alert" className={styles.validation}>{jsonError}</p> : null}
     <fieldset disabled={saving} className={styles.settingsFields}><section><h3>Global runtime</h3><Button tone="quiet" isDisabled={!Object.keys(globalDefaults).length} onPress={() => resetSection('global')}>Reset global defaults</Button><p className={styles.note}>Resets runtime, shortcuts and status bar in this draft. AI, credentials and appearance keep their own controls.</p><div className={styles.formGrid}>
-      <Field label="Terminal scrollback"><input type="number" min="100" max="100000" value={globalDraft.xterm_scrollback} onChange={(event) => change(setGlobalDraft, { xterm_scrollback: Number(event.target.value) })} /></Field>
-      <Field label="Pipeline depth"><input type="number" min="0" value={globalDraft.max_pipeline_depth} onChange={(event) => change(setGlobalDraft, { max_pipeline_depth: Number(event.target.value) })} /></Field>
-      <Field label="Event retention"><input type="number" value={globalDraft.max_event_log} onChange={(event) => change(setGlobalDraft, { max_event_log: Number(event.target.value) })} /></Field>
+      <Field label="Terminal scrollback"><NumericSettingInput fieldKey="xterm_scrollback" value={globalDraft.xterm_scrollback} onChange={(value) => change(setGlobalDraft, { xterm_scrollback: value })} /></Field>
+      <Field label="Pipeline depth"><NumericSettingInput fieldKey="max_pipeline_depth" value={globalDraft.max_pipeline_depth} onChange={(value) => change(setGlobalDraft, { max_pipeline_depth: value })} /></Field>
+      <Field label="Event retention"><NumericSettingInput fieldKey="max_event_log" value={globalDraft.max_event_log} onChange={(value) => change(setGlobalDraft, { max_event_log: value })} /></Field>
       <Field label="Metrics"><select value={globalDraft.metrics_enabled ? 'on' : 'off'} onChange={(event) => change(setGlobalDraft, { metrics_enabled: event.target.value === 'on' })}><option value="on">Enabled</option><option value="off">Disabled</option></select></Field>
     </div></section>
     <AppearancePreferencesPanel />
@@ -265,7 +281,7 @@ function SettingsPanel({ group, responses, send }: { group: string; responses: R
     <section><h3>Status bar</h3><div className={styles.statusVisibility}>{Object.entries(globalDraft.status_bar_visibility).map(([key, enabled]) => <label key={key}><input type="checkbox" checked={enabled === true} onChange={(event) => change(setGlobalDraft, { status_bar_visibility: { ...globalDraft.status_bar_visibility, [key]: event.target.checked } })} />{key.replaceAll('_', ' ')}</label>)}</div><p className={styles.note}>Choose which live daemon, usage, deployment, health, workload, task, and attention signals remain visible across workspaces.</p></section>
     <section><h3>{group} defaults</h3><Button tone="quiet" isDisabled={!Object.keys(groupDefaults).length} onPress={() => resetSection('group')}>Reset group defaults</Button><p className={styles.note}>Restores launch, worktree, notification and sync defaults. Empty launch overrides inherit their configured fallback. Save changes to apply.</p><div className={styles.formGrid}>
       <Field label="Default directory"><input value={groupDraft.default_directory} onChange={(event) => change(setGroupDraft, { default_directory: event.target.value })} /></Field>
-      <Field label="Maximum agents"><input type="number" value={groupDraft.max_agents} onChange={(event) => change(setGroupDraft, { max_agents: Number(event.target.value) })} /></Field>
+      <Field label="Maximum agents"><NumericSettingInput fieldKey="max_agents" value={groupDraft.max_agents} onChange={(value) => change(setGroupDraft, { max_agents: value })} /></Field>
       <Field label="Worktrees"><select value={groupDraft.git_worktree ? 'on' : 'off'} onChange={(event) => change(setGroupDraft, { git_worktree: event.target.value === 'on' })}><option value="on">Enabled</option><option value="off">Disabled</option></select></Field>
       <Field label="Merge mode"><select value={groupDraft.engineer_merge_mode} onChange={(event) => change(setGroupDraft, { engineer_merge_mode: event.target.value })}><option value="pr">Pull request</option><option value="direct">Direct</option><option value="engineer-choice">Engineer choice</option></select></Field>
     </div></section>
@@ -280,11 +296,11 @@ function SettingsPanel({ group, responses, send }: { group: string; responses: R
       <Field label="Embedding model"><input value={aiDraft.ai_embedding_model} onChange={(event) => change(setAiDraft, { ai_embedding_model: event.target.value })} /></Field>
       <Field label="Embedding runtime"><select value={aiDraft.ai_embedding_runtime} onChange={(event) => change(setAiDraft, { ai_embedding_runtime: event.target.value })}><option value="sentence_transformers">Sentence Transformers</option><option value="fastembed">FastEmbed</option></select></Field>
       <Field label="Boot summaries"><select value={aiDraft.ai_boot_summary_enabled ? 'on' : 'off'} onChange={(event) => change(setAiDraft, { ai_boot_summary_enabled: event.target.value === 'on' })}><option value="on">Enabled</option><option value="off">Disabled</option></select></Field>
-      <Field label="Boot summary minimum interval"><input type="number" value={aiDraft.ai_boot_summary_min_interval_seconds} onChange={(event) => change(setAiDraft, { ai_boot_summary_min_interval_seconds: Number(event.target.value) })} /></Field>
-      <Field label="Boot summary hourly limit"><input type="number" value={aiDraft.ai_boot_summary_max_refreshes_per_hour} onChange={(event) => change(setAiDraft, { ai_boot_summary_max_refreshes_per_hour: Number(event.target.value) })} /></Field>
+      <Field label="Boot summary minimum interval"><NumericSettingInput fieldKey="ai_boot_summary_min_interval_seconds" value={aiDraft.ai_boot_summary_min_interval_seconds} onChange={(value) => change(setAiDraft, { ai_boot_summary_min_interval_seconds: value })} /></Field>
+      <Field label="Boot summary hourly limit"><NumericSettingInput fieldKey="ai_boot_summary_max_refreshes_per_hour" value={aiDraft.ai_boot_summary_max_refreshes_per_hour} onChange={(value) => change(setAiDraft, { ai_boot_summary_max_refreshes_per_hour: value })} /></Field>
     </div><div className={styles.aiCorpus}><strong>Index corpus</strong>{Object.entries(aiDraft.ai_index_corpus).map(([key, enabled]) => <label key={key}><input type="checkbox" checked={enabled === true} onChange={(event) => change(setAiDraft, { ai_index_corpus: { ...aiDraft.ai_index_corpus, [key]: event.target.checked } })} />{key.replaceAll('_', ' ')}</label>)}</div>{Object.keys(aiConfirmation).length ? <div className={styles.secretResult}><strong>Embedding index rebuild required</strong><p>{text(aiConfirmation.message)}</p><Button tone="primary" onPress={() => { void save(true); }}>Confirm settings and rebuild</Button></div> : null}<div className={styles.settingsActions}>{record(aiAnthropic.key).configured === true ? <Button tone="danger" onPress={() => { setClearAiSecrets((value) => value.includes('anthropic') ? value.filter((item) => item !== 'anthropic') : [...value, 'anthropic']); setDirty(true); }}>{clearAiSecrets.includes('anthropic') ? 'Keep Anthropic key' : 'Clear Anthropic key'}</Button> : null}{record(aiOpenAi.key).configured === true ? <Button tone="danger" onPress={() => { setClearAiSecrets((value) => value.includes('openai_compatible') ? value.filter((item) => item !== 'openai_compatible') : [...value, 'openai_compatible']); setDirty(true); }}>{clearAiSecrets.includes('openai_compatible') ? 'Keep OpenAI key' : 'Clear OpenAI key'}</Button> : null}<Button tone="quiet" onPress={() => send({ cmd: 'ai_index_start', mode: Number(record(aiIndex.counts).indexed ?? 0) > 0 ? 'rebuild' : 'incremental', confirm: true })}>Build / rebuild index</Button></div><p className={styles.note}>Raw provider keys are write-only and never returned in snapshots or logs. Index: {text(aiIndex.status, 'disabled')} · {text(record(aiIndex.counts).indexed, '0')} indexed.</p></section>
     <section><h3>Relay connector</h3><div className={styles.formGrid}><Field label="Relay"><select value={relayDraft.relay_enabled ? 'on' : 'off'} onChange={(event) => changeRelay({ relay_enabled: event.target.value === 'on' })}><option value="off">Disabled</option><option value="on">Enabled</option></select></Field><Field label="Relay URL"><input value={relayDraft.relay_url} onChange={(event) => changeRelay({ relay_url: event.target.value })} /></Field><Field label="Daemon ID"><input value={relayDraft.relay_daemon_id} onChange={(event) => changeRelay({ relay_daemon_id: event.target.value })} /></Field><Field label="Credential ID"><input value={relayDraft.relay_credential_id} onChange={(event) => changeRelay({ relay_credential_id: event.target.value })} /></Field><Field label="Private key path"><input value={relayDraft.relay_private_key_path} onChange={(event) => changeRelay({ relay_private_key_path: event.target.value })} /></Field><Field label="One-time pairing token"><input type="password" value={pairingToken} onChange={(event) => setPairingToken(event.target.value)} autoComplete="off" /></Field></div><div className={styles.settingsActions}><Button tone="quiet" onPress={() => send({ cmd: 'test_relay_connection' })}>Test connection</Button><Button tone="quiet" isDisabled={!pairingToken.trim()} onPress={() => { send({ cmd: 'generate_daemon_credential', pairing_token: pairingToken }); setPairingToken(''); }}>Pair daemon credential</Button><Button tone="primary" isDisabled={!relayDraft.relay_enabled} onPress={() => send({ cmd: 'generate_relay_device_link', confirm: true })}>Generate one-time device link</Button></div>{Object.keys(relayTest).length ? <p className={styles.note}>{text(relayTest.status)} · {text(relayTest.message)}</p> : null}{Object.keys(daemonCredential).length ? <p className={styles.note}>{text(daemonCredential.message, text(daemonCredential.error))}</p> : null}{deviceLink.ok === true ? <div className={styles.secretResult}><strong>Display once</strong><p>{text(deviceLink.establish_url, text(deviceLink.url))}</p><code>{text(deviceLink.code)}</code><small>Expires {text(deviceLink.expires_at, 'soon')}</small></div> : null}</section>
-    <section><h3>Runtime and behavior settings</h3><p className={styles.note}>Fields retain their daemon defaults and inheritance. Group-wide defaults apply to future launches; per-agent overrides remain in Agents.</p><details><summary>Global defaults</summary><StructuredSettings providers={providers} value={record(JSON.parse(advancedGlobal))} defaults={globalDefaults} omit={[...Object.keys(globalDraft), ...Object.keys(relayDraft), ...Object.keys(aiDraft), 'default_lanes']} onChange={(next) => { setAdvancedGlobal(JSON.stringify(next)); setDirty(true); setSaved(false); }} /></details><details><summary>{group} execution, worktrees, notifications and sync</summary><StructuredSettings providers={providers} value={record(JSON.parse(advancedGroup))} defaults={groupDefaults} omit={Object.keys(groupDraft)} onChange={(next) => { setAdvancedGroup(JSON.stringify(next)); setDirty(true); setSaved(false); }} /></details><details><summary>Engineer behavior defaults</summary><Button tone="quiet" isDisabled={!Object.keys(engineerDefaults).length} onPress={() => resetSection('engineer')}>Reset Engineer defaults</Button><StructuredSettings providers={providers} value={record(JSON.parse(advancedEngineer))} defaults={engineerDefaults} onChange={(next) => { setAdvancedEngineer(JSON.stringify(next)); setDirty(true); setSaved(false); }} /></details><details><summary>Architect behavior defaults</summary><Button tone="quiet" isDisabled={!Object.keys(architectDefaults).length} onPress={() => resetSection('architect')}>Reset Architect defaults</Button><StructuredSettings providers={providers} value={record(JSON.parse(advancedArchitect))} defaults={architectDefaults} onChange={(next) => { setAdvancedArchitect(JSON.stringify(next)); setDirty(true); setSaved(false); }} /></details><div className={styles.settingsActions}><Button tone="quiet" onPress={() => { try { send({ cmd: 'preview_system_prompt', request_id: `react-engineer-${Date.now()}`, group, kind: 'engineer', group_settings: { ...record(JSON.parse(advancedGroup)), ...groupDraft }, settings: record(JSON.parse(advancedEngineer)) }); setJsonError(''); } catch { setJsonError('Advanced settings must be valid JSON.'); } }}>Preview Engineer system prompt</Button><Button tone="quiet" onPress={() => { try { send({ cmd: 'preview_system_prompt', request_id: `react-architect-${Date.now()}`, group, kind: 'architect', group_settings: { ...record(JSON.parse(advancedGroup)), ...groupDraft }, settings: record(JSON.parse(advancedArchitect)) }); setJsonError(''); } catch { setJsonError('Advanced settings must be valid JSON.'); } }}>Preview Architect system prompt</Button></div>{text(promptPreview.prompt) ? <details className={styles.promptPreview}><summary>{text(promptPreview.kind)} system prompt · {text(record(promptPreview.metadata).provider, 'inherited provider')}</summary><pre>{text(promptPreview.prompt)}</pre></details> : null}{jsonError ? <p className={styles.validation}>{jsonError}</p> : null}</section>
+    <section><h3>Runtime and behavior settings</h3><p className={styles.note}>Fields retain their daemon defaults and inheritance. Group-wide defaults apply to future launches; per-agent overrides remain in Agents.</p><details><summary>Global defaults</summary><StructuredSettings providers={providers} value={record(JSON.parse(advancedGlobal))} defaults={globalDefaults} omit={[...Object.keys(globalDraft), ...Object.keys(relayDraft), ...Object.keys(aiDraft), 'default_lanes']} onChange={(next) => { setAdvancedGlobal(JSON.stringify(next)); setDirty(true); setSaved(false); }} /></details><details><summary>{group} execution, worktrees, notifications and sync</summary><StructuredSettings providers={providers} value={record(JSON.parse(advancedGroup))} defaults={groupDefaults} omit={Object.keys(groupDraft)} onChange={(next) => { setAdvancedGroup(JSON.stringify(next)); setDirty(true); setSaved(false); }} /></details><details><summary>Engineer behavior defaults</summary><Button tone="quiet" isDisabled={!Object.keys(engineerDefaults).length} onPress={() => resetSection('engineer')}>Reset Engineer defaults</Button><StructuredSettings providers={providers} value={record(JSON.parse(advancedEngineer))} defaults={engineerDefaults} onChange={(next) => { setAdvancedEngineer(JSON.stringify(next)); setDirty(true); setSaved(false); }} /></details><details><summary>Architect behavior defaults</summary><Button tone="quiet" isDisabled={!Object.keys(architectDefaults).length} onPress={() => resetSection('architect')}>Reset Architect defaults</Button><StructuredSettings providers={providers} value={record(JSON.parse(advancedArchitect))} defaults={architectDefaults} onChange={(next) => { setAdvancedArchitect(JSON.stringify(next)); setDirty(true); setSaved(false); }} /></details><div className={styles.settingsActions}><Button tone="quiet" onPress={() => { try { send({ cmd: 'preview_system_prompt', request_id: `react-engineer-${Date.now()}`, group, kind: 'engineer', group_settings: { ...record(JSON.parse(advancedGroup)), ...groupDraft }, settings: record(JSON.parse(advancedEngineer)) }); setJsonError(''); } catch { setJsonError('Advanced settings must be valid JSON.'); } }}>Preview Engineer system prompt</Button><Button tone="quiet" onPress={() => { try { send({ cmd: 'preview_system_prompt', request_id: `react-architect-${Date.now()}`, group, kind: 'architect', group_settings: { ...record(JSON.parse(advancedGroup)), ...groupDraft }, settings: record(JSON.parse(advancedArchitect)) }); setJsonError(''); } catch { setJsonError('Advanced settings must be valid JSON.'); } }}>Preview Architect system prompt</Button></div>{text(promptPreview.prompt) ? <details className={styles.promptPreview}><summary>{text(promptPreview.kind)} system prompt · {text(record(promptPreview.metadata).provider, 'inherited provider')}</summary><pre>{text(promptPreview.prompt)}</pre></details> : null}</section>
   </fieldset></form>;
 }
 

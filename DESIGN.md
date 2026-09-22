@@ -2714,6 +2714,22 @@ scope.
 - Constraints: Compact count summaries are not activity rows. An active Activity section refreshes full messages through a correlated task-detail read while retaining the previous rows; hidden sections issue no refresh reads. New arrivals have an explicit reveal control so they do not replace the current reading window. Section switches retain paging and task drafts. This surface is task message history, not agent execution history.
 - Verification: Component tests cover ordering, date units, paging, compact refresh failures/retry and inactive sections. Browser acceptance covers compact card hydration, live append and draft continuity.
 
+### D-108 — Numeric settings keep editable drafts and validate before writes
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: Primary and structured numeric settings share one input contract. Clearing a field retains a blank draft instead of converting it to zero or restoring the previous value. Zero remains an explicit value where supported. Integer settings reject fractional and unsafe integer values; bounds follow the audited field definition. Save validates the complete form, including embedding-rebuild confirmation, before issuing any mutation.
+- Constraints: Invalid fields inside collapsed sections are revealed and focused. Reset updates the mounted input. Arbitrary map keys remain literal strings and do not inherit settings metadata because their names happen to match a setting. Backend normalizers remain authoritative; this UI contract does not certify every runtime side effect.
+- Verification: Component tests cover blank/replacement/reset, fractions, bounds, safe integer range, literal map keys and hidden invalid fields. Isolated browser acceptance checks actual numeric persistence and rejection before transport.
+
+### D-109 — Retry only unfinished settings scopes
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: Coordinated Settings save records acknowledgement independently for global, group, Engineer, Architect and AI scopes. After a partial failure, the draft stays mounted and retry sends only unfinished scopes or further operator edits. Completed scope resets and relay/secret intents are cleared only after their acknowledgement.
+- Constraints: An explicit error response cannot count as success. Embedding rebuild confirmation leaves AI pending. This is retry behavior within the mounted editor; crash recovery and ambiguous lost acknowledgements remain separate gates.
+- Verification: Component and real-daemon browser checks reject a group write after global success, then retry without resending global fields. A concurrent external update to the completed global scope survives retry.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:
