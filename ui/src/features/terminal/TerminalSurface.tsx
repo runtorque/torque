@@ -160,7 +160,7 @@ export function TerminalWorkspace({ agent, terminal, messages, messageHistory, m
     const draft = state.composer.drafts[agent.id];
     const targetId = agent.cellType === 'agent' ? agent.id : messageTarget?.id;
     const turn = targetId ? state.composer.turns[targetId] : undefined;
-    return (draft?.reply ? 28 : 0) + (draft?.attachments.length ? 30 : 0)
+    return (draft?.reply ? 28 : 0)
       + (draft?.error || draft?.notice ? 44 : 0) + (turn?.error || turn?.notice ? 44 : 0)
       + (messageLoopPanel(selectMessagesState(state).loops, state.composer.loopCancellations, targetId ?? '') ? 64 : 0);
   });

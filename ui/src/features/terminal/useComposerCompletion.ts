@@ -13,7 +13,7 @@ export function useComposerCompletion(cell: AgentViewModel, target: AgentViewMod
   const completion = enabled && focused && !composing && dismissed !== key ? composerCompletion(value, selection, { catalog, tasks: tasks.records, group, provider: target?.provider ?? '', hasTarget: Boolean(target) }) : null;
   const index = completion && choice.key === key ? completion.items.findIndex((item) => item.id === choice.id) : -1;
   const pick = (item: CompletionItem) => { if (!completion) return; const next = insertCompletion(value, completion, item); setDismissed(identity(next.text, next.selection)); onInsert(next.text, next.selection); };
-  const handleKey = (event: KeyboardEvent<HTMLTextAreaElement>): boolean => {
+  const handleKey = (event: KeyboardEvent<HTMLElement>): boolean => {
     if (!completion || event.nativeEvent.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return false;
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setDismissed(key); return true; }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {

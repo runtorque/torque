@@ -2910,6 +2910,15 @@ scope.
 - Acknowledgement: The UI confirms the matching agent, loop ID, cancelled status and audit message before reporting success. Pending/error/result state stays with that loop across reconnect and cell changes. A lost-response retry repeats the same request and key; an updated cancelled snapshot does not erase pending/error feedback. A replacement loop receives its own operation key. Unrelated draft text, selection, attachments and reply state remain intact.
 - Verification: Component, backend and isolated browser acceptance are recorded in the parity ledger. Existing API idempotency protects acknowledged retries; crash/partial-side-effect recovery remains a separate gate.
 
+### D-130 — Composer images participate in editing and undo history
+
+- Date: 2026-09-22
+- Status: accepted; React implementation verified under P-216.
+- Decision: Images are atomic inline tokens at text positions, with a separate accessible preview dialog. Inserting an image replaces the selected text/tokens; insertion between adjacent images and removal from either side preserve surrounding content. Outgoing messages expand tokens to their canonical paths at those positions. Text-only composition retains native textarea editing until inline tokens require the rich editor.
+- State: Each cell owns its text, image positions, selection and bounded semantic undo/redo snapshots. Preview URLs remain alive while a current draft or undo/redo snapshot references them, and are released after acknowledged send or discarded history. A successful send resets history so undo cannot resurrect a sent draft.
+- Uploads: Completion belongs to the originating cell and request. Edits move the pending insertion anchor; edits over an originally selected upload range collapse the replacement so the completion cannot erase newer text. Refusals retain the existing document. Paste, file selection and file drop share this contract.
+- Constraints: Routine deltas, selection changes and reconnect must not rewrite an actively edited DOM or interfere with IME composition. Inline editing, keyboard deletion, preview focus, async upload, compact layout and actual send paths require live-browser acceptance; model tests alone do not close P-216.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

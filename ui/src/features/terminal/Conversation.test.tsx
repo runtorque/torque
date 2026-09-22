@@ -7,6 +7,7 @@ import { toAgentViewModel } from '../agents/model';
 import { Conversation } from './Conversation';
 import { composerActions } from './composerState';
 import { acknowledgedMessage, cancellationLabels, composerCommand } from './composerModel';
+import { editorSelection, readComposerInput, type ComposerInput } from './composerDom';
 import { emptyComposerDraft } from './composerState';
 const terminal = toAgentViewModel('shell', { name: 'Shell', cell_type: 'terminal', session_id: 'shell-session' });
 const agent = toAgentViewModel('worker', { name: 'Worker', kind: 'worker', session_id: 'agent-session' });
@@ -49,8 +50,8 @@ describe('buffered terminal and agent composition', () => {
     const input = screen.getByRole('textbox', { name: 'Message Worker' }); fireEvent.change(input, { target: { value: 'Worker draft' } });
     act(() => { store.dispatch(composerActions.patch({ cellId: agent.id, changes: { attachments: [{ path: '/tmp/image.png', filename: 'image.png' }], selection: [2, 7], reply: { id: 'reply', agentId: agent.id, preview: 'A question' } } })); });
     show(terminal, null); fireEvent.change(screen.getByRole('textbox', { name: 'Message Shell' }), { target: { value: 'Shell draft' } });
-    show(agent, agent); expect(screen.getByRole('textbox', { name: 'Message Worker' })).toHaveValue('Worker draft'); expect(screen.getByRole('button', { name: /image.png/ })).toBeVisible(); expect(screen.getByText('Replying to: A question')).toBeVisible();
-    const restored = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Message Worker' }); expect([restored.selectionStart, restored.selectionEnd]).toEqual([2, 7]);
+    show(agent, agent); expect(readComposerInput(screen.getByRole<ComposerInput>('textbox', { name: 'Message Worker' }), store.getState().composer.drafts[agent.id]!.attachments).text).toBe('Worker draft'); expect(screen.getByRole('button', { name: /image.png/ })).toBeVisible(); expect(screen.getByText('Replying to: A question')).toBeVisible();
+    const restored = screen.getByRole<ComposerInput>('textbox', { name: 'Message Worker' }); expect(editorSelection(restored, store.getState().composer.drafts[agent.id]!.attachments)).toEqual([2, 7]);
     fireEvent.click(screen.getByRole('button', { name: 'Send' })); expect(calls[0]!.command.message).toBe('Worker draft\n/tmp/image.png');
     show(terminal, null); await reply(0); expect(screen.getByRole('textbox', { name: 'Message Shell' })).toHaveValue('Shell draft');
     show(agent, agent); expect(screen.getByRole('textbox', { name: 'Message Worker' })).toHaveValue(''); expect(screen.queryByRole('button', { name: /image.png/ })).not.toBeInTheDocument();
@@ -84,12 +85,12 @@ describe('buffered terminal and agent composition', () => {
     fireEvent.change(input, { target: { value: 'Changed' } }); fireEvent.keyDown(input, { key: 'z', ctrlKey: true }); expect(input).toHaveValue('Draft\nsecond line');
   });
   it('retains uploads for their source cell after selection changes and retains upload failures', async () => {
-    const { show, container } = harness(terminal, null); let finish: (frame: unknown) => void = () => { throw new Error('not uploading'); }; let body: FormData | undefined;
+    const { show, container, store } = harness(terminal, null); let finish: (frame: unknown) => void = () => { throw new Error('not uploading'); }; let body: FormData | undefined;
     vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => { body = options.body as FormData; return new Promise((resolve) => { finish = resolve; }); }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Message Shell' }), { target: { value: 'With image' } });
     fireEvent.change(container.querySelector('input[type=file]')!, { target: { files: [new File(['image'], 'test.png', { type: 'image/png' })] } }); expect(body?.get('agent_id')).toBe(terminal.id); expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
     show(other, other); await act(async () => { finish({ ok: true, json: () => Promise.resolve({ ok: true, data: [{ path: '/tmp/test.png', filename: 'test.png' }] }) }); await Promise.resolve(); }); expect(screen.queryByRole('button', { name: /test.png/ })).not.toBeInTheDocument();
-    show(terminal, null); expect(screen.getByRole('button', { name: /test.png/ })).toBeVisible(); expect(screen.getByRole('textbox', { name: 'Message Shell' })).toHaveValue('With image');
+    show(terminal, null); expect(screen.getByRole('button', { name: /test.png/ })).toBeVisible(); expect(readComposerInput(screen.getByRole<ComposerInput>('textbox', { name: 'Message Shell' }), store.getState().composer.drafts[terminal.id]!.attachments).text).toBe('With image');
     fireEvent.change(container.querySelector('input[type=file]')!, { target: { files: [new File(['bad'], 'bad.png')] } });
     await act(async () => { finish({ ok: false, json: () => Promise.resolve({ ok: false, error: 'Image refused' }) }); await Promise.resolve(); }); expect(await screen.findByRole('alert')).toHaveTextContent('Image refused'); expect(screen.getByRole('button', { name: /test.png/ })).toBeVisible();
   });

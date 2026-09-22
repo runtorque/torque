@@ -18,6 +18,7 @@ import type {
 } from '../protocol/types';
 
 import { composerSlice } from '../features/terminal/composerState';
+import { installComposerPreviewCleanup } from '../features/terminal/composerPreviewCleanup';
 
 export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected';
 
@@ -567,7 +568,7 @@ export const projectionActions = projectionSlice.actions;
 export const workspaceUiActions = workspaceUiSlice.actions;
 
 export function createAppStore() {
-  return configureStore({
+  const store = configureStore({
     reducer: {
       connection: connectionSlice.reducer,
       projection: projectionSlice.reducer,
@@ -582,6 +583,8 @@ export function createAppStore() {
       }),
     devTools: import.meta.env.DEV,
   });
+  installComposerPreviewCleanup(store);
+  return store;
 }
 
 export type AppStore = ReturnType<typeof createAppStore>;

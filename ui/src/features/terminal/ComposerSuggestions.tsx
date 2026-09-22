@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import type { Completion, CompletionItem } from './completionModel';
 import styles from './ComposerSuggestions.module.css';
-export function ComposerSuggestions({ id, input, completion, index, onPick, onChoose }: { id: string; input: RefObject<HTMLTextAreaElement | null>; completion: Completion; index: number; onPick: (item: CompletionItem) => void; onChoose: (item: CompletionItem) => void }) {
+export function ComposerSuggestions({ id, input, completion, index, onPick, onChoose }: { id: string; input: RefObject<HTMLElement | null>; completion: Completion; index: number; onPick: (item: CompletionItem) => void; onChoose: (item: CompletionItem) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const update = () => {

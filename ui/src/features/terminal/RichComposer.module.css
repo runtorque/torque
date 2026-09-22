@@ -1,0 +1,6 @@
+.editor { overflow-y: auto; min-height: 38px; max-height: 240px; white-space: pre-wrap; overflow-wrap: anywhere; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--background); color: var(--text); font: 11px/1.45 var(--font); outline: none; }
+.editor:focus { border-color: var(--accent); }
+.editor[aria-disabled='true'] { opacity: .65; }
+.editor [data-composer-image] { display: inline; padding: 1px 4px; margin-inline: 2px; border: 1px solid var(--border-emphasis); border-radius: var(--radius-sm); background: var(--surface-raised); color: var(--text); font-size: 10px; cursor: pointer; white-space: nowrap; }
+.editor [data-composer-image]:focus { outline: 1px solid var(--accent); }
+.preview { display: grid; gap: 8px; }.preview img { max-width: 100%; max-height: min(65vh, 640px); object-fit: contain; justify-self: center; }.preview p { overflow-wrap: anywhere; }

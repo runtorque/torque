@@ -71,10 +71,10 @@ test('composers retain per-cell drafts, acknowledge real terminal delivery and r
     await expect(page.getByRole('alert')).toContainText('Only PNG, JPEG, WebP, or GIF'); await expect(parentInput).toHaveValue('Companion reply');
     await page.locator('input[type="file"]').setInputFiles({ name: 'composer-image.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9X8AAAAASUVORK5CYII=', 'base64') });
     await expect(page.getByRole('button', { name: /composer-image.png/ })).toBeVisible();
-    await select(shell.id); await expect(shellInput).toHaveValue('Unsent shell draft'); await select(attached.id); await expect(parentInput).toHaveValue('Companion reply');
+    await select(shell.id); await expect(shellInput).toHaveValue('Unsent shell draft'); await select(attached.id); expect(await parentInput.evaluate((node) => { const copy = node.cloneNode(true) as HTMLElement; copy.querySelectorAll('[data-composer-image]').forEach((entry) => entry.remove()); return copy.textContent; })).toBe('Companion reply');
     await expect(page.getByText('Replying to: Parent reply target')).toBeVisible();
     await page.setViewportSize({ width: 760, height: 720 }); await page.getByRole('button', { name: 'Send', exact: true }).scrollIntoViewIfNeeded(); await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeInViewport(); await expect(parentInput).toBeInViewport(); await expect(page.getByText('Replying to: Parent reply target')).toBeInViewport(); await expect(page.getByRole('button', { name: /composer-image.png/ })).toBeInViewport(); await page.screenshot({ animations: 'disabled', path: test.info().outputPath('composer-reply-compact.png') });
-    await parentInput.press('Enter'); await expect(parentInput).toHaveValue(''); expect(dms).toHaveLength(1);
+    await parentInput.press('Enter'); await expect(parentInput.locator('[data-composer-image]')).toHaveCount(0); await expect(parentInput).toHaveValue(''); expect(dms).toHaveLength(1);
     expect(dms[0]).toMatchObject({ agent_id: parent.id, reply_to_id: seed.message_id, thread_id: `user-agent:user:${String(parent.id)}` }); expect(String(dms[0]!.message)).toContain('composer-image.png');
     await parentInput.fill('Keep this after cancellation'); await page.getByRole('button', { name: 'Cancel turn', exact: true }).click();
     await expect.poll(() => cancels.length).toBe(1); expect(cancels[0]).toMatchObject({ agent_id: parent.id, session_id: parent.session_id, turn_idempotency_key: dms[0]!.idempotency_key });

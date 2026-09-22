@@ -1,6 +1,7 @@
 import type { TorqueCommand, UnknownRecord } from '../../protocol';
 import type { AgentViewModel } from '../agents/model';
 import type { ComposerDraft, SentMessage } from './composerState';
+import { messageWithAttachments } from './composerDocument';
 export const record = (value: unknown): UnknownRecord => value && typeof value === 'object' && !Array.isArray(value) ? value as UnknownRecord : {};
 export const text = (value: unknown): string => typeof value === 'string' || typeof value === 'number' ? String(value) : '';
 export const rows = (value: unknown): UnknownRecord[] => Array.isArray(value) ? value.map(record) : [];
@@ -9,7 +10,7 @@ export function messageTime(value: unknown): number {
   const parsed = Date.parse(text(value)); return Number.isFinite(parsed) ? parsed / 1000 : 0;
 }
 export function composerCommand(cell: AgentViewModel, target: AgentViewModel | null, draft: ComposerDraft): TorqueCommand {
-  const message = [draft.text, ...draft.attachments.map((entry) => entry.path)].filter(Boolean).join('\n');
+  const message = messageWithAttachments(draft);
   if (!message.trim()) throw new Error('Enter a message or attach a file.');
   if (draft.reply && draft.reply.agentId !== target?.id) throw new Error('The reply target changed. Cancel the reply before sending to this target.');
   if (target) return { cmd: 'user_agent_message', agent_id: target.id, message, thread_id: `user-agent:user:${target.id}`, ...(draft.reply ? { reply_to_id: draft.reply.id } : {}) };
