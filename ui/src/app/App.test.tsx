@@ -996,17 +996,25 @@ describe('workspace shell', () => {
     expect(screen.getByRole('treeitem', { name: 'Wren, worker, running' })).toBeVisible();
   });
 
-  it('authors complete role definitions through the React catalog', async () => {
-    const frame: StateFrame = { ...compactStateFixture, roles: [{ name: 'reviewer', description: 'Review changes', scope: 'project' }] };
-    const { sendCommand } = renderShell(browserHost, frame);
-    fireEvent.click(screen.getByRole('button', { name: /Control/ }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Catalog' }));
-    const roleSection = screen.getByRole('heading', { name: 'Roles' }).closest('section');
-    expect(roleSection).not.toBeNull();
-    fireEvent.click(within(roleSection as HTMLElement).getByRole('button', { name: /reviewer/ }));
-    fireEvent.change(within(roleSection as HTMLElement).getByLabelText('Definition'), { target: { value: '{"description":"Review UI","preamble":"Be exact","priorities":["correctness"]}' } });
-    fireEvent.click(within(roleSection as HTMLElement).getByRole('button', { name: 'Save' }));
-    expect(sendCommand).toHaveBeenCalledWith(expect.objectContaining({ cmd: 'save_role', group: 'Foundation', name: 'reviewer', data: { description: 'Review UI', preamble: 'Be exact', priorities: ['correctness'] } }));
+  it('authors full scoped role definitions through the typed React catalog', async () => {
+    const commands: TorqueCommand[] = []; let definition: UnknownRecord = { name: 'reviewer', description: 'Review changes', model: 'keep-model', system_prompt: 'Keep full prompt' };
+    vi.stubGlobal('fetch', vi.fn((_url: string, options?: RequestInit) => {
+      const command = JSON.parse(typeof options?.body === 'string' ? options.body : '{}') as TorqueCommand; commands.push(command);
+      let data: UnknownRecord = { type: 'ok' };
+      if (command.cmd === 'list_roles') data = { type: 'roles', group: 'Foundation', roles: [{ name: 'reviewer', global: false, path: '/project/.torque/roles/reviewer.yaml' }] };
+      if (command.cmd === 'get_template') data = { type: 'template_detail', name: 'reviewer', template: definition };
+      if (command.cmd === 'save_role') { definition = command.data as UnknownRecord; data = { type: 'roles', group: 'Foundation', saved: 'reviewer', roles: [{ name: 'reviewer', global: false }] }; }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data }) });
+    }));
+    renderShell(); fireEvent.click(screen.getByRole('button', { name: /Control/ })); fireEvent.click(await screen.findByRole('button', { name: 'Catalog' }));
+    const library = within(screen.getByRole('region', { name: 'Roles library' }));
+    fireEvent.click(await library.findByRole('button', { name: /reviewer/ }));
+    fireEvent.change(await library.findByRole('textbox', { name: 'Description' }), { target: { value: 'Review UI' } });
+    fireEvent.change(library.getByRole('textbox', { name: 'Preamble' }), { target: { value: 'Be exact' } });
+    fireEvent.change(library.getByRole('textbox', { name: 'Priorities (one per line)' }), { target: { value: 'correctness' } });
+    fireEvent.click(library.getByRole('button', { name: 'Save' })); await library.findByRole('status');
+    expect(commands.find((command) => command.cmd === 'save_role')).toMatchObject({ group: 'Foundation', name: 'reviewer', old_scope: 'project', data: { description: 'Review UI', preamble: 'Be exact', priorities: ['correctness'], model: 'keep-model', system_prompt: 'Keep full prompt' } });
+    expect(commands.find((command) => command.cmd === 'save_role')?.data).not.toHaveProperty('path');
   });
 
   it('deduplicates overlapping project and built-in actions in Control Center', async () => {

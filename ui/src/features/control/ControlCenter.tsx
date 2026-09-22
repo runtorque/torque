@@ -296,7 +296,6 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable, host =
       mission: [{ cmd: 'get_mission_control', group }],
       activity: [{ cmd: 'get_events', limit: 100 }],
       actions: [{ cmd: 'list_actions', group }],
-      catalog: [{ cmd: 'list_roles', group }, { cmd: 'list_templates', group }, { cmd: 'list_specializations', group }],
       help: [{ cmd: 'help_list', audience: 'user' }],
     };
     (requests[tab] || []).forEach(send);
@@ -385,9 +384,9 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable, host =
       </div> : null}
       {tab === 'catalog' ? <div className={styles.catalog}>
         <AgentClassLibrary key={baseDir || group} baseDir={baseDir} refreshVersion={classRefreshVersion} />
-        <CatalogEditor title="Roles" kind="role" items={catalog.roles} group={group} send={send} />
-        <CatalogEditor title="Templates" kind="template" items={catalog.templates} group={group} send={send} />
-        <CatalogEditor title="Specializations" kind="specialization" items={catalog.specializations} group={group} send={send} />
+        <CatalogEditor key={`role:${group}:${baseDir}`} title="Roles" kind="role" group={group} refreshVersion={classRefreshVersion} onMutation={() => setClassRefreshVersion((value) => value + 1)} />
+        <CatalogEditor key={`template:${group}:${baseDir}`} title="Templates" kind="template" group={group} refreshVersion={classRefreshVersion} onMutation={() => setClassRefreshVersion((value) => value + 1)} />
+        <CatalogEditor key={`specialization:${group}:${baseDir}`} title="Specializations" kind="specialization" group={group} refreshVersion={classRefreshVersion} onMutation={() => setClassRefreshVersion((value) => value + 1)} />
         <BehaviorOverlayEditor group={group} active={catalog.behaviorOverlays} proposals={operations.behaviorOverlayProposals} responses={auxiliaryResponses} agents={agentItems} send={send} />
       </div> : null}
       {tab === 'settings' ? <SettingsWorkspace key={group} group={group} responses={auxiliaryResponses} send={send} /> : null}

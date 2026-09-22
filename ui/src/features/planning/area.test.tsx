@@ -35,9 +35,14 @@ describe('Area parity', () => {
     expect(calls.find((command) => command.cmd === 'area_note_create')).toMatchObject({ note_type: 'caveat', body: 'Durable warning' });
     fireEvent.click(screen.getByRole('button', { name: 'Edit note Caveat' })); fireEvent.change(screen.getByLabelText('Note body'), { target: { value: 'Changed warning' } });
     fail = true; fireEvent.click(screen.getByRole('button', { name: 'Save note' })); expect(await screen.findByRole('alert')).toHaveTextContent('Note rejected'); expect(screen.getByLabelText('Note body')).toHaveValue('Changed warning');
-    fail = false; fireEvent.click(screen.getByRole('button', { name: 'Save note' })); await screen.findByText('Changed warning');
+    fail = false; fireEvent.click(screen.getByRole('button', { name: 'Save note' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Edit note Caveat' }).closest('article')).toHaveTextContent('Changed warning'));
     expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('Keep local title');
-    act(() => { store.dispatch(connectionActions.connected({ at: 2000, reconnect: true })); }); await waitFor(() => expect(calls.filter((command) => command.cmd === 'area_show').length).toBeGreaterThanOrEqual(4));
+    const readsBeforeReconnect = calls.filter((command) => command.cmd === 'area_show').length;
+    notes = notes.map((entry) => ({ ...entry, body: 'Fresh after reconnect' }));
+    act(() => { store.dispatch(connectionActions.connected({ at: 2000, reconnect: true })); });
+    await waitFor(() => expect(calls.filter((command) => command.cmd === 'area_show').length).toBeGreaterThan(readsBeforeReconnect));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Edit note Caveat' }).closest('article')).toHaveTextContent('Fresh after reconnect'));
     expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('Keep local title');
     fireEvent.click(screen.getByRole('button', { name: 'Archive note Caveat' })); await waitFor(() => expect(screen.queryByRole('button', { name: 'Edit note Caveat' })).not.toBeInTheDocument());
   });

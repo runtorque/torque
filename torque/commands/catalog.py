@@ -233,21 +233,23 @@ async def handle_catalog_command(
             payload = data.get("specialization", {})
         old_name = str(data.get("old_name", "") or "").strip()
         old_scope = str(data.get("old_scope", "") or "").strip()
-        if old_name and (old_name != name or (
-                old_scope and old_scope != scope)):
-            if old_scope:
-                specialization_mgr.delete_specialization(
-                    old_name, scope=old_scope, base_dir=base_dir)
-            else:
-                specialization_mgr.delete_specialization(
-                    old_name, base_dir=base_dir)
-                specialization_mgr.delete_specialization(
-                    old_name, scope="user", base_dir=base_dir)
+        if scope not in {"project", "user"} or old_scope not in {"", "project", "user"}:
+            return {"type": "error", "message": "Catalog scope must be project or user"}
+        if old_name and not old_scope:
+            match = next((item for item in specialization_mgr.list_specializations(base_dir=base_dir)
+                          if item.get("name") == old_name), None)
+            old_scope = "user" if match and match.get("global") else "project"
+        if not isinstance(payload, dict):
+            return {"type": "error", "message": "Specialization definition must be an object"}
         try:
             specialization_mgr.save_specialization(
-                name, payload or {}, scope=scope, base_dir=base_dir)
-        except ValueError as exc:
+                name, payload, scope=scope, base_dir=base_dir)
+            if old_name and (old_name != name or old_scope != scope):
+                specialization_mgr.delete_specialization(
+                    old_name, scope=old_scope, base_dir=base_dir)
+        except (ValueError, OSError) as exc:
             return {"type": "error", "message": str(exc)}
+
         return {
             "type": "specializations",
             "group": data.get("group", ""),

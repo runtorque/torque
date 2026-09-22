@@ -187,3 +187,6 @@ Context pane acceptance: `context-split-live.spec.ts` uses an isolated profile t
 
 
 Agent Class acceptance: `agent-classes-live.spec.ts` runs on the isolated PTY-disabled profile and creates its own temporary project catalog. It checks structured authority, raw deny-rule and prompt/metadata preservation, reconnect with an unsaved draft/caret, rejected reads and writes, current-draft validation, duplicate staging, delayed creation acknowledgement, and archive/delete retry. Inspect the authority screenshot. The test removes its temporary project afterward; no provider dispatch or native lifecycle is exercised.
+
+
+Catalog acceptance: `catalog-live.spec.ts` exercises Roles, compatibility Templates and Specializations separately in temporary project directories on the disposable daemon. It checks full-definition and YAML preservation, typed prompt/priority/terminal fields, reconnect with an unsaved caret selection, failed list/detail reads, refused and delayed saves, duplicate staging, rename and confirmed deletion retry. All live writes stay in project scope; temporary-file backend tests separately verify project/user shadowing and scope moves. Native lifecycle, provider effects and crash recovery remain separate gates.

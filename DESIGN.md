@@ -2780,6 +2780,17 @@ scope.
 - Constraints: Existing deny definitions without the authored payload remain read-only until refreshed. Built-ins and archived definitions remain read-only. Reads pause during mutation and hidden Catalog cancels them. This does not certify provider launch effects, server conflict detection or recovery after a lost acknowledgement or process crash.
 - Verification: Model, component and backend regressions cover authored deny-rule preservation, unexposed fields, current-draft validation, reconnect and acknowledged lifecycle. The isolated browser scenario verifies the same paths through real YAML persistence and WebSocket reconnect.
 
+### D-117 — Catalog editing uses full scoped definitions and acknowledged lifecycle
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: Roles, compatibility Templates and Engineer Specializations load full definitions through scoped detail requests before editing. Project/user entries with the same name have separate selection identities. Listing paths, shadowing flags and discovery metadata are informational and never become authored fields. Templates remain aliases for worker roles, not a separate legacy configuration directory.
+- Authoring: Typed fields cover identity, provider/launch settings, behavior prompts and ordered priorities, appearance, worktrees, environment values and child terminals. Blank numeric values inherit; explicit zero remains a value. Optional flags offer inherit/enabled/disabled. Duplicate stages a new editable draft with no write. New definitions and invalid/mismatched acknowledgements retain their draft and selection.
+- Refresh: Active list/detail reads are independently cancellable and retryable on selection, reconnect and Refresh. Detail reconciliation adopts untouched fields while retaining local edits, focus/caret, open sections and scroll. Priority, environment and terminal edits are reconciled as whole fields. Hidden Catalog aborts reads; group or project-directory changes create a fresh editor.
+- Persistence: Save and custom confirmed Delete wait for a matching group/name acknowledgement. Reads pause while writing; a failed post-save read retries only the read. Rename/scope changes retain the original name and scope until success. Backend replacement persistence precedes source removal, and removal targets only the original scope, preserving shadowed definitions. Older callers without an original scope resolve the original by catalog precedence.
+- Limits: Mounted drafts survive failures; explicit selection changes or dismissal do not promise draft recall. This does not certify atomic multi-file recovery after a crash, ambiguous lost acknowledgements, provider launch effects or native lifecycle.
+- Verification: Model/component tests, temporary-file backend regressions and isolated live browser tests exercise full-definition preservation, all three catalog kinds, reconnect, duplicate staging, delayed/refused saves and deletion retry.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

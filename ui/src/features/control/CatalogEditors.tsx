@@ -1,5 +1,5 @@
 import { BehaviorReview, BehaviorVersionReview } from '../attention/BehaviorReview';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 
 import { Button, StateSurface } from '../../design/primitives';
 import type { TorqueCommand, UnknownRecord } from '../../protocol';
@@ -10,48 +10,7 @@ function record(value: unknown): UnknownRecord {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as UnknownRecord : {};
 }
 
-function label(value: unknown): string {
-  const item = record(value);
-  return text(item.name, text(item.slug, text(item.id, typeof value === 'string' ? value : 'Untitled')));
-}
-
-export function CatalogEditor({ title, kind, items, group, send }: {
-  title: string;
-  kind: 'role' | 'template' | 'specialization';
-  items: unknown;
-  group: string;
-  send: (command: TorqueCommand) => void;
-}) {
-  const rows = useMemo<unknown[]>(() => Array.isArray(items) ? Array.from(items as unknown[]) : Object.values(record(items)), [items]);
-  const [selected, setSelected] = useState('');
-  const [scope, setScope] = useState('project');
-  const [draftName, setDraftName] = useState('');
-  const [draftJson, setDraftJson] = useState('{}');
-  const [error, setError] = useState('');
-  const choose = (item: unknown) => {
-    const name = label(item);
-    const value = typeof item === 'string' ? { name } : record(item);
-    setSelected(name); setDraftName(name); setScope(value.global === true || value.scope === 'user' ? 'user' : 'project');
-    setDraftJson(JSON.stringify(value, null, 2)); setError('');
-  };
-  const create = () => { setSelected(''); setDraftName(''); setScope('project'); setDraftJson(kind === 'specialization' ? '{\n  "description": "",\n  "preamble": "",\n  "priorities": []\n}' : '{\n  "display_name": "",\n  "description": "",\n  "provider": "",\n  "model": "",\n  "preamble": "",\n  "priorities": []\n}'); setError(''); };
-  const save = () => {
-    try {
-      const data = JSON.parse(draftJson) as UnknownRecord;
-      const cmd = kind === 'specialization' ? 'save_specialization' : kind === 'template' ? 'save_template' : 'save_role';
-      send({ cmd, group, name: draftName, old_name: selected, old_scope: scope, scope, data });
-      setSelected(draftName); setError('');
-    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Invalid JSON'); }
-  };
-  const remove = () => {
-    const cmd = kind === 'specialization' ? 'delete_specialization' : kind === 'template' ? 'delete_template' : 'delete_role';
-    send({ cmd, group, name: selected || draftName, scope }); create();
-  };
-  return <section className={styles.libraryEditor}>
-    <aside><header><div><h2>{title}</h2><p>{rows.length} available</p></div><Button tone="quiet" onPress={create}>＋</Button></header><div>{rows.length ? rows.map((item, index) => <button key={`${label(item)}:${index}`} aria-current={selected === label(item) ? 'page' : undefined} onClick={() => choose(item)}><strong>{label(item)}</strong><small>{text(record(item).scope, record(item).global === true ? 'user' : 'project')}</small></button>) : <StateSurface title={`No ${title.toLowerCase()}`} description="Create the first project entry." />}</div></aside>
-    <form onSubmit={(event) => { event.preventDefault(); save(); }}><header><div><h2>{selected ? `Edit ${selected}` : `New ${kind}`}</h2><p>JSON exposes the complete durable authoring contract without hiding advanced fields.</p></div><Button tone="primary" type="submit" isDisabled={!draftName.trim()}>Save</Button></header><div className={styles.libraryMeta}><label>Name<input value={draftName} onChange={(event) => setDraftName(event.target.value)} /></label><label>Scope<select value={scope} onChange={(event) => setScope(event.target.value)}><option value="project">Project</option><option value="user">User</option></select></label></div><label className={styles.libraryJson}>Definition<textarea value={draftJson} onChange={(event) => setDraftJson(event.target.value)} spellCheck={false} /></label>{error ? <p className={styles.validation}>{error}</p> : null}<footer><Button tone="danger" isDisabled={!selected} onPress={remove}>Delete</Button><span /><Button tone="quiet" onPress={() => { try { setDraftJson(JSON.stringify(JSON.parse(draftJson), null, 2)); setError(''); } catch { setError('Invalid JSON'); } }}>Format JSON</Button></footer></form>
-  </section>;
-}
+export { CatalogEditor } from './CatalogLibrary';
 
 export function BehaviorOverlayEditor({ group, active, proposals, responses, agents, send }: {
   group: string; active: unknown; proposals: unknown; responses: Record<string, unknown>; agents: UnknownRecord[]; send: (command: TorqueCommand) => void;
