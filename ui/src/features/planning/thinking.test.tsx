@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Provider } from 'react-redux';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { connectionActions, createAppStore, projectionActions } from '../../app/store';
+import { connectionActions, createAppStore, projectionActions, selectPlanningState } from '../../app/store';
 import type { TorqueCommand, UnknownRecord } from '../../protocol';
 import { compactStateFixture } from '../../protocol/fixtures';
 import { PlanningWorkspace } from './PlanningWorkspace';
@@ -102,4 +102,21 @@ describe('Thinking contracts and acknowledged lifecycle', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(calls[0]).toMatchObject({ cmd: 'idea_brief_create', title: 'New brief', problem_opportunity: 'Real need' });
   });
+});
+
+
+it.each(['note', 'brief'] as const)('retains archived %s detail after a late mutation acknowledgement', (kind) => {
+  const store = createAppStore();
+  store.dispatch(projectionActions.snapshotReceived(compactStateFixture));
+  const archived = { id: 'archived', group: 'Foundation', title: 'Keep archive', archived: true, status: 'archived' };
+  const receive = (frame: { type: string; [key: string]: unknown }) => store.dispatch(projectionActions.auxiliaryResourceReceived(frame));
+  receive(kind === 'note' ? { type: 'scratchpad_note_list', notes: [archived] } : { type: 'idea_brief_list', idea_briefs: [archived] });
+  receive(kind === 'note' ? { type: 'scratchpad_note_archived', note: archived } : { type: 'idea_brief_archived', idea_brief: archived });
+  receive({ type: kind === 'note' ? 'scratchpad_note' : 'idea_brief', ...archived });
+  const planning = selectPlanningState(store.getState());
+  expect((kind === 'note' ? planning.scratchpadNotes : planning.ideaBriefs).archived).toMatchObject(archived);
+  if (kind === 'note') {
+    receive({ type: 'scratchpad_note_deleted', note: { ...archived, deleted: true } });
+    expect(selectPlanningState(store.getState()).scratchpadNotes.archived).toBeUndefined();
+  }
 });

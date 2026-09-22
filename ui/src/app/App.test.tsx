@@ -208,8 +208,13 @@ describe('workspace shell', () => {
     expect(screen.queryByText('Restored task')).not.toBeInTheDocument();
   });
 
-  it('opens the full task dialog from the global Board command', () => {
-    const { appStore, sendCommand } = renderShell();
+  it('opens the full task dialog from the global Board command', async () => {
+    const commands: TorqueCommand[] = [];
+    vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => {
+      commands.push(JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand);
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: 'board_task_added', task_id: 'created' } }) });
+    }));
+    const { appStore } = renderShell();
     act(() => { appStore.dispatch(projectionActions.auxiliaryResourceReceived({
       type: 'actions',
       actions: [{ name: 'feature/implement' }, { name: 'feature/implement' }, { name: 'oneshot/fix' }],
@@ -222,11 +227,12 @@ describe('workspace shell', () => {
     });
     fireEvent.change(screen.getByRole('textbox', { name: 'Action variables (JSON)' }), { target: { value: '[]' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create task' }));
-    expect(screen.getByText('Action variables must be a JSON object.')).toBeVisible();
+    await screen.findByText('Action variables must be a JSON object.');
     fireEvent.change(screen.getByRole('textbox', { name: 'Action variables (JSON)' }), { target: { value: '{}' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create task' }));
 
-    expect(sendCommand).toHaveBeenCalledWith({
+    await waitFor(() => expect(commands).toHaveLength(1));
+    expect(commands[0]).toMatchObject({
       cmd: 'board_add_task',
       task: 'Ship Phase 2',
       group: 'Foundation',

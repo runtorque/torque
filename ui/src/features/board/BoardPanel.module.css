@@ -77,14 +77,14 @@
 .boardFooter { display: flex; min-height: 27px; align-items: center; justify-content: flex-end; gap: 16px; padding: 0 12px; border-top: 1px solid var(--border); color: var(--text-muted); background: var(--surface); font-size: 9px; }
 .createFields { display: contents; }
 .detailForm, .scheduleForm { display: grid; gap: 12px; }
-.taskDetailForm { height: 100%; min-height: 0; grid-template-rows: auto auto minmax(180px, 1fr) auto auto; overflow: hidden; }
+.taskDetailForm { height: 100%; min-height: 0; grid-template-rows: minmax(100px, auto) auto minmax(100px, 1fr) auto auto; overflow: hidden; }
 .detailForm label, .scheduleForm label { display: grid; gap: 5px; color: var(--text-dim); font-size: 10px; font-weight: 600; }
 .detailForm input, .detailForm select, .scheduleForm input, .scheduleForm select { height: 31px; padding: 0 8px; }
 .detailForm textarea { min-height: 100px; resize: vertical; padding: 8px; line-height: 1.45; }
 .scheduleForm textarea { min-height: 64px; padding: 8px; resize: vertical; }
 .detailForm input:focus, .detailForm textarea:focus, .detailForm select:focus, .scheduleForm input:focus, .scheduleForm select:focus { border-color: var(--accent); box-shadow: var(--focus-ring); }
 .formGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.detailOverview { display: grid; grid-row: 1; grid-template-columns: minmax(0, 1.7fr) minmax(250px, .75fr); gap: 12px; }
+.detailOverview { min-height: 0; overflow: auto; display: grid; grid-row: 1; grid-template-columns: minmax(0, 1.7fr) minmax(250px, .75fr); gap: 12px; }
 .detailPrimary, .detailSummary { display: grid; align-content: start; gap: 10px; min-width: 0; }
 .detailSummary { padding: 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
 .detailFacts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin: 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--border); }
@@ -190,7 +190,5 @@
   .boardCount { display: none; }
   .detailOverview, .formGrid, .detailFacts { grid-template-columns: 1fr; }
   .detailTabs { overflow-x: auto; }
-  .taskDetailForm { height: auto; max-height: none; grid-template-rows: none; overflow: visible; }
-  .taskDetailForm > * { grid-row: auto; }
-  .detailSecondary > [role='tabpanel'] { overflow: visible; }
+
 }

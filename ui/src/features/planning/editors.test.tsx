@@ -67,8 +67,12 @@ describe('Planning editor acknowledgements and contracts', () => {
     const { calls, fail, onClose } = setup('initiative');
     await waitFor(() => expect(screen.getByLabelText('Summary')).toHaveValue('Full summary'));
     fireEvent.change(screen.getByLabelText('Why this matters'), { target: { value: 'Unsaved rationale' } });
+    fail('list_actions');
     fireEvent.click(screen.getByRole('button', { name: 'Create Board task' }));
     let dialog = within(screen.getByRole('dialog', { name: 'Create Board task' }));
+    await dialog.findByText('Write rejected');
+    fail(''); fireEvent.click(dialog.getByRole('button', { name: 'Retry task options' }));
+    await waitFor(() => expect(dialog.queryByText('Write rejected')).not.toBeInTheDocument());
     expect(dialog.getByLabelText('Title')).toHaveValue('Roadmap');
     expect(dialog.getByLabelText('Description')).toHaveValue('Source initiative: i — Roadmap\n\nSummary\nFull summary\n\nWhy\nUnsaved rationale');
     expect(dialog.getByLabelText('Lane')).toHaveValue('');

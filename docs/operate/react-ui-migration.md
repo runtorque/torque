@@ -138,7 +138,7 @@ This opt-in test refuses the default port/profile, launches `ui/e2e/fixtures/str
 
 ### Initiative and Decision lifecycle regression
 
-`planning-editors-live.spec.ts` creates its own groups and generic Architect/Engineer records on an isolated daemon. It validates every offered status through backend reads, typed relationships, sparse scope/rationale saves, failure retention, archive and restore. It can run in the PTY-disabled profile harness; no commercial provider is used. Generic agents are removed afterward, while Planning evidence remains in the disposable profile. A separate scenario reviews an unsaved Initiative task prefill, cancels without mutation, injects create/link failures, resumes the acknowledged task link, and verifies task fields and unchanged Initiative scope through backend reads. It does not certify reload/crash recovery or the remaining task-creation dependency, verification and evidence controls.
+`planning-editors-live.spec.ts` creates its own groups and generic Architect/Engineer records on an isolated daemon. It validates every offered status through backend reads, typed relationships, sparse scope/rationale saves, failure retention, archive and restore. It can run in the PTY-disabled profile harness; no commercial provider is used. Generic agents are removed afterward, while Planning evidence remains in the disposable profile. A separate scenario reviews an unsaved Initiative task prefill, cancels without mutation, injects create/link failures, resumes the acknowledged task link, and verifies task fields and unchanged Initiative scope through backend reads. It does not certify reload/crash recovery or the remaining external-reference, variable-editor, prompt-preview and draft-recall controls.
 
 ## Classic burn-in and retirement
 
@@ -161,3 +161,6 @@ On a macOS development host, `make tauri-build-mac` performs the local productio
 gate. It defaults to ad-hoc signing when `APPLE_SIGNING_IDENTITY` is unset, then
 strictly verifies the generated app signature and DMG checksum. A dry run remains
 the required safe release rehearsal; see [Releasing Torque](releasing.md).
+
+
+`task-create-live.spec.ts` uses its own disposable groups and a cross-group dependency. It uploads an image and report, removes a staged file, adds an external path reference and an inline artifact, injects one rejected create, then reads the persisted task and canonical attachment URLs. A cancelled draft must return 404 for its former upload; successful creation must preserve the external reference and remove the draft URL. The scenario reopens verification to inspect the persisted state. It requires an isolated daemon and does not dispatch a provider.

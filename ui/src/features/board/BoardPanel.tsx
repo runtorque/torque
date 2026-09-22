@@ -1,4 +1,6 @@
 import { AskResponse } from '../attention/AskResponse';
+import { TaskCreateDialog } from './TaskCreateDialog';
+import { VerificationFields, type VerificationDraft } from './VerificationFields';
 import {
   DndContext,
   KeyboardSensor,
@@ -380,84 +382,6 @@ function InlineCreate({ lane, group, onClose, sendCommand, onCommandUnavailable 
   );
 }
 
-export function CreateTaskDialog({
-  group,
-  lanes,
-  actions,
-  roles,
-  onClose,
-  initialValues,
-  onCreate,
-  pending = false,
-  createdTaskId = '',
-  requestError = '',
-}: {
-  initialValues?: { title: string; description: string };
-  onCreate: (command: TorqueCommand) => void;
-  pending?: boolean;
-  createdTaskId?: string;
-  requestError?: string;
-  group: string;
-  lanes: string[];
-  actions: unknown;
-  roles: unknown;
-  onClose: () => void;
-}) {
-  const [title, setTitle] = useState(initialValues?.title ?? '');
-  const [description, setDescription] = useState(initialValues?.description ?? '');
-  const [lane, setLane] = useState(initialValues ? '' : lanes[0] ?? 'Backlog');
-  const [labels, setLabels] = useState('');
-  const [actionName, setActionName] = useState('');
-  const [role, setRole] = useState('');
-  const [scheduledAt, setScheduledAt] = useState('');
-  const [actionVars, setActionVars] = useState('{}');
-  const [error, setError] = useState('');
-
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (pending || !title.trim()) return;
-    try {
-      const parsedVars = parseJsonObject(actionVars);
-      const command: TorqueCommand = {
-        cmd: 'board_add_task',
-        task: title.trim(),
-        group,
-        lane,
-        description: description.trim(),
-        labels: labels.split(',').map((label) => label.trim()).filter(Boolean),
-        action_name: actionName,
-        agent_template: role,
-        action_vars: parsedVars,
-        scheduled_at: scheduledAt,
-      };
-      onCreate(command);
-    } catch {
-      setError('Action variables must be a JSON object.');
-    }
-  };
-
-  return (
-    <form className={styles.detailForm} onSubmit={submit}>
-      {createdTaskId ? <p role="status">Task {createdTaskId} was created. Retry linking this task to the Initiative.</p> : null}
-      <fieldset disabled={pending || Boolean(createdTaskId)} className={styles.createFields}>
-      <label>Title<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} /></label>
-      <label>Description<textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={4} /></label>
-      <div className={styles.formGrid}>
-        <label>Lane<select value={lane} onChange={(event) => setLane(event.target.value)}><option value="">Group default</option>{lanes.map((value) => <option key={value}>{value}</option>)}</select></label>
-        <label>Labels<input value={labels} onChange={(event) => setLabels(event.target.value)} placeholder="labels, comma separated" /></label>
-        <label>Action<select value={actionName} onChange={(event) => setActionName(event.target.value)}><option value="">Group default</option>{actionItems(actions).map((item) => <option key={textValue(item.name)} value={textValue(item.name)}>{textValue(item.name)}</option>)}</select></label>
-        <label>Worker role<select value={role} onChange={(event) => setRole(event.target.value)}><option value="">Action/default role</option>{roleItems(roles).map((item) => <option key={textValue(item.slug, textValue(item.name))} value={textValue(item.slug, textValue(item.name))}>{textValue(item.name, textValue(item.slug))}</option>)}</select></label>
-        <label>Schedule<input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} /></label>
-      </div>
-      <label>Action variables (JSON)<textarea value={actionVars} onChange={(event) => { setActionVars(event.target.value); setError(''); }} rows={4} spellCheck={false} /></label>
-      </fieldset>
-      {error || requestError ? <p role="alert" className={styles.formError}>{error || requestError}</p> : null}
-      <footer className={styles.detailFooter}><span /><Button tone="quiet" type="button" isDisabled={pending} onPress={onClose}>{createdTaskId ? 'Close' : 'Cancel'}</Button><Button tone="primary" type="submit" isDisabled={pending || !title.trim()}>{createdTaskId ? 'Retry link' : 'Create task'}</Button></footer>
-    </form>
-  );
-}
-
 interface TaskDetailProps {
   task: BoardTask;
   tasks: BoardTask[];
@@ -487,13 +411,7 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
   const [externalId, setExternalId] = useState(task.externalId);
   const [externalUrl, setExternalUrl] = useState(task.externalUrl);
   const [syncEnabled, setSyncEnabled] = useState(task.boardSync.enabled !== false && (Boolean(task.boardSync.enabled) || Boolean(task.boardSync.provider)));
-  const [verificationMode, setVerificationMode] = useState(textValue(task.raw.verification_mode));
-  const [verificationState, setVerificationState] = useState(task.verificationState);
-  const [verificationTests, setVerificationTests] = useState(textValue(record(task.raw.verification_summary).tests_run));
-  const [verificationNotes, setVerificationNotes] = useState(textValue(task.raw.verification_notes));
-  const [manualSmoke, setManualSmoke] = useState(Boolean(record(task.raw.verification_summary).manual_smoke_done));
-  const [deployNeeded, setDeployNeeded] = useState(Boolean(record(task.raw.verification_summary).deploy_needed));
-  const [humanPending, setHumanPending] = useState(textValue(record(task.raw.verification_summary).human_validation_pending));
+  const [verification, setVerification] = useState<VerificationDraft>({ mode: textValue(task.raw.verification_mode), state: task.verificationState, notes: textValue(task.raw.verification_notes), summary: record(task.raw.verification_summary) });
   const [attachments, setAttachments] = useState(task.attachments);
   const [removedAttachments, setRemovedAttachments] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -562,10 +480,10 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
       external_id: externalId,
       external_url: externalUrl,
       board_sync: { ...task.boardSync, version: Number(task.boardSync.version ?? 1), enabled: syncEnabled, provider: provider || textValue(task.boardSync.provider, 'github') },
-      verification_mode: verificationMode,
-      verification_state: verificationState,
-      verification_notes: verificationNotes,
-      verification_summary: { tests_run: verificationTests, manual_smoke_done: manualSmoke, deploy_needed: deployNeeded, human_validation_pending: humanPending },
+      verification_mode: verification.mode,
+      verification_state: verification.state,
+      verification_notes: verification.notes,
+      verification_summary: verification.summary,
       enforce_dispatch_edit_gate: true,
     }, onCommandUnavailable);
     removedAttachments.forEach((filename) => sendOrNotify(sendCommand, { cmd: 'remove_attachment', task_id: task.id, filename }, onCommandUnavailable));
@@ -606,7 +524,7 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
             <div><dt>Health</dt><dd title={task.healthState}>{task.healthState}</dd></div>
             <div><dt>Action</dt><dd title={actionName || 'default'}>{actionName || 'default'}</dd></div>
             <div><dt>Role</dt><dd title={role || 'default'}>{role || 'default'}</dd></div>
-            <div><dt>Verification</dt><dd title={verificationState || 'not requested'}>{verificationState || 'not requested'}</dd></div>
+            <div><dt>Verification</dt><dd title={verification.state || 'not requested'}>{verification.state || 'not requested'}</dd></div>
             <div><dt>Created by</dt><dd title={identityDescription(attribution.creator)}>{attribution.creator.name} · {attribution.creator.kind}</dd></div>
             <div><dt>Executing</dt><dd title={`Executing ${identityDescription(attribution.responsible)}${attribution.activeAgent ? ` via ${identityDescription(attribution.activeAgent)}` : ''}`}>{attribution.responsible.name}{attribution.responsible.kind ? ` · ${attribution.responsible.kind}` : ''}{attribution.activeAgent ? ` via ${attribution.activeAgent.name}` : ''}</dd></div>
           </dl>
@@ -633,7 +551,7 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
         <label>Action variables (JSON)<textarea value={actionVars} onChange={(event) => setActionVars(event.target.value)} rows={4} spellCheck={false} /></label>
         {textValue(promptPreview.prompt) ? <details className={styles.promptPreview} open><summary>Rendered prompt preview</summary><pre>{textValue(promptPreview.prompt)}</pre></details> : null}
       </section> : null}
-      {detailTab === 'verification' ? <section className={styles.detailSection} role="tabpanel" aria-label="Verification"><header><div><h3>Verification</h3><p>Record release gates and human checks for this task.</p></div><Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'board_verify_task', id: task.id, actor_name: 'Operator', verification_state: 'passed', manual_smoke_done: true, human_validation_pending: '', deploy_needed: false }, onCommandUnavailable)}>Mark verified</Button></header><div className={styles.formGrid}><label>Mode<input value={verificationMode} onChange={(event) => setVerificationMode(event.target.value)} placeholder="required / advisory" /></label><label>State<select value={verificationState} onChange={(event) => setVerificationState(event.target.value)}><option value="">Not requested</option><option value="pending">Pending</option><option value="attempted">Attempted</option><option value="passed">Passed</option><option value="failed">Failed</option></select></label><label>Tests run<input value={verificationTests} onChange={(event) => setVerificationTests(event.target.value)} /></label><label>Human validation pending<input value={humanPending} onChange={(event) => setHumanPending(event.target.value)} /></label></div><div className={styles.checkRow}><label><input type="checkbox" checked={manualSmoke} onChange={(event) => setManualSmoke(event.target.checked)} />Manual smoke done</label><label><input type="checkbox" checked={deployNeeded} onChange={(event) => setDeployNeeded(event.target.checked)} />Deploy needed</label></div><label>Verification notes<textarea rows={3} value={verificationNotes} onChange={(event) => setVerificationNotes(event.target.value)} /></label>{Object.keys(record(task.raw.completion_evidence)).length ? <details><summary>Completion evidence</summary><pre>{JSON.stringify(task.raw.completion_evidence, null, 2)}</pre></details> : null}</section> : null}
+      {detailTab === 'verification' ? <section className={styles.detailSection} role="tabpanel" aria-label="Verification"><header><div><h3>Verification</h3><p>Record release gates and human checks for this task.</p></div><Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'board_verify_task', id: task.id, actor_name: 'Operator', verification_state: 'passed', manual_smoke_done: true, human_validation_pending: '', deploy_needed: false }, onCommandUnavailable)}>Mark verified</Button></header><VerificationFields value={verification} onChange={setVerification} />{Object.keys(record(task.raw.completion_evidence)).length ? <details><summary>Completion evidence</summary><pre>{JSON.stringify(task.raw.completion_evidence, null, 2)}</pre></details> : null}</section> : null}
       {detailTab === 'integration' ? <section className={styles.detailSection} role="tabpanel" aria-label="Integrations"><header><div><h3>External ticket and sync</h3><p>Link, synchronize, or communicate with the provider ticket.</p></div>{task.externalUrl ? <Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'external_open_task', id: task.id }, onCommandUnavailable)}>Open ticket</Button> : null}</header><div className={styles.formGrid}><label>Provider<input value={provider} onChange={(event) => setProvider(event.target.value)} placeholder="github" /></label><label>External ID<input value={externalId} onChange={(event) => setExternalId(event.target.value)} placeholder="owner/repo#123" /></label><label>External URL<input value={externalUrl} onChange={(event) => setExternalUrl(event.target.value)} /></label><label className={styles.checkField}><input type="checkbox" checked={syncEnabled} onChange={(event) => setSyncEnabled(event.target.checked)} />Track with Board sync</label></div><div className={styles.taskActionRow}><Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'board_sync_task', task: task.id }, onCommandUnavailable)} isDisabled={!externalId && !externalUrl}>Sync now</Button><Button tone="quiet" type="button" onPress={() => { setPullBaseline(pullResponse); setPullRequested(true); sendOrNotify(sendCommand, { cmd: 'board_pull_preview', task: task.id }, onCommandUnavailable); }} isDisabled={!externalId && !externalUrl}>Pull preview</Button><Button tone="quiet" type="button" onPress={() => { setProvider(''); setExternalId(''); setExternalUrl(''); setSyncEnabled(false); sendOrNotify(sendCommand, { cmd: 'external_link_task', id: task.id, ref: '', provider: '', external_id: '', external_url: '', board_sync: { version: 1, enabled: false } }, onCommandUnavailable); }} isDisabled={!externalId && !externalUrl}>Unlink</Button></div>{Object.keys(pullChanges).length ? <div className={styles.pullPreview}><h4>Inbound changes</h4>{Object.entries(pullChanges).map(([field, value]) => <div key={field}><strong>{field}</strong><span>Local: {textValue(record(value).local)}</span><span>Remote: {textValue(record(value).remote)}</span></div>)}<Button tone="primary" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'board_pull_apply', task: task.id, fields: Object.keys(pullChanges) }, onCommandUnavailable)}>Apply all changes</Button></div> : null}<div className={styles.externalComposer}><label>Push status<input value={externalStatus} onChange={(event) => setExternalStatus(event.target.value)} /></label><Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'external_push_task_status', id: task.id, status: externalStatus, note: '' }, onCommandUnavailable)} isDisabled={!externalStatus.trim() || (!externalId && !externalUrl)}>Push</Button><label>Post comment<textarea value={externalComment} onChange={(event) => setExternalComment(event.target.value)} rows={2} /></label><Button tone="quiet" type="button" onPress={() => { sendOrNotify(sendCommand, { cmd: 'external_post_task_comment', id: task.id, comment: externalComment.trim() }, onCommandUnavailable); setExternalComment(''); }} isDisabled={!externalComment.trim() || (!externalId && !externalUrl)}>Post</Button></div>{task.messages.length ? <details><summary>External activity · {task.messages.length}</summary><div className={styles.messageHistory}>{task.messages.map((message, index) => <article key={textValue(message.id, String(index))}><strong>{textValue(message.action, 'update')}</strong><time>{displayTime(textValue(message.timestamp))}</time><p>{textValue(message.message, textValue(message.comment, textValue(message.status)))}</p></article>)}</div></details> : null}</section> : null}
       {detailTab === 'evidence' ? <section className={styles.artifacts} role="tabpanel" aria-labelledby="task-artifacts-heading">
         <header><div><h3 id="task-artifacts-heading">Artifacts and attachments</h3><p>Persist evidence, logs, reports, diffs, and operator-provided files.</p></div><><input ref={fileInputRef} type="file" multiple hidden onChange={(event) => { void upload([...(event.target.files ?? [])]); event.target.value = ''; }} /><Button tone="quiet" type="button" onPress={() => fileInputRef.current?.click()} isDisabled={uploading}>{uploading ? 'Uploading…' : 'Upload files'}</Button></></header>
@@ -1185,9 +1103,7 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPa
           ? <TaskDetail key={`${detailTask.id}:${detailVersion}`} task={detailTask} tasks={groupTasks} groups={groupsState.records} agents={agents} actions={catalog.actions} roles={catalog.roles} responses={auxiliaryResponses} sendCommand={sendCommand} onCommandUnavailable={onCommandUnavailable} onClose={() => dispatch(workspaceUiActions.setDetailTask(null))} onRemove={() => setRemoveTaskId(detailTask.id)} />
           : detailTask ? <StateSurface title="Loading task" description="Retrieving complete task fields." /> : null}
       </ModalDialog>
-      <ModalDialog title="Create task" description={`Add work to ${group}`} size="large" isOpen={workspaceUi.createTaskDialogOpen} onOpenChange={(open) => dispatch(workspaceUiActions.setCreateTaskDialogOpen(open))}>
-        <CreateTaskDialog group={group} lanes={lanes} actions={catalog.actions} roles={catalog.roles} onCreate={(command) => { if (sendCommand(command)) dispatch(workspaceUiActions.setCreateTaskDialogOpen(false)); else onCommandUnavailable(); }} onClose={() => dispatch(workspaceUiActions.setCreateTaskDialogOpen(false))} />
-      </ModalDialog>
+      {workspaceUi.createTaskDialogOpen ? <TaskCreateDialog group={group} lanes={lanes} actions={catalog.actions} roles={catalog.roles} onClose={() => dispatch(workspaceUiActions.setCreateTaskDialogOpen(false))} /> : null}
       <ModalDialog title="Schedules" description={`Automated task dispatches for ${group}`} size="large" isOpen={schedulesOpen} onOpenChange={setSchedulesOpen}>
         <SchedulesPanel group={group} schedules={schedules} actions={catalog.actions} roles={catalog.roles} sendCommand={sendCommand} onCommandUnavailable={onCommandUnavailable} onClose={() => setSchedulesOpen(false)} />
       </ModalDialog>

@@ -1,12 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import { projectionActions, selectCatalogState, selectTasksState } from '../../app/store';
-import { Button, ModalDialog } from '../../design/primitives';
-import type { TorqueCommand, UnknownRecord } from '../../protocol';
+import { Button } from '../../design/primitives';
+import type { UnknownRecord } from '../../protocol';
 import { readCommand } from '../../protocol/http';
-import { CreateTaskDialog } from '../board/BoardPanel';
+import { TaskCreateDialog } from '../board/TaskCreateDialog';
 import { text } from './model';
-import { usePlanningMutation } from './usePlanningMutation';
 
 function initiativeTaskPrefill(initiative: UnknownRecord) {
   const title = text(initiative.title, text(initiative.id)).trim();
@@ -27,10 +26,8 @@ export function InitiativeTaskCreator({ initiative, disabled, onLinked }: {
   const { lanes } = useAppSelector(selectTasksState);
   const [prefill, setPrefill] = useState<ReturnType<typeof initiativeTaskPrefill> | null>(null);
   const [createdTaskId, setCreatedTaskId] = useState('');
-  const createdId = useRef('');
   const [catalogError, setCatalogError] = useState('');
   const [catalogRevision, setCatalogRevision] = useState(0);
-  const mutation = usePlanningMutation();
   const group = text(initiative.group, text(initiative.group_name));
   const open = Boolean(prefill);
   useEffect(() => {
@@ -45,22 +42,15 @@ export function InitiativeTaskCreator({ initiative, disabled, onLinked }: {
     });
     return () => controller.abort();
   }, [open, group, dispatch, catalogRevision]);
-  const create = (command: TorqueCommand) => { void mutation.run(async (request) => {
-    if (!createdId.current) {
-      const result = await request(command);
-      const id = text(result.task_id);
-      if (!id) throw new Error('Task creation returned no ID. Check the Board before retrying.');
-      createdId.current = id; setCreatedTaskId(id);
-    }
-    await request({ cmd: 'initiative_link_task', id: text(initiative.id), task_id: createdId.current });
-    createdId.current = ''; setCreatedTaskId(''); setPrefill(null); onLinked();
-  }); };
+  const link = async (taskId: string) => {
+    const frame = await readCommand({ cmd: 'initiative_link_task', id: text(initiative.id), task_id: taskId }, new AbortController().signal);
+    if (frame.type === 'error') throw new Error(text(frame.message, 'Could not link task.'));
+    dispatch(projectionActions.auxiliaryResourceReceived(frame));
+    setCreatedTaskId(''); onLinked();
+  };
   return <>
     {createdTaskId ? <p role="status">Task {createdTaskId} exists but has not been linked. Resume to retry the link, or link it later from the Board task selector.</p> : null}
     <Button isDisabled={disabled} onPress={() => setPrefill(initiativeTaskPrefill(initiative))}>{createdTaskId ? 'Resume task link' : 'Create Board task'}</Button>
-    <ModalDialog title="Create Board task" description={`From Initiative ${text(initiative.id)} · ${group}`} size="large" isOpen={open} onOpenChange={(next) => { if (!next && !mutation.busy.current) setPrefill(null); }}>
-      {catalogError ? <p role="alert">{catalogError} <Button onPress={() => setCatalogRevision((value) => value + 1)}>Retry task options</Button></p> : null}
-      {prefill ? <CreateTaskDialog group={group} lanes={lanes.filter((lane): lane is string => typeof lane === 'string' && lane !== 'Archived')} actions={catalog.actions} roles={catalog.roles} initialValues={prefill} onCreate={create} pending={mutation.pending} createdTaskId={createdTaskId} requestError={mutation.error} onClose={() => setPrefill(null)} /> : null}
-    </ModalDialog>
+    {prefill ? <TaskCreateDialog group={group} lanes={lanes.filter((lane): lane is string => typeof lane === 'string' && lane !== 'Archived')} actions={catalog.actions} roles={catalog.roles} initialValues={prefill} notice={catalogError ? <p role="alert">{catalogError} <Button onPress={() => setCatalogRevision((value) => value + 1)}>Retry task options</Button></p> : null} createdTaskId={createdTaskId} onCreated={setCreatedTaskId} afterCreate={link} onClose={() => setPrefill(null)} /> : null}
   </>;
 }

@@ -2627,6 +2627,28 @@ scope.
 - Constraints: Creation waits for acknowledgement before linking. Once a task ID is acknowledged, failed linking retains that ID and offers Retry link; closing the child dialog exposes Resume task link in the Initiative editor. Retrying does not create another task. Group default lane remains selectable. Pending writes prevent closing the child dialog. This does not certify persistence of local drafts across page reloads or ambiguous lost creation responses.
 - Verification: Focused component and isolated browser tests exercise cancellation, rejected creation, acknowledged creation with failed linking, close/resume, same-ID retry and unchanged Initiative scope until explicit Save. Broader task-form parity is tracked separately in P-150–P-152.
 
+### D-097 — Review complete creation evidence before the task exists
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: Board and Initiative task creation share an acknowledged dialog with cross-group dependency selection, canonical verification modes/states, and draft attachments/artifacts. Verification uses the same fields in create and edit, including deploy/restart attempted. Disclosure sections retain edits without rebuilding the form.
+- Constraints: Uploads are scoped to a unique draft ID, remain available after failed creation, and move to the canonical task ID only on successful creation. Closing an uncreated draft waits for upload cleanup; failed cleanup retains the dialog. Removed files are deleted before they can be finalized. External file references retain their original paths. Structured artifact edits must be saved or cancelled before creating the task. Creation and uploads serialize; close and duplicate submission are blocked while a write is pending. Local scheduling values are converted to ISO timestamps.
+- Verification: Component tests cover rejected creation, cross-group dependencies, every verification field, artifact drafts, failed removal/cleanup and pending-close guards. Isolated browser QA checks canonical attachment paths, external references, removed-file absence, cancellation cleanup, retained failure drafts, and persisted fields after reopening.
+
+### D-098 — Task detail keeps its save controls inside the viewport
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: The task detail grid reserves its footer while allowing both the overview and secondary section to scroll. Narrow layouts keep the same bounded regions instead of expanding the form beyond its containing dialog.
+- Verification: The live task workflow reproduced an offscreen Save button at 1280×720 before repair. It now asserts visibility at 1280×720 and 760×600, changes verification, saves and checks persistence. Other viewport combinations still require their own evidence.
+
+### D-099 — Archived Thinking visibility belongs to the selected filter
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: Note and brief detail/mutation responses retain archived records in the projection. The Planning archive filter controls visibility; deletion still removes notes. A late HTTP archive acknowledgement must not erase records received through a list or WebSocket update.
+- Verification: Deterministic regressions apply an archived list followed by archive acknowledgement and detail read for both notes and briefs. Live Thinking archive/read/delete coverage verifies the resulting operator flow.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

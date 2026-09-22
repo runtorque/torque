@@ -306,19 +306,19 @@ const projectionSlice = createSlice({
           replaceCollection('thinking_scratchpad_notes', frame.notes ?? frame.scratchpad_notes);
           break;
         case 'scratchpad_note':
-          upsertResource('thinking_scratchpad_notes', frame);
+          upsertResource('thinking_scratchpad_notes', frame, true);
           break;
         case 'scratchpad_note_deleted':
         case 'scratchpad_note_created':
         case 'scratchpad_note_updated':
         case 'scratchpad_note_archived':
-          upsertResource('thinking_scratchpad_notes', frame.note);
+          upsertResource('thinking_scratchpad_notes', frame.note, true);
           break;
         case 'idea_brief_list':
           replaceCollection('idea_briefs', frame.idea_briefs);
           break;
         case 'idea_brief':
-          upsertResource('idea_briefs', frame);
+          upsertResource('idea_briefs', frame, true);
           break;
         case 'idea_brief_proposed':
         case 'idea_brief_created':
@@ -326,7 +326,7 @@ const projectionSlice = createSlice({
         case 'idea_brief_refined':
         case 'idea_brief_parked':
         case 'idea_brief_archived':
-          upsertResource('idea_briefs', frame.idea_brief);
+          upsertResource('idea_briefs', frame.idea_brief, true);
           break;
         case 'decision':
           upsertResource('decisions', frame, true);

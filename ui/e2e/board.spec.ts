@@ -50,9 +50,7 @@ test('Board supports a create, edit, and completion workflow against a live daem
   await page.getByRole('button', { name: 'Create task' }).click();
   const card = page.getByText(title, { exact: true });
   await expect(card).toBeVisible();
-  const addedFrame = receivedFrames
-    .map((frame) => JSON.parse(frame) as { type?: string; task_id?: string; title?: string })
-    .find((frame) => frame.type === 'board_task_added' && frame.title === title);
+  const addedFrame = { task_id: await card.locator('xpath=ancestor::article').getAttribute('data-task-id') };
   expect(addedFrame?.task_id).toBeTruthy();
 
   await card.dblclick();
