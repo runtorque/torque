@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Provider } from 'react-redux';
 import { afterEach, expect, it, vi } from 'vitest';
-import { createAppStore, projectionActions, workspaceUiActions } from '../../app/store';
+import { connectionActions, createAppStore, projectionActions, workspaceUiActions } from '../../app/store';
 import { compactStateFixture } from '../../protocol/fixtures';
 import type { TorqueCommand, UnknownRecord } from '../../protocol';
 import { BoardPanel } from './BoardPanel';
@@ -10,6 +10,7 @@ import { localSchedule, taskEditChanges } from './taskEditModel';
 afterEach(() => vi.unstubAllGlobals());
 function setup(extra: UnknownRecord = {}) {
   const store = createAppStore();
+  store.dispatch(connectionActions.connected({ at: 1, reconnect: false }));
   store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, board_tasks: { task: { id: 'task', task: 'Saved task', description: 'Saved scope', group: 'Foundation', lane: 'Backlog', action_vars: {}, agent_id: 'agent-1', labels: ['original'], ...extra } } }));
   store.dispatch(workspaceUiActions.setDetailTask('task'));
   const calls: TorqueCommand[] = []; let failure = ''; let deferred: ((command: TorqueCommand) => Promise<unknown>) | null = null;

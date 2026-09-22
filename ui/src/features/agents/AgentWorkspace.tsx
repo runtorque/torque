@@ -83,6 +83,7 @@ function AgentTreeRow({ row, selected, focused, taskTitle, collapsed, onToggle, 
   return (
     <div
       role="treeitem"
+      aria-selected={selected}
       aria-level={row.depth + 1}
       aria-expanded={row.childCount ? !collapsed : undefined}
       className={`${styles.agentTreeRow} ${selected ? styles.agentSelected : ''} ${focused ? styles.agentFocused : ''}`}

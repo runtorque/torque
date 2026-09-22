@@ -2743,8 +2743,24 @@ scope.
 - Date: 2026-09-22
 - Status: accepted
 - Decision: Active Context uses correlated list requests on entry, Apply and reconnect. Reconnect reuses applied filters; typing does not change the current query. Incoming records refresh untouched editor fields without replacing local changes, focus or caret. Publishing, editing and pinning wait for a matching entry acknowledgement. Existing-entry writes include only changed fields; failures retain the draft and selection for retry. Entry types match the backend: finding, decision, warning, handoff and note. Title/content inputs respect the 200/4000-character limits. Detail shows expiry, and pinning is described as ranking rather than extending retention.
-- Constraints: Hidden Context aborts reads. Reads pause while a mutation is pending. A failed list refresh after a successful publish retries only the list, preserving the acknowledged entry. New-entry agent links are captured when editing begins. Group changes reset the workspace to prevent cross-group drafts. This does not provide crash/lost-acknowledgement recovery or server-side conflict detection; task/pipeline attachment controls remain a separate parity gap.
+- Constraints: Hidden Context aborts reads. Reads pause while a mutation is pending. A failed list refresh after a successful publish retries only the list, preserving the acknowledged entry. New-entry agent links are captured when editing begins. Group changes reset the workspace to prevent cross-group drafts. This does not provide crash/lost-acknowledgement recovery or server-side conflict detection; task/pipeline attachment controls are addressed separately by D-112.
 - Verification: Component coverage checks targets, applied filters, draft reconciliation, failed and mismatched acknowledgements, pin retry and hidden cancellation. Real-daemon browser acceptance checks WebSocket reconnect, sparse persistence, failed reads/writes and a successful publish followed by failed refresh.
+
+### D-112 — Context links are explicit and independent of scope
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: New shared Context entries offer optional task, pipeline and agent links with a searchable target picker. Pipeline choices resolve explicit pipeline-root IDs or walk the compact parent chain, deduplicating child tasks. The picker starts with the current group as its search and supports targets across groups with readable names, groups and IDs; duplicate links are omitted. Draft links can be removed and survive reconnect, filter changes and failed publication. Task/agent focus prefills the corresponding optional link while keeping it removable.
+- Constraints: Links and scope remain independent. A target absent from the current client inventory stays visible as unavailable and blocks new publication until removed. The backend acknowledgement still determines write success; this does not guarantee target existence across a server-side race. Existing-entry edits leave stored links intact. Saved links show names and IDs and open task/pipeline detail or the selected agent; unavailable records show their IDs with navigation disabled. Agent-tree selection exposes its selected state to assistive technology. Crash recovery and archived-target discovery are separate gates.
+- Verification: Component tests cover pipeline roots, target filtering, deduplication, draft retention, missing-target recovery, sparse edits and navigation callbacks. Isolated browser acceptance persists all three link kinds, rejects a publication, reconnects, edits without replacing links, navigates each target and cancels without publishing.
+
+### D-113 — Selected Board tasks hydrate regardless of entry point
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: The active Board requests full task detail and its group's action/role catalogs when a task is selected for detail, including selection from Context or other surfaces. Reopen and reconnect refresh that selection; unrelated renders do not repeat the requests. Card clicks set the selection instead of owning a separate hydration path.
+- Constraints: During compact reconnect hydration, the Board retains the selected task's last full record so the mounted editor and its draft/caret survive until fresh detail arrives. Task detail still uses the existing WebSocket protocol and projection. Correlated read-failure recovery and archived-target discovery are not certified by this change.
+- Verification: App tests open a compact task through shared selection, accept its full detail, reconnect with local edits and reopen. Live Context-link acceptance navigates both a child task and its pipeline root into hydrated editors.
 
 ## Decision entry template
 

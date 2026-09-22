@@ -830,6 +830,25 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPa
     || Object.prototype.hasOwnProperty.call(detailTask.raw, 'action_vars')
     || Object.prototype.hasOwnProperty.call(detailTask.raw, 'attachments')
   ));
+  // Compact snapshots intentionally omit full fields. Keep the mounted editor
+  // until the selected task's fresh detail arrives instead of discarding drafts.
+  const [hydratedDetail, setHydratedDetail] = useState<BoardTask | null>(null);
+  if (detailTask && detailIsHydrated && hydratedDetail !== detailTask) setHydratedDetail(detailTask);
+  else if (!detailTask && hydratedDetail) setHydratedDetail(null);
+  const editorTask = detailTask && (detailIsHydrated ? detailTask : hydratedDetail?.id === detailTask.id ? hydratedDetail : null);
+  const taskDetailRequest = useRef('');
+  const requestedTaskId = workspaceUi.detailTaskId;
+  const requestedTaskGroup = detailTask?.group || group;
+  useEffect(() => {
+    if (!requestedTaskId) { taskDetailRequest.current = ''; return; }
+    if (connection.status !== 'connected') return;
+    const key = `${requestedTaskId}:${requestedTaskGroup}:${connection.reconnectCount}`;
+    if (taskDetailRequest.current === key) return;
+    taskDetailRequest.current = key;
+    sendOrNotify(sendCommand, { cmd: 'task_detail', id: requestedTaskId }, onCommandUnavailable);
+    sendOrNotify(sendCommand, { cmd: 'list_actions', group: requestedTaskGroup }, onCommandUnavailable);
+    sendOrNotify(sendCommand, { cmd: 'list_roles', group: requestedTaskGroup }, onCommandUnavailable);
+  }, [requestedTaskId, requestedTaskGroup, connection.status, connection.reconnectCount, sendCommand, onCommandUnavailable]);
   const removeTask = removeTaskId ? taskById.get(removeTaskId) ?? null : null;
   const selectedTasks = workspaceUi.selectedTaskIds.map((id) => taskById.get(id)).filter((task): task is BoardTask => Boolean(task));
   const dispatchTarget = dispatchTargetId ? taskById.get(dispatchTargetId) ?? null : null;
@@ -920,9 +939,6 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPa
 
   const openTask = (taskId: string, tab: 'execution' | 'activity' = 'execution') => {
     setInitialTaskTab(tab);
-    sendOrNotify(sendCommand, { cmd: 'task_detail', id: taskId }, onCommandUnavailable);
-    sendOrNotify(sendCommand, { cmd: 'list_actions', group }, onCommandUnavailable);
-    sendOrNotify(sendCommand, { cmd: 'list_roles', group }, onCommandUnavailable);
     dispatch(workspaceUiActions.setDetailTask(taskId));
   };
 
@@ -1153,8 +1169,8 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPa
       </footer>
 
       <ModalDialog title={detailTask?.task ?? 'Task details'} description={detailTask?.id ?? ''} size="wide" bodyLayout="fit" isOpen={Boolean(detailTask)} onOpenChange={(open) => { if (!open && !taskEditBusy.current) { if (taskEditClose.current) taskEditClose.current(); else dispatch(workspaceUiActions.setDetailTask(null)); } }}>
-        {detailTask && detailIsHydrated
-          ? <TaskDetail key={detailTask.id} busyRef={taskEditBusy} closeRef={taskEditClose} initialTab={initialTaskTab} task={detailTask} tasks={groupTasks} groups={groupsState.records} agents={agents} actions={catalog.actions} roles={catalog.roles} responses={auxiliaryResponses} sendCommand={sendCommand} onCommandUnavailable={onCommandUnavailable} onClose={() => { setInitialTaskTab('execution'); dispatch(workspaceUiActions.setDetailTask(null)); }} onRemove={() => setRemoveTaskId(detailTask.id)} />
+        {editorTask
+          ? <TaskDetail key={editorTask.id} busyRef={taskEditBusy} closeRef={taskEditClose} initialTab={initialTaskTab} task={editorTask} tasks={groupTasks} groups={groupsState.records} agents={agents} actions={catalog.actions} roles={catalog.roles} responses={auxiliaryResponses} sendCommand={sendCommand} onCommandUnavailable={onCommandUnavailable} onClose={() => { setInitialTaskTab('execution'); dispatch(workspaceUiActions.setDetailTask(null)); }} onRemove={() => setRemoveTaskId(editorTask.id)} />
           : detailTask ? <StateSurface title="Loading task" description="Retrieving complete task fields." /> : null}
       </ModalDialog>
       {workspaceUi.createTaskDialogOpen ? <TaskCreateDialog group={group} lanes={lanes} actions={catalog.actions} roles={catalog.roles} onClose={() => dispatch(workspaceUiActions.setCreateTaskDialogOpen(false))} /> : null}

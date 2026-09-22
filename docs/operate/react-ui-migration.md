@@ -146,7 +146,7 @@ This opt-in test refuses the default port/profile, launches `ui/e2e/fixtures/str
 
 ### Shared Context acknowledgement and reconnect regression
 
-`context-live.spec.ts` uses the disposable PTY-disabled profile. It changes an entry through a second client, reconnects the real WebSocket, and checks that untouched fields refresh while local content, focus, caret and unapplied search remain intact. It injects list, edit, publish and pin failures; verifies sparse persisted edits; and checks that retrying a failed list after successful publication creates no duplicate. Hidden Context must issue no reads. Optional task/pipeline links and History reconnect remain separate acceptance rows.
+`context-live.spec.ts` uses the disposable PTY-disabled profile. It changes an entry through a second client, reconnects the real WebSocket, and checks that untouched fields refresh while local content, focus, caret and unapplied search remain intact. It injects list, edit, publish and pin failures; verifies sparse persisted edits; and checks that retrying a failed list after successful publication creates no duplicate. Hidden Context must issue no reads. `context-links-live.spec.ts` separately checks optional task/pipeline/agent links, a disappearing draft target, rejection/retry, real reconnect, preserved links after sparse edits, saved-target navigation across groups, compact pipeline-root resolution and Cancel. History reconnect and the Context split ratio remain separate acceptance rows.
 
 ## Classic burn-in and retirement
 

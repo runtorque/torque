@@ -8,7 +8,7 @@ import type { TorqueCommand } from '../protocol/commands';
 import type { StateFrame, UnknownRecord } from '../protocol/types';
 import { WorkspaceShell } from './App';
 import { sanitizeClientError } from './clientDiagnostics';
-import { connectionActions, createAppStore, projectionActions } from './store';
+import { connectionActions, createAppStore, projectionActions, workspaceUiActions } from './store';
 
 function renderShell(host = browserHost, frame: StateFrame = compactStateFixture) {
   const appStore = createAppStore();
@@ -800,6 +800,23 @@ describe('workspace shell', () => {
     fireEvent.click(screen.getByRole('button', { name: '＋ New' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), { target: { value: 'Architecture direction' } });
     expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();
+  });
+
+  it('hydrates tasks opened outside Board cards and refreshes the selected task after reconnect', async () => {
+    const { appStore, sendCommand } = renderShell();
+    act(() => { appStore.dispatch(workspaceUiActions.setDetailTask('task-1')); });
+    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'task_detail', id: 'task-1' });
+    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'list_roles', group: 'Foundation' });
+    const reads = () => sendCommand.mock.calls.filter(([command]) => command.cmd === 'task_detail').length;
+    expect(reads()).toBe(1);
+    act(() => { appStore.dispatch(projectionActions.taskDetailReceived({ type: 'task_detail', id: 'task-1', task: { id: 'task-1', task: 'Hydrated linked task', description: 'Full task scope', group: 'Foundation', lane: 'Backlog' } })); });
+    const title = await screen.findByRole<HTMLInputElement>('textbox', { name: 'Title' }); expect(title).toHaveValue('Hydrated linked task');
+    fireEvent.change(title, { target: { value: 'Retained task draft' } }); title.focus(); title.setSelectionRange(2, 6);
+    act(() => { appStore.dispatch(projectionActions.snapshotReceived(compactStateFixture)); appStore.dispatch(connectionActions.connected({ at: 3_000, reconnect: true })); }); expect(reads()).toBe(2);
+    act(() => { appStore.dispatch(projectionActions.taskDetailReceived({ type: 'task_detail', id: 'task-1', task: { task: 'Remote title' } })); });
+    expect(screen.getByRole('textbox', { name: 'Title' })).toBe(title); expect(title).toHaveValue('Retained task draft'); expect(title).toHaveFocus(); expect([title.selectionStart, title.selectionEnd]).toEqual([2, 6]);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    act(() => { appStore.dispatch(workspaceUiActions.setDetailTask('task-1')); }); expect(reads()).toBe(3);
   });
 
   it('loads shared memory through the active Control Center Context panel', async () => {
