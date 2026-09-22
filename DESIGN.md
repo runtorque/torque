@@ -2840,6 +2840,16 @@ scope.
 - Limits: Eligibility reflects the latest client projection. The existing backend batch is atomic but has no age or Done-only precondition; a concurrent server mutation after selection is not a new guarantee. Crash/lost-acknowledgement recovery remains separate acceptance. No scheduler or automatic archival is added.
 - Verification: Model/component tests cover cutoff/order/exclusions, pending/error/retry, expected acknowledgement and idle timer cleanup. Isolated browser QA advances only its clock and exercises real task creation, batch persistence, filtered scope, keyboard activation, failure retention, unrelated Board state and reload/reconnect. Executed evidence appears in the parity ledger.
 
+### D-123 — Per-agent settings reconcile current values and acknowledge each save scope
+
+- Date: 2026-09-22
+- Status: accepted
+- Decision: Architect/Engineer Settings pins its agent target and reads current server-resolved values on open, reconnect, relevant defaults changes and explicit Refresh. Reads are cancellable and require a matching agent ID and response type. Untouched fields reconcile; explicit drafts remain; staged inheritance follows the latest inherited value. Runtime digest counters do not trigger reads. Hidden dialogs do not read settings.
+- Interaction: The dialog indicates unsaved changes, disables unchanged Save and confirms dirty dismissal through Cancel, Close, Escape and outside clicks. Keep editing retains the same form; explicit discard closes it. Initial read failure retains snapshot data and offers retry; writes wait for successful initial hydration. Pending saves prevent dismissal and duplicate submission. Routine refresh does not remount fields or reset focus/caret/scroll.
+- Recovery: Saves are sparse, ordered identity → launch → digest → specializations → optional relaunch. Each acknowledged scope advances its baseline. Later failure retains only unfinished intents; external changes to completed fields can reconcile without being replayed on retry. Numeric blank means inheritance, explicit zero remains zero, and non-finite/fractional/negative values are rejected before transport (worker concurrency requires at least one).
+- Limits: This extends D-121's identity recovery to the remaining scopes. It is not an atomic multi-command transaction, server conflict detection or crash/lost-acknowledgement recovery. Provider-specific runtime effects and exhaustive settings-field acceptance remain separate gates.
+- Verification: Model/component coverage includes cancellation, response validation, reconciliation, dirty dismissal, failed reads, explicit values and scope retries. Isolated browser acceptance and its results are recorded in the parity ledger.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

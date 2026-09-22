@@ -1,14 +1,11 @@
+import { AgentSettingsDialog } from './AgentSettingsDialog';
 import { savedWindowBounds } from '../../host/windowState';
-import { providerChoices } from '../control/providerChoices';
-import { readCommand } from '../../protocol/http';
-import { useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type CSSProperties } from 'react';
 
 import type { TorqueCommand } from '../../protocol';
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import {
   selectAuxiliaryResponseState,
-  selectProviders,
-  projectionActions,
   selectAgentsState,
   selectCatalogState,
   selectGroupsState,
@@ -164,200 +161,11 @@ function OrganizationForm({ agent, agents, groups, sendCommand, onUnavailable, o
   </form>;
 }
 
-interface SettingsFormProps {
-  agent: AgentViewModel;
-  onSavingChange: (saving: boolean) => void;
-  rawSettings: unknown;
-  rawDigestSettings: unknown;
-  resolvedSettings: unknown;
-  sendCommand: CommandSender;
-  onUnavailable: () => void;
-  onClose: () => void;
-}
-
-const principalSettingFields = [
-  ['provider', 'Provider', 'text'],
-  ['boot_command', 'Boot command', 'text'],
-  ['model', 'Model', 'text'],
-  ['reasoning_effort', 'Reasoning effort', 'text'],
-  ['fast_mode', 'Fast mode', 'fast'],
-  ['autonomy_mode', 'Autonomy mode', 'text'],
-  ['custom_instructions', 'Custom instructions', 'textarea'],
-] as const;
-
-const engineerSettingFields = [
-  ['default_worker_concurrency', 'Default worker concurrency', 'number'],
-  ['wave_size_preference', 'Wave size preference', 'text'],
-  ['same_agent_follow_up_preference', 'Same-agent follow-up', 'text'],
-  ['escalation_style', 'Escalation style', 'text'],
-  ['engineer_can_override_worker_provider', 'Worker provider override', 'boolean'],
-  ['restrict_to_created_agents', 'Restrict to created agents', 'boolean'],
-] as const;
-
-const digestSettingFields = [
-  ['paused', 'Digest delivery', 'paused'],
-  ['push_interval', 'Push interval (seconds)', 'number'],
-  ['max_interval', 'Maximum interval (seconds)', 'number'],
-  ['heartbeat_interval', 'Heartbeat interval (seconds)', 'number'],
-  ['digest_verbosity', 'Digest verbosity', 'text'],
-  ['enabled_events', 'Enabled events', 'list'],
-] as const;
-
-function settingText(value: unknown): string {
-  if (Array.isArray(value)) return value.join(', ');
-  if (typeof value === 'boolean') return value ? 'true' : 'false';
-  return text(value);
-}
-
-function SettingsForm({ agent, rawSettings, rawDigestSettings, resolvedSettings, onClose, onSavingChange }: SettingsFormProps) {
-  const dispatch = useAppDispatch();
-  const providers = useAppSelector(selectProviders);
-  const instance = useId();
-  const [settings] = useState(() => asRecord(rawSettings));
-  const [digestSettings] = useState(() => asRecord(rawDigestSettings));
-  const [resolved] = useState(() => asRecord(resolvedSettings));
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState('');
-  const saveErrorElement = useRef<HTMLParagraphElement>(null);
-  useEffect(() => {
-    if (saveError && saveError !== 'Name is required.' && !saving) saveErrorElement.current?.focus();
-  }, [saveError, saving]);
-  const savingRef = useRef(false);
-  const entry = (key: string) => asRecord(resolved[key]);
-  const effective = (key: string, digest = false) => settingText(entry(key).value ?? (digest ? digestSettings[key] : settings[key]));
-  const [name, setName] = useState(agent.name);
-  const nameInput = useRef<HTMLInputElement>(null);
-  const identityBaseline = useRef({ name: agent.name, icon: text(agent.raw.icon), tab_color: text(agent.raw.tab_color) });
-  const [icon, setIcon] = useState(text(agent.raw.icon));
-  const [tabColor, setTabColor] = useState(text(agent.raw.tab_color));
-  const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(
-    [...principalSettingFields, ...engineerSettingFields].map(([key]) => [key, effective(key)]),
-  ));
-  const [digestValues, setDigestValues] = useState<Record<string, string>>(() => Object.fromEntries(
-    digestSettingFields.map(([key]) => [key, effective(key, true)]),
-  ));
-  const [specializations, setSpecializations] = useState(settingText(agent.raw.engineer_specializations));
-  const [relaunch, setRelaunch] = useState(false);
-  const [inheritFields, setInheritFields] = useState<string[]>([]);
-  const [editedFields, setEditedFields] = useState<string[]>([]);
-  const resetToInherited = (key: string, digest = false) => {
-    const inherited = asRecord(entry(key).inherited);
-    const value = settingText(inherited.value);
-    if (digest) setDigestValues((current) => ({ ...current, [key]: value }));
-    else setValues((current) => ({ ...current, [key]: value }));
-    setInheritFields((current) => current.includes(key) ? current : [...current, key]);
-  };
-  const origin = (key: string) => Object.keys(entry(key)).length ? text(entry(key).origin, 'default') : 'inherit';
-  const originControl = (key: string, digest = false) => <span className={styles.settingOrigin}><span>{inheritFields.includes(key) ? 'inherited' : editedFields.includes(key) ? 'per-agent (unsaved)' : origin(key)}</span>{(origin(key) === 'per-agent' || editedFields.includes(key)) && !inheritFields.includes(key) ? <button type="button" onClick={() => resetToInherited(key, digest)}>Use inherited</button> : null}</span>;
-  const updateValue = (key: string, value: string, digest = false) => {
-    setEditedFields((current) => current.includes(key) ? current : [...current, key]);
-    if (digest) setDigestValues((current) => ({ ...current, [key]: value }));
-    else setValues((current) => ({ ...current, [key]: value }));
-    setInheritFields((current) => current.filter((item) => item !== key));
-  };
-  const control = (key: string, label: string, type: string, digest = false) => {
-    const value = (digest ? digestValues : values)[key] ?? '';
-    const common = { id: `${instance}-${key}`, 'aria-label': label, value, onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => updateValue(key, event.target.value, digest) };
-    const suggestions = providerChoices(providers, key, values);
-    const choicesId = `${instance}-${key}-choices`;
-    const options = key === 'autonomy_mode' ? (agent.kind === 'architect' ? ['dispatch_freely', 'dispatch_after_confirm', 'ask_always'] : ['suggest_only', 'dispatch_when_clear', 'aggressive_auto_continue']) : key === 'wave_size_preference' ? ['small', 'balanced', 'large'] : key === 'same_agent_follow_up_preference' ? ['balanced', 'prefer_same_agent', 'prefer_fresh_agent'] : key === 'escalation_style' ? ['ask_early', 'note_then_ask', 'keep_moving'] : key === 'digest_verbosity' ? (agent.kind === 'architect' ? ['terse', 'balanced', 'verbose'] : ['compact', 'balanced', 'detailed']) : null;
-    let input: ReactNode;
-    if (type === 'textarea' || type === 'list') input = <textarea {...common} rows={type === 'list' ? 3 : 7} />;
-    else if (type === 'number') input = <input {...common} type="number" placeholder="inherit" />;
-    else if (type === 'boolean') input = <select {...common}><option value="">Inherited</option><option value="true">Allowed</option><option value="false">Not allowed</option></select>;
-    else if (type === 'paused') input = <select {...common}><option value="">Inherited</option><option value="false">Enabled</option><option value="true">Paused</option></select>;
-    else if (type === 'fast') input = <select {...common}><option value="">Inherited</option><option value="on">Fast on</option><option value="off">Fast off</option></select>;
-    else if (options) input = <select {...common}><option value="">Inherited</option>{[...new Set([...options, ...(value ? [value] : [])])].map((option) => <option key={option} value={option}>{option.replaceAll('_', ' ')}</option>)}</select>;
-    else input = <input {...common} list={suggestions.length ? choicesId : undefined} placeholder="inherit" />;
-    return <div className={styles.settingField} key={key}><label htmlFor={`${instance}-${key}`}>{label}</label>{originControl(key, digest)}{input}{suggestions.length ? <datalist id={choicesId}>{suggestions.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}</datalist> : null}</div>;
-  };
-
-  return (
-    <form className={styles.settingsForm} onSubmit={(event) => {
-      event.preventDefault();
-      if (savingRef.current) return;
-      const nextName = name.trim();
-      if (!nextName) { setSaveError('Name is required.'); nameInput.current?.focus(); return; }
-      const identityChanges: Record<string, string> = {};
-      const commands: TorqueCommand[] = [];
-      if (nextName !== identityBaseline.current.name) {
-        if (agent.kind === 'engineer') commands.push({ cmd: 'rename_engineer', id: agent.id, new_name: nextName });
-        else identityChanges.name = nextName;
-      }
-      if (icon.trim() !== identityBaseline.current.icon) identityChanges.icon = icon.trim();
-      if (tabColor.trim() !== identityBaseline.current.tab_color) identityChanges.tab_color = tabColor.trim();
-      if (Object.keys(identityChanges).length) commands.push({ cmd: 'update_agent', id: agent.id, ...identityChanges });
-      const changes: Record<string, string | number | boolean | null> = {};
-      for (const [key, value] of Object.entries(values)) {
-        if (inheritFields.includes(key)) changes[key] = null;
-        else if (value !== effective(key) || (editedFields.includes(key) && origin(key) !== 'per-agent')) changes[key] = value;
-      }
-      ['default_worker_concurrency'].forEach((key) => { if (typeof changes[key] === 'string' && changes[key]) changes[key] = Number(changes[key]); });
-      ['engineer_can_override_worker_provider', 'restrict_to_created_agents'].forEach((key) => { if (changes[key] === 'true') changes[key] = true; else if (changes[key] === 'false') changes[key] = false; });
-      const digestChanges: Record<string, string | number | boolean | string[] | null> = {};
-      for (const [key, value] of Object.entries(digestValues)) {
-        if (inheritFields.includes(key)) digestChanges[key] = null;
-        else if (value !== effective(key, true) || (editedFields.includes(key) && origin(key) !== 'per-agent')) digestChanges[key] = value;
-      }
-      ['push_interval', 'max_interval', 'heartbeat_interval'].forEach((key) => { if (typeof digestChanges[key] === 'string' && digestChanges[key]) digestChanges[key] = Number(digestChanges[key]); });
-      if (digestChanges.paused === 'true') digestChanges.paused = true;
-      else if (digestChanges.paused === 'false') digestChanges.paused = false;
-      if (typeof digestChanges.enabled_events === 'string') digestChanges.enabled_events = digestChanges.enabled_events.split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
-      if (['architect', 'engineer'].includes(agent.kind)) {
-        if (Object.keys(changes).length) commands.push({ cmd: 'update_agent_settings', agent_id: agent.id, settings: changes });
-        if (Object.keys(digestChanges).length) commands.push({ cmd: 'update_agent_digest_settings', agent_id: agent.id, settings: digestChanges });
-      }
-      const nextSpecs = specializations.split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
-      const currentSpecs = Array.isArray(agent.raw.engineer_specializations) ? agent.raw.engineer_specializations.map(String) : [];
-      if (agent.kind === 'engineer' && JSON.stringify(nextSpecs) !== JSON.stringify(currentSpecs)) commands.push({ cmd: 'set_engineer_specializations', engineer_id: agent.id, specializations: nextSpecs });
-      if (relaunch) commands.push({ cmd: 'relaunch_agent', id: agent.id });
-      if (!commands.length) { onClose(); return; }
-      savingRef.current = true; setSaving(true); onSavingChange(true); setSaveError('');
-      void (async () => {
-        let identitySaved = false;
-        try {
-          for (const command of commands) {
-            const frame = await readCommand(command, new AbortController().signal);
-            if (command.cmd === 'rename_engineer') {
-              if (frame.id !== agent.id || frame.name !== command.new_name || frame.kind !== 'engineer') throw new Error('Could not confirm the Engineer rename. Your changes are retained.');
-              identityBaseline.current.name = nextName;
-              identitySaved = true;
-            } else if (command.cmd === 'update_agent') {
-              Object.assign(identityBaseline.current, identityChanges);
-              identitySaved = true;
-            }
-            if (frame.type !== 'state') dispatch(projectionActions.auxiliaryResourceReceived(frame));
-          }
-          onClose();
-        } catch (cause) {
-          const message = cause instanceof Error ? cause.message : 'Could not save settings. Your changes are retained.';
-          setSaveError(`${identitySaved ? 'Identity changes were saved. ' : ''}${message}`);
-        } finally { savingRef.current = false; setSaving(false); onSavingChange(false); }
-      })();
-    }}>
-      {saveError ? <p role="alert" ref={saveErrorElement} tabIndex={-1}>{saveError}</p> : null}
-      <fieldset disabled={saving} style={{ border: 0, margin: 0, padding: 0 }}>
-      <section className={styles.settingsSection}><h3>Identity</h3><div className={styles.formGrid}><label>Name<input ref={nameInput} aria-invalid={saveError === 'Name is required.'} value={name} onChange={(event) => setName(event.target.value)} required /></label><label>Icon<input value={icon} onChange={(event) => setIcon(event.target.value)} placeholder="optional icon" /></label><label>Tab color<input value={tabColor} onChange={(event) => setTabColor(event.target.value)} placeholder="#6172f3" /></label></div></section>
-      {['architect', 'engineer'].includes(agent.kind) ? <>
-        <section className={styles.settingsSection}><h3>Launch and behavior</h3><div className={styles.formGrid}>{principalSettingFields.map(([key, label, type]) => control(key, label, type))}{agent.kind === 'engineer' ? engineerSettingFields.map(([key, label, type]) => control(key, label, type)) : null}</div></section>
-        {agent.kind === 'engineer' ? <section className={styles.settingsSection}><h3>Specializations</h3><label>Ordered specialization slugs<textarea value={specializations} onChange={(event) => setSpecializations(event.target.value)} rows={3} placeholder="ui-ux, frontend" /></label></section> : null}
-        <section className={styles.settingsSection}><h3>Digest delivery</h3><div className={styles.formGrid}>{digestSettingFields.map(([key, label, type]) => control(key, label, type, true))}</div></section>
-        <label className={styles.inlineCheck}><input type="checkbox" checked={relaunch} onChange={(event) => setRelaunch(event.target.checked)} />Relaunch after saving launch-bound changes</label>
-      </> : <p className={styles.formHint}>Worker provider and launch settings are inherited from its role, Agent Class, and group defaults.</p>}
-      <footer><Button tone="quiet" type="button" isDisabled={saving} onPress={onClose}>Cancel</Button><Button tone="primary" type="submit" isDisabled={saving}>{saving ? 'Saving settings…' : 'Save settings'}</Button></footer>
-      </fieldset>
-    </form>
-  );
-}
-
 interface FocusPanelProps {
   agent: AgentViewModel;
   terminal: AgentViewModel;
   detachedTerminal: Record<string, unknown> | null;
   messages: unknown;
-  rawSettings: unknown;
-  rawDigestSettings: unknown;
-  resolvedSettings: unknown;
   host: DesktopHost;
   sendCommand: CommandSender;
   onUnavailable: () => void;
@@ -371,9 +179,8 @@ interface FocusPanelProps {
   composeHeight?: number;
 }
 
-function FocusPanel({ agent, terminal, detachedTerminal, messages, rawSettings, rawDigestSettings, resolvedSettings, host, sendCommand, onUnavailable, onDetachAgent, onInspectWorktree, onOrganize, onRemove, active = true, terminalOnly = false, directMessagesHeight = 0, composeHeight = 0 }: FocusPanelProps) {
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const settingsSaving = useRef(false);
+function FocusPanel({ agent, terminal, detachedTerminal, messages, host, sendCommand, onUnavailable, onDetachAgent, onInspectWorktree, onOrganize, onRemove, active = true, terminalOnly = false, directMessagesHeight = 0, composeHeight = 0 }: FocusPanelProps) {
+  const [settingsTarget, setSettingsTarget] = useState<AgentViewModel | null>(null);
   const run = (command: Record<string, unknown>) => { if (!sendCommand(command as { cmd: string })) onUnavailable(); };
   const focusDetached = () => {
     const label = text(detachedTerminal?.label);
@@ -385,7 +192,7 @@ function FocusPanel({ agent, terminal, detachedTerminal, messages, rawSettings, 
       {!terminalOnly ? <header className={styles.focusHeader}>
         <div><span className={`${styles.statusDot} ${styles[`tone_${statusTone(agent)}`] ?? ''}`} /><div><h2>{agent.name}</h2><p>{agent.kind} · {agent.status}{agent.provider ? ` · ${agent.provider}` : ''}</p></div></div>
         <div>
-          {agent.cellType === 'agent' ? <Button tone="quiet" onPress={() => setSettingsOpen(true)}>Settings</Button> : null}
+          {agent.cellType === 'agent' ? <Button tone="quiet" onPress={() => setSettingsTarget(agent)}>Settings</Button> : null}
           {hasHostCapability(host, 'detach-panel') ? <span className={styles.detachIconWrap} title="Detach selected agent workspace"><Button className={styles.detachIcon ?? ''} tone="quiet" aria-label="Detach selected agent workspace" onPress={onDetachAgent}>↗</Button></span> : null}
           <ActionMenu label={`Lifecycle actions for ${agent.name}`}>
             <ActionMenuItem onAction={() => run({ cmd: 'clear_agent_context', id: agent.id })} isDisabled={agent.cellType === 'terminal'}>Clear context</ActionMenuItem>
@@ -421,9 +228,7 @@ function FocusPanel({ agent, terminal, detachedTerminal, messages, rawSettings, 
           : <TerminalWorkspace agent={agent} terminal={terminal} messages={messages} sendCommand={sendCommand} onUnavailable={onUnavailable} showConversation={!terminalOnly && agent.cellType === 'agent'} active={active} directMessagesHeight={directMessagesHeight} composeHeight={composeHeight} />}
       </div>
 
-      <ModalDialog title="Agent settings" description={`${agent.kind} · ${agent.id}`} size="large" isOpen={settingsOpen} onOpenChange={(open) => { if (!settingsSaving.current) setSettingsOpen(open); }}>
-        <SettingsForm onSavingChange={(saving) => { settingsSaving.current = saving; }} agent={agent} rawSettings={rawSettings} rawDigestSettings={rawDigestSettings} resolvedSettings={resolvedSettings} sendCommand={sendCommand} onUnavailable={onUnavailable} onClose={() => setSettingsOpen(false)} />
-      </ModalDialog>
+      {settingsTarget ? <AgentSettingsDialog target={settingsTarget} onClose={() => setSettingsTarget(null)} /> : null}
     </section>
   );
 }
@@ -439,7 +244,7 @@ export interface AgentWorkspaceProps {
 
 export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable, terminalOnly = false, active = true }: AgentWorkspaceProps) {
   const dispatch = useAppDispatch();
-  const { records, settings, resolvedSettings, digestSettings, digestBufferStats, digestSentEvents, engineerBufferStats, engineerSentEvents } = useAppSelector(selectAgentsState);
+  const { records, digestSettings, digestBufferStats, digestSentEvents, engineerBufferStats, engineerSentEvents } = useAppSelector(selectAgentsState);
   const groupsState = useAppSelector(selectGroupsState);
   const catalog = useAppSelector(selectCatalogState);
   const auxiliaryResponses = useAppSelector(selectAuxiliaryResponseState);
@@ -536,7 +341,7 @@ export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable,
 
   if (!group) return <StateSurface title="Choose a group" description="Agents are scoped to the active Torque group." />;
   if (terminalOnly) {
-    return selected && terminalChoices.length ? <FocusPanel agent={selected} terminal={terminalChoices.find((cell) => cell.id === selectedTerminalId) ?? terminalChoices[0] ?? selected} detachedTerminal={null} messages={messagesState.direct[selected.id]} rawSettings={settings[selected.id]} rawDigestSettings={digestSettings[selected.id]} resolvedSettings={resolvedSettings[selected.id]} host={host} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onDetachAgent={() => { void detachAgents(); }} onInspectWorktree={() => setWorktreeTarget(selected)} onOrganize={() => setOrganizationTarget(selected)} onRemove={() => setRemoveTarget(selected)} directMessagesHeight={Number(workspace.terminalDirectMessagesHeight) || 0} composeHeight={Number(workspace.terminalComposeHeight) || 0} terminalOnly /> : <StateSurface title="No active terminal" description="Select or relaunch an agent in the main Torque window." />;
+    return selected && terminalChoices.length ? <FocusPanel agent={selected} terminal={terminalChoices.find((cell) => cell.id === selectedTerminalId) ?? terminalChoices[0] ?? selected} detachedTerminal={null} messages={messagesState.direct[selected.id]} host={host} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onDetachAgent={() => { void detachAgents(); }} onInspectWorktree={() => setWorktreeTarget(selected)} onOrganize={() => setOrganizationTarget(selected)} onRemove={() => setRemoveTarget(selected)} directMessagesHeight={Number(workspace.terminalDirectMessagesHeight) || 0} composeHeight={Number(workspace.terminalComposeHeight) || 0} terminalOnly /> : <StateSurface title="No active terminal" description="Select or relaunch an agent in the main Torque window." />;
   }
 
   return (
@@ -568,7 +373,7 @@ export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable,
         <div className={styles.detailHost}>
           {selected ? <header className={styles.detailViewBar}><span>Agent view</span>{viewControl(selected)}</header> : null}
           <div className={`${styles.detailPane} ${workspaceUi.agentsViewMode === 'live' ? '' : styles.workspaceHidden}`} aria-hidden={workspaceUi.agentsViewMode !== 'live'}>
-            {selected ? <FocusPanel agent={selected} terminal={selected} detachedTerminal={terminalEntry} messages={messagesState.direct[selected.id]} rawSettings={settings[selected.id]} rawDigestSettings={digestSettings[selected.id]} resolvedSettings={resolvedSettings[selected.id]} host={host} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onDetachAgent={() => { void detachAgents(); }} onInspectWorktree={() => setWorktreeTarget(selected)} onOrganize={() => setOrganizationTarget(selected)} onRemove={() => setRemoveTarget(selected)} directMessagesHeight={Number(workspace.terminalDirectMessagesHeight) || 0} composeHeight={Number(workspace.terminalComposeHeight) || 0} active={active && workspaceUi.agentsViewMode === 'live'} /> : <StateSurface title="Select an agent" description="Choose an agent to inspect status, worktree, settings, messages, and terminal." />}
+            {selected ? <FocusPanel agent={selected} terminal={selected} detachedTerminal={terminalEntry} messages={messagesState.direct[selected.id]} host={host} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onDetachAgent={() => { void detachAgents(); }} onInspectWorktree={() => setWorktreeTarget(selected)} onOrganize={() => setOrganizationTarget(selected)} onRemove={() => setRemoveTarget(selected)} directMessagesHeight={Number(workspace.terminalDirectMessagesHeight) || 0} composeHeight={Number(workspace.terminalComposeHeight) || 0} active={active && workspaceUi.agentsViewMode === 'live'} /> : <StateSurface title="Select an agent" description="Choose an agent to inspect status, worktree, settings, messages, and terminal." />}
           </div>
           <div className={`${styles.detailPane} ${workspaceUi.agentsViewMode === 'activity' ? '' : styles.workspaceHidden}`} aria-hidden={workspaceUi.agentsViewMode !== 'activity'}>
             {workspaceUi.agentsViewMode === 'activity' ? selected?.cellType === 'agent' ? <AgentDetailWorkspace key={selected.id} agent={selected} group={group} catalog={catalog} responses={auxiliaryResponses} tasks={tasks} directMessages={messagesState.direct[selected.id]} peerThreads={messagesState.peerThreads} digestSettings={digestSettings[selected.id]} digestBufferStats={digestBufferStats[selected.id] ?? engineerBufferStats[group]} digestSentEvents={digestSentEvents[selected.id] ?? engineerSentEvents[group]} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} /> : <StateSurface title="Select an agent" description="Activity is available for Architects, Engineers, and Workers rather than standalone terminals." /> : null}

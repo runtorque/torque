@@ -675,6 +675,10 @@ export const selectAgentsState = createSelector(
   [selectAgentRecords, selectAgentSettings, selectResolvedAgentSettings, selectAgentDigestSettings, selectDigestBufferStats, selectDigestSentEvents, selectEngineerBufferStats, selectEngineerSentEvents],
   (records, settings, resolvedSettings, digestSettings, digestBufferStats, digestSentEvents, engineerBufferStats, engineerSentEvents) => ({ records, settings, resolvedSettings, digestSettings, digestBufferStats, digestSentEvents, engineerBufferStats, engineerSentEvents }),
 );
+export const selectAgentSettingsDefaults = createSelector(
+  [selectRecord('global_settings'), selectRecord('group_settings'), selectRecord('engineer_settings'), selectRecord('architect_settings')],
+  (global, groups, engineers, architects) => ({ global, groups, engineers, architects }),
+);
 export const selectGroupsState = createSelector(
   [selectGroupRecords, selectChildren, selectGroupSettings],
   (records, children, settings) => ({ records, children, settings }),

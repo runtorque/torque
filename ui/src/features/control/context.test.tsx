@@ -61,7 +61,7 @@ it('retains edits on read/write errors, rejects mismatched acknowledgements and 
   fail(''); mismatch(true); fireEvent.click(screen.getByRole('button', { name: 'Save context' })); await screen.findByText(/not acknowledged/); expect(screen.getByRole('textbox', { name: 'Title' })).toBe(title);
   mismatch(false); fireEvent.click(screen.getByRole('button', { name: 'Save context' })); await screen.findByRole('heading', { name: 'Local title' });
   expect(commands.filter((item) => item.cmd === 'memory_publish')).toHaveLength(3);
-  fail('memory_pin'); fireEvent.click(screen.getByRole('button', { name: 'Pin' })); await screen.findByText(/Injected refusal/); expect(screen.getByRole('button', { name: 'Pin' })).toBeEnabled();
+  fail('memory_pin'); fireEvent.click(await screen.findByRole('button', { name: 'Pin' })); await screen.findByText(/Injected refusal/); expect(screen.getByRole('button', { name: 'Pin' })).toBeEnabled();
   fail(''); fireEvent.click(screen.getByRole('button', { name: 'Pin' })); await screen.findByRole('button', { name: 'Unpin' });
 });
 

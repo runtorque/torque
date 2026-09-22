@@ -206,3 +206,7 @@ Prompt-editor acceptance: `prompt-editor-live.spec.ts` runs against the disposab
 ### Stale completed-task archive regression
 
 `stale-archive-live.spec.ts` advances only the browser clock to compare six-day and eight-day eligibility. It creates real tasks in two disposable groups, verifies filtered scope and hidden/Archive behavior, injects one batch refusal, then archives through the actual daemon command. Keyboard submission, unrelated draft/caret/selection/scroll, reload/reconnect and persisted task lanes are checked. Test teardown removes its task records. No daemon clock, production data, provider or native window is changed.
+
+### Per-agent settings refresh and recovery regression
+
+`ui/e2e/agent-settings-live.spec.ts` uses a disposable generic Engineer in an isolated profile to verify changed defaults, reconnect, retained reset/draft/caret, dirty dismissal, failed-read retry and launch-success/digest-failure recovery. The test verifies persisted values after external updates and reload, checks compact discard layout and removes its own Engineer. Run against the isolated browser QA daemon using the same Playwright environment as the other live regressions; never target the default profile.

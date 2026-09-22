@@ -26,6 +26,11 @@ function renderShell(host = browserHost, frame: StateFrame = compactStateFixture
 
 afterEach(() => vi.unstubAllGlobals());
 
+function agentSettingsResponse(frame: StateFrame, id: string) {
+  return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: 'agent_settings', agent_id: id, settings: (frame.agent_settings as Record<string, unknown> | undefined)?.[id] ?? {}, resolved: (frame.resolved_agent_settings as Record<string, unknown> | undefined)?.[id] ?? {} } }) });
+}
+
+
 function mockSettingsRequests(failSave = false) {
   const commands: TorqueCommand[] = []; let failedRead = '';
   const snapshots: Record<string, UnknownRecord> = {
@@ -712,7 +717,7 @@ describe('workspace shell', () => {
     expect(screen.queryByRole('button', { name: /Inspect activity/ })).not.toBeInTheDocument();
   });
 
-  it('shows server-resolved per-agent setting origins without writing an unchanged form', () => {
+  it('shows server-resolved per-agent setting origins without writing an unchanged form', async () => {
     const principalFrame: StateFrame = {
       ...compactStateFixture,
       agents: {
@@ -728,10 +733,13 @@ describe('workspace shell', () => {
         },
       },
     };
+    vi.stubGlobal('fetch', vi.fn(() => agentSettingsResponse(principalFrame, 'architect')));
     const { sendCommand } = renderShell(browserHost, principalFrame);
     fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
 
+    await waitFor(() => expect(screen.queryByText('Refreshing agent settings…')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Save settings' })).toBeDisabled();
     expect(screen.getAllByText('group')).toHaveLength(2);
     expect(screen.getAllByText('default')).toHaveLength(2);
     fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
@@ -741,16 +749,19 @@ describe('workspace shell', () => {
   it('retains per-agent overrides on failed save and explicitly restores inheritance', async () => {
     const frame: StateFrame = { ...compactStateFixture, agents: { architect: { id: 'architect', name: 'Principal', group: 'Foundation', kind: 'architect', status: 'idle' } }, resolved_agent_settings: { architect: { model: { value: 'override', origin: 'per-agent', inherited: { value: 'group-model', origin: 'group' } }, custom_instructions: { value: 'Group instructions', origin: 'group' } } } };
     let fail = true; const commands: TorqueCommand[] = [];
-    vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => { const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand; commands.push(command); return Promise.resolve({ ok: true, json: () => Promise.resolve(fail ? { ok: false, error: 'Save refused' } : { ok: true, data: { type: 'agent_settings', agent_id: 'architect', settings: command.settings } }) }); }));
+    vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => { const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand; if (command.cmd === 'get_agent_settings') return agentSettingsResponse(frame, String(command.agent_id)); commands.push(command); return Promise.resolve({ ok: true, json: () => Promise.resolve(fail ? { ok: false, error: 'Save refused' } : { ok: true, data: { type: 'agent_settings', agent_id: 'architect', settings: command.settings, resolved: { model: { value: 'group-model', origin: 'group' }, custom_instructions: { value: '', origin: 'default' } } } }) }); }));
     const { appStore } = renderShell(browserHost, frame);
     fireEvent.click(screen.getByRole('button', { name: /Agents/ })); fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await waitFor(() => expect(screen.queryByText('Refreshing agent settings…')).not.toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'Use inherited' }));
     const model = screen.getByRole('textbox', { name: /^Model/ }); expect(model).toHaveValue('group-model');
     const instructions = screen.getByRole('textbox', { name: /^Custom instructions/ }); fireEvent.change(instructions, { target: { value: '' } });
     act(() => { appStore.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: 11, ops: [{ op: 'agent_settings_update', agent_id: 'architect', resolved: { provider: { value: 'new-provider', origin: 'group' } } }] })); });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save settings' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Save refused'); expect(model).toHaveValue('group-model');
     expect(commands[0]).toEqual({ cmd: 'update_agent_settings', agent_id: 'architect', settings: { model: null, custom_instructions: '' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save settings' })).toBeEnabled());
     fail = false; fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Agent settings' })).not.toBeInTheDocument());
   });
@@ -759,10 +770,11 @@ describe('workspace shell', () => {
     const frame: StateFrame = { ...compactStateFixture, agents: { engineer: { id: 'engineer', name: 'Original', group: 'Foundation', kind: 'engineer', status: 'idle' } } };
     const commands: TorqueCommand[] = []; let refuse = true;
     vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => {
-      const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand; commands.push(command);
-      return Promise.resolve({ ok: true, json: () => Promise.resolve(refuse ? { ok: false, error: "Engineer 'Taken' already exists" } : { ok: true, data: command.cmd === 'rename_engineer' ? { id: 'engineer', kind: 'engineer', name: command.new_name } : { type: 'ok' } }) });
+      const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand; if (command.cmd === 'get_agent_settings') return agentSettingsResponse(frame, String(command.agent_id)); commands.push(command);
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(refuse ? { ok: false, error: "Engineer 'Taken' already exists" } : { ok: true, data: command.cmd === 'rename_engineer' ? { id: 'engineer', kind: 'engineer', name: command.new_name } : command.cmd === 'update_agent_settings' ? { type: 'agent_settings', agent_id: 'engineer', settings: command.settings, resolved: { model: { value: 'new-model', origin: 'per-agent' } } } : { type: 'ok' } }) });
     }));
     renderShell(browserHost, frame); fireEvent.click(screen.getByRole('button', { name: /Agents/ })); fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await waitFor(() => expect(screen.queryByText('Refreshing agent settings…')).not.toBeInTheDocument());
     const name = screen.getByRole('textbox', { name: 'Name' });
     fireEvent.change(name, { target: { value: '   ' } }); fireEvent.change(screen.getByLabelText('Icon'), { target: { value: 'gear' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
@@ -770,6 +782,7 @@ describe('workspace shell', () => {
     fireEvent.change(name, { target: { value: 'Taken' } }); fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
     expect(await screen.findByRole('alert')).toHaveTextContent("Engineer 'Taken' already exists"); await waitFor(() => expect(screen.getByRole('alert')).toHaveFocus()); expect(name).toHaveValue('Taken'); expect(screen.getByLabelText('Icon')).toHaveValue('gear');
     expect(commands).toEqual([{ cmd: 'rename_engineer', id: 'engineer', new_name: 'Taken' }]);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save settings' })).toBeEnabled());
     refuse = false; fireEvent.change(name, { target: { value: '  Available  ' } }); fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Agent settings' })).not.toBeInTheDocument());
     expect(commands.slice(1)).toEqual([{ cmd: 'rename_engineer', id: 'engineer', new_name: 'Available' }, { cmd: 'update_agent', id: 'engineer', icon: 'gear' }]);
@@ -779,10 +792,11 @@ describe('workspace shell', () => {
     const frame: StateFrame = { ...compactStateFixture, agents: { engineer: { id: 'engineer', name: 'Original', group: 'Foundation', kind: 'engineer', status: 'idle' } } };
     const commands: TorqueCommand[] = []; let release: (frame: UnknownRecord) => void = () => { throw new Error('Rename not pending'); };
     vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => {
-      const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand; commands.push(command);
+      const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand; if (command.cmd === 'get_agent_settings') return agentSettingsResponse(frame, String(command.agent_id)); commands.push(command);
       return new Promise((resolve) => { release = (data) => resolve({ ok: true, json: () => Promise.resolve({ ok: true, data }) }); });
     }));
     renderShell(browserHost, frame); fireEvent.click(screen.getByRole('button', { name: /Agents/ })); fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await waitFor(() => expect(screen.queryByText('Refreshing agent settings…')).not.toBeInTheDocument());
     const name = screen.getByRole('textbox', { name: 'Name' }); fireEvent.change(name, { target: { value: 'Renamed' } }); fireEvent.change(screen.getByLabelText('Icon'), { target: { value: 'gear' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
     expect(screen.getByRole('button', { name: 'Saving settings…' })).toBeDisabled(); expect(name).toBeDisabled();
@@ -796,20 +810,42 @@ describe('workspace shell', () => {
     const frame: StateFrame = { ...compactStateFixture, agents: { engineer: { id: 'engineer', name: 'Original', group: 'Foundation', kind: 'engineer', status: 'idle' } } };
     const commands: TorqueCommand[] = []; let refuseSettings = true;
     vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => {
-      const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand; commands.push(command);
-      return Promise.resolve({ ok: true, json: () => Promise.resolve(command.cmd === 'update_agent_settings' && refuseSettings ? { ok: false, error: 'Settings refused' } : { ok: true, data: command.cmd === 'rename_engineer' ? { id: 'engineer', kind: 'engineer', name: command.new_name } : { type: 'ok' } }) });
+      const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand; if (command.cmd === 'get_agent_settings') return agentSettingsResponse(frame, String(command.agent_id)); commands.push(command);
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(command.cmd === 'update_agent_settings' && refuseSettings ? { ok: false, error: 'Settings refused' } : { ok: true, data: command.cmd === 'rename_engineer' ? { id: 'engineer', kind: 'engineer', name: command.new_name } : command.cmd === 'update_agent_settings' ? { type: 'agent_settings', agent_id: 'engineer', settings: command.settings, resolved: { model: { value: 'new-model', origin: 'per-agent' } } } : { type: 'ok' } }) });
     }));
     const { appStore } = renderShell(browserHost, frame); fireEvent.click(screen.getByRole('button', { name: /Agents/ })); fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await waitFor(() => expect(screen.queryByText('Refreshing agent settings…')).not.toBeInTheDocument());
     const name = screen.getByRole('textbox', { name: 'Name' }); fireEvent.change(name, { target: { value: 'Renamed' } }); fireEvent.change(screen.getByLabelText('Icon'), { target: { value: 'gear' } }); fireEvent.change(screen.getByLabelText('Model'), { target: { value: 'new-model' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save settings' })); expect(await screen.findByRole('alert')).toHaveTextContent('Identity changes were saved. Settings refused');
+    fireEvent.click(screen.getByRole('button', { name: 'Save settings' })); expect(await screen.findByRole('alert')).toHaveTextContent('Some changes were saved. Settings refused');
     act(() => { appStore.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: 11, ops: [{ op: 'agent_upsert', id: 'engineer', name: 'External name', icon: 'external', kind: 'engineer', group: 'Foundation', status: 'idle' }] })); });
     expect(screen.getByRole('heading', { name: 'External name', hidden: true })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save settings' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'Save settings' })); await waitFor(() => expect(commands.filter((command) => command.cmd === 'update_agent_settings')).toHaveLength(2));
     expect(await screen.findByRole('alert')).toHaveTextContent('Settings refused'); expect(commands.filter((command) => command.cmd === 'rename_engineer')).toHaveLength(1); expect(commands.filter((command) => command.cmd === 'update_agent')).toHaveLength(1);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save settings' })).toBeEnabled());
     refuseSettings = false; fireEvent.change(name, { target: { value: 'Original' } }); fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Agent settings' })).not.toBeInTheDocument());
     expect(commands.filter((command) => command.cmd === 'rename_engineer')).toEqual([{ cmd: 'rename_engineer', id: 'engineer', new_name: 'Renamed' }, { cmd: 'rename_engineer', id: 'engineer', new_name: 'Original' }]);
     expect(commands.filter((command) => command.cmd === 'update_agent')).toHaveLength(1);
+  });
+
+  it('pins an open settings dialog to its original agent when workspace selection changes', async () => {
+    const frame: StateFrame = { ...compactStateFixture, agents: { engineer: { id: 'engineer', name: 'Original', group: 'Foundation', kind: 'engineer', status: 'idle' }, other: { id: 'other', name: 'Other', group: 'Foundation', kind: 'engineer', status: 'idle' } } };
+    const commands: TorqueCommand[] = [];
+    vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => {
+      const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand; commands.push(command);
+      return agentSettingsResponse(frame, 'engineer');
+    }));
+    const { appStore } = renderShell(browserHost, frame);
+    act(() => { appStore.dispatch(workspaceUiActions.setSelectedAgent('engineer')); });
+    fireEvent.click(screen.getByRole('button', { name: /Agents/ })); fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await waitFor(() => expect(screen.queryByText('Refreshing agent settings…')).not.toBeInTheDocument());
+    const model = screen.getByLabelText('Model'); fireEvent.change(model, { target: { value: 'draft' } });
+    act(() => { appStore.dispatch(workspaceUiActions.setSelectedAgent('other')); });
+    expect(screen.getByLabelText('Name')).toHaveValue('Original'); expect(screen.getByLabelText('Model')).toBe(model); expect(model).toHaveValue('draft');
+    fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Agent settings' })).not.toBeInTheDocument());
+    expect(commands.at(-1)).toEqual({ cmd: 'update_agent_settings', agent_id: 'engineer', settings: { model: 'draft' } });
   });
 
   it('opens Phase 4 Planning, lazy-loads its resources, and creates an initiative', async () => {
