@@ -1117,3 +1117,7 @@ P-251/P-252 restore explicit Off/Metadata/Full choices and Classic retention min
 ### Settings search checkpoint — 2026-09-23
 
 P-254 adds local label/description/scope search with bounded accessible results, disclosure reveal and focus on the retained control. Draft values and secrets are excluded from the index. Reconnect updates available results without replacing the search query or edited form. D-151 records the interaction. The main ledger now has **254 behaviors: 245 implemented/equivalent dispositions, 5 open repairs and 4 intentional retirements**. Broad settings and lazy/reconnect rows, plus independent native/external acceptance, still prevent Phase 4 completion and Classic retirement.
+
+### Numeric settings and inheritance audit checkpoint — 2026-09-23
+
+P-255 supplies the remaining supported numeric bounds and endpoint persistence evidence. The audit adds P-256/P-257 for inherited launch suggestions/previews and resolved relay configuration. It also reopens P-095 because shortcut conflict handling was never implemented despite the earlier Required disposition. The ledger now has **257 behaviors: 245 implemented/equivalent dispositions, 8 open repairs and 4 intentional retirements**. Broad settings/lazy-reconnect and independent native/external acceptance remain open.

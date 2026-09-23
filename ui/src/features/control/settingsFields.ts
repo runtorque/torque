@@ -948,12 +948,14 @@ export const settingFields: Record<string, SettingField> = {
   },
   "guidance_hint_cadence": {
     "label": "Guidance hint cadence",
-    "description": "0=every time; otherwise 1st, then every N",
+    "min": "0", "max": "100",
+    "description": "Show guidance on the first occurrence and every N occurrences after that (0–100). Set 0 to show it every time.",
     "kind": "int"
   },
   "context_default_ttl_days": {
     "label": "Context default ttl days",
-    "description": "Shared Context entry lifetime, clamped to 1..60.",
+    "min": "1", "max": "60",
+    "description": "Default lifetime of new Shared Context entries, from 1 to 60 days.",
     "kind": "int"
   },
   "engineer_hint_snoozes": {
@@ -1149,10 +1151,14 @@ export const settingFields: Record<string, SettingField> = {
   },
   "perceived_empty_probe_threshold": {
     "label": "Perceived empty probe threshold",
+    "min": "2", "max": "25",
+    "description": "Empty-result probes required to detect an episode, from 2 to 25.",
     "kind": "int"
   },
   "perceived_empty_window_seconds": {
     "label": "Perceived empty window seconds",
+    "min": "10", "max": "3600",
+    "description": "Window for counting empty-result probes, from 10 to 3600 seconds.",
     "kind": "int"
   },
   "status_bar_visibility": {

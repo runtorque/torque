@@ -100,3 +100,17 @@ it.each([
   for (const draft of invalid) { fireEvent.change(input, { target: { value: draft } }); expect(input).toBeInvalid(); expect(input).toHaveValue(draft ? Number(draft) : null); }
   fireEvent.change(input, { target: { value: String(minimum) } }); expect(input).toBeValid();
 });
+
+it.each([
+  ['guidance_hint_cadence', 'Guidance hint cadence', 0, 100],
+  ['context_default_ttl_days', 'Context default ttl days', 1, 60],
+  ['perceived_empty_probe_threshold', 'Perceived empty probe threshold', 2, 25],
+  ['perceived_empty_window_seconds', 'Perceived empty window seconds', 10, 3600],
+] as const)('keeps %s drafts within the daemon-supported range', (key, label, minimum, maximum) => {
+  function Form() { const [value, setValue] = useState<Record<string, unknown>>({ [key]: minimum }); return <StructuredSettings value={value} onChange={setValue} />; }
+  render(<Form />); const input = screen.getByRole('spinbutton', { name: label });
+  for (const valid of [minimum, maximum]) { fireEvent.change(input, { target: { value: String(valid) } }); expect(input).toBeValid(); }
+  for (const draft of ['', String(minimum - 1), String(maximum + 1), String(minimum + 0.5)]) {
+    fireEvent.change(input, { target: { value: draft } }); expect(input).toBeInvalid(); expect(input).toHaveValue(draft ? Number(draft) : null);
+  }
+});

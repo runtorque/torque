@@ -240,3 +240,7 @@ The worktree diff scenario also exercises real WebSocket reconnect while Changes
 ### Settings search acceptance
 
 `settings-search-live.spec.ts` searches real settings across global/group, Engineer/Architect defaults, AI, appearance and shortcuts. It checks closed-section reveal, keyboard focus/viewport, retained directory and secret drafts, caret selection, no writes from search or Enter, updated map-field results after a real WebSocket reconnect, and wide/narrow screenshots. The fixture uses an isolated group and synthetic values; it never submits its secret draft.
+
+### Remaining numeric settings boundaries
+
+`settings-bounds-live.spec.ts` validates cadence, Context TTL and perceived-empty detector bounds. It closes each control's disclosure before invalid saves, checks reveal/focus and absence of writes, then saves and reloads both endpoints through real global/group commands. The Python settings-contract suite also verifies every endpoint after SQLite reload. Personal transcript replay tests may skip when their files are absent; do not count those skips as detector runtime verification.

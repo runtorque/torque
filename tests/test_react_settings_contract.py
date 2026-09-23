@@ -68,6 +68,24 @@ class ReactSettingsContractTests(unittest.TestCase):
                     stored = restarted.global_settings if scope == 'global' else getattr(restarted, f'get_{scope}_settings')('qa')
                     self.assertEqual(getattr(stored, key), value)
 
+    def test_editable_numeric_boundaries_survive_write_and_restart(self):
+        for scope, key, minimum, maximum in [
+            ('group', 'guidance_hint_cadence', 0, 100),
+            ('group', 'context_default_ttl_days', 1, 60),
+            ('global', 'perceived_empty_probe_threshold', 2, 25),
+            ('global', 'perceived_empty_window_seconds', 10, 3600),
+        ]:
+            for value in (minimum, maximum):
+                with self.subTest(scope=scope, field=key, value=value):
+                    if scope == 'global':
+                        self.state.update_global_settings(**{key: value})
+                    else:
+                        self.state.update_group_settings('qa', **{key: value})
+                    restarted = MatrixState(self.db)
+                    restarted.load()
+                    stored = restarted.global_settings if scope == 'global' else restarted.get_group_settings('qa')
+                    self.assertEqual(getattr(stored, key), value)
+
     def test_engineer_visibility_setting_is_routed_and_persisted(self):
         runtime = EngineerOperationRuntime(**{field.name: None for field in fields(EngineerOperationRuntime)})
         runtime.state = self.state

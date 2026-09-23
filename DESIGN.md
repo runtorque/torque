@@ -3165,3 +3165,12 @@ History renders the persisted contract: role/template, input/output token counts
 - Navigation: Activating a result clears the search, opens its ancestor disclosures and focuses/scrolls the existing control. Enter activates the first available match without submitting Settings; Arrow Down enters results and Escape or Clear settings search clears the query. Search does not save, reset, remount or filter away form fields. Pending-save disabled controls remain unavailable in results.
 - Refresh and privacy: Refresh results when mounted controls, labels or descriptions change, while retaining the query and its selection. Never index input values, provider keys, textarea drafts or option content. The search index stays local to the mounted Settings form and sends no requests.
 - Verification: P-254 records focused model/component/app checks and isolated browser acceptance, including retained drafts, reconnect, scope reveal and narrow-screen results. Broad settings lifecycle and native acceptance remain separate gates.
+
+
+### D-152 — Settings numeric editors use the supported domain boundaries
+
+- Date: 2026-09-23
+- Scope: Guidance hint cadence, Shared Context default lifetime, and perceived-empty probe threshold/window.
+- Decision: Require integer cadence 0–100, Context lifetime 1–60 days, probe threshold 2–25 and window 10–3600 seconds. Describe the units and cadence-zero behavior beside the controls. These match Classic's cadence control and the daemon's existing normalization boundaries.
+- Validation: Preserve invalid editing buffers, reveal/focus hidden invalid controls and prevent the coordinated save from writing any scope. Accept and persist both endpoints without silently clamping the operator's entered value.
+- Verification: P-255 records focused component, persistence/reload and isolated production-browser evidence. The existing daemon normalization/runtime semantics are unchanged.
