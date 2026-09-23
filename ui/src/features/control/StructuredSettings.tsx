@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 
 import { SpecializationPicker } from './SpecializationPicker';
+import { DefaultRoleSetting } from './DefaultRoleSetting';
 import { NumericSettingInput } from './NumericSettingInput';
 import { Button } from '../../design/primitives';
 import type { UnknownRecord } from '../../protocol';
@@ -29,7 +30,7 @@ function SettingObject({ value, onChange, label, template, fixedSchema = false }
   return <fieldset><legend>{label}</legend><StructuredSettings value={value} onChange={onChange} prefix={label} schema={false} onRemove={(key) => { const next = { ...value }; delete next[key]; onChange(next); }} /><label>New {label.toLocaleLowerCase()} key<input value={newKey} onChange={(event) => setNewKey(event.target.value)} /></label><Button isDisabled={!newKey.trim() || newKey.trim() in value} onPress={() => { onChange({ ...value, [newKey.trim()]: '' }); setNewKey(''); }}>Add entry</Button></fieldset>;
 }
 
-export function StructuredSettings({ value, onChange, prefix = '', omit = [], onRemove, providers = [], defaults = {}, schema = true, group = '', launchContext }: { launchContext?: LaunchContext; group?: string; schema?: boolean; defaults?: UnknownRecord; providers?: unknown[]; value: UnknownRecord; onChange: (next: UnknownRecord) => void; prefix?: string; omit?: string[]; onRemove?: (key: string) => void }) {
+export function StructuredSettings({ value, onChange, prefix = '', omit = [], onRemove, providers = [], defaults = {}, schema = true, group = '', launchContext, templates = [] }: { templates?: unknown[]; launchContext?: LaunchContext; group?: string; schema?: boolean; defaults?: UnknownRecord; providers?: unknown[]; value: UnknownRecord; onChange: (next: UnknownRecord) => void; prefix?: string; omit?: string[]; onRemove?: (key: string) => void }) {
   const instance = useId();
   return <div className={styles.structuredSettings}>{Object.entries(value).filter(([key]) => !omit.includes(key)).map(([key, item]) => {
     const field = schema ? settingFields[key] : undefined; const label = `${prefix ? `${prefix}: ` : ''}${schema ? labelFor(key) : key}`;
@@ -43,7 +44,7 @@ export function StructuredSettings({ value, onChange, prefix = '', omit = [], on
     const choicesId = `${instance}-${key}-choices`;
     const options = suggestions.length ? undefined : field?.options;
     const choice = options?.length ? [...options, ...(!options.some((option) => option.value === scalar(item)) ? [{ value: scalar(item), label: scalar(item) || 'Inherit' }] : [])] : null;
-    return <div key={key}><label className={styles.field}><span>{label}</span>{typeof item === 'boolean' ? <select aria-label={label} aria-describedby={descriptionId} value={item ? 'true' : 'false'} onChange={(event) => set(event.target.value === 'true')}><option value="true">Enabled</option><option value="false">Disabled</option></select>
+    return <div key={key}><label className={styles.field}><span>{label}</span>{schema && key === 'default_agent_template' ? <DefaultRoleSetting label={label} descriptionId={descriptionId} value={scalar(item)} templates={templates} onChange={set} /> : typeof item === 'boolean' ? <select aria-label={label} aria-describedby={descriptionId} value={item ? 'true' : 'false'} onChange={(event) => set(event.target.value === 'true')}><option value="true">Enabled</option><option value="false">Disabled</option></select>
       : Array.isArray(item) ? <StringListSetting value={item as unknown[]} onChange={set} label={label} descriptionId={descriptionId} />
       : choice ? <select aria-label={label} aria-describedby={descriptionId} value={scalar(item)} onChange={(event) => set(typeof item === 'number' ? Number(event.target.value) : event.target.value)}>{choice.map((option) => <option key={option.value} value={option.value}>{option.value === '' && inherited.placeholder ? inherited.placeholder : option.label || 'Inherit'}</option>)}</select>
       : typeof item === 'number' || field?.kind === 'int' || field?.kind === 'float' ? <NumericSettingInput fieldKey={schema ? key : ''} aria-label={label} aria-describedby={descriptionId} value={typeof item === 'number' ? item : scalar(item)} onChange={set} />

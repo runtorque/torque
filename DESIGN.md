@@ -3206,3 +3206,12 @@ History renders the persisted contract: role/template, input/output token counts
 - Enabled fallback: Explain when the environment enables Relay. Saving Disabled clears the settings override; the environment flag can still keep Relay enabled, and the post-save form must reflect that effective state.
 - Privacy and boundaries: Read only the five public configuration fields. Display private-key paths or empty inheritance placeholders; never read or display inline PEM fields. Configuration verification does not imply external Relay connectivity or credential provisioning.
 - Verification: P-257 records model/app tests, backend resolution-contract checks, and isolated production-browser acceptance with the connector module deliberately unavailable.
+
+
+### D-156 — Default role selection uses the scoped catalog
+
+- Date: 2026-09-23
+- Scope: Group default_agent_template, the compatibility field for the default worker role.
+- Decision: Offer None plus Project and User optgroups using discovered display names. Filter shadowed entries and prefer a project role when names collide, including older catalogs without explicit shadowed flags. Persist only the role name through the normal group settings save.
+- Continuity: A selected name absent from the current catalog remains selected and visibly identified as unavailable. Refresh, disappearance or changed labels do not clear it, write settings, replace the editor or move focus. Reappearing entries regain their discovered label. None and Reset explicitly clear the override while preserving other launch settings.
+- Verification: P-258 records component coverage and isolated production-browser catalog disappearance/reappearance, sparse save/reload, clear and reset acceptance. No role is launched by this selector.

@@ -1141,3 +1141,8 @@ P-256 now supplies current shared/runtime provider choices and inherited launch 
 ### Resolved Relay settings checkpoint — 2026-09-23
 
 P-257 now displays resolved configuration and source inheritance while preserving focused/dirty fields and sparse saves. D-155 and the matrix record focused, backend-contract and isolated production-browser evidence. The audit adds P-258 for the missing default role/template catalog picker. The main ledger now has **258 behaviors: 248 implemented/equivalent dispositions, 6 open repairs and 4 intentional retirements**. Broad settings, lazy/reconnect, role discovery and native/external acceptance remain open; Phase 4 is not complete.
+
+
+### Default role picker checkpoint — 2026-09-23
+
+P-258 now restores scoped catalog discovery while retaining unavailable selections, focus and sparse group saves. D-156 and the matrix record component and isolated live-daemon acceptance. The main ledger now has **258 behaviors: 249 implemented/equivalent dispositions, 5 open repairs and 4 intentional retirements**. Broad settings/lazy-reconnect audits and native/external acceptance remain open; Phase 4 is not complete.
