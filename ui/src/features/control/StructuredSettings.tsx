@@ -5,6 +5,7 @@ import { NumericSettingInput } from './NumericSettingInput';
 import { Button } from '../../design/primitives';
 import type { UnknownRecord } from '../../protocol';
 import { providerChoices } from './providerChoices';
+import { launchInheritance, type LaunchContext } from './launchInheritance';
 import { settingFields } from './settingsFields';
 import { changedSettings, githubSettingsDefaults, settingsEqual } from './settingsModel';
 import styles from './ControlCenter.module.css';
@@ -28,7 +29,7 @@ function SettingObject({ value, onChange, label, template, fixedSchema = false }
   return <fieldset><legend>{label}</legend><StructuredSettings value={value} onChange={onChange} prefix={label} schema={false} onRemove={(key) => { const next = { ...value }; delete next[key]; onChange(next); }} /><label>New {label.toLocaleLowerCase()} key<input value={newKey} onChange={(event) => setNewKey(event.target.value)} /></label><Button isDisabled={!newKey.trim() || newKey.trim() in value} onPress={() => { onChange({ ...value, [newKey.trim()]: '' }); setNewKey(''); }}>Add entry</Button></fieldset>;
 }
 
-export function StructuredSettings({ value, onChange, prefix = '', omit = [], onRemove, providers = [], defaults = {}, schema = true, group = '' }: { group?: string; schema?: boolean; defaults?: UnknownRecord; providers?: unknown[]; value: UnknownRecord; onChange: (next: UnknownRecord) => void; prefix?: string; omit?: string[]; onRemove?: (key: string) => void }) {
+export function StructuredSettings({ value, onChange, prefix = '', omit = [], onRemove, providers = [], defaults = {}, schema = true, group = '', launchContext }: { launchContext?: LaunchContext; group?: string; schema?: boolean; defaults?: UnknownRecord; providers?: unknown[]; value: UnknownRecord; onChange: (next: UnknownRecord) => void; prefix?: string; omit?: string[]; onRemove?: (key: string) => void }) {
   const instance = useId();
   return <div className={styles.structuredSettings}>{Object.entries(value).filter(([key]) => !omit.includes(key)).map(([key, item]) => {
     const field = schema ? settingFields[key] : undefined; const label = `${prefix ? `${prefix}: ` : ''}${schema ? labelFor(key) : key}`;
@@ -37,16 +38,17 @@ export function StructuredSettings({ value, onChange, prefix = '', omit = [], on
     const reset = key in defaults ? <Button tone="quiet" isDisabled={settingsEqual(item, defaults[key])} onPress={() => set(structuredClone(defaults[key]))}>Reset {label}</Button> : null;
     if (schema && key === 'default_engineer_specializations' && group && Array.isArray(item)) return <div key={key} className={styles.settingObject}><fieldset><legend>{label}</legend><SpecializationPicker group={group} label={label} value={item.filter((entry): entry is string => typeof entry === 'string')} onChange={set} /></fieldset>{reset}</div>;
     if (item && typeof item === 'object' && !Array.isArray(item)) return <div key={key} className={styles.settingObject}><SettingObject value={item as UnknownRecord} onChange={set} label={label} fixedSchema={schema && key === 'architect_review_gate_thresholds'} template={schema && key === 'board_sync_github' ? githubSettingsDefaults : undefined} />{reset}</div>;
-    const suggestions = schema ? providerChoices(providers, key, value) : [];
+    const inherited = launchInheritance(key, value, providers, schema ? launchContext : undefined);
+    const suggestions = schema ? providerChoices(providers, key, inherited.choices) : [];
     const choicesId = `${instance}-${key}-choices`;
     const options = suggestions.length ? undefined : field?.options;
     const choice = options?.length ? [...options, ...(!options.some((option) => option.value === scalar(item)) ? [{ value: scalar(item), label: scalar(item) || 'Inherit' }] : [])] : null;
     return <div key={key}><label className={styles.field}><span>{label}</span>{typeof item === 'boolean' ? <select aria-label={label} aria-describedby={descriptionId} value={item ? 'true' : 'false'} onChange={(event) => set(event.target.value === 'true')}><option value="true">Enabled</option><option value="false">Disabled</option></select>
       : Array.isArray(item) ? <StringListSetting value={item as unknown[]} onChange={set} label={label} descriptionId={descriptionId} />
-      : choice ? <select aria-label={label} aria-describedby={descriptionId} value={scalar(item)} onChange={(event) => set(typeof item === 'number' ? Number(event.target.value) : event.target.value)}>{choice.map((option) => <option key={option.value} value={option.value}>{option.label || 'Inherit'}</option>)}</select>
+      : choice ? <select aria-label={label} aria-describedby={descriptionId} value={scalar(item)} onChange={(event) => set(typeof item === 'number' ? Number(event.target.value) : event.target.value)}>{choice.map((option) => <option key={option.value} value={option.value}>{option.value === '' && inherited.placeholder ? inherited.placeholder : option.label || 'Inherit'}</option>)}</select>
       : typeof item === 'number' || field?.kind === 'int' || field?.kind === 'float' ? <NumericSettingInput fieldKey={schema ? key : ''} aria-label={label} aria-describedby={descriptionId} value={typeof item === 'number' ? item : scalar(item)} onChange={set} />
       : /instructions|nudge|prompt/.test(key) ? <textarea aria-label={label} aria-describedby={descriptionId} rows={4} value={scalar(item)} onChange={(event) => set(event.target.value)} />
-      : <input list={suggestions.length ? choicesId : undefined} aria-label={label} aria-describedby={descriptionId} value={scalar(item)} placeholder={field?.placeholder || (scalar(item) === '' ? 'Inherit / default' : '')} onChange={(event) => set(event.target.value)} />}
+      : <input list={suggestions.length ? choicesId : undefined} aria-label={label} aria-describedby={descriptionId} value={scalar(item)} placeholder={inherited.placeholder || field?.placeholder || (scalar(item) === '' ? 'Inherit / default' : '')} onChange={(event) => set(event.target.value)} />}
     {suggestions.length ? <datalist id={choicesId}>{suggestions.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}</datalist> : null}</label>{reset}{field?.description ? <small id={descriptionId}>{field.description}</small> : null}{onRemove ? <Button tone="quiet" onPress={() => onRemove(key)}>Remove {label}</Button> : null}</div>;
   })}</div>;
 }

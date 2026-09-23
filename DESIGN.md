@@ -3185,3 +3185,13 @@ History renders the persisted contract: role/template, input/output token counts
 - Navigation: Cmd/Ctrl+G opens group-only search; Cmd/Ctrl+P opens panel-only search over the fixed workspaces and Control Center destinations. Cmd/Ctrl+K opens all commands. Existing fuzzy selection, arrow/Enter/Escape navigation and Settings draft protection apply. Docking, pinning and panel reordering remain covered by the documented fixed-workspace redesign.
 - Dispatch: Use the effective saved bindings for actual actions and hints. Both B and Classic K open Board by default; the legacy panel.toggle override remains supported as an alternate Board entry point. Focus composer reveals the selected agent's Live view before focusing its editor. A saved create-task override replaces N even while a Board card owns focus.
 - Verification: Focused model/component tests and isolated production-browser acceptance are recorded under P-095/P-101/P-102. Native window routing and cross-platform host lifecycle remain separate acceptance gates.
+
+
+### D-154 — Launch inheritance is a preview, not an implicit override
+
+- Date: 2026-09-23
+- Scope: Shared Agent and Worker/Engineer/Architect launch settings.
+- Decision: Resolve model and reasoning suggestions from the explicit role provider, the current shared Agent provider draft, then the runtime default command matched against discovered provider metadata. Use the effective model's reasoning choices and advertised default when available. Keep unknown/custom providers and models editable; do not invent choices for missing metadata.
+- Preview: Empty provider, model, reasoning, command, directory, shell and environment-file fields show the inherited shared draft or known runtime/provider default. Shared edits update these previews before Save. Role-specific explicit overrides stay intact. Show provider/system default, current directory or none when no concrete inherited value is available.
+- Persistence and stability: Keep the input value empty while it inherits. Preview computation must not add settings writes, convert suggestions into overrides or replace a focused editor. Reset/clear resumes inheritance. Current coordinated Settings save and reconnect reconciliation continue to own drafts, focus and sparse writes.
+- Verification: P-256 records focused component/model and isolated production-browser evidence. This projection does not launch providers or change the daemon's launch-resolution rules.

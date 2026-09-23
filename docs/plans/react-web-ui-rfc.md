@@ -1131,3 +1131,8 @@ Further source inspection reopens P-101/P-102: filtered group/panel navigator ho
 ### Keyboard parity checkpoint — 2026-09-23
 
 P-095/P-101/P-102 now have conflict/reset review, filtered Cmd/Ctrl+G/P entry points and actual dispatch from saved bindings, including Classic K and composer focus from Activity. D-153 and the detailed matrix record unit and isolated production-browser evidence. The main ledger now has **257 behaviors: 246 implemented/equivalent dispositions, 7 open repairs and 4 intentional retirements**. Broad settings/lazy-reconnect, inherited launch/relay projections and independent native/external acceptance still prevent a full-parity or Phase 4 completion claim.
+
+
+### Inherited launch settings checkpoint — 2026-09-23
+
+P-256 now supplies current shared/runtime provider choices and inherited launch previews without promoting empty overrides. D-154 and the parity matrix record focused and isolated live-daemon acceptance. The main ledger now has **257 behaviors: 247 implemented/equivalent dispositions, 6 open repairs and 4 intentional retirements**. Broad settings, lazy/reconnect, resolved Relay configuration and independent native/external acceptance remain open; Phase 4 is not complete.
