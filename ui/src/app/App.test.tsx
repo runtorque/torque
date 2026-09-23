@@ -1284,6 +1284,7 @@ describe('workspace shell', () => {
     await waitFor(() => expect(screen.queryByText(/Settings refresh failed/)).not.toBeInTheDocument()); expect(screen.getByRole('combobox', { name: 'Default worker concurrency' })).toBe(concurrency); expect(concurrency).toHaveValue('2');
     fireEvent.click(screen.getByRole('button', { name: 'Reset Engineer defaults' })); expect(concurrency).toHaveValue('7');
     fireEvent.click(screen.getByRole('button', { name: 'Mission Control' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
     const reads = commands.filter((command) => ['get_global_settings', 'get_group_settings', 'get_ai_settings'].includes(String(command.cmd))).length;
     await act(async () => { appStore.dispatch(connectionActions.connected({ at: 3_000, reconnect: true })); await Promise.resolve(); });
     expect(commands.filter((command) => ['get_global_settings', 'get_group_settings', 'get_ai_settings'].includes(String(command.cmd)))).toHaveLength(reads);
@@ -1470,4 +1471,101 @@ it('restores lane visibility and persists selected lane independently per group'
   fireEvent.click(screen.getByRole('button', { name: 'Show lanes' }));
   fireEvent.click(screen.getByRole('menuitem', { name: 'Show Ready' }));
   expect(sendCommand).toHaveBeenCalledWith({ cmd: 'board_set_hidden_wide_lanes', hidden_wide_lanes_by_group: { Foundation: { Ready: false } } });
+});
+
+it('protects settings drafts on section and workspace navigation and retains field identity on cancel', async () => {
+  const { commands } = mockSettingsRequests(); renderShell();
+  fireEvent.click(screen.getByRole('button', { name: /◎ Control/ })); fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+  const input = await screen.findByRole('textbox', { name: 'Default directory' });
+  fireEvent.change(input, { target: { value: '/retained/draft' } }); input.focus(); (input as HTMLInputElement).setSelectionRange(3, 8);
+  fireEvent.click(screen.getByRole('button', { name: 'Help' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Discard settings changes?' });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Keep editing' }));
+  await waitFor(() => expect(input).toHaveFocus()); expect(input).toHaveValue('/retained/draft'); expect((input as HTMLInputElement).selectionStart).toBe(3);
+  expect(screen.getByRole('textbox', { name: 'Default directory' })).toBe(input);
+  fireEvent.keyDown(document.body, { key: 'b' }); await screen.findByRole('dialog', { name: 'Discard settings changes?' });
+  fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+  await screen.findByRole('heading', { name: 'Board' });
+  expect(commands.some((command) => /^(update_|engineer_update_)/.test(String(command.cmd)))).toBe(false);
+});
+
+it('does not send group navigation on cancel and allows it exactly once after discard', async () => {
+  mockSettingsRequests(); const { sendCommand } = renderShell(browserHost, { ...compactStateFixture, groups: { ...(compactStateFixture.groups as Record<string, unknown>), Research: { name: 'Research' } } });
+  fireEvent.click(screen.getByRole('button', { name: /◎ Control/ })); fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+  fireEvent.change(await screen.findByRole('spinbutton', { name: 'Maximum agents' }), { target: { value: '7' } });
+  const group = screen.getByRole('button', { name: 'Research' }); fireEvent.click(group);
+  await screen.findByRole('dialog', { name: 'Discard settings changes?' }); fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+  expect(sendCommand.mock.calls.filter(([command]) => command.cmd === 'ui_select_group')).toHaveLength(0);
+  fireEvent.click(group); fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
+  expect(sendCommand.mock.calls.filter(([command]) => command.cmd === 'ui_select_group')).toEqual([[{ cmd: 'ui_select_group', group: 'Research' }]]);
+});
+
+it('keeps pending and failed saves mounted until a deliberate exit after the result', async () => {
+  const { fetcher, setFailure, commands } = mockSettingsRequests(true); renderShell();
+  fireEvent.click(screen.getByRole('button', { name: /◎ Control/ })); fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+  const input = await screen.findByRole('spinbutton', { name: 'Maximum agents' }); fireEvent.change(input, { target: { value: '7' } });
+  const original = fetcher.getMockImplementation()!; let release = () => {};
+  fetcher.mockImplementation((url, options) => {
+    const command = JSON.parse(typeof options?.body === 'string' ? options.body : '{}') as TorqueCommand;
+    if (command.cmd === 'update_group_settings') return new Promise((resolve) => { release = () => { void original(url, options).then(resolve); }; });
+    return original(url, options);
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' })); fireEvent.click(screen.getByRole('button', { name: /▦ Board/ }));
+  await screen.findByRole('dialog', { name: 'Settings save in progress' });
+  expect(screen.queryByRole('button', { name: 'Discard changes' })).not.toBeInTheDocument();
+  expect(input).toBeDisabled(); await act(async () => { release(); await Promise.resolve(); });
+  await screen.findByRole('dialog', { name: 'Discard settings changes?' }); fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+  expect(await screen.findByText(/Group save refused/)).toBeVisible(); expect(screen.getByRole('spinbutton', { name: 'Maximum agents' })).toBe(input); expect(input).toHaveValue(7);
+  setFailure(false); fireEvent.click(screen.getByRole('button', { name: 'Save changes' })); fireEvent.click(screen.getByRole('button', { name: /▦ Board/ }));
+  await screen.findByRole('dialog', { name: 'Settings save in progress' }); await act(async () => { release(); await Promise.resolve(); });
+  await screen.findByRole('dialog', { name: 'Leave Settings?' }); expect(screen.queryByRole('heading', { name: 'Board' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Continue navigation' })); await screen.findByRole('heading', { name: 'Board' });
+  expect(commands.filter((command) => command.cmd === 'update_group_settings')).toHaveLength(2);
+});
+
+it('guards native-menu and command-palette exits, then clears discarded secrets and permits clean exits', async () => {
+  mockSettingsRequests(); renderShell();
+  fireEvent.click(screen.getByRole('button', { name: /◎ Control/ })); fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+  const key = await screen.findByLabelText('Anthropic key'); fireEvent.change(key, { target: { value: 'draft-secret-not-sent' } });
+  act(() => { (window as Window & { openLogViewer?: () => void }).openLogViewer!(); });
+  await screen.findByRole('dialog', { name: 'Discard settings changes?' }); fireEvent.click(screen.getByRole('button', { name: 'Keep editing' })); expect(key).toHaveValue('draft-secret-not-sent');
+  fireEvent.click(screen.getByRole('button', { name: /Search commands/ })); fireEvent.change(screen.getByRole('combobox', { name: 'Search commands' }), { target: { value: 'Open Board' } });
+  fireEvent.click(screen.getByRole('option', { name: 'Open Board' }));
+  await screen.findByRole('dialog', { name: 'Discard settings changes?' }); expect(screen.queryByRole('dialog', { name: 'Command palette' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Discard changes' })); await screen.findByRole('heading', { name: 'Board' });
+  fireEvent.click(screen.getByRole('button', { name: /◎ Control/ })); expect(await screen.findByLabelText('Anthropic key')).toHaveValue('');
+  const directory = screen.getByRole('textbox', { name: 'Default directory' }); fireEvent.change(directory, { target: { value: '/temporary' } }); fireEvent.change(directory, { target: { value: '' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Mission Control' })); expect(screen.queryByRole('dialog', { name: 'Discard settings changes?' })).not.toBeInTheDocument();
+});
+
+it('retains the edited settings group when the daemon changes the active group', async () => {
+  const { refresh } = mockSettingsRequests();
+  const frame = { ...compactStateFixture, groups: { ...(compactStateFixture.groups as Record<string, unknown>), Research: { name: 'Research' } } };
+  const { appStore } = renderShell(browserHost, frame);
+  fireEvent.click(screen.getByRole('button', { name: /◎ Control/ })); fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+  const directory = await screen.findByRole('textbox', { name: 'Default directory' }); fireEvent.change(directory, { target: { value: '/foundation/draft' } });
+  act(() => { appStore.dispatch(projectionActions.snapshotReceived({ ...frame, active_group: 'Research' })); });
+  expect(await screen.findByText(/Settings for Foundation remain open/)).toBeVisible(); expect(directory).toHaveValue('/foundation/draft');
+  fireEvent.click(screen.getByRole('button', { name: 'Switch to Research' })); fireEvent.click(await screen.findByRole('button', { name: 'Keep editing' }));
+  expect(screen.getByRole('textbox', { name: 'Default directory' })).toBe(directory);
+  refresh('get_group_settings', { group: 'Research', settings: { default_directory: '/research' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Switch to Research' })); fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
+  await waitFor(() => expect(screen.getByRole('textbox', { name: 'Default directory' })).toHaveValue('/research'));
+});
+
+it('does not detach a dirty settings workspace before explicit discard at the host boundary', async () => {
+  mockSettingsRequests(); const invoke = vi.fn((command: string) => Promise.resolve(command === 'list_detached' ? [] : command === 'detach' ? 'settings-detached' : null));
+  const { sendCommand, appStore } = renderShell(createTauriHost(invoke));
+  fireEvent.click(screen.getByRole('button', { name: /◎ Control/ })); fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+  const input = await screen.findByRole('spinbutton', { name: 'Maximum agents' }); fireEvent.change(input, { target: { value: '7' } });
+  act(() => { (window as Window & { detachActivePanel?: () => void }).detachActivePanel!(); });
+  fireEvent.click(await screen.findByRole('button', { name: 'Keep editing' })); expect(invoke.mock.calls.some(([command]) => command === 'detach')).toBe(false);
+  // External native ownership changes must not destroy the local draft either.
+  act(() => { appStore.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: 11, ops: [{ op: 'ui_update', key: 'detached_panels', value: { control: { label: 'external-control' } } }] })); });
+  expect(screen.getByRole('spinbutton', { name: 'Maximum agents' })).toBe(input); expect(input).toHaveValue(7);
+  act(() => { appStore.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: 12, ops: [{ op: 'ui_update', key: 'detached_panels', value: {} }] })); });
+  act(() => { (window as Window & { detachActivePanel?: () => void }).detachActivePanel!(); });
+  fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('detach', { panel: 'control', section: 'settings', bounds: { width: 1080, height: 740 } }));
+  expect(sendCommand.mock.calls.filter(([command]) => command.cmd === 'ui_set_detached_panels')).toHaveLength(1);
 });

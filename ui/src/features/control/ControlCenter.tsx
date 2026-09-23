@@ -1,3 +1,4 @@
+import { useSettingsNavigation, useSettingsProtection } from '../../app/settingsNavigation';
 import { selectProviders } from '../../app/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -62,7 +63,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return <label className={styles.field}><span>{label}</span>{children}</label>;
 }
 
-function SettingsPanel({ group, responses, send, snapshot, onSavingChange }: { group: string; responses: Record<string, unknown>; send: (command: TorqueCommand) => void; snapshot: SettingsSnapshot; onSavingChange: (busy: boolean) => void }) {
+function SettingsPanel({ group, responses, send, snapshot, onSavingChange, onDiscard }: { onDiscard: () => void; group: string; responses: Record<string, unknown>; send: (command: TorqueCommand) => void; snapshot: SettingsSnapshot; onSavingChange: (busy: boolean) => void }) {
   const operations = useAppSelector(selectOperationsState);
   const providers = useAppSelector(selectProviders);
   const currentGlobal = record(snapshot.global.settings);
@@ -100,6 +101,11 @@ function SettingsPanel({ group, responses, send, snapshot, onSavingChange }: { g
   const form = useRef<HTMLFormElement>(null);
   const saveController = useRef<AbortController | null>(null);
   const [resetScopes, setResetScopes] = useState(() => new Set<string>());
+  const lastEditor = useRef<HTMLElement | null>(null);
+  const restoreFocus = useCallback(() => { lastEditor.current?.focus(); }, []);
+  const currentDrafts = { global: { ...record(JSON.parse(advancedGlobal)), ...globalDraft }, group: { ...record(JSON.parse(advancedGroup)), ...groupDraft }, engineer: record(JSON.parse(advancedEngineer)), architect: record(JSON.parse(advancedArchitect)), ai: aiDraft };
+  const hasEdits = resetScopes.size > 0 || relayTouched.length > 0 || clearAiSecrets.length > 0 || Object.values(aiSecrets).some(Boolean) || (Object.keys(currentDrafts) as (keyof typeof currentDrafts)[]).some((scope) => Object.keys(changedSettings(baseline[scope], currentDrafts[scope])).length > 0);
+  useSettingsProtection({ dirty: dirty && hasEdits, saving, group, discard: onDiscard, restoreFocus });
   const [appliedSnapshot, setAppliedSnapshot] = useState(snapshot);
   if (appliedSnapshot !== snapshot) {
     setAppliedSnapshot(snapshot);
@@ -197,7 +203,7 @@ function SettingsPanel({ group, responses, send, snapshot, onSavingChange }: { g
   const aiConfirmation = record(responses['ai_settings_requires_confirmation:_'] ?? responses['ai_settings_requires_confirmation:latest']);
   const promptPreview = record(responses[`system_prompt_preview:${group}`] ?? responses['system_prompt_preview:latest']);
 
-  return <form ref={form} noValidate className={styles.settings} onSubmit={(event) => { event.preventDefault(); void save(); }}>
+  return <form ref={form} onFocusCapture={(event) => { if (event.target instanceof HTMLElement && event.target.matches('input, select, textarea')) lastEditor.current = event.target; }} noValidate className={styles.settings} onSubmit={(event) => { event.preventDefault(); void save(); }}>
     <header><div><h2>Workspace settings</h2><p>Global, group, and AI changes save as one coordinated operation.</p></div><span>{saving ? 'Saving…' : dirty ? 'Unsaved changes' : saved ? 'Saved' : 'Up to date'}</span><Button tone="primary" type="submit" isDisabled={!dirty || saving}>Save changes</Button></header>
     {jsonError ? <p role="alert" className={styles.validation}>{jsonError}</p> : null}
     <fieldset disabled={saving} className={styles.settingsFields}><section><h3>Global runtime</h3><Button tone="quiet" isDisabled={!Object.keys(globalDefaults).length} onPress={() => resetSection('global')}>Reset global defaults</Button><p className={styles.note}>Resets runtime, shortcuts and status bar in this draft. AI, credentials and appearance keep their own controls.</p><div className={styles.formGrid}>
@@ -236,6 +242,8 @@ function SettingsPanel({ group, responses, send, snapshot, onSavingChange }: { g
 
 function SettingsWorkspace({ group, responses, send }: { group: string; responses: Record<string, unknown>; send: (command: TorqueCommand) => void }) {
   const dispatch = useAppDispatch(); const connection = useAppSelector(selectConnection);
+  const [generation, setGeneration] = useState(0);
+  const discard = useCallback(() => setGeneration((value) => value + 1), []);
   const [snapshot, setSnapshot] = useState<SettingsSnapshot | null>(null);
   const [error, setError] = useState(''); const [retry, setRetry] = useState(0);
   const [busy, setBusy] = useState(false); const busyRef = useRef(false);
@@ -253,7 +261,7 @@ function SettingsWorkspace({ group, responses, send }: { group: string; response
     return () => controller.abort();
   }, [group, dispatch, retry, connection.status, connection.reconnectCount, busy]);
   const retryButton = <Button onPress={() => { setError(''); setRetry((value) => value + 1); }}>Retry settings</Button>;
-  return snapshot ? <>{error ? <div role="alert">Settings refresh failed. Your draft is retained. {error} {retryButton}</div> : null}<SettingsPanel group={group} responses={responses} send={send} snapshot={snapshot} onSavingChange={savingChanged} /></> : error ? <StateSurface title="Settings unavailable" description={error} action={retryButton} /> : <StateSurface title="Loading settings" description="Loading global, group and AI defaults before editing." />;
+  return snapshot ? <>{error ? <div role="alert">Settings refresh failed. Your draft is retained. {error} {retryButton}</div> : null}<SettingsPanel key={generation} onDiscard={discard} group={group} responses={responses} send={send} snapshot={snapshot} onSavingChange={savingChanged} /></> : error ? <StateSurface title="Settings unavailable" description={error} action={retryButton} /> : <StateSurface title="Loading settings" description="Loading global, group and AI defaults before editing." />;
 }
 
 export function ControlCenter({ group, sendCommand, onCommandUnavailable, host = browserHost }: {
@@ -272,7 +280,8 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable, host =
   const agents = useAppSelector(selectAgentsState);
   const messages = useAppSelector(selectMessagesState);
   const tab = workspaceUi.controlTab;
-  const setTab = (next: ControlTab) => dispatch(workspaceUiActions.setControlTab(next));
+  const settingsNavigation = useSettingsNavigation();
+  const setTab = (next: ControlTab) => { if (next !== tab) settingsNavigation.request(() => dispatch(workspaceUiActions.setControlTab(next))); };
   const [selectedAction, setSelectedAction] = useState('');
   const [helpRefreshVersion, setHelpRefreshVersion] = useState(0);
   const [actionRefreshVersion, setActionRefreshVersion] = useState(0);

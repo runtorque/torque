@@ -1102,3 +1102,10 @@ Create PR now reviews the source branch, target base and push implication before
 P-250 and D-148 now cover current Git/shared-use review, cancellation, active-session guards, link-only release, destructive-file warnings and retained physical-removal/branch outcomes. Real local Git/PTY browser acceptance and the full 3,208-test regression suite passed; a screenshot-discovered long-path overflow was fixed and rechecked on desktop/mobile. The parity ledger records the exact evidence and limits.
 
 The settings audit adds P-251–P-254 for missing capture choices, retention boundaries, dirty-navigation protection and search/reveal. There are now 254 mapped behaviors: 241 implemented/equivalent dispositions, 9 open repair rows and 4 intentional retirements. Broad settings/lazy-reconnect and independent native/external acceptance remain open. This checkpoint does not certify Phase 4 or authorize Classic retirement.
+
+
+### Settings draft and navigation checkpoint
+
+P-253 and D-149 now cover explicit dirty-exit confirmation, retained pending-save results, editor identity/focus/caret and group-scope continuity. Workspace/section/group navigation, command palette, Classic-link navigation and native menu/detach entry points share the guard. An externally selected group cannot replace a dirty form; saves retain their original scope. Production-browser navigation/reconnect/validation scenarios and all 465 UI tests passed.
+
+The main ledger now records 254 behaviors: 242 implemented/equivalent dispositions, 8 open repairs and 4 intentional retirements. Broad settings/lazy-reconnect acceptance, the explicit capture/retention/search gaps and independent native/external gates remain open. This does not claim draft persistence after hard refresh or window destruction, and does not close Phase 4.
