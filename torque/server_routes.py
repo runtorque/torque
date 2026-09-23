@@ -21,6 +21,9 @@ from typing import Any
 from aiohttp import web
 
 from . import profiling
+from .worktree_requests import (
+    ACKNOWLEDGED_WORKTREE_MUTATIONS, PendingWorktreeWrites, WorktreeRequestConflict,
+)
 from .attachment_uploads import AttachmentUploadError, save_message_attachment_stream
 from .config import log
 from .state import hot_json_dumps_async
@@ -582,6 +585,8 @@ def build_http_routes(
                 terminal_clients.get(cell_id, set()).discard(ws)
             return ws
 
+    pending_worktree_writes = PendingWorktreeWrites()
+
     async def handle_api_cmd(request):
             """REST endpoint for CLI and scripting access.
 
@@ -613,6 +618,23 @@ def build_http_routes(
                      "type": "worker_lifecycle_guard"},
                     status=guard["status"])
 
+            key = str(data.get("idempotency_key", "") or "").strip()
+            if not key or cmd not in ACKNOWLEDGED_WORKTREE_MUTATIONS:
+                return await _execute_api_command(data)
+            try:
+                response = await pending_worktree_writes.run(
+                    key, api_request_hash(data),
+                    lambda: _execute_api_command(data),
+                )
+            except WorktreeRequestConflict as exc:
+                return web.json_response({"ok": False, "error": str(exc)}, status=409)
+            # Each HTTP caller gets a distinct response object; only the
+            # completed body from its keyed worktree operation is shared.
+            return web.Response(body=response.body, status=response.status,
+                                headers=response.headers.copy())
+
+    async def _execute_api_command(data):
+            cmd = data["cmd"]
             idempotency_key = str(data.get("idempotency_key", "") or "").strip()
             request_hash = ""
             if idempotency_key and is_api_write_command(cmd):

@@ -1049,6 +1049,30 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(old_path.exists())
         self.assertEqual(cell.worktree_branch, "")
 
+    async def test_strict_checkpoint_distinguishes_noop_from_git_failure(self):
+        cell = self._make_cell()
+        wt_path = await self.mgr.create(cell, str(self.repo_root), base_branch="main")
+        self.assertIsNone(await self.mgr.checkpoint(cell, raise_on_error=True))
+        head = await self._git("rev-parse", "HEAD", cwd=wt_path)
+        hooks = self.repo_root / "reject-hooks"
+        hooks.mkdir()
+        hook = hooks / "pre-commit"
+        hook.write_text("#!/bin/sh\necho 'checkpoint fixture refusal' >&2\nexit 1\n")
+        hook.chmod(0o755)
+        await self._git("config", "core.hooksPath", str(hooks), cwd=wt_path)
+        (Path(wt_path) / "README.md").write_text("explicit checkpoint change\n")
+        with self.assertRaisesRegex(RuntimeError, "checkpoint fixture refusal"):
+            await self.mgr.checkpoint(cell, raise_on_error=True)
+        self.assertIsNone(await self.mgr.checkpoint(cell))
+        self.assertEqual(await self._git("rev-parse", "HEAD", cwd=wt_path), head)
+
+    async def test_strict_checkpoint_rejects_shared_checkout(self):
+        cell = self._make_cell()
+        cell.worktree_path = str(self.repo_root)
+        cell.worktree_repo_root = str(self.repo_root)
+        with self.assertRaisesRegex(RuntimeError, "isolated worktree"):
+            await self.mgr.checkpoint(cell, raise_on_error=True)
+
     async def test_checkpoint_history_and_rollback_cover_worktree_progress(self):
         cell = self._make_cell()
         wt_path = await self.mgr.create(cell, str(self.repo_root), base_branch="main")

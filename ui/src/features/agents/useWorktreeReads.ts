@@ -8,7 +8,7 @@ export type WorktreeRead = keyof typeof commands;
 interface Slot { scope: string; request: string; status: 'loading' | 'ready' | 'error'; data: UnknownRecord; error: string }
 const empty: UnknownRecord = {};
 function validate(value: UnknownRecord, key: WorktreeRead, id: string): void {
-  if (value.type === 'error' || value.error) throw new Error(typeof value.message === 'string' ? value.message : typeof value.error === 'string' ? value.error : 'Worktree read failed.');
+  if (value.type === 'error' || (value.error && key !== 'preflight')) throw new Error(typeof value.message === 'string' ? value.message : typeof value.error === 'string' ? value.error : 'Worktree read failed.');
   if (value.type !== commands[key] || value.id !== id) throw new Error('Worktree response did not match the requested target.');
   if ((key === 'diff' && !Array.isArray(value.files)) || (key === 'history' && !Array.isArray(value.commits)) || (key === 'preflight' && typeof value.clean !== 'boolean')) throw new Error('Worktree response was incomplete.');
 }

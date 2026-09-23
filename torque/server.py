@@ -3570,15 +3570,18 @@ async def main(connection=None):
         except Exception:
             return []
 
-    async def _checkpoint_worktree_with_submodules(cell, message: str = ""):
+    async def _checkpoint_worktree_with_submodules(
+            cell, message: str = "", *, raise_on_error: bool = False):
+        strict = {"raise_on_error": True} if raise_on_error else {}
         submodules = _worktree_submodules_for_cell(cell)
         if submodules:
             return await worktree_mgr.checkpoint(
                 cell,
                 message=message,
                 worktree_submodules=submodules,
+                **strict,
             )
-        return await worktree_mgr.checkpoint(cell, message=message)
+        return await worktree_mgr.checkpoint(cell, message=message, **strict)
 
     async def _safe_remove_worktree_result(
             cell, *, merge_commit_sha: str = "",

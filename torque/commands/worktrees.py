@@ -483,6 +483,9 @@ async def handle_worktree_command(
                     "message": "Agent has no worktree",
                     "id": cell.id,
                 }
+            else:
+                result = {"type": "error", "id": str(data.get("id", "") or ""),
+                          "message": "Agent not found"}
     elif cmd == "worktree_list":
         requested_root = str(data.get("repo_root", "") or "").strip()
         repo_root = (
@@ -617,18 +620,21 @@ async def handle_worktree_command(
             }
             return result
     elif cmd == "worktree_checkpoint":
-        cell = state.agents.get(data["id"])
-        block_reason = _shared_review_checkpoint_block_reason(
-            state,
-            cell,
-        )
+        aid = str(data.get("id", "") or "")
+        cell = state.agents.get(aid)
+        if not cell or getattr(cell, "deleted_at", 0) or not cell.worktree_path:
+            return {"type": "error", "id": aid,
+                    "message": "Agent has no active worktree"}
+        block_reason = _shared_review_checkpoint_block_reason(state, cell)
         if block_reason:
-            result = {"type": "error", "message": block_reason}
-        elif cell and cell.worktree_path:
-            msg = _checkpoint_message(cell)
-            await _checkpoint_worktree_with_submodules(cell, msg)
-            state._emit_agent(cell)
-            state._db_save_agent(cell)
+            return {"type": "error", "id": aid, "message": block_reason}
+        sha = await _checkpoint_worktree_with_submodules(
+            cell, _checkpoint_message(cell), raise_on_error=True)
+        state._emit_agent(cell)
+        state._db_save_agent(cell)
+        result = {"type": "worktree_checkpoint", "id": aid, "ok": True,
+                  "created": bool(sha), "sha": sha or "",
+                  "message": "Checkpoint created" if sha else "No changes to checkpoint"}
     elif cmd == "worktree_history":
         cell = state.agents.get(data.get("id", ""))
         commits = []
@@ -1044,12 +1050,19 @@ async def handle_worktree_command(
             result = {"type": "worktree_rebase",
                       "id": aid, "error": "No worktree"}
     elif cmd == "worktree_rollback":
-        cell = state.agents.get(data.get("id", ""))
-        sha = data.get("sha", "")
-        if cell and cell.worktree_path and sha:
-            await worktree_mgr.rollback(cell, sha)
-            state._emit_agent(cell)
-            state._db_save_agent(cell)
+        aid = str(data.get("id", "") or "")
+        cell = state.agents.get(aid)
+        sha = str(data.get("sha", "") or "").strip()
+        if not cell or getattr(cell, "deleted_at", 0) or not cell.worktree_path or not sha:
+            return {"type": "error", "id": aid,
+                    "message": "Rollback requires an active worktree and checkpoint"}
+        if not await worktree_mgr.rollback(cell, sha):
+            return {"type": "error", "id": aid,
+                    "message": "Rollback failed; the selected checkpoint was not restored"}
+        state._emit_agent(cell)
+        state._db_save_agent(cell)
+        result = {"type": "worktree_rollback", "id": aid, "ok": True,
+                  "sha": sha, "message": "Checkpoint restored"}
     elif cmd == "worktree_diff":
         cell = state.agents.get(data.get("id", ""))
         await _reconcile_worktree_branch(state, worktree_mgr, cell)
@@ -1273,6 +1286,9 @@ async def handle_worktree_command(
                           "message": msg}
                 if getattr(cell, "driverless", False):
                     result["driverless"] = True
+        if result:
+            result["id"] = getattr(cell, "id", "") or str(data.get("id", "") or "")
+            result["ok"] = not bool(result.get("error"))
     elif cmd == "worktree_merge":
         target, live_cell, error_result = await _resolve_worktree_command_target_value(
             state=state,

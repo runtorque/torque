@@ -647,10 +647,17 @@ class ChangesMixin:
         return True
 
     async def checkpoint(self, cell, message: str = "",
-                         worktree_submodules=None) -> Optional[str]:
-        """Auto-commit all changes in the worktree. Returns commit SHA."""
+                         worktree_submodules=None, *,
+                         raise_on_error: bool = False) -> Optional[str]:
+        """Auto-commit changes, returning SHA or None when unchanged.
+
+        Legacy callers retain best-effort failure behavior. Explicit operator
+        commands use raise_on_error to distinguish refusal from a clean no-op.
+        """
         wt_dir = self._isolated_worktree_dir(cell, "checkpoint commit")
         if not wt_dir:
+            if raise_on_error:
+                raise RuntimeError("Checkpoint requires an isolated worktree")
             return None
         try:
             # Seed checkpoint counter from git history if not yet set
@@ -686,7 +693,9 @@ class ChangesMixin:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            await proc.communicate()
+            _, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                raise RuntimeError("Checkpoint staging failed: " + stderr.decode().strip())
 
             # Check if there's anything to commit
             proc = await asyncio.create_subprocess_exec(
@@ -699,6 +708,8 @@ class ChangesMixin:
             if proc.returncode == 0:
                 log.debug("No changes to checkpoint for '%s'", cell.name)
                 return None
+            if proc.returncode != 1:
+                raise RuntimeError("Could not inspect staged changes for checkpoint")
 
             proc = await asyncio.create_subprocess_exec(
                 "git", "-C", wt_dir,
@@ -708,9 +719,7 @@ class ChangesMixin:
             )
             _, stderr = await proc.communicate()
             if proc.returncode != 0:
-                log.warning("Checkpoint commit failed for '%s': %s",
-                            cell.name, stderr.decode().strip())
-                return None
+                raise RuntimeError("Checkpoint commit failed: " + stderr.decode().strip())
 
             # Get the SHA
             proc = await asyncio.create_subprocess_exec(
@@ -721,17 +730,21 @@ class ChangesMixin:
             )
             stdout, _ = await proc.communicate()
             sha = stdout.decode().strip()
+            if proc.returncode != 0 or not sha:
+                raise RuntimeError("Checkpoint commit could not be verified")
             if not await self._assert_nested_gitlinks_match_heads(
                     wt_dir,
                     worktree_submodules,
             ):
-                return None
+                raise RuntimeError("Checkpoint nested gitlinks could not be verified")
             cell.worktree_checkpoints += 1
             log.info("Checkpoint %d for '%s': %s",
                      cell.worktree_checkpoints, cell.name, sha[:8])
             return sha
         except Exception:
             log.exception("Checkpoint failed for '%s'", cell.name)
+            if raise_on_error:
+                raise
             return None
 
     async def current_head(self, cell) -> Optional[str]:
