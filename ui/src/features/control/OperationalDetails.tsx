@@ -30,6 +30,7 @@ function sortValue(session: UnknownRecord, key: string): string | number {
 
 export function SupervisorDetails({ supervisor, send, onTerminate }: { supervisor: UnknownRecord; send: Sender; onTerminate: (id: string, label: string) => void }) {
   const saved = useAppSelector(selectSupervisorUiState);
+  const reconnect = useAppSelector((state) => state.connection.reconnectCount);
   const [view, setView] = useState(() => ({ autoRefresh: saved.autoRefresh !== false, sortKey: text(saved.sortKey, 'owner'), sortDirection: text(saved.sortDirection, 'asc'), selectedSessionId: text(saved.selectedSessionId, ''), expandedSessionId: text(saved.expandedSessionId, ''), scrollPos: Number(saved.scrollPos || 0) }));
   const [sessions, setSessions] = useState(() => list(supervisor.sessions));
   const [error, setError] = useState('');
@@ -53,7 +54,7 @@ export function SupervisorDetails({ supervisor, send, onTerminate }: { superviso
     };
     void poll();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [view.autoRefresh, refresh]);
+  }, [view.autoRefresh, refresh, reconnect]);
   useEffect(() => () => clearTimeout(scrollTimer.current), []);
   const sorted = [...sessions].sort((a, b) => {
     const left = sortValue(a, view.sortKey); const right = sortValue(b, view.sortKey);

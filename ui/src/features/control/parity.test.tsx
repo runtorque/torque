@@ -24,7 +24,7 @@ describe('log viewer', () => {
     const requests: AbortSignal[] = [];
     const fetcher = vi.fn((url: string, options: RequestInit) => { requests.push(options.signal as AbortSignal); return Promise.resolve({ ok: true, json: () => Promise.resolve({ target: url.includes('supervisor') ? 'supervisor' : 'daemon', cursor: 42, lines: [{ ts: 1, level: 'ERROR', message: url.includes('supervisor') ? 'PTY failed' : 'Daemon failed' }, { ts: 2, level: 'INFO', message: 'Ready' }] }) }); });
     vi.stubGlobal('fetch', fetcher);
-    const view = render(<LogViewer host={browserHost} />);
+    const view = render(<Provider store={createAppStore()}><LogViewer host={browserHost} /></Provider>);
     expect(await screen.findByText('Daemon failed')).toBeVisible();
     expect(fetcher.mock.calls[0]?.[0]).toContain('/logs?target=daemon&since=0');
     fireEvent.change(screen.getByLabelText('Level'), { target: { value: 'ERROR' } });
@@ -41,7 +41,7 @@ describe('log viewer', () => {
     vi.useFakeTimers();
     const fetcher = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ cursor: 10, lines: Array.from({ length: 500 }, (_, i) => ({ message: `line ${i}` })) }) }));
     vi.stubGlobal('fetch', fetcher);
-    render(<LogViewer host={browserHost} />);
+    render(<Provider store={createAppStore()}><LogViewer host={browserHost} /></Provider>);
     await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
     expect(screen.getByRole('log').children).toHaveLength(2000);
     fireEvent.click(screen.getByLabelText('Follow'));
@@ -52,7 +52,7 @@ describe('log viewer', () => {
   });
   it('shows recoverable errors instead of an empty successful log', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
-    render(<LogViewer host={browserHost} />);
+    render(<Provider store={createAppStore()}><LogViewer host={browserHost} /></Provider>);
     expect(await screen.findByRole('alert')).toHaveTextContent('offline');
     expect(screen.getByRole('button', { name: 'Refresh logs' })).toBeEnabled();
   });

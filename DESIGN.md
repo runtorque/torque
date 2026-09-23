@@ -2966,6 +2966,14 @@ scope.
 - Scope: This repairs the retained whole-workspace detach contract. It does not change the retirement of arbitrary docking or permit multiple independently owned windows for the same workspace.
 - Verification: URL/adapter/bootstrap and current-section component tests, plus production browser host-boundary scenarios for Context, Logs and Help. Actual native lifecycle acceptance remains a separate gate.
 
+### D-136 — Reconnect refresh is independent of operational polling preferences
+
+- Date: 2026-09-22
+- Status: accepted; component and production browser acceptance recorded under P-226/P-227.
+- Decision: Visible Supervisor and Logs perform a fresh HTTP read when the WebSocket reconnect epoch changes, including when Auto-refresh sessions or Follow is off. The pause setting controls periodic polling and automatic log scrolling; reconnect must not silently re-enable either. HTTP log/session access remains independent of WebSocket availability.
+- Continuity: Retain accepted content, session sort/disclosure, log target/search/level/cursor and focused controls. Abort superseded requests before beginning the new read, ignore late responses, retain normal retry behavior, and stop all reads after unmount. A paused log tail appends new entries at its retained cursor without scrolling to the bottom.
+- Verification: Reproduction tests fail before the repair for both paused panels; component tests cover pause/focus/scroll/disclosure/cursor and superseded responses, with production browser acceptance against real daemon HTTP data and real WebSocket reconnects.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
+import { useAppSelector } from '../../app/hooks';
 import { Button } from '../../design/primitives';
 import { hasHostCapability, type DesktopHost } from '../../host';
 import { matchesLog, type LogLine, type LogPage } from './logModel';
@@ -7,6 +8,7 @@ import styles from './ParityPanels.module.css';
 
 
 function LogTail({ target, host }: { target: string; host: DesktopHost }) {
+  const reconnect = useAppSelector((state) => state.connection.reconnectCount);
   const [lines, setLines] = useState<LogLine[]>([]);
   const [level, setLevel] = useState('');
   const [search, setSearch] = useState('');
@@ -51,7 +53,7 @@ function LogTail({ target, host }: { target: string; host: DesktopHost }) {
     };
     void poll();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [target, follow, refresh]);
+  }, [target, follow, refresh, reconnect]);
 
   useLayoutEffect(() => {
     if (follow && list.current) list.current.scrollTop = list.current.scrollHeight;
