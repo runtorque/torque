@@ -89,6 +89,9 @@ describe('pipeline explorer', () => {
     const fetcher = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: 'pipelines', pipelines: [pipeline] } }) });
     vi.stubGlobal('fetch', fetcher);
     const store = createAppStore(); const edit = vi.fn();
+    store.dispatch(projectionActions.snapshotReceived(compactStateFixture));
+    store.dispatch(connectionActions.connected({ at: 1, reconnect: false }));
+    store.dispatch(connectionActions.snapshotAccepted(compactStateFixture));
     render(<Provider store={store}><PipelineExplorer group="A" onEdit={edit} /></Provider>);
     const graph = await screen.findByRole('group', { name: 'Pipeline graph' });
     expect(screen.getByText(/deployment approval/)).toBeVisible();

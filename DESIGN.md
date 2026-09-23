@@ -2974,6 +2974,15 @@ scope.
 - Continuity: Retain accepted content, session sort/disclosure, log target/search/level/cursor and focused controls. Abort superseded requests before beginning the new read, ignore late responses, retain normal retry behavior, and stop all reads after unmount. A paused log tail appends new entries at its retained cursor without scrolling to the bottom.
 - Verification: Reproduction tests fail before the repair for both paused panels; component tests cover pause/focus/scroll/disclosure/cursor and superseded responses, with production browser acceptance against real daemon HTTP data and real WebSocket reconnects.
 
+### D-137 — Pipeline discovery refresh preserves the graph workspace
+
+- Date: 2026-09-22
+- Status: accepted; component and production browser acceptance recorded under P-228.
+- Decision: The active Pipeline explorer keeps its last accepted group-specific discovery independently of compact snapshot caches. Reconnect, sequence resync and explicit discovery refresh the data after synchronization without removing the current graph. Errors remain actionable above the accepted graph; obsolete, foreign-scope or malformed payloads cannot replace it.
+- Continuity: Keep graph DOM, zoom, pan, selected pipeline and focused/selected action while that pipeline remains available. If a pipeline is removed, choose an available fallback instead of retaining an invisible stale selection. Group changes hide the prior graph, and hidden explorers abort reads. The shared auxiliary projection remains updated for compatible consumers.
+- Scope: This changes discovery lifecycle, not graph layout or action editing. Older daemon responses without a group field are correlated by their cancelable HTTP request.
+- Verification: Component tests reproduce compact-snapshot removal and cover deferred/failed/stale reads, synchronization, selection and hidden cleanup; production browser acceptance uses actual saved action pipelines and reconnects.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

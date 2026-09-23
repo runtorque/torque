@@ -2,6 +2,20 @@ export interface PipelineEdge { from: string; to: string; when: string }
 export interface Pipeline { name: string; actions: string[]; edges: PipelineEdge[]; asks: { from: string; when: string }[] }
 export interface PipelineNode { name: string; x: number; y: number }
 
+/** Reject incomplete discovery payloads before they can replace a readable graph. */
+export function parsePipelines(value: unknown): Pipeline[] | null {
+  const object = (item: unknown): Record<string, unknown> => item && typeof item === 'object' && !Array.isArray(item) ? item as Record<string, unknown> : {};
+  if (!Array.isArray(value)) return null;
+  const valid = value.every((raw: unknown) => {
+    const item = object(raw);
+    return typeof item.name === 'string' && item.name.length > 0
+      && Array.isArray(item.actions) && item.actions.every((name: unknown) => typeof name === 'string')
+      && Array.isArray(item.edges) && item.edges.every((raw: unknown) => { const edge = object(raw); return typeof edge.from === 'string' && typeof edge.to === 'string' && typeof edge.when === 'string'; })
+      && Array.isArray(item.asks) && item.asks.every((raw: unknown) => { const ask = object(raw); return typeof ask.from === 'string' && typeof ask.when === 'string'; });
+  });
+  return valid ? value as Pipeline[] : null;
+}
+
 /** Longest dependency depth, with bounded relaxation for review-cycle edges. */
 export function layoutPipeline(pipeline: Pipeline): { nodes: PipelineNode[]; width: number; height: number } {
   const names = [...new Set(pipeline.actions)];

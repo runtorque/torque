@@ -1,10 +1,10 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
-import { projectionActions, selectAuxiliaryResponseState, selectConnection } from '../../app/store';
+import { projectionActions, selectAuxiliaryResponseState } from '../../app/store';
 import { Button } from '../../design/primitives';
 import { readCommand } from '../../protocol/http';
-import { layoutPipeline, type Pipeline } from './pipelineModel';
+import { layoutPipeline, parsePipelines, type Pipeline } from './pipelineModel';
 import styles from './ParityPanels.module.css';
 
 function PipelineGraph({ pipeline, onEdit }: { pipeline: Pipeline; onEdit: (name: string) => void }) {
@@ -12,11 +12,12 @@ function PipelineGraph({ pipeline, onEdit }: { pipeline: Pipeline; onEdit: (name
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [selected, setSelected] = useState('');
+  const selectedAction = pipeline.actions.includes(selected) ? selected : '';
   const svg = useRef<SVGSVGElement>(null);
   const drag = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null);
   const marker = useId().replaceAll(':', '');
   return <>
-    <div className={styles.toolbar}><Button aria-label="Zoom out pipeline" onPress={() => setScale((value) => Math.max(.25, value / 1.25))}>−</Button><span>{Math.round(scale * 100)}%</span><Button aria-label="Zoom in pipeline" onPress={() => setScale((value) => Math.min(4, value * 1.25))}>＋</Button><Button onPress={() => { setScale(1); setOffset({ x: 0, y: 0 }); }}>Fit pipeline</Button>{selected ? <Button onPress={() => onEdit(selected)}>Edit {selected}</Button> : null}<small>Drag background to pan · arrows pan · nodes open the action editor</small></div>
+    <div className={styles.toolbar}><Button aria-label="Zoom out pipeline" onPress={() => setScale((value) => Math.max(.25, value / 1.25))}>−</Button><span>{Math.round(scale * 100)}%</span><Button aria-label="Zoom in pipeline" onPress={() => setScale((value) => Math.min(4, value * 1.25))}>＋</Button><Button onPress={() => { setScale(1); setOffset({ x: 0, y: 0 }); }}>Fit pipeline</Button>{selectedAction ? <Button onPress={() => onEdit(selectedAction)}>Edit {selectedAction}</Button> : null}<small>Drag background to pan · arrows pan · nodes open the action editor</small></div>
     <div className={styles.graph}>
       <svg ref={svg} viewBox={`${-offset.x} ${-offset.y} ${layout.width / scale} ${layout.height / scale}`} tabIndex={0} role="group" aria-label="Pipeline graph"
         onKeyDown={(event) => { if (event.target !== event.currentTarget) return; const moves: Record<string, [number, number]> = { ArrowLeft: [40, 0], ArrowRight: [-40, 0], ArrowUp: [0, 40], ArrowDown: [0, -40] }; const move = moves[event.key]; if (move) { event.preventDefault(); setOffset((point) => ({ x: point.x + move[0], y: point.y + move[1] })); } }}
@@ -34,22 +35,31 @@ function PipelineGraph({ pipeline, onEdit }: { pipeline: Pipeline; onEdit: (name
 
 export function PipelineExplorer({ group, onEdit }: { group: string; onEdit: (name: string) => void }) {
   const dispatch = useAppDispatch();
-  const responses = useAppSelector(selectAuxiliaryResponseState);
-  const connection = useAppSelector(selectConnection);
+  const cached = useAppSelector((state) => selectAuxiliaryResponseState(state)[`pipelines:${group}`]) as { pipelines?: unknown } | undefined;
+  const ready = useAppSelector((state) => state.connection.status === 'connected' && state.connection.expectedSeq !== null && !state.connection.awaitingResync);
+  const reconnect = useAppSelector((state) => state.connection.reconnectCount);
   const [refresh, setRefresh] = useState(0);
-  const [error, setError] = useState('');
+  const [failure, setFailure] = useState({ group: '', message: '' });
   const [selected, setSelected] = useState('');
-  const frame = responses[`pipelines:${group}`] as { pipelines?: Pipeline[] } | undefined;
-  const pipelines = frame?.pipelines || [];
+  const [accepted, setAccepted] = useState<{ group: string; pipelines: Pipeline[] } | null>(() => { const pipelines = parsePipelines(cached?.pipelines); return pipelines ? { group, pipelines } : null; });
+  const frame = accepted?.group === group ? accepted : null;
+  const pipelines = frame?.pipelines ?? [];
+  const error = failure.group === group ? failure.message : '';
   const active = pipelines.find((item) => item.name === selected) ?? pipelines[0];
   useEffect(() => {
+    if (!ready) return;
     const controller = new AbortController();
     void readCommand({ cmd: 'discover_pipelines', group }, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
-      if (result.type !== 'pipelines' || !Array.isArray(result.pipelines)) throw new Error('Unexpected pipeline discovery response');
-      dispatch(projectionActions.auxiliaryResourceReceived({ ...result, group })); setError('');
-    }).catch((cause: unknown) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Discovery failed'); });
+      if (result.type === 'error') throw new Error(typeof result.message === 'string' ? result.message : 'Pipeline discovery failed.');
+      const next = parsePipelines(result.pipelines);
+      // Older daemon responses omit group; the abortable HTTP request supplies correlation.
+      if (result.type !== 'pipelines' || (result.group !== undefined && result.group !== group) || !next) throw new Error('Unexpected pipeline discovery response');
+      setAccepted({ group, pipelines: next }); setFailure({ group, message: '' });
+      setSelected((current) => next.some((pipeline) => pipeline.name === current) ? current : next[0]?.name ?? '');
+      dispatch(projectionActions.auxiliaryResourceReceived({ ...result, group }));
+    }).catch((cause: unknown) => { if (!controller.signal.aborted) setFailure({ group, message: cause instanceof Error ? cause.message : 'Discovery failed' }); });
     return () => controller.abort();
-  }, [group, refresh, connection.reconnectCount, dispatch]);
-  return <section className={styles.panel} aria-label="Pipeline explorer"><header className={styles.toolbar}><h2>Pipeline explorer</h2><label>Pipeline<select value={active?.name || ''} onChange={(event) => setSelected(event.target.value)}>{pipelines.map((pipeline) => <option key={pipeline.name}>{pipeline.name}</option>)}</select></label><Button onPress={() => setRefresh((value) => value + 1)}>Discover pipelines</Button></header>{error ? <p role="alert">{error}. Discover pipelines to retry.</p> : null}{active ? <PipelineGraph key={`${group}-${active.name}`} pipeline={active} onEdit={onEdit} /> : <p>{frame ? 'No connected action pipelines in this group.' : error ? 'Pipelines unavailable.' : 'Discovering action pipelines…'}</p>}</section>;
+  }, [group, refresh, ready, reconnect, dispatch]);
+  return <section className={styles.panel} aria-label="Pipeline explorer"><header className={styles.toolbar}><h2>Pipeline explorer</h2><label>Pipeline<select value={active?.name || ''} onChange={(event) => setSelected(event.target.value)}>{pipelines.map((pipeline) => <option key={pipeline.name}>{pipeline.name}</option>)}</select></label><Button isDisabled={!ready} onPress={() => setRefresh((value) => value + 1)}>Discover pipelines</Button></header>{!ready ? <p role="status">Waiting for a synchronized connection. Accepted pipelines remain available.</p> : null}{error ? <p role="alert">{error}. Discover pipelines to retry.</p> : null}{active ? <PipelineGraph key={`${group}-${active.name}`} pipeline={active} onEdit={onEdit} /> : <p>{frame ? 'No connected action pipelines in this group.' : error ? 'Pipelines unavailable.' : 'Discovering action pipelines…'}</p>}</section>;
 }
