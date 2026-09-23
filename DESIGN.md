@@ -3195,3 +3195,14 @@ History renders the persisted contract: role/template, input/output token counts
 - Preview: Empty provider, model, reasoning, command, directory, shell and environment-file fields show the inherited shared draft or known runtime/provider default. Shared edits update these previews before Save. Role-specific explicit overrides stay intact. Show provider/system default, current directory or none when no concrete inherited value is available.
 - Persistence and stability: Keep the input value empty while it inherits. Preview computation must not add settings writes, convert suggestions into overrides or replace a focused editor. Reset/clear resumes inheritance. Current coordinated Settings save and reconnect reconciliation continue to own drafts, focus and sparse writes.
 - Verification: P-256 records focused component/model and isolated production-browser evidence. This projection does not launch providers or change the daemon's launch-resolution rules.
+
+
+### D-155 — Relay editing preserves resolved configuration and explicit overrides
+
+- Date: 2026-09-23
+- Scope: Relay settings in Control Center.
+- Decision: Show the daemon's effective enabled state and source provenance. Keep inherited text values in placeholders, with empty editable overrides; show settings-sourced values in their editors. Prefer live resolved configuration from snapshots, settings reads and low-frequency deltas. If the resolved contract is absent, retain raw settings compatibility.
+- Editing: Only touched fields enter the coordinated save payload. Clearing text resumes file/environment inheritance. Incoming updates refresh untouched fields, preserve dirty drafts, and defer replacement of a focused clean editor until blur. Save acknowledgement must retain the most recent focused edit rather than restore its pre-edit value.
+- Enabled fallback: Explain when the environment enables Relay. Saving Disabled clears the settings override; the environment flag can still keep Relay enabled, and the post-save form must reflect that effective state.
+- Privacy and boundaries: Read only the five public configuration fields. Display private-key paths or empty inheritance placeholders; never read or display inline PEM fields. Configuration verification does not imply external Relay connectivity or credential provisioning.
+- Verification: P-257 records model/app tests, backend resolution-contract checks, and isolated production-browser acceptance with the connector module deliberately unavailable.

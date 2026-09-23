@@ -1263,6 +1263,33 @@ describe('workspace shell', () => {
     expect(commands.some((command) => command.cmd === 'update_global_settings')).toBe(false);
   });
 
+  it('displays effective Relay configuration without promoting inherited values on unrelated saves', async () => {
+    const { commands, refresh } = mockSettingsRequests();
+    refresh('get_global_settings', { relay_config: { config: { enabled: true }, sources: { enabled: { source: 'env', value: true }, relay_url: { source: 'ee_connector.json', value: 'wss://inherited.invalid/ws' }, private_key_path: { source: 'ee_connector.json', value: '' } } } });
+    renderShell(); fireEvent.click(screen.getByRole('button', { name: /Control/ })); fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    expect(await screen.findByLabelText('Relay')).toHaveValue('on');
+    expect(screen.getByLabelText('Relay URL')).toHaveValue(''); expect(screen.getByLabelText('Relay URL')).toHaveAttribute('placeholder', 'wss://inherited.invalid/ws');
+    expect(screen.getByLabelText('Private key path')).toHaveValue('');
+    fireEvent.change(screen.getByLabelText('Terminal scrollback'), { target: { value: '9000' } }); fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await screen.findByText('Saved', { exact: true });
+    expect(commands.find((command) => command.cmd === 'update_global_settings')?.settings).toEqual({ xterm_scrollback: 9000 });
+  });
+
+  it('refreshes untouched Relay fields while preserving focused and dirty fields through deltas', async () => {
+    const { commands, refresh } = mockSettingsRequests();
+    const config = { config: { enabled: false }, sources: { relay_url: { source: 'settings', value: 'wss://original.invalid/ws' }, daemon_id: { source: 'settings', value: 'old-daemon' }, credential_id: { source: 'env', value: 'inherited-credential' } } };
+    refresh('get_global_settings', { relay_config: config });
+    const { appStore } = renderShell(); fireEvent.click(screen.getByRole('button', { name: /Control/ })); fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    const daemon = await screen.findByLabelText('Daemon ID'); fireEvent.change(daemon, { target: { value: 'local-draft' } });
+    const url = screen.getByLabelText<HTMLInputElement>('Relay URL'); act(() => url.focus()); url.setSelectionRange(6, 14);
+    act(() => { appStore.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: 11, ops: [{ op: 'relay_config', config: { enabled: true }, sources: { relay_url: { source: 'settings', value: 'wss://updated.invalid/ws' }, daemon_id: { source: 'settings', value: 'remote-daemon' }, credential_id: { source: 'settings', value: 'new-credential' } } }] })); });
+    expect(url).toHaveValue('wss://original.invalid/ws'); expect(url).toHaveFocus(); expect([url.selectionStart, url.selectionEnd]).toEqual([6, 14]);
+    expect(daemon).toHaveValue('local-draft'); expect(screen.getByLabelText('Credential ID')).toHaveValue('new-credential'); expect(screen.getByLabelText('Relay')).toHaveValue('on');
+    fireEvent.blur(url); expect(url).toHaveValue('wss://updated.invalid/ws');
+    fireEvent.change(url, { target: { value: '' } }); fireEvent.click(screen.getByRole('button', { name: 'Save changes' })); await screen.findByText('Saved', { exact: true });
+    expect(commands.find((command) => command.cmd === 'update_global_settings')?.settings).toEqual({ relay_daemon_id: 'local-draft', relay_url: '' });
+  });
+
   it('saves only edited global fields without promoting inherited relay or unrelated settings', async () => {
     const { commands } = mockSettingsRequests();
     renderShell();

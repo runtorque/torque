@@ -1136,3 +1136,8 @@ P-095/P-101/P-102 now have conflict/reset review, filtered Cmd/Ctrl+G/P entry po
 ### Inherited launch settings checkpoint — 2026-09-23
 
 P-256 now supplies current shared/runtime provider choices and inherited launch previews without promoting empty overrides. D-154 and the parity matrix record focused and isolated live-daemon acceptance. The main ledger now has **257 behaviors: 247 implemented/equivalent dispositions, 6 open repairs and 4 intentional retirements**. Broad settings, lazy/reconnect, resolved Relay configuration and independent native/external acceptance remain open; Phase 4 is not complete.
+
+
+### Resolved Relay settings checkpoint — 2026-09-23
+
+P-257 now displays resolved configuration and source inheritance while preserving focused/dirty fields and sparse saves. D-155 and the matrix record focused, backend-contract and isolated production-browser evidence. The audit adds P-258 for the missing default role/template catalog picker. The main ledger now has **258 behaviors: 248 implemented/equivalent dispositions, 6 open repairs and 4 intentional retirements**. Broad settings, lazy/reconnect, role discovery and native/external acceptance remain open; Phase 4 is not complete.
