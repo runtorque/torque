@@ -6,14 +6,14 @@ import { compactStateFixture } from '../../protocol/fixtures';
 import type { UnknownRecord } from '../../protocol';
 import { toAgentViewModel } from './model';
 import { WorktreeInspector } from './WorktreeInspector';
-const agent = toAgentViewModel('qa', { id: 'qa', name: 'QA', kind: 'worker', worktree_path: '/tmp/qa', worktree_branch: 'qa' });
+const agent = toAgentViewModel('qa', { id: 'qa', name: 'QA', group: 'qa-group', kind: 'worker', worktree_path: '/tmp/qa', worktree_branch: 'qa' });
 const frames: Record<string, UnknownRecord> = {
   worktree_diff_full: { type: 'worktree_diff_full', id: 'qa', files: [{ path: 'keep.txt', hunks: [{ header: '@@ first @@', lines: [{ type: 'add', text: 'retained line' }] }] }] },
   worktree_check_merge: { type: 'worktree_check_merge', id: 'qa', clean: true, default_message: 'Suggested message' },
   worktree_history: { type: 'worktree_history', id: 'qa', commits: [{ sha: 'abc', message: 'Retained checkpoint' }] },
 };
-function setup() {
-  const store = createAppStore(); store.dispatch(projectionActions.snapshotReceived(compactStateFixture)); store.dispatch(connectionActions.connected({ at: 1, reconnect: false })); store.dispatch(connectionActions.snapshotAccepted(compactStateFixture));
+function setup(settings: UnknownRecord = {}) {
+  const store = createAppStore(); store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, group_settings: { 'qa-group': settings } })); store.dispatch(connectionActions.connected({ at: 1, reconnect: false })); store.dispatch(connectionActions.snapshotAccepted(compactStateFixture));
   const props = { agent, sendCommand: vi.fn(() => true), onUnavailable: vi.fn(), onClose: vi.fn() };
   const element = (responses: Record<string, unknown>, active = true, target: ReturnType<typeof toAgentViewModel> | null = agent) => <Provider store={store}><WorktreeInspector {...props} agent={target} responses={responses} active={active} /></Provider>;
   const cached = Object.fromEntries(Object.entries(frames).map(([key, value]) => [`${key}:qa`, value]));
@@ -158,9 +158,9 @@ it('displays typed rebase refusal and permits a new keyed attempt after the refu
 it('shows PR refusals and pending nested PR outcomes without dismissing the inspector', async () => {
   const requests = mutationApi(); const view = setup(); await screen.findByRole('region');
   requests.outcome(() => Promise.resolve({ ok: true, data: { type: 'worktree_pr', id: 'qa', ok: false, error: 'No remote configured' } }));
-  fireEvent.click(screen.getByRole('button', { name: 'Create PR' })); await screen.findByText('No remote configured'); await waitFor(() => expect(screen.getByRole('button', { name: 'Create PR' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Create PR' })); const review = screen.getByRole('dialog', { name: 'Create pull request?' }); fireEvent.click(within(review).getByRole('button', { name: 'Push branch and create PR' })); await within(review).findByText('No remote configured'); await waitFor(() => expect(within(review).getByRole('button', { name: 'Push branch and create PR' })).toBeEnabled());
   requests.outcome(() => Promise.resolve({ ok: true, data: { type: 'worktree_pr', id: 'qa', ok: true, pending: true, pending_ee_pr: true, url: 'https://example.invalid/nested', message: 'Nested PR requires review' } }));
-  fireEvent.click(screen.getByRole('button', { name: 'Create PR' })); await screen.findByText('Nested PR requires review'); expect(screen.getByRole('link', { name: 'https://example.invalid/nested' })).toBeInTheDocument(); expect(view.onClose).not.toHaveBeenCalled();
+  fireEvent.click(within(review).getByRole('button', { name: 'Push branch and create PR' })); await screen.findByText('Nested PR requires review'); expect(screen.getByRole('link', { name: 'https://example.invalid/nested' })).toBeInTheDocument(); expect(view.onClose).not.toHaveBeenCalled();
 });
 it('keeps merge cleanup warnings visible after the successful merge acknowledgement', async () => {
   const requests = mutationApi(); const view = setup(); await screen.findByRole('region');
@@ -181,4 +181,67 @@ it('retains the submitted target and cleanup result when merge closes the live a
 it('retains valid blocked preflight data so stale-base recovery remains available', async () => {
   const requests = api(); requests.frame('worktree_check_merge', { type: 'worktree_check_merge', id: 'qa', clean: false, stale_base: true, error: 'Base advanced; rebase required', conflicts: [{ path: 'sample.txt', reason: 'Base changed' }] }); setup();
   await screen.findByText('Base advanced; rebase required'); expect(screen.getByRole('button', { name: 'Rebase onto base' })).toBeEnabled(); expect(screen.getByRole('button', { name: 'Create PR & merge' })).toBeDisabled(); expect(screen.getByRole('button', { name: 'Create PR' })).toBeDisabled(); expect(screen.getByText('Base changed')).toBeInTheDocument(); expect(screen.queryByRole('button', { name: 'Retry preflight' })).not.toBeInTheDocument();
+});
+
+it('reviews PR branch, base and push before any write and cancels without sending', async () => {
+  const requests = mutationApi(); setup(); await screen.findByRole('region');
+  fireEvent.click(screen.getByRole('button', { name: 'Create PR' }));
+  const dialog = screen.getByRole('dialog', { name: 'Create pull request?' });
+  expect(within(dialog).getByText(/pushed to origin/)).toBeVisible();
+  expect(within(dialog).getByText('qa', { exact: true })).toBeVisible();
+  expect(within(dialog).getByText('main', { exact: true })).toBeVisible();
+  expect(requests.writes()).toHaveLength(0);
+  await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus());
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+  expect(screen.queryByRole('dialog', { name: 'Create pull request?' })).not.toBeInTheDocument(); expect(requests.writes()).toHaveLength(0); expect(screen.getByRole('button', { name: 'Create PR' })).toHaveFocus();
+});
+it.each([
+  ['keep', false, false], ['close', true, false], ['remove', false, true], ['close_remove', true, true], ['auto_sweep', true, true],
+])('inherits %s cleanup and preserved diff from the target group', async (mode, close, remove) => {
+  const requests = mutationApi(); setup({ worktree_merge_cleanup: mode, worktree_merge_preserve_diff: true }); await screen.findByRole('region');
+  expect(screen.getByRole('checkbox', { name: 'Close agent after merge' })).toHaveProperty('checked', close);
+  expect(screen.getByRole('checkbox', { name: 'Delete worktree after merge' })).toHaveProperty('checked', remove);
+  expect(screen.getByRole('checkbox', { name: 'Preserve boundary diff' })).toBeChecked();
+  expect(screen.getByText(/Cleanup options run only after/)).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Create PR & merge' }));
+  expect(requests.writes()[0]).toMatchObject({ close_agent_on_merge: close, remove_worktree_on_merge: remove, preserve_merge_diff: true });
+  await screen.findByText('Refused');
+});
+
+it('keeps PR confirmation through pending and lost replies and retries the exact operation after reconnect', async () => {
+  const requests = mutationApi(); const view = setup(); await screen.findByRole('region');
+  let reject: (error: Error) => void = () => {};
+  requests.outcome(() => new Promise((_resolve, fail) => { reject = fail; }));
+  fireEvent.click(screen.getByRole('button', { name: 'Create PR' })); const dialog = screen.getByRole('dialog', { name: 'Create pull request?' });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Push branch and create PR' }));
+  expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeDisabled(); expect(within(dialog).getByRole('button', { name: 'Push branch and create PR' })).toBeDisabled();
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Push branch and create PR' })); expect(requests.writes()).toHaveLength(1);
+  await act(async () => { reject(new TypeError('Lost response')); await Promise.resolve(); }); await within(dialog).findByText(/outcome is unknown/);
+  view.update({}, false); expect(screen.queryByRole('dialog', { name: 'Create pull request?' })).not.toBeInTheDocument();
+  act(() => { view.store.dispatch(connectionActions.connected({ at: 2, reconnect: true })); view.store.dispatch(connectionActions.snapshotAccepted(compactStateFixture)); }); view.update({}, true);
+  expect(requests.writes()).toHaveLength(1); const restored = await screen.findByRole('dialog', { name: 'Create pull request?' });
+  requests.outcome(() => Promise.resolve({ ok: true, data: { type: 'worktree_pr', id: 'qa', ok: true, url: 'https://example.invalid/pr/qa', message: 'PR created' } }));
+  fireEvent.click(within(restored).getByRole('button', { name: 'Retry PR operation' })); await screen.findByText('PR created');
+  expect(requests.writes()[1]).toEqual(requests.writes()[0]); expect(screen.queryByRole('dialog', { name: 'Create pull request?' })).not.toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'https://example.invalid/pr/qa' })).toBeVisible();
+});
+it('requires fresh PR review when the branch or base changes while confirmation is open', async () => {
+  const requests = mutationApi(); const view = setup(); await screen.findByRole('region'); fireEvent.click(screen.getByRole('button', { name: 'Create PR' }));
+  const changed = { ...agent, worktreeBranch: 'replacement', raw: { ...agent.raw, worktree_base_branch: 'release' } }; view.update({}, true, changed);
+  const dialog = screen.getByRole('dialog', { name: 'Create pull request?' }); expect(within(dialog).getByRole('alert')).toHaveTextContent('target has changed');
+  expect(within(dialog).getByRole('button', { name: 'Push branch and create PR' })).toBeDisabled(); expect(within(dialog).getByText('qa', { exact: true })).toBeVisible(); expect(requests.writes()).toHaveLength(0);
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' })); await waitFor(() => expect(screen.getByRole('button', { name: 'Create PR' })).toBeEnabled()); fireEvent.click(screen.getByRole('button', { name: 'Create PR' }));
+  const current = screen.getByRole('dialog', { name: 'Create pull request?' }); expect(within(current).getByText('replacement', { exact: true })).toBeVisible(); expect(within(current).getByText('release', { exact: true })).toBeVisible(); expect(requests.writes()).toHaveLength(0);
+});
+it('refreshes untouched merge defaults but retains edits and submitted options through reconnect and refusal', async () => {
+  const requests = mutationApi(); const view = setup({ worktree_merge_cleanup: 'close_remove', worktree_merge_preserve_diff: true }); await screen.findByRole('region');
+  const close = screen.getByRole('checkbox', { name: 'Close agent after merge' }); fireEvent.click(close);
+  const updateDefaults = (mode: string, preserve: boolean) => view.store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, group_settings: { 'qa-group': { worktree_merge_cleanup: mode, worktree_merge_preserve_diff: preserve } } }));
+  act(() => { updateDefaults('keep', false); }); expect(close).not.toBeChecked(); expect(screen.getByRole('checkbox', { name: 'Delete worktree after merge' })).not.toBeChecked(); expect(screen.getByRole('checkbox', { name: 'Preserve boundary diff' })).not.toBeChecked();
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Preserve boundary diff' }));
+  act(() => { updateDefaults('close_remove', false); view.store.dispatch(connectionActions.connected({ at: 2, reconnect: true })); view.store.dispatch(connectionActions.snapshotAccepted(compactStateFixture)); });
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Create PR & merge' })).toBeEnabled()); expect(close).not.toBeChecked(); expect(screen.getByRole('checkbox', { name: 'Delete worktree after merge' })).toBeChecked(); expect(screen.getByRole('checkbox', { name: 'Preserve boundary diff' })).toBeChecked();
+  fireEvent.click(screen.getByRole('button', { name: 'Create PR & merge' })); await screen.findByText('Refused');
+  act(() => { updateDefaults('keep', false); }); expect(screen.getByRole('checkbox', { name: 'Delete worktree after merge' })).toBeChecked(); expect(screen.getByRole('checkbox', { name: 'Preserve boundary diff' })).toBeChecked();
+  expect(requests.writes()[0]).toMatchObject({ close_agent_on_merge: false, remove_worktree_on_merge: true, preserve_merge_diff: true });
 });

@@ -1090,3 +1090,8 @@ Agent creation now discovers classes in the pinned group's project through an ow
 ### Worktree toolbar recovery checkpoint
 
 Worktree creation now confirms active-session replacement, acknowledges the created path and requested new session, and retains partial creation so relaunch can be retried without another worktree. Toolbar checkpoint exposes acknowledged commit/no-op/refusal outcomes, and toolbar Preflight merge opens the correlated inspector. P-245–P-247 and D-146 record acceptance and retry limits. PR push confirmation, inherited merge options, contextual removal, broad settings and lazy/reconnect acceptance remain open; this checkpoint does not close Phase 4 or permit Classic retirement.
+
+
+### Worktree publication review and merge-default checkpoint
+
+Create PR now reviews the source branch, target base and push implication before sending, retaining confirmation for refusals and uncertain-outcome retries. Merge cleanup and preserved-diff options inherit the target group defaults and retain reviewed edits across refresh/reconnect. P-248/P-249 and D-147 record evidence, including real local cleanup and explicitly simulated external-PR responses. Shared-worktree removal, broad Settings/reconnect and independent native/external acceptance gates remain open; Phase 4 and Classic retirement remain unproven.

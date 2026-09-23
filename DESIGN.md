@@ -3113,3 +3113,14 @@ History renders the persisted contract: role/template, input/output token counts
 - Checkpoint and preflight: Toolbar checkpoint uses the same acknowledged lifecycle as the inspector, including created, clean no-op, refusal and explicit retry. Preflight opens the retained inspector and its correlated Changes/preflight/History reads so readiness is visible for the requested agent.
 - Boundaries: Session or target changes during awaited work are checked before the next lifecycle effect; deleting an agent during creation cannot resurrect it through persistence. These checks do not make Git and PTY operations atomic across daemon crash or preserve unsent retries across window destruction.
 - Verification: Focused component/backend regressions and isolated real-Git/real-PTY browser acceptance are recorded in the parity ledger. External GitHub effects and native lifecycle remain separate gates.
+
+
+### D-147 — Review PR publication and inherit merge cleanup intent
+
+- Date: 2026-09-23
+- Scope: Worktree inspector PR creation and merge options.
+- PR review: Before any Create PR write, show the reviewed source branch and target base and state that the branch is pushed to origin first. Cancel sends no write. A changed agent, path, branch or base requires a new review. Pending/refused/unknown outcomes retain that review; known refusals allow a fresh explicit attempt, while unknown outcomes retry the exact acknowledged-operation payload/key. A confirmed result returns to the inspector with its message/link.
+- Confirmation workspace: PR review and rollback share the inspector's single dialog, preserving the mounted diff and merge controls while temporarily hiding them. This avoids inaccessible overlapping dialogs when the workspace hides and reopens. Keyboard focus moves into the confirmation and returns to its opener after cancellation or completion.
+- Merge defaults: Read cleanup mode and preserved-diff defaults from the target agent's group. `keep`, `close`, `remove`, `close_remove` and `auto_sweep` use the same close/remove mapping as Classic. Untouched options follow refreshed group defaults; explicit checkbox edits remain through refresh/reconnect. Once submitted, the reviewed values remain fixed through failure and retry. Closing and reopening starts a fresh review from current defaults.
+- Timing: Explain that cleanup runs after the merge completes, not when a pull request is merely created. The backend remains authoritative for actual cleanup, preserved-diff eligibility and warnings.
+- Verification: P-248/P-249 record component, Classic-contract and isolated production-browser evidence. External GitHub execution and native lifecycle remain separate acceptance gates.

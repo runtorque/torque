@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useAppSelector } from '../../app/hooks';
+import { selectGroupsState } from '../../app/store';
 
 import { Button, ModalDialog, StateSurface } from '../../design/primitives';
 import type { AgentViewModel } from './model';
@@ -36,15 +38,28 @@ function number(value: unknown): number {
 export function WorktreeInspector({ agent, responses, onClose, active = true }: WorktreeInspectorProps) {
   const [tab, setTab] = useState<'diff' | 'history'>('diff');
   const [message, setMessage] = useState('');
-  const [closeAgent, setCloseAgent] = useState(false);
-  const [removeAfterMerge, setRemoveAfterMerge] = useState(false);
-  const [preserveDiff, setPreserveDiff] = useState(false);
+  const [mergeEdits, setMergeEdits] = useState<Partial<{ close: boolean; remove: boolean; preserve: boolean }>>({});
+  const [prReview, setPrReview] = useState<{ id: string; path: string; branch: string; base: string } | null>(null);
   const [clearContext, setClearContext] = useState(false);
   const [forceDirect, setForceDirect] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [rollbackSha, setRollbackSha] = useState('');
+  const confirmationReturnFocus = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (active && !prReview && !rollbackSha) {
+      const opener = confirmationReturnFocus.current;
+      confirmationReturnFocus.current = null;
+      opener?.focus();
+    }
+  }, [active, prReview, rollbackSha]);
   const [operationAgent, setOperationAgent] = useState<AgentViewModel | null>(null);
   const target = agent ?? operationAgent;
+  const groups = useAppSelector(selectGroupsState);
+  const defaults = record(groups.settings[target?.group ?? '']);
+  const cleanupMode = text(defaults.worktree_merge_cleanup) || 'keep';
+  const closeAgent = mergeEdits.close ?? ['close', 'close_remove', 'auto_sweep'].includes(cleanupMode);
+  const removeAfterMerge = mergeEdits.remove ?? ['remove', 'close_remove', 'auto_sweep'].includes(cleanupMode);
+  const preserveDiff = mergeEdits.preserve ?? Boolean(defaults.worktree_merge_preserve_diff);
 
   const mutation = useWorktreeMutation();
   const blocked = mutation.pending || mutation.uncertain;
@@ -53,12 +68,14 @@ export function WorktreeInspector({ agent, responses, onClose, active = true }: 
   async function finish(operation: Promise<Record<string, unknown> | null>) {
     const result = await operation;
     if (!result) return;
+    if (result.type === 'worktree_pr') setPrReview(null);
     if (result.type === 'worktree_rollback') setRollbackSha('');
     if (result.type === 'worktree_remove') { setConfirmRemove(false); onClose(); }
     else reads.refresh();
   }
   function run(command: Record<string, unknown>) {
     if (!agent || !reads.ready || blocked) return;
+    if (command.cmd === 'worktree_merge') setMergeEdits({ close: closeAgent, remove: removeAfterMerge, preserve: preserveDiff });
     setOperationAgent(agent);
     setProgressAtStart(agent ? responses[`worktree_merge_progress:${agent.id}`] : null);
     void finish(mutation.run(command));
@@ -86,16 +103,20 @@ export function WorktreeInspector({ agent, responses, onClose, active = true }: 
   const defaultMessage = text(preflight.default_message);
   const effectiveMessage = message || defaultMessage;
   const artifacts = list(diff.artifacts);
+  const branch = target?.worktreeBranch || text(diff.branch) || 'worktree branch';
+  const base = text(target?.raw.worktree_base_branch) || text(diff.base_branch) || 'main';
+  const prAvailable = Boolean(agent) && reads.ready && preflightCurrent && !mergeDirty && !preflight.error;
+  const prTargetChanged = Boolean(prReview && (prReview.id !== agent?.id || prReview.path !== agent?.worktreePath || prReview.branch !== branch || prReview.base !== base));
 
   if (!target) return null;
   return <ModalDialog
-    title={`${target.name} worktree`}
-    description={`${text(diff.branch) || target.worktreeBranch || 'branch'} → ${text(diff.base_branch) || text(target.raw.worktree_base_branch) || 'main'}`}
-    size="large"
+    title={prReview ? 'Create pull request?' : rollbackSha ? 'Rollback worktree?' : `${target.name} worktree`}
+    description={rollbackSha ? rollbackSha.slice(0, 12) : prReview ? target.name : `${branch} → ${base}`}
+    size={prReview || rollbackSha ? 'small' : 'large'}
     isOpen={active}
-    onOpenChange={(open) => { if (!open && !blocked) onClose(); }}
+    onOpenChange={(open) => { if (!open && !blocked) { if (prReview) setPrReview(null); else if (rollbackSha) setRollbackSha(''); else onClose(); } }}
   >
-    <div className={styles.worktreeInspector}>
+    <div className={styles.worktreeInspector} hidden={Boolean(prReview || rollbackSha)}>
       <nav aria-label="Worktree views">
         <button aria-current={tab === 'diff' ? 'page' : undefined} onClick={() => setTab('diff')}>Changes</button>
         <button aria-current={tab === 'history' ? 'page' : undefined} onClick={() => setTab('history')}>History <span>{commits.length}</span></button>
@@ -132,12 +153,12 @@ export function WorktreeInspector({ agent, responses, onClose, active = true }: 
         {Object.keys(history).length && !commits.length ? <StateSurface title="No checkpoints" description="This branch has no worktree checkpoints yet." /> : null}
         {commits.map((commit, index) => <article key={text(commit.sha) || String(index)}>
           <div><strong>{text(commit.message) || text(commit.short_sha)}</strong><small>{text(commit.short_sha)} · {text(commit.date)} · +{number(commit.insertions)} −{number(commit.deletions)}</small>{text(commit.body) ? <p>{text(commit.body)}</p> : null}</div>
-          {index === 0 ? <span>HEAD</span> : <Button tone="quiet" isDisabled={!reads.ready || blocked} onPress={() => setRollbackSha(text(commit.sha))}>Rollback…</Button>}
+          {index === 0 ? <span>HEAD</span> : <Button tone="quiet" isDisabled={!reads.ready || blocked} onPress={(event) => { confirmationReturnFocus.current = event.target instanceof HTMLElement ? event.target : null; setRollbackSha(text(commit.sha)); }}>Rollback…</Button>}
         </article>)}
       </div>
 
       {mutation.pending ? <p role="status">Worktree operation in progress…</p> : null}
-      {mutation.error ? <div role="alert" className={styles.worktreeResult}>{mutation.error}{mutation.uncertain ? <Button isDisabled={mutation.pending} onPress={() => { void finish(mutation.retry()); }}>Retry operation</Button> : null}</div> : null}
+      {mutation.error && !prReview && !rollbackSha ? <div role="alert" className={styles.worktreeResult}>{mutation.error}{mutation.uncertain ? <Button isDisabled={mutation.pending} onPress={() => { void finish(mutation.retry()); }}>Retry operation</Button> : null}</div> : null}
       {activeProgress ? <div role="status" className={styles.worktreeResult}>{activeProgress}</div> : null}
       {resultMessage ? <div role="status" className={styles.worktreeResult}>{resultMessage}</div> : null}
       {resultUrl ? <div className={styles.worktreeResult}>Pull request: <a href={resultUrl} target="_blank" rel="noreferrer">{resultUrl}</a></div> : null}
@@ -145,11 +166,12 @@ export function WorktreeInspector({ agent, responses, onClose, active = true }: 
       {Array.isArray(cleanupErrors) && cleanupErrors.length ? <div role="alert">Cleanup needs attention: {cleanupErrors.map(text).join('; ')}</div> : null}
 
       <section className={styles.mergeControls}>
+        <p>Cleanup options run only after the merge completes, not when a pull request is created.</p>
         <label>Merge message<textarea disabled={blocked} rows={2} value={effectiveMessage} onChange={(event) => setMessage(event.target.value)} placeholder="Commit or pull-request message" /></label>
         <div className={styles.checkGrid}>
-          <label className={styles.inlineCheck}><input type="checkbox" disabled={blocked} checked={closeAgent} onChange={(event) => setCloseAgent(event.target.checked)} />Close agent after merge</label>
-          <label className={styles.inlineCheck}><input type="checkbox" disabled={blocked} checked={removeAfterMerge} onChange={(event) => setRemoveAfterMerge(event.target.checked)} />Delete worktree after merge</label>
-          <label className={styles.inlineCheck}><input type="checkbox" disabled={blocked} checked={preserveDiff} onChange={(event) => setPreserveDiff(event.target.checked)} />Preserve boundary diff</label>
+          <label className={styles.inlineCheck}><input type="checkbox" disabled={blocked} checked={closeAgent} onChange={(event) => setMergeEdits((current) => ({ ...current, close: event.target.checked }))} />Close agent after merge</label>
+          <label className={styles.inlineCheck}><input type="checkbox" disabled={blocked} checked={removeAfterMerge} onChange={(event) => setMergeEdits((current) => ({ ...current, remove: event.target.checked }))} />Delete worktree after merge</label>
+          <label className={styles.inlineCheck}><input type="checkbox" disabled={blocked} checked={preserveDiff} onChange={(event) => setMergeEdits((current) => ({ ...current, preserve: event.target.checked }))} />Preserve boundary diff</label>
           <label className={styles.inlineCheck}><input type="checkbox" disabled={blocked} checked={clearContext} onChange={(event) => setClearContext(event.target.checked)} />Clear context after merge</label>
           <label className={styles.inlineCheck}><input type="checkbox" disabled={blocked} checked={forceDirect} onChange={(event) => setForceDirect(event.target.checked)} />Force direct local merge</label>
         </div>
@@ -160,14 +182,26 @@ export function WorktreeInspector({ agent, responses, onClose, active = true }: 
         <span />
         <Button tone="quiet" isDisabled={!reads.ready || blocked} onPress={() => run({ cmd: 'worktree_checkpoint', id: target.id })}>Checkpoint</Button>
         {(stale || conflicts.length) ? <Button tone="quiet" isDisabled={!reads.ready || blocked} onPress={() => run({ cmd: 'worktree_rebase', id: target.id })}>Rebase onto base</Button> : null}
-        <Button tone="quiet" onPress={() => run({ cmd: 'worktree_create_pr', id: target.id })} isDisabled={blocked || !preflightCurrent || mergeDirty || Boolean(preflight.error)}>Create PR</Button>
+        <Button tone="quiet" onPress={(event) => { if (mutation.reset()) { confirmationReturnFocus.current = event.target instanceof HTMLElement ? event.target : null; setPrReview({ id: target.id, path: target.worktreePath, branch, base }); } }} isDisabled={blocked || !prAvailable}>Create PR</Button>
         <Button tone="primary" onPress={() => run({ cmd: 'worktree_merge', id: target.id, message: effectiveMessage, close_agent_on_merge: closeAgent, remove_worktree_on_merge: removeAfterMerge, preserve_merge_diff: preserveDiff, clear_context: clearContext, ...(forceDirect ? { force_direct: true } : {}) })} isDisabled={blocked || !preflightCurrent || !mergeClean || Boolean(preflight.error)}>Create PR & merge</Button>
         <Button tone="quiet" isDisabled={blocked} onPress={onClose}>Close</Button>
       </footer>
     </div>
 
-    <ModalDialog title="Rollback worktree?" description={rollbackSha ? rollbackSha.slice(0, 12) : ''} size="small" isOpen={active && Boolean(rollbackSha)} onOpenChange={(open) => { if (!open && !blocked) setRollbackSha(''); }}>
-      <div className={styles.removeDialog}><p>Changes after this checkpoint will be lost.</p>{mutation.pending ? <p role="status">Restoring checkpoint…</p> : null}{mutation.error ? <p role="alert">{mutation.error}</p> : null}{mutation.uncertain ? <Button isDisabled={mutation.pending} onPress={() => { void finish(mutation.retry()); }}>Retry rollback</Button> : null}<footer><Button tone="quiet" isDisabled={blocked} onPress={() => setRollbackSha('')}>Cancel</Button><Button tone="danger" isDisabled={!reads.ready || blocked} onPress={() => run({ cmd: 'worktree_rollback', id: target.id, sha: rollbackSha })}>Rollback</Button></footer></div>
-    </ModalDialog>
+    {prReview ? <>
+      <div className={styles.removeDialog}>
+        <p>Create a pull request from <strong>{prReview?.branch}</strong> into <strong>{prReview?.base}</strong>? The branch will be pushed to origin first.</p>
+        {prTargetChanged ? <p role="alert">The worktree target has changed. Cancel and review the current branch before creating a pull request.</p> : null}
+        {mutation.pending ? <p role="status">Creating pull request…</p> : null}
+        {mutation.error ? <p role="alert">{mutation.error}</p> : null}
+        {!reads.ready && !blocked ? <p role="status">Waiting for a synchronized connection and an available worktree.</p> : null}
+        {mutation.uncertain ? <Button isDisabled={mutation.pending} onPress={() => { void finish(mutation.retry()); }}>Retry PR operation</Button> : null}
+        <footer><Button autoFocus tone="quiet" isDisabled={blocked} onPress={() => setPrReview(null)}>Cancel</Button><Button tone="primary" isDisabled={blocked || !prAvailable || prTargetChanged} onPress={() => { if (prReview && !prTargetChanged) run({ cmd: 'worktree_create_pr', id: prReview.id }); }}>Push branch and create PR</Button></footer>
+      </div>
+    </> : null}
+
+    {rollbackSha ? <>
+      <div className={styles.removeDialog}><p>Changes after this checkpoint will be lost.</p>{mutation.pending ? <p role="status">Restoring checkpoint…</p> : null}{mutation.error ? <p role="alert">{mutation.error}</p> : null}{mutation.uncertain ? <Button isDisabled={mutation.pending} onPress={() => { void finish(mutation.retry()); }}>Retry rollback</Button> : null}<footer><Button autoFocus tone="quiet" isDisabled={blocked} onPress={() => setRollbackSha('')}>Cancel</Button><Button tone="danger" isDisabled={!reads.ready || blocked} onPress={() => run({ cmd: 'worktree_rollback', id: target.id, sha: rollbackSha })}>Rollback</Button></footer></div>
+    </> : null}
   </ModalDialog>;
 }
