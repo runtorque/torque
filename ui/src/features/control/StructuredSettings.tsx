@@ -20,8 +20,9 @@ function StringListSetting({ value, onChange, label, descriptionId }: { value: u
   return <textarea aria-label={label} aria-describedby={descriptionId} rows={3} value={buffer.draft} onChange={(event) => { const next = event.target.value.split('\n').filter((entry) => entry.trim()); setBuffer({ value: next, draft: event.target.value }); onChange(next); }} placeholder="One value per line" />;
 }
 
-function SettingObject({ value, onChange, label, template }: { value: UnknownRecord; onChange: (next: UnknownRecord) => void; label: string; template?: UnknownRecord | undefined }) {
+function SettingObject({ value, onChange, label, template, fixedSchema = false }: { fixedSchema?: boolean; value: UnknownRecord; onChange: (next: UnknownRecord) => void; label: string; template?: UnknownRecord | undefined }) {
   const [newKey, setNewKey] = useState('');
+  if (fixedSchema) return <fieldset><legend>{label}</legend><StructuredSettings value={value} prefix={label} onChange={onChange} /></fieldset>;
   if (template) { const displayed = { ...template, ...value }; return <fieldset><legend>{label}</legend><StructuredSettings value={displayed} prefix={label} onChange={(next) => onChange({ ...value, ...changedSettings(displayed, next) })} /></fieldset>; }
   return <fieldset><legend>{label}</legend><StructuredSettings value={value} onChange={onChange} prefix={label} schema={false} onRemove={(key) => { const next = { ...value }; delete next[key]; onChange(next); }} /><label>New {label.toLocaleLowerCase()} key<input value={newKey} onChange={(event) => setNewKey(event.target.value)} /></label><Button isDisabled={!newKey.trim() || newKey.trim() in value} onPress={() => { onChange({ ...value, [newKey.trim()]: '' }); setNewKey(''); }}>Add entry</Button></fieldset>;
 }
@@ -33,7 +34,7 @@ export function StructuredSettings({ value, onChange, prefix = '', omit = [], on
     const descriptionId = field?.description ? `${instance}-${key}-help` : undefined;
     const set = (next: unknown) => onChange({ ...value, [key]: next });
     const reset = key in defaults ? <Button tone="quiet" isDisabled={settingsEqual(item, defaults[key])} onPress={() => set(structuredClone(defaults[key]))}>Reset {label}</Button> : null;
-    if (item && typeof item === 'object' && !Array.isArray(item)) return <div key={key}><SettingObject value={item as UnknownRecord} onChange={set} label={label} template={key === 'board_sync_github' ? githubSettingsDefaults : undefined} />{reset}</div>;
+    if (item && typeof item === 'object' && !Array.isArray(item)) return <div key={key}><SettingObject value={item as UnknownRecord} onChange={set} label={label} fixedSchema={schema && key === 'architect_review_gate_thresholds'} template={schema && key === 'board_sync_github' ? githubSettingsDefaults : undefined} />{reset}</div>;
     const suggestions = schema ? providerChoices(providers, key, value) : [];
     const choicesId = `${instance}-${key}-choices`;
     const options = suggestions.length ? undefined : field?.options;

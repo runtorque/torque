@@ -2,6 +2,9 @@
 // and state dataclasses. Values continue to come from the daemon.
 export interface SettingField { label: string; options?: { value: string; label: string }[]; min?: string; max?: string; step?: string; placeholder?: string; description?: string; kind?: string }
 export const settingFields: Record<string, SettingField> = {
+  ship_direct_max: { label: 'Ship direct max', kind: 'int', min: '0', description: 'Maximum changed lines allowed for direct shipping by the review gate.' },
+  review_default_above: { label: 'Review default above', kind: 'int', min: '0', description: 'Changed-line threshold above which review is the default.' },
+  self_review_bypass_allowed: { label: 'Self review bypass allowed', kind: 'bool' },
   github_project_number: { label: 'GitHub project number', kind: 'int', min: '0' },
   github_lane_status_map: { label: 'GitHub lane status map', kind: 'dict' },
   github_assignee_map: { label: 'GitHub assignee map', kind: 'dict' },

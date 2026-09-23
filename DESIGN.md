@@ -2983,6 +2983,14 @@ scope.
 - Scope: This changes discovery lifecycle, not graph layout or action editing. Older daemon responses without a group field are correlated by their cancelable HTTP request.
 - Verification: Component tests reproduce compact-snapshot removal and cover deferred/failed/stale reads, synchronization, selection and hidden cleanup; production browser acceptance uses actual saved action pipelines and reconnects.
 
+### D-138 — Architect review thresholds use fixed validated fields
+
+- Date: 2026-09-22
+- Status: accepted; component, production browser, SQLite persistence and backend policy checks passed for P-229.
+- Decision: The Architect review-gate object has two non-negative whole-number thresholds and a boolean self-review bypass setting. Present those named controls with units and validate safe integers before saving. Blank, negative, fractional and unsafe values remain editable drafts with focused validation; saving cannot silently truncate or clamp them.
+- Schema: This object has a fixed server schema, so it has no arbitrary add/remove-key controls. Its enclosing reset uses daemon defaults. User maps such as environment variables continue to accept literal keys/string values even when a key matches a threshold name.
+- Verification: Component boundary/reset/type tests, real daemon refusal/retry/reload of exact numeric/boolean values, and existing review-policy backend tests. Full acceptance of other settings remains separate.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:
