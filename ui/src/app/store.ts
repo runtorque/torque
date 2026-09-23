@@ -579,7 +579,7 @@ export const connectionActions = connectionSlice.actions;
 export const projectionActions = projectionSlice.actions;
 export const workspaceUiActions = workspaceUiSlice.actions;
 
-export function createAppStore() {
+export function createAppStore(initialNavigation?: WorkspaceNavigation | null) {
   const store = configureStore({
     reducer: {
       connection: connectionSlice.reducer,
@@ -595,6 +595,7 @@ export function createAppStore() {
       }),
     devTools: import.meta.env.DEV,
   });
+  if (initialNavigation) store.dispatch(workspaceUiActions.restoreNavigation(initialNavigation));
   installComposerPreviewCleanup(store);
   return store;
 }

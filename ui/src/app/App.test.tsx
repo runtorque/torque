@@ -341,6 +341,21 @@ describe('workspace shell', () => {
     expect(invoke.mock.calls.filter(([command]) => command === 'list_detached')).toHaveLength(1);
   });
 
+  it('hands off the currently selected Control section and focuses an existing window without resetting it', async () => {
+    const invoke = vi.fn((command: string) => Promise.resolve(command === 'list_detached' ? [{ panel: 'control', label: 'control-existing' }] : command === 'detach' ? 'control-new' : null));
+    const { appStore } = renderShell(createTauriHost(invoke));
+    for (const section of ['context', 'logs', 'help'] as const) {
+      act(() => { appStore.dispatch(workspaceUiActions.setActivePanel('control')); appStore.dispatch(workspaceUiActions.setControlTab(section)); });
+      act(() => { (window as Window & { detachActivePanel?: () => void }).detachActivePanel!(); });
+      await waitFor(() => expect(invoke).toHaveBeenCalledWith('detach', { panel: 'control', section, bounds: { width: 1080, height: 740 } }));
+    }
+    act(() => { appStore.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: 11, ops: [{ op: 'ui_update', key: 'detached_panels', value: { control: { label: 'control-existing' } } }] })); });
+    invoke.mockClear();
+    act(() => { (window as Window & { detachActivePanel?: () => void }).detachActivePanel!(); });
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('focus_window', { label: 'control-existing' }));
+    expect(invoke.mock.calls.some(([command]) => command === 'detach')).toBe(false);
+  });
+
   it('uses icon-only workspace detach actions without a terminal detach row', () => {
     const tauriHost = createTauriHost(vi.fn((command: string) => Promise.resolve(command === 'detach' ? 'agents-window' : null)));
     renderShell(tauriHost);

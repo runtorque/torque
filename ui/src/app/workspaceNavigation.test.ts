@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { compactStateFixture } from '../protocol/fixtures';
 import type { TorqueCommand, UnknownRecord } from '../protocol';
 import { connectionActions, createAppStore, projectionActions, workspaceUiActions } from './store';
-import { defaultNavigation, restoredNavigation, validNavigation, type WorkspaceNavigation } from './workspaceNavigation';
+import { controlTabs, defaultNavigation, detachedNavigation, restoredNavigation, validNavigation, type WorkspaceNavigation } from './workspaceNavigation';
 import { installWorkspaceNavigation } from './workspaceNavigationPersistence';
 const preference: WorkspaceNavigation = { version: 1, activePanel: 'control', controlTab: 'context' };
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
@@ -18,6 +18,23 @@ function setup(hydrate = true) {
   return { store, errors, calls, snapshot, ack, ...persistence };
 }
 describe('workspace preference projection', () => {
+  it('initializes detached Control sections before render and bounds untrusted query values', () => {
+    for (const controlTab of controlTabs) {
+      const initial = detachedNavigation(`?panel=control&section=${controlTab}&window=control-test`);
+      expect(initial).toEqual({ version: 1, activePanel: 'control', controlTab });
+      const store = createAppStore(initial);
+      expect(store.getState().workspaceUi).toMatchObject({ activePanel: 'control', controlTab, navigationRevision: 0 });
+      store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, react_workspace_state: defaultNavigation }));
+      expect(store.getState().workspaceUi.controlTab).toBe(controlTab);
+    }
+    for (const section of ['', 'missing', 'CONTEXT', 'context%26panel%3Dboard', 'https%3A%2F%2Fevil.test']) {
+      expect(detachedNavigation(`?panel=control&section=${section}`)).toEqual({ ...defaultNavigation, activePanel: 'control' });
+    }
+    expect(detachedNavigation('?panel=control')).toEqual({ ...defaultNavigation, activePanel: 'control' });
+    expect(detachedNavigation('?panel=board&section=context')).toEqual(defaultNavigation);
+    expect(detachedNavigation('?section=context')).toBeNull();
+    expect(detachedNavigation('?panel=unknown&section=context')).toBeNull();
+  });
   it('restores only bounded known preferences and migrates Classic panel ownership', () => {
     expect(validNavigation({ ...preference, discarded: 'field' })).toEqual(preference);
     for (const raw of [null, [], {}, { ...preference, version: true }, { ...preference, version: 2 }, { ...preference, activePanel: 'legacy' }, { ...preference, controlTab: {} }]) expect(validNavigation(raw)).toBeNull();

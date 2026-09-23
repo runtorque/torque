@@ -23,6 +23,8 @@ export interface WindowBounds {
 
 export interface DetachPanelRequest {
   panel: string;
+  /** Initial Control Center section; local navigation remains window-owned. */
+  section?: string;
   bounds?: WindowBounds | null;
 }
 

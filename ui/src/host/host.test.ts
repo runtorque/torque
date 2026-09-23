@@ -36,6 +36,12 @@ describe('Tauri host', () => {
     expect(host.capabilities.has('detach-panel')).toBe(true);
   });
 
+  it('passes the optional Control section through the native boundary', async () => {
+    const invoke = vi.fn(() => Promise.resolve('control-window'));
+    await createTauriHost(invoke).detachPanel({ panel: 'control', section: 'context' });
+    expect(invoke).toHaveBeenCalledWith('detach', { panel: 'control', section: 'context', bounds: null });
+  });
+
   it('passes native confirm arguments in the Rust command shape', async () => {
     const invoke = vi.fn(() => Promise.resolve(true));
     const host = createTauriHost(invoke);

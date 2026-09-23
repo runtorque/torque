@@ -25,6 +25,7 @@ import {
   workspaceUiActions,
   type AppStore,
 } from './store';
+import { detachedNavigation } from './workspaceNavigation';
 import { useWorkspaceNavigation } from './useWorkspaceNavigation';
 import { RenderTelemetry } from './RenderTelemetry';
 import { sanitizeClientError } from './clientDiagnostics';
@@ -430,7 +431,7 @@ export function WorkspaceShell({ host, sendCommand }: WorkspaceShellProps) {
         return;
       }
       const bounds = savedWindowBounds(existing, panel === 'board' ? { width: 1180, height: 760 } : { width: 1080, height: 740 });
-      void host.detachPanel({ panel, bounds }).then((detached) => {
+      void host.detachPanel({ panel, bounds, ...(panel === 'control' ? { section: workspaceUi.controlTab } : {}) }).then((detached) => {
         sendCommand({ cmd: 'ui_set_detached_panels', detached_panels: { ...current, [panel]: { label: detached.label, bounds } } });
       }).catch(commandUnavailable);
     };
@@ -457,7 +458,7 @@ export function WorkspaceShell({ host, sendCommand }: WorkspaceShellProps) {
       delete target.torqueMainWindowBoundsChanged;
       delete target.torqueDetachedWindowBoundsChanged;
     };
-  }, [commandUnavailable, detachedPanel, detachedWindowLabel, dispatch, host, runCommand, sendCommand, workspace.detachedPanels, workspaceUi.activePanel]);
+  }, [commandUnavailable, detachedPanel, detachedWindowLabel, dispatch, host, runCommand, sendCommand, workspace.detachedPanels, workspaceUi.activePanel, workspaceUi.controlTab]);
 
   const closeCommandPalette = () => dispatch(workspaceUiActions.setCommandPaletteOpen(false));
   const openPanel = (panel: 'board' | 'agents' | 'planning' | 'control') => {
@@ -634,7 +635,7 @@ interface AppProps {
 }
 
 export function App({ appStore, host, clientFactory }: AppProps) {
-  const resolvedStore = useMemo(() => appStore ?? createAppStore(), [appStore]);
+  const resolvedStore = useMemo(() => appStore ?? createAppStore(detachedNavigation(window.location.search)), [appStore]);
   const resolvedHost = useMemo(() => host ?? createDesktopHost(), [host]);
   const client = useMemo(
     () => clientFactory?.(resolvedStore) ?? new TorqueProtocolClient({ store: resolvedStore }),

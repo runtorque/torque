@@ -26,3 +26,13 @@ export function restoredNavigation(data: UnknownRecord): WorkspaceNavigation {
   const active = candidates.find((value) => typeof value === 'string' && Object.hasOwn(classicPanels, value));
   return { ...defaultNavigation, ...classicPanels[typeof active === 'string' ? active : ''] };
 }
+
+/** Validate the one-time native handoff before any workspace mounts or reads. */
+export function detachedNavigation(search: string): WorkspaceNavigation | null {
+  const query = new URLSearchParams(search);
+  const panel = query.get('panel');
+  if (!workspacePanels.some((value) => value === panel)) return null;
+  const section = query.get('section');
+  const controlTab = panel === 'control' && controlTabs.some((value) => value === section) ? section as WorkspaceNavigation['controlTab'] : 'mission';
+  return { version: 1, activePanel: panel as WorkspaceNavigation['activePanel'], controlTab };
+}

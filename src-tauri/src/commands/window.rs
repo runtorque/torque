@@ -107,8 +107,9 @@ pub async fn detach(
     window_state: tauri::State<'_, NativeWindowState>,
     panel: String,
     bounds: Option<WindowBounds>,
+    section: Option<String>,
 ) -> Result<String, String> {
-    detach_panel(&app, &settings, &window_state, panel, bounds)
+    detach_panel(&app, &settings, &window_state, panel, bounds, section)
 }
 
 #[tauri::command]
@@ -176,8 +177,12 @@ pub fn detach_panel(
     window_state: &NativeWindowState,
     panel: String,
     bounds: Option<WindowBounds>,
+    section: Option<String>,
 ) -> Result<String, String> {
     let panel = sanitize_panel(&panel).ok_or_else(|| "Unknown panel".to_string())?;
+
+    let label = make_detached_label(&panel);
+    let url = detached_url(&settings.frontend_url(), &panel, &label, section.as_deref())?;
 
     if let Some(existing) = window_state.detached_label_for_panel(&panel) {
         if let Some(window) = app.get_webview_window(&existing) {
@@ -187,8 +192,6 @@ pub fn detach_panel(
         window_state.remove_detached_by_label(&existing);
     }
 
-    let label = make_detached_label(&panel);
-    let url = detached_url(&settings.frontend_url(), &panel, &label)?;
     let clamped = clamp_bounds(bounds.clone(), primary_monitor_frame(app)).or(bounds.clone());
     let mut builder = WebviewWindowBuilder::new(app, label.clone(), WebviewUrl::External(url))
         .title(format!("Torque — {}", panel_title(&panel)))
@@ -317,29 +320,52 @@ pub fn panel_from_label(label: &str) -> Option<String> {
     sanitize_panel(panel)
 }
 
-fn detached_url(base: &str, panel: &str, label: &str) -> Result<tauri::Url, String> {
-    let sep = if base.contains('?') { '&' } else { '?' };
-    let url = format!(
-        "{}{}panel={}&window={}",
-        base,
-        sep,
-        percent_encode(panel),
-        percent_encode(label)
-    );
-    url.parse::<tauri::Url>()
-        .map_err(|error| format!("Invalid detached window URL '{url}': {error}"))
-}
-
-fn percent_encode(value: &str) -> String {
-    value
-        .bytes()
-        .flat_map(|byte| match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                vec![byte as char]
-            }
-            _ => format!("%{byte:02X}").chars().collect(),
-        })
-        .collect()
+fn detached_url(
+    base: &str,
+    panel: &str,
+    label: &str,
+    section: Option<&str>,
+) -> Result<tauri::Url, String> {
+    if let Some(section) = section {
+        if panel != "control"
+            || !matches!(
+                section,
+                "mission"
+                    | "activity"
+                    | "history"
+                    | "context"
+                    | "logs"
+                    | "chat"
+                    | "pipelines"
+                    | "actions"
+                    | "catalog"
+                    | "settings"
+                    | "help"
+            )
+        {
+            return Err("Unknown detached Control Center section".to_string());
+        }
+    }
+    let mut url = base
+        .parse::<tauri::Url>()
+        .map_err(|error| format!("Invalid detached window URL '{base}': {error}"))?;
+    let retained: Vec<(String, String)> = url
+        .query_pairs()
+        .filter(|(key, _)| !matches!(key.as_ref(), "panel" | "window" | "section"))
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect();
+    {
+        let mut query = url.query_pairs_mut();
+        query
+            .clear()
+            .extend_pairs(retained)
+            .append_pair("panel", panel)
+            .append_pair("window", label);
+        if let Some(section) = section {
+            query.append_pair("section", section);
+        }
+    }
+    Ok(url)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -457,13 +483,64 @@ mod tests {
 
     #[test]
     fn detached_url_preserves_route_base_for_relative_assets() {
-        let url = detached_url("http://127.0.0.1:18933/ui-next/", "board", "panel-board-1")
-            .expect("detached URL");
+        let url = detached_url(
+            "http://127.0.0.1:18933/ui-next/",
+            "board",
+            "panel-board-1",
+            None,
+        )
+        .expect("detached URL");
 
         assert_eq!(
             url.as_str(),
             "http://127.0.0.1:18933/ui-next/?panel=board&window=panel-board-1"
         );
+    }
+
+    #[test]
+    fn detached_control_sections_are_bounded_and_preserve_other_url_parts() {
+        for section in [
+            "mission",
+            "activity",
+            "history",
+            "context",
+            "logs",
+            "chat",
+            "pipelines",
+            "actions",
+            "catalog",
+            "settings",
+            "help",
+        ] {
+            let url = detached_url(
+                "http://127.0.0.1:18933/ui-next/?onboarding=0&panel=board&section=old#anchor",
+                "control",
+                "control window",
+                Some(section),
+            )
+            .unwrap();
+            let pairs: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+            assert_eq!(pairs.get("section").map(String::as_str), Some(section));
+            assert_eq!(pairs.get("panel").map(String::as_str), Some("control"));
+            assert_eq!(
+                pairs.get("window").map(String::as_str),
+                Some("control window")
+            );
+            assert_eq!(pairs.get("onboarding").map(String::as_str), Some("0"));
+            assert_eq!(
+                url.query_pairs().filter(|(key, _)| key == "panel").count(),
+                1
+            );
+            assert_eq!(url.path(), "/ui-next/");
+            assert_eq!(url.fragment(), Some("anchor"));
+        }
+        for section in ["", "unknown", "CONTEXT", "context&panel=board"] {
+            assert!(
+                detached_url("http://127.0.0.1:18933/", "control", "test", Some(section)).is_err()
+            );
+        }
+        assert!(detached_url("http://127.0.0.1:18933/", "board", "test", Some("context")).is_err());
+        assert!(detached_url("http://127.0.0.1:18933/", "control", "test", None).is_ok());
     }
 
     #[test]

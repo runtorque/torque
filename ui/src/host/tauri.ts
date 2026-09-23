@@ -38,6 +38,7 @@ export function createTauriHost(
     async detachPanel(request: DetachPanelRequest): Promise<DetachedWindow> {
       const label = await call<string>('detach', {
         panel: request.panel,
+        ...(request.section !== undefined ? { section: request.section } : {}),
         bounds: request.bounds ?? null,
       });
       return {

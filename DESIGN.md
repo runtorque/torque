@@ -2957,6 +2957,15 @@ scope.
 - Continuity: Health scope and history window remain local to each window across Control Center tab changes. They do not change the durable workspace navigation preference. Scope changes never display the previous scope's data; performance history remains daemon-wide while workflow health follows the chosen group scope.
 - Verification: Component coverage exercises tick fields, unknown/disabled/offline states, polling, cancellation, failures, timeouts, reconnect, hidden cleanup and filter restoration. Production browser acceptance compares displayed frontend values with actual daemon ticks and waits through the real minute timer.
 
+### D-135 — Detach the selected Control Center section
+
+- Date: 2026-09-22
+- Status: accepted; component, Rust and browser host-boundary acceptance recorded under P-222.
+- Decision: Whole-workspace Control Center detachment carries the current section through the typed host request and native URL. Native code accepts only the known Control sections, rejects section parameters on unrelated workspaces, and preserves the frontend route/query/fragment. React validates query input independently and initializes the selected section before mounting any data-reading panel; absent or unknown sections use Mission Control.
+- Ownership: Section handoff happens once at window creation. Subsequent local navigation survives reconnects and shared preference updates; detached windows do not write the main-window workspace preference. Reload restores the section in that window's launch URL. Detaching an already open workspace focuses it without resetting its current section. Reattachment exposes the main window's existing section.
+- Scope: This repairs the retained whole-workspace detach contract. It does not change the retirement of arbitrary docking or permit multiple independently owned windows for the same workspace.
+- Verification: URL/adapter/bootstrap and current-section component tests, plus production browser host-boundary scenarios for Context, Logs and Help. Actual native lifecycle acceptance remains a separate gate.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:
