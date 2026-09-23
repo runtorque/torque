@@ -1156,3 +1156,8 @@ P-259/P-260 restore named group Engineer/Architect event choices, mandatory-floo
 ### Status-bar preview checkpoint — 2026-09-23
 
 P-261 now previews unsaved visibility choices with passive sample indicators, empty-selection feedback and retained draft/reset/save behavior. D-158 and the matrix record focused and isolated browser acceptance, including desktop/narrow visual inspection and saved-footer isolation. The audit adds missing Architect checkpoint-frequency choices P-262. The main ledger has **262 behaviors: 252 implemented/equivalent dispositions, 6 open repairs and 4 intentional retirements**. Broad settings/lazy-reconnect and native/external acceptance remain open; Phase 4 is not complete.
+
+
+### Architect journal frequency checkpoint — 2026-09-23
+
+P-262 now provides readable action/minute/manual presets and validated custom entry while preserving saved custom frequencies, focus, resets and acknowledged sparse saves. D-159 and the parity matrix record component, Classic/backend-contract and isolated production-browser acceptance. The main ledger has **262 behaviors: 253 implemented/equivalent dispositions, 5 open repairs and 4 intentional retirements**. The remaining broad settings/lazy-reconnect audits and native/external/recovery acceptance still prevent a full-parity or Phase 4 completion claim.

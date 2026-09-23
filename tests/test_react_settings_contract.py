@@ -81,6 +81,15 @@ class ReactSettingsContractTests(unittest.TestCase):
         optional = [event for event in re.findall(r"'([^']+)'", architect) if event not in ARCHITECT_MANDATORY_EVENTS]
         self.assertEqual(catalog['architect']['optional'], optional)
 
+    def test_journal_checkpoint_choices_match_classic_and_are_backend_valid(self):
+        from torque.state import normalize_architect_journal_checkpoint_frequency
+        choices = json.loads((ROOT / 'ui/src/features/control/journalCheckpointChoices.json').read_text())
+        classic = (ROOT / 'static/js/modals/group-settings.js').read_text()
+        catalog = re.search(r'const _ARCHITECT_JOURNAL_CHECKPOINT_OPTIONS = \[(.*?)\];', classic, re.S).group(1)
+        self.assertEqual(choices, re.findall(r"'([^']+)'", catalog))
+        for value in choices + ['every_1_minutes', 'every_35_actions']:
+            self.assertEqual(normalize_architect_journal_checkpoint_frequency(value, strict=True), value)
+
     def test_editable_numeric_boundaries_survive_write_and_restart(self):
         for scope, key, minimum, maximum in [
             ('group', 'guidance_hint_cadence', 0, 100),

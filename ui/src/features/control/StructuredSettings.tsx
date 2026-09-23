@@ -3,6 +3,7 @@ import { useId, useState } from 'react';
 import { SpecializationPicker } from './SpecializationPicker';
 import { DefaultRoleSetting } from './DefaultRoleSetting';
 import { DigestEventSetting } from './DigestEventSetting';
+import { JournalCheckpointSetting } from './JournalCheckpointSetting';
 import { NumericSettingInput } from './NumericSettingInput';
 import { Button } from '../../design/primitives';
 import type { UnknownRecord } from '../../protocol';
@@ -38,6 +39,7 @@ export function StructuredSettings({ value, onChange, prefix = '', omit = [], on
     const descriptionId = field?.description ? `${instance}-${key}-help` : undefined;
     const set = (next: unknown) => onChange({ ...value, [key]: next });
     const reset = key in defaults ? <Button tone="quiet" isDisabled={settingsEqual(item, defaults[key])} onPress={() => set(structuredClone(defaults[key]))}>Reset {label}</Button> : null;
+    if (schema && key === 'architect_journal_checkpoint_frequency') return <div key={key}><JournalCheckpointSetting label={label} value={scalar(item)} onChange={set} />{reset}</div>;
     if (schema && (key === 'enabled_events' || key === 'architect_enabled_events') && Array.isArray(item)) return <div key={key} className={styles.settingObject}><DigestEventSetting kind={key === 'enabled_events' ? 'engineer' : 'architect'} label={label} value={item.filter((entry): entry is string => typeof entry === 'string')} onChange={set} />{reset}</div>;
     if (schema && key === 'default_engineer_specializations' && group && Array.isArray(item)) return <div key={key} className={styles.settingObject}><fieldset><legend>{label}</legend><SpecializationPicker group={group} label={label} value={item.filter((entry): entry is string => typeof entry === 'string')} onChange={set} /></fieldset>{reset}</div>;
     if (item && typeof item === 'object' && !Array.isArray(item)) return <div key={key} className={styles.settingObject}><SettingObject value={item as UnknownRecord} onChange={set} label={label} fixedSchema={schema && key === 'architect_review_gate_thresholds'} template={schema && key === 'board_sync_github' ? githubSettingsDefaults : undefined} />{reset}</div>;

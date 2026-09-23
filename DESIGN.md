@@ -3234,3 +3234,12 @@ History renders the persisted contract: role/template, input/output token counts
 - Decision: Display a compact wrapping rail of sample indicators above the visibility choices. Label the values as samples; mirror the React footer order and keep segments passive. Every visibility edit immediately updates the preview. An explicit empty choice shows “No optional items selected”.
 - State: The preview derives only from the current global draft and shares its reset, refresh, reconnect and save lifecycle. It performs no reads or writes. The live workspace footer continues using acknowledged saved settings; preview interaction never navigates or triggers operational actions.
 - Verification: P-261 records component and isolated browser coverage for all indicators, unsaved changes, empty selection, reset, save/refusal/retry, reload and reconnect retention.
+
+
+### D-159 — Architect journal frequency offers named choices and custom entry
+
+- Date: 2026-09-23
+- Scope: Group Architect journal checkpoint frequency.
+- Decision: Offer Classic's action-count, elapsed-minute and manual-only choices with readable labels. Saved custom frequencies remain selected and editable through an explicit Custom frequency choice. Custom input accepts the existing positive-integer action/minute syntax and manual_only; blank or malformed drafts block Settings Save using native form validity.
+- Continuity: Choosing a frequency edits only the Architect settings draft. Custom typing retains its input and focus even when it matches a preset. External field reset restores the default preset. Existing sparse save, refusal/retry and reconnect handling remain shared with other settings.
+- Verification: P-262 records focused picker/reset/validation tests, exact Classic/backend catalog comparison and isolated browser save/reload/reconnect acceptance. Selecting a frequency does not certify timer-driven reminders or provider execution.
