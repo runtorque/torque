@@ -269,3 +269,6 @@
 .notificationPreset label { display: grid; gap: 5px; color: var(--text-dim); font-size: 10px; }
 .notificationPreset select { min-width: 0; max-width: 100%; padding: 6px; color: var(--text); background: var(--background); border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .notificationPreset p { margin: 0; color: var(--text-muted); font-size: 9px; line-height: 1.5; }
+
+.shortcutConflict { margin: 10px 0; padding: 12px; border: 1px solid var(--warning); border-radius: var(--radius); background: var(--surface-raised); font-size: 11px; overflow-wrap: anywhere; }
+.shortcutConflict button { margin-right: 8px; }

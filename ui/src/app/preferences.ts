@@ -28,6 +28,7 @@ export const keybindingDefaults: Record<string, KeybindingDescriptor> = {
   'navigator.open': { key: 'k', ctrl: false, meta: true, alt: false, shift: false },
   'task.create': { key: 'n', ctrl: false, meta: false, alt: false, shift: false },
   'composer.focus': { key: 'c', ctrl: false, meta: false, alt: false, shift: false },
+  'panel.toggle': { key: 'k', ctrl: false, meta: false, alt: false, shift: false },
   'react.panel.board': { key: 'b', ctrl: false, meta: false, alt: false, shift: false },
   'react.panel.agents': { key: 'a', ctrl: false, meta: false, alt: false, shift: false },
   'react.panel.planning': { key: 'p', ctrl: false, meta: false, alt: false, shift: false },
@@ -96,8 +97,8 @@ export function effectiveBinding(settings: unknown, action: string): KeybindingD
 export function eventMatchesBinding(event: KeyboardEvent, binding: KeybindingDescriptor | null, allowPlatformModifier = false): boolean {
   if (!binding) return false;
   const key = event.key === ' ' ? 'Space' : event.key;
-  const modifierMatches = allowPlatformModifier && binding.meta
-    ? (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey
+  const modifierMatches = allowPlatformModifier && binding.meta && !binding.ctrl
+    ? (event.metaKey || event.ctrlKey) && event.altKey === binding.alt && event.shiftKey === binding.shift
     : event.ctrlKey === binding.ctrl && event.metaKey === binding.meta && event.altKey === binding.alt && event.shiftKey === binding.shift;
   return modifierMatches && key.toLocaleLowerCase() === binding.key.toLocaleLowerCase();
 }

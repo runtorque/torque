@@ -90,6 +90,48 @@ describe('workspace shell', () => {
     expect(screen.getByRole('heading', { name: 'Agents' })).toBeVisible();
   });
 
+  it('opens filtered group and panel navigators with either platform modifier', async () => {
+    renderShell();
+    fireEvent.keyDown(window, { key: 'g', metaKey: true });
+    const search = await screen.findByRole('combobox', { name: 'Search groups' });
+    expect(screen.getByRole('option', { name: 'Open group: Foundation' })).toBeVisible();
+    expect(screen.queryByRole('option', { name: 'New Board task' })).not.toBeInTheDocument();
+    fireEvent.keyDown(search, { key: 'p', ctrlKey: true });
+    const panels = await screen.findByRole('combobox', { name: 'Search panels' });
+    expect(screen.queryByRole('option', { name: 'Open group: Foundation' })).not.toBeInTheDocument();
+    fireEvent.change(panels, { target: { value: 'Logs' } }); fireEvent.keyDown(panels, { key: 'Enter' });
+    expect(await screen.findByRole('heading', { name: 'Torque logs' })).toBeVisible();
+  });
+  it('keeps the Classic Board shortcut and its override working in fixed workspaces', async () => {
+    const { appStore } = renderShell(browserHost, { ...compactStateFixture, global_settings: { keybindings: { 'panel.toggle': { key: 'j', alt: true } } } });
+    act(() => { appStore.dispatch(workspaceUiActions.setActivePanel('agents')); });
+    fireEvent.keyDown(window, { key: 'k' }); expect(appStore.getState().workspaceUi.activePanel).toBe('agents');
+    fireEvent.keyDown(window, { key: 'j', altKey: true }); expect(appStore.getState().workspaceUi.activePanel).toBe('board');
+    fireEvent.keyDown(window, { key: 'g', metaKey: true });
+    const groups = await screen.findByRole('combobox', { name: 'Search groups' });
+    fireEvent.keyDown(groups, { key: 'k', metaKey: true });
+    expect(await screen.findByRole('combobox', { name: 'Search commands' })).toBeVisible();
+    expect(screen.getByRole('option', { name: 'Open Board' })).toHaveTextContent('B / ⌥J');
+  });
+
+  it('reveals Live and focuses the composer with its configured shortcut', async () => {
+    const { appStore } = renderShell(browserHost, { ...compactStateFixture, global_settings: { keybindings: { 'composer.focus': { key: 'j', alt: true } } } });
+    fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Activity' }));
+    fireEvent.click(screen.getByRole('button', { name: /▦ Board/ }));
+    fireEvent.keyDown(window, { key: 'c' }); expect(appStore.getState().workspaceUi.activePanel).toBe('board');
+    fireEvent.keyDown(window, { key: 'j', altKey: true });
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message Foundation Worker' })).toHaveFocus());
+    expect(screen.getByRole('tab', { name: 'Live' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('uses the configured create-task key even when a Board card owns focus', () => {
+    const { appStore } = renderShell(browserHost, { ...compactStateFixture, global_settings: { keybindings: { 'task.create': { key: 't', ctrl: false, meta: false, alt: false, shift: false } } } });
+    const card = screen.getByText('Build the foundation').closest('article')!;
+    fireEvent.keyDown(card, { key: 'n' }); expect(appStore.getState().workspaceUi.createTaskDialogOpen).toBe(false);
+    fireEvent.keyDown(card, { key: 't' }); expect(appStore.getState().workspaceUi.createTaskDialogOpen).toBe(true);
+  });
+
   it('sizes Board tracks from the viewport and lane count rather than card content', () => {
     renderShell();
 
@@ -1207,6 +1249,18 @@ describe('workspace shell', () => {
     expect(commands.filter((command) => /^(update_|engineer_update_)/.test(String(command.cmd)))).toHaveLength(0);
     fireEvent.click(screen.getByRole('button', { name: 'Clear settings search' }));
     expect(search).toHaveFocus(); expect(search).toHaveValue(''); expect(draft).toHaveValue(9300);
+  });
+
+  it('captures a palette-key conflict without opening the palette or saving settings', async () => {
+    const { commands } = mockSettingsRequests(); renderShell();
+    fireEvent.click(screen.getByRole('button', { name: /Control/ })); fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    const input = await screen.findByRole('textbox', { name: 'Create task shortcut' });
+    fireEvent.keyDown(input, { key: 'k', ctrlKey: true });
+    expect(screen.getByRole('alert')).toHaveTextContent('Open command palette');
+    expect(screen.queryByRole('dialog', { name: 'Command palette' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel reassignment' }));
+    expect(input).toHaveFocus(); expect(input).toHaveValue('N');
+    expect(commands.some((command) => command.cmd === 'update_global_settings')).toBe(false);
   });
 
   it('saves only edited global fields without promoting inherited relay or unrelated settings', async () => {

@@ -1126,3 +1126,8 @@ P-255 supplies the remaining supported numeric bounds and endpoint persistence e
 ### Keyboard acceptance correction — 2026-09-23
 
 Further source inspection reopens P-101/P-102: filtered group/panel navigator hotkeys are absent, and Board still handles N independently of the configured create-task binding. The current main ledger tally is **257 behaviors: 243 implemented/equivalent dispositions, 10 open repairs and 4 intentional retirements**. P-095 conflict handling must be verified alongside these actual dispatch paths and effective shortcut hints. Prior implementation counts remain historical dispositions, not full acceptance certification.
+
+
+### Keyboard parity checkpoint — 2026-09-23
+
+P-095/P-101/P-102 now have conflict/reset review, filtered Cmd/Ctrl+G/P entry points and actual dispatch from saved bindings, including Classic K and composer focus from Activity. D-153 and the detailed matrix record unit and isolated production-browser evidence. The main ledger now has **257 behaviors: 246 implemented/equivalent dispositions, 7 open repairs and 4 intentional retirements**. Broad settings/lazy-reconnect, inherited launch/relay projections and independent native/external acceptance still prevent a full-parity or Phase 4 completion claim.

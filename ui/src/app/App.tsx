@@ -32,7 +32,8 @@ import { detachedNavigation } from './workspaceNavigation';
 import { useWorkspaceNavigation } from './useWorkspaceNavigation';
 import { RenderTelemetry } from './RenderTelemetry';
 import { sanitizeClientError } from './clientDiagnostics';
-import { effectiveBinding, eventMatchesBinding } from './preferences';
+import { effectiveBinding, eventMatchesBinding, formatBinding } from './preferences';
+import { fixedNavigatorScope, type NavigatorScope } from './shortcutBindings';
 import styles from './App.module.css';
 
 const PlanningWorkspace = lazy(() => import('../features/planning/PlanningWorkspace')
@@ -78,6 +79,7 @@ interface CommandPaletteEntry {
   run?: () => void;
   href?: string;
   group?: string;
+  category?: 'panel';
 }
 
 function fuzzyScore(value: string, query: string): number {
@@ -97,14 +99,15 @@ function fuzzyScore(value: string, query: string): number {
   return 100 + gap;
 }
 
-function CommandPalette({ entries, onClose, onGroup, onLink }: { entries: CommandPaletteEntry[]; onClose: () => void; onGroup: (group: string) => void; onLink: (href: string) => void }) {
+function CommandPalette({ entries, scope, onClose, onGroup, onLink }: { scope: NavigatorScope; entries: CommandPaletteEntry[]; onClose: () => void; onGroup: (group: string) => void; onLink: (href: string) => void }) {
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const visible = useMemo(() => entries
+    .filter((entry) => scope === 'all' || (scope === 'groups' ? Boolean(entry.group) : entry.category === 'panel'))
     .map((entry, order) => ({ entry, order, score: fuzzyScore(`${entry.label} ${entry.keywords ?? ''}`, query) }))
     .filter((result) => result.score >= 0)
     .sort((left, right) => left.score - right.score || left.order - right.order)
-    .map((result) => result.entry), [entries, query]);
+    .map((result) => result.entry), [entries, query, scope]);
   const boundedActiveIndex = Math.min(activeIndex, Math.max(0, visible.length - 1));
   const activate = (entry: CommandPaletteEntry | undefined) => {
     if (!entry) return;
@@ -118,7 +121,7 @@ function CommandPalette({ entries, onClose, onGroup, onLink }: { entries: Comman
     if (event.key === 'Enter') { event.preventDefault(); activate(visible[boundedActiveIndex]); }
     if (event.key === 'Escape') { event.preventDefault(); onClose(); }
   }}>
-    <label className={styles.commandSearch}><span>⌕</span><input autoFocus type="search" role="combobox" aria-expanded="true" aria-controls="command-results" aria-activedescendant={visible[boundedActiveIndex] ? `command-${visible[boundedActiveIndex].id}` : undefined} value={query} onChange={(event) => { setQuery(event.target.value); setActiveIndex(0); }} placeholder="Type a command, group, or destination" aria-label="Search commands" autoComplete="off" /></label>
+    <label className={styles.commandSearch}><span>⌕</span><input autoFocus type="search" role="combobox" aria-expanded="true" aria-controls="command-results" aria-activedescendant={visible[boundedActiveIndex] ? `command-${visible[boundedActiveIndex].id}` : undefined} value={query} onChange={(event) => { setQuery(event.target.value); setActiveIndex(0); }} placeholder={scope === 'groups' ? 'Search groups' : scope === 'panels' ? 'Search panels' : 'Type a command, group, or destination'} aria-label={scope === 'groups' ? 'Search groups' : scope === 'panels' ? 'Search panels' : 'Search commands'} autoComplete="off" /></label>
     <div id="command-results" className={styles.commandResults} role="listbox" aria-label="Command results">
       {visible.length ? visible.map((entry, index) => entry.href
         ? <a id={`command-${entry.id}`} key={entry.id} href={entry.href} onClick={(event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); onLink(entry.href!); } }} role="option" aria-label={entry.label} aria-selected={index === boundedActiveIndex} onMouseEnter={() => setActiveIndex(index)}><span>{entry.label}</span>{entry.shortcut ? <kbd>{entry.shortcut}</kbd> : null}</a>
@@ -283,28 +286,32 @@ function WorkspaceShellContent({ host, sendCommand }: WorkspaceShellProps) {
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.repeat) return;
+      const fixedScope = fixedNavigatorScope(event);
+      if (fixedScope) { event.preventDefault(); dispatch(workspaceUiActions.openNavigator(fixedScope)); return; }
       const target = event.target as HTMLElement | null;
-      const isEditing = Boolean(target?.matches('input, textarea, select, [contenteditable="true"]'));
+      const isEditing = Boolean(target?.closest?.('input, textarea, select, [contenteditable="true"]'));
       const matches = (action: string, platform = false) => eventMatchesBinding(event, effectiveBinding(globalSettings, action), platform);
       if (matches('navigator.open', true)) {
         event.preventDefault();
-        dispatch(workspaceUiActions.setCommandPaletteOpen(!workspaceUi.commandPaletteOpen));
+        if (workspaceUi.commandPaletteOpen && workspaceUi.commandPaletteScope === 'all') dispatch(workspaceUiActions.setCommandPaletteOpen(false));
+        else dispatch(workspaceUiActions.openNavigator('all'));
         return;
       }
-      if (isEditing || workspaceUi.commandPaletteOpen) return;
-      const panel = ([['react.panel.board', 'board'], ['react.panel.agents', 'agents'], ['react.panel.planning', 'planning'], ['react.panel.control', 'control']] as const)
+      if (isEditing || workspaceUi.commandPaletteOpen || target?.closest?.('[role="dialog"], [role="menu"]')) return;
+      const panel = ([['react.panel.board', 'board'], ['panel.toggle', 'board'], ['react.panel.agents', 'agents'], ['react.panel.planning', 'planning'], ['react.panel.control', 'control']] as const)
         .find(([action]) => matches(action));
       if (panel) { event.preventDefault(); navigatePanel(panel[1]); return; }
-      if (event.key === '/') {
+      if (event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey) {
         event.preventDefault();
         window.dispatchEvent(new CustomEvent('torque:focus-board-search'));
       }
       if (matches('task.create')) { event.preventDefault(); navigatePanel('board', undefined, () => dispatch(workspaceUiActions.setCreateTaskDialogOpen(true))); }
-      if (matches('composer.focus')) { event.preventDefault(); navigatePanel('agents', undefined, () => { window.setTimeout(() => window.dispatchEvent(new CustomEvent('torque:focus-composer')), 0); }); }
+      if (matches('composer.focus')) { event.preventDefault(); navigatePanel('agents', undefined, () => { dispatch(workspaceUiActions.setAgentsViewMode('live')); window.setTimeout(() => window.dispatchEvent(new CustomEvent('torque:focus-composer')), 0); }); }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [dispatch, navigatePanel, globalSettings, workspaceUi.commandPaletteOpen]);
+  }, [dispatch, navigatePanel, globalSettings, workspaceUi.commandPaletteOpen, workspaceUi.commandPaletteScope]);
 
   useEffect(() => {
     if (sidebarResize.current || !Number.isFinite(persistedSidebarWidth) || persistedSidebarWidth <= 0) return;
@@ -475,12 +482,14 @@ function WorkspaceShellContent({ host, sendCommand }: WorkspaceShellProps) {
     closeCommandPalette();
     navigatePanel(panel);
   };
+  const bindingHint = (action: string) => formatBinding(effectiveBinding(globalSettings, action));
   const commandEntries: CommandPaletteEntry[] = [
-    { id: 'board', label: 'Open Board', keywords: 'tasks lanes work', shortcut: 'B', run: () => openPanel('board') },
-    { id: 'agents', label: 'Open Agents', keywords: 'workers engineers architects terminals', shortcut: 'A', run: () => openPanel('agents') },
-    { id: 'planning', label: 'Open Planning', keywords: 'initiatives areas thinking decisions', shortcut: 'P', run: () => openPanel('planning') },
-    { id: 'control', label: 'Open Control Center', keywords: 'mission activity history settings help', shortcut: 'O', run: () => openPanel('control') },
-    { id: 'new-task', label: 'New Board task', keywords: 'create add work', shortcut: 'N', run: () => { navigatePanel('board', undefined, () => dispatch(workspaceUiActions.setCreateTaskDialogOpen(true))); } },
+    { id: 'board', label: 'Open Board', keywords: 'tasks lanes work', category: 'panel', shortcut: `${bindingHint('react.panel.board')} / ${bindingHint('panel.toggle')}`, run: () => openPanel('board') },
+    { id: 'agents', label: 'Open Agents', keywords: 'workers engineers architects terminals', category: 'panel', shortcut: bindingHint('react.panel.agents'), run: () => openPanel('agents') },
+    { id: 'planning', label: 'Open Planning', keywords: 'initiatives areas thinking decisions', category: 'panel', shortcut: bindingHint('react.panel.planning'), run: () => openPanel('planning') },
+    { id: 'control', label: 'Open Control Center', keywords: 'mission activity history settings help', category: 'panel', shortcut: bindingHint('react.panel.control'), run: () => openPanel('control') },
+    ...([['mission', 'Mission Control'], ['activity', 'Activity'], ['logs', 'Logs'], ['chat', 'Chat'], ['pipelines', 'Pipelines'], ['history', 'History'], ['context', 'Context'], ['actions', 'Actions'], ['catalog', 'Catalog'], ['settings', 'Settings'], ['help', 'Help']] as const).map(([tab, label]) => ({ id: `control-${tab}`, label: `Open ${label}`, category: 'panel' as const, run: () => navigatePanel('control', tab) })),
+    { id: 'new-task', label: 'New Board task', keywords: 'create add work', shortcut: bindingHint('task.create'), run: () => { navigatePanel('board', undefined, () => dispatch(workspaceUiActions.setCreateTaskDialogOpen(true))); } },
     { id: 'new-architect', label: 'New Architect', keywords: 'create agent principal', run: () => { navigatePanel('agents', undefined, () => dispatch(workspaceUiActions.setCreateAgentKind('architect'))); } },
     { id: 'new-engineer', label: 'New Engineer', keywords: 'create agent lead', run: () => { navigatePanel('agents', undefined, () => dispatch(workspaceUiActions.setCreateAgentKind('engineer'))); } },
     { id: 'new-worker', label: 'New Worker', keywords: 'create agent task', run: () => { navigatePanel('agents', undefined, () => dispatch(workspaceUiActions.setCreateAgentKind('worker'))); } },
@@ -524,10 +533,10 @@ function WorkspaceShellContent({ host, sendCommand }: WorkspaceShellProps) {
           <div><strong>Torque</strong><span>{textValue(runtime.profile, 'default')}</span></div>
         </header>
         <nav className={styles.primaryNav} aria-label="Product areas">
-          <button className={workspaceUi.activePanel === 'board' && !activeDetachedLabel ? styles.navActive : ''} aria-current={workspaceUi.activePanel === 'board' && !activeDetachedLabel ? 'page' : undefined} onClick={() => navigatePanel('board')}><span>▦</span> Board <kbd>B</kbd></button>
-          <button className={workspaceUi.activePanel === 'agents' ? styles.navActive : ''} aria-current={workspaceUi.activePanel === 'agents' ? 'page' : undefined} onClick={() => navigatePanel('agents')}><span>⌁</span> Agents <kbd>A</kbd></button>
-          <button className={workspaceUi.activePanel === 'planning' && !activeDetachedLabel ? styles.navActive : ''} aria-current={workspaceUi.activePanel === 'planning' && !activeDetachedLabel ? 'page' : undefined} onClick={() => navigatePanel('planning')}><span>◇</span> Planning <kbd>P</kbd></button>
-          <button className={workspaceUi.activePanel === 'control' && !activeDetachedLabel ? styles.navActive : ''} aria-current={workspaceUi.activePanel === 'control' && !activeDetachedLabel ? 'page' : undefined} onClick={() => navigatePanel('control')}><span>◎</span> Control <kbd>O</kbd></button>
+          <button className={workspaceUi.activePanel === 'board' && !activeDetachedLabel ? styles.navActive : ''} aria-current={workspaceUi.activePanel === 'board' && !activeDetachedLabel ? 'page' : undefined} onClick={() => navigatePanel('board')}><span>▦</span> Board <kbd>{bindingHint('react.panel.board')}</kbd></button>
+          <button className={workspaceUi.activePanel === 'agents' ? styles.navActive : ''} aria-current={workspaceUi.activePanel === 'agents' ? 'page' : undefined} onClick={() => navigatePanel('agents')}><span>⌁</span> Agents <kbd>{bindingHint('react.panel.agents')}</kbd></button>
+          <button className={workspaceUi.activePanel === 'planning' && !activeDetachedLabel ? styles.navActive : ''} aria-current={workspaceUi.activePanel === 'planning' && !activeDetachedLabel ? 'page' : undefined} onClick={() => navigatePanel('planning')}><span>◇</span> Planning <kbd>{bindingHint('react.panel.planning')}</kbd></button>
+          <button className={workspaceUi.activePanel === 'control' && !activeDetachedLabel ? styles.navActive : ''} aria-current={workspaceUi.activePanel === 'control' && !activeDetachedLabel ? 'page' : undefined} onClick={() => navigatePanel('control')}><span>◎</span> Control <kbd>{bindingHint('react.panel.control')}</kbd></button>
         </nav>
         <section className={styles.groupNav} aria-labelledby="groups-heading">
           <header><h2 id="groups-heading">Groups</h2><span>{groupNames.length}</span><button aria-label="Add group" onClick={() => setAddGroupOpen(true)}>＋</button></header>
@@ -549,7 +558,7 @@ function WorkspaceShellContent({ host, sendCommand }: WorkspaceShellProps) {
 
       <section className={styles.workspace}>
         <header className={styles.globalChrome}>
-          <button className={styles.commandTrigger} onClick={() => dispatch(workspaceUiActions.setCommandPaletteOpen(true))}><span>⌕</span> Search commands <kbd>⌘K</kbd></button>
+          <button className={styles.commandTrigger} onClick={() => dispatch(workspaceUiActions.setCommandPaletteOpen(true))}><span>⌕</span> Search commands <kbd>{bindingHint('navigator.open')}</kbd></button>
           <span className={styles.chromeSpacer} />
           <a href={legacyUrl} className={styles.legacyLink} onClick={(event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); requestNavigation(() => window.location.assign(legacyUrl)); } }}>Classic UI</a>
           <ActionMenu label="Workspace actions" trigger={<Button tone="quiet">•••</Button>}>
@@ -599,8 +608,8 @@ function WorkspaceShellContent({ host, sendCommand }: WorkspaceShellProps) {
         </footer>
       </section>
 
-      <ModalDialog title="Command palette" description="Jump to a workspace or run a common action." size="medium" isOpen={workspaceUi.commandPaletteOpen} onOpenChange={(open) => dispatch(workspaceUiActions.setCommandPaletteOpen(open))}>
-        <CommandPalette key={workspaceUi.commandPaletteOpen ? 'open' : 'closed'} entries={commandEntries} onLink={(href) => { closeCommandPalette(); requestNavigation(() => window.location.assign(href)); }} onClose={closeCommandPalette} onGroup={selectGroup} />
+      <ModalDialog title={workspaceUi.commandPaletteScope === 'groups' ? 'Group navigator' : workspaceUi.commandPaletteScope === 'panels' ? 'Panel navigator' : 'Command palette'} description="Jump to a workspace or run a common action." size="medium" isOpen={workspaceUi.commandPaletteOpen} onOpenChange={(open) => dispatch(workspaceUiActions.setCommandPaletteOpen(open))}>
+        <CommandPalette key={`${workspaceUi.commandPaletteOpen}:${workspaceUi.commandPaletteScope}`} scope={workspaceUi.commandPaletteScope} entries={commandEntries} onLink={(href) => { closeCommandPalette(); requestNavigation(() => window.location.assign(href)); }} onClose={closeCommandPalette} onGroup={selectGroup} />
       </ModalDialog>
 
       <ModalDialog title="Welcome to Torque" description="A local workspace for planning, dispatching, and supervising agent work." size="large" isOpen={welcomeOpen} onOpenChange={setWelcomeOpen}>

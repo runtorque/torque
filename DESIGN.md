@@ -3174,3 +3174,14 @@ History renders the persisted contract: role/template, input/output token counts
 - Decision: Require integer cadence 0–100, Context lifetime 1–60 days, probe threshold 2–25 and window 10–3600 seconds. Describe the units and cadence-zero behavior beside the controls. These match Classic's cadence control and the daemon's existing normalization boundaries.
 - Validation: Preserve invalid editing buffers, reveal/focus hidden invalid controls and prevent the coordinated save from writing any scope. Accept and persist both endpoints without silently clamping the operator's entered value.
 - Verification: P-255 records focused component, persistence/reload and isolated production-browser evidence. The existing daemon normalization/runtime semantics are unchanged.
+
+
+### D-153 — Shortcut capture, navigation and dispatch share effective bindings
+
+- Date: 2026-09-23
+- Scope: Settings keyboard editors, the command/group/panel navigators, Board/create/composer actions and their visible hints.
+- Conflict review: Capturing a shortcut edits the Settings draft only. Show the current owner before replacing a mutable binding; Cancel retains both assignments and restores editor focus. Explicit reassignment swaps the previous binding into the other action only when the resulting assignments are unambiguous. Reset uses the same review. If assignments change during review, require a fresh confirmation. Fixed navigation conflicts cannot be reassigned.
+- Input ownership: Tab traverses controls and Escape cancels review. Capture does not activate global shortcuts; composing/repeated key events are ignored. Preserve ordinary text editing, menus, dialogs and local item-navigation keys. Command-palette platform aliases retain every additional modifier.
+- Navigation: Cmd/Ctrl+G opens group-only search; Cmd/Ctrl+P opens panel-only search over the fixed workspaces and Control Center destinations. Cmd/Ctrl+K opens all commands. Existing fuzzy selection, arrow/Enter/Escape navigation and Settings draft protection apply. Docking, pinning and panel reordering remain covered by the documented fixed-workspace redesign.
+- Dispatch: Use the effective saved bindings for actual actions and hints. Both B and Classic K open Board by default; the legacy panel.toggle override remains supported as an alternate Board entry point. Focus composer reveals the selected agent's Live view before focusing its editor. A saved create-task override replaces N even while a Board card owns focus.
+- Verification: Focused model/component tests and isolated production-browser acceptance are recorded under P-095/P-101/P-102. Native window routing and cross-platform host lifecycle remain separate acceptance gates.

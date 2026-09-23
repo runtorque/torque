@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import {
   appearanceDefaults,
@@ -11,18 +11,9 @@ import {
   type AppearancePreferences,
   type KeybindingDescriptor,
 } from '../../app/preferences';
+import { reviewShortcutChange, shortcutLabels, fixedNavigators } from '../../app/shortcutBindings';
 import { Button } from '../../design/primitives';
 import styles from './ControlCenter.module.css';
-
-const shortcutLabels: Record<string, string> = {
-  'navigator.open': 'Open command palette',
-  'task.create': 'Create task',
-  'composer.focus': 'Focus agent composer',
-  'react.panel.board': 'Open Board',
-  'react.panel.agents': 'Open Agents',
-  'react.panel.planning': 'Open Planning',
-  'react.panel.control': 'Open Control Center',
-};
 
 export function AppearancePreferencesPanel() {
   const [value, setValue] = useState(readAppearance);
@@ -41,13 +32,36 @@ export function AppearancePreferencesPanel() {
 
 export function ShortcutPreferencesPanel({ settings, onChange }: { settings: Record<string, unknown>; onChange: (value: Record<string, unknown>) => void }) {
   const overrides = settings.keybindings && typeof settings.keybindings === 'object' && !Array.isArray(settings.keybindings) ? settings.keybindings as Record<string, unknown> : {};
+  const [pending, setPending] = useState<ReturnType<typeof reviewShortcutChange> | null>(null);
+  const [changedReview, setChangedReview] = useState(false);
+  const editors = useRef<Record<string, HTMLInputElement | null>>({});
+  const restore = (action: string) => { editors.current[action]?.focus(); };
   const setBinding = (action: string, binding: KeybindingDescriptor | null) => {
-    const next = { ...overrides };
-    if (binding) next[action] = binding; else delete next[action];
-    onChange(next);
+    const review = reviewShortcutChange(overrides, action, binding); setChangedReview(false);
+    if (review.fixed || review.conflicts.length) setPending(review);
+    else { setPending(null); onChange(review.next); }
   };
-  return <section><h3>Keyboard shortcuts</h3><div className={styles.shortcutGrid}>{Object.keys(keybindingDefaults).map((action) => {
+  const cancel = () => { if (pending) restore(pending.action); setPending(null); setChangedReview(false); };
+  const confirm = () => {
+    if (!pending) return;
+    const latest = reviewShortcutChange(overrides, pending.action, pending.binding);
+    if (latest.signature !== pending.signature) { setPending(latest); setChangedReview(true); return; }
+    if (!latest.canReassign) return;
+    onChange(latest.next); restore(latest.action); setPending(null); setChangedReview(false);
+  };
+  return <section><h3>Keyboard shortcuts</h3>{pending ? <div role="alert" className={styles.shortcutConflict}>
+    {changedReview ? <p>Shortcuts changed while this review was open. Review the current assignments before continuing.</p> : null}
+    <p><strong>{formatBinding(pending.binding)}</strong> {pending.fixed ? `is reserved for ${pending.fixed}, a fixed shortcut.` : pending.conflicts.length ? `is already assigned to ${pending.conflicts.map((action) => shortcutLabels[action]).join(', ')}.` : 'is now available. Cancel this review and enter it again to apply.'}</p>
+    {pending.canReassign ? <><p>Assign it to {shortcutLabels[pending.action]} and move {shortcutLabels[pending.conflicts[0]!]} to {formatBinding(pending.previous)}?</p><Button tone="primary" onPress={confirm}>Reassign shortcut</Button></> : <p>Choose another shortcut.</p>}
+    <Button tone="quiet" onPress={cancel}>Cancel reassignment</Button>
+  </div> : null}<div className={styles.shortcutGrid}>{Object.keys(keybindingDefaults).map((action) => {
     const binding = effectiveBinding({ keybindings: overrides }, action);
-    return <article key={action}><span><strong>{shortcutLabels[action]}</strong><small>{action}</small></span><input readOnly value={formatBinding(binding)} aria-label={`${shortcutLabels[action]} shortcut`} onKeyDown={(event) => { event.preventDefault(); const descriptor = descriptorFromKeyboardEvent(event.nativeEvent); if (descriptor) setBinding(action, descriptor); }} onFocus={(event) => event.currentTarget.select()} /><Button tone="quiet" onPress={() => setBinding(action, null)} isDisabled={!overrides[action]}>Reset</Button></article>;
-  })}</div><p className={styles.note}>Focus a shortcut field, then press the new key combination. Global shortcuts are ignored while editing text.</p></section>;
+    return <article key={action}><span><strong>{shortcutLabels[action]}</strong><small>{action}</small></span><input ref={(element) => { editors.current[action] = element; }} readOnly value={formatBinding(binding)} aria-label={`${shortcutLabels[action]} shortcut`} onKeyDown={(event) => {
+      if (event.key === 'Tab') return;
+      event.preventDefault(); event.stopPropagation();
+      if (event.key === 'Escape') { cancel(); return; }
+      if (event.nativeEvent.isComposing || event.repeat) return;
+      const descriptor = descriptorFromKeyboardEvent(event.nativeEvent); if (descriptor) setBinding(action, descriptor);
+    }} onFocus={(event) => event.currentTarget.select()} /><Button tone="quiet" onPress={() => setBinding(action, null)} isDisabled={!overrides[action]}>Reset</Button></article>;
+  })}</div><p className={styles.note}>Focus a shortcut field, then press the new key combination. Tab moves to the next control; Escape cancels a conflict review. Ordinary shortcuts are ignored while editing text.</p><p className={styles.note}>{fixedNavigators.map((item) => `${item.label}: ⌘${item.key.toUpperCase()} / Ctrl+${item.key.toUpperCase()}`).join(' · ')}. Item navigation keys and / for Board search are fixed.</p></section>;
 }

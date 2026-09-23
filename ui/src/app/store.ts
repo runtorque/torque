@@ -49,6 +49,7 @@ export interface WorkspaceUiState {
   healthScope: 'active' | 'all';
   healthWindow: '24h' | '7d' | '30d';
   commandPaletteOpen: boolean;
+  commandPaletteScope: 'all' | 'groups' | 'panels';
   detailTaskId: string | null;
   focusedTaskId: string | null;
   selectedTaskIds: string[];
@@ -69,6 +70,7 @@ function initialWorkspaceUiState(): WorkspaceUiState {
     healthScope: 'active',
     healthWindow: '24h',
     commandPaletteOpen: false,
+    commandPaletteScope: 'all',
     detailTaskId: null,
     focusedTaskId: null,
     selectedTaskIds: [],
@@ -526,7 +528,9 @@ const workspaceUiSlice = createSlice({
     setHealthWindow(state, action: PayloadAction<WorkspaceUiState['healthWindow']>) { state.healthWindow = action.payload; },
     setCommandPaletteOpen(state, action: PayloadAction<boolean>) {
       state.commandPaletteOpen = action.payload;
+      if (action.payload) state.commandPaletteScope = 'all';
     },
+    openNavigator(state, action: PayloadAction<WorkspaceUiState['commandPaletteScope']>) { state.commandPaletteScope = action.payload; state.commandPaletteOpen = true; },
     setDetailTask(state, action: PayloadAction<string | null>) {
       state.detailTaskId = action.payload;
     },

@@ -1046,8 +1046,7 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPa
   const handleBoardKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
     if (target.matches('input, textarea, select, [contenteditable="true"]') || target.closest('button, [role="menuitem"]')) return;
-    if (event.key === '/') { event.preventDefault(); searchRef.current?.focus(); }
-    if (event.key.toLocaleLowerCase() === 'n') { event.preventDefault(); dispatch(workspaceUiActions.setCreateTaskDialogOpen(true)); }
+    if (event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey) { event.preventDefault(); searchRef.current?.focus(); }
     if (event.key === 'ArrowRight' || event.key === 'ArrowDown') { event.preventDefault(); focusRelative(1); }
     if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') { event.preventDefault(); focusRelative(-1); }
     if (event.key === 'Enter' && workspaceUi.focusedTaskId) { event.preventDefault(); openTask(workspaceUi.focusedTaskId); }
