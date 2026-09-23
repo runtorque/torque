@@ -217,3 +217,6 @@ Prompt-editor acceptance: `prompt-editor-live.spec.ts` runs against the disposab
 
 
 The Agent creation browser suite also creates two temporary projects with the same Agent Class ID and different identities. It checks scoped discovery, failed-read retry with retained caret, archive-on-reconnect refusal, a matching real launch from the second project and persisted identity after reload. Use a disposable profile; the test removes its generated agents and project files.
+
+
+GitHub settings acceptance: `github-settings-live.spec.ts` uses a disposable daemon with `ui/e2e/fixtures/github-settings` prepended to that daemon's `PATH` and `TORQUE_GITHUB_SETTINGS_FIXTURE=1`. Set the same flag for the browser test, plus its isolated `TORQUE_UI_BASE_URL`. The fixture executable accepts only version/auth/repository/project reads and returns deterministic metadata; it never accesses GitHub. The case verifies unsaved project discovery, selection and Status/lane suggestions, repository detection, refusal/retry, explicit save and reload through the production UI and real daemon. Board sync stays disabled. This is integration evidence with a simulated external provider, not live GitHub credentials/network acceptance. Never prepend the fixture path to a live profile.

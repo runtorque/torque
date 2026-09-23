@@ -2999,6 +2999,15 @@ scope.
 - Scope: Structured settings only; window resizing retains the current mounted inputs and drafts. No values or save semantics change.
 - Verification: Browser geometry, screenshot inspection and reset/draft checks at 1280, 960 and 760 pixel widths.
 
+### D-140 — GitHub configuration helpers use unsaved settings
+
+- Date: 2026-09-22
+- Status: accepted; component, provider/manager and production fixture acceptance recorded under P-231–P-234.
+- Decision: Group settings provide accessible project discovery, connection preflight, current-repository detection and lane/status suggestions alongside the explicit GitHub fields. Helpers query the unsaved draft; only Save changes persists it. Selecting a project fills its owner/number/id and resolves its Status options. Server suggestions fill an empty lane map and never replace an existing mapping.
+- Lifecycle: Correlate reads by group and configuration, cancel on edits, provider/group changes, save or unmount, bound requests to 30 seconds, and clear completed request intent. Refusals and partial/empty discovery remain visible and retryable; resetting a field must not replay a prior request. No automatic reads occur in hidden panels.
+- Repository context: Existing Classic/backend preflight resolves an unspecified repository from the daemon working directory. The helper states this behavior and clears the manual repository only in its temporary detection request. It stages the returned repository after success; no backend directory semantics are changed here.
+- Verification: Component lifecycle and mapping tests, existing provider/manager tests, and a production-browser scenario through the real daemon with a deterministic read-only gh executable. This fixture does not certify external GitHub credentials, network or permission behavior.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:
