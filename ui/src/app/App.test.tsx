@@ -637,7 +637,7 @@ describe('workspace shell', () => {
     expect(sendCommand).toHaveBeenCalledWith({ cmd: 'purge_agent_now', id: 'deleted' });
   });
 
-  it('retains concurrent worktree responses and renders diff, preflight, and history together', async () => {
+  it.each(['Inspect diff', 'Preflight merge'])('opens %s with correlated diff, preflight and history', async (opener) => {
     const frame: StateFrame = {
       ...compactStateFixture,
       agents: {
@@ -661,7 +661,7 @@ describe('workspace shell', () => {
     }));
     renderShell(browserHost, frame);
     fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Inspect diff' }));
+    fireEvent.click(screen.getByRole('button', { name: opener }));
     expect(reads).toEqual(['worktree_diff_full', 'worktree_check_merge', 'worktree_history'].map((cmd) => ({ cmd, id: 'agent-1' })));
     await act(async () => { pending.reverse().forEach((reply) => reply()); await Promise.resolve(); });
     expect(screen.getByText('ui.tsx')).toBeVisible();

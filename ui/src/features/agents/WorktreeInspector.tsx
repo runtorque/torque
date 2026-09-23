@@ -68,7 +68,7 @@ export function WorktreeInspector({ agent, responses, onClose, active = true }: 
   const preflight = reads.preflight.data;
   const history = reads.history.data;
   const preflightCurrent = reads.preflight.status === 'ready';
-  const result = mutation.result;
+  const result = mutation.result.ok === false ? {} : mutation.result;
   const progressFrame = target ? responses[`worktree_merge_progress:${target.id}`] : null;
   const progress = record(progressFrame);
   const files = list(diff.files);

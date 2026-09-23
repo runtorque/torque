@@ -1085,3 +1085,8 @@ Worker creation displays server-resolved role/group launch fields while retainin
 
 
 Agent creation now discovers classes in the pinned group's project through an owned, correlated read. Reconnect retains drafts and selection while checking availability; stale, archived or invalid explicit choices block launch until corrected. P-201 and D-125 preserve explicit-path/legacy discovery compatibility and leave backend launch validation authoritative.
+
+
+### Worktree toolbar recovery checkpoint
+
+Worktree creation now confirms active-session replacement, acknowledges the created path and requested new session, and retains partial creation so relaunch can be retried without another worktree. Toolbar checkpoint exposes acknowledged commit/no-op/refusal outcomes, and toolbar Preflight merge opens the correlated inspector. P-245–P-247 and D-146 record acceptance and retry limits. PR push confirmation, inherited merge options, contextual removal, broad settings and lazy/reconnect acceptance remain open; this checkpoint does not close Phase 4 or permit Classic retirement.

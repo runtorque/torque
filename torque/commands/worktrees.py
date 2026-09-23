@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..config import log
+from .worktree_creation import handle_worktree_create
 
 
 WORKTREE_COMMAND_NAMES = frozenset({
@@ -175,92 +176,7 @@ async def handle_worktree_command(
     result = None
 
     if cmd == "worktree_create":
-        cell = state.agents.get(data["id"])
-        if cell and not cell.worktree_path and cell.directory:
-            gs = state.get_group_settings(cell.group)
-            repo_root = await worktree_mgr.get_repo_root(
-                cell.directory)
-            if repo_root:
-                wt_path = await worktree_mgr.create(
-                    cell, repo_root,
-                    base_dir=cell.worktree_base_dir
-                        or ".torque/worktrees",
-                    base_branch=cell.worktree_base_branch
-                        or gs.worktree_base_branch or "",
-                    symlinks=gs.worktree_symlinks,
-                    include_gitignored_symlinks=getattr(
-                        gs,
-                        "worktree_symlink_gitignored_paths",
-                        False,
-                    ),
-                    worktree_submodules=getattr(
-                        gs,
-                        "worktree_submodules",
-                        [],
-                    ),
-                    state=state,
-                )
-                if wt_path:
-                    cell.directory = wt_path
-                    state._emit_agent(cell)
-                    state._db_save_agent(cell)
-                    # Relaunch if requested by the UI
-                    if data.get("relaunch"):
-                        if cell.session_id:
-                            await bridge.close_session(
-                                cell.session_id)
-                        cell.status = "stopped"
-                        cell.session_id = None
-                        # Clear session ID — the old session
-                        # may not exist (no prompts sent yet)
-                        cell.agent_session_id = ""
-                        base_dir = cell.worktree_repo_root \
-                            or cell.directory \
-                            or await _resolve_base_dir(cell.group)
-                        launch_resolver = _launch_resolver_for_cell(
-                            cell,
-                            resolve_agent_launch_config=
-                            _resolve_agent_launch_config,
-                            resolve_engineer_launch_config=
-                            _resolve_engineer_launch_config,
-                            resolve_architect_launch_config=
-                            _resolve_architect_launch_config,
-                            resolve_worker_launch_config=
-                            _resolve_worker_launch_config,
-                            is_designated_engineer=
-                            _is_designated_engineer,
-                        )
-                        launch_cfg = launch_resolver(
-                            cell.group,
-                            base_dir=base_dir,
-                            explicit_template=cell.template,
-                            overrides={},
-                        )
-                        if cell.agent_type:
-                            get_adapter(cell.agent_type) \
-                                .uninstall_persistent_prompt(
-                                    os.path.expanduser(repo_root),
-                                    _persistent_prompt_filename(cell))
-                        _apply_persistent_prompt(
-                            cell, launch_cfg,
-                            _build_cell_persistent_prompt(
-                                cell, launch_cfg))
-                        state._emit_agent(cell)
-                        state._db_save_agent(cell)
-                        await bridge.create_session(
-                            cell,
-                            env_vars=runtime_env_vars_for_cell(
-                                cell, launch_cfg.get("env_vars")),
-                            env_file=launch_cfg.get("env_file", ""),
-                            shell=launch_cfg.get("shell", ""),
-                            system_prompt=launch_cfg.get(
-                                "system_prompt", ""),
-                            mcp_entrypoint=mcp_entrypoint_for_cell(
-                                cell),
-                            target_session_id=data.get(
-                                "target_session_id", ""),
-                            target_window_id=data.get(
-                                "target_window_id", ""))
+        return await handle_worktree_create(data, runtime)
     elif cmd == "worktree_advance_boundary":
         target, live_cell, error_result = await _resolve_worktree_command_target_value(
             state=state,

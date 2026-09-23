@@ -38,6 +38,8 @@ import { AgentDetailWorkspace } from './AgentDetailWorkspace';
 import { AgentCreateDialog } from './AgentCreateDialog';
 import styles from './AgentWorkspace.module.css';
 import { WorktreeInspector } from './WorktreeInspector';
+import { useWorktreeToolbar } from './useWorktreeToolbar';
+import { WorktreeOperationDialog } from './WorktreeOperationDialog';
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -173,6 +175,9 @@ interface FocusPanelProps {
   onUnavailable: () => void;
   onDetachAgent: () => void;
   onInspectWorktree: () => void;
+  onCreateWorktree: () => void;
+  onCheckpoint: () => void;
+  worktreeDisabled: boolean;
   onOrganize: () => void;
   onRemove: () => void;
   active?: boolean;
@@ -181,7 +186,7 @@ interface FocusPanelProps {
   composeHeight?: number;
 }
 
-function FocusPanel({ agent, terminal, detachedTerminal, messages, messageTarget = null, messageHistory, host, sendCommand, onUnavailable, onDetachAgent, onInspectWorktree, onOrganize, onRemove, active = true, terminalOnly = false, directMessagesHeight = 0, composeHeight = 0 }: FocusPanelProps) {
+function FocusPanel({ agent, terminal, detachedTerminal, messages, messageTarget = null, messageHistory, host, sendCommand, onUnavailable, onDetachAgent, onInspectWorktree, onCreateWorktree, onCheckpoint, worktreeDisabled, onOrganize, onRemove, active = true, terminalOnly = false, directMessagesHeight = 0, composeHeight = 0 }: FocusPanelProps) {
   const [settingsTarget, setSettingsTarget] = useState<AgentViewModel | null>(null);
   const run = (command: Record<string, unknown>) => { if (!sendCommand(command as { cmd: string })) onUnavailable(); };
   const focusDetached = () => {
@@ -219,9 +224,9 @@ function FocusPanel({ agent, terminal, detachedTerminal, messages, messageTarget
 
       {!terminalOnly && agent.cellType === 'agent' ? <div className={styles.worktreeBar}>
         <span>Worktree controls</span>
-        <Button tone="quiet" onPress={() => agent.worktreePath ? onInspectWorktree() : run({ cmd: 'worktree_create', id: agent.id, relaunch: Boolean(agent.sessionId) })}>{agent.worktreePath ? 'Inspect diff' : 'Create'}</Button>
-        <Button tone="quiet" onPress={() => run({ cmd: 'worktree_checkpoint', id: agent.id })} isDisabled={!agent.worktreePath}>Checkpoint</Button>
-        <Button tone="quiet" onPress={() => run({ cmd: 'worktree_check_merge', id: agent.id })} isDisabled={!agent.worktreePath}>Preflight merge</Button>
+        <Button tone="quiet" isDisabled={worktreeDisabled} onPress={agent.worktreePath ? onInspectWorktree : onCreateWorktree}>{agent.worktreePath ? 'Inspect diff' : 'Create'}</Button>
+        <Button tone="quiet" onPress={onCheckpoint} isDisabled={!agent.worktreePath || worktreeDisabled}>Checkpoint</Button>
+        <Button tone="quiet" onPress={onInspectWorktree} isDisabled={!agent.worktreePath || worktreeDisabled}>Preflight merge</Button>
       </div> : null}
 
       <div className={styles.terminalHost}>
@@ -246,6 +251,7 @@ export interface AgentWorkspaceProps {
 
 export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable, terminalOnly = false, active = true }: AgentWorkspaceProps) {
   const dispatch = useAppDispatch();
+  const worktreeToolbar = useWorktreeToolbar(active);
   const { records, digestSettings, digestBufferStats, digestSentEvents, engineerBufferStats, engineerSentEvents } = useAppSelector(selectAgentsState);
   const groupsState = useAppSelector(selectGroupsState);
   const catalog = useAppSelector(selectCatalogState);
@@ -345,7 +351,7 @@ export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable,
 
   if (!group) return <StateSurface title="Choose a group" description="Agents are scoped to the active Torque group." />;
   if (terminalOnly) {
-    return selected && terminalChoices.length ? <FocusPanel agent={selected} terminal={terminalChoices.find((cell) => cell.id === selectedTerminalId) ?? terminalChoices[0] ?? selected} detachedTerminal={null} messages={messageTarget ? messagesState.direct[messageTarget.id] : []} messageTarget={messageTarget} messageHistory={messagesState.history[selected.id]} host={host} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onDetachAgent={() => { void detachAgents(); }} onInspectWorktree={() => setWorktreeTarget(selected)} onOrganize={() => setOrganizationTarget(selected)} onRemove={() => setRemoveTarget(selected)} directMessagesHeight={Number(workspace.terminalDirectMessagesHeight) || 0} composeHeight={Number(workspace.terminalComposeHeight) || 0} terminalOnly /> : <StateSurface title="No active terminal" description="Select or relaunch an agent in the main Torque window." />;
+    return selected && terminalChoices.length ? <FocusPanel agent={selected} terminal={terminalChoices.find((cell) => cell.id === selectedTerminalId) ?? terminalChoices[0] ?? selected} detachedTerminal={null} messages={messageTarget ? messagesState.direct[messageTarget.id] : []} messageTarget={messageTarget} messageHistory={messagesState.history[selected.id]} host={host} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onDetachAgent={() => { void detachAgents(); }} onInspectWorktree={() => setWorktreeTarget(selected)} onCreateWorktree={() => worktreeToolbar.begin(selected, 'create')} onCheckpoint={() => worktreeToolbar.begin(selected, 'checkpoint')} worktreeDisabled={!worktreeToolbar.ready || worktreeToolbar.blocked} onOrganize={() => setOrganizationTarget(selected)} onRemove={() => setRemoveTarget(selected)} directMessagesHeight={Number(workspace.terminalDirectMessagesHeight) || 0} composeHeight={Number(workspace.terminalComposeHeight) || 0} terminalOnly /> : <StateSurface title="No active terminal" description="Select or relaunch an agent in the main Torque window." />;
   }
 
   return (
@@ -377,7 +383,7 @@ export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable,
         <div className={styles.detailHost}>
           {selected ? <header className={styles.detailViewBar}><span>Agent view</span>{viewControl(selected)}</header> : null}
           <div className={`${styles.detailPane} ${workspaceUi.agentsViewMode === 'live' ? '' : styles.workspaceHidden}`} aria-hidden={workspaceUi.agentsViewMode !== 'live'}>
-            {selected ? <FocusPanel agent={selected} terminal={selected} detachedTerminal={terminalEntry} messages={messageTarget ? messagesState.direct[messageTarget.id] : []} messageTarget={messageTarget} messageHistory={messagesState.history[selected.id]} host={host} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onDetachAgent={() => { void detachAgents(); }} onInspectWorktree={() => setWorktreeTarget(selected)} onOrganize={() => setOrganizationTarget(selected)} onRemove={() => setRemoveTarget(selected)} directMessagesHeight={Number(workspace.terminalDirectMessagesHeight) || 0} composeHeight={Number(workspace.terminalComposeHeight) || 0} active={active && workspaceUi.agentsViewMode === 'live'} /> : <StateSurface title="Select an agent" description="Choose an agent to inspect status, worktree, settings, messages, and terminal." />}
+            {selected ? <FocusPanel agent={selected} terminal={selected} detachedTerminal={terminalEntry} messages={messageTarget ? messagesState.direct[messageTarget.id] : []} messageTarget={messageTarget} messageHistory={messagesState.history[selected.id]} host={host} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onDetachAgent={() => { void detachAgents(); }} onInspectWorktree={() => setWorktreeTarget(selected)} onCreateWorktree={() => worktreeToolbar.begin(selected, 'create')} onCheckpoint={() => worktreeToolbar.begin(selected, 'checkpoint')} worktreeDisabled={!worktreeToolbar.ready || worktreeToolbar.blocked} onOrganize={() => setOrganizationTarget(selected)} onRemove={() => setRemoveTarget(selected)} directMessagesHeight={Number(workspace.terminalDirectMessagesHeight) || 0} composeHeight={Number(workspace.terminalComposeHeight) || 0} active={active && workspaceUi.agentsViewMode === 'live'} /> : <StateSurface title="Select an agent" description="Choose an agent to inspect status, worktree, settings, messages, and terminal." />}
           </div>
           <div className={`${styles.detailPane} ${workspaceUi.agentsViewMode === 'activity' ? '' : styles.workspaceHidden}`} aria-hidden={workspaceUi.agentsViewMode !== 'activity'}>
             {workspaceUi.agentsViewMode === 'activity' ? selected?.cellType === 'agent' ? <AgentDetailWorkspace key={selected.id} agent={selected} group={group} catalog={catalog} responses={auxiliaryResponses} tasks={tasks} directMessages={messagesState.direct[selected.id]} peerThreads={messagesState.peerThreads} digestSettings={digestSettings[selected.id]} digestBufferStats={digestBufferStats[selected.id] ?? engineerBufferStats[group]} digestSentEvents={digestSentEvents[selected.id] ?? engineerSentEvents[group]} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} /> : <StateSurface title="Select an agent" description="Activity is available for Architects, Engineers, and Workers rather than standalone terminals." /> : null}
@@ -390,6 +396,7 @@ export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable,
         <div className={styles.removeDialog}><p>This stops the live session and moves supported principals into Torque’s restore window. Worktree safety rules still apply.</p><footer><Button tone="quiet" onPress={() => setRemoveTarget(null)}>Cancel</Button><Button tone="danger" onPress={() => { if (removeTarget && !sendCommand({ cmd: 'remove_agent', id: removeTarget.id })) onCommandUnavailable(); setRemoveTarget(null); }}>Delete agent</Button></footer></div>
       </ModalDialog>
       {workspaceUi.createAgentKind ? <AgentCreateDialog key={workspaceUi.createAgentKind} open initialKind={workspaceUi.createAgentKind} group={group} agents={hierarchy.all} catalog={catalog} sendCommand={sendCommand} onCreated={(id) => { dispatch(workspaceUiActions.setSelectedAgent(id)); dispatch(workspaceUiActions.setAgentsViewMode('live')); if (!sendCommand({ cmd: 'ui_select_agent', id })) onCommandUnavailable(); }} onClose={() => dispatch(workspaceUiActions.setCreateAgentKind(null))} /> : null}
+      <WorktreeOperationDialog controller={worktreeToolbar} active={active} />
       {worktreeTarget ? <WorktreeInspector key={worktreeTarget.id} agent={inspectorAgent && !Number(inspectorAgent.raw.deleted_at) ? inspectorAgent : null} active={active} responses={auxiliaryResponses} onClose={() => setWorktreeTarget(null)} /> : null}
       <ModalDialog title="Move or reorder agent" description={organizationTarget ? `${organizationTarget.name} · ${organizationTarget.kind}` : ''} size="small" isOpen={Boolean(organizationTarget)} onOpenChange={(open) => { if (!open) setOrganizationTarget(null); }}>
         {organizationTarget ? <OrganizationForm key={organizationTarget.id} agent={organizationTarget} agents={Object.entries(records).map(([id, value]) => toAgentViewModel(id, value)).filter((item) => Number(item.raw.deleted_at ?? 0) <= 0)} groups={groupsState.records} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onClose={() => setOrganizationTarget(null)} /> : null}

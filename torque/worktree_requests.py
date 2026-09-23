@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 ACKNOWLEDGED_WORKTREE_MUTATIONS = frozenset({
-    "worktree_checkpoint", "worktree_rollback", "worktree_rebase",
+    "worktree_create", "worktree_checkpoint", "worktree_rollback", "worktree_rebase",
     "worktree_remove", "worktree_create_pr", "worktree_merge",
 })
 
@@ -17,7 +17,7 @@ class WorktreeRequestConflict(ValueError):
 
 
 class PendingWorktreeWrites:
-    """Complement the persisted response cache for the six worktree writes.
+    """Complement the persisted response cache for the seven worktree writes.
 
     A disconnected waiter does not cancel its write. A matching retry joins
     the same operation until its result reaches the existing SQLite cache.

@@ -98,9 +98,9 @@ class WorktreeAcknowledgementTests(unittest.IsolatedAsyncioTestCase):
 
 
 class PendingWorktreeWriteTests(unittest.IsolatedAsyncioTestCase):
-    def test_scope_is_only_the_six_acknowledged_worktree_mutations(self):
+    def test_scope_is_only_the_seven_acknowledged_worktree_mutations(self):
         self.assertEqual(ACKNOWLEDGED_WORKTREE_MUTATIONS, {
-            'worktree_checkpoint', 'worktree_rollback', 'worktree_rebase',
+            'worktree_create', 'worktree_checkpoint', 'worktree_rollback', 'worktree_rebase',
             'worktree_remove', 'worktree_create_pr', 'worktree_merge',
         })
 
