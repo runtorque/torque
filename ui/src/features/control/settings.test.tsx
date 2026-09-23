@@ -79,3 +79,24 @@ it('reconciles nested local edits and removals without dropping remote additions
   const latest = { number: 9, map: { edited: 'remote', untouched: 'fresh', removed: 'remote', added: 'new' }, list: ['fresh'] };
   expect(reconcileSettings(before, draft, latest)).toEqual({ number: '', map: { edited: 'draft', untouched: 'fresh', added: 'new' }, list: ['fresh'] });
 });
+
+it('offers only the three MCP capture modes and explains future-event capture and allowlist behavior', () => {
+  const change = vi.fn();
+  render(<StructuredSettings value={{ mcp_call_log_args_capture: 'metadata', mcp_call_log_full_capture_tools: [] }} onChange={change} />);
+  const capture = screen.getByRole('combobox', { name: 'MCP call log args capture' });
+  expect([...capture.querySelectorAll('option')].map((option) => [option.value, option.textContent])).toEqual([['off', 'Off'], ['metadata', 'Metadata'], ['full', 'Full']]);
+  expect(capture).toHaveAccessibleDescription(/future events/i);
+  expect(screen.getByRole('textbox', { name: 'MCP call log full capture tools' })).toHaveAccessibleDescription(/metadata mode/i);
+  fireEvent.change(capture, { target: { value: 'off' } });
+  expect(change).toHaveBeenCalledWith({ mcp_call_log_args_capture: 'off', mcp_call_log_full_capture_tools: [] });
+});
+it.each([
+  ['event_ingest_max_rows', 'Event ingest max rows', 1, ['0', '-1', '1.5', '']],
+  ['event_ingest_max_days', 'Event ingest max days', 0, ['-1', '0.5', '']],
+] as const)('enforces the %s retention boundary without changing invalid drafts', (key, label, minimum, invalid) => {
+  function Form() { const [value, setValue] = useState<Record<string, unknown>>({ [key]: minimum }); return <StructuredSettings value={value} onChange={setValue} />; }
+  render(<Form />); const input = screen.getByRole('spinbutton', { name: label });
+  expect(input).toHaveAttribute('min', String(minimum)); expect(input).toBeValid();
+  for (const draft of invalid) { fireEvent.change(input, { target: { value: draft } }); expect(input).toBeInvalid(); expect(input).toHaveValue(draft ? Number(draft) : null); }
+  fireEvent.change(input, { target: { value: String(minimum) } }); expect(input).toBeValid();
+});

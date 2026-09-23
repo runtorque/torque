@@ -412,6 +412,23 @@ class EventIngestStoreTests(unittest.TestCase):
                 off.close()
                 meta.close()
 
+    def test_zero_age_retains_old_events_but_one_row_limit_still_applies(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = EventIngestStore(
+                Path(tmp) / "ingest.db", max_rows=10, max_age_days=0,
+            ).init()
+            try:
+                store.append({"n": "old"}, "old", now=100)
+                with mock.patch("torque.event_ingest_db.time.time", return_value=100 + 30 * 86400):
+                    self.assertEqual(store.ack(up_to=1)["trimmed"], 0)
+                    self.assertEqual([r["event"]["n"] for r in store.query(limit=10)], ["old"])
+                    store.configure(max_rows=1)
+                    store.append({"n": "new"}, "new")
+                    self.assertEqual(store.ack(up_to=2)["trimmed"], 1)
+                    self.assertEqual([r["event"]["n"] for r in store.query(limit=10)], ["new"])
+            finally:
+                store.close()
+
     def test_retention_trims_by_row_count_and_age(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = EventIngestStore(

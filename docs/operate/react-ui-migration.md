@@ -232,3 +232,7 @@ Worktree diff acceptance: `worktree-diff-live.spec.ts` creates a temporary Git r
 
 
 The worktree diff scenario also exercises real WebSocket reconnect while Changes/preflight reads are refused. It verifies retained line budgets, file DOM, scroll, merge draft/focus/caret, a disabled merge action until fresh preflight, then successful retry against a newer real checkpoint. Closing the inspector and reconnecting must issue no worktree reads. Component tests separately verify malformed/mismatched responses, aborts on scope/hide/unmount, and the 30-second read timeout. This does not certify acknowledgement or retry semantics for worktree mutations.
+
+### MCP capture and event retention acceptance
+
+`settings-ingest-live.spec.ts` uses an isolated daemon to save/reload each capture choice, post synthetic MCP hook events and query persisted call records. It checks both result formats, Metadata allowlist glob/regex behavior, Off precedence, unchanged older capture decisions, invalid-draft no-write/focus behavior and actual row-cap trimming. Its settings are restored on exit; the test necessarily deletes older events when exercising the row cap and must never target a production profile. The zero-day age-expiry contract also has a controlled-time regression in `tests/test_event_ingest.py`.

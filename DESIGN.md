@@ -3146,3 +3146,12 @@ History renders the persisted contract: role/template, input/output token counts
 - Scope continuity: If the daemon changes the active group while Settings has edited or saving state, retain the original group form and identify it visibly. Switching to the new group is explicit. Save continues to target the retained group. An external native ownership change likewise does not erase the local form.
 - Boundaries: This guard does not persist drafts or raw secret inputs, promise recovery after hard browser refresh/window destruction, or intercept operating-system process termination. Existing appearance controls retain their immediate local-save behavior. Native menu/detach integration has host-boundary tests; actual Tauri lifecycle remains a separate acceptance gate.
 - Verification: P-253 records focused app coverage, isolated production-browser navigation/reconnect/save-failure acceptance and screenshot inspection. Broad settings lifecycle and remaining enum/validation/search work remain open.
+
+
+### D-150 — Capture choices and retention limits explain their storage effects
+
+- Date: 2026-09-23
+- Scope: Global event-ingest and MCP call-log controls.
+- Decision: Offer Off, Metadata and Full as explicit choices. Explain that capture applies to future events and does not rewrite historical records. Metadata keeps argument keys and size summaries; matching allowlist tool names, globs or regexes retain full values. Off drops arguments and results regardless of the allowlist.
+- Retention: Require at least one row and a nonnegative integer day count. Explain that zero days disables age expiry while the row cap still applies, and lowering retention can remove older records. Invalid drafts stay visible and receive focus before any save writes occur.
+- Verification: P-251/P-252 record component, time-controlled retention and isolated production-browser acceptance. This change uses the existing daemon capture/retention semantics.

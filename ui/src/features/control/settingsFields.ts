@@ -1126,19 +1126,25 @@ export const settingFields: Record<string, SettingField> = {
   },
   "event_ingest_max_rows": {
     "label": "Event ingest max rows",
+    "min": "1",
+    "description": "Keep at most this many ingested events. Minimum 1; reducing this limit can remove older records.",
     "kind": "int"
   },
   "event_ingest_max_days": {
     "label": "Event ingest max days",
+    "min": "0",
+    "description": "Days to retain ingested events. Set 0 to disable age expiry; the row limit still applies.",
     "kind": "int"
   },
   "mcp_call_log_args_capture": {
-    "label": "Mcp call log args capture",
-    "description": "off | metadata | full",
+    "label": "MCP call log args capture",
+    "description": "Applies to future events. Off drops tool arguments and results; Metadata retains argument keys and byte counts; Full retains values. Existing records are unchanged.",
+    "options": [{ "value": "off", "label": "Off" }, { "value": "metadata", "label": "Metadata" }, { "value": "full", "label": "Full" }],
     "kind": "str"
   },
   "mcp_call_log_full_capture_tools": {
-    "label": "Mcp call log full capture tools",
+    "label": "MCP call log full capture tools",
+    "description": "In Metadata mode, matching tools retain full arguments and results. Enter one tool name, glob, or regex per line. Off still drops values.",
     "kind": "list[str]"
   },
   "perceived_empty_probe_threshold": {
