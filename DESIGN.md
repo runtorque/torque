@@ -3225,3 +3225,12 @@ History renders the persisted contract: role/template, input/output token counts
 - Extensibility: Preserve saved unknown names as additional choices. Retain unchecked additional choices in the mounted editor so operators can undo a draft change. An explicit event-name field supports extension/future event names; Enter adds to the local draft without submitting Settings. Prevent duplicate or mandatory entries.
 - Stability and save: Incoming reconciliation, presets and reset update checkbox values without replacing focused controls. Selecting events only edits the settings draft. Save uses existing sparse role-scoped commands, preserves unrelated values and retains changes after refusal/reconnect.
 - Verification: P-259/P-260 record focused component tests, direct comparisons with Classic choices and backend mandatory constants, and isolated production-browser acceptance. Configuring a digest filter does not certify timer-driven or external-provider delivery.
+
+
+### D-158 — Status-bar settings preview the unsaved visibility draft
+
+- Date: 2026-09-23
+- Scope: Global status-bar visibility in React Settings.
+- Decision: Display a compact wrapping rail of sample indicators above the visibility choices. Label the values as samples; mirror the React footer order and keep segments passive. Every visibility edit immediately updates the preview. An explicit empty choice shows “No optional items selected”.
+- State: The preview derives only from the current global draft and shares its reset, refresh, reconnect and save lifecycle. It performs no reads or writes. The live workspace footer continues using acknowledged saved settings; preview interaction never navigates or triggers operational actions.
+- Verification: P-261 records component and isolated browser coverage for all indicators, unsaved changes, empty selection, reset, save/refusal/retry, reload and reconnect retention.

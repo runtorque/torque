@@ -284,3 +284,9 @@
 
 .digestEventCustom { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin-bottom: 10px; }
 .digestEventCustom > label { flex: 1 1 180px; }
+
+.statusPreview { margin: 9px 0; padding: 9px; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); }
+.statusPreview > small { display: block; margin-bottom: 7px; font-size: 9px; }
+.statusPreview ul { display: flex; flex-wrap: wrap; gap: 6px 0; padding: 0; margin: 0; list-style: none; }
+.statusPreview li { padding: 3px 8px; border-inline-end: 1px solid var(--border); font-size: 10px; }
+.statusPreview p { margin: 0; font-size: 10px; }

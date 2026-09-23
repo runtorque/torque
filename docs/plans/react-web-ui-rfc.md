@@ -1151,3 +1151,8 @@ P-258 now restores scoped catalog discovery while retaining unavailable selectio
 ### Digest event settings checkpoint — 2026-09-23
 
 P-259/P-260 restore named group Engineer/Architect event choices, mandatory-floor presentation and extension-name editing with preset/reset/save/reconnect acceptance. D-157 and the parity matrix record component, backend-contract and isolated browser evidence, including a repaired narrow Settings grid overflow. The audit adds missing status-bar preview P-261. The main ledger has **261 behaviors: 251 implemented/equivalent dispositions, 6 open repairs and 4 intentional retirements**. Broad settings/lazy-reconnect and native/external acceptance remain open; Phase 4 is not complete.
+
+
+### Status-bar preview checkpoint — 2026-09-23
+
+P-261 now previews unsaved visibility choices with passive sample indicators, empty-selection feedback and retained draft/reset/save behavior. D-158 and the matrix record focused and isolated browser acceptance, including desktop/narrow visual inspection and saved-footer isolation. The audit adds missing Architect checkpoint-frequency choices P-262. The main ledger has **262 behaviors: 252 implemented/equivalent dispositions, 6 open repairs and 4 intentional retirements**. Broad settings/lazy-reconnect and native/external acceptance remain open; Phase 4 is not complete.

@@ -27,6 +27,7 @@ import { NumericSettingInput } from './NumericSettingInput';
 import { EngineerNotificationPreset } from './EngineerNotificationPreset';
 import { StructuredSettings } from './StructuredSettings';
 import { SettingsSearch } from './SettingsSearch';
+import { StatusBarSettingsPreview } from './StatusBarSettingsPreview';
 import { RelayConfigurationFields } from './RelayConfigurationFields';
 import { relayConfigurationView } from './relayConfiguration';
 import { BoardSyncSettings } from './BoardSyncSettings';
@@ -221,7 +222,7 @@ function SettingsPanel({ group, responses, send, snapshot, onSavingChange, onDis
     </div></section>
     <AppearancePreferencesPanel />
     <ShortcutPreferencesPanel settings={globalDraft} onChange={(keybindings) => change(setGlobalDraft, { keybindings })} />
-    <section><h3>Status bar</h3><div className={styles.statusVisibility}>{Object.entries(globalDraft.status_bar_visibility).map(([key, enabled]) => <label key={key}><input type="checkbox" checked={enabled === true} onChange={(event) => change(setGlobalDraft, { status_bar_visibility: { ...globalDraft.status_bar_visibility, [key]: event.target.checked } })} />{key.replaceAll('_', ' ')}</label>)}</div><p className={styles.note}>Choose which live daemon, usage, deployment, health, workload, task, and attention signals remain visible across workspaces.</p></section>
+    <section><h3>Status bar</h3><StatusBarSettingsPreview visibility={globalDraft.status_bar_visibility} /><div className={styles.statusVisibility}>{Object.entries(globalDraft.status_bar_visibility).map(([key, enabled]) => <label key={key}><input type="checkbox" checked={enabled === true} onChange={(event) => change(setGlobalDraft, { status_bar_visibility: { ...globalDraft.status_bar_visibility, [key]: event.target.checked } })} />{key.replaceAll('_', ' ')}</label>)}</div><p className={styles.note}>Choose which live daemon, usage, deployment, health, workload, task, and attention signals remain visible across workspaces.</p></section>
     <section><h3>{group} defaults</h3><Button tone="quiet" isDisabled={!Object.keys(groupDefaults).length} onPress={() => resetSection('group')}>Reset group defaults</Button><p className={styles.note}>Restores launch, worktree, notification and sync defaults. Empty launch overrides inherit their configured fallback. Save changes to apply.</p><div className={styles.formGrid}>
       <Field label="Default directory"><input value={groupDraft.default_directory} onChange={(event) => change(setGroupDraft, { default_directory: event.target.value })} /></Field>
       <Field label="Maximum agents"><NumericSettingInput fieldKey="max_agents" value={groupDraft.max_agents} onChange={(value) => change(setGroupDraft, { max_agents: value })} /></Field>
