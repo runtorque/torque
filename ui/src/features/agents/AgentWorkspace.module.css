@@ -156,11 +156,16 @@
 .conflictList div,
 .worktreeArtifacts div { display: flex; justify-content: space-between; gap: 8px; font-size: 9px; }
 .diffFiles { display: grid; max-height: 52vh; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
-.diffFiles details + details { border-top: 1px solid var(--border); }
-.diffFiles summary { display: flex; min-height: 32px; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 8px; cursor: pointer; background: var(--surface); }
-.diffFiles summary span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.diffFiles summary small { flex: 0 0 auto; color: var(--text-muted); }
-.diffFiles details > p { padding: 8px; color: var(--text-muted); }
+.diffFiles > section + section { border-top: 1px solid var(--border); }
+.diffFileHeader { display: flex; width: 100%; min-height: 32px; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 8px; border: 0; color: var(--text); font: inherit; text-align: left; cursor: pointer; background: var(--surface); }
+.diffFileHeader > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diffFileHeader small { flex: 0 0 auto; color: var(--text-muted); }
+.diffFiles > section > p { padding: 8px; color: var(--text-muted); }
+.diffToolbar, .diffLoadMore { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 0; }
+.diffToolbar > span, .diffLoadMore > span { color: var(--text-muted); font-size: 9px; }
+.diffLoadMore { padding: 6px 8px; }
+.worktreeTab { display: grid; gap: 8px; min-width: 0; }
+.worktreeTab[hidden], .worktreeHistory[hidden] { display: none; }
 .diffHunk { border-top: 1px solid var(--border); }
 .diffHunk header { padding: 4px 8px; color: var(--text-muted); background: var(--surface-raised); font: 8px var(--font-mono); }
 .diffHunk pre { overflow-x: auto; margin: 0; padding: 5px 0; font: 9px/1.35 var(--font-mono); }

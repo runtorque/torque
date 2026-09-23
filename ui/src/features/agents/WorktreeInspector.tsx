@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Button, ModalDialog, StateSurface } from '../../design/primitives';
 import type { CommandSender } from '../board/BoardPanel';
 import type { AgentViewModel } from './model';
+import { WorktreeDiff } from './WorktreeDiff';
 import styles from './AgentWorkspace.module.css';
 
 interface WorktreeInspectorProps {
@@ -91,7 +92,7 @@ export function WorktreeInspector({ agent, responses, sendCommand, onUnavailable
         <Button tone="quiet" onPress={refresh}>Refresh</Button>
       </nav>
 
-      {tab === 'diff' ? <>
+      <div className={styles.worktreeTab} hidden={tab !== 'diff'}>
         <div className={styles.diffSummary}>
           <span>{files.length} files</span>
           <span className={styles.diffAdd}>+{number(stats.insertions)}</span>
@@ -107,29 +108,20 @@ export function WorktreeInspector({ agent, responses, sendCommand, onUnavailable
         {text(preflight.stale_base_warning) ? <pre className={styles.worktreeWarning}>{text(preflight.stale_base_warning)}</pre> : null}
         {conflicts.length ? <section className={styles.conflictList}><h3>Conflicts</h3>{conflicts.map((conflict, index) => <div key={`${text(conflict.path)}-${index}`}><strong>{text(conflict.path) || 'Unknown path'}</strong><span>{text(conflict.reason)}</span></div>)}</section> : null}
         {artifacts.length ? <section className={styles.worktreeArtifacts}><h3>Boundary artifacts</h3>{artifacts.map((artifact, index) => <div key={`${text(artifact.id)}-${index}`}><strong>{text(artifact.name) || text(artifact.title) || `Artifact ${index + 1}`}</strong><span>{text(artifact.path) || text(artifact.url)}</span></div>)}</section> : null}
-        <div className={styles.diffFiles}>
+        <div>
           {!Object.keys(diff).length ? <StateSurface title="Loading changes" description="Torque is building the complete worktree diff." /> : null}
           {Object.keys(diff).length && !files.length && !diff.error ? <StateSurface title="No changes" description="The worktree matches its base branch." /> : null}
-          {files.map((file, index) => <details key={`${text(file.path)}-${index}`} open={files.length < 8}>
-            <summary><span>{text(file.path) || '(unknown file)'}</span><small>{text(file.status)} · <b className={styles.diffAdd}>+{number(file.insertions)}</b> <b className={styles.diffDelete}>−{number(file.deletions)}</b></small></summary>
-            {file.binary ? <p>Binary file changed.</p> : list(file.hunks).map((hunk, hunkIndex) => <section key={`${text(hunk.header)}-${hunkIndex}`} className={styles.diffHunk}>
-              <header>{text(hunk.header)}</header>
-              <pre>{list(hunk.lines).map((line, lineIndex) => {
-                const type = text(line.type);
-                const prefix = type === 'add' ? '+' : type === 'del' ? '−' : ' ';
-                return <span key={lineIndex} className={type === 'add' ? styles.diffLineAdd : type === 'del' ? styles.diffLineDelete : ''}>{prefix}{text(line.text)}{'\n'}</span>;
-              })}</pre>
-            </section>)}
-          </details>)}
+
         </div>
-      </> : <div className={styles.worktreeHistory}>
+        <WorktreeDiff files={files} />
+      </div><div className={styles.worktreeHistory} hidden={tab !== 'history'}>
         {!Object.keys(history).length ? <StateSurface title="Loading history" description="Torque is loading worktree checkpoints." /> : null}
         {Object.keys(history).length && !commits.length ? <StateSurface title="No checkpoints" description="This branch has no worktree checkpoints yet." /> : null}
         {commits.map((commit, index) => <article key={text(commit.sha) || String(index)}>
           <div><strong>{text(commit.message) || text(commit.short_sha)}</strong><small>{text(commit.short_sha)} · {text(commit.date)} · +{number(commit.insertions)} −{number(commit.deletions)}</small>{text(commit.body) ? <p>{text(commit.body)}</p> : null}</div>
           {index === 0 ? <span>HEAD</span> : <Button tone="quiet" onPress={() => setRollbackSha(text(commit.sha))}>Rollback…</Button>}
         </article>)}
-      </div>}
+      </div>
 
       {text(rebase.error) ? <div role="alert" className={styles.worktreeResult}>{text(rebase.error)}</div> : null}
       {pr.url ? <div className={styles.worktreeResult}>Pull request created: <a href={text(pr.url)} target="_blank" rel="noreferrer">{text(pr.url)}</a></div> : null}

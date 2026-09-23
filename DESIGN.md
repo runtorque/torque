@@ -3027,6 +3027,15 @@ scope.
 - Inheritance: Untouched creation fields follow group defaults. An edited empty event list is an explicit empty override, not a request to inherit. Per-agent origin labels and Use inherited actions remain authoritative.
 - Verification: Compare all three bundles to the checked-in Classic constant, test atomic application and manual edits, and exercise real group save/reload, creation, per-agent refusal/retry and relaunch against an isolated daemon. Runtime timer delivery and native lifecycle acceptance remain separate gates.
 
+### D-143 — Worktree diff disclosure bounds mounted lines
+
+- Date: 2026-09-22
+- Status: accepted; P-242 tracks executable acceptance.
+- Decision: Worktree Changes uses the Classic automatic disclosure thresholds: collapse when there are more than 12 files, more than 1,500 total lines, or a single file has more than 800 lines. In an automatically collapsed diff, preview the first file with at most 400 lines when available. File headers remain keyboard-operable; collapsed files mount no line content.
+- Reading: Expanded files initially mount at most 400 lines across hunks. Show more adds the next 400 (or remaining) lines without replacing preceding content. Collapse all and Expand all preserve already requested line budgets. Label how many files are collapsed and how many lines remain; binary and unavailable line diffs have explicit states.
+- Continuity: Key disclosure and line budgets by file path for the inspector lifetime. Refresh/reordering retains existing file nodes; switching Changes/History hides their existing surfaces instead of recreating them. Each agent's inspector starts a new disclosure workspace. Reconnect/read-cancellation acceptance remains a separate lifecycle gate.
+- Verification: Classic threshold boundaries, mixed large/small/binary files, multi-hunk truncation, complete progressive expansion, path-keyed refresh and inspector tab retention have focused tests. Production acceptance uses an actual temporary Git worktree.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:
