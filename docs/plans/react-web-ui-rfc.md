@@ -1121,3 +1121,8 @@ P-254 adds local label/description/scope search with bounded accessible results,
 ### Numeric settings and inheritance audit checkpoint — 2026-09-23
 
 P-255 supplies the remaining supported numeric bounds and endpoint persistence evidence. The audit adds P-256/P-257 for inherited launch suggestions/previews and resolved relay configuration. It also reopens P-095 because shortcut conflict handling was never implemented despite the earlier Required disposition. The ledger now has **257 behaviors: 245 implemented/equivalent dispositions, 8 open repairs and 4 intentional retirements**. Broad settings/lazy-reconnect and independent native/external acceptance remain open.
+
+
+### Keyboard acceptance correction — 2026-09-23
+
+Further source inspection reopens P-101/P-102: filtered group/panel navigator hotkeys are absent, and Board still handles N independently of the configured create-task binding. The current main ledger tally is **257 behaviors: 243 implemented/equivalent dispositions, 10 open repairs and 4 intentional retirements**. P-095 conflict handling must be verified alongside these actual dispatch paths and effective shortcut hints. Prior implementation counts remain historical dispositions, not full acceptance certification.
