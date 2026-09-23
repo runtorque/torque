@@ -108,3 +108,13 @@ it('uses group specialization defaults until explicitly edited, including an int
   fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Default engineer' } }); fireEvent.click(screen.getByRole('button', { name: 'Create engineer' }));
   await waitFor(() => expect(close).toHaveBeenCalledOnce()); expect(calls.find((call) => call.cmd === 'add_engineer')).toMatchObject({ specializations: [] });
 });
+it('stages a notification preset for creation and preserves an explicitly empty event override', async () => {
+  const calls: TorqueCommand[] = [];
+  vi.stubGlobal('fetch', mockFetch((_url, options) => { calls.push(commandFrom(options)); return Promise.resolve(response({ type: 'ok', id: 'created', kind: 'engineer', name: 'Quiet engineer', group: 'Foundation' })); }));
+  const { close } = setup('engineer'); await ready();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Engineer notification preset' }), { target: { value: 'quiet' } });
+  expect(screen.getByLabelText('Heartbeat interval')).toHaveValue(0); expect(screen.getByLabelText('Digest verbosity')).toHaveValue('compact');
+  fireEvent.change(screen.getByLabelText('Enabled digest events'), { target: { value: '' } }); expect(screen.getByRole('combobox', { name: 'Engineer notification preset' })).toHaveValue('custom');
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Quiet engineer' } }); fireEvent.click(screen.getByRole('button', { name: 'Create engineer' }));
+  await waitFor(() => expect(close).toHaveBeenCalledOnce()); expect(calls.find((call) => call.cmd === 'add_engineer')).toMatchObject({ agent_digest_settings: { digest_verbosity: 'compact', push_interval: 120, max_interval: 600, heartbeat_interval: 0, enabled_events: [] } });
+});

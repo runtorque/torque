@@ -1,3 +1,4 @@
+import { EngineerNotificationPreset } from '../control/EngineerNotificationPreset';
 import { SpecializationPicker } from '../control/SpecializationPicker';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
@@ -106,7 +107,9 @@ export function AgentCreateDialog({
   const [pushInterval, setPushInterval] = useState('');
   const [maxInterval, setMaxInterval] = useState('');
   const [heartbeatInterval, setHeartbeatInterval] = useState('');
-  const [enabledEvents, setEnabledEvents] = useState('');
+  const [enabledEventsDraft, setEnabledEvents] = useState<string | null>(null);
+  const enabledEvents = enabledEventsDraft ?? '';
+  const inheritedDigest = record(defaults.engineers[group]);
 
   useEffect(() => {
     if (!open || connection.status !== 'connected') return;
@@ -208,7 +211,7 @@ export function AgentCreateDialog({
       push_interval: pushInterval ? Number(pushInterval) : '',
       max_interval: maxInterval ? Number(maxInterval) : '',
       heartbeat_interval: heartbeatInterval ? Number(heartbeatInterval) : '',
-      enabled_events: enabledEvents.trim() ? csv(enabledEvents) : '',
+      enabled_events: enabledEventsDraft === null ? '' : csv(enabledEvents),
     };
     for (const [key, value] of Object.entries(digestValues)) {
       if (typeof value === 'number' && (!Number.isSafeInteger(value) || value < 0)) { setError(`${key.replaceAll('_', ' ')} must be a non-negative whole number.`); return; }
@@ -321,6 +324,7 @@ export function AgentCreateDialog({
 
       {principal && !(kind === 'engineer' && hiringArchitectId) ? <section>
         <h3>Behavior and delivery</h3>
+        {kind === 'engineer' ? <EngineerNotificationPreset value={{ digest_verbosity: digestVerbosity || inheritedDigest.digest_verbosity, push_interval: pushInterval || inheritedDigest.push_interval, max_interval: maxInterval || inheritedDigest.max_interval, heartbeat_interval: heartbeatInterval || inheritedDigest.heartbeat_interval, enabled_events: enabledEventsDraft === null ? inheritedDigest.enabled_events : csv(enabledEvents) }} disabled={saving} onApply={(preset) => { setDigestVerbosity(preset.digest_verbosity); setPushInterval(String(preset.push_interval)); setMaxInterval(String(preset.max_interval)); setHeartbeatInterval(String(preset.heartbeat_interval)); setEnabledEvents(preset.enabled_events.join(', ')); }} /> : null}
         <div className={styles.formGrid}>
           <label>Autonomy mode<input value={autonomyMode} onChange={(event) => setAutonomyMode(event.target.value)} placeholder="inherit" /></label>
           <label>Digest verbosity<input value={digestVerbosity} onChange={(event) => setDigestVerbosity(event.target.value)} placeholder="inherit" /></label>

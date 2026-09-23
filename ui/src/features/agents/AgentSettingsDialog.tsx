@@ -4,6 +4,7 @@ import { projectionActions, selectAgentsState, selectAgentSettingsDefaults, sele
 import { Button, ModalDialog } from '../../design/primitives';
 import type { TorqueCommand } from '../../protocol';
 import { readCommand } from '../../protocol/http';
+import { EngineerNotificationPreset } from '../control/EngineerNotificationPreset';
 import { SpecializationPicker } from '../control/SpecializationPicker';
 import { providerChoices } from '../control/providerChoices';
 import { toAgentViewModel, type AgentViewModel } from './model';
@@ -126,7 +127,7 @@ export function AgentSettingsDialog({ target, onClose }: { target: AgentViewMode
       {['architect', 'engineer'].includes(agent.kind) ? <>
         <section className={styles.settingsSection}><h3>Launch and behavior</h3><div className={styles.formGrid}>{principalSettingFields.map(([key, label, type]) => control(key, label, type))}{agent.kind === 'engineer' ? engineerSettingFields.map(([key, label, type]) => control(key, label, type)) : null}</div></section>
         {agent.kind === 'engineer' ? <section className={styles.settingsSection}><h3>Specializations</h3><SpecializationPicker group={agent.group} value={specializations.split(/[\n,]/).map((item) => item.trim()).filter(Boolean)} onChange={(next) => setSpecializations(next.join(', '))} disabled={saving} /></section> : null}
-        <section className={styles.settingsSection}><h3>Digest delivery</h3><div className={styles.formGrid}>{digestSettingFields.map(([key, label, type]) => control(key, label, type, true))}</div></section>
+        <section className={styles.settingsSection}><h3>Digest delivery</h3>{agent.kind === 'engineer' ? <EngineerNotificationPreset value={digestValues} disabled={saving} onApply={(preset) => setEditor((current) => Object.entries(preset).reduce((next, [key, value]) => editSetting(next, key, Array.isArray(value) ? value.join(', ') : String(value)), current))} /> : null}<div className={styles.formGrid}>{digestSettingFields.map(([key, label, type]) => control(key, label, type, true))}</div></section>
         <label className={styles.inlineCheck}><input type="checkbox" checked={relaunch} onChange={(event) => setRelaunch(event.target.checked)} />Relaunch after saving launch-bound changes</label>
       </> : <p className={styles.formHint}>Worker provider and launch settings are inherited from its role, Agent Class, and group defaults.</p>}
       <footer><Button tone="quiet" type="button" isDisabled={saving} onPress={requestClose}>Cancel</Button><Button tone="primary" type="submit" isDisabled={saving || loading || !hydrated || !dirty}>{saving ? 'Saving settings…' : 'Save settings'}</Button></footer>

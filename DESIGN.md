@@ -3018,6 +3018,15 @@ scope.
 - Authority: The operator settings command remains `set_engineer_specializations`. Its server handler also serves the Classic Architect-scoped alias; no MCP scope or ownership rule changes.
 - Verification: Component order/focus/draft/error tests, default-inheritance reproduction, production creation/edit/group round trips, and existing backend catalog/creation/Architect scope tests. Other lifecycle and native gates remain separate.
 
+### D-142 — Engineer notification presets stage explicit settings
+
+- Date: 2026-09-22
+- Status: accepted; acceptance evidence tracked under P-239–P-241.
+- Decision: Group Engineer defaults, direct Engineer creation and per-agent settings share Quiet, Normal and Noisy notification bundles. Each bundle stages the Classic verbosity, push/max delivery intervals, heartbeat and enabled-event list together. Only the existing explicit save/create flow persists the values; relaunch follows acknowledged settings saves.
+- Drafts: Derive the selected preset from all five current values. Event order and duplicates do not affect matching. Manual changes, unknown events and explicitly empty event lists remain intact and show Custom when unmatched. Selecting Custom does not mutate fields; selecting a named preset replaces only its five fields. Refusal and reconnect retain pending edits.
+- Inheritance: Untouched creation fields follow group defaults. An edited empty event list is an explicit empty override, not a request to inherit. Per-agent origin labels and Use inherited actions remain authoritative.
+- Verification: Compare all three bundles to the checked-in Classic constant, test atomic application and manual edits, and exercise real group save/reload, creation, per-agent refusal/retry and relaunch against an isolated daemon. Runtime timer delivery and native lifecycle acceptance remain separate gates.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

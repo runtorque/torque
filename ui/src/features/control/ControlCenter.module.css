@@ -264,3 +264,8 @@
 .specializationPicker label { display: grid; gap: 4px; min-width: 0; }
 .specializationPicker select, .specializationPicker textarea { min-width: 0; max-width: 100%; padding: 6px; color: var(--text); background: var(--background); border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .specializationPicker [role="alert"] { color: var(--danger); }
+
+.notificationPreset { display: grid; gap: 5px; margin: 8px 0; min-width: 0; }
+.notificationPreset label { display: grid; gap: 5px; color: var(--text-dim); font-size: 10px; }
+.notificationPreset select { min-width: 0; max-width: 100%; padding: 6px; color: var(--text); background: var(--background); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.notificationPreset p { margin: 0; color: var(--text-muted); font-size: 9px; line-height: 1.5; }

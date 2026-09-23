@@ -123,3 +123,20 @@ describe('Agent settings lifecycle', () => {
   });
 
 });
+it('retains a selected notification preset through a refused save and acknowledges only its five fields', async () => {
+  let refuse = true; const writes: TorqueCommand[] = [];
+  const normal: UnknownRecord = { digest_verbosity: 'balanced', push_interval: 60, max_interval: 300, heartbeat_interval: 300, enabled_events: ['agent_started', 'task_dispatched', 'task_derived', 'task_health_alert'] };
+  let resolved = { ...metadata(), ...Object.fromEntries(Object.entries(normal).map(([key, value]) => [key, { value, origin: 'group' }])) };
+  vi.stubGlobal('fetch', vi.fn((_url, options: RequestInit) => {
+    const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand;
+    if (command.cmd === 'update_agent_digest_settings') {
+      writes.push(command); if (refuse) return Promise.resolve(response({ type: 'error', message: 'Digest preset refused' }));
+      resolved = { ...resolved, ...Object.fromEntries(Object.entries(command.settings as UnknownRecord).map(([key, value]) => [key, { value, origin: 'per-agent' }])) };
+    }
+    return Promise.resolve(response({ type: 'agent_settings', agent_id: 'eng', settings: {}, resolved }));
+  }));
+  const { close } = setup(); await ready(); const picker = screen.getByRole('combobox', { name: 'Engineer notification preset' }); expect(picker).toHaveValue('normal');
+  fireEvent.change(picker, { target: { value: 'quiet' } }); fireEvent.click(screen.getByRole('button', { name: 'Save settings' })); expect(await screen.findByRole('alert')).toHaveTextContent('Digest preset refused'); expect(picker).toHaveValue('quiet');
+  await ready(); refuse = false; fireEvent.click(screen.getByRole('button', { name: 'Save settings' })); await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  expect(writes).toEqual(Array.from({ length: 2 }, () => ({ cmd: 'update_agent_digest_settings', agent_id: 'eng', settings: { digest_verbosity: 'compact', push_interval: 120, max_interval: 600, heartbeat_interval: 0, enabled_events: ['task_derived', 'task_health_alert'] } })));
+});
