@@ -2991,6 +2991,14 @@ scope.
 - Schema: This object has a fixed server schema, so it has no arbitrary add/remove-key controls. Its enclosing reset uses daemon defaults. User maps such as environment variables continue to accept literal keys/string values even when a key matches a threshold name.
 - Verification: Component boundary/reset/type tests, real daemon refusal/retry/reload of exact numeric/boolean values, and existing review-policy backend tests. Full acceptance of other settings remains separate.
 
+### D-139 — Structured settings fit their available width
+
+- Date: 2026-09-22
+- Status: accepted; production browser geometry, draft/reset checks and screenshot review passed for P-230.
+- Decision: Named settings objects occupy a full form row, with their children using the shared responsive grid. Nested grids can shrink below the preferred field width. Reset and remove labels wrap within their own cells instead of overlapping adjacent controls; full accessible names remain available.
+- Scope: Structured settings only; window resizing retains the current mounted inputs and drafts. No values or save semantics change.
+- Verification: Browser geometry, screenshot inspection and reset/draft checks at 1280, 960 and 760 pixel widths.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

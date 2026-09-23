@@ -34,7 +34,7 @@ export function StructuredSettings({ value, onChange, prefix = '', omit = [], on
     const descriptionId = field?.description ? `${instance}-${key}-help` : undefined;
     const set = (next: unknown) => onChange({ ...value, [key]: next });
     const reset = key in defaults ? <Button tone="quiet" isDisabled={settingsEqual(item, defaults[key])} onPress={() => set(structuredClone(defaults[key]))}>Reset {label}</Button> : null;
-    if (item && typeof item === 'object' && !Array.isArray(item)) return <div key={key}><SettingObject value={item as UnknownRecord} onChange={set} label={label} fixedSchema={schema && key === 'architect_review_gate_thresholds'} template={schema && key === 'board_sync_github' ? githubSettingsDefaults : undefined} />{reset}</div>;
+    if (item && typeof item === 'object' && !Array.isArray(item)) return <div key={key} className={styles.settingObject}><SettingObject value={item as UnknownRecord} onChange={set} label={label} fixedSchema={schema && key === 'architect_review_gate_thresholds'} template={schema && key === 'board_sync_github' ? githubSettingsDefaults : undefined} />{reset}</div>;
     const suggestions = schema ? providerChoices(providers, key, value) : [];
     const choicesId = `${instance}-${key}-choices`;
     const options = suggestions.length ? undefined : field?.options;
