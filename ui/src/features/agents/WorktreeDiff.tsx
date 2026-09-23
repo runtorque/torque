@@ -1,29 +1,13 @@
-import { useState } from 'react';
+import { lineChunk, initialDisclosure, records, text, count, lineCount, fileKey, useDiffDisclosure, type DiffDisclosureState } from './worktreeDiffModel';
 import { Button } from '../../design/primitives';
 import type { UnknownRecord } from '../../protocol';
 import styles from './AgentWorkspace.module.css';
 
-const lineChunk = 400;
-function records(value: unknown): UnknownRecord[] {
-  return Array.isArray(value) ? value.filter((item): item is UnknownRecord => item !== null && typeof item === 'object' && !Array.isArray(item)) : [];
-}
-function text(value: unknown): string { return typeof value === 'string' || typeof value === 'number' ? String(value) : ''; }
-function count(value: unknown): number { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : 0; }
-function lineCount(file: UnknownRecord): number { return records(file.hunks).reduce((total, hunk) => total + (Array.isArray(hunk.lines) ? hunk.lines.length : 0), 0); }
-function fileKey(file: UnknownRecord, index: number): string { return text(file.path) || `unknown-${index}`; }
-interface Disclosure { collapseAll: boolean; expanded: Record<string, boolean>; limits: Record<string, number> }
-function initialDisclosure(files: UnknownRecord[]): Disclosure {
-  const lengths = files.map(lineCount);
-  const collapseAll = files.length > 12 || lengths.reduce((sum, lines) => sum + lines, 0) > 1500 || (files.length === 1 && (lengths[0] ?? 0) > 800);
-  const preview = collapseAll ? files.findIndex((_file, index) => (lengths[index] ?? 0) <= lineChunk) : -1;
-  return { collapseAll, expanded: preview >= 0 ? { [fileKey(files[preview]!, preview)]: true } : {}, limits: {} };
-}
-
-export function WorktreeDiff({ files }: { files: UnknownRecord[] }) {
-  const [saved, setDisclosure] = useState<Disclosure | null>(null);
+export function WorktreeDiff({ files, workspace }: { files: UnknownRecord[]; workspace?: DiffDisclosureState }) {
+  const ownWorkspace = useDiffDisclosure(workspace ? [] : files);
+  const [saved, setDisclosure] = workspace ?? ownWorkspace;
   const disclosure = saved ?? initialDisclosure(files);
-  // Initialize when the first actual diff arrives, not while its read is pending.
-  if (saved === null && files.length) setDisclosure(disclosure);
+
   const expanded = (key: string) => disclosure.expanded[key] ?? !disclosure.collapseAll;
   const collapsed = files.filter((file, index) => !expanded(fileKey(file, index))).length;
   if (!files.length) return null;

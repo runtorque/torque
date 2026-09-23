@@ -3036,6 +3036,16 @@ scope.
 - Continuity: Key disclosure and line budgets by file path for the inspector lifetime. Refresh/reordering retains existing file nodes; switching Changes/History hides their existing surfaces instead of recreating them. Each agent's inspector starts a new disclosure workspace. Reconnect/read-cancellation acceptance remains a separate lifecycle gate.
 - Verification: Classic threshold boundaries, mixed large/small/binary files, multi-hunk truncation, complete progressive expansion, path-keyed refresh and inspector tab retention have focused tests. Production acceptance uses an actual temporary Git worktree.
 
+### D-144 — Worktree inspector reads survive resync and failure
+
+- Date: 2026-09-22
+- Status: accepted; P-243 tracks executable acceptance.
+- Decision: The open inspector owns its accepted Changes, merge-preflight and History results. Read each through a correlated HTTP request, validate the response type/agent and required shape, and retain the previous successful result independently if a later read fails. Compact WebSocket cache replacement must not remove accepted content.
+- Lifecycle: Read only while the inspector is active and the connection has a synchronized snapshot. Refresh on reconnect/resync and explicit Refresh/Retry. Cancel obsolete requests on target/path/branch changes, hide, disconnect and unmount; bound each read to 30 seconds. Hidden or closed inspectors perform no reads. Errors identify the failed resource and keep retry available.
+- Continuity: Keep file disclosure, requested line budgets, Changes/History selection and merge drafts while refreshing; preserve existing file nodes and reading scroll through refused reads. Temporarily hiding the inspector retains its disclosure model outside the modal portal. Agent removal or worktree relocation is resolved from current agent state, not the captured opener record.
+- Preflight: PR/merge controls require a successful current preflight; a retained older clean result does not enable actions during disconnection, refresh or failure. Existing server mutation and merge-authority rules remain unchanged.
+- Verification: Reproduced cache-loss regression, independent read failures, mismatched/incomplete replies, stale cancellation, hidden/unmounted inactivity, bounded timeout/retry and production-browser reconnect with real checkpoint changes. Mutation acknowledgement and native lifecycle remain separate gates.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

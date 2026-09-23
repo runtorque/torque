@@ -278,6 +278,7 @@ export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable,
   const [focusedId, setFocusedId] = useState(selected?.id ?? null);
   const [removeTarget, setRemoveTarget] = useState<AgentViewModel | null>(null);
   const [worktreeTarget, setWorktreeTarget] = useState<AgentViewModel | null>(null);
+  const inspectorAgent = worktreeTarget && records[worktreeTarget.id] ? toAgentViewModel(worktreeTarget.id, records[worktreeTarget.id]) : null;
   const [organizationTarget, setOrganizationTarget] = useState<AgentViewModel | null>(null);
   const [deletedOpen, setDeletedOpen] = useState(false);
   const [purgeTarget, setPurgeTarget] = useState<AgentViewModel | null>(null);
@@ -389,7 +390,7 @@ export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable,
         <div className={styles.removeDialog}><p>This stops the live session and moves supported principals into Torque’s restore window. Worktree safety rules still apply.</p><footer><Button tone="quiet" onPress={() => setRemoveTarget(null)}>Cancel</Button><Button tone="danger" onPress={() => { if (removeTarget && !sendCommand({ cmd: 'remove_agent', id: removeTarget.id })) onCommandUnavailable(); setRemoveTarget(null); }}>Delete agent</Button></footer></div>
       </ModalDialog>
       {workspaceUi.createAgentKind ? <AgentCreateDialog key={workspaceUi.createAgentKind} open initialKind={workspaceUi.createAgentKind} group={group} agents={hierarchy.all} catalog={catalog} sendCommand={sendCommand} onCreated={(id) => { dispatch(workspaceUiActions.setSelectedAgent(id)); dispatch(workspaceUiActions.setAgentsViewMode('live')); if (!sendCommand({ cmd: 'ui_select_agent', id })) onCommandUnavailable(); }} onClose={() => dispatch(workspaceUiActions.setCreateAgentKind(null))} /> : null}
-      {worktreeTarget ? <WorktreeInspector key={worktreeTarget.id} agent={worktreeTarget} responses={auxiliaryResponses} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onClose={() => setWorktreeTarget(null)} /> : null}
+      {worktreeTarget ? <WorktreeInspector key={worktreeTarget.id} agent={inspectorAgent && !Number(inspectorAgent.raw.deleted_at) ? inspectorAgent : null} active={active} responses={auxiliaryResponses} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onClose={() => setWorktreeTarget(null)} /> : null}
       <ModalDialog title="Move or reorder agent" description={organizationTarget ? `${organizationTarget.name} · ${organizationTarget.kind}` : ''} size="small" isOpen={Boolean(organizationTarget)} onOpenChange={(open) => { if (!open) setOrganizationTarget(null); }}>
         {organizationTarget ? <OrganizationForm key={organizationTarget.id} agent={organizationTarget} agents={Object.entries(records).map(([id, value]) => toAgentViewModel(id, value)).filter((item) => Number(item.raw.deleted_at ?? 0) <= 0)} groups={groupsState.records} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onClose={() => setOrganizationTarget(null)} /> : null}
       </ModalDialog>

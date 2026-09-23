@@ -229,3 +229,6 @@ Notification preset acceptance: `notification-presets-live.spec.ts` uses an isol
 
 
 Worktree diff acceptance: `worktree-diff-live.spec.ts` creates a temporary Git repository, a generic worker and a real Torque worktree under that repository. It checkpoints changes to a large and a small file, then verifies automatic disclosure and keyboard expansion, progressive 400-line mounting, retained line budgets across History/Changes and explicit refresh, path identity, scroll position and bulk collapse/expand. It permanently removes only its own disposable worker and deletes its temporary repository afterward. Run against a non-default isolated daemon after `make ui-check`. It does not create a PR, merge changes, or certify worktree mutation/reconnect lifecycle behavior.
+
+
+The worktree diff scenario also exercises real WebSocket reconnect while Changes/preflight reads are refused. It verifies retained line budgets, file DOM, scroll, merge draft/focus/caret, a disabled merge action until fresh preflight, then successful retry against a newer real checkpoint. Closing the inspector and reconnecting must issue no worktree reads. Component tests separately verify malformed/mismatched responses, aborts on scope/hide/unmount, and the 30-second read timeout. This does not certify acknowledgement or retry semantics for worktree mutations.

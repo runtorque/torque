@@ -1,9 +1,7 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
-import { expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { expect, it } from 'vitest';
 import type { UnknownRecord } from '../../protocol';
-import { toAgentViewModel } from './model';
 import { WorktreeDiff } from './WorktreeDiff';
-import { WorktreeInspector } from './WorktreeInspector';
 function file(path: string, lengths: number[]): UnknownRecord {
   let line = 0;
   return { path, status: 'modified', insertions: lengths.reduce((sum, count) => sum + count, 0), hunks: lengths.map((count, index) => ({ header: `@@ hunk ${index} @@`, lines: Array.from({ length: count }, () => ({ type: 'add', text: `${path} line ${++line}` })) })) };
@@ -36,16 +34,4 @@ it('keeps path-keyed disclosure, loaded lines and existing nodes through refresh
   view.rerender(<WorktreeDiff files={[file('second.txt', [4]), file('first.txt', [655]), file('new.txt', [1])]} />);
   expect(screen.getByRole('button', { name: /first.txt/ })).toBe(header); expect(header).toHaveFocus(); expect(screen.getByRole('button', { name: /second.txt/ })).toHaveAttribute('aria-expanded', 'false');
   expect(screen.getByRole('region').querySelectorAll('pre span')).toHaveLength(656);
-});
-it('retains diff nodes and disclosure across inspector tabs and explicit refresh', () => {
-  const agent = toAgentViewModel('qa', { id: 'qa', name: 'QA', worktree_path: '/tmp/qa', kind: 'worker' }); const send = vi.fn(() => true);
-  const props = { agent, sendCommand: send, onUnavailable: vi.fn(), onClose: vi.fn() };
-  const responses = { 'worktree_diff_full:qa': { files: [file('first.txt', [650])] }, 'worktree_check_merge:qa': { clean: true }, 'worktree_history:qa': { commits: [] } };
-  const view = render(<WorktreeInspector {...props} responses={responses} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Show 250 more lines' })); const region = screen.getByRole('region');
-  const nav = screen.getByRole('navigation', { name: 'Worktree views' }); fireEvent.click(within(nav).getByRole('button', { name: /History/ })); expect(region).not.toBeVisible();
-  fireEvent.click(within(nav).getByRole('button', { name: 'Changes' })); expect(screen.getByRole('region')).toBe(region); expect(region.querySelectorAll('pre span')).toHaveLength(650);
-  fireEvent.click(within(nav).getByRole('button', { name: 'Refresh' })); expect(send.mock.calls).toHaveLength(6);
-  view.rerender(<WorktreeInspector {...props} responses={{ ...responses, 'worktree_diff_full:qa': { files: [file('first.txt', [655])] } }} />);
-  expect(region.querySelectorAll('pre span')).toHaveLength(655);
 });

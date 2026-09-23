@@ -637,7 +637,7 @@ describe('workspace shell', () => {
     expect(sendCommand).toHaveBeenCalledWith({ cmd: 'purge_agent_now', id: 'deleted' });
   });
 
-  it('retains concurrent worktree responses and renders diff, preflight, and history together', () => {
+  it('retains concurrent worktree responses and renders diff, preflight, and history together', async () => {
     const frame: StateFrame = {
       ...compactStateFixture,
       agents: {
@@ -649,28 +649,21 @@ describe('workspace shell', () => {
         },
       },
     };
-    const { appStore, sendCommand } = renderShell(browserHost, frame);
+    const reads: TorqueCommand[] = []; const pending: (() => void)[] = [];
+    const frames: Record<string, UnknownRecord> = {
+      worktree_diff_full: { type: 'worktree_diff_full', id: 'agent-1', branch: 'torque/ui-worker', base_branch: 'main', stats: { insertions: 2, deletions: 1 }, files: [{ path: 'ui.tsx', status: 'modified', insertions: 2, deletions: 1, hunks: [{ header: '@@ -1 +1 @@', lines: [{ type: 'add', text: 'new UI' }] }] }] },
+      worktree_check_merge: { type: 'worktree_check_merge', id: 'agent-1', clean: true, default_message: 'Ship UI', conflicts: [] },
+      worktree_history: { type: 'worktree_history', id: 'agent-1', commits: [{ sha: 'abcdef123456', short_sha: 'abcdef1', message: 'Checkpoint', date: 'now' }] },
+    };
+    vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => {
+      const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand; reads.push(command);
+      return new Promise((resolve) => pending.push(() => resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: frames[command.cmd] }) })));
+    }));
+    renderShell(browserHost, frame);
     fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Inspect diff' }));
-
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'worktree_diff_full', id: 'agent-1' });
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'worktree_check_merge', id: 'agent-1' });
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'worktree_history', id: 'agent-1' });
-
-    act(() => {
-      appStore.dispatch(projectionActions.auxiliaryResourceReceived({
-        type: 'worktree_diff_full', id: 'agent-1', branch: 'torque/ui-worker', base_branch: 'main',
-        stats: { insertions: 2, deletions: 1 },
-        files: [{ path: 'ui.tsx', status: 'modified', insertions: 2, deletions: 1, hunks: [{ header: '@@ -1 +1 @@', lines: [{ type: 'add', text: 'new UI' }] }] }],
-      }));
-      appStore.dispatch(projectionActions.auxiliaryResourceReceived({
-        type: 'worktree_check_merge', id: 'agent-1', clean: true, default_message: 'Ship UI', conflicts: [],
-      }));
-      appStore.dispatch(projectionActions.auxiliaryResourceReceived({
-        type: 'worktree_history', id: 'agent-1', commits: [{ sha: 'abcdef123456', short_sha: 'abcdef1', message: 'Checkpoint', date: 'now' }],
-      }));
-    });
-
+    expect(reads).toEqual(['worktree_diff_full', 'worktree_check_merge', 'worktree_history'].map((cmd) => ({ cmd, id: 'agent-1' })));
+    await act(async () => { pending.reverse().forEach((reply) => reply()); await Promise.resolve(); });
     expect(screen.getByText('ui.tsx')).toBeVisible();
     expect(screen.getByText('Clean merge')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Create PR & merge' })).toBeEnabled();
