@@ -446,6 +446,7 @@ from .commands.ai_reports import (
     TORQUE_AI_MCP_REPORT_TOOL_NAMES as _TORQUE_AI_MCP_REPORT_TOOL_NAMES,
     handle_ai_report_command,
 )
+from .commands.worktree_removal import clear_worktree_tracking as _clear_worktree_tracking
 from .commands.worktrees import (
     WORKTREE_COMMAND_NAMES,
     WorktreeCommandRuntime,
@@ -3271,6 +3272,8 @@ def _build_worktree_command_runtime(
         target_has_driverless_payload=_target_has_driverless_payload,
         untracked_overwrite_message=_untracked_overwrite_message,
         workflow_breach_active_task_for_worker=_workflow_breach_active_task_for_worker,
+        worktree_removal_refusal_reason=_worktree_removal_refusal_reason,
+        worktree_path_contains=_worktree_path_contains,
         worktree_full_diff=_worktree_full_diff,
         worktree_merge_error=_worktree_merge_error,
         worktree_merge_requested_cleanup=_worktree_merge_requested_cleanup,
@@ -3547,19 +3550,6 @@ async def main(connection=None):
             ],
             "mismatches": [],
         }
-
-    def _clear_worktree_tracking(cell) -> None:
-        cell.worktree_path = ""
-        cell.worktree_branch = ""
-        cell.worktree_base_branch = ""
-        cell.worktree_repo_root = ""
-        cell.worktree_dirty = False
-        cell.worktree_diff = {}
-        cell.worktree_changed_files = []
-        cell.worktree_checkpoints = 0
-        cell.worktree_ahead = 0
-        cell.worktree_behind = 0
-        cell.worktree_merged = False
 
     def _worktree_submodules_for_cell(cell) -> list[str]:
         if not cell:

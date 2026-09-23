@@ -7,6 +7,7 @@ import type { AgentViewModel } from './model';
 import { WorktreeDiff } from './WorktreeDiff';
 import { useDiffDisclosure } from './worktreeDiffModel';
 import { useWorktreeReads } from './useWorktreeReads';
+import { useWorktreeRemovalReview } from './useWorktreeRemovalReview';
 import { useWorktreeMutation } from './useWorktreeMutation';
 import styles from './AgentWorkspace.module.css';
 
@@ -42,16 +43,16 @@ export function WorktreeInspector({ agent, responses, onClose, active = true }: 
   const [prReview, setPrReview] = useState<{ id: string; path: string; branch: string; base: string } | null>(null);
   const [clearContext, setClearContext] = useState(false);
   const [forceDirect, setForceDirect] = useState(false);
-  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [removalTarget, setRemovalTarget] = useState<AgentViewModel | null>(null);
   const [rollbackSha, setRollbackSha] = useState('');
   const confirmationReturnFocus = useRef<HTMLElement | null>(null);
   useEffect(() => {
-    if (active && !prReview && !rollbackSha) {
+    if (active && !prReview && !rollbackSha && !removalTarget) {
       const opener = confirmationReturnFocus.current;
       confirmationReturnFocus.current = null;
       opener?.focus();
     }
-  }, [active, prReview, rollbackSha]);
+  }, [active, prReview, rollbackSha, removalTarget]);
   const [operationAgent, setOperationAgent] = useState<AgentViewModel | null>(null);
   const target = agent ?? operationAgent;
   const groups = useAppSelector(selectGroupsState);
@@ -63,18 +64,19 @@ export function WorktreeInspector({ agent, responses, onClose, active = true }: 
 
   const mutation = useWorktreeMutation();
   const blocked = mutation.pending || mutation.uncertain;
-  const reads = useWorktreeReads(target?.id ?? '', target?.worktreePath ?? '', target?.worktreeBranch ?? '', active && Boolean(agent) && !blocked);
+  const removalComplete = mutation.result.type === 'worktree_remove' && mutation.result.ok === true;
+  const reads = useWorktreeReads(target?.id ?? '', target?.worktreePath ?? '', target?.worktreeBranch ?? '', active && Boolean(agent) && !blocked && !removalComplete);
+  const removal = useWorktreeRemovalReview(removalTarget?.id ?? '', removalTarget?.worktreePath ?? '', active && Boolean(removalTarget && agent?.worktreePath) && !blocked && !removalComplete);
   const [progressAtStart, setProgressAtStart] = useState<unknown>(null);
   async function finish(operation: Promise<Record<string, unknown> | null>) {
     const result = await operation;
     if (!result) return;
     if (result.type === 'worktree_pr') setPrReview(null);
     if (result.type === 'worktree_rollback') setRollbackSha('');
-    if (result.type === 'worktree_remove') { setConfirmRemove(false); onClose(); }
-    else reads.refresh();
+    if (result.type !== 'worktree_remove') reads.refresh();
   }
   function run(command: Record<string, unknown>) {
-    if (!agent || !reads.ready || blocked) return;
+    if (!agent || blocked || (command.cmd === 'worktree_remove' ? !removal.ready : !reads.ready)) return;
     if (command.cmd === 'worktree_merge') setMergeEdits({ close: closeAgent, remove: removeAfterMerge, preserve: preserveDiff });
     setOperationAgent(agent);
     setProgressAtStart(agent ? responses[`worktree_merge_progress:${agent.id}`] : null);
@@ -110,13 +112,13 @@ export function WorktreeInspector({ agent, responses, onClose, active = true }: 
 
   if (!target) return null;
   return <ModalDialog
-    title={prReview ? 'Create pull request?' : rollbackSha ? 'Rollback worktree?' : `${target.name} worktree`}
-    description={rollbackSha ? rollbackSha.slice(0, 12) : prReview ? target.name : `${branch} → ${base}`}
-    size={prReview || rollbackSha ? 'small' : 'large'}
+    title={removalTarget ? removal.preview?.review.mode === 'unlink' ? 'Remove worktree link?' : 'Remove worktree?' : prReview ? 'Create pull request?' : rollbackSha ? 'Rollback worktree?' : `${target.name} worktree`}
+    description={removalTarget ? removalTarget.name : rollbackSha ? rollbackSha.slice(0, 12) : prReview ? target.name : `${branch} → ${base}`}
+    size={prReview || rollbackSha || removalTarget ? 'small' : 'large'}
     isOpen={active}
-    onOpenChange={(open) => { if (!open && !blocked) { if (prReview) setPrReview(null); else if (rollbackSha) setRollbackSha(''); else onClose(); } }}
+    onOpenChange={(open) => { if (!open && !blocked) { if (removalComplete) onClose(); else if (removalTarget) setRemovalTarget(null); else if (prReview) setPrReview(null); else if (rollbackSha) setRollbackSha(''); else onClose(); } }}
   >
-    <div className={styles.worktreeInspector} hidden={Boolean(prReview || rollbackSha)}>
+    <div className={styles.worktreeInspector} hidden={Boolean(prReview || rollbackSha || removalTarget)}>
       <nav aria-label="Worktree views">
         <button aria-current={tab === 'diff' ? 'page' : undefined} onClick={() => setTab('diff')}>Changes</button>
         <button aria-current={tab === 'history' ? 'page' : undefined} onClick={() => setTab('history')}>History <span>{commits.length}</span></button>
@@ -158,7 +160,7 @@ export function WorktreeInspector({ agent, responses, onClose, active = true }: 
       </div>
 
       {mutation.pending ? <p role="status">Worktree operation in progress…</p> : null}
-      {mutation.error && !prReview && !rollbackSha ? <div role="alert" className={styles.worktreeResult}>{mutation.error}{mutation.uncertain ? <Button isDisabled={mutation.pending} onPress={() => { void finish(mutation.retry()); }}>Retry operation</Button> : null}</div> : null}
+      {mutation.error && !prReview && !rollbackSha && !removalTarget ? <div role="alert" className={styles.worktreeResult}>{mutation.error}{mutation.uncertain ? <Button isDisabled={mutation.pending} onPress={() => { void finish(mutation.retry()); }}>Retry operation</Button> : null}</div> : null}
       {activeProgress ? <div role="status" className={styles.worktreeResult}>{activeProgress}</div> : null}
       {resultMessage ? <div role="status" className={styles.worktreeResult}>{resultMessage}</div> : null}
       {resultUrl ? <div className={styles.worktreeResult}>Pull request: <a href={resultUrl} target="_blank" rel="noreferrer">{resultUrl}</a></div> : null}
@@ -178,7 +180,7 @@ export function WorktreeInspector({ agent, responses, onClose, active = true }: 
       </section>
 
       <footer className={styles.worktreeFooter}>
-        {confirmRemove ? <><span>Delete this worktree and relaunch the agent?</span><Button tone="quiet" isDisabled={blocked} onPress={() => setConfirmRemove(false)}>Cancel</Button><Button tone="danger" isDisabled={!reads.ready || blocked} onPress={() => run({ cmd: 'worktree_remove', id: target.id, relaunch: Boolean(target.sessionId) })}>Delete worktree</Button></> : <Button tone="danger" isDisabled={!reads.ready || blocked} onPress={() => setConfirmRemove(true)}>Delete worktree…</Button>}
+        <Button tone="danger" isDisabled={!reads.ready || blocked} onPress={(event) => { if (mutation.reset()) { confirmationReturnFocus.current = event.target instanceof HTMLElement ? event.target : null; setRemovalTarget(target); } }}>Delete worktree…</Button>
         <span />
         <Button tone="quiet" isDisabled={!reads.ready || blocked} onPress={() => run({ cmd: 'worktree_checkpoint', id: target.id })}>Checkpoint</Button>
         {(stale || conflicts.length) ? <Button tone="quiet" isDisabled={!reads.ready || blocked} onPress={() => run({ cmd: 'worktree_rebase', id: target.id })}>Rebase onto base</Button> : null}
@@ -187,6 +189,25 @@ export function WorktreeInspector({ agent, responses, onClose, active = true }: 
         <Button tone="quiet" isDisabled={blocked} onPress={onClose}>Close</Button>
       </footer>
     </div>
+
+    {removalTarget ? <div className={styles.removeDialog}>
+      {removal.preview ? <>
+        <p>{removal.preview.review.mode === 'unlink' ? "Only this agent's link will be cleared. The shared worktree, files and branch will be kept." : 'Delete this worktree directory and discard its uncommitted files. Git will also try to delete the branch; a branch that Git cannot safely delete will be retained.'}</p>
+        <p>Worktree: <code>{removal.preview.review.path}</code></p>
+        {removal.preview.shared_with.length ? <p>Shared with: {removal.preview.shared_with.map((item) => item.name).join(', ')}.</p> : null}
+        {removal.preview.review.dirty ? <p>This worktree has uncommitted changes.{removal.preview.review.mode === 'unlink' ? ' They will be retained in the shared worktree.' : ' These changes will be permanently discarded.'}</p> : null}
+        {removal.preview.review.checkpoints > 0 ? <p>This worktree has {removal.preview.review.checkpoints} {removal.preview.review.checkpoints === 1 ? 'commit' : 'commits'} ahead of its base.{removal.preview.review.mode === 'unlink' ? ' They will be retained on the shared branch.' : ' The branch may be retained after the directory is deleted; this operation does not push commits.'}</p> : null}
+        {removal.preview.review.ignored_files ? <p>{removal.preview.review.mode === 'unlink' ? 'Ignored files will also remain in the shared worktree.' : 'Ignored files in this directory will also be permanently discarded.'}</p> : null}
+        <p>{removal.preview.review.session_id ? 'This agent has an attached session. Stop it before releasing the worktree.' : 'The agent is stopped. This operation will not start or restart a session.'}</p>
+        {removal.preview.blocked_reason ? <p role="alert">{removal.preview.blocked_reason}</p> : null}
+      </> : null}
+      {!removalComplete && !removal.ready && !blocked && !removal.error ? <p role="status">Waiting for a current removal review and synchronized connection…</p> : null}
+      {removal.error ? <p role="alert">{removal.error}</p> : null}
+      {mutation.pending ? <p role="status">Releasing worktree…</p> : null}
+      {mutation.error ? <p role="alert">{mutation.error}</p> : null}
+      {mutation.uncertain ? <Button isDisabled={mutation.pending} onPress={() => { void finish(mutation.retry()); }}>Retry removal</Button> : null}
+      {removalComplete ? <><p role="status">{text(mutation.result.message) || (mutation.result.mode === 'unlink' ? 'Agent link cleared. Shared worktree and branch retained.' : 'Worktree removed.')}</p><Button autoFocus onPress={onClose}>Done</Button></> : <footer><Button autoFocus tone="quiet" isDisabled={blocked} onPress={() => setRemovalTarget(null)}>Cancel</Button><Button tone="quiet" isDisabled={blocked} onPress={removal.refresh}>Refresh review</Button><Button tone="danger" isDisabled={blocked || !removal.ready || Boolean(removal.preview?.blocked_reason)} onPress={() => { if (removal.ready && removal.preview && !removal.preview.blocked_reason) run({ cmd: 'worktree_remove', id: removalTarget.id, removal_review: removal.preview.review, relaunch: false }); }}>{removal.preview?.review.mode === 'unlink' ? 'Remove link' : 'Delete worktree'}</Button></footer>}
+    </div> : null}
 
     {prReview ? <>
       <div className={styles.removeDialog}>

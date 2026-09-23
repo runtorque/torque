@@ -14,6 +14,7 @@ from typing import Any
 
 from ..config import log
 from .worktree_creation import handle_worktree_create
+from .worktree_removal import removal_preview, remove_reviewed_worktree
 
 
 WORKTREE_COMMAND_NAMES = frozenset({
@@ -21,6 +22,7 @@ WORKTREE_COMMAND_NAMES = frozenset({
     "worktree_advance_boundary",
     "worktree_adopt",
     "worktree_remove",
+    "worktree_remove_preview",
     "worktree_list",
     "worktree_prune",
     "worktree_checkpoint",
@@ -88,6 +90,8 @@ class WorktreeCommandRuntime:
     target_has_driverless_payload: Any
     untracked_overwrite_message: Any
     workflow_breach_active_task_for_worker: Any
+    worktree_removal_refusal_reason: Any
+    worktree_path_contains: Any
     worktree_full_diff: Any
     worktree_merge_error: Any
     worktree_merge_requested_cleanup: Any
@@ -298,7 +302,13 @@ async def handle_worktree_command(
                             build_cell_persistent_prompt=_build_cell_persistent_prompt,
                             send_agent_prompt=_send_agent_prompt,
                         )
+    elif cmd == "worktree_remove_preview":
+        return await removal_preview(data, runtime)
     elif cmd == "worktree_remove":
+        if "removal_review" in data:
+            if _target_has_driverless_payload(data):
+                return {"type": "worktree_remove", "id": str(data.get("id", "") or ""), "ok": False, "error": "Reviewed release requires an agent target"}
+            return await remove_reviewed_worktree(data, runtime)
         if _target_has_driverless_payload(data):
             target, _cell, error_result = await _resolve_worktree_command_target_value(
                 state=state,

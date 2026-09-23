@@ -7,7 +7,9 @@ import type { UnknownRecord } from '../../protocol';
 import { toAgentViewModel } from './model';
 import { WorktreeInspector } from './WorktreeInspector';
 const agent = toAgentViewModel('qa', { id: 'qa', name: 'QA', group: 'qa-group', kind: 'worker', worktree_path: '/tmp/qa', worktree_branch: 'qa' });
+const removalReview = { path: '/tmp/qa', branch: 'qa', repo_root: '/tmp', session_id: '', mode: 'remove', shared_ids: [], dirty: false, ignored_files: false, head: 'head', base_head: 'base', changes_digest: 'digest', checkpoints: 0 };
 const frames: Record<string, UnknownRecord> = {
+  worktree_remove_preview: { type: 'worktree_remove_preview', id: 'qa', ok: true, review: removalReview, shared_with: [], blocked_reason: '' },
   worktree_diff_full: { type: 'worktree_diff_full', id: 'qa', files: [{ path: 'keep.txt', hunks: [{ header: '@@ first @@', lines: [{ type: 'add', text: 'retained line' }] }] }] },
   worktree_check_merge: { type: 'worktree_check_merge', id: 'qa', clean: true, default_message: 'Suggested message' },
   worktree_history: { type: 'worktree_history', id: 'qa', commits: [{ sha: 'abc', message: 'Retained checkpoint' }] },
@@ -95,13 +97,13 @@ it('retains deletion confirmation during pending and refused writes and dismisse
   const requests = mutationApi(); const view = setup(); await screen.findByRole('region');
   let release: (value: unknown) => void = () => {};
   requests.outcome(() => new Promise((resolve) => { release = resolve; }));
-  fireEvent.click(screen.getByRole('button', { name: 'Delete worktree…' })); fireEvent.click(screen.getByRole('button', { name: 'Delete worktree' }));
-  expect(screen.getByRole('button', { name: 'Close' })).toBeDisabled(); expect(screen.getByRole('button', { name: 'Delete worktree' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Delete worktree…' })); await waitFor(() => expect(screen.getByRole('button', { name: 'Delete worktree' })).toBeEnabled()); fireEvent.click(screen.getByRole('button', { name: 'Delete worktree' }));
+  expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled(); expect(screen.getByRole('button', { name: 'Delete worktree' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: 'Delete worktree' })); expect(requests.writes()).toHaveLength(1); expect(view.onClose).not.toHaveBeenCalled();
   await act(async () => { release({ ok: false, error: 'Active worktree cannot be removed' }); await Promise.resolve(); }); await screen.findByText('Active worktree cannot be removed');
   expect(view.onClose).not.toHaveBeenCalled(); await waitFor(() => expect(screen.getByRole('button', { name: 'Delete worktree' })).toBeEnabled());
-  requests.outcome(() => Promise.resolve({ ok: true, data: { type: 'worktree_remove', id: 'qa', worktree_removed: true } }));
-  fireEvent.click(screen.getByRole('button', { name: 'Delete worktree' })); await waitFor(() => expect(view.onClose).toHaveBeenCalledTimes(1));
+  requests.outcome(() => Promise.resolve({ ok: true, data: { type: 'worktree_remove', id: 'qa', ok: true, mode: 'remove', worktree_path: '/tmp/qa', branch_deleted: true, worktree_removed: true } }));
+  fireEvent.click(screen.getByRole('button', { name: 'Delete worktree' })); await screen.findByRole('button', { name: 'Done' }); expect(view.onClose).not.toHaveBeenCalled(); fireEvent.click(screen.getByRole('button', { name: 'Done' })); expect(view.onClose).toHaveBeenCalledTimes(1);
   expect(requests.writes()[1]?.idempotency_key).not.toBe(requests.writes()[0]?.idempotency_key);
 });
 it('retains an uncertain operation and retries its exact payload without replaying on reconnect', async () => {
@@ -117,8 +119,8 @@ it('retains an uncertain operation and retries its exact payload without replayi
 it('rejects mismatched and incomplete acknowledgements without treating a removal as complete', async () => {
   const requests = mutationApi(); const view = setup(); await screen.findByRole('region');
   requests.outcome(() => Promise.resolve({ ok: true, data: { type: 'worktree_remove', id: 'other', worktree_removed: true } }));
-  fireEvent.click(screen.getByRole('button', { name: 'Delete worktree…' })); fireEvent.click(screen.getByRole('button', { name: 'Delete worktree' })); await screen.findByText(/did not match/);
-  requests.outcome(() => Promise.resolve({ ok: true, data: { type: 'worktree_remove', id: 'qa' } })); fireEvent.click(screen.getByRole('button', { name: 'Retry operation' })); await screen.findByText(/removal was not confirmed/); expect(view.onClose).not.toHaveBeenCalled(); expect(requests.writes()[1]).toEqual(requests.writes()[0]);
+  fireEvent.click(screen.getByRole('button', { name: 'Delete worktree…' })); await waitFor(() => expect(screen.getByRole('button', { name: 'Delete worktree' })).toBeEnabled()); fireEvent.click(screen.getByRole('button', { name: 'Delete worktree' })); await screen.findByText(/did not match/);
+  requests.outcome(() => Promise.resolve({ ok: true, data: { type: 'worktree_remove', id: 'qa', ok: true, mode: 'remove', worktree_path: '/tmp/qa' } })); fireEvent.click(screen.getByRole('button', { name: 'Retry removal' })); await screen.findByText(/removal was not confirmed/); expect(view.onClose).not.toHaveBeenCalled(); expect(requests.writes()[1]).toEqual(requests.writes()[0]);
 });
 it('refreshes reads after checkpoint and ignores cached terminal merge progress', async () => {
   const requests = mutationApi(); const view = setup(); await screen.findByRole('region');
@@ -244,4 +246,66 @@ it('refreshes untouched merge defaults but retains edits and submitted options t
   fireEvent.click(screen.getByRole('button', { name: 'Create PR & merge' })); await screen.findByText('Refused');
   act(() => { updateDefaults('keep', false); }); expect(screen.getByRole('checkbox', { name: 'Delete worktree after merge' })).toBeChecked(); expect(screen.getByRole('checkbox', { name: 'Preserve boundary diff' })).toBeChecked();
   expect(requests.writes()[0]).toMatchObject({ close_agent_on_merge: false, remove_worktree_on_merge: true, preserve_merge_diff: true });
+});
+
+it('reviews shared-link consequences, dirty commits and stopped-session behavior without writing on cancel', async () => {
+  const prior = frames.worktree_remove_preview!; frames.worktree_remove_preview = { ...prior, review: { ...removalReview, mode: 'unlink', shared_ids: ['peer'], dirty: true, checkpoints: 3 }, shared_with: [{ id: 'peer', name: 'Other worker' }] };
+  try {
+    const requests = mutationApi(); setup(); const diff = await screen.findByRole('region'); fireEvent.click(screen.getByRole('button', { name: 'Delete worktree…' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Remove worktree link?' }); expect(within(dialog).getByText(/Only this agent's link/)).toBeVisible(); expect(within(dialog).getByText(/Other worker/)).toBeVisible(); expect(within(dialog).getByText(/uncommitted changes/)).toBeVisible(); expect(within(dialog).getByText(/3 commits ahead of its base/)).toBeVisible(); expect(within(dialog).getByText(/will not start or restart/)).toBeVisible();
+    expect(requests.writes()).toHaveLength(0); fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' })); expect(screen.getByRole('region')).toBe(diff); expect(requests.writes()).toHaveLength(0);
+  } finally { frames.worktree_remove_preview = prior; }
+});
+it('refuses to accept filesystem deletion for a reviewed unlink and retries the original link operation', async () => {
+  const prior = frames.worktree_remove_preview!; const review = { ...removalReview, mode: 'unlink', shared_ids: ['peer'] }; frames.worktree_remove_preview = { ...prior, review, shared_with: [{ id: 'peer', name: 'Peer' }] };
+  try {
+    const requests = mutationApi(); const view = setup(); await screen.findByRole('region'); fireEvent.click(screen.getByRole('button', { name: 'Delete worktree…' })); await screen.findByRole('button', { name: 'Remove link' });
+    requests.outcome(() => Promise.resolve({ ok: true, data: { type: 'worktree_remove', id: 'qa', ok: true, mode: 'unlink', worktree_path: '/tmp/qa', link_cleared: true, worktree_removed: true } }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove link' })); await screen.findByText(/Link-only removal was not confirmed/); expect(view.onClose).not.toHaveBeenCalled(); expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    view.update({}, true, { ...agent, worktreePath: '' }); expect(screen.getByText(/Only this agent's link/)).toBeVisible();
+    requests.outcome(() => Promise.resolve({ ok: true, data: { type: 'worktree_remove', id: 'qa', ok: true, mode: 'unlink', worktree_path: '/tmp/qa', link_cleared: true, worktree_removed: false } }));
+    fireEvent.click(screen.getByRole('button', { name: 'Retry removal' })); await screen.findByRole('button', { name: 'Done' }); expect(view.onClose).not.toHaveBeenCalled(); fireEvent.click(screen.getByRole('button', { name: 'Done' })); expect(view.onClose).toHaveBeenCalledTimes(1); expect(requests.writes()[1]).toEqual(requests.writes()[0]); expect(requests.writes()[0]).toMatchObject({ removal_review: review, relaunch: false });
+  } finally { frames.worktree_remove_preview = prior; }
+});
+it('shows active-use refusal before any removal and refreshes after the session stops', async () => {
+  const prior = frames.worktree_remove_preview!; frames.worktree_remove_preview = { ...prior, review: { ...removalReview, session_id: 'live' }, blocked_reason: 'Active/fresh agent must stop first' };
+  try {
+    const requests = mutationApi(); setup(); await screen.findByRole('region'); fireEvent.click(screen.getByRole('button', { name: 'Delete worktree…' })); await screen.findByText('Active/fresh agent must stop first'); expect(screen.getByText(/has an attached session/)).toBeVisible(); expect(screen.getByRole('button', { name: 'Delete worktree' })).toBeDisabled(); expect(requests.writes()).toHaveLength(0);
+    frames.worktree_remove_preview = prior; fireEvent.click(screen.getByRole('button', { name: 'Refresh review' })); await screen.findByText(/will not start or restart/); expect(screen.getByRole('button', { name: 'Delete worktree' })).toBeEnabled(); expect(requests.writes()).toHaveLength(0);
+  } finally { frames.worktree_remove_preview = prior; }
+});
+it('retains removal context through failed reconnect review and requires a fresh matching review to write', async () => {
+  const requests = api(); const view = setup(); await screen.findByRole('region'); fireEvent.click(screen.getByRole('button', { name: 'Delete worktree…' })); await screen.findByText(/will not start or restart/);
+  requests.frame('worktree_remove_preview', { ...frames.worktree_remove_preview, id: 'different' });
+  act(() => { view.store.dispatch(connectionActions.connected({ at: 2, reconnect: true })); view.store.dispatch(connectionActions.snapshotAccepted(compactStateFixture)); });
+  await screen.findByText(/Removal review did not match/); expect(screen.getByText(/will not start or restart/)).toBeVisible(); expect(screen.getByRole('button', { name: 'Delete worktree' })).toBeDisabled();
+  requests.frame('worktree_remove_preview', { ...frames.worktree_remove_preview, review: { ...removalReview, mode: 'unlink', shared_ids: ['peer'] }, shared_with: [{ id: 'peer', name: 'New sharing worker' }] }); fireEvent.click(screen.getByRole('button', { name: 'Refresh review' })); await screen.findByText(/New sharing worker/); expect(screen.getByRole('button', { name: 'Remove link' })).toBeEnabled();
+  view.update({}, false); const before = requests.calls.length; expect(requests.calls.every((call) => call.signal.aborted)).toBe(true);
+  act(() => { view.store.dispatch(connectionActions.connected({ at: 3, reconnect: true })); view.store.dispatch(connectionActions.snapshotAccepted(compactStateFixture)); }); expect(requests.calls).toHaveLength(before);
+  view.update({}, true); await screen.findByRole('dialog', { name: 'Remove worktree link?' });
+});
+it('times out an unavailable removal review and retries without enabling an unreviewed deletion', async () => {
+  const requests = api(); setup(); await screen.findByRole('region'); requests.hold(true); vi.useFakeTimers(); fireEvent.click(screen.getByRole('button', { name: 'Delete worktree…' })); await act(async () => { await vi.advanceTimersByTimeAsync(30_001); });
+  expect(screen.getByRole('alert')).toHaveTextContent('Removal review timed out'); expect(screen.getByRole('button', { name: 'Delete worktree' })).toBeDisabled(); vi.useRealTimers();
+  requests.hold(false); fireEvent.click(screen.getByRole('button', { name: 'Refresh review' })); await screen.findByText(/will not start or restart/); expect(screen.getByRole('button', { name: 'Delete worktree' })).toBeEnabled();
+  await act(async () => { requests.release(); await Promise.resolve(); }); expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+
+it('warns about discarded dirty and ignored files and retains the actual branch cleanup result', async () => {
+  const prior = frames.worktree_remove_preview!;
+  frames.worktree_remove_preview = { ...prior, review: { ...removalReview, dirty: true, ignored_files: true, checkpoints: 2 } };
+  try {
+    const requests = mutationApi(); const view = setup(); await screen.findByRole('region');
+    fireEvent.click(screen.getByRole('button', { name: 'Delete worktree…' }));
+    await screen.findByText(/These changes will be permanently discarded/);
+    expect(screen.getByText(/Ignored files.*permanently discarded/)).toBeVisible();
+    requests.outcome(() => Promise.resolve({ ok: true, data: { type: 'worktree_remove', id: 'qa', ok: true, mode: 'remove', worktree_path: '/tmp/qa', worktree_removed: true, branch_deleted: false, message: 'Worktree removed. Branch retained: qa' } }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete worktree' }));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Worktree removed. Branch retained: qa'));
+    view.update({}, true, { ...agent, worktreePath: '' });
+    expect(screen.queryByRole('button', { name: 'Delete worktree' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry removal' })).not.toBeInTheDocument();
+    expect(view.onClose).not.toHaveBeenCalled(); expect(requests.writes()).toHaveLength(1);
+  } finally { frames.worktree_remove_preview = prior; }
 });

@@ -144,6 +144,7 @@ EXPECTED_WORKTREE_COMMANDS = {
     "worktree_advance_boundary",
     "worktree_adopt",
     "worktree_remove",
+    "worktree_remove_preview",
     "worktree_list",
     "worktree_prune",
     "worktree_checkpoint",

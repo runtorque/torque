@@ -1095,3 +1095,10 @@ Worktree creation now confirms active-session replacement, acknowledges the crea
 ### Worktree publication review and merge-default checkpoint
 
 Create PR now reviews the source branch, target base and push implication before sending, retaining confirmation for refusals and uncertain-outcome retries. Merge cleanup and preserved-diff options inherit the target group defaults and retain reviewed edits across refresh/reconnect. P-248/P-249 and D-147 record evidence, including real local cleanup and explicitly simulated external-PR responses. Shared-worktree removal, broad Settings/reconnect and independent native/external acceptance gates remain open; Phase 4 and Classic retirement remain unproven.
+
+
+### Reviewed worktree release checkpoint
+
+P-250 and D-148 now cover current Git/shared-use review, cancellation, active-session guards, link-only release, destructive-file warnings and retained physical-removal/branch outcomes. Real local Git/PTY browser acceptance and the full 3,208-test regression suite passed; a screenshot-discovered long-path overflow was fixed and rechecked on desktop/mobile. The parity ledger records the exact evidence and limits.
+
+The settings audit adds P-251–P-254 for missing capture choices, retention boundaries, dirty-navigation protection and search/reveal. There are now 254 mapped behaviors: 241 implemented/equivalent dispositions, 9 open repair rows and 4 intentional retirements. Broad settings/lazy-reconnect and independent native/external acceptance remain open. This checkpoint does not certify Phase 4 or authorize Classic retirement.

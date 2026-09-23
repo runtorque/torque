@@ -3124,3 +3124,14 @@ History renders the persisted contract: role/template, input/output token counts
 - Merge defaults: Read cleanup mode and preserved-diff defaults from the target agent's group. `keep`, `close`, `remove`, `close_remove` and `auto_sweep` use the same close/remove mapping as Classic. Untouched options follow refreshed group defaults; explicit checkbox edits remain through refresh/reconnect. Once submitted, the reviewed values remain fixed through failure and retry. Closing and reopening starts a fresh review from current defaults.
 - Timing: Explain that cleanup runs after the merge completes, not when a pull request is merely created. The backend remains authoritative for actual cleanup, preserved-diff eligibility and warnings.
 - Verification: P-248/P-249 record component, Classic-contract and isolated production-browser evidence. External GitHub execution and native lifecycle remain separate acceptance gates.
+
+
+### D-148 — Worktree release reviews shared use and destructive consequences
+
+- Date: 2026-09-23
+- Scope: React worktree inspector removal; the existing unreviewed cleanup callers retain their contracts.
+- Review: A correlated read identifies other agents using the path, the current branch/base commits, uncommitted and ignored files, and attached-session or queued-work guards. Read errors disable confirmation. Git evidence is read again on submission; changes to the reviewed target, sharing, session, HEAD, status, diff or untracked-file metadata require a fresh review. These checks are not a filesystem lock or an atomic transaction with Git/PTY operations.
+- Shared use: Clear only the selected stopped agent's link and restore its repository directory. Keep the shared files, branch and other agents' metadata and sessions. Shared users include agents whose directory/current path/git root is inside the worktree, even without an explicit worktree link.
+- Physical removal: Explicitly warn that uncommitted and ignored files will be discarded. Existing active/fresh/queued-work guards remain in force. Branch deletion uses the existing safe Git cleanup; a retained branch is a visible partial cleanup result, not a reason to replay physical removal. Reviewed release does not restart a session.
+- Recovery: Cancel performs no mutation. Pending and unknown outcomes retain the reviewed context; explicit retry uses the same payload/key. Verified link-only and physical-removal acknowledgements have distinct contracts. Keep the acknowledged result visible until dismissal, including retained-branch details. Long paths and branch names wrap within desktop and narrow dialogs.
+- Verification: Component and backend regressions, real-Git evidence checks and isolated browser acceptance are recorded under P-250. Native lifecycle, external integrations, crash atomicity and window-destruction retry persistence remain separate concerns.

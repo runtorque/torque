@@ -14,7 +14,11 @@ function acknowledgement(frame: UnknownRecord, command: UnknownRecord) {
   if (frame.type !== responses[String(command.cmd)] || frame.id !== command.id) throw new Error('The acknowledgement did not match this worktree operation.');
   if (frame.ok === false || frame.error) throw new Refused(typeof frame.error === 'string' ? frame.error : typeof frame.message === 'string' ? frame.message : 'Worktree operation refused.', frame);
   if (command.cmd === 'worktree_remove') {
-    if (frame.worktree_removed !== true) throw new Error('Worktree removal was not confirmed.');
+    const review = command.removal_review as UnknownRecord | undefined;
+    if (review && (frame.ok !== true || frame.mode !== review.mode || frame.worktree_path !== review.path)) throw new Error('The removal acknowledgement did not match the reviewed operation.');
+    if (review?.mode === 'unlink') {
+      if (frame.link_cleared !== true || frame.worktree_removed !== false) throw new Error('Link-only removal was not confirmed.');
+    } else if (frame.worktree_removed !== true || (review && typeof frame.branch_deleted !== 'boolean')) throw new Error('Worktree removal was not confirmed.');
   } else if (frame.ok !== true) throw new Error('The worktree acknowledgement was incomplete.');
   if (command.cmd === 'worktree_create' && (frame.created !== true || typeof frame.worktree_path !== 'string' || !frame.worktree_path || typeof frame.relaunched !== 'boolean' || (command.relaunch === true && (frame.relaunched !== true || typeof frame.session_id !== 'string' || !frame.session_id || frame.session_id === command.expected_session_id)))) throw new Error('Worktree creation or its requested relaunch was not confirmed.');
   if (command.cmd === 'worktree_checkpoint' && (typeof frame.created !== 'boolean' || (frame.created && !frame.sha))) throw new Error('The checkpoint result was incomplete.');
