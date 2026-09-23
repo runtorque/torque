@@ -236,3 +236,7 @@ The worktree diff scenario also exercises real WebSocket reconnect while Changes
 ### MCP capture and event retention acceptance
 
 `settings-ingest-live.spec.ts` uses an isolated daemon to save/reload each capture choice, post synthetic MCP hook events and query persisted call records. It checks both result formats, Metadata allowlist glob/regex behavior, Off precedence, unchanged older capture decisions, invalid-draft no-write/focus behavior and actual row-cap trimming. Its settings are restored on exit; the test necessarily deletes older events when exercising the row cap and must never target a production profile. The zero-day age-expiry contract also has a controlled-time regression in `tests/test_event_ingest.py`.
+
+### Settings search acceptance
+
+`settings-search-live.spec.ts` searches real settings across global/group, Engineer/Architect defaults, AI, appearance and shortcuts. It checks closed-section reveal, keyboard focus/viewport, retained directory and secret drafts, caret selection, no writes from search or Enter, updated map-field results after a real WebSocket reconnect, and wide/narrow screenshots. The fixture uses an isolated group and synthetic values; it never submits its secret draft.

@@ -1113,3 +1113,7 @@ The main ledger now records 254 behaviors: 242 implemented/equivalent dispositio
 ### Capture and retention settings checkpoint — 2026-09-23
 
 P-251/P-252 restore explicit Off/Metadata/Full choices and Classic retention minima with explanatory copy. Component regressions, controlled-time retention tests and isolated browser saves/reloads plus actual persisted event queries verify the behavior. D-150 records the contract. The main ledger now has **254 behaviors: 244 implemented/equivalent dispositions, 6 open repairs and 4 intentional retirements**. Broad settings, lazy/reconnect, settings search and native/external acceptance remain open; Phase 4 is not complete.
+
+### Settings search checkpoint — 2026-09-23
+
+P-254 adds local label/description/scope search with bounded accessible results, disclosure reveal and focus on the retained control. Draft values and secrets are excluded from the index. Reconnect updates available results without replacing the search query or edited form. D-151 records the interaction. The main ledger now has **254 behaviors: 245 implemented/equivalent dispositions, 5 open repairs and 4 intentional retirements**. Broad settings and lazy/reconnect rows, plus independent native/external acceptance, still prevent Phase 4 completion and Classic retirement.

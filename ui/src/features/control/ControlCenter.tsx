@@ -26,6 +26,7 @@ import { projectionActions } from '../../app/store';
 import { NumericSettingInput } from './NumericSettingInput';
 import { EngineerNotificationPreset } from './EngineerNotificationPreset';
 import { StructuredSettings } from './StructuredSettings';
+import { SettingsSearch } from './SettingsSearch';
 import { BoardSyncSettings } from './BoardSyncSettings';
 import { aiSettingsDraft, primaryGlobalSettings, primaryGroupSettings, relaySettingsDraft, reconcileSettings, changedSettings, editableSettings, resetSettings, type SettingsSnapshot } from './settingsModel';
 import { PeerChat } from './PeerChat';
@@ -205,6 +206,7 @@ function SettingsPanel({ group, responses, send, snapshot, onSavingChange, onDis
 
   return <form ref={form} onFocusCapture={(event) => { if (event.target instanceof HTMLElement && event.target.matches('input, select, textarea')) lastEditor.current = event.target; }} noValidate className={styles.settings} onSubmit={(event) => { event.preventDefault(); void save(); }}>
     <header><div><h2>Workspace settings</h2><p>Global, group, and AI changes save as one coordinated operation.</p></div><span>{saving ? 'Saving…' : dirty ? 'Unsaved changes' : saved ? 'Saved' : 'Up to date'}</span><Button tone="primary" type="submit" isDisabled={!dirty || saving}>Save changes</Button></header>
+    <SettingsSearch form={form} />
     {jsonError ? <p role="alert" className={styles.validation}>{jsonError}</p> : null}
     <fieldset disabled={saving} className={styles.settingsFields}><section><h3>Global runtime</h3><Button tone="quiet" isDisabled={!Object.keys(globalDefaults).length} onPress={() => resetSection('global')}>Reset global defaults</Button><p className={styles.note}>Resets runtime, shortcuts and status bar in this draft. AI, credentials and appearance keep their own controls.</p><div className={styles.formGrid}>
       <Field label="Terminal scrollback"><NumericSettingInput fieldKey="xterm_scrollback" value={globalDraft.xterm_scrollback} onChange={(value) => change(setGlobalDraft, { xterm_scrollback: value })} /></Field>

@@ -1190,6 +1190,25 @@ describe('workspace shell', () => {
     expect(commands.find((command) => command.cmd === 'agent_class_create')?.agent_class).toMatchObject({ id: 'release-worker', display_name: 'Release Worker', acl: { mode: 'allow', rules: [{ capability: 'self.read', scope: 'self' }] } });
   });
 
+  it('searches settings descriptions and reveals a closed control without saving or losing drafts', async () => {
+    const { commands } = mockSettingsRequests(); renderShell();
+    fireEvent.click(screen.getByRole('button', { name: /Control/ })); fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    const draft = await screen.findByRole('spinbutton', { name: 'Terminal scrollback' });
+    fireEvent.change(draft, { target: { value: '9300' } });
+    const search = screen.getByRole('searchbox', { name: 'Search settings' });
+    fireEvent.change(search, { target: { value: 'age expiry' } });
+    fireEvent.click(screen.getByRole('button', { name: /Event ingest max days.*Global defaults/ }));
+    const days = screen.getByRole('spinbutton', { name: 'Event ingest max days' });
+    expect(days).toHaveFocus(); expect(days.closest('details')).toHaveAttribute('open');
+    expect(draft).toHaveValue(9300); expect(search).toHaveValue('');
+    fireEvent.change(search, { target: { value: 'no such setting' } });
+    expect(screen.getByRole('status')).toHaveTextContent('No settings found');
+    fireEvent.keyDown(search, { key: 'Enter' });
+    expect(commands.filter((command) => /^(update_|engineer_update_)/.test(String(command.cmd)))).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Clear settings search' }));
+    expect(search).toHaveFocus(); expect(search).toHaveValue(''); expect(draft).toHaveValue(9300);
+  });
+
   it('saves only edited global fields without promoting inherited relay or unrelated settings', async () => {
     const { commands } = mockSettingsRequests();
     renderShell();

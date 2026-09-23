@@ -3155,3 +3155,13 @@ History renders the persisted contract: role/template, input/output token counts
 - Decision: Offer Off, Metadata and Full as explicit choices. Explain that capture applies to future events and does not rewrite historical records. Metadata keeps argument keys and size summaries; matching allowlist tool names, globs or regexes retain full values. Off drops arguments and results regardless of the allowlist.
 - Retention: Require at least one row and a nonnegative integer day count. Explain that zero days disables age expiry while the row cap still applies, and lowering retention can remove older records. Invalid drafts stay visible and receive focus before any save writes occur.
 - Verification: P-251/P-252 record component, time-controlled retention and isolated production-browser acceptance. This change uses the existing daemon capture/retention semantics.
+
+
+### D-151 — Settings search reveals the existing editor
+
+- Date: 2026-09-23
+- Scope: Workspace Settings controls across global/group, Engineer/Architect defaults, AI, relay, appearance and keyboard shortcuts.
+- Decision: Search mounted control labels, associated descriptions and section/disclosure scopes, including closed disclosures. Show the scope beside each result so repeated names are distinguishable. Match all query words without case sensitivity. Initially show 20 results with an explicit Show more action; announce counts and empty results.
+- Navigation: Activating a result clears the search, opens its ancestor disclosures and focuses/scrolls the existing control. Enter activates the first available match without submitting Settings; Arrow Down enters results and Escape or Clear settings search clears the query. Search does not save, reset, remount or filter away form fields. Pending-save disabled controls remain unavailable in results.
+- Refresh and privacy: Refresh results when mounted controls, labels or descriptions change, while retaining the query and its selection. Never index input values, provider keys, textarea drafts or option content. The search index stays local to the mounted Settings form and sends no requests.
+- Verification: P-254 records focused model/component/app checks and isolated browser acceptance, including retained drafts, reconnect, scope reveal and narrow-screen results. Broad settings lifecycle and native acceptance remain separate gates.

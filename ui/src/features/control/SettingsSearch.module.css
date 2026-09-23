@@ -1,0 +1,8 @@
+.search { min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.row { display: flex; align-items: end; gap: 10px; flex-wrap: wrap; }
+.row label { display: grid; flex: 1; min-width: min(240px, 100%); gap: 5px; color: var(--text-dim); font-size: 10px; }
+.row input { width: 100%; min-width: 0; scroll-margin-top: 110px; }
+.search p { margin: 8px 0; color: var(--text-dim); font-size: 10px; overflow-wrap: anywhere; }
+.results { display: grid; gap: 4px; max-height: 260px; overflow-y: auto; margin: 0; padding: 0; list-style: none; }
+.results button { display: grid; justify-items: start; justify-content: stretch; gap: 3px; width: 100%; padding: 8px; text-align: left; white-space: normal; overflow-wrap: anywhere; }
+.results small { color: var(--text-muted); font-size: 9px; }
