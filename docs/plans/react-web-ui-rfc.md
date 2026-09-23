@@ -1146,3 +1146,8 @@ P-257 now displays resolved configuration and source inheritance while preservin
 ### Default role picker checkpoint — 2026-09-23
 
 P-258 now restores scoped catalog discovery while retaining unavailable selections, focus and sparse group saves. D-156 and the matrix record component and isolated live-daemon acceptance. The main ledger now has **258 behaviors: 249 implemented/equivalent dispositions, 5 open repairs and 4 intentional retirements**. Broad settings/lazy-reconnect audits and native/external acceptance remain open; Phase 4 is not complete.
+
+
+### Digest event settings checkpoint — 2026-09-23
+
+P-259/P-260 restore named group Engineer/Architect event choices, mandatory-floor presentation and extension-name editing with preset/reset/save/reconnect acceptance. D-157 and the parity matrix record component, backend-contract and isolated browser evidence, including a repaired narrow Settings grid overflow. The audit adds missing status-bar preview P-261. The main ledger has **261 behaviors: 251 implemented/equivalent dispositions, 6 open repairs and 4 intentional retirements**. Broad settings/lazy-reconnect and native/external acceptance remain open; Phase 4 is not complete.

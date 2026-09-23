@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import defaults from './settingsContract.fixture.json';
@@ -35,6 +35,7 @@ describe('settings reset contracts', () => {
     for (const [key, value] of Object.entries(fields)) {
       const label = settingFields[key]?.label; expect(label, key).toBeTruthy();
       if (value && typeof value === 'object' && !Array.isArray(value)) continue;
+      if (key === 'enabled_events' || key === 'architect_enabled_events') { expect(within(screen.getByRole('group', { name: label! })).queryAllByRole('checkbox', { checked: true })).toHaveLength((value as string[]).length); continue; }
       const control = screen.getByLabelText(label!);
       if (typeof value === 'boolean') expect(control).toHaveValue(String(value));
       else if (typeof value === 'number') expect(control).toHaveValue(control.tagName === 'SELECT' ? String(value) : value);

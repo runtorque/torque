@@ -3215,3 +3215,13 @@ History renders the persisted contract: role/template, input/output token counts
 - Decision: Offer None plus Project and User optgroups using discovered display names. Filter shadowed entries and prefer a project role when names collide, including older catalogs without explicit shadowed flags. Persist only the role name through the normal group settings save.
 - Continuity: A selected name absent from the current catalog remains selected and visibly identified as unavailable. Refresh, disappearance or changed labels do not clear it, write settings, replace the editor or move focus. Reappearing entries regain their discovered label. None and Reset explicitly clear the override while preserving other launch settings.
 - Verification: P-258 records component coverage and isolated production-browser catalog disappearance/reappearance, sparse save/reload, clear and reset acceptance. No role is launched by this selector.
+
+
+### D-157 — Digest event selection separates mandatory and optional delivery
+
+- Date: 2026-09-23
+- Scope: Group Engineer and Architect digest event settings.
+- Decision: Show role-specific, named optional-event checkboxes and an Always included list matching the daemon's mandatory event floor. Mandatory events have no off control. Clearing optional selections persists an explicit empty list while mandatory delivery remains active. The Engineer preset selector continues to update these choices; manual changes can produce Custom.
+- Extensibility: Preserve saved unknown names as additional choices. Retain unchecked additional choices in the mounted editor so operators can undo a draft change. An explicit event-name field supports extension/future event names; Enter adds to the local draft without submitting Settings. Prevent duplicate or mandatory entries.
+- Stability and save: Incoming reconciliation, presets and reset update checkbox values without replacing focused controls. Selecting events only edits the settings draft. Save uses existing sparse role-scoped commands, preserves unrelated values and retains changes after refusal/reconnect.
+- Verification: P-259/P-260 record focused component tests, direct comparisons with Classic choices and backend mandatory constants, and isolated production-browser acceptance. Configuring a digest filter does not certify timer-driven or external-provider delivery.

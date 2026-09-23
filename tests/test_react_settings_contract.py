@@ -1,6 +1,7 @@
 """Defaults exposed to React must survive the real settings write/load paths."""
 import asyncio
 import json
+import re
 import tempfile
 import sqlite3
 import unittest
@@ -67,6 +68,18 @@ class ReactSettingsContractTests(unittest.TestCase):
                     restarted.load()
                     stored = restarted.global_settings if scope == 'global' else getattr(restarted, f'get_{scope}_settings')('qa')
                     self.assertEqual(getattr(stored, key), value)
+
+    def test_digest_event_choices_match_classic_and_the_daemon_mandatory_floor(self):
+        from torque.state import ENGINEER_MANDATORY_EVENTS, ARCHITECT_MANDATORY_EVENTS
+        catalog = json.loads((ROOT / 'ui/src/features/control/digestEventCatalogs.json').read_text())
+        self.assertEqual(set(catalog['engineer']['mandatory']), set(ENGINEER_MANDATORY_EVENTS))
+        self.assertEqual(set(catalog['architect']['mandatory']), set(ARCHITECT_MANDATORY_EVENTS))
+        classic = (ROOT / 'static/js/modals/group-settings.js').read_text()
+        engineer = re.search(r'function _getEngineerEnabledEvents\(\) \{(.*?)\n\}', classic, re.S).group(1)
+        self.assertEqual(catalog['engineer']['optional'], re.findall(r"events\.push\('([^']+)'\)", engineer))
+        architect = re.search(r'const _ARCHITECT_DIGEST_EVENT_CATALOG = \[(.*?)\];', classic, re.S).group(1)
+        optional = [event for event in re.findall(r"'([^']+)'", architect) if event not in ARCHITECT_MANDATORY_EVENTS]
+        self.assertEqual(catalog['architect']['optional'], optional)
 
     def test_editable_numeric_boundaries_survive_write_and_restart(self):
         for scope, key, minimum, maximum in [
