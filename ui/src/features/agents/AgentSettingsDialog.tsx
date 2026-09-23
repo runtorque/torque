@@ -4,6 +4,7 @@ import { projectionActions, selectAgentsState, selectAgentSettingsDefaults, sele
 import { Button, ModalDialog } from '../../design/primitives';
 import type { TorqueCommand } from '../../protocol';
 import { readCommand } from '../../protocol/http';
+import { SpecializationPicker } from '../control/SpecializationPicker';
 import { providerChoices } from '../control/providerChoices';
 import { toAgentViewModel, type AgentViewModel } from './model';
 import { acceptSettings, createSettingsEditor, digestSettingFields, editSetting, engineerSettingFields, identityValues, inheritSetting, principalSettingFields, record as asRecord, refreshSettings, settingText as text, settingsCommands, settingsDirty, settingsRefreshValues, settingsValues, validateSettingsFrame } from './agentSettingsModel';
@@ -124,7 +125,7 @@ export function AgentSettingsDialog({ target, onClose }: { target: AgentViewMode
       <section className={styles.settingsSection}><h3>Identity</h3><div className={styles.formGrid}><label>Name<input ref={nameInput} aria-invalid={saveError === 'Name is required.'} value={name} onChange={(event) => setName(event.target.value)} required /></label><label>Icon<input value={icon} onChange={(event) => setIcon(event.target.value)} placeholder="optional icon" /></label><label>Tab color<input value={tabColor} onChange={(event) => setTabColor(event.target.value)} placeholder="#6172f3" /></label></div></section>
       {['architect', 'engineer'].includes(agent.kind) ? <>
         <section className={styles.settingsSection}><h3>Launch and behavior</h3><div className={styles.formGrid}>{principalSettingFields.map(([key, label, type]) => control(key, label, type))}{agent.kind === 'engineer' ? engineerSettingFields.map(([key, label, type]) => control(key, label, type)) : null}</div></section>
-        {agent.kind === 'engineer' ? <section className={styles.settingsSection}><h3>Specializations</h3><label>Ordered specialization slugs<textarea value={specializations} onChange={(event) => setSpecializations(event.target.value)} rows={3} placeholder="ui-ux, frontend" /></label></section> : null}
+        {agent.kind === 'engineer' ? <section className={styles.settingsSection}><h3>Specializations</h3><SpecializationPicker group={agent.group} value={specializations.split(/[\n,]/).map((item) => item.trim()).filter(Boolean)} onChange={(next) => setSpecializations(next.join(', '))} disabled={saving} /></section> : null}
         <section className={styles.settingsSection}><h3>Digest delivery</h3><div className={styles.formGrid}>{digestSettingFields.map(([key, label, type]) => control(key, label, type, true))}</div></section>
         <label className={styles.inlineCheck}><input type="checkbox" checked={relaunch} onChange={(event) => setRelaunch(event.target.checked)} />Relaunch after saving launch-bound changes</label>
       </> : <p className={styles.formHint}>Worker provider and launch settings are inherited from its role, Agent Class, and group defaults.</p>}

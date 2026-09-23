@@ -3008,6 +3008,16 @@ scope.
 - Repository context: Existing Classic/backend preflight resolves an unspecified repository from the daemon working directory. The helper states this behavior and clears the manual repository only in its temporary detection request. It stages the returned repository after success; no backend directory semantics are changed here.
 - Verification: Component lifecycle and mapping tests, existing provider/manager tests, and a production-browser scenario through the real daemon with a deterministic read-only gh executable. This fixture does not certify external GitHub credentials, network or permission behavior.
 
+### D-141 — Engineer specializations use one ordered project picker
+
+- Date: 2026-09-22
+- Status: accepted; component, backend and production-browser evidence recorded under P-235–P-238.
+- Decision: Per-agent settings, direct creation/hire and group defaults use the same project-aware specialization controls: add, remove, move up/down, and a primary marker on the first entry. Keep manual slug editing as an optional disclosure. Existing selections unavailable in a refreshed project catalog remain visible until the operator changes them.
+- Lifecycle: Catalog discovery starts on request/focus and refreshes after reconnect while mounted. Scope validation, cancellation, failure/retry and retained input nodes protect selected order, manual drafts and keyboard focus. Changes continue through each surface's acknowledged save/create flow.
+- Defaults: A new Engineer follows group specialization defaults until the operator edits its list. An explicitly empty selection means no specializations and is never replaced by later defaults.
+- Authority: The operator settings command remains `set_engineer_specializations`. Its server handler also serves the Classic Architect-scoped alias; no MCP scope or ownership rule changes.
+- Verification: Component order/focus/draft/error tests, default-inheritance reproduction, production creation/edit/group round trips, and existing backend catalog/creation/Architect scope tests. Other lifecycle and native gates remain separate.
+
 ## Decision entry template
 
 Copy this section for a new durable decision:

@@ -1,3 +1,4 @@
+import { SpecializationPicker } from '../control/SpecializationPicker';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Button, ModalDialog } from '../../design/primitives';
@@ -5,7 +6,7 @@ import type { CommandSender } from '../board/BoardPanel';
 import { readCommand } from '../../protocol/http';
 import type { TorqueCommand } from '../../protocol';
 import { useAppSelector } from '../../app/hooks';
-import { selectConnection } from '../../app/store';
+import { selectAgentSettingsDefaults, selectConnection } from '../../app/store';
 import { createdTarget, initialLaunchDraft, resolvedLaunchDraft, validateTemplateResponse, type LaunchDraft } from './agentCreationModel';
 import type { AgentViewModel } from './model';
 import { creationClassDisabledReason, creationClassLabel, useCreationClasses } from './useCreationClasses';
@@ -97,7 +98,10 @@ export function AgentCreateDialog({
   const [parentId, setParentId] = useState('');
   const [customInstructions, setCustomInstructions] = useState('');
   const [autonomyMode, setAutonomyMode] = useState('');
-  const [specializations, setSpecializations] = useState('');
+  const defaults = useAppSelector(selectAgentSettingsDefaults);
+  const inheritedSpecializations = record(defaults.groups[group]).default_engineer_specializations;
+  const [specializationDraft, setSpecializations] = useState<string | null>(null);
+  const specializations = specializationDraft ?? (Array.isArray(inheritedSpecializations) ? inheritedSpecializations.filter((item): item is string => typeof item === 'string').join(', ') : '');
   const [digestVerbosity, setDigestVerbosity] = useState('');
   const [pushInterval, setPushInterval] = useState('');
   const [maxInterval, setMaxInterval] = useState('');
@@ -166,7 +170,6 @@ export function AgentCreateDialog({
     [...optionList(catalog.roles), ...optionList(catalog.templates)].forEach((item) => { if (!byId.has(item.id)) byId.set(item.id, item); });
     return [...byId.values()];
   }, [catalog.roles, catalog.templates]);
-  const specializationOptions = useMemo(() => optionList(catalog.specializations), [catalog.specializations]);
   const architects = agents.filter((agent) => agent.kind === 'architect');
   const parents = agents.filter((agent) => agent.cellType === 'agent');
 
@@ -299,7 +302,7 @@ export function AgentCreateDialog({
         {classError && !classCatalog.error ? <p role="alert">{classError}</p> : null}
         {classCatalog.issues.length ? <details><summary>Agent Class catalog issues ({classCatalog.issues.length})</summary>{classCatalog.issues.map((issue, index) => <p key={index}>{text(issue.message)} <small>{text(issue.path)}</small></p>)}</details> : null}
       </section> : null}
-      {kind === 'engineer' && hiringArchitectId ? <section><h3>Hire request</h3><p>The Engineer is created after approval in Planning.</p><label>Specializations<input value={specializations} onChange={(event) => setSpecializations(event.target.value)} placeholder="ordered, comma separated" /></label></section> : null}
+      {kind === 'engineer' && hiringArchitectId ? <section><h3>Hire request</h3><p>The Engineer is created after approval in Planning.</p><div className={styles.creationSpecializations}><h4>Specializations</h4><SpecializationPicker group={group} value={csv(specializations)} onChange={(next) => setSpecializations(next.join(", "))} label="Specializations" /></div></section> : null}
       {!(kind === 'engineer' && hiringArchitectId) ? <section>
         <h3>Launch</h3>
         <div className={styles.formGrid}>
@@ -324,7 +327,7 @@ export function AgentCreateDialog({
           <label>Push interval<input type="number" value={pushInterval} onChange={(event) => setPushInterval(event.target.value)} placeholder="inherit" /></label>
           <label>Maximum interval<input type="number" value={maxInterval} onChange={(event) => setMaxInterval(event.target.value)} placeholder="inherit" /></label>
           <label>Heartbeat interval<input type="number" value={heartbeatInterval} onChange={(event) => setHeartbeatInterval(event.target.value)} placeholder="inherit" /></label>
-          {kind === 'engineer' ? <label>Specializations<input value={specializations} onChange={(event) => setSpecializations(event.target.value)} list="agent-specializations" placeholder="ordered, comma separated" /><datalist id="agent-specializations">{specializationOptions.map((item) => <option key={item.id} value={item.id} />)}</datalist></label> : null}
+          {kind === 'engineer' ? <div className={styles.creationSpecializations}><h4>Specializations</h4><SpecializationPicker group={group} value={csv(specializations)} onChange={(next) => setSpecializations(next.join(", "))} label="Specializations" /></div> : null}
         </div>
         <label>Enabled digest events<textarea value={enabledEvents} onChange={(event) => setEnabledEvents(event.target.value)} rows={2} placeholder="event names, comma separated" /></label>
         <label>Custom instructions<textarea value={customInstructions} onChange={(event) => setCustomInstructions(event.target.value)} rows={5} /></label>

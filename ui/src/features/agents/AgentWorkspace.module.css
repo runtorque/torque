@@ -348,3 +348,6 @@
 .settingField { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 
 .settingsStatus { display: flex; min-height: 32px; align-items: center; justify-content: space-between; gap: var(--space-2); color: var(--text-dim); font-size: var(--ui-font-size); }
+
+.creationSpecializations { grid-column: 1 / -1; min-width: 0; display: grid; gap: 6px; }
+.creationSpecializations h4 { margin: 0; font-size: 10px; }

@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Provider } from 'react-redux';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { connectionActions, createAppStore } from '../../app/store';
+import { connectionActions, createAppStore, projectionActions } from '../../app/store';
+import { compactStateFixture } from '../../protocol/fixtures';
 import type { TorqueCommand, UnknownRecord } from '../../protocol';
 import { AgentCreateDialog } from './AgentCreateDialog';
 import { toAgentViewModel } from './model';
@@ -91,4 +92,19 @@ describe('agent creation', () => {
     await act(async () => { reads[0]!.resolve(rendered('', { model: 'stale' })); await Promise.resolve(); });
     expect(screen.getByLabelText('Model')).toHaveValue('review-model'); expect(screen.getByLabelText('Name')).toHaveValue('Draft'); expect(screen.getByRole('button', { name: 'Create worker' })).toBeEnabled(); unmount(); expect(reads[2]!.signal.aborted).toBe(true);
   });
+});
+
+it('uses group specialization defaults until explicitly edited, including an intentional empty selection', async () => {
+  const calls: TorqueCommand[] = [];
+  vi.stubGlobal('fetch', mockFetch((_url, options) => { calls.push(commandFrom(options)); return Promise.resolve(response({ type: 'ok', id: 'created', kind: 'engineer', name: 'Default engineer', group: 'Foundation' })); }));
+  const { store, close } = setup('engineer'); await ready();
+  act(() => { store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, group_settings: { Foundation: { default_engineer_specializations: ['frontend'] } } })); });
+  expect(screen.getByRole('listitem')).toHaveTextContent('frontend · Primary');
+  act(() => { store.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: 11, ops: [{ op: 'group_settings_update', name: 'Foundation', default_engineer_specializations: ['backend'] }] })); });
+  expect(screen.getByRole('listitem')).toHaveTextContent('backend · Primary');
+  fireEvent.click(screen.getByRole('button', { name: 'Remove backend' }));
+  act(() => { store.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: 12, ops: [{ op: 'group_settings_update', name: 'Foundation', default_engineer_specializations: ['frontend'] }] })); });
+  expect(screen.queryByRole('listitem')).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Default engineer' } }); fireEvent.click(screen.getByRole('button', { name: 'Create engineer' }));
+  await waitFor(() => expect(close).toHaveBeenCalledOnce()); expect(calls.find((call) => call.cmd === 'add_engineer')).toMatchObject({ specializations: [] });
 });

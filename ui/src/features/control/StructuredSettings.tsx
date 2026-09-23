@@ -1,5 +1,6 @@
 import { useId, useState } from 'react';
 
+import { SpecializationPicker } from './SpecializationPicker';
 import { NumericSettingInput } from './NumericSettingInput';
 import { Button } from '../../design/primitives';
 import type { UnknownRecord } from '../../protocol';
@@ -27,13 +28,14 @@ function SettingObject({ value, onChange, label, template, fixedSchema = false }
   return <fieldset><legend>{label}</legend><StructuredSettings value={value} onChange={onChange} prefix={label} schema={false} onRemove={(key) => { const next = { ...value }; delete next[key]; onChange(next); }} /><label>New {label.toLocaleLowerCase()} key<input value={newKey} onChange={(event) => setNewKey(event.target.value)} /></label><Button isDisabled={!newKey.trim() || newKey.trim() in value} onPress={() => { onChange({ ...value, [newKey.trim()]: '' }); setNewKey(''); }}>Add entry</Button></fieldset>;
 }
 
-export function StructuredSettings({ value, onChange, prefix = '', omit = [], onRemove, providers = [], defaults = {}, schema = true }: { schema?: boolean; defaults?: UnknownRecord; providers?: unknown[]; value: UnknownRecord; onChange: (next: UnknownRecord) => void; prefix?: string; omit?: string[]; onRemove?: (key: string) => void }) {
+export function StructuredSettings({ value, onChange, prefix = '', omit = [], onRemove, providers = [], defaults = {}, schema = true, group = '' }: { group?: string; schema?: boolean; defaults?: UnknownRecord; providers?: unknown[]; value: UnknownRecord; onChange: (next: UnknownRecord) => void; prefix?: string; omit?: string[]; onRemove?: (key: string) => void }) {
   const instance = useId();
   return <div className={styles.structuredSettings}>{Object.entries(value).filter(([key]) => !omit.includes(key)).map(([key, item]) => {
     const field = schema ? settingFields[key] : undefined; const label = `${prefix ? `${prefix}: ` : ''}${schema ? labelFor(key) : key}`;
     const descriptionId = field?.description ? `${instance}-${key}-help` : undefined;
     const set = (next: unknown) => onChange({ ...value, [key]: next });
     const reset = key in defaults ? <Button tone="quiet" isDisabled={settingsEqual(item, defaults[key])} onPress={() => set(structuredClone(defaults[key]))}>Reset {label}</Button> : null;
+    if (schema && key === 'default_engineer_specializations' && group && Array.isArray(item)) return <div key={key} className={styles.settingObject}><fieldset><legend>{label}</legend><SpecializationPicker group={group} label={label} value={item.filter((entry): entry is string => typeof entry === 'string')} onChange={set} /></fieldset>{reset}</div>;
     if (item && typeof item === 'object' && !Array.isArray(item)) return <div key={key} className={styles.settingObject}><SettingObject value={item as UnknownRecord} onChange={set} label={label} fixedSchema={schema && key === 'architect_review_gate_thresholds'} template={schema && key === 'board_sync_github' ? githubSettingsDefaults : undefined} />{reset}</div>;
     const suggestions = schema ? providerChoices(providers, key, value) : [];
     const choicesId = `${instance}-${key}-choices`;
