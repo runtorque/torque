@@ -3243,3 +3243,14 @@ History renders the persisted contract: role/template, input/output token counts
 - Decision: Offer Classic's action-count, elapsed-minute and manual-only choices with readable labels. Saved custom frequencies remain selected and editable through an explicit Custom frequency choice. Custom input accepts the existing positive-integer action/minute syntax and manual_only; blank or malformed drafts block Settings Save using native form validity.
 - Continuity: Choosing a frequency edits only the Architect settings draft. Custom typing retains its input and focus even when it matches a preset. External field reset restores the default preset. Existing sparse save, refusal/retry and reconnect handling remain shared with other settings.
 - Verification: P-262 records focused picker/reset/validation tests, exact Classic/backend catalog comparison and isolated browser save/reload/reconnect acceptance. Selecting a frequency does not certify timer-driven reminders or provider execution.
+
+
+### D-160 — Agent Activity reads belong to the visible tab
+
+- Date: 2026-09-23
+- Scope: Selected-agent Activity resource loading, refresh and reconnect.
+- Decision: Read Events, role Journal, Decisions, MCP, History, Agent Class and Architect peer resources only while their owning Activity tab is visible. Tabs backed by the synchronized task/message snapshot perform no auxiliary read. Engineer Journal requests only its journal/session/settings dependencies; Engineer Events includes group pause settings. Refresh repeats only the current plan at the retained page limits.
+- Lifecycle: Use owned abortable HTTP reads with response-type/target validation, a 30-second timeout and visible retry. Changing agent, tab, applied filters or visibility cancels obsolete reads. Wait for a synchronized connection and refresh after reconnect/resync. Retain accepted target-scoped content so refresh, compact snapshots and failures do not remount expanded rows or remove focus. Do not use another agent's latest response aliases.
+- MCP drafts: Typing tool/outcome/range edits does not fetch or reset the displayed result window. Apply commits the query and resets its remote limit; refresh/reconnect/page extension use the applied query while unfinished edits remain in their controls.
+- Layout: Read status and retry occupy a dedicated auto-sized row above the bounded scrolling content, so the content cannot overlap the retry control.
+- Verification: P-263 records component/integration and isolated browser acceptance. Planning section reads are a separate P-264 repair; this change does not close the broad P-112 gate.

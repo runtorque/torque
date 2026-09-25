@@ -47,7 +47,7 @@
 .detailViewBar > span { margin-right: auto; color: var(--text-muted); font-size: 8px; letter-spacing: .04em; text-transform: uppercase; }
 .detailPane { min-width: 0; min-height: 0; overflow: hidden; }
 .detailPane > * { height: 100%; }
-.agentDetailWorkspace { display: grid; min-width: 0; min-height: 0; flex: 1; grid-template-rows: auto auto minmax(0, 1fr); overflow: hidden; background: var(--background); }
+.agentDetailWorkspace { display: grid; min-width: 0; min-height: 0; flex: 1; grid-template-rows: auto auto auto minmax(0, 1fr); overflow: hidden; background: var(--background); }
 .agentDetailHeader { display: flex; min-height: 72px; align-items: center; justify-content: space-between; gap: 16px; padding: 9px 14px; border-bottom: 1px solid var(--border); background: var(--surface); }
 .agentDetailHeader > div:first-child { min-width: 0; }
 .agentDetailHeader > div:last-child { display: flex; align-items: center; gap: 5px; }
@@ -57,6 +57,8 @@
 .agentDetailTabs { display: flex; min-width: 0; gap: 2px; overflow-x: auto; padding: 4px 10px 0; border-bottom: 1px solid var(--border); background: var(--surface); }
 .agentDetailTabs button { min-height: 30px; padding: 0 10px; border: 0; border-bottom: 2px solid transparent; color: var(--text-muted); background: transparent; font-size: 9px; }
 .agentDetailTabs button[aria-selected='true'] { border-bottom-color: var(--accent); color: var(--text); }
+.activityReadStatus { min-width: 0; }
+.activityReadStatus > p { margin: 0; padding: 7px 10px; font-size: 9px; }
 .agentDetailContent { min-width: 0; min-height: 0; overflow: auto; padding: 10px; }
 .agentFeed { display: grid; align-content: start; gap: 5px; }
 .agentFeed > article, .agentDecisionPanel > article { display: grid; gap: 5px; padding: 8px 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }

@@ -4,9 +4,9 @@ import { Button, StateSurface } from '../../design/primitives';
 import type { CommandSender } from '../board/BoardPanel';
 import type { AgentViewModel } from './model';
 import styles from './AgentWorkspace.module.css';
+import { activityReads, type ActivityTab as AgentTab, type RemoteSection } from './activityReads';
+import { useActivityReads } from './useActivityReads';
 
-type AgentTab = 'decisions' | 'journal' | 'messages' | 'events' | 'queued' | 'worklog' | 'mcp' | 'history' | 'class' | 'chat';
-type RemoteSection = 'events' | 'journal' | 'mcp' | 'history' | 'class';
 
 const PAGE_SIZE = 20;
 const INITIAL_LIMITS: Record<RemoteSection, number> = { events: PAGE_SIZE, journal: PAGE_SIZE, mcp: PAGE_SIZE, history: PAGE_SIZE, class: PAGE_SIZE };
@@ -14,6 +14,7 @@ const REMOTE_MAX: Record<RemoteSection, number> = { events: 200, journal: 200, m
 
 interface CatalogBundle { agentClasses: unknown }
 interface Props {
+  active?: boolean;
   agent: AgentViewModel;
   group: string;
   catalog: CatalogBundle;
@@ -44,6 +45,14 @@ function json(value: unknown): string {
   if (value === undefined || value === null || value === '') return '—';
   if (typeof value === 'string') return value;
   try { return JSON.stringify(value, null, 2); } catch { return '[unserializable value]'; }
+}
+function retainedActivityFrames(source: Record<string, unknown>, id: string, group: string): Record<string, unknown> {
+  const keys = [
+    ...['cell_events', 'mcp_calls', 'agent_history_detail', 'agent_class_status', 'agent_class_assignment', 'agent_class_audit', 'architect_journal_entries', 'architect_peer_inbox'].map((type) => `${type}:${id}`),
+    ...['engineer_journal_snapshot', 'engineer_session_map', 'group_settings'].map((type) => `${type}:${group}`),
+    'decisions_snapshot:_', 'agent_classes:_',
+  ];
+  return Object.fromEntries(keys.filter((key) => source[key] !== undefined).map((key) => [key, source[key]]));
 }
 function responseFor(responses: Record<string, unknown>, type: string, target: string): Record<string, unknown> {
   return record(responses[`${type}:${target}`]);
@@ -160,7 +169,10 @@ function DigestPanel({ agent, queued, sent, paused, bufferedCount, onSend, onTog
   </section>;
 }
 
-export function AgentDetailWorkspace({ agent, group, catalog, responses, tasks, directMessages, peerThreads, digestSettings: rawDigestSettings, digestBufferStats: rawDigestBufferStats, digestSentEvents: rawDigestSentEvents, sendCommand, onUnavailable }: Props) {
+export function AgentDetailWorkspace({ active = true, agent, group, catalog, responses: incomingResponses, tasks, directMessages, peerThreads, digestSettings: rawDigestSettings, digestBufferStats: rawDigestBufferStats, digestSentEvents: rawDigestSentEvents, sendCommand, onUnavailable }: Props) {
+  const [cache, setCache] = useState(() => ({ source: incomingResponses, frames: retainedActivityFrames(incomingResponses, agent.id, group) }));
+  const responses = cache.source === incomingResponses ? cache.frames : { ...cache.frames, ...retainedActivityFrames(incomingResponses, agent.id, group) };
+  if (cache.source !== incomingResponses) setCache({ source: incomingResponses, frames: responses });
   const tabs = useMemo(() => tabsFor(agent.kind), [agent.kind]);
   const [tab, setTab] = useState<AgentTab>(tabs[0]?.id ?? 'events');
   const [toolFilter, setToolFilter] = useState('');
@@ -171,52 +183,22 @@ export function AgentDetailWorkspace({ agent, group, catalog, responses, tasks, 
   const [engineerReply, setEngineerReply] = useState('');
   const [archiveView, setArchiveView] = useState({ agentId: agent.id, visible: false });
   const [limitState, setLimitState] = useState({ agentId: agent.id, values: INITIAL_LIMITS });
-  const [mcpAnchor] = useState(() => Date.now() / 1_000);
+  const [appliedMcp, setAppliedMcp] = useState(() => ({ tool: '', outcome: 'all', range: '24h', anchor: Date.now() / 1000 }));
   const showArchived = archiveView.agentId === agent.id && archiveView.visible;
   const limits = limitState.agentId === agent.id ? limitState.values : INITIAL_LIMITS;
 
   const run = (command: Record<string, unknown>) => {
     if (!sendCommand(command as { cmd: string })) onUnavailable();
   };
-  const mcpCommand = (limit: number) => {
-    const since = range === '1h' ? mcpAnchor - 3_600 : range === '6h' ? mcpAnchor - 21_600 : range === '24h' ? mcpAnchor - 86_400 : undefined;
-    return { cmd: 'mcp_calls', cell_id: agent.id, tool_name_pattern: toolFilter.trim() ? `*${toolFilter.trim()}*` : 'mcp__torque__%', hook_event_name: 'PostToolUse', success_filter: outcome, limit, ...(since ? { since } : {}) };
-  };
+  const reads = useActivityReads(activityReads(tab, agent.id, agent.kind, group, limits, appliedMcp, appliedMcp.anchor), active);
   const requestSection = (section: RemoteSection, limit: number) => {
     setLimitState({ agentId: agent.id, values: { ...limits, [section]: limit } });
-    if (section === 'events') run({ cmd: 'get_cell_events', cell_id: agent.id, limit });
-    if (section === 'mcp') run(mcpCommand(limit));
-    if (section === 'history') run({ cmd: 'get_agent_history_detail', agent_id: agent.id, message_limit: limit });
-    if (section === 'class') run({ cmd: 'agent_class_audit', agent_id: agent.id, limit });
-    if (section === 'journal' && agent.kind === 'architect') run({ cmd: 'architect_journal_read', architect_id: agent.id, limit });
-    if (section === 'journal' && agent.kind === 'engineer') run({ cmd: 'engineer_journal_snapshot', group, engineer_id: agent.id, include_streams: true, limit });
-  };
-  const refresh = (requested = limits) => {
-    run({ cmd: 'get_cell_events', cell_id: agent.id, limit: requested.events });
-    run(mcpCommand(requested.mcp));
-    run({ cmd: 'agent_class_list' });
-    run({ cmd: 'agent_class_status', agent_id: agent.id });
-    run({ cmd: 'agent_class_audit', agent_id: agent.id, limit: requested.class });
-    run({ cmd: 'get_agent_history_detail', agent_id: agent.id, message_limit: requested.history });
-    if (agent.kind === 'architect') {
-      run({ cmd: 'architect_journal_read', architect_id: agent.id, limit: requested.journal });
-      run({ cmd: 'decisions_snapshot', include_archived: true });
-      run({ cmd: 'architect_peer_inbox', architect_id: agent.id, detail: true, limit: 100 });
-    } else if (agent.kind === 'engineer') {
-      run({ cmd: 'engineer_journal_snapshot', group, engineer_id: agent.id, include_streams: true, limit: requested.journal });
-      run({ cmd: 'engineer_session_map_read', group, engineer_id: agent.id });
-      run({ cmd: 'get_group_settings', group });
-    }
   };
   const updateDecision = (id: string, updates: Record<string, unknown>) => {
     run({ cmd: 'architect_decision_update', architect_id: agent.id, id, ...updates });
     run({ cmd: 'decisions_snapshot', include_archived: true });
   };
-  useEffect(() => {
-    refresh(INITIAL_LIMITS);
-    // Requests are selected-agent scoped and reset when that selection changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agent.id, group]);
+
 
   const events = list(record(responses[`cell_events:${agent.id}`]).events);
   const calls = list(responseFor(responses, 'mcp_calls', agent.id).calls ?? responseFor(responses, 'mcp_calls', agent.id).events);
@@ -228,8 +210,9 @@ export function AgentDetailWorkspace({ agent, group, catalog, responses, tasks, 
   const assignmentFrame = responseFor(responses, 'agent_class_assignment', agent.id);
   const classStatus = record(assignmentFrame.status ?? classFrame.status ?? agent.raw.agent_class_status);
   const classAuditFrame = responseFor(responses, 'agent_class_audit', agent.id);
-  const classAudit = list((Object.keys(classAuditFrame).length ? classAuditFrame : record(responses['agent_class_audit:latest'])).events);
-  const classes = useMemo(() => classOptions(catalog.agentClasses).filter((item) => !item.kind || item.kind === agent.kind), [agent.kind, catalog.agentClasses]);
+  const classAudit = list(classAuditFrame.events);
+  const availableClasses = record(responses['agent_classes:_']).classes ?? catalog.agentClasses;
+  const classes = useMemo(() => classOptions(availableClasses).filter((item) => !item.kind || item.kind === agent.kind), [agent.kind, availableClasses]);
   const selectedClass = classes.find((item) => item.id === selectedClassId)?.raw ?? {};
   const architectJournal = list(record(responses[`architect_journal_entries:${agent.id}`]).entries);
   const engineerFrame = record(responses[`engineer_journal_snapshot:${group}`]);
@@ -251,7 +234,7 @@ export function AgentDetailWorkspace({ agent, group, catalog, responses, tasks, 
     const participantIds = Array.isArray(thread.participant_ids) ? thread.participant_ids.map(String) : [];
     return participantIds.includes(agent.id) || list(thread.messages).some((message) => [message.sender_id, message.recipient_id].some((value) => text(value) === agent.id));
   });
-  const peerInboxFrame = record(responses[`architect_peer_inbox:${agent.id}`] ?? responses['architect_peer_inbox:_'] ?? responses['architect_peer_inbox:latest']);
+  const peerInboxFrame = record(responses[`architect_peer_inbox:${agent.id}`]);
   const inboxPeerThreads = list(peerInboxFrame.threads);
   const architectPeerThreads = (inboxPeerThreads.length ? inboxPeerThreads : snapshotPeerThreads)
     .sort((a, b) => Number(b.last_message_at ?? b.last_activity_at ?? 0) - Number(a.last_message_at ?? a.last_activity_at ?? 0));
@@ -270,8 +253,10 @@ export function AgentDetailWorkspace({ agent, group, catalog, responses, tasks, 
   const progressive = (section: RemoteSection) => ({ requestLimit: limits[section], requestMax: REMOTE_MAX[section], onRequestMore: (limit: number) => requestSection(section, limit) });
 
   return <section className={styles.agentDetailWorkspace} aria-label={`Activity for ${agent.name}`}>
-    <header className={styles.agentDetailHeader}><div><span>Selected agent</span><h2>{agent.name}</h2><p>{agent.kind}{agent.role ? ` · ${agent.role}` : ''} · {agent.status}</p></div><div><Button tone="quiet" onPress={() => refresh()}>Refresh</Button></div></header>
+    <header className={styles.agentDetailHeader}><div><span>Selected agent</span><h2>{agent.name}</h2><p>{agent.kind}{agent.role ? ` · ${agent.role}` : ''} · {agent.status}</p></div><div><Button tone="quiet" isDisabled={!reads.ready} onPress={reads.refresh}>Refresh</Button></div></header>
     <nav className={styles.agentDetailTabs} role="tablist" aria-label={`${agent.kind} details`}>{tabs.map((item) => <button key={item.id} role="tab" aria-selected={tab === item.id} onClick={() => setTab(item.id)}>{item.label}</button>)}</nav>
+    <div className={styles.activityReadStatus}>{!reads.ready ? <p role="status">Waiting for a synchronized connection. Loaded activity remains available.</p> : reads.pending ? <p role="status">Refreshing activity…</p> : null}
+    {reads.error ? <p role="alert">{reads.error} <Button onPress={reads.refresh}>Retry activity</Button></p> : null}</div>
     <div className={styles.agentDetailContent} data-activity-scroll>
       {tab === 'events' ? <section className={styles.agentFeed} aria-label="Agent events">{['architect', 'engineer'].includes(agent.kind) ? <DigestPanel agent={agent} queued={digestQueuedEvents} sent={digestSentEvents} paused={digestPaused} bufferedCount={Number(digestBufferStats.buffered_events ?? digestBufferStats.buffered_count ?? 0) || 0} onSend={() => run({ cmd: 'engineer_flush_now', agent_id: agent.id })} onTogglePause={() => run({ cmd: digestPaused ? 'digest_resume' : 'digest_pause', agent_id: agent.id })} /> : null}<header className={styles.feedSectionHeader}><h3>Lifecycle events</h3><span>{events.length}</span></header>{events.length ? <ProgressiveItems items={events} sectionKey={`${agent.id}-events`} {...progressive('events')} renderItem={(event, index) => <FeedItem key={text(event.id, `${text(event.timestamp)}-${index}`)} title={text(event.kind, 'event').replaceAll('_', ' ')} time={event.timestamp} footer={<><span>{text(event.task_id)}</span><span>{text(event.source, 'runtime')}</span></>}><p>{text(event.message, text(event.summary, 'Runtime event'))}</p></FeedItem>} /> : <Empty title="No events yet" description="Lifecycle, dispatch, and runtime events for this agent appear here." />}</section> : null}
 
@@ -300,7 +285,7 @@ export function AgentDetailWorkspace({ agent, group, catalog, responses, tasks, 
       {tab === 'queued' ? <TaskRows rows={queuedTasks} empty="No queued tasks" note="Queued tasks" sectionKey={`${agent.id}-queued`} /> : null}
       {tab === 'worklog' ? <TaskRows rows={agent.kind === 'engineer' ? completedTasks : ownedTasks} empty={agent.kind === 'engineer' ? 'No completed tasks' : 'No task history'} note={agent.kind === 'engineer' ? 'Completed work' : 'Task history'} sectionKey={`${agent.id}-worklog`} /> : null}
 
-      {tab === 'mcp' ? <section className={styles.inspectorMcp} aria-label="MCP activity"><form onSubmit={(event) => { event.preventDefault(); requestSection('mcp', PAGE_SIZE); }}><label>Tool contains<input value={toolFilter} onChange={(event) => setToolFilter(event.target.value)} placeholder="task_progress" /></label><label>Outcome<select value={outcome} onChange={(event) => setOutcome(event.target.value)}><option value="all">All</option><option value="success">Success</option><option value="error">Error</option></select></label><label>Range<select value={range} onChange={(event) => setRange(event.target.value)}><option value="1h">1 hour</option><option value="6h">6 hours</option><option value="24h">24 hours</option><option value="all">All retained</option></select></label><Button type="submit">Apply</Button></form><div className={styles.inspectorFeed}>{calls.length ? <ProgressiveItems items={calls} sectionKey={`${agent.id}-mcp-${toolFilter}-${outcome}-${range}`} {...progressive('mcp')} renderItem={(call, index) => <details key={text(call.cursor, text(call.idempotency_key, String(index)))}><summary><span className={bool(call.success) ? styles.callSuccess : styles.callError}>{bool(call.success) ? '✓' : '!'}</span><strong>{text(call.tool_name, 'MCP call')}</strong><time>{timestamp(call.appended_at ?? call.timestamp)}</time></summary><dl><div><dt>Duration</dt><dd>{text(call.duration_ms, '—')} ms</dd></div><div><dt>Hook</dt><dd>{text(call.hook_event_name, '—')}</dd></div><div><dt>Session</dt><dd>{text(call.session_id, '—')}</dd></div></dl><h4>Arguments</h4><pre>{json(call.args ?? call.arguments ?? call.args_summary)}</pre><h4>Result</h4><pre>{json(call.result ?? call.result_summary ?? call.error)}</pre></details>} /> : <Empty title="No matching MCP calls" description="Adjust the tool, outcome, or time filters and apply again." />}</div></section> : null}
+      {tab === 'mcp' ? <section className={styles.inspectorMcp} aria-label="MCP activity"><form onSubmit={(event) => { event.preventDefault(); setAppliedMcp({ tool: toolFilter, outcome, range, anchor: Date.now() / 1000 }); requestSection('mcp', PAGE_SIZE); }}><label>Tool contains<input value={toolFilter} onChange={(event) => setToolFilter(event.target.value)} placeholder="task_progress" /></label><label>Outcome<select value={outcome} onChange={(event) => setOutcome(event.target.value)}><option value="all">All</option><option value="success">Success</option><option value="error">Error</option></select></label><label>Range<select value={range} onChange={(event) => setRange(event.target.value)}><option value="1h">1 hour</option><option value="6h">6 hours</option><option value="24h">24 hours</option><option value="all">All retained</option></select></label><Button type="submit">Apply</Button></form><div className={styles.inspectorFeed}>{calls.length ? <ProgressiveItems items={calls} sectionKey={`${agent.id}-mcp-${appliedMcp.tool}-${appliedMcp.outcome}-${appliedMcp.range}`} {...progressive('mcp')} renderItem={(call, index) => <details key={text(call.cursor, text(call.idempotency_key, String(index)))}><summary><span className={bool(call.success) ? styles.callSuccess : styles.callError}>{bool(call.success) ? '✓' : '!'}</span><strong>{text(call.tool_name, 'MCP call')}</strong><time>{timestamp(call.appended_at ?? call.timestamp)}</time></summary><dl><div><dt>Duration</dt><dd>{text(call.duration_ms, '—')} ms</dd></div><div><dt>Hook</dt><dd>{text(call.hook_event_name, '—')}</dd></div><div><dt>Session</dt><dd>{text(call.session_id, '—')}</dd></div></dl><h4>Arguments</h4><pre>{json(call.args ?? call.arguments ?? call.args_summary)}</pre><h4>Result</h4><pre>{json(call.result ?? call.result_summary ?? call.error)}</pre></details>} /> : <Empty title="No matching MCP calls" description="Adjust the tool, outcome, or time filters and apply again." />}</div></section> : null}
 
       {tab === 'history' ? <section className={styles.inspectorHistory} aria-label="Agent history">{Object.keys(historyRecord).length ? <><dl className={styles.inspectorFacts}><div><dt>Status</dt><dd>{text(historyRecord.status, agent.status)}</dd></div><div><dt>Started</dt><dd>{timestamp(historyRecord.created_at ?? historyRecord.started_at)}</dd></div><div><dt>Finished</dt><dd>{timestamp(historyRecord.removed_at ?? historyRecord.completed_at)}</dd></div><div><dt>Provider</dt><dd>{text(historyRecord.provider, agent.provider || '—')}</dd></div><div><dt>Model</dt><dd>{text(historyRecord.model, '—')}</dd></div><div><dt>Tokens</dt><dd>{text(historyRecord.total_tokens ?? historyRecord.token_count, '—')}</dd></div><div><dt>Branch</dt><dd>{text(historyRecord.worktree_branch ?? historyRecord.branch, agent.worktreeBranch || '—')}</dd></div><div><dt>Outcome</dt><dd>{text(historyRecord.outcome, '—')}</dd></div></dl><div className={styles.historyColumns}><section><h3>Tasks <span>{historyTasks.length}</span></h3>{historyTasks.length ? <ProgressiveItems items={historyTasks} sectionKey={`${agent.id}-history-tasks`} renderItem={(task, index) => <FeedItem key={text(task.task_id, text(task.id, String(index)))} title={text(task.task, text(task.title, text(task.task_id, 'Task')))} badge={text(task.lane, text(task.status))}><p>{text(task.result, text(task.summary))}</p></FeedItem>} /> : <p>No recorded tasks.</p>}</section><section><h3>Messages <span>{historyMessages.length}</span></h3>{historyMessages.length ? <ProgressiveItems items={historyMessages} sectionKey={`${agent.id}-history-messages`} {...progressive('history')} renderItem={(message, index) => {
         const body = text(message.message, text(message.content, text(message.text)));

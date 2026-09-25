@@ -32,6 +32,16 @@ function renderShell(host = browserHost, frame: StateFrame = compactStateFixture
 
 afterEach(() => vi.unstubAllGlobals());
 
+function pendingActivityReads() {
+  const commands: TorqueCommand[] = [];
+  vi.stubGlobal('fetch', (_input: RequestInfo | URL, options?: RequestInit) => {
+    commands.push(JSON.parse(typeof options?.body === 'string' ? options.body : '{}') as TorqueCommand);
+    // Tests below provide response frames explicitly, independently of reads.
+    return new Promise<never>(() => {});
+  });
+  return commands;
+}
+
 function agentSettingsResponse(frame: StateFrame, id: string) {
   return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: 'agent_settings', agent_id: id, settings: (frame.agent_settings as Record<string, unknown> | undefined)?.[id] ?? {}, resolved: (frame.resolved_agent_settings as Record<string, unknown> | undefined)?.[id] ?? {} } }) });
 }
@@ -714,15 +724,12 @@ describe('workspace shell', () => {
   });
 
   it('shows agent events, MCP calls, persisted history, and Agent Class state inside Activity', () => {
-    const { appStore, sendCommand } = renderShell();
+    const activityCommands = pendingActivityReads();
+    const { appStore } = renderShell();
     fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
     fireEvent.click(within(screen.getByRole('tablist', { name: 'View for Foundation Worker' })).getByRole('tab', { name: 'Activity' }));
 
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'get_cell_events', cell_id: 'agent-1', limit: 20 });
-    expect(sendCommand).toHaveBeenCalledWith(expect.objectContaining({ cmd: 'mcp_calls', cell_id: 'agent-1' }));
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'agent_class_status', agent_id: 'agent-1' });
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'agent_class_audit', agent_id: 'agent-1', limit: 20 });
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'get_agent_history_detail', agent_id: 'agent-1', message_limit: 20 });
+    expect(activityCommands).toEqual([{ cmd: 'get_cell_events', cell_id: 'agent-1', limit: 20 }]);
 
     act(() => {
       appStore.dispatch(projectionActions.auxiliaryResourceReceived({
@@ -759,14 +766,17 @@ describe('workspace shell', () => {
     fireEvent.click(within(activity).getByText('task progress'));
     expect(within(activity).getByText('Implemented inspector')).toBeVisible();
     fireEvent.click(within(activity).getByRole('tab', { name: 'MCP' }));
+    expect(activityCommands.at(-1)).toMatchObject({ cmd: 'mcp_calls', cell_id: 'agent-1' });
     expect(within(activity).getByText('mcp__torque__task_progress')).toBeVisible();
     fireEvent.click(within(activity).getByRole('tab', { name: 'History' }));
+    expect(activityCommands.at(-1)).toEqual({ cmd: 'get_agent_history_detail', agent_id: 'agent-1', message_limit: 20 });
     const retainedMessages = within(activity).getAllByText('History retained');
     expect(retainedMessages[0]).toBeVisible();
     expect(retainedMessages[1]).not.toBeVisible();
     fireEvent.click(within(activity).getByText('progress'));
     expect(retainedMessages[1]).toBeVisible();
     fireEvent.click(within(activity).getByRole('tab', { name: 'Agent Class' }));
+    expect(activityCommands.slice(-3).map((command) => command.cmd)).toEqual(['agent_class_list', 'agent_class_status', 'agent_class_audit']);
     expect(within(activity).getAllByText('Default Worker')).toHaveLength(2);
     expect(within(activity).getByText('Desired class saved')).not.toBeVisible();
     fireEvent.click(within(activity).getByText('assignment set'));
@@ -984,7 +994,8 @@ describe('workspace shell', () => {
   });
 
   it('restores the original role-specific Architect activity panel', () => {
-    const { appStore, sendCommand } = renderShell(browserHost, {
+    const activityCommands = pendingActivityReads();
+    const { appStore } = renderShell(browserHost, {
       ...compactStateFixture,
       agents: { architect: { id: 'architect', name: 'Aria', group: 'Foundation', kind: 'architect', status: 'idle' } },
     });
@@ -1000,7 +1011,7 @@ describe('workspace shell', () => {
     expect(within(panel).getByRole('tab', { name: 'History' })).toBeVisible();
     expect(within(panel).getByRole('tab', { name: 'Agent Class' })).toBeVisible();
     expect(within(panel).getByRole('tab', { name: 'Peer chat' })).toBeVisible();
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'decisions_snapshot', include_archived: true });
+    expect(activityCommands).toEqual([{ cmd: 'decisions_snapshot', include_archived: true }]);
     act(() => { appStore.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'decisions_snapshot', decisions: { 'decision-1': { id: 'decision-1', architect_id: 'architect', title: 'Keep Tauri', rationale: 'Electron remains an option.', status: 'accepted' } } })); });
     expect(within(panel).getByText('Keep Tauri')).toBeVisible();
     expect(within(panel).getByText('Electron remains an option.')).not.toBeVisible();
@@ -1015,6 +1026,7 @@ describe('workspace shell', () => {
   });
 
   it('keeps peer chat read-only and puts Architect digest delivery in Events', () => {
+    const activityCommands = pendingActivityReads();
     const { sendCommand } = renderShell(browserHost, {
       ...compactStateFixture,
       agents: { architect: { id: 'architect', name: 'Aria', group: 'Foundation', kind: 'architect', status: 'idle' } },
@@ -1048,7 +1060,7 @@ describe('workspace shell', () => {
     fireEvent.click(within(panel).getByRole('button', { name: /Release planning/ }));
     expect(within(panel).getByRole('heading', { name: 'Release planning' })).toBeVisible();
     expect(within(panel).getAllByText('Sequence the release after verification.')).toHaveLength(2);
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'architect_peer_inbox', architect_id: 'architect', detail: true, limit: 100 });
+    expect(activityCommands.at(-1)).toEqual({ cmd: 'architect_peer_inbox', architect_id: 'architect', detail: true, limit: 100 });
   });
 
   it('moves the Engineer digest from Journal to Events with group-data fallback', () => {
@@ -1071,6 +1083,7 @@ describe('workspace shell', () => {
   });
 
   it('loads Activity pages at the scroll tail and manages active and archived decisions', () => {
+    const activityCommands = pendingActivityReads();
     let intersectionCallback: IntersectionObserverCallback | undefined;
     vi.stubGlobal('IntersectionObserver', class {
       root = null;
@@ -1123,7 +1136,7 @@ describe('workspace shell', () => {
     const entries = Array.from({ length: 20 }, (_, index) => ({ id: `journal-${index}`, type: 'observation', entry: `Entry ${index}`, timestamp: 100 - index }));
     act(() => { appStore.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'architect_journal_entries', architect_id: 'architect', entries })); });
     act(() => intersectionCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver));
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'architect_journal_read', architect_id: 'architect', limit: 40 });
+    expect(activityCommands.at(-1)).toEqual({ cmd: 'architect_journal_read', architect_id: 'architect', limit: 40 });
     vi.unstubAllGlobals();
   });
 

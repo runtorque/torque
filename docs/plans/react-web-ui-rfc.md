@@ -1161,3 +1161,8 @@ P-261 now previews unsaved visibility choices with passive sample indicators, em
 ### Architect journal frequency checkpoint — 2026-09-23
 
 P-262 now provides readable action/minute/manual presets and validated custom entry while preserving saved custom frequencies, focus, resets and acknowledged sparse saves. D-159 and the parity matrix record component, Classic/backend-contract and isolated production-browser acceptance. The main ledger has **262 behaviors: 253 implemented/equivalent dispositions, 5 open repairs and 4 intentional retirements**. The remaining broad settings/lazy-reconnect audits and native/external/recovery acceptance still prevent a full-parity or Phase 4 completion claim.
+
+
+### Agent Activity loading checkpoint — 2026-09-25
+
+P-263 now loads only visible role/tab resources, cancels obsolete reads, refreshes after reconnect/resync and retains accepted content, paging and unfinished MCP filters through failures/retry. D-160 and the parity matrix record component/App and real-daemon browser evidence, including the status-row overlap discovered and repaired during acceptance. Planning's separate eager-loading gap is P-264. The main ledger has **264 behaviors: 254 implemented/equivalent dispositions, 6 open repairs and 4 intentional retirements**. Broad settings/lazy-reconnect and independent native/external/recovery gates remain open; Phase 4 is not complete.
