@@ -5,6 +5,7 @@ import {
   TerminalController,
   type WebSocketLike,
 } from './terminalController';
+import { applyAppearance, appearanceDefaults } from '../../app/preferences';
 
 const writes: string[] = [];
 const sent: string[] = [];
@@ -16,7 +17,7 @@ let tailCalls = 0;
 
 class FakeTerminal {
   static current: FakeTerminal;
-  constructor(options: Record<string, unknown>) { terminalOptions = options; FakeTerminal.current = this; }
+  constructor(public options: Record<string, unknown>) { terminalOptions = options; FakeTerminal.current = this; }
   buffer = { active: { baseY: 100, viewportY: 60 } };
   cols = 100;
   rows = 30;
@@ -81,6 +82,8 @@ beforeEach(() => {
   socketCreations = 0;
   terminalOptions = {};
   sockets.length = 0;
+  document.documentElement.removeAttribute('style');
+  document.documentElement.removeAttribute('data-torque-contrast');
   vi.useFakeTimers();
   window.Terminal = FakeTerminal;
   window.FitAddon = { FitAddon: FakeFitAddon };
@@ -93,6 +96,7 @@ afterEach(() => {
   delete window.Terminal;
   delete window.FitAddon;
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('terminal controller', () => {
@@ -303,4 +307,44 @@ describe('terminal controller', () => {
     expect(sent).toEqual([]);
     controller.dispose();
   });
+});
+
+it('initializes current appearance and configured scrollback, and updates font/theme without replacing the PTY', async () => {
+  applyAppearance({ ...appearanceDefaults, terminalFont: 16, accent: 'teal' });
+  document.documentElement.style.setProperty('--background', '#08090c'); document.documentElement.style.setProperty('--text', '#ffffff');
+  const controller = new TerminalController({ cellId: 'preferences', sessionId: 's', surface: surface(), isActive: () => true, webSocketFactory: socketFactory, scrollback: '3500' });
+  expect(terminalOptions).toMatchObject({ fontSize: 16, scrollback: 3500, theme: { background: '#08090c', foreground: '#ffffff', cursor: '#2dd4bf', selectionBackground: '#2dd4bf4d' } });
+  sockets[0]?.onopen?.(); vi.advanceTimersByTime(20); const terminal = FakeTerminal.current; const fit = vi.spyOn(FakeFitAddon.prototype, 'fit');
+  applyAppearance({ ...appearanceDefaults, terminalFont: 16, accent: 'amber' }); await Promise.resolve(); vi.advanceTimersByTime(20);
+  expect(terminal.options.theme).toMatchObject({ cursor: '#f0ad39', selectionBackground: '#f0ad394d' }); expect(fit).not.toHaveBeenCalled();
+  applyAppearance({ ...appearanceDefaults, terminalFont: 18, accent: 'amber' }); await Promise.resolve(); vi.advanceTimersByTime(20);
+  expect(terminal.options.fontSize).toBe(18); expect(fit).toHaveBeenCalledTimes(1); expect(terminal.buffer.active.viewportY).toBe(60); expect(socketCreations).toBe(1); expect(terminalDisposals).toBe(0); expect(writes).toHaveLength(0);
+  applyAppearance({ ...appearanceDefaults, terminalFont: 18, accent: 'amber' }); await Promise.resolve(); vi.advanceTimersByTime(20); expect(fit).toHaveBeenCalledTimes(1);
+  controller.dispose();
+});
+it('preserves reading distance and tail intent when font preview and restoration refit the terminal', async () => {
+  const controller = new TerminalController({ cellId: 'font-reader', sessionId: 's', surface: surface(), isActive: () => true, webSocketFactory: socketFactory });
+  sockets[0]?.onopen?.(); vi.advanceTimersByTime(20); const terminal = FakeTerminal.current;
+  vi.spyOn(FakeFitAddon.prototype, 'fit').mockImplementation(() => { terminal.buffer.active.baseY = 130; terminal.buffer.active.viewportY = 0; terminal.rows = 25; });
+  applyAppearance({ ...appearanceDefaults, terminalFont: 18 }); await Promise.resolve(); vi.advanceTimersByTime(20);
+  expect(terminal.buffer.active.viewportY).toBe(90); expect(terminal.options.fontSize).toBe(18);
+  controller.scrollToTail(); applyAppearance(appearanceDefaults); await Promise.resolve(); vi.advanceTimersByTime(20);
+  expect(terminal.buffer.active.viewportY).toBe(130); expect(terminal.options.fontSize).toBe(12);
+  expect(sent.map((frame) => (JSON.parse(frame) as { type: string }).type).every((type) => type === 'resize')).toBe(true); controller.dispose();
+});
+it('updates hidden terminal preferences without emitting ownership frames, and disconnects the appearance observer on disposal', async () => {
+  const controller = new TerminalController({ cellId: 'hidden-preferences', sessionId: 's', surface: surface(), isActive: () => false, webSocketFactory: socketFactory }); const terminal = FakeTerminal.current;
+  const fit = vi.spyOn(FakeFitAddon.prototype, 'fit');
+  applyAppearance({ ...appearanceDefaults, terminalFont: 20, accent: 'violet' }); controller.setScrollback(100); await Promise.resolve(); vi.advanceTimersByTime(20);
+  expect(terminal.options).toMatchObject({ fontSize: 20, scrollback: 100, theme: { cursor: '#a78bfa' } }); expect(sent).toHaveLength(0); expect(fit).not.toHaveBeenCalled();
+  controller.dispose(); applyAppearance(appearanceDefaults); controller.setScrollback(5000); await Promise.resolve(); vi.advanceTimersByTime(20);
+  expect(terminal.options).toMatchObject({ fontSize: 20, scrollback: 100 }); expect(terminalDisposals).toBe(1);
+});
+it('sets normalized scrollback only when changed, without resetting output, focus or geometry', () => {
+  const controller = new TerminalController({ cellId: 'scrollback-options', sessionId: 's', surface: surface(), isActive: () => true, webSocketFactory: socketFactory });
+  expect(FakeTerminal.current.options.scrollback).toBe(2000); vi.advanceTimersByTime(20); sent.length = 0;
+  let current = 2000; const set = vi.fn((value: number) => { current = value; });
+  Object.defineProperty(FakeTerminal.current.options, 'scrollback', { get: () => current, set });
+  controller.setScrollback(4000); controller.setScrollback('4000'); controller.setScrollback(100_001); controller.setScrollback(NaN);
+  expect(set.mock.calls).toEqual([[4000], [2000]]); expect(writes).toHaveLength(0); expect(sent).toHaveLength(0); expect(socketCreations).toBe(1); controller.dispose();
 });

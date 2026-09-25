@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -15,9 +16,10 @@ import {
   type TerminalController,
 } from './terminalController';
 import styles from './TerminalSurface.module.css';
+import { terminalScrollback } from './terminalPreferences';
 import { Conversation } from './Conversation';
 import { messageLoopPanel } from './messageLoopModel';
-import { selectMessagesState } from '../../app/store';
+import { selectAgentSettingsDefaults, selectMessagesState } from '../../app/store';
 import { VerticalResizeHandle } from './VerticalResizeHandle';
 
 interface UploadedAttachment {
@@ -61,6 +63,12 @@ function TerminalMount({ cell, active }: TerminalMountProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<TerminalController | null>(null);
   const [status, setStatus] = useState<TerminalConnectionStatus>('connecting');
+  const scrollback = useAppSelector((state) => terminalScrollback(selectAgentSettingsDefaults(state).global.xterm_scrollback));
+  const scrollbackRef = useRef(scrollback);
+  useLayoutEffect(() => {
+    scrollbackRef.current = scrollback;
+    controllerRef.current?.setScrollback(scrollback);
+  }, [scrollback]);
 
   useEffect(() => {
     const surface = surfaceRef.current;
@@ -74,8 +82,10 @@ function TerminalMount({ cell, active }: TerminalMountProps) {
         surface,
         isActive: () => active,
         onStatus: setStatus,
+        scrollback: scrollbackRef.current,
       });
       controllerRef.current = lease.controller;
+      lease.controller.setScrollback(scrollbackRef.current);
     } catch {
       queueMicrotask(() => setStatus('unavailable'));
     }

@@ -1,0 +1,27 @@
+import { act, render } from '@testing-library/react';
+import { Provider } from 'react-redux';
+import { beforeEach, expect, it, vi } from 'vitest';
+import { createAppStore, projectionActions } from '../../app/store';
+import { compactStateFixture } from '../../protocol/fixtures';
+import { toAgentViewModel } from '../agents/model';
+import { TerminalWorkspace } from './TerminalSurface';
+import { acquireTerminalController } from './terminalController';
+const lease = vi.hoisted(() => ({ controller: { setScrollback: vi.fn() }, release: vi.fn() }));
+vi.mock('./terminalController', () => ({ acquireTerminalController: vi.fn(() => lease) }));
+beforeEach(() => { vi.clearAllMocks(); });
+it('binds initial, live, acknowledged and resynced saved scrollback without remounting the terminal', () => {
+  const store = createAppStore(); store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, global_settings: { xterm_scrollback: 7000 } }));
+  const agent = toAgentViewModel('prefs', { name: 'Prefs', kind: 'worker', session_id: 's' });
+  const content = (active: boolean) => <Provider store={store}><TerminalWorkspace agent={agent} terminal={agent} active={active} messages={[]} sendCommand={() => true} onUnavailable={() => {}} showConversation={false} /></Provider>;
+  const view = render(content(true));
+  expect(acquireTerminalController).toHaveBeenCalledTimes(1); expect(vi.mocked(acquireTerminalController).mock.calls[0]?.[1].scrollback).toBe(7000);
+  act(() => { store.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: store.getState().projection.seq + 1, ops: [{ op: 'global_settings_update', xterm_scrollback: 100 }] })); });
+  expect(lease.controller.setScrollback).toHaveBeenLastCalledWith(100);
+  act(() => { store.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'global_settings', settings: { xterm_scrollback: 6000 } })); });
+  expect(lease.controller.setScrollback).toHaveBeenLastCalledWith(6000);
+  act(() => { store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, seq: store.getState().projection.seq + 1, global_settings: { xterm_scrollback: 9000 } })); });
+  expect(lease.controller.setScrollback).toHaveBeenLastCalledWith(9000); expect(acquireTerminalController).toHaveBeenCalledTimes(1); expect(lease.release).not.toHaveBeenCalled();
+  view.rerender(content(false)); expect(lease.release).toHaveBeenCalledTimes(1);
+  act(() => { store.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'global_settings', settings: { xterm_scrollback: 4000 } })); });
+  view.rerender(content(true)); expect(vi.mocked(acquireTerminalController).mock.calls.at(-1)?.[1].scrollback).toBe(4000); view.unmount();
+});

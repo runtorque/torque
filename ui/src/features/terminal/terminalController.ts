@@ -1,8 +1,11 @@
+import { terminalAppearance, terminalScrollback } from './terminalPreferences';
+
 export type TerminalConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'unavailable';
 
 interface DisposableLike { dispose(): void }
 
 interface TerminalLike {
+  options: { fontSize?: number; scrollback?: number; theme?: Record<string, string> };
   cols: number;
   rows: number;
   buffer?: { active: { baseY: number; viewportY: number; type?: string } };
@@ -59,6 +62,7 @@ export interface TerminalControllerOptions {
   reconnectDelayMs?: number;
   maxReconnects?: number;
   windowObject?: Window;
+  scrollback?: unknown;
 }
 
 function terminalSocketUrl(cellId: string, targetWindow: Window): string {
@@ -85,6 +89,8 @@ export class TerminalController {
   private scrollIntentUntil = 0;
   private scrollPointerDown = false;
   private readonly resizeObserver: ResizeObserver;
+  private readonly appearanceObserver: MutationObserver;
+  private appearance: ReturnType<typeof terminalAppearance>;
   private readonly webSocketFactory: (url: string) => WebSocketLike;
   private socket: WebSocketLike | null = null;
   private resizeFrame = 0;
@@ -106,21 +112,15 @@ export class TerminalController {
     }
     this.webSocketFactory = options.webSocketFactory
       ?? ((url) => new WebSocket(url) as unknown as WebSocketLike);
-    const terminalFontSize = Number.parseFloat(this.targetWindow.getComputedStyle(this.targetWindow.document.documentElement).getPropertyValue('--terminal-font-size')) || 12;
+    this.appearance = terminalAppearance(this.targetWindow);
     this.terminal = new TerminalClass({
       cursorBlink: true,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-      fontSize: terminalFontSize,
+      ...this.appearance,
       lineHeight: 1,
-      scrollback: 5_000,
+      scrollback: terminalScrollback(options.scrollback),
       convertEol: false,
       screenReaderMode: true,
-      theme: {
-        background: '#0d0f13',
-        foreground: '#e5e8ee',
-        cursor: '#8da2fb',
-        selectionBackground: '#8da2fb4d',
-      },
     });
     this.fitAddon = new FitClass();
     this.terminal.loadAddon(this.fitAddon);
@@ -168,10 +168,33 @@ export class TerminalController {
     });
     this.resizeObserver = new ResizeObserver(() => this.scheduleFit());
     this.resizeObserver.observe(options.surface);
+    this.appearanceObserver = new MutationObserver(this.refreshAppearance);
+    this.appearanceObserver.observe(this.targetWindow.document.documentElement, {
+      attributes: true, attributeFilter: ['style', 'data-torque-contrast'],
+    });
     this.targetWindow.document.addEventListener('visibilitychange', this.handleVisibility);
     this.connect();
     this.scheduleFit();
   }
+
+  setScrollback(value: unknown): void {
+    if (this.disposed) return;
+    const scrollback = terminalScrollback(value);
+    if (this.terminal.options.scrollback !== scrollback) this.terminal.options.scrollback = scrollback;
+  }
+
+  private readonly refreshAppearance = () => {
+    if (this.disposed) return;
+    const next = terminalAppearance(this.targetWindow);
+    const fontChanged = next.fontSize !== this.appearance.fontSize;
+    const themeChanged = (Object.keys(next.theme) as (keyof typeof next.theme)[]).some((key) => next.theme[key] !== this.appearance.theme[key]);
+    this.appearance = next;
+    if (fontChanged) this.terminal.options.fontSize = next.fontSize;
+    if (themeChanged) this.terminal.options.theme = { ...next.theme };
+    // Color-only changes need no PTY resize. The existing fit path preserves
+    // reading/tail intent and sends geometry only for the visible owner.
+    if (fontChanged) this.scheduleFit();
+  };
 
   focus(): void {
     if (!this.canOwnPty()) return;
@@ -197,6 +220,7 @@ export class TerminalController {
     this.options.onStatus?.('disconnected');
     this.targetWindow.document.removeEventListener('visibilitychange', this.handleVisibility);
     this.resizeObserver.disconnect();
+    this.appearanceObserver.disconnect();
     this.dataDisposable.dispose();
     this.scrollDisposable?.dispose();
     this.options.surface.removeEventListener('pointerdown', this.handleScrollPointerDown, true);

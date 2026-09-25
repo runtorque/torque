@@ -42,7 +42,7 @@ function object(value: unknown): UnknownRecord { return value && typeof value ==
 function settingText(value: unknown, fallback = '') { return typeof value === 'string' ? value : fallback; }
 function numericDraft(value: unknown): number | string { return Number(value); }
 export function primaryGlobalSettings(source: UnknownRecord) {
-  return { xterm_scrollback: numericDraft(source.xterm_scrollback ?? 5000), max_pipeline_depth: numericDraft(source.max_pipeline_depth ?? 10), max_event_log: numericDraft(source.max_event_log ?? 500), metrics_enabled: source.metrics_enabled !== false, keybindings: object(source.keybindings), status_bar_visibility: { daemon_status: false, claude_usage: false, codex_usage: false, deploy: true, health: false, workload: false, tasks: true, attention: true, ...object(source.status_bar_visibility) } };
+  return { xterm_scrollback: numericDraft(source.xterm_scrollback ?? 2000), max_pipeline_depth: numericDraft(source.max_pipeline_depth ?? 10), max_event_log: numericDraft(source.max_event_log ?? 500), metrics_enabled: source.metrics_enabled !== false, keybindings: object(source.keybindings), status_bar_visibility: { daemon_status: false, claude_usage: false, codex_usage: false, deploy: true, health: false, workload: false, tasks: true, attention: true, ...object(source.status_bar_visibility) } };
 }
 export function primaryGroupSettings(source: UnknownRecord) {
   return { default_directory: settingText(source.default_directory), max_agents: numericDraft(source.max_agents ?? 0), git_worktree: source.git_worktree === true, engineer_merge_mode: settingText(source.engineer_merge_mode, 'pr') };

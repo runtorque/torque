@@ -3380,3 +3380,13 @@ History renders the persisted contract: role/template, input/output token counts
 - Commit/discard: Commit appearance locally after all coordinated daemon settings writes succeed. Refusal or rebuild confirmation retains the preview and leaves persisted appearance unchanged. Storage failure is explicit, retains the draft and permits manual retry without replaying acknowledged daemon writes. Leaving/unmounting Settings restores the persisted appearance; successful saves become the new baseline.
 - Dirty state: The unsaved caption, Save availability and navigation protection use the same actual pending-change predicate. Returning fields/appearance to the baseline clears ordinary edits. Staged section resets, explicit Relay overrides and AI clear intents remain pending until acknowledged or discarded. Submitting a clean form sends nothing.
 - Verification: P-292/P-293 require component and isolated browser evidence for edit/revert, reset, explicit intents, preview/cancel/discard, acknowledged persistence, reconnect and failed-save retention. Existing terminal instances applying the previewed font are separately audited.
+
+
+### D-173 — Terminal preferences update the existing xterm session
+
+- Date: 2026-09-25
+- Scope: embedded terminals, local appearance and global scrollback; P-294/P-295.
+- Appearance: Initialize xterm from the owning document's effective terminal font, background, text and accent tokens, including selection color. Observe appearance style/contrast changes so preview, discard and saved changes update existing instances. Apply changed options only; color-only changes require no fit. Font changes use the existing fit path that preserves reading/tail intent and restricts geometry messages to the visible PTY owner.
+- Scrollback: Match Classic/daemon normalization: finite numeric values are floored, 100–100,000 lines are accepted, invalid/out-of-range values use 2,000. Initialize from saved global settings, update existing instances on settings deltas and resync, and keep user drafts separate. Changing preferences must not remount xterm, recreate its socket, reset output or focus the terminal.
+- Lifetime: Disconnect appearance observers with the controller. Hidden/inactive controllers can accept options but cannot claim PTY focus/resize ownership. Shrinking scrollback intentionally drops history beyond the new limit; surviving history retains xterm's viewport behavior.
+- Verification: Model/controller tests, store-to-mounted-terminal checks and real-xterm isolated browser acceptance cover initialization, updates, normalization, reading/tail continuity, cleanup and reconnect. Native multi-window/cross-platform acceptance remains separate.
