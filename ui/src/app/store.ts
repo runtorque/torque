@@ -1,3 +1,4 @@
+import { classAssignmentSlice } from '../features/agents/classAssignmentState';
 import {
   configureStore,
   createSelector,
@@ -590,6 +591,7 @@ export function createAppStore(initialNavigation?: WorkspaceNavigation | null) {
       projection: projectionSlice.reducer,
       workspaceUi: workspaceUiSlice.reducer,
       composer: composerSlice.reducer,
+      classAssignments: classAssignmentSlice.reducer,
     },
     middleware: (getDefaultMiddleware) =>
       getDefaultMiddleware({

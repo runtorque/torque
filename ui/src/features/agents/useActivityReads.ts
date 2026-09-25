@@ -5,7 +5,7 @@ import type { UnknownRecord } from '../../protocol';
 import { readCommand } from '../../protocol/http';
 import { validateActivityRead, type ActivityRead } from './activityReads';
 
-export function useActivityReads(requests: ActivityRead[], active: boolean) {
+export function useActivityReads(requests: ActivityRead[], active: boolean, invalidation = '') {
   const dispatch = useAppDispatch();
   const ready = useAppSelector((state) => state.connection.status === 'connected' && state.connection.expectedSeq !== null && !state.connection.awaitingResync) && active;
   const reconnect = useAppSelector((state) => state.connection.reconnectCount);
@@ -13,7 +13,7 @@ export function useActivityReads(requests: ActivityRead[], active: boolean) {
   const [revision, setRevision] = useState(0);
   const [catalog, setCatalog] = useState<{ key: string; frame: UnknownRecord } | null>(null);
   const [result, setResult] = useState({ key: '', error: '' });
-  const plan = JSON.stringify(requests); const key = JSON.stringify([plan, ready, reconnect, snapshot, revision]);
+  const plan = JSON.stringify(requests); const key = JSON.stringify([plan, ready, reconnect, snapshot, revision, invalidation]);
   useEffect(() => {
     const reads = JSON.parse(plan) as ActivityRead[];
     if (!ready || !reads.length) return;

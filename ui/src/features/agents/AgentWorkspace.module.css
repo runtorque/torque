@@ -252,6 +252,8 @@
 .historyColumns > section > p { color: var(--text-muted); font-size: 8px; }
 .historyColumns > section > p { padding: 8px; }
 .classInspector { display: grid; align-content: start; gap: 10px; }
+.classInspector > p { margin: 0; color: var(--text-dim); font-size: 9px; line-height: 1.45; }
+.classInspector > p[role="alert"] { color: var(--danger); }
 .classAssignment { display: grid; grid-template-columns: minmax(220px, 1fr) auto auto; align-items: end; gap: 7px; padding: 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
 .classWarnings { margin: 0; padding: 8px 8px 8px 26px; border: 1px solid color-mix(in srgb, var(--warning) 38%, var(--border)); color: var(--warning); background: color-mix(in srgb, var(--warning) 7%, var(--surface)); font-size: 9px; }
 .classPreview { padding: 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
