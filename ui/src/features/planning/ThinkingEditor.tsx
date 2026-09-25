@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { useAppSelector } from '../../app/hooks';
 import { selectConnection } from '../../app/store';
@@ -14,8 +15,8 @@ const briefFields = {
   risks_tradeoffs: 'Risks and tradeoffs', open_questions: 'Open questions',
 };
 const noteFields = { title: 'Title', body: 'Body' };
-export function ThinkingEditor({ kind, item, notes, onClose }: {
-  kind: 'note' | 'brief'; item: UnknownRecord; notes: UnknownRecord[]; onClose: () => void;
+export function ThinkingEditor({ kind, item, notes, onClose, readStatus }: {
+  kind: 'note' | 'brief'; item: UnknownRecord; notes: UnknownRecord[]; onClose: () => void; readStatus?: ReactNode;
 }) {
   const id = text(item.id);
   const prefix = kind === 'note' ? 'scratchpad_note' : 'idea_brief';
@@ -75,6 +76,7 @@ export function ThinkingEditor({ kind, item, notes, onClose }: {
   const available = notes.filter((note) => !note.archived && !note.deleted && !links.some((link) => link.type === 'scratchpad_note' && link.id === note.id));
   return <ModalDialog title={kind === 'note' ? 'Scratchpad note' : 'Idea Brief'} description={id} size="large" isOpen onOpenChange={(open) => { if (!open && !busy.current) onClose(); }}>
     <form className={styles.detailForm} onSubmit={(event) => { event.preventDefault(); if (loaded && valid && !archived) mutate('save'); }}>
+      {readStatus}
       {error ? <p role="alert">{error}</p> : null}
       {loadError ? <p role="alert">{loadError} <Button onPress={() => setRetry((value) => value + 1)}>Retry details</Button></p> : null}
       {!loaded ? <p>Loading full details…</p> : null}

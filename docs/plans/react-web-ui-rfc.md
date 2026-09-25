@@ -1166,3 +1166,8 @@ P-262 now provides readable action/minute/manual presets and validated custom en
 ### Agent Activity loading checkpoint — 2026-09-25
 
 P-263 now loads only visible role/tab resources, cancels obsolete reads, refreshes after reconnect/resync and retains accepted content, paging and unfinished MCP filters through failures/retry. D-160 and the parity matrix record component/App and real-daemon browser evidence, including the status-row overlap discovered and repaired during acceptance. Planning's separate eager-loading gap is P-264. The main ledger has **264 behaviors: 254 implemented/equivalent dispositions, 6 open repairs and 4 intentional retirements**. Broad settings/lazy-reconnect and independent native/external/recovery gates remain open; Phase 4 is not complete.
+
+
+### Planning loading checkpoint — 2026-09-25
+
+P-264 now reads visible sections plus open-editor dependencies, retains accepted collections and drafts through reconnect, and exposes retry within modal focus containment. D-161 and the parity matrix record focused/full UI checks and six isolated live browser scenarios covering loading plus existing Planning/Thinking lifecycle workflows. Further audit adds P-265–P-269 for the Area list window, search, lifecycle/type filters and stable ordering. The main ledger has **269 behaviors: 255 implemented/equivalent dispositions, 10 open repairs and 4 intentional retirements**. Broad settings/lazy-reconnect, these Area browsing repairs and independent native/external/recovery gates remain open; Phase 4 is not complete.

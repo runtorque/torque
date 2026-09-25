@@ -1,8 +1,8 @@
 import { AreaEditor } from './AreaEditor';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useAppSelector } from '../../app/hooks';
-import { selectAgentsState, selectConnection, selectPlanningState, selectTasksState } from '../../app/store';
+import { selectAgentsState, selectConnection, selectTasksState } from '../../app/store';
 import { Button, ModalDialog, StateSurface } from '../../design/primitives';
 import type { CommandSender } from '../board/BoardPanel';
 import { groupInitiatives, groupRecords, planningStatuses, records, text } from './model';
@@ -11,7 +11,8 @@ import { ThinkingEditor } from './ThinkingEditor';
 import { usePlanningMutation } from './usePlanningMutation';
 import styles from './PlanningWorkspace.module.css';
 
-type PlanningTab = 'roadmap' | 'areas' | 'thinking' | 'decisions' | 'team' | 'schedules';
+import { planningReads, type PlanningTab } from './planningReads';
+import { usePlanningReads } from './usePlanningReads';
 
 const tabs: { id: PlanningTab; label: string }[] = [
   { id: 'roadmap', label: 'Initiatives' },
@@ -37,7 +38,6 @@ export function PlanningWorkspace({ group, sendCommand, onCommandUnavailable }: 
   sendCommand: CommandSender;
   onCommandUnavailable: () => void;
 }) {
-  const planning = useAppSelector(selectPlanningState);
   const tasks = useAppSelector(selectTasksState);
   const agents = useAppSelector(selectAgentsState);
   const connection = useAppSelector(selectConnection);
@@ -50,41 +50,18 @@ export function PlanningWorkspace({ group, sendCommand, onCommandUnavailable }: 
   const createMutation = usePlanningMutation();
   const [showArchivedDecisions, setShowArchivedDecisions] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
-  const [requested, setRequested] = useState(false);
-  const lastRequestKey = useRef('');
-  const error = connection.lastAuxiliaryFrame?.type === 'error'
-    ? text(connection.lastAuxiliaryFrame.message, 'The request failed.') : '';
+  const reads = usePlanningReads(planningReads(tab, group, showArchived, showArchivedDecisions, selected?.kind));
+  const { planning, refresh } = reads;
 
-  const refresh = useCallback(() => {
-    const commands = [
-      { cmd: 'initiative_list', group, include_archived: false },
-      { cmd: 'area_list', group, include_links: true, include_notes: true },
-      { cmd: 'scratchpad_note_list', group, include_archived: showArchived },
-      { cmd: 'idea_brief_list', group, include_archived: showArchived },
-      { cmd: 'decisions_snapshot', include_archived: showArchivedDecisions },
-      { cmd: 'pending_hires_snapshot', status: 'pending' },
-      { cmd: 'engineer_journal_snapshot', group, include_streams: true },
-    ];
-    const sent = commands.every((command) => sendCommand(command));
-    if (!sent) onCommandUnavailable();
-    setRequested(sent);
-  }, [group, onCommandUnavailable, sendCommand, showArchived, showArchivedDecisions]);
-
+  const lastMutation = useRef(connection.lastAuxiliaryFrame);
   useEffect(() => {
-    if (!group || connection.status !== 'connected') return;
-    const key = `${group}:${connection.reconnectCount}:${showArchived}:${showArchivedDecisions}`;
-    if (lastRequestKey.current === key) return;
-    lastRequestKey.current = key;
-    refresh();
-  }, [group, connection.status, connection.reconnectCount, refresh, showArchived, showArchivedDecisions]);
-
-  useEffect(() => {
+    if (lastMutation.current === connection.lastAuxiliaryFrame) return;
+    lastMutation.current = connection.lastAuxiliaryFrame;
     const type = connection.lastAuxiliaryFrame?.type || '';
-    // Link command replies carry the mutation, while compact clients may not
-    // receive a relationship delta. Rehydrate without remounting the editor.
-    if (/^initiative_(task|decision)_(linked|unlinked)$/.test(type)) sendCommand({ cmd: 'initiative_list', group, include_archived: false });
-    if (/^area_(linked|unlinked|note_(created|updated|archived))$/.test(type)) sendCommand({ cmd: 'area_list', group, include_links: true, include_notes: true });
-  }, [connection.lastAuxiliaryFrame, group, sendCommand]);
+    // Refresh only a displayed relationship collection after a compact reply.
+    if ((tab === 'roadmap' && /^initiative_(task|decision)_(linked|unlinked)$/.test(type))
+      || (tab === 'areas' && /^area_(linked|unlinked|note_(created|updated|archived))$/.test(type))) refresh();
+  }, [connection.lastAuxiliaryFrame, tab, refresh]);
 
   const initiatives = useMemo(() => groupInitiatives(planning.initiatives, group), [planning.initiatives, group]);
   const areas = useMemo(() => groupRecords(planning.areas, group), [planning.areas, group]);
@@ -127,15 +104,18 @@ export function PlanningWorkspace({ group, sendCommand, onCommandUnavailable }: 
     });
   };
 
-  const empty = (name: string, description: string) => requested
+  const empty = (name: string, description: string) => reads.ready && !reads.pending
     ? <StateSurface title={`No ${name}`} description={description} />
     : <StateSurface title={`Loading ${name}`} description="Torque is hydrating this panel on demand." />;
+
+  const readStatus = <>{!reads.ready ? <div role="status">Waiting for a synchronized connection. Loaded Planning remains available.</div> : reads.pending ? <div role="status">Refreshing Planning…</div> : null}
+    {reads.error ? <div className={styles.error} role="alert">{reads.error} <Button onPress={refresh}>Retry Planning</Button></div> : null}</>;
 
   return <section className={styles.root} aria-label="Planning">
     <header className={styles.header}>
       <div><p>Workspace / {group || 'No group'}</p><h1>Planning</h1></div>
-      <span>{totalInitiatives} initiatives · {areas.length} areas</span>
-      <Button tone="quiet" onPress={refresh}>Refresh</Button>
+      <span>{tab === 'roadmap' ? `${totalInitiatives} initiatives` : tab === 'areas' ? `${areas.length} areas` : tab === 'thinking' ? `${briefs.length} briefs · ${notes.length} notes` : tab === 'decisions' ? `${visibleDecisions.length} decisions` : tab === 'team' ? `${hires.length} pending hires · ${journals.length} journal entries` : `${schedules.length} schedules`}</span>
+      <Button tone="quiet" isDisabled={!reads.ready} onPress={refresh}>Refresh</Button>
       {createKindForTab ? <Button tone="primary" onPress={() => setCreateKind(createKindForTab)}>＋ New</Button> : null}
     </header>
     <nav className={styles.tabs} aria-label="Planning sections">
@@ -143,7 +123,7 @@ export function PlanningWorkspace({ group, sendCommand, onCommandUnavailable }: 
     </nav>
     {tab === 'thinking' ? <label className={styles.archiveFilter}><input type="checkbox" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} />Show archived Thinking</label> : null}
     {tab === 'decisions' ? <label className={styles.archiveFilter}><input type="checkbox" checked={showArchivedDecisions} onChange={(event) => setShowArchivedDecisions(event.target.checked)} />Show archived decisions</label> : null}
-    {error ? <div className={styles.error} role="alert">{error}</div> : null}
+    {!selected && !createKind ? readStatus : null}
     <div className={styles.content}>
       {tab === 'roadmap' ? <div className={styles.roadmap}>
         {planningStatuses.map((status) => <section key={status} className={styles.column}>
@@ -158,13 +138,14 @@ export function PlanningWorkspace({ group, sendCommand, onCommandUnavailable }: 
       </div> : null}
       {tab === 'decisions' ? <div className={styles.grid}>{visibleDecisions.length ? visibleDecisions.map((item) => <Card key={item.id} item={item} eyebrow={text(item.status, 'decision')} onOpen={() => setSelected({ kind: 'decision', item })} />) : empty('decisions', 'Architect decisions will appear after they are recorded.')}</div> : null}
       {tab === 'team' ? <div className={styles.split}>
-        <section><header><h2>Pending hires</h2><span>{hires.length}</span></header><div className={styles.list}>{hires.length ? hires.map((item) => <article className={styles.hireCard} key={item.id}><Card item={item} eyebrow={text(item.status, 'pending')} /><div><Button tone="quiet" onPress={() => sendCommand({ cmd: 'pending_hire_reject', id: item.id, note: 'Rejected by user from Planning' })}>Reject</Button><Button tone="primary" onPress={() => sendCommand({ cmd: 'pending_hire_approve', id: item.id })}>Approve</Button></div></article>) : empty('pending hires', 'Architect hiring requests will appear here for review.')}</div></section>
+        <section><header><h2>Pending hires</h2><span>{hires.length}</span></header><div className={styles.list}>{hires.length ? hires.map((item) => <article className={styles.hireCard} key={item.id}><Card item={item} eyebrow={text(item.status, 'pending')} /><div><Button tone="quiet" onPress={() => { if (!sendCommand({ cmd: 'pending_hire_reject', id: item.id, note: 'Rejected by user from Planning' })) onCommandUnavailable(); }}>Reject</Button><Button tone="primary" onPress={() => { if (!sendCommand({ cmd: 'pending_hire_approve', id: item.id })) onCommandUnavailable(); }}>Approve</Button></div></article>) : empty('pending hires', 'Architect hiring requests will appear here for review.')}</div></section>
         <section><header><h2>Engineer journals</h2><span>{journals.length}</span></header><div className={styles.list}>{journals.length ? journals.map((item) => <Card key={item.id} item={item} eyebrow="journal" />) : empty('journal entries', 'Engineer progress journals are empty for this group.')}</div></section>
       </div> : null}
       {tab === 'schedules' ? <div className={styles.grid}>{schedules.length ? schedules.map((item) => <Card key={item.id} item={item} eyebrow={item.enabled === false ? 'paused' : 'enabled'} />) : empty('schedules', 'Create recurring work from the Board schedule editor.')}</div> : null}
     </div>
     <ModalDialog title={`New ${createKind ?? 'planning item'}`} description={`Create in ${group}.`} size="small" isOpen={createKind !== null} onOpenChange={(open) => { if (!open && !createMutation.busy.current) setCreateKind(null); }}>
       <form className={styles.createForm} onSubmit={(event) => { event.preventDefault(); create(); }}>
+        {readStatus}
         {createMutation.error ? <p role="alert">{createMutation.error}</p> : null}
         <fieldset disabled={createMutation.pending} className={styles.editorFields}>
         <label>Title<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} /></label>
@@ -173,9 +154,9 @@ export function PlanningWorkspace({ group, sendCommand, onCommandUnavailable }: 
         <footer><Button tone="quiet" onPress={() => setCreateKind(null)}>Cancel</Button><Button tone="primary" type="submit" isDisabled={createMutation.pending || !title.trim() || (createKind === 'brief' && !description.trim()) || (createKind === 'decision' && (!architectId || !description.trim()))}>Create</Button></footer></fieldset>
       </form>
     </ModalDialog>
-    {selected?.kind === 'initiative' ? <InitiativeEditor key={text(selected.item.id)} item={records(planning.initiatives).find((item) => item.id === selected.item.id) ?? selected.item} tasks={taskItems} decisions={decisions.filter((item) => !item.archived)} onClose={() => setSelected(null)} /> : null}
-    {selected?.kind === 'area' ? <AreaEditor key={text(selected.item.id)} item={records(planning.areas).find((item) => item.id === selected.item.id) ?? selected.item} targets={{ task: taskItems, decision: decisions, initiative: Object.values(initiatives).flat(), area: areas }} onClose={() => setSelected(null)} /> : null}
-    {selected?.kind === 'note' || selected?.kind === 'brief' ? <ThinkingEditor key={text(selected.item.id)} kind={selected.kind} item={records(selected.kind === 'note' ? planning.scratchpadNotes : planning.ideaBriefs).find((item) => item.id === selected.item.id) ?? selected.item} notes={notes} onClose={() => setSelected(null)} /> : null}
-    {selected?.kind === 'decision' ? <DecisionEditor key={text(selected.item.id)} item={decisions.find((item) => item.id === selected.item.id) ?? selected.item} tasks={taskItems} engineers={engineers} decisions={decisions} onClose={() => setSelected(null)} /> : null}
+    {selected?.kind === 'initiative' ? <InitiativeEditor readStatus={readStatus} key={text(selected.item.id)} item={records(planning.initiatives).find((item) => item.id === selected.item.id) ?? selected.item} tasks={taskItems} decisions={decisions.filter((item) => !item.archived)} onClose={() => setSelected(null)} /> : null}
+    {selected?.kind === 'area' ? <AreaEditor readStatus={readStatus} key={text(selected.item.id)} item={records(planning.areas).find((item) => item.id === selected.item.id) ?? selected.item} targets={{ task: taskItems, decision: decisions, initiative: Object.values(initiatives).flat(), area: areas }} onClose={() => setSelected(null)} /> : null}
+    {selected?.kind === 'note' || selected?.kind === 'brief' ? <ThinkingEditor readStatus={readStatus} key={text(selected.item.id)} kind={selected.kind} item={records(selected.kind === 'note' ? planning.scratchpadNotes : planning.ideaBriefs).find((item) => item.id === selected.item.id) ?? selected.item} notes={notes} onClose={() => setSelected(null)} /> : null}
+    {selected?.kind === 'decision' ? <DecisionEditor readStatus={readStatus} key={text(selected.item.id)} item={decisions.find((item) => item.id === selected.item.id) ?? selected.item} tasks={taskItems} engineers={engineers} decisions={decisions} onClose={() => setSelected(null)} /> : null}
   </section>;
 }

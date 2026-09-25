@@ -1,0 +1,42 @@
+import { expect, test, type APIRequestContext, type WebSocketRoute } from '@playwright/test';
+type Row = Record<string, unknown>;
+async function command(request: APIRequestContext, data: Row) {
+  const result = await (await request.post('/api/cmd', { data })).json() as { ok: boolean; error?: string; data: Row };
+  expect(result.ok, result.error).toBe(true); expect(result.data.type).not.toBe('error'); return result.data;
+}
+test('Planning reads visible sections and editor choices, preserving drafts through reconnect failure and retry', async ({ page, request }) => {
+  test.setTimeout(90_000); page.setDefaultTimeout(15_000);
+  const runtime = (await (await request.get('/api/runtime')).json() as { data: { runtime: Row } }).data.runtime;
+  expect(runtime.port).not.toBe(18932); expect(runtime.profile).not.toBe('default');
+  const group = `Planning loading ${Date.now()}`;
+  await command(request, { cmd: 'add_group', group }); await command(request, { cmd: 'ui_select_group', group }); await command(request, { cmd: 'ui_set_react_workspace_state', state: { version: 1, activePanel: 'planning', controlTab: 'mission' } });
+  await command(request, { cmd: 'initiative_create', group, title: 'Lazy initiative', summary: 'Saved initiative', planning_status: 'triage' });
+  await command(request, { cmd: 'area_create', group, title: 'Lazy area', summary: 'Saved area', lifecycle: 'planned' });
+  await command(request, { cmd: 'scratchpad_note_create', group, title: 'Lazy note', body: 'Saved note' });
+  await command(request, { cmd: 'idea_brief_create', group, title: 'Lazy brief', problem_opportunity: 'Saved problem', status: 'draft' });
+  const listTypes = new Set(['initiative_list', 'area_list', 'scratchpad_note_list', 'idea_brief_list', 'decisions_snapshot', 'pending_hires_snapshot', 'engineer_journal_snapshot']);
+  const reads: Row[] = []; let socket: WebSocketRoute | undefined; let connections = 0; let refusal = false;
+  await page.routeWebSocket(/\/ws\?/, (connection) => { connection.connectToServer(); socket = connection; connections++; });
+  await page.route('**/api/cmd', async (route) => { const data = route.request().postDataJSON() as Row; if (listTypes.has(String(data.cmd))) reads.push(data); if (data.cmd === 'area_list' && refusal) { refusal = false; await route.fulfill({ json: { ok: false, error: 'QA Planning refresh refused' } }); } else await route.continue(); });
+  const kinds = (start: number) => reads.slice(start).map((row) => String(row.cmd)).sort();
+  const settled = async () => { await expect(page.getByText('Refreshing Planning…', { exact: true })).toHaveCount(0); };
+  const reconnect = async () => { const before = connections; await socket!.close({ code: 1012, reason: 'Planning reading continuity' }); await expect.poll(() => connections).toBeGreaterThan(before); };
+  await page.goto('/'); await expect(page.getByRole('button', { name: /Lazy initiative/ })).toBeVisible(); await settled(); expect(kinds(0)).toEqual(['initiative_list']);
+  let start = reads.length; await page.getByRole('button', { name: 'Areas', exact: true }).click(); await expect(page.getByRole('button', { name: /Lazy area/ })).toBeVisible(); await settled(); expect(kinds(start)).toEqual(['area_list']);
+  start = reads.length; await page.getByRole('button', { name: /Lazy area/ }).click(); const dialog = page.getByRole('dialog', { name: 'Area', exact: true }); await expect(dialog).toBeVisible();
+  await dialog.getByLabel('Relationship type').selectOption('initiative'); await expect(dialog.getByLabel('Relationship target').locator('option', { hasText: 'Lazy initiative' })).toHaveCount(1); await settled(); expect(kinds(start)).toEqual(['area_list', 'decisions_snapshot', 'initiative_list']);
+  const title = dialog.getByLabel('Title', { exact: true }); await title.fill('Unfinished area title'); await title.focus(); await title.evaluate((node) => { const input = node as HTMLInputElement; input.setSelectionRange(2, 8); input.dataset.retained = 'yes'; });
+  start = reads.length; refusal = true; await reconnect(); await expect(dialog.getByRole('alert')).toContainText('QA Planning refresh refused'); expect(kinds(start)).toEqual(['area_list', 'decisions_snapshot', 'initiative_list']);
+  await expect(title).toHaveValue('Unfinished area title'); await expect(title).toBeFocused(); await expect(title).toHaveAttribute('data-retained', 'yes'); expect(await title.evaluate((node) => [(node as HTMLInputElement).selectionStart, (node as HTMLInputElement).selectionEnd])).toEqual([2, 8]);
+  await page.screenshot({ path: test.info().outputPath('planning-lazy-retry.png') });
+  await dialog.getByRole('button', { name: 'Retry Planning' }).click(); await expect(dialog.getByRole('alert')).toHaveCount(0); await settled(); await expect(title).toHaveValue('Unfinished area title'); await expect(dialog.getByLabel('Relationship target').locator('option', { hasText: 'Lazy initiative' })).toHaveCount(1);
+  await page.screenshot({ path: test.info().outputPath('planning-lazy-editor.png') });
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click(); await expect(dialog).toHaveCount(0); await settled();
+  start = reads.length; await page.getByRole('button', { name: 'Thinking', exact: true }).click(); await expect(page.getByRole('button', { name: /Lazy brief/ })).toBeVisible(); await expect(page.getByRole('button', { name: /Lazy note/ })).toBeVisible(); await settled(); expect(kinds(start)).toEqual(['idea_brief_list', 'scratchpad_note_list']);
+  start = reads.length; await page.getByLabel('Show archived Thinking').check(); await expect.poll(() => reads.length).toBeGreaterThan(start); await settled(); expect(kinds(start)).toEqual(['idea_brief_list', 'scratchpad_note_list']); expect(reads.slice(start).every((row) => row.include_archived === true)).toBe(true);
+  start = reads.length; await page.getByRole('button', { name: 'Decisions', exact: true }).click(); await expect.poll(() => reads.length).toBeGreaterThan(start); await settled(); expect(kinds(start)).toEqual(['decisions_snapshot']);
+  start = reads.length; await page.getByLabel('Show archived decisions').check(); await expect.poll(() => reads.length).toBeGreaterThan(start); await settled(); expect(reads.slice(start)).toEqual([{ cmd: 'decisions_snapshot', include_archived: true }]);
+  start = reads.length; await page.getByRole('button', { name: 'Hires & journals', exact: true }).click(); await expect.poll(() => reads.length).toBeGreaterThan(start); await settled(); expect(kinds(start)).toEqual(['engineer_journal_snapshot', 'pending_hires_snapshot']);
+  start = reads.length; await page.getByRole('button', { name: 'Schedules', exact: true }).click(); await reconnect(); await page.waitForTimeout(300); expect(kinds(start)).toEqual([]);
+  await page.getByRole('button', { name: /▦ Board/ }).click(); start = reads.length; await reconnect(); await page.waitForTimeout(300); expect(kinds(start)).toEqual([]);
+});

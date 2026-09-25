@@ -920,14 +920,13 @@ describe('workspace shell', () => {
     const writes: TorqueCommand[] = [];
     vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => {
       const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand; writes.push(command);
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: 'initiative_created', initiative: { id: 'new-initiative', ...command } } }) });
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: command.cmd === 'initiative_list' ? { type: 'initiative_list', group: 'Foundation', initiatives: [] } : { type: 'initiative_created', initiative: { id: 'new-initiative', ...command } } }) });
     }));
-    const { sendCommand } = renderShell();
+    renderShell();
     fireEvent.click(screen.getByRole('button', { name: /Planning/ }));
 
     expect(await screen.findByRole('heading', { name: 'Planning' })).toBeVisible();
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'initiative_list', group: 'Foundation', include_archived: false });
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'engineer_journal_snapshot', group: 'Foundation', include_streams: true });
+    await waitFor(() => expect(writes).toEqual([{ cmd: 'initiative_list', group: 'Foundation', include_archived: false }]));
 
     fireEvent.click(screen.getByRole('button', { name: '＋ New' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), { target: { value: 'Ship Phase 4' } });

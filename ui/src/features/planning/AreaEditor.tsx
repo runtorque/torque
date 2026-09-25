@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import { projectionActions, selectConnection } from '../../app/store';
@@ -9,8 +10,8 @@ import { records, text } from './model';
 import styles from './PlanningWorkspace.module.css';
 
 const emptyNote = { title: '', body: '', note_type: 'caveat', target_type: '', target_id: '' };
-export function AreaEditor({ item, targets, onClose }: {
-  item: UnknownRecord; targets: Record<AreaTarget, UnknownRecord[]>; onClose: () => void;
+export function AreaEditor({ item, targets, onClose, readStatus }: {
+  item: UnknownRecord; targets: Record<AreaTarget, UnknownRecord[]>; onClose: () => void; readStatus?: ReactNode;
 }) {
   const dispatch = useAppDispatch();
   const reconnect = useAppSelector(selectConnection).reconnectCount;
@@ -55,6 +56,7 @@ export function AreaEditor({ item, targets, onClose }: {
   const targetOptions = (kind: AreaTarget, excludeSelf = true) => targets[kind].filter((entry) => !excludeSelf || kind !== 'area' || text(entry.id) !== id).map((entry) => <option key={text(entry.id)} value={text(entry.id)}>{text(entry.title, text(entry.task, text(entry.id)))}</option>);
   return <ModalDialog title="Area" description={id} size="large" isOpen onOpenChange={(open) => { if (!open && !busy.current) onClose(); }}>
     <form className={styles.detailForm} onSubmit={(event) => { event.preventDefault(); void mutate({ cmd: 'area_update', id, ...draft }, onClose); }}>
+      {readStatus}
       {error ? <p role="alert">{error}</p> : null}{loadError ? <p role="alert">{loadError} <Button onPress={() => setRetry((value) => value + 1)}>Retry Area details</Button></p> : null}
       <fieldset disabled={pending} style={{ border: 0, margin: 0, padding: 0 }}>
         <div className={styles.formGrid}><label className={styles.field}>Title<input value={draft.title} onChange={(event) => change({ title: event.target.value })} /></label><label className={styles.field}>Type<input value={draft.area_type} onChange={(event) => change({ area_type: event.target.value })} /></label><label className={styles.field}>Lifecycle<select value={draft.lifecycle} onChange={(event) => change({ lifecycle: event.target.value })}>{areaLifecycles.map((value) => <option key={value}>{value}</option>)}</select></label><label className={styles.field}>Owner kind<select value={draft.owner_kind} onChange={(event) => change({ owner_kind: event.target.value })}>{['user', 'architect', 'engineer'].map((value) => <option key={value}>{value}</option>)}</select></label><label className={styles.field}>Owner ID<input value={draft.owner_id} onChange={(event) => change({ owner_id: event.target.value })} /></label></div>

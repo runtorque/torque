@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { Button, ModalDialog } from '../../design/primitives';
 import type { TorqueCommand, UnknownRecord } from '../../protocol';
@@ -14,8 +15,8 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 function stringIds(value: unknown): string[] { return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []; }
 
-export function InitiativeEditor({ item, tasks, decisions, onClose }: {
-  item: UnknownRecord; tasks: UnknownRecord[]; decisions: UnknownRecord[]; onClose: () => void;
+export function InitiativeEditor({ item, tasks, decisions, onClose, readStatus }: {
+  item: UnknownRecord; tasks: UnknownRecord[]; decisions: UnknownRecord[]; onClose: () => void; readStatus?: ReactNode;
 }) {
   const editor = usePlanningEditor('initiative', item, initiativeFields);
   const { detail, draft, change } = editor;
@@ -39,6 +40,7 @@ export function InitiativeEditor({ item, tasks, decisions, onClose }: {
   }); };
   return <ModalDialog title="Initiative" description={id} size="large" isOpen onOpenChange={(open) => { if (!open && !mutation.busy.current) onClose(); }}>
     <form className={styles.detailForm} onSubmit={(event) => { event.preventDefault(); save(); }}>
+      {readStatus}
       {mutation.error ? <p role="alert">{mutation.error}</p> : null}
       {editor.loadError ? <p role="alert">{editor.loadError} <Button onPress={editor.reload}>Retry details</Button></p> : null}
       {!editor.loaded ? <p>Loading full details…</p> : null}
@@ -66,8 +68,8 @@ export function InitiativeEditor({ item, tasks, decisions, onClose }: {
   </ModalDialog>;
 }
 
-export function DecisionEditor({ item, tasks, engineers, decisions, onClose }: {
-  item: UnknownRecord; tasks: UnknownRecord[]; engineers: UnknownRecord[]; decisions: UnknownRecord[]; onClose: () => void;
+export function DecisionEditor({ item, tasks, engineers, decisions, onClose, readStatus }: {
+  item: UnknownRecord; tasks: UnknownRecord[]; engineers: UnknownRecord[]; decisions: UnknownRecord[]; onClose: () => void; readStatus?: ReactNode;
 }) {
   const editor = usePlanningEditor('decision', item, decisionFields);
   const { detail, draft, change } = editor;
@@ -85,6 +87,7 @@ export function DecisionEditor({ item, tasks, engineers, decisions, onClose }: {
   const save = () => { if (!valid || archived) return; const patch = editor.patch(); if (!Object.keys(patch).length) { onClose(); return; } mutate({ cmd: 'architect_decision_update', ...patch }, true); };
   return <ModalDialog title="Architect decision" description={id} size="large" isOpen onOpenChange={(open) => { if (!open && !mutation.busy.current) onClose(); }}>
     <form className={styles.detailForm} onSubmit={(event) => { event.preventDefault(); save(); }}>
+      {readStatus}
       {mutation.error ? <p role="alert">{mutation.error}</p> : null}
       {editor.loadError ? <p role="alert">{editor.loadError} <Button onPress={editor.reload}>Retry details</Button></p> : null}
       {!editor.loaded ? <p>Loading full details…</p> : null}

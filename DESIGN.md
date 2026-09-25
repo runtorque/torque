@@ -3254,3 +3254,13 @@ History renders the persisted contract: role/template, input/output token counts
 - MCP drafts: Typing tool/outcome/range edits does not fetch or reset the displayed result window. Apply commits the query and resets its remote limit; refresh/reconnect/page extension use the applied query while unfinished edits remain in their controls.
 - Layout: Read status and retry occupy a dedicated auto-sized row above the bounded scrolling content, so the content cannot overlap the retry control.
 - Verification: P-263 records component/integration and isolated browser acceptance. Planning section reads are a separate P-264 repair; this change does not close the broad P-112 gate.
+
+
+### D-161 — Planning reads follow the visible section and editor
+
+- Date: 2026-09-25
+- Scope: Planning section lists, relationship choices, reconnect and read failures.
+- Decision: Initiatives reads its list; Areas reads its list with links/notes; Thinking reads notes and briefs; Decisions reads its current archive view; Hires & journals reads pending hires and group journals. Schedules uses the synchronized snapshot. Only an open Initiative editor adds decisions; an open Area editor adds initiatives and decisions for its relationship/note selectors. The header reports the visible section's counts instead of implying unseen collections have loaded.
+- Lifecycle: Correlated HTTP reads validate response type and explicit group, abort on plan change/unmount, time out after 30 seconds and retry in place. Reconnect/resync waits for a synchronized snapshot and refreshes only the current plan. Retain accepted collections until their own replacement arrives, then apply ordinary live updates again; pending/failed reads preserve selected editors, drafts, focus and caret. Changing workspace group mounts a fresh scope.
+- Feedback: Loading/error/retry is visible inside an open editor or creation dialog, so modal focus containment never makes the recovery action inaccessible. Otherwise it appears above the section content. Retry and Refresh only repeat the current plan; archive toggles only affect their relevant section.
+- Verification: P-264 records component/integration and isolated production-browser acceptance. Broad P-112 and other parity gates remain independently open.
