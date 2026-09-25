@@ -27,3 +27,11 @@ export function relayConfigurationView(settings: UnknownRecord, resolved: unknow
   return { values, placeholders, origins };
 }
 
+
+export function relayCredentialGate(resolved: unknown) {
+  const source = record(resolved); const config = record(source.config); const sources = record(source.sources);
+  const effective = (key: string) => text(key in config ? config[key] : record(sources[key]).value).trim();
+  const url = effective('relay_url'); const daemonId = effective('daemon_id'); const credentialId = effective('credential_id');
+  const reason = !url && !daemonId ? 'Set and save the Relay URL and daemon ID before pairing.' : !url ? 'Set and save the Relay URL before pairing.' : !daemonId ? 'Set and save the daemon ID before pairing.' : '';
+  return { url, daemonId, credentialId, reason, key: JSON.stringify([url, daemonId, credentialId]) };
+}

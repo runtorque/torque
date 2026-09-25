@@ -1257,7 +1257,7 @@ describe('workspace shell', () => {
     expect(days).toHaveFocus(); expect(days.closest('details')).toHaveAttribute('open');
     expect(draft).toHaveValue(9300); expect(search).toHaveValue('');
     fireEvent.change(search, { target: { value: 'no such setting' } });
-    expect(screen.getByRole('status')).toHaveTextContent('No settings found');
+    expect(screen.getByText('No settings found for “no such setting”')).toHaveAttribute('role', 'status');
     fireEvent.keyDown(search, { key: 'Enter' });
     expect(commands.filter((command) => /^(update_|engineer_update_)/.test(String(command.cmd)))).toHaveLength(0);
     fireEvent.click(screen.getByRole('button', { name: 'Clear settings search' }));

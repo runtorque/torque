@@ -297,3 +297,10 @@
 .statusPreview ul { display: flex; flex-wrap: wrap; gap: 6px 0; padding: 0; margin: 0; list-style: none; }
 .statusPreview li { padding: 3px 8px; border-inline-end: 1px solid var(--border); font-size: 10px; }
 .statusPreview p { margin: 0; font-size: 10px; }
+
+.relayPairing { min-width: 0; padding: 9px; margin-top: 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.relayPairing h4 { margin: 0 0 7px; font-size: 10px; }
+.relayPairing p { margin: 7px 0; color: var(--text-dim); font-size: 9px; overflow-wrap: anywhere; }
+.relayPairing [role="alert"] { color: var(--danger); }
+.relayPairing dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 9px; font-size: 9px; }
+.relayPairing dd { margin: 0; overflow-wrap: anywhere; }
