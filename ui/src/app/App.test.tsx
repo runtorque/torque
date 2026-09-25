@@ -35,7 +35,8 @@ afterEach(() => vi.unstubAllGlobals());
 function pendingActivityReads() {
   const commands: TorqueCommand[] = [];
   vi.stubGlobal('fetch', (_input: RequestInfo | URL, options?: RequestInit) => {
-    commands.push(JSON.parse(typeof options?.body === 'string' ? options.body : '{}') as TorqueCommand);
+    const command = JSON.parse(typeof options?.body === 'string' ? options.body : '{}') as TorqueCommand; commands.push(command);
+    if (command.cmd === 'agent_class_list') return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: 'agent_classes', classes: [{ id: 'default-worker', display_name: 'Default Worker', base_kind: 'worker', version: '1' }] } }) });
     // Tests below provide response frames explicitly, independently of reads.
     return new Promise<never>(() => {});
   });
@@ -723,7 +724,7 @@ describe('workspace shell', () => {
     expect(screen.getByText('abcdef1 · now · +0 −0')).toBeVisible();
   });
 
-  it('shows agent events, MCP calls, persisted history, and Agent Class state inside Activity', () => {
+  it('shows agent events, MCP calls, persisted history, and Agent Class state inside Activity', async () => {
     const activityCommands = pendingActivityReads();
     const { appStore } = renderShell();
     fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
@@ -777,7 +778,7 @@ describe('workspace shell', () => {
     expect(retainedMessages[1]).toBeVisible();
     fireEvent.click(within(activity).getByRole('tab', { name: 'Agent Class' }));
     expect(activityCommands.slice(-3).map((command) => command.cmd)).toEqual(['agent_class_list', 'agent_class_status', 'agent_class_audit']);
-    expect(within(activity).getAllByText('Default Worker')).toHaveLength(2);
+    await waitFor(() => expect(within(activity).getAllByText('Default Worker')).toHaveLength(2));
     expect(within(activity).getByText('Desired class saved')).not.toBeVisible();
     fireEvent.click(within(activity).getByText('assignment set'));
     expect(within(activity).getByText('Desired class saved')).toBeVisible();

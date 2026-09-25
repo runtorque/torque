@@ -7,7 +7,7 @@ import { compactStateFixture } from '../../protocol/fixtures';
 import { readCommand } from '../../protocol/http';
 import { AgentDetailWorkspace } from './AgentDetailWorkspace';
 import { toAgentViewModel } from './model';
-import { activityReads, validateActivityRead, type ActivityTab } from './activityReads';
+import { activityReads, agentClassBaseDir, validateActivityRead, type ActivityTab } from './activityReads';
 vi.mock('../../protocol/http', () => ({ readCommand: vi.fn() }));
 const read = vi.mocked(readCommand);
 const limits = { events: 20, journal: 20, mcp: 20, history: 20, class: 20 };
@@ -16,7 +16,7 @@ beforeEach(() => { read.mockReset(); });
 function mount() {
   const store = createAppStore(); store.dispatch(projectionActions.snapshotReceived(compactStateFixture)); store.dispatch(connectionActions.connected({ at: 1, reconnect: false })); store.dispatch(connectionActions.snapshotAccepted(compactStateFixture));
   const agent = toAgentViewModel('agent-1', { id: 'agent-1', name: 'Worker', group: 'Foundation', kind: 'worker', status: 'idle' });
-  function Panel({ active }: { active: boolean }) { const responses = useAppSelector(selectAuxiliaryResponseState); return <AgentDetailWorkspace active={active} agent={agent} group="Foundation" catalog={{ agentClasses: [] }} responses={responses} tasks={{}} directMessages={[]} peerThreads={[]} digestSettings={{}} digestBufferStats={{}} digestSentEvents={[]} sendCommand={() => true} onUnavailable={() => {}} />; }
+  function Panel({ active }: { active: boolean }) { const responses = useAppSelector(selectAuxiliaryResponseState); return <AgentDetailWorkspace active={active} agent={agent} group="Foundation" responses={responses} tasks={{}} directMessages={[]} peerThreads={[]} digestSettings={{}} digestBufferStats={{}} digestSentEvents={[]} sendCommand={() => true} onUnavailable={() => {}} />; }
   const view = render(<Provider store={store}><Panel active /></Provider>);
   return { store, hide: () => view.rerender(<Provider store={store}><Panel active={false} /></Provider>), show: () => view.rerender(<Provider store={store}><Panel active /></Provider>), reconnect: () => act(() => { store.dispatch(connectionActions.disconnected({ at: 2 })); store.dispatch(connectionActions.connected({ at: 3, reconnect: true })); store.dispatch(projectionActions.snapshotReceived(compactStateFixture)); store.dispatch(connectionActions.snapshotAccepted(compactStateFixture)); }) };
 }
@@ -59,6 +59,36 @@ describe('visible Agent Activity reads', () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
       expect(signal?.aborted).toBe(true); expect(screen.getByRole('alert')).toHaveTextContent('timed out'); expect(screen.getByRole('button', { name: 'Retry activity' })).toBeEnabled();
     } finally { vi.useRealTimers(); }
+  });
+
+  it('uses the agent project rather than the shared catalog and rejects obsolete project replies', async () => {
+    expect(agentClassBaseDir({ worktree_repo_root: '/repo', directory: '/worktree', current_path: '/cwd' })).toBe('/repo');
+    expect(agentClassBaseDir({ directory: '/project', current_path: '/cwd' })).toBe('/project'); expect(agentClassBaseDir({ current_path: '/cwd' })).toBe('/cwd');
+    const store = createAppStore(); store.dispatch(projectionActions.snapshotReceived(compactStateFixture)); store.dispatch(connectionActions.connected({ at: 1, reconnect: false })); store.dispatch(connectionActions.snapshotAccepted(compactStateFixture));
+    const sent = vi.fn(() => true); let release!: (frame: { type: string; base_dir: string; classes: unknown[] }) => void;
+    const classDefinition = { id: 'shared-id', base_kind: 'worker', display_name: 'Project B class' };
+    read.mockImplementation((command) => {
+      if (command.cmd === 'agent_class_list' && command.base_dir === '/a') return new Promise((resolve) => { release = resolve; });
+      if (command.cmd === 'agent_class_list') return Promise.resolve({ type: 'agent_classes', base_dir: '/b', classes: [classDefinition, { id: 'disabled-class', base_kind: 'worker', display_name: 'Unavailable class', launchable: false }] });
+      if (command.cmd === 'agent_class_status') return Promise.resolve({ type: 'agent_class_status', status: { agent_id: 'agent-1' } });
+      if (command.cmd === 'agent_class_audit') return Promise.resolve({ type: 'agent_class_audit', agent_id: 'agent-1', events: [] });
+      return Promise.resolve({ type: 'cell_events', cell_id: 'agent-1', events: [] });
+    });
+    function Panel({ directory }: { directory: string }) { const responses = useAppSelector(selectAuxiliaryResponseState); return <AgentDetailWorkspace agent={toAgentViewModel('agent-1', { id: 'agent-1', kind: 'worker', name: 'Worker', directory })} group="Foundation" responses={responses} tasks={{}} directMessages={[]} peerThreads={[]} digestSettings={{}} digestBufferStats={{}} digestSentEvents={[]} sendCommand={sent} onUnavailable={() => {}} />; }
+    const view = render(<Provider store={store}><Panel directory="/a" /></Provider>); fireEvent.click(screen.getByRole('tab', { name: 'Agent Class' }));
+    await waitFor(() => expect(read.mock.calls.some(([command]) => command.cmd === 'agent_class_list' && command.base_dir === '/a')).toBe(true));
+    const signal = read.mock.calls.find(([command]) => command.cmd === 'agent_class_list')![1];
+    act(() => { store.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'agent_classes', classes: [{ id: 'wrong', display_name: 'Unrelated global catalog', base_kind: 'worker' }] })); });
+    expect(screen.queryByRole('option', { name: 'Unrelated global catalog' })).not.toBeInTheDocument(); expect(screen.getByRole('button', { name: 'Save assignment' })).toBeDisabled();
+    view.rerender(<Provider store={store}><Panel directory="/b" /></Provider>); await screen.findByRole('option', { name: 'Project B class' }); expect(screen.getByRole('option', { name: 'Unavailable class (unavailable)' })).toBeDisabled(); expect(signal.aborted).toBe(true);
+    await act(async () => { release({ type: 'agent_classes', base_dir: '/a', classes: [{ ...classDefinition, display_name: 'Obsolete A class' }] }); await Promise.resolve(); }); expect(screen.queryByRole('option', { name: 'Obsolete A class' })).not.toBeInTheDocument();
+    const select = screen.getByLabelText('Desired class for next launch'); fireEvent.change(select, { target: { value: 'shared-id' } }); await waitFor(() => expect(screen.getByRole('button', { name: 'Save assignment' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Save assignment' })); expect(sent).toHaveBeenCalledWith({ cmd: 'agent_class_assign', agent_id: 'agent-1', base_dir: '/b', class_id: 'shared-id', actor_label: 'trusted-user-react-ui' });
+    read.mockImplementation((command) => Promise.resolve(command.cmd === 'agent_class_list' ? { type: 'agent_classes', base_dir: '/WRONG', classes: [] } : command.cmd === 'agent_class_status' ? { type: 'agent_class_status', status: { agent_id: 'agent-1' } } : { type: 'agent_class_audit', agent_id: 'agent-1', events: [] }));
+    act(() => { select.focus(); store.dispatch(projectionActions.snapshotReceived(compactStateFixture)); store.dispatch(connectionActions.snapshotAccepted(compactStateFixture)); });
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('requested target')); expect(select).toHaveFocus(); expect(select).toHaveValue('shared-id'); expect(screen.getByRole('option', { name: 'Project B class' })).toBeInTheDocument(); expect(screen.getByRole('button', { name: 'Save assignment' })).toBeDisabled();
+    read.mockImplementation((command) => Promise.resolve(command.cmd === 'agent_class_list' ? { type: 'agent_classes', base_dir: '/b', classes: [] } : command.cmd === 'agent_class_status' ? { type: 'agent_class_status', status: { agent_id: 'agent-1' } } : { type: 'agent_class_audit', agent_id: 'agent-1', events: [] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Retry activity' })); await screen.findByRole('option', { name: 'shared-id (unavailable)' }); expect(select).toHaveValue('shared-id'); expect(screen.getByRole('button', { name: 'Save assignment' })).toBeDisabled();
   });
 
 });

@@ -4,20 +4,19 @@ import { Button, StateSurface } from '../../design/primitives';
 import type { CommandSender } from '../board/BoardPanel';
 import type { AgentViewModel } from './model';
 import styles from './AgentWorkspace.module.css';
-import { activityReads, type ActivityTab as AgentTab, type RemoteSection } from './activityReads';
+import { activityReads, agentClassBaseDir, type ActivityTab as AgentTab, type RemoteSection } from './activityReads';
 import { useActivityReads } from './useActivityReads';
+import { creationClassDisabledReason } from './useCreationClasses';
 
 
 const PAGE_SIZE = 20;
 const INITIAL_LIMITS: Record<RemoteSection, number> = { events: PAGE_SIZE, journal: PAGE_SIZE, mcp: PAGE_SIZE, history: PAGE_SIZE, class: PAGE_SIZE };
 const REMOTE_MAX: Record<RemoteSection, number> = { events: 200, journal: 200, mcp: 500, history: 1_000, class: 500 };
 
-interface CatalogBundle { agentClasses: unknown }
 interface Props {
   active?: boolean;
   agent: AgentViewModel;
   group: string;
-  catalog: CatalogBundle;
   responses: Record<string, unknown>;
   tasks: Record<string, unknown>;
   directMessages: unknown;
@@ -50,7 +49,7 @@ function retainedActivityFrames(source: Record<string, unknown>, id: string, gro
   const keys = [
     ...['cell_events', 'mcp_calls', 'agent_history_detail', 'agent_class_status', 'agent_class_assignment', 'agent_class_audit', 'architect_journal_entries', 'architect_peer_inbox'].map((type) => `${type}:${id}`),
     ...['engineer_journal_snapshot', 'engineer_session_map', 'group_settings'].map((type) => `${type}:${group}`),
-    'decisions_snapshot:_', 'agent_classes:_',
+    'decisions_snapshot:_',
   ];
   return Object.fromEntries(keys.filter((key) => source[key] !== undefined).map((key) => [key, source[key]]));
 }
@@ -169,7 +168,7 @@ function DigestPanel({ agent, queued, sent, paused, bufferedCount, onSend, onTog
   </section>;
 }
 
-export function AgentDetailWorkspace({ active = true, agent, group, catalog, responses: incomingResponses, tasks, directMessages, peerThreads, digestSettings: rawDigestSettings, digestBufferStats: rawDigestBufferStats, digestSentEvents: rawDigestSentEvents, sendCommand, onUnavailable }: Props) {
+export function AgentDetailWorkspace({ active = true, agent, group, responses: incomingResponses, tasks, directMessages, peerThreads, digestSettings: rawDigestSettings, digestBufferStats: rawDigestBufferStats, digestSentEvents: rawDigestSentEvents, sendCommand, onUnavailable }: Props) {
   const [cache, setCache] = useState(() => ({ source: incomingResponses, frames: retainedActivityFrames(incomingResponses, agent.id, group) }));
   const responses = cache.source === incomingResponses ? cache.frames : { ...cache.frames, ...retainedActivityFrames(incomingResponses, agent.id, group) };
   if (cache.source !== incomingResponses) setCache({ source: incomingResponses, frames: responses });
@@ -190,7 +189,8 @@ export function AgentDetailWorkspace({ active = true, agent, group, catalog, res
   const run = (command: Record<string, unknown>) => {
     if (!sendCommand(command as { cmd: string })) onUnavailable();
   };
-  const reads = useActivityReads(activityReads(tab, agent.id, agent.kind, group, limits, appliedMcp, appliedMcp.anchor), active);
+  const classBaseDir = agentClassBaseDir(agent.raw);
+  const reads = useActivityReads(activityReads(tab, agent.id, agent.kind, group, limits, appliedMcp, appliedMcp.anchor, classBaseDir), active);
   const requestSection = (section: RemoteSection, limit: number) => {
     setLimitState({ agentId: agent.id, values: { ...limits, [section]: limit } });
   };
@@ -211,9 +211,10 @@ export function AgentDetailWorkspace({ active = true, agent, group, catalog, res
   const classStatus = record(assignmentFrame.status ?? classFrame.status ?? agent.raw.agent_class_status);
   const classAuditFrame = responseFor(responses, 'agent_class_audit', agent.id);
   const classAudit = list(classAuditFrame.events);
-  const availableClasses = record(responses['agent_classes:_']).classes ?? catalog.agentClasses;
+  const availableClasses = reads.classCatalog?.classes;
   const classes = useMemo(() => classOptions(availableClasses).filter((item) => !item.kind || item.kind === agent.kind), [agent.kind, availableClasses]);
   const selectedClass = classes.find((item) => item.id === selectedClassId)?.raw ?? {};
+  const selectedClassIssue = selectedClassId ? classes.some((item) => item.id === selectedClassId) ? creationClassDisabledReason(selectedClass, agent.kind) : 'The selected Agent Class is unavailable in this project.' : '';
   const architectJournal = list(record(responses[`architect_journal_entries:${agent.id}`]).entries);
   const engineerFrame = record(responses[`engineer_journal_snapshot:${group}`]);
   const engineerJournal = list(record(engineerFrame.engineer_journal)[agent.id]);
@@ -292,7 +293,7 @@ export function AgentDetailWorkspace({ active = true, agent, group, catalog, res
         return <FeedItem key={text(message.id, String(index))} title={text(message.action, text(message.role, 'message'))} time={message.created_at ?? message.timestamp} preview={body}><p>{body}</p></FeedItem>;
       }} /> : <p>No recorded messages.</p>}</section></div></> : <Empty title="Loading agent history" description="Torque is retrieving persisted tasks, messages, and lifecycle metadata." />}</section> : null}
 
-      {tab === 'class' ? <section className={styles.classInspector} aria-label="Agent Class assignment"><div className={styles.classAssignment}><label>Desired class for next launch<select value={selectedClassId} onChange={(event) => setSelectedClassId(event.target.value)}><option value="">Default for {agent.kind}</option>{classes.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label><Button tone="primary" onPress={() => run({ cmd: selectedClassId ? 'agent_class_assign' : 'agent_class_clear', agent_id: agent.id, ...(selectedClassId ? { class_id: selectedClassId } : {}), actor_label: 'trusted-user-react-ui' })}>Save assignment</Button>{bool(classStatus.pending_next_launch) ? <Button onPress={() => run({ cmd: 'relaunch_agent', id: agent.id })}>Relaunch to apply</Button> : null}</div><dl className={styles.inspectorFacts}><div><dt>Effective now</dt><dd>{text(classStatus.effective_primary_identity_label, text(classStatus.effective_class_id, 'Default'))}</dd></div><div><dt>Desired</dt><dd>{text(classStatus.next_launch_primary_identity_label, text(classStatus.next_launch_class_id, 'Default'))}</dd></div><div><dt>Effective version</dt><dd>{text(classStatus.effective_class_version, '—')}</dd></div><div><dt>Next version</dt><dd>{text(classStatus.next_launch_class_version, '—')}</dd></div><div><dt>Assigned by</dt><dd>{text(classStatus.assigned_by, '—')}</dd></div><div><dt>Apply state</dt><dd>{bool(classStatus.pending_next_launch) ? 'Pending relaunch' : 'Current'}</dd></div></dl>{selectedClassId ? <section className={styles.classPreview}><h3>{text(selectedClass.display_name, text(selectedClass.name, selectedClassId))}</h3><p>{text(selectedClass.description, 'No description provided.')}</p><pre>{json(selectedClass)}</pre></section> : null}<section className={styles.classAudit}><h3>Assignment audit <span>{classAudit.length}</span></h3>{classAudit.length ? <ProgressiveItems items={classAudit} sectionKey={`${agent.id}-class-audit`} {...progressive('class')} renderItem={(event, index) => <FeedItem key={text(event.id, String(index))} title={text(event.event, 'class event').replaceAll('_', ' ')} time={event.created_at}><p>{text(event.message)}</p><span>{text(event.actor_label, text(event.actor_kind))}</span></FeedItem>} /> : <p>No assignment changes recorded.</p>}</section></section> : null}
+      {tab === 'class' ? <section className={styles.classInspector} aria-label="Agent Class assignment"><div className={styles.classAssignment}><label>Desired class for next launch<select value={selectedClassId} onChange={(event) => setSelectedClassId(event.target.value)}><option value="">Default for {agent.kind}</option>{selectedClassId && !classes.some((item) => item.id === selectedClassId) ? <option value={selectedClassId}>{selectedClassId} (unavailable)</option> : null}{classes.map((item) => <option key={item.id} value={item.id} disabled={Boolean(creationClassDisabledReason(item.raw, agent.kind))}>{item.label}{creationClassDisabledReason(item.raw, agent.kind) ? ' (unavailable)' : ''}</option>)}</select></label><Button tone="primary" isDisabled={!reads.ready || reads.pending || Boolean(reads.error) || !reads.classCatalog || Boolean(selectedClassIssue)} onPress={() => run({ cmd: selectedClassId ? 'agent_class_assign' : 'agent_class_clear', agent_id: agent.id, ...(classBaseDir ? { base_dir: classBaseDir } : {}), ...(selectedClassId ? { class_id: selectedClassId } : {}), actor_label: 'trusted-user-react-ui' })}>Save assignment</Button>{bool(classStatus.pending_next_launch) ? <Button onPress={() => run({ cmd: 'relaunch_agent', id: agent.id })}>Relaunch to apply</Button> : null}</div>{selectedClassIssue ? <p role="status">{selectedClassIssue}</p> : null}<dl className={styles.inspectorFacts}><div><dt>Effective now</dt><dd>{text(classStatus.effective_primary_identity_label, text(classStatus.effective_class_id, 'Default'))}</dd></div><div><dt>Desired</dt><dd>{text(classStatus.next_launch_primary_identity_label, text(classStatus.next_launch_class_id, 'Default'))}</dd></div><div><dt>Effective version</dt><dd>{text(classStatus.effective_class_version, '—')}</dd></div><div><dt>Next version</dt><dd>{text(classStatus.next_launch_class_version, '—')}</dd></div><div><dt>Assigned by</dt><dd>{text(classStatus.assigned_by, '—')}</dd></div><div><dt>Apply state</dt><dd>{bool(classStatus.pending_next_launch) ? 'Pending relaunch' : 'Current'}</dd></div></dl>{selectedClassId ? <section className={styles.classPreview}><h3>{text(selectedClass.display_name, text(selectedClass.name, selectedClassId))}</h3><p>{text(selectedClass.description, 'No description provided.')}</p><pre>{json(selectedClass)}</pre></section> : null}<section className={styles.classAudit}><h3>Assignment audit <span>{classAudit.length}</span></h3>{classAudit.length ? <ProgressiveItems items={classAudit} sectionKey={`${agent.id}-class-audit`} {...progressive('class')} renderItem={(event, index) => <FeedItem key={text(event.id, String(index))} title={text(event.event, 'class event').replaceAll('_', ' ')} time={event.created_at}><p>{text(event.message)}</p><span>{text(event.actor_label, text(event.actor_kind))}</span></FeedItem>} /> : <p>No assignment changes recorded.</p>}</section></section> : null}
 
       {tab === 'chat' ? <section className={styles.peerChat} aria-label="Architect peer chat">
         <aside className={styles.peerThreadList}><header><h3>Peer threads</h3><span>{architectPeerThreads.length}</span></header>{architectPeerThreads.length ? <ProgressiveItems items={architectPeerThreads} sectionKey={`${agent.id}-peer-threads`} renderItem={(thread, index) => {

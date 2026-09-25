@@ -1176,3 +1176,8 @@ P-264 now reads visible sections plus open-editor dependencies, retains accepted
 ### Area browsing checkpoint — 2026-09-25
 
 P-265–P-269 now restore Classic's 500-Area window, multi-field search, combined lifecycle/type filters and stable lifecycle/type/title ordering, with retained controls and unfiltered editor choices. D-162 and the parity matrix record focused/full UI checks, a 501-Area real-daemon acceptance scenario, desktop/narrow inspection and two existing workflow regressions. The main ledger has **269 behaviors: 260 implemented/equivalent dispositions, 5 open repairs and 4 intentional retirements**. Broad settings/lazy-reconnect and independent native/external/recovery gates remain open; Phase 4 is not complete.
+
+
+### Activity Agent Class scope checkpoint — 2026-09-25
+
+P-270/P-271 now isolate catalog discovery by the selected agent's project, retain desired choices through refresh/failure and apply Classic-equivalent unavailable-choice gates. D-163 and the parity matrix record focused/full UI checks, two-project live discovery/assignment/archive/delete acceptance and existing Activity/Class authoring regressions. Further audit adds P-272/P-273 for fresh status precedence and acknowledged assignment saves. The main ledger has **273 behaviors: 262 implemented/equivalent dispositions, 7 open repairs and 4 intentional retirements**. Broad settings/lazy-reconnect, the assignment repairs and independent native/external/recovery gates remain open; Phase 4 is not complete.

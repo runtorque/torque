@@ -3274,3 +3274,13 @@ History renders the persisted contract: role/template, input/output token counts
 - Controls: Search matches id, slug, title, type, lifecycle, summary, user purpose and system purpose case-insensitively. Lifecycle offers all seven values and All. Type choices come from active Areas in the current group; a selected type that disappears remains explicit until changed or cleared. Combine the filters locally, show matching/total counts, distinguish no matches from no Areas and provide Clear filters.
 - Continuity: Filters survive section changes, refresh, reconnect and incoming records within the mounted group. Filtering sends no reads or writes. Retain the search input, focus and caret during incoming data; changing group resets the scoped workspace. Controls wrap in narrow layouts.
 - Verification: P-265–P-269 cover the window, search, lifecycle/type filters and ordering independently, with focused and real-daemon browser acceptance.
+
+
+### D-163 — Activity owns its project Agent Class catalog
+
+- Date: 2026-09-25
+- Scope: Selected-agent Activity / Agent Class discovery and choice availability.
+- Decision: Resolve the catalog from worktree repo root, agent directory, then current path; if no path exists, resolve the selected group. Scope list/status/assignment commands consistently. Activity owns the correlated catalog response and never borrows the shared Control Center/creation catalog. Reject explicit directory mismatches and obsolete responses; a changed project invalidates the prior catalog immediately.
+- Continuity: Retain the accepted same-project catalog and desired draft through reconnect, compact snapshots and failed refresh. A missing desired ID remains an explicit unavailable option. Block assignment while reads are pending/failed or the current catalog has not been verified.
+- Availability: Reuse the creation flow's Classic-equivalent base-kind, archived/disabled, launchable and invalid checks. Unavailable catalog entries remain visible but disabled. Explain a retained unavailable selection; changing to Default is explicit. Assignment still applies only at the next launch boundary.
+- Verification: P-270/P-271 track project isolation and unavailable-choice gating with focused and isolated browser acceptance. Assignment acknowledgement/relaunch behavior remains separately auditable under P-054.

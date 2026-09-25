@@ -3,7 +3,10 @@ export type ActivityTab = 'decisions' | 'journal' | 'messages' | 'events' | 'que
 export type RemoteSection = 'events' | 'journal' | 'mcp' | 'history' | 'class';
 export interface ActivityRead { command: TorqueCommand; type: string; target?: [string, string] }
 export interface McpFilter { tool: string; outcome: string; range: string }
-export function activityReads(tab: ActivityTab, id: string, kind: string, group: string, limits: Record<RemoteSection, number>, filter: McpFilter, anchor: number): ActivityRead[] {
+export function agentClassBaseDir(agent: UnknownRecord): string {
+  return [agent.worktree_repo_root, agent.directory, agent.current_path].find((value): value is string => typeof value === 'string' && Boolean(value.trim()))?.trim() ?? '';
+}
+export function activityReads(tab: ActivityTab, id: string, kind: string, group: string, limits: Record<RemoteSection, number>, filter: McpFilter, anchor: number, baseDir = ''): ActivityRead[] {
   const read = (command: TorqueCommand, type: string, target?: [string, string]): ActivityRead => ({ command, type, ...(target ? { target } : {}) });
   const settings = () => read({ cmd: 'get_group_settings', group }, 'group_settings', ['group', group]);
   if (tab === 'events') return [read({ cmd: 'get_cell_events', cell_id: id, limit: limits.events }, 'cell_events', ['cell_id', id]), ...(kind === 'engineer' ? [settings()] : [])];
@@ -15,7 +18,10 @@ export function activityReads(tab: ActivityTab, id: string, kind: string, group:
     return [read({ cmd: 'mcp_calls', cell_id: id, tool_name_pattern: filter.tool.trim() ? `*${filter.tool.trim()}*` : 'mcp__torque__%', hook_event_name: 'PostToolUse', success_filter: filter.outcome, limit: limits.mcp, ...(seconds ? { since: anchor - seconds } : {}) }, 'mcp_calls', ['cell_id', id])];
   }
   if (tab === 'history') return [read({ cmd: 'get_agent_history_detail', agent_id: id, message_limit: limits.history }, 'agent_history_detail', ['record.id', id])];
-  if (tab === 'class') return [read({ cmd: 'agent_class_list' }, 'agent_classes'), read({ cmd: 'agent_class_status', agent_id: id }, 'agent_class_status', ['status.agent_id', id]), read({ cmd: 'agent_class_audit', agent_id: id, limit: limits.class }, 'agent_class_audit', ['agent_id', id])];
+  if (tab === 'class') {
+    const scope = baseDir ? { base_dir: baseDir } : {};
+    return [read({ cmd: 'agent_class_list', group, ...scope }, 'agent_classes', baseDir ? ['base_dir', baseDir] : undefined), read({ cmd: 'agent_class_status', agent_id: id, ...scope }, 'agent_class_status', ['status.agent_id', id]), read({ cmd: 'agent_class_audit', agent_id: id, limit: limits.class }, 'agent_class_audit', ['agent_id', id])];
+  }
   return [];
 }
 export function validateActivityRead(frame: UnknownRecord, request: ActivityRead): void {
