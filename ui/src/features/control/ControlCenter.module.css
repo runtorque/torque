@@ -304,3 +304,7 @@
 .relayPairing [role="alert"] { color: var(--danger); }
 .relayPairing dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 9px; font-size: 9px; }
 .relayPairing dd { margin: 0; overflow-wrap: anywhere; }
+
+.deviceLinkDisplay { margin-top: 9px; min-width: 0; }
+.deviceLinkQr { display: block; width: 180px; max-width: 100%; height: auto; margin: 9px 0; background: white; }
+.deviceLinkDisplay code { user-select: all; overflow-wrap: anywhere; }

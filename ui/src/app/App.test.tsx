@@ -70,6 +70,25 @@ function mockSettingsRequests(failSave = false) {
 }
 
 describe('workspace shell', () => {
+  it('keeps generated device-link secrets out of shared state and does not restore cached links on reopen', async () => {
+    const { refresh } = mockSettingsRequests();
+    refresh('get_global_settings', { relay_config: { config: { enabled: true, relay_url: 'https://relay.invalid' } } });
+    const settingsFetch = globalThis.fetch; let minted = 0;
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, options?: RequestInit) => {
+      const command = JSON.parse(typeof options?.body === 'string' ? options.body : '{}') as TorqueCommand;
+      if (command.cmd === 'generate_relay_device_link') { minted += 1; return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: 'relay_device_link', ok: true, code: 'owned-secret-code', establish_url: 'https://relay.invalid/establish?code=owned-secret-code' } }) }); }
+      return settingsFetch(input, options);
+    });
+    const { appStore } = renderShell();
+    act(() => { appStore.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'relay_device_link', ok: true, code: 'obsolete-cache-code', establish_url: 'https://relay.invalid/obsolete-cache-code' })); });
+    fireEvent.click(screen.getByRole('button', { name: /Control/ })); fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    const generate = await screen.findByRole('button', { name: 'Generate one-time device link' }); expect(screen.queryByText('obsolete-cache-code')).not.toBeInTheDocument();
+    fireEvent.click(generate); expect(minted).toBe(0); fireEvent.click(screen.getByRole('button', { name: 'Confirm and generate device link' }));
+    expect(await screen.findByLabelText('Device link code')).toHaveTextContent('owned-secret-code'); expect(JSON.stringify(appStore.getState())).not.toContain('owned-secret-code');
+    fireEvent.click(screen.getByRole('button', { name: 'Mission Control' })); fireEvent.click(screen.getByRole('button', { name: 'Settings' })); await screen.findByRole('button', { name: 'Generate one-time device link' });
+    expect(screen.queryByLabelText('Device link code')).not.toBeInTheDocument(); expect(screen.queryByText('obsolete-cache-code')).not.toBeInTheDocument(); expect(minted).toBe(1);
+  });
+
   it('renders the live Board, group navigation, and connection state', () => {
     renderShell();
 

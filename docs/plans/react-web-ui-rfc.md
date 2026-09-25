@@ -1195,3 +1195,8 @@ P-278/P-279 now provide draft-owned, correlated Engineer/Architect previews and 
 ### Relay credential pairing checkpoint — 2026-09-25
 
 P-280/P-281 now provide transient pairing-token entry, effective configuration gates, replacement confirmation and acknowledged success/refusal/recovery. D-167 and the parity matrix record 14 focused tests, the full 573-test React check and three isolated browser scenarios with controlled Relay replies and real Settings/reconnect behavior. Live external credential minting was not performed. The main ledger has **283 behaviors: 271 implemented/equivalent dispositions, 8 open repairs and 4 intentional retirements**. Device-link confirmation and display-once scan details remain P-282/P-283; broad Relay/Settings/lazy-reconnect and independent native/external/recovery acceptance remain open. Phase 4 is not complete.
+
+
+### Relay device-link checkpoint — 2026-09-25
+
+P-282/P-283 now provide effective-config gating, inline confirmation, owned generation outcomes and a transient display-once QR/link/expiry view. D-168 and the parity matrix record 101 focused tests, the full 589-test React check and four isolated browser scenarios with consistent controlled Relay replies, actual local QR encoding, zero external requests and dismiss/close/reconnect acceptance. Live external minting was not performed. The audit adds P-284–P-286 for connection-probe detail/ownership, live diagnostics and the passive Relay indicator. Main ledger: **286 behaviors: 273 implemented/equivalent dispositions, 9 open repairs and 4 intentional retirements**. Broad Settings/lazy-reconnect and independent native/external/recovery gates remain open; Phase 4 is not complete.
