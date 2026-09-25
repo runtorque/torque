@@ -1,3 +1,4 @@
+import { AiRuntime } from '../ai/AiRuntime';
 import { useSettingsNavigation, useSettingsProtection } from '../../app/settingsNavigation';
 import { selectProviders } from '../../app/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -74,7 +75,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return <label className={styles.field}><span>{label}</span>{children}</label>;
 }
 
-function SettingsPanel({ group, send, snapshot, onSavingChange, onDiscard }: { onDiscard: () => void; group: string; send: (command: TorqueCommand) => void; snapshot: SettingsSnapshot; onSavingChange: (busy: boolean) => void }) {
+function SettingsPanel({ group, snapshot, onSavingChange, onDiscard }: { onDiscard: () => void; group: string; snapshot: SettingsSnapshot; onSavingChange: (busy: boolean) => void }) {
   const operations = useAppSelector(selectOperationsState);
   const discoveredProviders = useAppSelector(selectProviders);
   const providers = Array.isArray(snapshot.group.providers) ? snapshot.group.providers : discoveredProviders;
@@ -90,7 +91,6 @@ function SettingsPanel({ group, send, snapshot, onSavingChange, onDiscard }: { o
   const aiGeneration = record(currentAi.generation);
   const aiAnthropic = record(aiGeneration.anthropic);
   const aiOpenAi = record(aiGeneration.openai_compatible);
-  const aiIndex = record(currentAi.index);
   const [globalDraft, setGlobalDraft] = useState(() => primaryGlobalSettings(currentGlobal));
   const [groupDraft, setGroupDraft] = useState(() => primaryGroupSettings(currentGroup));
   const [aiDraft, setAiDraft] = useState(() => aiSettingsDraft(record(snapshot.ai.settings), currentGlobal));
@@ -266,13 +266,13 @@ function SettingsPanel({ group, send, snapshot, onSavingChange, onDiscard }: { o
       <Field label="Boot summaries"><select value={aiDraft.ai_boot_summary_enabled ? 'on' : 'off'} onChange={(event) => change(setAiDraft, { ai_boot_summary_enabled: event.target.value === 'on' })}><option value="on">Enabled</option><option value="off">Disabled</option></select></Field>
       <Field label="Boot summary minimum interval"><NumericSettingInput fieldKey="ai_boot_summary_min_interval_seconds" value={aiDraft.ai_boot_summary_min_interval_seconds} onChange={(value) => change(setAiDraft, { ai_boot_summary_min_interval_seconds: value })} /></Field>
       <Field label="Boot summary hourly limit"><NumericSettingInput fieldKey="ai_boot_summary_max_refreshes_per_hour" value={aiDraft.ai_boot_summary_max_refreshes_per_hour} onChange={(value) => change(setAiDraft, { ai_boot_summary_max_refreshes_per_hour: value })} /></Field>
-    </div><div className={styles.aiCorpus}><strong>Index corpus</strong>{Object.entries(aiDraft.ai_index_corpus).map(([key, enabled]) => <label key={key}><input type="checkbox" checked={enabled === true} onChange={(event) => change(setAiDraft, { ai_index_corpus: { ...aiDraft.ai_index_corpus, [key]: event.target.checked } })} />{key.replaceAll('_', ' ')}</label>)}</div>{aiConfirmation && aiConfirmation.key === aiConfirmationKey ? <div className={styles.secretResult} role="group" aria-label="Confirm embedding rebuild"><strong>Embedding index rebuild required</strong><p>{aiConfirmation.message}</p><Button tone="primary" onPress={() => { void save(true); }}>Confirm settings and rebuild</Button><Button tone="quiet" onPress={() => { setAiConfirmation(null); setJsonError(''); }}>Cancel rebuild</Button></div> : null}<div className={styles.settingsActions}><Button tone="quiet" onPress={() => send({ cmd: 'ai_index_start', mode: Number(record(aiIndex.counts).indexed ?? 0) > 0 ? 'rebuild' : 'incremental', confirm: true })}>Build / rebuild index</Button></div><p className={styles.note}>Raw provider keys are write-only and never returned in snapshots or logs. Index: {text(aiIndex.status, 'disabled')} · {text(record(aiIndex.counts).indexed, '0')} indexed.</p></section>
+    </div><div className={styles.aiCorpus}><strong>Index corpus</strong>{Object.entries(aiDraft.ai_index_corpus).map(([key, enabled]) => <label key={key}><input type="checkbox" checked={enabled === true} onChange={(event) => change(setAiDraft, { ai_index_corpus: { ...aiDraft.ai_index_corpus, [key]: event.target.checked } })} />{key.replaceAll('_', ' ')}</label>)}</div>{aiConfirmation && aiConfirmation.key === aiConfirmationKey ? <div className={styles.secretResult} role="group" aria-label="Confirm embedding rebuild"><strong>Embedding index rebuild required</strong><p>{aiConfirmation.message}</p><Button tone="primary" onPress={() => { void save(true); }}>Confirm settings and rebuild</Button><Button tone="quiet" onPress={() => { setAiConfirmation(null); setJsonError(''); }}>Cancel rebuild</Button></div> : null}<AiRuntime settings={currentAi} disabled={saving || credentialBusy} /><p className={styles.note}>Raw provider keys are write-only and never returned in snapshots or logs.</p></section>
     <section><h3>Relay connector</h3><RelayConfigurationFields view={relayView} draft={relayDraft} touched={relayTouched} onChange={changeRelay} /><RelayConnectionDetails connection={operations.relayConnection} /><RelayProbe disabled={saving || credentialBusy} /><RelayCredentialPairing resolved={resolvedRelay} disabled={saving} onBusyChange={credentialBusyChanged} onResolved={(relayConfig) => settingsDispatch(projectionActions.auxiliaryResourceReceived({ type: 'global_settings', relay_config: relayConfig }))} /><RelayDeviceLink resolved={resolvedRelay} disabled={saving || credentialBusy} /></section>
     <section><h3>Runtime and behavior settings</h3><p className={styles.note}>Fields retain their daemon defaults and inheritance. Group-wide defaults apply to future launches; per-agent overrides remain in Agents.</p><details><summary>Global defaults</summary><StructuredSettings providers={providers} value={record(JSON.parse(advancedGlobal))} defaults={globalDefaults} omit={[...Object.keys(globalDraft), ...Object.keys(relayDraft), ...Object.keys(aiDraft), 'default_lanes']} onChange={(next) => { setAdvancedGlobal(JSON.stringify(next)); setDirty(true); setSaved(false); }} /></details><details><summary>{group} execution, worktrees, notifications and sync</summary><StructuredSettings templates={Array.isArray(snapshot.group.templates) ? snapshot.group.templates : []} launchContext={launchContext} group={group} providers={providers} value={record(JSON.parse(advancedGroup))} defaults={groupDefaults} omit={Object.keys(groupDraft)} onChange={(next) => { setAdvancedGroup(JSON.stringify(next)); setDirty(true); setSaved(false); }} /><BoardSyncSettings group={group} disabled={saving} settings={{ ...record(JSON.parse(advancedGroup)), ...groupDraft }} onChange={updateGithubDraft} /></details><details><summary>Engineer behavior defaults</summary><Button tone="quiet" isDisabled={!Object.keys(engineerDefaults).length} onPress={() => resetSection('engineer')}>Reset Engineer defaults</Button><EngineerNotificationPreset value={record(JSON.parse(advancedEngineer))} disabled={saving} onApply={(preset) => { setAdvancedEngineer((previous) => JSON.stringify({ ...record(JSON.parse(previous)), ...preset })); setDirty(true); setSaved(false); }} /><StructuredSettings launchContext={launchContext} providers={providers} value={record(JSON.parse(advancedEngineer))} defaults={engineerDefaults} onChange={(next) => { setAdvancedEngineer(JSON.stringify(next)); setDirty(true); setSaved(false); }} /></details><details><summary>Architect behavior defaults</summary><Button tone="quiet" isDisabled={!Object.keys(architectDefaults).length} onPress={() => resetSection('architect')}>Reset Architect defaults</Button><StructuredSettings launchContext={launchContext} providers={providers} value={record(JSON.parse(advancedArchitect))} defaults={architectDefaults} onChange={(next) => { setAdvancedArchitect(JSON.stringify(next)); setDirty(true); setSaved(false); }} /></details><SettingsPromptPreview group={group} groupSettings={currentDrafts.group} engineer={currentDrafts.engineer} architect={currentDrafts.architect} disabled={saving} /></section>
   </fieldset></form>;
 }
 
-function SettingsWorkspace({ group, send }: { group: string; send: (command: TorqueCommand) => void }) {
+function SettingsWorkspace({ group }: { group: string }) {
   const dispatch = useAppDispatch(); const connection = useAppSelector(selectConnection);
   const [generation, setGeneration] = useState(0);
   const discard = useCallback(() => setGeneration((value) => value + 1), []);
@@ -293,7 +293,7 @@ function SettingsWorkspace({ group, send }: { group: string; send: (command: Tor
     return () => controller.abort();
   }, [group, dispatch, retry, connection.status, connection.reconnectCount, busy]);
   const retryButton = <Button onPress={() => { setError(''); setRetry((value) => value + 1); }}>Retry settings</Button>;
-  return snapshot ? <>{error ? <div role="alert">Settings refresh failed. Your draft is retained. {error} {retryButton}</div> : null}<SettingsPanel key={generation} onDiscard={discard} group={group} send={send} snapshot={snapshot} onSavingChange={savingChanged} /></> : error ? <StateSurface title="Settings unavailable" description={error} action={retryButton} /> : <StateSurface title="Loading settings" description="Loading global, group and AI defaults before editing." />;
+  return snapshot ? <>{error ? <div role="alert">Settings refresh failed. Your draft is retained. {error} {retryButton}</div> : null}<SettingsPanel key={generation} onDiscard={discard} group={group} snapshot={snapshot} onSavingChange={savingChanged} /></> : error ? <StateSurface title="Settings unavailable" description={error} action={retryButton} /> : <StateSurface title="Loading settings" description="Loading global, group and AI defaults before editing." />;
 }
 
 export function ControlCenter({ group, sendCommand, onCommandUnavailable, host = browserHost }: {
@@ -367,7 +367,7 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable, host =
         <CatalogEditor key={`specialization:${group}:${baseDir}`} title="Specializations" kind="specialization" group={group} refreshVersion={classRefreshVersion} onMutation={() => setClassRefreshVersion((value) => value + 1)} />
         <BehaviorOverlayEditor group={group} active={catalog.behaviorOverlays} proposals={operations.behaviorOverlayProposals} responses={auxiliaryResponses} agents={agentItems} send={send} />
       </div> : null}
-      {tab === 'settings' ? <SettingsWorkspace key={group} group={group} send={send} /> : null}
+      {tab === 'settings' ? <SettingsWorkspace key={group} group={group} /> : null}
       {tab === 'help' ? <HelpPanel refreshVersion={helpRefreshVersion} /> : null}
     </div>
   </section>;

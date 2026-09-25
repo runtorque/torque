@@ -1,3 +1,4 @@
+import { applyAiDelta } from './aiProjection';
 import type { Draft } from '@reduxjs/toolkit';
 
 import {
@@ -243,9 +244,6 @@ function applyCommonOperation(
     case 'relay_config':
     case 'relay_connection':
     case 'global_settings_update':
-    case 'ai_settings_update':
-    case 'ai_index_status_update':
-    case 'ai_summary_status_update':
       replaceObject(
         state,
         operation.op === 'global_settings_update'
@@ -253,6 +251,11 @@ function applyCommonOperation(
           : operation.op.replace(/_update$/, ''),
         operation,
       );
+      break;
+    case 'ai_settings_update':
+    case 'ai_index_status_update':
+    case 'ai_summary_status_update':
+      state.data.ai_settings = applyAiDelta(state.data.ai_settings, operation);
       break;
     case 'provider_usage': {
       const provider = operationId(operation, 'provider', 'provider_id', 'adapter', 'name');

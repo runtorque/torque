@@ -1,3 +1,4 @@
+import { aiIndexStartSlice } from '../features/ai/aiIndexStartState';
 import { relayProbeSlice } from '../features/relay/relayProbeState';
 import { classAssignmentSlice } from '../features/agents/classAssignmentState';
 import {
@@ -594,6 +595,7 @@ export function createAppStore(initialNavigation?: WorkspaceNavigation | null) {
       composer: composerSlice.reducer,
       classAssignments: classAssignmentSlice.reducer,
       relayProbe: relayProbeSlice.reducer,
+    aiIndexStart: aiIndexStartSlice.reducer,
     },
     middleware: (getDefaultMiddleware) =>
       getDefaultMiddleware({
