@@ -1069,6 +1069,8 @@ The granular [parity ledger](react-ui-parity-matrix.md) includes source, command
 
 Agent Class assignment now uses the latest accepted per-agent status and a correlated save acknowledgement. Untouched selections follow saved state, edited choices survive refresh, live assignment/launch changes refresh visible details, and duplicate pending writes are blocked. Refusal and uncertain outcomes remain explicit without automatic replay. P-272/P-273 and D-164 record the separate status and save contracts; the broader parity and native acceptance gates remain open.
 
+Activity class review now separates readable selected/default authority from the running class: scoped resolved grants, authored denials, lifecycle/scratch state, apply timing, independent warnings, and assignment/freeze metadata. P-275–P-277 and D-165 define these contracts. Generic connector-governance copy stays omitted as in the maintained Classic implementation; compact grant projections are not interpreted as deny rules. Settings system-prompt request correlation and copying remain separately open under P-278/P-279.
+
 ### Engineer identity parity checkpoint
 
 Agent Settings now uses validated Engineer renaming, matching acknowledgements and retained failure drafts. Sparse presentation writes exclude Engineer names. Successful identity edits are not replayed when later settings fail, and pending requests retain the dialog. P-193/P-194 and D-121 record the contracts and acceptance evidence; remaining per-agent settings and native parity gates stay open.
