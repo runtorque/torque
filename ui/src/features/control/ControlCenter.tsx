@@ -1,3 +1,4 @@
+import { useAppearanceDraft } from './useAppearanceDraft';
 import { AiRuntime } from '../ai/AiRuntime';
 import { useSettingsNavigation, useSettingsProtection } from '../../app/settingsNavigation';
 import { selectProviders } from '../../app/store';
@@ -119,6 +120,7 @@ function SettingsPanel({ group, snapshot, onSavingChange, onDiscard }: { onDisca
   const [advancedArchitect, setAdvancedArchitect] = useState(() => JSON.stringify(editableSettings(currentArchitect), null, 2));
   const [jsonError, setJsonError] = useState('');
   const [dirty, setDirty] = useState(false);
+  const appearance = useAppearanceDraft();
   const [saved, setSaved] = useState(false);
   const changeRelay = (patch: Partial<typeof relayDraft>) => { setRelayDraft((previous) => ({ ...previous, ...patch })); setRelayTouched((keys) => [...new Set([...keys, ...Object.keys(patch)])]); setDirty(true); setSaved(false); };
   const updateGithubDraft = useCallback((github: UnknownRecord) => { setAdvancedGroup((value) => JSON.stringify({ ...record(JSON.parse(value)), board_sync_github: github })); setDirty(true); setSaved(false); }, [setAdvancedGroup, setDirty, setSaved]);
@@ -131,8 +133,9 @@ function SettingsPanel({ group, snapshot, onSavingChange, onDiscard }: { onDisca
   const restoreFocus = useCallback(() => { lastEditor.current?.focus(); }, []);
   const currentDrafts = { global: { ...record(JSON.parse(advancedGlobal)), ...globalDraft }, group: { ...record(JSON.parse(advancedGroup)), ...groupDraft }, engineer: record(JSON.parse(advancedEngineer)), architect: record(JSON.parse(advancedArchitect)), ai: aiDraft };
   const launchContext = { group: currentDrafts.group, runtime: record(snapshot.group.runtime) };
-  const hasEdits = resetScopes.size > 0 || relayTouched.length > 0 || clearAiSecrets.length > 0 || Object.values(aiSecrets).some(Boolean) || (Object.keys(currentDrafts) as (keyof typeof currentDrafts)[]).some((scope) => Object.keys(changedSettings(baseline[scope], currentDrafts[scope])).length > 0);
-  useSettingsProtection({ dirty: dirty && hasEdits, saving: saving || credentialBusy, group, discard: onDiscard, restoreFocus });
+  const hasEdits = appearance.dirty || resetScopes.size > 0 || relayTouched.length > 0 || clearAiSecrets.length > 0 || Object.values(aiSecrets).some(Boolean) || (Object.keys(currentDrafts) as (keyof typeof currentDrafts)[]).some((scope) => Object.keys(changedSettings(baseline[scope], currentDrafts[scope])).length > 0);
+  const hasUnsavedChanges = dirty && hasEdits;
+  useSettingsProtection({ dirty: hasUnsavedChanges, saving: saving || credentialBusy, group, discard: onDiscard, restoreFocus });
   const [appliedSnapshot, setAppliedSnapshot] = useState(snapshot);
   if (appliedSnapshot !== snapshot) {
     setAppliedSnapshot(snapshot);
@@ -179,6 +182,7 @@ function SettingsPanel({ group, snapshot, onSavingChange, onDiscard }: { onDisca
     setter((value) => ({ ...value, ...patch })); setDirty(true); setSaved(false);
   };
   const save = async (confirmEmbeddingRebuild = false) => {
+    if (!hasUnsavedChanges) return;
     if (form.current && !form.current.checkValidity()) {
       const invalid = form.current.querySelector<HTMLInputElement>('input:invalid, select:invalid, textarea:invalid');
       let ancestor = invalid?.parentElement;
@@ -226,6 +230,7 @@ function SettingsPanel({ group, snapshot, onSavingChange, onDiscard }: { onDisca
         if (scope === 'global') setRelayTouched([]);
         if (scope === 'ai') { setAiSecrets({ anthropic: '', openai_compatible: '' }); setClearAiSecrets([]); }
       }
+      appearance.commit();
       setBaseline(next); setResetScopes(new Set()); setRelayTouched([]);
       setDirty(false); setSaved(true); setAiSecrets({ anthropic: '', openai_compatible: '' }); setClearAiSecrets([]);
     } catch (cause) {
@@ -235,7 +240,7 @@ function SettingsPanel({ group, snapshot, onSavingChange, onDiscard }: { onDisca
   };
 
   return <form ref={form} onFocusCapture={(event) => { if (event.target instanceof HTMLElement && event.target.matches('input, select, textarea')) lastEditor.current = event.target; }} noValidate className={styles.settings} onSubmit={(event) => { event.preventDefault(); void save(); }}>
-    <header><div><h2>Workspace settings</h2><p>Global, group, and AI changes save as one coordinated operation.</p></div><span>{credentialBusy ? 'Pairing credential…' : saving ? 'Saving…' : dirty ? 'Unsaved changes' : saved ? 'Saved' : 'Up to date'}</span><Button tone="primary" type="submit" isDisabled={!dirty || saving || credentialBusy}>Save changes</Button></header>
+    <header><div><h2>Workspace settings</h2><p>Global, group, and AI changes save as one coordinated operation.</p></div><span>{credentialBusy ? 'Pairing credential…' : saving ? 'Saving…' : hasUnsavedChanges ? 'Unsaved changes' : saved ? 'Saved' : 'Up to date'}</span><Button tone="primary" type="submit" isDisabled={!hasUnsavedChanges || saving || credentialBusy}>Save changes</Button></header>
     <SettingsSearch form={form} />
     {jsonError ? <p role="alert" className={styles.validation}>{jsonError}</p> : null}
     <fieldset disabled={saving || credentialBusy} className={styles.settingsFields}><section><h3>Global runtime</h3><Button tone="quiet" isDisabled={!Object.keys(globalDefaults).length} onPress={() => resetSection('global')}>Reset global defaults</Button><p className={styles.note}>Resets runtime, shortcuts and status bar in this draft. AI, credentials and appearance keep their own controls.</p><div className={styles.formGrid}>
@@ -244,7 +249,7 @@ function SettingsPanel({ group, snapshot, onSavingChange, onDiscard }: { onDisca
       <Field label="Event retention"><NumericSettingInput fieldKey="max_event_log" value={globalDraft.max_event_log} onChange={(value) => change(setGlobalDraft, { max_event_log: value })} /></Field>
       <Field label="Metrics"><select value={globalDraft.metrics_enabled ? 'on' : 'off'} onChange={(event) => change(setGlobalDraft, { metrics_enabled: event.target.value === 'on' })}><option value="on">Enabled</option><option value="off">Disabled</option></select></Field>
     </div></section>
-    <AppearancePreferencesPanel />
+    <AppearancePreferencesPanel value={appearance.value} onChange={(value) => { appearance.setValue(value); setDirty(true); setSaved(false); }} />
     <ShortcutPreferencesPanel settings={globalDraft} onChange={(keybindings) => change(setGlobalDraft, { keybindings })} />
     <section><h3>Status bar</h3><StatusBarSettingsPreview visibility={globalDraft.status_bar_visibility} /><div className={styles.statusVisibility}>{Object.entries(globalDraft.status_bar_visibility).map(([key, enabled]) => <label key={key}><input type="checkbox" checked={enabled === true} onChange={(event) => change(setGlobalDraft, { status_bar_visibility: { ...globalDraft.status_bar_visibility, [key]: event.target.checked } })} />{key.replaceAll('_', ' ')}</label>)}</div><p className={styles.note}>Choose which live daemon, usage, deployment, health, workload, task, and attention signals remain visible across workspaces.</p></section>
     <section><h3>{group} defaults</h3><Button tone="quiet" isDisabled={!Object.keys(groupDefaults).length} onPress={() => resetSection('group')}>Reset group defaults</Button><p className={styles.note}>Restores launch, worktree, notification and sync defaults. Empty launch overrides inherit their configured fallback. Save changes to apply.</p><div className={styles.formGrid}>

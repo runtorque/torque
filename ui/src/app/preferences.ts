@@ -69,9 +69,11 @@ export function applyAppearance(value: AppearancePreferences, root: HTMLElement 
   root.style.setProperty('--terminal-font-size', `${value.terminalFont}px`);
 }
 
-export function saveAppearance(value: AppearancePreferences, storage: Pick<Storage, 'setItem'> | null = typeof localStorage === 'undefined' ? null : localStorage): void {
-  try { storage?.setItem(appearanceKey, JSON.stringify(value)); } catch { /* client-local preference is best effort */ }
+export function saveAppearance(value: AppearancePreferences, storage: Pick<Storage, 'setItem'> | null = typeof localStorage === 'undefined' ? null : localStorage): boolean {
+  if (!storage) return false;
+  try { storage.setItem(appearanceKey, JSON.stringify(value)); } catch { return false; }
   applyAppearance(value);
+  return true;
 }
 
 export function descriptorFromKeyboardEvent(event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'>): KeybindingDescriptor | null {

@@ -1,0 +1,43 @@
+import { expect, test, type APIRequestContext, type WebSocketRoute } from '@playwright/test';
+type Row = Record<string, unknown>;
+const key = 'torque.appearance.v1';
+async function command(request: APIRequestContext, data: Row) { const body = await (await request.post('/api/cmd', { data })).json() as { ok: boolean; error?: string; data: Row }; expect(body.ok, body.error).toBe(true); return body.data; }
+async function prepare(request: APIRequestContext) {
+  const runtime = (await (await request.get('/api/runtime')).json() as { data: { runtime: Row } }).data.runtime;
+  expect(runtime.profile).not.toBe('default'); expect(runtime.port).not.toBe(18932);
+  const group = `Appearance ${Date.now()}`; await command(request, { cmd: 'add_group', group }); await command(request, { cmd: 'update_group_settings', group, settings: { default_directory: '/private/tmp' } }); await command(request, { cmd: 'ui_select_group', group });
+  await command(request, { cmd: 'ui_set_react_workspace_state', state: { version: 1, activePanel: 'control', controlTab: 'settings' } }); return group;
+}
+test('appearance previews, discards and explicitly persists, while reverted fields become clean', async ({ page, request }) => {
+  await prepare(request); const writes: Row[] = [];
+  await page.route('**/api/cmd', async (route) => { const data = route.request().postDataJSON() as Row; if (/^(update_|engineer_update_)/.test(String(data.cmd))) writes.push(data); await route.continue(); });
+  await page.goto('/'); const save = page.getByRole('button', { name: 'Save changes', exact: true }); const directory = page.getByLabel('Default directory', { exact: true });
+  await expect(directory).toHaveValue('/private/tmp'); await expect(save).toBeDisabled(); await directory.fill('/private/tmp/draft'); await expect(save).toBeEnabled(); await directory.fill('/private/tmp'); await expect(save).toBeDisabled(); await expect(page.getByText('Unsaved changes', { exact: true })).toHaveCount(0);
+  const appearance = page.getByRole('heading', { name: 'Appearance', exact: true }).locator('..'); const root = page.locator('html');
+  await page.getByRole('combobox', { name: 'Contrast', exact: true }).selectOption('high'); await page.getByRole('combobox', { name: 'Density', exact: true }).selectOption('comfortable'); await page.getByRole('button', { name: 'teal accent', exact: true }).click(); await page.getByRole('checkbox', { name: 'Reduce motion', exact: true }).check();
+  await page.getByRole('slider', { name: /UI scale/ }).fill('110'); await page.getByRole('slider', { name: /Terminal font/ }).fill('16');
+  await expect(root).toHaveAttribute('data-torque-contrast', 'high'); await expect(root).toHaveAttribute('data-torque-density', 'comfortable'); await expect(root).toHaveAttribute('data-torque-reduce-motion', 'true');
+  expect(await root.evaluate((node) => [node.style.getPropertyValue('--accent'), node.style.getPropertyValue('--ui-scale'), node.style.getPropertyValue('--terminal-font-size')])).toEqual(['#2dd4bf', '1.1', '16px']); expect(await page.evaluate((name) => localStorage.getItem(name), key)).toBeNull(); expect(writes).toHaveLength(0);
+  await page.getByRole('button', { name: 'Help', exact: true }).click(); await page.getByRole('button', { name: 'Keep editing', exact: true }).click(); await expect(page.getByRole('combobox', { name: 'Contrast', exact: true })).toHaveValue('high');
+  await appearance.scrollIntoViewIfNeeded(); await page.screenshot({ path: test.info().outputPath('appearance-preview.png') }); await page.setViewportSize({ width: 390, height: 844 }); await appearance.scrollIntoViewIfNeeded(); expect(await appearance.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true); await page.screenshot({ path: test.info().outputPath('appearance-narrow.png') }); await page.setViewportSize({ width: 1280, height: 720 });
+  await page.getByRole('button', { name: 'Help', exact: true }).click(); await page.getByRole('button', { name: 'Discard changes', exact: true }).click(); await expect(root).toHaveAttribute('data-torque-contrast', 'balanced'); expect(await page.evaluate((name) => localStorage.getItem(name), key)).toBeNull();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click(); await expect(save).toBeDisabled(); await page.getByRole('button', { name: 'amber accent', exact: true }).click(); await expect(save).toBeEnabled(); expect(writes).toHaveLength(0); await save.click(); await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  expect(JSON.parse((await page.evaluate((name) => localStorage.getItem(name), key))!)).toMatchObject({ accent: 'amber', contrast: 'balanced', scale: 100 }); expect(writes).toHaveLength(0);
+  await page.reload(); await expect(page.getByRole('button', { name: 'amber accent', exact: true })).toHaveAttribute('aria-pressed', 'true'); await expect(save).toBeDisabled();
+  await appearance.getByRole('button', { name: 'Reset', exact: true }).click(); await expect(save).toBeEnabled(); expect(JSON.parse((await page.evaluate((name) => localStorage.getItem(name), key))!)).toMatchObject({ accent: 'amber' }); await page.getByRole('button', { name: 'amber accent', exact: true }).click(); await expect(save).toBeDisabled();
+  await page.getByRole('button', { name: 'Help', exact: true }).click(); await expect(page.getByRole('dialog')).toHaveCount(0); expect(writes).toHaveLength(0);
+});
+test('a pending or refused coordinated save retains appearance across reconnect, then commits on retry', async ({ page, request }) => {
+  test.setTimeout(60_000); const group = await prepare(request); let socket: WebSocketRoute | undefined; let connections = 0; let reads = 0; const writes: Row[] = []; let held = false; let refuse = true; let release = () => {};
+  await page.routeWebSocket(/\/ws\?/, (route) => { route.connectToServer(); socket = route; connections++; });
+  await page.route('**/api/cmd', async (route) => { const data = route.request().postDataJSON() as Row; if (data.cmd === 'get_global_settings') reads++; if (data.cmd === 'update_group_settings') { writes.push(data); held = true; await new Promise<void>((resolve) => { release = resolve; }); if (refuse) { await route.fulfill({ json: { ok: false, error: 'Appearance save fixture refusal' } }); return; } } await route.continue(); });
+  try {
+    await page.goto('/'); const directory = page.getByLabel('Default directory', { exact: true }); const density = page.getByRole('combobox', { name: 'Density', exact: true }); const save = page.getByRole('button', { name: 'Save changes', exact: true });
+    await expect(directory).toHaveValue('/private/tmp'); await directory.fill('/private/tmp/appearance-saved'); await density.selectOption('comfortable'); await density.evaluate((node) => { node.setAttribute('data-appearance-anchor', 'retained'); });
+    const beforeReads = reads; const before = connections; await socket!.close({ code: 1012, reason: 'Appearance draft reconnect' }); await expect.poll(() => connections).toBeGreaterThan(before); await expect.poll(() => reads).toBeGreaterThan(beforeReads); await expect(density).toHaveValue('comfortable'); await expect(density).toHaveAttribute('data-appearance-anchor', 'retained'); expect(writes).toHaveLength(0);
+    await save.click(); await expect.poll(() => held).toBe(true); await expect(density).toBeDisabled(); await page.getByRole('button', { name: 'Help', exact: true }).click(); await expect(page.getByRole('dialog', { name: 'Settings save in progress' })).toBeVisible(); expect(await page.evaluate((name) => localStorage.getItem(name), key)).toBeNull();
+    release(); await page.getByRole('button', { name: 'Keep editing', exact: true }).click(); await expect(page.getByRole('alert')).toContainText('Appearance save fixture refusal'); await expect(save).toBeEnabled(); await expect(density).toHaveValue('comfortable'); expect(await page.evaluate((name) => localStorage.getItem(name), key)).toBeNull();
+    held = false; refuse = false; await save.click(); await expect.poll(() => held).toBe(true); release(); await expect(page.getByText('Saved', { exact: true })).toBeVisible(); await expect(save).toBeDisabled(); expect(writes).toHaveLength(2); expect((await command(request, { cmd: 'get_group_settings', group })).settings).toMatchObject({ default_directory: '/private/tmp/appearance-saved' });
+    expect(JSON.parse((await page.evaluate((name) => localStorage.getItem(name), key))!)).toMatchObject({ density: 'comfortable' }); await page.reload(); await expect(density).toHaveValue('comfortable'); await expect(directory).toHaveValue('/private/tmp/appearance-saved');
+  } finally { release(); }
+});
