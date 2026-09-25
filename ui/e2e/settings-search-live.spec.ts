@@ -36,7 +36,7 @@ test('settings search reveals scopes, preserves drafts and caret, and refreshes 
   }
   expect(await directory.evaluate((input: HTMLInputElement) => [input.selectionStart, input.selectionEnd])).toEqual([2, 10]);
   for (const value of ['fixture-secret-unsearchable', '/private/tmp/search-local-draft', 'no-such-setting']) {
-    await search.fill(value); await expect(page.getByRole('status')).toContainText('No settings found'); await search.press('Enter'); expect(writes).toHaveLength(0);
+    await search.fill(value); await expect(page.getByRole('status').filter({ hasText: 'No settings found' })).toContainText('No settings found'); await search.press('Enter'); expect(writes).toHaveLength(0);
   }
   await search.fill('env vars search'); await expect(page.getByRole('button', { name: /^Env vars: SEARCH_OLD — / })).toBeVisible();
   await command(request, { cmd: 'update_group_settings', group, settings: { env_vars: { SEARCH_NEW: 'fresh' } } });

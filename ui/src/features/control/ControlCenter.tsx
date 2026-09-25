@@ -23,6 +23,8 @@ import { BehaviorOverlayEditor, CatalogEditor } from './CatalogEditors';
 import { browserHost, type DesktopHost } from '../../host';
 import { readCommand } from '../../protocol/http';
 import { projectionActions } from '../../app/store';
+import { AiSecretSetting } from './AiSecretSetting';
+import { aiRebuildPrompt, redactAiSaveError } from './aiSettingsSafety';
 import { NumericSettingInput } from './NumericSettingInput';
 import { EngineerNotificationPreset } from './EngineerNotificationPreset';
 import { StructuredSettings } from './StructuredSettings';
@@ -72,7 +74,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return <label className={styles.field}><span>{label}</span>{children}</label>;
 }
 
-function SettingsPanel({ group, responses, send, snapshot, onSavingChange, onDiscard }: { onDiscard: () => void; group: string; responses: Record<string, unknown>; send: (command: TorqueCommand) => void; snapshot: SettingsSnapshot; onSavingChange: (busy: boolean) => void }) {
+function SettingsPanel({ group, send, snapshot, onSavingChange, onDiscard }: { onDiscard: () => void; group: string; send: (command: TorqueCommand) => void; snapshot: SettingsSnapshot; onSavingChange: (busy: boolean) => void }) {
   const operations = useAppSelector(selectOperationsState);
   const discoveredProviders = useAppSelector(selectProviders);
   const providers = Array.isArray(snapshot.group.providers) ? snapshot.group.providers : discoveredProviders;
@@ -94,6 +96,17 @@ function SettingsPanel({ group, responses, send, snapshot, onSavingChange, onDis
   const [aiDraft, setAiDraft] = useState(() => aiSettingsDraft(record(snapshot.ai.settings), currentGlobal));
   const [aiSecrets, setAiSecrets] = useState({ anthropic: '', openai_compatible: '' });
   const [clearAiSecrets, setClearAiSecrets] = useState<string[]>([]);
+  const [secretRevision, setSecretRevision] = useState(0);
+  const [aiConfirmation, setAiConfirmation] = useState<{ key: string; message: string } | null>(null);
+  // A confirmation belongs to exactly this AI draft and secret intent. Raw keys
+  // remain in the local password draft, never in a shared response cache.
+  const aiConfirmationKey = JSON.stringify([aiDraft, secretRevision]);
+  if (aiConfirmation && aiConfirmation.key !== aiConfirmationKey) setAiConfirmation(null);
+  const setSecretIntent = (provider: keyof typeof aiSecrets, value: string, clearing: boolean) => {
+    setAiSecrets((current) => ({ ...current, [provider]: value }));
+    setClearAiSecrets((current) => clearing ? [...new Set([...current, provider])] : current.filter((item) => item !== provider));
+    setSecretRevision((revision) => revision + 1); setDirty(true); setSaved(false);
+  };
   const resolvedRelay = operations.relayConfig.config || operations.relayConfig.sources ? operations.relayConfig : snapshot.global.relay_config;
   const relayView = relayConfigurationView(currentGlobal, resolvedRelay);
   const [relayDraft, setRelayDraft] = useState(() => relayView.values);
@@ -176,6 +189,12 @@ function SettingsPanel({ group, responses, send, snapshot, onSavingChange, onDis
     let fullGlobal: UnknownRecord; let fullGroup: UnknownRecord; let fullEngineer: UnknownRecord; let fullArchitect: UnknownRecord;
     try { fullGlobal = record(JSON.parse(advancedGlobal)); fullGroup = record(JSON.parse(advancedGroup)); fullEngineer = record(JSON.parse(advancedEngineer)); fullArchitect = record(JSON.parse(advancedArchitect)); } catch { setJsonError('Advanced settings must be valid JSON.'); return; }
     if (saveController.current || credentialBusy) return;
+    const confirmed = confirmEmbeddingRebuild && aiConfirmation?.key === aiConfirmationKey;
+    const aiChanged = Object.keys(changedSettings(baseline.ai, aiDraft)).length > 0 || Object.values(aiSecrets).some((value) => value.trim()) || clearAiSecrets.length > 0;
+    const rebuildPrompt = aiChanged ? aiRebuildPrompt(currentAi, aiDraft) : null;
+    if (!confirmed && rebuildPrompt) { setAiConfirmation({ key: aiConfirmationKey, message: rebuildPrompt }); setJsonError(''); setSaved(false); return; }
+    if (confirmEmbeddingRebuild && !confirmed) return;
+    setAiConfirmation(null);
     onSavingChange(true); setSaving(true); setJsonError(''); setSaved(false);
     const controller = new AbortController(); saveController.current = controller;
     const next = { global: { ...fullGlobal, ...globalDraft }, group: { ...fullGroup, ...groupDraft }, engineer: fullEngineer, architect: fullArchitect, ai: { ...aiDraft } };
@@ -191,14 +210,18 @@ function SettingsPanel({ group, responses, send, snapshot, onSavingChange, onDis
     if (Object.keys(groupChanges).length) commands.push({ scope: 'group', command: { cmd: 'update_group_settings', group, settings: groupChanges } });
     if (Object.keys(engineerChanges).length) commands.push({ scope: 'engineer', command: { cmd: 'engineer_update_settings', group, ...engineerChanges } });
     if (Object.keys(architectChanges).length) commands.push({ scope: 'architect', command: { cmd: 'update_architect_settings', group, settings: architectChanges } });
-    if (Object.keys(aiChanges).length || Object.values(aiSecrets).some((value) => value.trim()) || clearAiSecrets.length) commands.push({ scope: 'ai', command: { cmd: 'update_ai_settings', settings: aiChanges, secrets: Object.fromEntries(Object.entries(aiSecrets).filter(([, value]) => value.trim())), clear_secrets: clearAiSecrets, ...(confirmEmbeddingRebuild ? { confirm_embedding_rebuild: true } : {}) } });
+    if (Object.keys(aiChanges).length || Object.values(aiSecrets).some((value) => value.trim()) || clearAiSecrets.length) commands.push({ scope: 'ai', command: { cmd: 'update_ai_settings', settings: aiChanges, secrets: Object.fromEntries(Object.entries(aiSecrets).filter(([, value]) => value.trim())), clear_secrets: clearAiSecrets, ...(confirmed ? { confirm_embedding_rebuild: true } : {}) } });
     try {
       for (const { scope, command } of commands) {
         const response = await readCommand(command, controller.signal);
         if (controller.signal.aborted) return;
         if (response.type === 'error') throw new Error(text(response.message, 'Settings save failed.'));
+        if (scope === 'ai' && response.type === 'ai_settings_requires_confirmation') {
+          setAiConfirmation({ key: aiConfirmationKey, message: redactAiSaveError(text(response.message, 'Changing embedding settings requires rebuilding the index. Continue?'), aiSecrets) });
+          return;
+        }
+        if (scope === 'ai' && (response.type !== 'ai_settings' || !response.settings || typeof response.settings !== 'object' || Array.isArray(response.settings))) throw new Error('The daemon returned an invalid AI settings acknowledgement; the outcome is unknown');
         if (response.type !== 'state') settingsDispatch(projectionActions.auxiliaryResourceReceived(response));
-        if (response.type === 'ai_settings_requires_confirmation') throw new Error('AI settings require embedding rebuild confirmation.');
         setBaseline((current) => ({ ...current, [scope]: next[scope] })); setResetScopes((current) => { const pending = new Set(current); pending.delete(scope); return pending; });
         if (scope === 'global') setRelayTouched([]);
         if (scope === 'ai') { setAiSecrets({ anthropic: '', openai_compatible: '' }); setClearAiSecrets([]); }
@@ -206,11 +229,10 @@ function SettingsPanel({ group, responses, send, snapshot, onSavingChange, onDis
       setBaseline(next); setResetScopes(new Set()); setRelayTouched([]);
       setDirty(false); setSaved(true); setAiSecrets({ anthropic: '', openai_compatible: '' }); setClearAiSecrets([]);
     } catch (cause) {
-      if (!controller.signal.aborted) setJsonError(`Some settings may already be saved. ${cause instanceof Error ? cause.message : 'Save failed'}. Your draft is retained; retry when ready.`);
+      if (!controller.signal.aborted) setJsonError(`Some settings may already be saved. ${redactAiSaveError(cause instanceof Error ? cause.message : 'Save failed', aiSecrets)}. Your draft is retained; retry when ready.`);
     } finally { saveController.current = null; if (!controller.signal.aborted) { setSaving(false); onSavingChange(false); } }
 
   };
-  const aiConfirmation = record(responses['ai_settings_requires_confirmation:_'] ?? responses['ai_settings_requires_confirmation:latest']);
 
   return <form ref={form} onFocusCapture={(event) => { if (event.target instanceof HTMLElement && event.target.matches('input, select, textarea')) lastEditor.current = event.target; }} noValidate className={styles.settings} onSubmit={(event) => { event.preventDefault(); void save(); }}>
     <header><div><h2>Workspace settings</h2><p>Global, group, and AI changes save as one coordinated operation.</p></div><span>{credentialBusy ? 'Pairing credential…' : saving ? 'Saving…' : dirty ? 'Unsaved changes' : saved ? 'Saved' : 'Up to date'}</span><Button tone="primary" type="submit" isDisabled={!dirty || saving || credentialBusy}>Save changes</Button></header>
@@ -235,22 +257,22 @@ function SettingsPanel({ group, responses, send, snapshot, onSavingChange, onDis
       <Field label="AI"><select value={aiDraft.ai_enabled ? 'on' : 'off'} onChange={(event) => change(setAiDraft, { ai_enabled: event.target.value === 'on' })}><option value="off">Disabled</option><option value="on">Enabled</option></select></Field>
       <Field label="Generation provider"><select value={aiDraft.ai_generation_provider} onChange={(event) => change(setAiDraft, { ai_generation_provider: event.target.value })}><option value="anthropic">Anthropic</option><option value="openai_compatible">OpenAI compatible</option></select></Field>
       <Field label="Anthropic model"><input value={aiDraft.ai_anthropic_model} onChange={(event) => change(setAiDraft, { ai_anthropic_model: event.target.value })} /></Field>
-      <Field label={`Anthropic key${record(aiAnthropic.key).configured === true ? ` · configured …${text(record(aiAnthropic.key).last4)}` : ''}`}><input type="password" value={aiSecrets.anthropic} onChange={(event) => { setAiSecrets({ ...aiSecrets, anthropic: event.target.value }); setDirty(true); }} placeholder="Leave blank to keep current" autoComplete="off" /></Field>
+      <AiSecretSetting label="Anthropic" configured={record(aiAnthropic.key).configured === true} last4={text(record(aiAnthropic.key).last4)} value={aiSecrets.anthropic} clearing={clearAiSecrets.includes('anthropic')} onChange={(value) => setSecretIntent('anthropic', value, false)} onClear={() => setSecretIntent('anthropic', '', true)} onKeep={() => setSecretIntent('anthropic', '', false)} />
       <Field label="OpenAI-compatible URL"><input value={aiDraft.ai_openai_compatible_base_url} onChange={(event) => change(setAiDraft, { ai_openai_compatible_base_url: event.target.value })} /></Field>
       <Field label="OpenAI-compatible model"><input value={aiDraft.ai_openai_compatible_model} onChange={(event) => change(setAiDraft, { ai_openai_compatible_model: event.target.value })} /></Field>
-      <Field label={`OpenAI-compatible key${record(aiOpenAi.key).configured === true ? ` · configured …${text(record(aiOpenAi.key).last4)}` : ''}`}><input type="password" value={aiSecrets.openai_compatible} onChange={(event) => { setAiSecrets({ ...aiSecrets, openai_compatible: event.target.value }); setDirty(true); }} placeholder="Leave blank to keep current" autoComplete="off" /></Field>
+      <AiSecretSetting label="OpenAI-compatible" configured={record(aiOpenAi.key).configured === true} last4={text(record(aiOpenAi.key).last4)} value={aiSecrets.openai_compatible} clearing={clearAiSecrets.includes('openai_compatible')} onChange={(value) => setSecretIntent('openai_compatible', value, false)} onClear={() => setSecretIntent('openai_compatible', '', true)} onKeep={() => setSecretIntent('openai_compatible', '', false)} />
       <Field label="Embedding model"><input value={aiDraft.ai_embedding_model} onChange={(event) => change(setAiDraft, { ai_embedding_model: event.target.value })} /></Field>
       <Field label="Embedding runtime"><select value={aiDraft.ai_embedding_runtime} onChange={(event) => change(setAiDraft, { ai_embedding_runtime: event.target.value })}><option value="sentence_transformers">Sentence Transformers</option><option value="fastembed">FastEmbed</option></select></Field>
       <Field label="Boot summaries"><select value={aiDraft.ai_boot_summary_enabled ? 'on' : 'off'} onChange={(event) => change(setAiDraft, { ai_boot_summary_enabled: event.target.value === 'on' })}><option value="on">Enabled</option><option value="off">Disabled</option></select></Field>
       <Field label="Boot summary minimum interval"><NumericSettingInput fieldKey="ai_boot_summary_min_interval_seconds" value={aiDraft.ai_boot_summary_min_interval_seconds} onChange={(value) => change(setAiDraft, { ai_boot_summary_min_interval_seconds: value })} /></Field>
       <Field label="Boot summary hourly limit"><NumericSettingInput fieldKey="ai_boot_summary_max_refreshes_per_hour" value={aiDraft.ai_boot_summary_max_refreshes_per_hour} onChange={(value) => change(setAiDraft, { ai_boot_summary_max_refreshes_per_hour: value })} /></Field>
-    </div><div className={styles.aiCorpus}><strong>Index corpus</strong>{Object.entries(aiDraft.ai_index_corpus).map(([key, enabled]) => <label key={key}><input type="checkbox" checked={enabled === true} onChange={(event) => change(setAiDraft, { ai_index_corpus: { ...aiDraft.ai_index_corpus, [key]: event.target.checked } })} />{key.replaceAll('_', ' ')}</label>)}</div>{Object.keys(aiConfirmation).length ? <div className={styles.secretResult}><strong>Embedding index rebuild required</strong><p>{text(aiConfirmation.message)}</p><Button tone="primary" onPress={() => { void save(true); }}>Confirm settings and rebuild</Button></div> : null}<div className={styles.settingsActions}>{record(aiAnthropic.key).configured === true ? <Button tone="danger" onPress={() => { setClearAiSecrets((value) => value.includes('anthropic') ? value.filter((item) => item !== 'anthropic') : [...value, 'anthropic']); setDirty(true); }}>{clearAiSecrets.includes('anthropic') ? 'Keep Anthropic key' : 'Clear Anthropic key'}</Button> : null}{record(aiOpenAi.key).configured === true ? <Button tone="danger" onPress={() => { setClearAiSecrets((value) => value.includes('openai_compatible') ? value.filter((item) => item !== 'openai_compatible') : [...value, 'openai_compatible']); setDirty(true); }}>{clearAiSecrets.includes('openai_compatible') ? 'Keep OpenAI key' : 'Clear OpenAI key'}</Button> : null}<Button tone="quiet" onPress={() => send({ cmd: 'ai_index_start', mode: Number(record(aiIndex.counts).indexed ?? 0) > 0 ? 'rebuild' : 'incremental', confirm: true })}>Build / rebuild index</Button></div><p className={styles.note}>Raw provider keys are write-only and never returned in snapshots or logs. Index: {text(aiIndex.status, 'disabled')} · {text(record(aiIndex.counts).indexed, '0')} indexed.</p></section>
+    </div><div className={styles.aiCorpus}><strong>Index corpus</strong>{Object.entries(aiDraft.ai_index_corpus).map(([key, enabled]) => <label key={key}><input type="checkbox" checked={enabled === true} onChange={(event) => change(setAiDraft, { ai_index_corpus: { ...aiDraft.ai_index_corpus, [key]: event.target.checked } })} />{key.replaceAll('_', ' ')}</label>)}</div>{aiConfirmation && aiConfirmation.key === aiConfirmationKey ? <div className={styles.secretResult} role="group" aria-label="Confirm embedding rebuild"><strong>Embedding index rebuild required</strong><p>{aiConfirmation.message}</p><Button tone="primary" onPress={() => { void save(true); }}>Confirm settings and rebuild</Button><Button tone="quiet" onPress={() => { setAiConfirmation(null); setJsonError(''); }}>Cancel rebuild</Button></div> : null}<div className={styles.settingsActions}><Button tone="quiet" onPress={() => send({ cmd: 'ai_index_start', mode: Number(record(aiIndex.counts).indexed ?? 0) > 0 ? 'rebuild' : 'incremental', confirm: true })}>Build / rebuild index</Button></div><p className={styles.note}>Raw provider keys are write-only and never returned in snapshots or logs. Index: {text(aiIndex.status, 'disabled')} · {text(record(aiIndex.counts).indexed, '0')} indexed.</p></section>
     <section><h3>Relay connector</h3><RelayConfigurationFields view={relayView} draft={relayDraft} touched={relayTouched} onChange={changeRelay} /><RelayConnectionDetails connection={operations.relayConnection} /><RelayProbe disabled={saving || credentialBusy} /><RelayCredentialPairing resolved={resolvedRelay} disabled={saving} onBusyChange={credentialBusyChanged} onResolved={(relayConfig) => settingsDispatch(projectionActions.auxiliaryResourceReceived({ type: 'global_settings', relay_config: relayConfig }))} /><RelayDeviceLink resolved={resolvedRelay} disabled={saving || credentialBusy} /></section>
     <section><h3>Runtime and behavior settings</h3><p className={styles.note}>Fields retain their daemon defaults and inheritance. Group-wide defaults apply to future launches; per-agent overrides remain in Agents.</p><details><summary>Global defaults</summary><StructuredSettings providers={providers} value={record(JSON.parse(advancedGlobal))} defaults={globalDefaults} omit={[...Object.keys(globalDraft), ...Object.keys(relayDraft), ...Object.keys(aiDraft), 'default_lanes']} onChange={(next) => { setAdvancedGlobal(JSON.stringify(next)); setDirty(true); setSaved(false); }} /></details><details><summary>{group} execution, worktrees, notifications and sync</summary><StructuredSettings templates={Array.isArray(snapshot.group.templates) ? snapshot.group.templates : []} launchContext={launchContext} group={group} providers={providers} value={record(JSON.parse(advancedGroup))} defaults={groupDefaults} omit={Object.keys(groupDraft)} onChange={(next) => { setAdvancedGroup(JSON.stringify(next)); setDirty(true); setSaved(false); }} /><BoardSyncSettings group={group} disabled={saving} settings={{ ...record(JSON.parse(advancedGroup)), ...groupDraft }} onChange={updateGithubDraft} /></details><details><summary>Engineer behavior defaults</summary><Button tone="quiet" isDisabled={!Object.keys(engineerDefaults).length} onPress={() => resetSection('engineer')}>Reset Engineer defaults</Button><EngineerNotificationPreset value={record(JSON.parse(advancedEngineer))} disabled={saving} onApply={(preset) => { setAdvancedEngineer((previous) => JSON.stringify({ ...record(JSON.parse(previous)), ...preset })); setDirty(true); setSaved(false); }} /><StructuredSettings launchContext={launchContext} providers={providers} value={record(JSON.parse(advancedEngineer))} defaults={engineerDefaults} onChange={(next) => { setAdvancedEngineer(JSON.stringify(next)); setDirty(true); setSaved(false); }} /></details><details><summary>Architect behavior defaults</summary><Button tone="quiet" isDisabled={!Object.keys(architectDefaults).length} onPress={() => resetSection('architect')}>Reset Architect defaults</Button><StructuredSettings launchContext={launchContext} providers={providers} value={record(JSON.parse(advancedArchitect))} defaults={architectDefaults} onChange={(next) => { setAdvancedArchitect(JSON.stringify(next)); setDirty(true); setSaved(false); }} /></details><SettingsPromptPreview group={group} groupSettings={currentDrafts.group} engineer={currentDrafts.engineer} architect={currentDrafts.architect} disabled={saving} /></section>
   </fieldset></form>;
 }
 
-function SettingsWorkspace({ group, responses, send }: { group: string; responses: Record<string, unknown>; send: (command: TorqueCommand) => void }) {
+function SettingsWorkspace({ group, send }: { group: string; send: (command: TorqueCommand) => void }) {
   const dispatch = useAppDispatch(); const connection = useAppSelector(selectConnection);
   const [generation, setGeneration] = useState(0);
   const discard = useCallback(() => setGeneration((value) => value + 1), []);
@@ -271,7 +293,7 @@ function SettingsWorkspace({ group, responses, send }: { group: string; response
     return () => controller.abort();
   }, [group, dispatch, retry, connection.status, connection.reconnectCount, busy]);
   const retryButton = <Button onPress={() => { setError(''); setRetry((value) => value + 1); }}>Retry settings</Button>;
-  return snapshot ? <>{error ? <div role="alert">Settings refresh failed. Your draft is retained. {error} {retryButton}</div> : null}<SettingsPanel key={generation} onDiscard={discard} group={group} responses={responses} send={send} snapshot={snapshot} onSavingChange={savingChanged} /></> : error ? <StateSurface title="Settings unavailable" description={error} action={retryButton} /> : <StateSurface title="Loading settings" description="Loading global, group and AI defaults before editing." />;
+  return snapshot ? <>{error ? <div role="alert">Settings refresh failed. Your draft is retained. {error} {retryButton}</div> : null}<SettingsPanel key={generation} onDiscard={discard} group={group} send={send} snapshot={snapshot} onSavingChange={savingChanged} /></> : error ? <StateSurface title="Settings unavailable" description={error} action={retryButton} /> : <StateSurface title="Loading settings" description="Loading global, group and AI defaults before editing." />;
 }
 
 export function ControlCenter({ group, sendCommand, onCommandUnavailable, host = browserHost }: {
@@ -345,7 +367,7 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable, host =
         <CatalogEditor key={`specialization:${group}:${baseDir}`} title="Specializations" kind="specialization" group={group} refreshVersion={classRefreshVersion} onMutation={() => setClassRefreshVersion((value) => value + 1)} />
         <BehaviorOverlayEditor group={group} active={catalog.behaviorOverlays} proposals={operations.behaviorOverlayProposals} responses={auxiliaryResponses} agents={agentItems} send={send} />
       </div> : null}
-      {tab === 'settings' ? <SettingsWorkspace key={group} group={group} responses={auxiliaryResponses} send={send} /> : null}
+      {tab === 'settings' ? <SettingsWorkspace key={group} group={group} send={send} /> : null}
       {tab === 'help' ? <HelpPanel refreshVersion={helpRefreshVersion} /> : null}
     </div>
   </section>;
