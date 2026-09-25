@@ -3305,3 +3305,13 @@ History renders the persisted contract: role/template, input/output token counts
 - Warnings: Keep Current class warnings associated with the frozen effective class and Selected class warnings associated with the reviewed choice. Normalize duplicates within each scope. Match Classic's deliberate exclusion of generic connector-governance notices (`_agentPanelClassConnectorCaveat` returns an empty string); retain actionable connector warnings. This corrects the earlier P-276 inventory wording, which treated the intentionally omitted caveat as a gap.
 - Metadata: Current status includes base-kind metadata, lifecycle/status, assignment actor/time and effective freeze time. Accepted status takes precedence over stale raw agent fields, including explicit zero timestamps. Render valid timestamps with machine-readable dates and wrap long values in narrow layouts.
 - Verification: P-275–P-277 track preview, warning and metadata acceptance independently. No mutation/backend contract changes are required.
+
+
+### D-166 — Settings prompt previews belong to the reviewed draft
+
+- Date: 2026-09-25
+- Scope: Settings Engineer/Architect system-prompt preview and copying.
+- Decision: Keep the inline preview design, with an owned HTTP read using the unsaved selected-role settings and group overrides. Accept only a response matching its request ID, group and role. Cancel obsolete reads on replacement, draft change or unmount; changing and reverting a draft does not revive a cancelled preview.
+- Outcomes: Show loading, empty, failure and stale states explicitly. Bound waiting to 30 seconds, provide an explicit retry, and never save settings or automatically replay a request to obtain a preview. Unrelated role edits leave the accepted preview intact.
+- Copy: Enable copying only for the accepted current result. Preserve selectable text when clipboard access fails, show success/failure inline, and prevent a late clipboard completion from unlocking or labeling a newer copy. Saving settings disables preview/copy actions.
+- Verification: P-278/P-279 track response ownership and clipboard behavior. Focused regressions cover mismatches, cancellation, timeout, empty/refused results and overlapping clipboard completions; isolated browser acceptance covers both real backend role renderers and persisted-settings isolation.
