@@ -7,6 +7,8 @@ import { Provider } from 'react-redux';
 import { Dialog, DialogTrigger, Heading, Popover } from 'react-aria-components';
 
 import { ActionMenu, ActionMenuItem, Button, ModalDialog, StateSurface } from '../design/primitives';
+import { RelayStatusIndicator } from '../features/relay/RelayStatus';
+import { statusVisibilityEnabled } from '../features/relay/relayStatusModel';
 import { extensionRegistry } from '../extensions';
 import { BoardPanel, type CommandSender } from '../features/board/BoardPanel';
 import { AgentWorkspace } from '../features/agents/AgentWorkspace';
@@ -597,7 +599,8 @@ function WorkspaceShellContent({ host, sendCommand }: WorkspaceShellProps) {
         {retainedGroup && retainedGroup !== activeGroup ? <div role="status">Settings for {retainedGroup} remain open. <Button onPress={() => requestNavigation(() => {})}>Switch to {activeGroup}</Button></div> : null}
         {workspaceUi.activePanel === 'control' && !activeDetachedLabel ? <Suspense fallback={<StateSurface title="Loading Control Center" description="Preparing operational resources." />}><ControlCenter host={host} key={controlGroup} group={controlGroup} sendCommand={sendCommand} onCommandUnavailable={commandUnavailable} /></Suspense> : null}
         <footer className={styles.statusBar} aria-label="Workspace status">
-          {statusVisibility.daemon_status ? <span data-state={connection.status}>● Daemon {connection.status}</span> : null}
+          {statusVisibilityEnabled(statusVisibility.daemon_status) ? <span data-state={connection.status}>● Daemon {connection.status}</span> : null}
+          <RelayStatusIndicator connection={operations.relayConnection} visible={statusVisibility.daemon_status} />
           {statusVisibility.deploy ? <span>Deploy {textValue(deployState.status, textValue(deployState.state, '—'))}{Number(deployState.commits_behind ?? deployState.behind ?? 0) ? ` +${Number(deployState.commits_behind ?? deployState.behind)}` : ''}</span> : null}
           {statusVisibility.health ? <span>Health {healthState}</span> : null}
           {statusVisibility.workload ? <span>Agents {runningAgents} run · {groupAgents.length} total</span> : null}

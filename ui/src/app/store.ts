@@ -1,3 +1,4 @@
+import { relayProbeSlice } from '../features/relay/relayProbeState';
 import { classAssignmentSlice } from '../features/agents/classAssignmentState';
 import {
   configureStore,
@@ -592,6 +593,7 @@ export function createAppStore(initialNavigation?: WorkspaceNavigation | null) {
       workspaceUi: workspaceUiSlice.reducer,
       composer: composerSlice.reducer,
       classAssignments: classAssignmentSlice.reducer,
+      relayProbe: relayProbeSlice.reducer,
     },
     middleware: (getDefaultMiddleware) =>
       getDefaultMiddleware({

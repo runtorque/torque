@@ -1200,3 +1200,8 @@ P-280/P-281 now provide transient pairing-token entry, effective configuration g
 ### Relay device-link checkpoint — 2026-09-25
 
 P-282/P-283 now provide effective-config gating, inline confirmation, owned generation outcomes and a transient display-once QR/link/expiry view. D-168 and the parity matrix record 101 focused tests, the full 589-test React check and four isolated browser scenarios with consistent controlled Relay replies, actual local QR encoding, zero external requests and dismiss/close/reconnect acceptance. Live external minting was not performed. The audit adds P-284–P-286 for connection-probe detail/ownership, live diagnostics and the passive Relay indicator. Main ledger: **286 behaviors: 273 implemented/equivalent dispositions, 9 open repairs and 4 intentional retirements**. Broad Settings/lazy-reconnect and independent native/external/recovery gates remain open; Phase 4 is not complete.
+
+
+### Relay connection diagnostics checkpoint — 2026-09-25
+
+P-284–P-286 now provide an owned retained connection probe, readable live connection diagnostics and the configured passive Relay indicator with retry escalation. D-169 and the parity matrix record 29 focused tests, the full 616-test React check and five isolated browser scenarios covering real disabled probing, controlled service outcomes, draft/focus continuity and reconnect. P-079 returns to Required after the complete P-280–P-286 implementation pass. Main ledger: **286 behaviors: 277 implemented/equivalent dispositions, 5 open repairs and 4 intentional retirements**. The remaining broad rows are Settings P-087–P-090 and lazy/reconnect P-112. Live external Relay, full native/recovery and the other acceptance gates remain separate and unverified; Phase 4 is not complete.

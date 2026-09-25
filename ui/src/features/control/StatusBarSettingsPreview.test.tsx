@@ -6,7 +6,7 @@ describe('status-bar settings preview', () => {
   it('shows sample values for all supported indicators without actionable controls', () => {
     render(<StatusBarSettingsPreview visibility={{ daemon_status: true, deploy: true, health: true, workload: true, tasks: true, attention: true, claude_usage: true, codex_usage: true, unknown: true }} />);
     const preview = screen.getByRole('group', { name: 'Status bar preview' });
-    expect(within(preview).getAllByRole('listitem').map((item) => item.textContent)).toEqual(['● Daemon connected', 'Deploy +2', 'Health good', 'Agents 3 run', 'Tasks 4 active', 'Attention 1', 'Claude 42%', 'Codex 20%']);
+    expect(within(preview).getAllByRole('listitem').map((item) => item.textContent)).toEqual(['● Daemon connected', '● Relay connected', 'Deploy +2', 'Health good', 'Agents 3 run', 'Tasks 4 active', 'Attention 1', 'Claude 42%', 'Codex 20%']);
     expect(preview).toHaveTextContent('Sample values'); expect(within(preview).queryByRole('button')).not.toBeInTheDocument();
   });
   it('tracks the current draft including explicit empty selections and preserves retained segments', () => {
