@@ -6,7 +6,7 @@ export function planningReads(tab: PlanningTab, group: string, archived: boolean
   if (!group) return [];
   const available: Record<PlanningRead['field'], PlanningRead> = {
     initiatives: { command: { cmd: 'initiative_list', group, include_archived: false }, type: 'initiative_list', field: 'initiatives' },
-    areas: { command: { cmd: 'area_list', group, include_links: true, include_notes: true }, type: 'area_list', field: 'areas' },
+    areas: { command: { cmd: 'area_list', group, include_archived: false, limit: 500, include_links: true, include_notes: true }, type: 'area_list', field: 'areas' },
     scratchpadNotes: { command: { cmd: 'scratchpad_note_list', group, include_archived: archived }, type: 'scratchpad_note_list', field: 'scratchpadNotes' },
     ideaBriefs: { command: { cmd: 'idea_brief_list', group, include_archived: archived }, type: 'idea_brief_list', field: 'ideaBriefs' },
     decisions: { command: { cmd: 'decisions_snapshot', include_archived: archivedDecisions }, type: 'decisions_snapshot', field: 'decisions' },

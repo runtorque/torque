@@ -1,0 +1,48 @@
+import { expect, test, type APIRequestContext, type WebSocketRoute } from '@playwright/test';
+type Row = Record<string, unknown>;
+async function command(request: APIRequestContext, data: Row) {
+  const result = await (await request.post('/api/cmd', { data })).json() as { ok: boolean; error?: string; data: Row };
+  expect(result.ok, result.error).toBe(true); expect(result.data.type).not.toBe('error'); return result.data;
+}
+test('Areas exposes the Classic 500-item window, combined local filters, ordering and reconnect continuity', async ({ page, request }) => {
+  test.setTimeout(120_000); page.setDefaultTimeout(15_000);
+  const runtime = (await (await request.get('/api/runtime')).json() as { data: { runtime: Row } }).data.runtime;
+  expect(runtime.port).not.toBe(18932); expect(runtime.profile).not.toBe('default');
+  const group = `Area browse ${Date.now()}`; const other = `${group} other`;
+  await command(request, { cmd: 'add_group', group }); await command(request, { cmd: 'add_group', group: other });
+  const create = async (title: string, fields: Row = {}) => (await command(request, { cmd: 'area_create', group, title, ...fields })).area as Row;
+  const oldest = await create('Outside retained window', { lifecycle: 'retired', area_type: 'Oldest' });
+  const edge = await create('Window edge', { lifecycle: 'deprecated', area_type: 'Boundary', system_purpose: 'Old collection boundary' });
+  for (let index = 0; index < 497; index++) await create(`Bulk ${String(index).padStart(3, '0')}`, { lifecycle: 'maintenance', area_type: 'Bulk' });
+  const alpha = await create('Alpha API', { lifecycle: 'planned', area_type: 'API', summary: 'Needle scope', user_purpose: 'Operator evidence' });
+  await create('Beta API', { lifecycle: 'planned', area_type: 'API', summary: 'Needle alternative' });
+  const archived = await create('Archived Area', { lifecycle: 'planned', area_type: 'ArchivedOnly' }); await command(request, { cmd: 'area_archive', id: archived.id });
+  await create('Other group Area', { group: other, area_type: 'OtherOnly' });
+  const retained = (await command(request, { cmd: 'area_list', group, limit: 500 })).areas as Row[];
+  expect(retained).toHaveLength(500); expect(retained.some((row) => row.id === edge.id)).toBe(true); expect(retained.some((row) => row.id === oldest.id)).toBe(false);
+  await command(request, { cmd: 'ui_select_group', group }); await command(request, { cmd: 'ui_set_react_workspace_state', state: { version: 1, activePanel: 'planning', controlTab: 'mission' } });
+  const reads: Row[] = []; let socket: WebSocketRoute | undefined; let connections = 0; let refusal = false;
+  await page.routeWebSocket(/\/ws\?/, (connection) => { connection.connectToServer(); socket = connection; connections++; });
+  await page.route('**/api/cmd', async (route) => { const data = route.request().postDataJSON() as Row; if (data.cmd === 'area_list') { reads.push(data); if (refusal) { refusal = false; await route.fulfill({ json: { ok: false, error: 'QA Area refresh refused' } }); return; } } await route.continue(); });
+  await page.goto('/'); await page.getByRole('button', { name: 'Areas', exact: true }).click();
+  const results = page.locator('[aria-label="Area results"]'); const count = page.getByLabel('Matching areas'); const search = page.getByRole('searchbox', { name: 'Search areas' }); const lifecycle = page.getByLabel('Filter areas by lifecycle'); const type = page.getByLabel('Filter areas by type');
+  await expect(count).toHaveText('500 / 500'); expect(reads.at(-1)).toMatchObject({ limit: 500, include_archived: false, group });
+  await expect(results.getByRole('button')).toHaveCount(500); await expect(results.getByRole('button').first()).toContainText('Alpha API'); await expect(results.getByRole('button').nth(1)).toContainText('Beta API');
+  await expect(type.locator('option')).toHaveText(['All types', 'API', 'Boundary', 'Bulk']);
+  const beforeFilters = reads.length; await search.fill('OLD COLLECTION BOUNDARY'); await expect(results.getByRole('button')).toHaveCount(1); await expect(results.getByRole('button')).toContainText('Window edge');
+  await search.fill('needle'); await lifecycle.selectOption('planned'); await type.selectOption('API'); await expect(count).toHaveText('2 / 500'); expect(reads).toHaveLength(beforeFilters);
+  await results.getByRole('button', { name: /Alpha API/ }).click(); const dialog = page.getByRole('dialog', { name: 'Area', exact: true }); await dialog.getByLabel('Relationship type').selectOption('area'); await expect(dialog.getByLabel('Relationship target').locator('option', { hasText: 'Window edge' })).toHaveCount(1); await dialog.getByRole('button', { name: 'Cancel', exact: true }).click(); await expect(dialog).toHaveCount(0);
+  await search.focus(); await search.evaluate((node) => { const input = node as HTMLInputElement; input.setSelectionRange(1, 4); input.dataset.retained = 'yes'; });
+  const alphaCard = results.getByRole('button', { name: /Alpha API/ }); await alphaCard.evaluate((node) => node.setAttribute('data-retained', 'yes'));
+  const before = connections; refusal = true; await socket!.close({ code: 1012, reason: 'Area filters reconnect' }); await expect.poll(() => connections).toBeGreaterThan(before); await expect(page.getByRole('alert')).toContainText('QA Area refresh refused');
+  await expect(search).toBeFocused(); await expect(search).toHaveValue('needle'); await expect(search).toHaveAttribute('data-retained', 'yes'); expect(await search.evaluate((node) => [(node as HTMLInputElement).selectionStart, (node as HTMLInputElement).selectionEnd])).toEqual([1, 4]); await expect(lifecycle).toHaveValue('planned'); await expect(type).toHaveValue('API'); await expect(alphaCard).toHaveAttribute('data-retained', 'yes'); await expect(count).toHaveText('2 / 500');
+  await page.getByRole('button', { name: 'Retry Planning' }).click(); await expect(page.getByRole('alert')).toHaveCount(0); await expect(page.getByText('Refreshing Planning…', { exact: true })).toHaveCount(0); await expect(count).toHaveText('2 / 500');
+  await search.fill('Operator evidence'); await expect(count).toHaveText('1 / 500'); await command(request, { cmd: 'area_update', id: alpha.id, area_type: 'Renamed' }); await expect(page.getByText('No matching Areas')).toBeVisible();
+  await page.getByRole('button', { name: 'Clear filters', exact: true }).click(); await expect(search).toHaveValue(''); await expect(count).toHaveText('500 / 500');
+  await type.selectOption('Renamed'); await search.focus(); await command(request, { cmd: 'area_archive', id: alpha.id }); await expect(page.getByText('No matching Areas')).toBeVisible(); await expect(type).toHaveValue('Renamed'); await expect(type.locator('option:checked')).toHaveText('Renamed (no current Areas)'); await expect(search).toBeFocused();
+  await page.getByRole('button', { name: 'Clear filters', exact: true }).click(); await search.fill('Beta API'); await page.getByRole('button', { name: 'Thinking', exact: true }).click(); await page.getByRole('button', { name: 'Areas', exact: true }).click(); await expect(search).toHaveValue('Beta API'); await expect(count).toHaveText('1 / 500');
+  await page.screenshot({ path: test.info().outputPath('area-browsing-desktop.png') });
+  await page.setViewportSize({ width: 390, height: 844 }); await expect(search).toBeVisible(); await expect(lifecycle).toBeVisible(); await expect(type).toBeVisible();
+  const bounds = await page.getByRole('group', { name: 'Area filters', exact: true }).evaluate((node) => { const rect = node.getBoundingClientRect(); return { left: rect.left, right: rect.right, viewport: window.innerWidth }; }); expect(bounds.left).toBeGreaterThanOrEqual(0); expect(bounds.right).toBeLessThanOrEqual(bounds.viewport + 1);
+  await page.screenshot({ path: test.info().outputPath('area-browsing-narrow.png') });
+});

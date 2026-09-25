@@ -1171,3 +1171,8 @@ P-263 now loads only visible role/tab resources, cancels obsolete reads, refresh
 ### Planning loading checkpoint — 2026-09-25
 
 P-264 now reads visible sections plus open-editor dependencies, retains accepted collections and drafts through reconnect, and exposes retry within modal focus containment. D-161 and the parity matrix record focused/full UI checks and six isolated live browser scenarios covering loading plus existing Planning/Thinking lifecycle workflows. Further audit adds P-265–P-269 for the Area list window, search, lifecycle/type filters and stable ordering. The main ledger has **269 behaviors: 255 implemented/equivalent dispositions, 10 open repairs and 4 intentional retirements**. Broad settings/lazy-reconnect, these Area browsing repairs and independent native/external/recovery gates remain open; Phase 4 is not complete.
+
+
+### Area browsing checkpoint — 2026-09-25
+
+P-265–P-269 now restore Classic's 500-Area window, multi-field search, combined lifecycle/type filters and stable lifecycle/type/title ordering, with retained controls and unfiltered editor choices. D-162 and the parity matrix record focused/full UI checks, a 501-Area real-daemon acceptance scenario, desktop/narrow inspection and two existing workflow regressions. The main ledger has **269 behaviors: 260 implemented/equivalent dispositions, 5 open repairs and 4 intentional retirements**. Broad settings/lazy-reconnect and independent native/external/recovery gates remain open; Phase 4 is not complete.

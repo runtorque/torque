@@ -60,4 +60,21 @@ describe('Planning visible-section reads', () => {
     vi.useFakeTimers();
     try { read.mockImplementation(() => new Promise(() => {})); mount(); const signal = read.mock.calls[0]![1]; await act(async () => { await vi.advanceTimersByTimeAsync(30_000); }); expect(signal.aborted).toBe(true); expect(screen.getByRole('alert')).toHaveTextContent('timed out'); expect(screen.getByRole('button', { name: 'Retry Planning' })).toBeEnabled(); } finally { vi.useRealTimers(); }
   });
+  it('filters the full Area window locally and retains filters, focus and missing-type choices through reconnect and live updates', async () => {
+    const areas = Array.from({ length: 105 }, (_, index) => ({ id: `area-${index}`, group: 'Foundation', title: `Area ${index}`, lifecycle: index === 104 ? 'stable' : 'planned', area_type: index === 104 ? 'API' : 'UI', system_purpose: index === 104 ? 'Needle context' : '' }));
+    read.mockImplementation((command) => Promise.resolve(command.cmd === 'area_list' ? { type: 'area_list', group: 'Foundation', areas } : response(command)));
+    const app = mount(); await screen.findByText('Retained initiative'); fireEvent.click(screen.getByRole('button', { name: 'Areas' })); await screen.findByText('Area 104');
+    expect(read.mock.calls.at(-1)?.[0]).toMatchObject({ cmd: 'area_list', limit: 500 });
+    expect(screen.getByLabelText('Matching areas')).toHaveTextContent('105 / 105'); const before = read.mock.calls.length;
+    const search = screen.getByRole('searchbox', { name: 'Search areas' }); fireEvent.change(search, { target: { value: 'needle' } });
+    fireEvent.change(screen.getByLabelText('Filter areas by lifecycle'), { target: { value: 'stable' } }); fireEvent.change(screen.getByLabelText('Filter areas by type'), { target: { value: 'API' } });
+    expect(screen.getByLabelText('Matching areas')).toHaveTextContent('1 / 105'); expect(screen.queryByText('Area 103')).not.toBeInTheDocument(); expect(read).toHaveBeenCalledTimes(before);
+    const card = screen.getByText('Area 104'); act(() => { search.focus(); (search as HTMLInputElement).setSelectionRange(1, 4); }); app.reconnect(); await waitFor(() => expect(read).toHaveBeenCalledTimes(before + 1)); await waitFor(() => expect(screen.queryByText('Refreshing Planning…')).not.toBeInTheDocument());
+    expect(screen.getByText('Area 104')).toBe(card); expect(search).toHaveFocus(); expect(search).toHaveValue('needle'); expect((search as HTMLInputElement).selectionStart).toBe(1);
+    act(() => { app.store.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'area', ...areas[104], area_type: 'Renamed' })); });
+    expect(screen.getByText('No matching Areas')).toBeVisible(); expect(screen.getByLabelText('Filter areas by type')).toHaveValue('API'); expect(screen.getByRole('option', { name: 'API (no current Areas)' })).toBeInTheDocument(); expect(search).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' })); expect(screen.getByLabelText('Matching areas')).toHaveTextContent('105 / 105'); expect(search).toHaveValue('');
+    fireEvent.change(search, { target: { value: 'Area 104' } }); fireEvent.click(screen.getByRole('button', { name: 'Thinking' })); fireEvent.click(screen.getByRole('button', { name: 'Areas' })); expect(screen.getByRole('searchbox', { name: 'Search areas' })).toHaveValue('Area 104');
+  });
+
 });

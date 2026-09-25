@@ -55,3 +55,9 @@
 .editorFields { display: grid; min-width: 0; gap: 12px; border: 0; margin: 0; padding: 0; }
 
 .archiveFilter { display: flex; align-items: center; gap: 6px; padding: 8px 12px; color: var(--text-dim); font-size: 10px; }
+
+.areaFilters { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.areaFilters label { display: grid; flex: 1 1 140px; min-width: 0; gap: 4px; color: var(--text-muted); font-size: 9px; }
+.areaFilters label:first-child { flex-grow: 2; }
+.areaFilters input, .areaFilters select { width: 100%; min-width: 0; height: 30px; padding: 0 7px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); background: var(--surface); font: inherit; }
+.areaFilters > span { align-self: center; color: var(--text-muted); font-size: 9px; white-space: nowrap; }

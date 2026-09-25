@@ -3264,3 +3264,13 @@ History renders the persisted contract: role/template, input/output token counts
 - Lifecycle: Correlated HTTP reads validate response type and explicit group, abort on plan change/unmount, time out after 30 seconds and retry in place. Reconnect/resync waits for a synchronized snapshot and refreshes only the current plan. Retain accepted collections until their own replacement arrives, then apply ordinary live updates again; pending/failed reads preserve selected editors, drafts, focus and caret. Changing workspace group mounts a fresh scope.
 - Feedback: Loading/error/retry is visible inside an open editor or creation dialog, so modal focus containment never makes the recovery action inaccessible. Otherwise it appears above the section content. Retry and Refresh only repeat the current plan; archive toggles only affect their relevant section.
 - Verification: P-264 records component/integration and isolated production-browser acceptance. Broad P-112 and other parity gates remain independently open.
+
+
+### D-162 — Area browsing restores the Classic retained window and filters
+
+- Date: 2026-09-25
+- Scope: Planning / Areas list, discovery and relationship targets.
+- Decision: Request the same bounded 500 active Areas as Classic. Use the entire accepted collection for relationship/note choices; search and filters affect only the browsing list. Exclude archived and other-group records and sort by lifecycle order, case-insensitive type, then title/id, with Classic's planned fallback for unknown lifecycles.
+- Controls: Search matches id, slug, title, type, lifecycle, summary, user purpose and system purpose case-insensitively. Lifecycle offers all seven values and All. Type choices come from active Areas in the current group; a selected type that disappears remains explicit until changed or cleared. Combine the filters locally, show matching/total counts, distinguish no matches from no Areas and provide Clear filters.
+- Continuity: Filters survive section changes, refresh, reconnect and incoming records within the mounted group. Filtering sends no reads or writes. Retain the search input, focus and caret during incoming data; changing group resets the scoped workspace. Controls wrap in narrow layouts.
+- Verification: P-265–P-269 cover the window, search, lifecycle/type filters and ordering independently, with focused and real-daemon browser acceptance.

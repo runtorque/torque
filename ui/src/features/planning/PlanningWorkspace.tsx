@@ -1,4 +1,6 @@
 import { AreaEditor } from './AreaEditor';
+import { AreaFilterBar } from './AreaFilterBar';
+import { areaLifecycle, areaTypes, filterAreas, sortedAreas, type AreaFilters } from './areaModel';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useAppSelector } from '../../app/hooks';
@@ -50,6 +52,7 @@ export function PlanningWorkspace({ group, sendCommand, onCommandUnavailable }: 
   const createMutation = usePlanningMutation();
   const [showArchivedDecisions, setShowArchivedDecisions] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [areaFilters, setAreaFilters] = useState<AreaFilters>({ search: '', lifecycle: '', type: '' });
   const reads = usePlanningReads(planningReads(tab, group, showArchived, showArchivedDecisions, selected?.kind));
   const { planning, refresh } = reads;
 
@@ -64,7 +67,9 @@ export function PlanningWorkspace({ group, sendCommand, onCommandUnavailable }: 
   }, [connection.lastAuxiliaryFrame, tab, refresh]);
 
   const initiatives = useMemo(() => groupInitiatives(planning.initiatives, group), [planning.initiatives, group]);
-  const areas = useMemo(() => groupRecords(planning.areas, group), [planning.areas, group]);
+  const areas = useMemo(() => sortedAreas(planning.areas, group), [planning.areas, group]);
+  const visibleAreas = useMemo(() => filterAreas(areas, areaFilters), [areas, areaFilters]);
+  const types = useMemo(() => areaTypes(areas), [areas]);
   const briefs = useMemo(() => groupRecords(planning.ideaBriefs, group).filter((item) => showArchived || (!item.archived && !item.archived_at && item.status !== 'archived')), [planning.ideaBriefs, group, showArchived]);
   const notes = useMemo(() => groupRecords(planning.scratchpadNotes, group).filter((item) => !item.deleted && (showArchived || !item.archived)), [planning.scratchpadNotes, group, showArchived]);
   const decisions = useMemo(() => records(planning.decisions).filter((item) => {
@@ -123,6 +128,7 @@ export function PlanningWorkspace({ group, sendCommand, onCommandUnavailable }: 
     </nav>
     {tab === 'thinking' ? <label className={styles.archiveFilter}><input type="checkbox" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} />Show archived Thinking</label> : null}
     {tab === 'decisions' ? <label className={styles.archiveFilter}><input type="checkbox" checked={showArchivedDecisions} onChange={(event) => setShowArchivedDecisions(event.target.checked)} />Show archived decisions</label> : null}
+    {tab === 'areas' ? <AreaFilterBar value={areaFilters} types={types} count={visibleAreas.length} total={areas.length} onChange={setAreaFilters} /> : null}
     {!selected && !createKind ? readStatus : null}
     <div className={styles.content}>
       {tab === 'roadmap' ? <div className={styles.roadmap}>
@@ -131,7 +137,7 @@ export function PlanningWorkspace({ group, sendCommand, onCommandUnavailable }: 
           <div>{initiatives[status].length ? initiatives[status].map((item) => <Card key={item.id} item={item} onOpen={() => setSelected({ kind: 'initiative', item })} />) : empty('initiatives', `Nothing is scheduled for ${status}; use New to add the next initiative.`)}</div>
         </section>)}
       </div> : null}
-      {tab === 'areas' ? <div className={styles.grid}>{areas.length ? areas.map((item) => <Card key={item.id} item={item} eyebrow={text(item.area_type, 'area')} onOpen={() => setSelected({ kind: 'area', item })} />) : empty('areas', 'Use New to organize durable product context around an Area.')}</div> : null}
+      {tab === 'areas' ? <div className={styles.grid} aria-label="Area results">{visibleAreas.length ? visibleAreas.map((item) => <Card key={item.id} item={item} eyebrow={`${text(item.area_type, 'Area')} · ${areaLifecycle(item.lifecycle).replaceAll('_', ' ')}`} onOpen={() => setSelected({ kind: 'area', item })} />) : areas.length ? <StateSurface title="No matching Areas" description="Change or clear the Area filters to see more results." /> : empty('areas', 'Use New to organize durable product context around an Area.')}</div> : null}
       {tab === 'thinking' ? <div className={styles.split}>
         <section><header><h2>Idea briefs</h2><span>{briefs.length}</span><Button tone="quiet" onPress={() => setCreateKind('brief')}>＋ Brief</Button></header><div className={styles.list}>{briefs.length ? briefs.map((item) => <Card key={item.id} item={item} eyebrow={text(item.status, 'idea')} onOpen={() => setSelected({ kind: 'brief', item })} />) : empty('idea briefs', 'Use Brief to shape a promising idea before it becomes Board work.')}</div></section>
         <section><header><h2>Scratchpad</h2><span>{notes.length}</span><Button tone="quiet" onPress={() => setCreateKind('note')}>＋ Note</Button></header><div className={styles.list}>{notes.length ? notes.map((item) => <Card key={item.id} item={item} eyebrow="note" onOpen={() => setSelected({ kind: 'note', item })} />) : empty('notes', 'Use Note to capture rough thinking without creating a Board task.')}</div></section>
