@@ -1481,7 +1481,7 @@ describe('workspace shell', () => {
 
   it('operates Mission Control cards, health history, and supervisor sessions', async () => {
     const requests: TorqueCommand[] = [];
-    vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => { const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}' ) as TorqueCommand; requests.push(command); return new Promise(() => undefined); }));
+    vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => { const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}' ) as TorqueCommand; requests.push(command); if (command.cmd === 'get_mission_control' || command.cmd === 'mission_control_dismiss') return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: command.cmd === 'get_mission_control' ? { type: 'mission_control_summary', ...(frame.mission_control_summary as Record<string, unknown>) } : { type: 'ok' } }) }); return new Promise(() => undefined); }));
     const frame: StateFrame = {
       ...compactStateFixture,
       mission_control_summary: { group: 'Foundation', sections: { needs_operator_now: { items: [{ id: 'gate-1', title: 'Approve release', reason: 'Verification gate', primary_task_id: 'task-1' }] } } },
@@ -1491,8 +1491,8 @@ describe('workspace shell', () => {
     const { sendCommand } = renderShell(browserHost, frame);
     fireEvent.click(screen.getByRole('button', { name: /Control/ }));
     expect(await screen.findByText('Approve release')).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
-    expect(sendCommand).toHaveBeenCalledWith(expect.objectContaining({ cmd: 'mission_control_dismiss', id: 'gate-1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss Approve release' }));
+    expect(requests).toContainEqual(expect.objectContaining({ cmd: 'mission_control_dismiss', id: 'gate-1' }));
     fireEvent.click(screen.getByRole('button', { name: 'Terminate UI Worker' }));
     expect(screen.getByRole('dialog', { name: 'Terminate PTY session?' })).toBeVisible();
     expect(sendCommand).not.toHaveBeenCalledWith({ cmd: 'supervisor_session_terminate', session_id: 'session-1' });

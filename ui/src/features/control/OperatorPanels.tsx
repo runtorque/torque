@@ -1,3 +1,4 @@
+import { MissionSummary } from '../mission/MissionSummary';
 import { AskResponse } from '../attention/AskResponse';
 import { isOpenAsk } from '../attention/model';
 import { HealthDetails, SupervisorDetails } from './OperationalDetails';
@@ -12,38 +13,21 @@ import styles from './ControlCenter.module.css';
 
 function record(value: unknown): UnknownRecord { return value && typeof value === 'object' && !Array.isArray(value) ? value as UnknownRecord : {}; }
 function list(value: unknown): UnknownRecord[] { return Array.isArray(value) ? value.map(record) : Object.values(record(value)).map(record); }
-function chips(value: unknown): unknown[] { return Array.isArray(value) ? value : []; }
 function time(value: unknown): string { const n = Number(value ?? 0); if (!n) return '—'; const d = new Date(n < 1e12 ? n * 1000 : n); return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString(); }
 function label(value: unknown, fallback = 'Untitled'): string { const item = record(value); return text(item.title, text(item.name, text(item.message, text(item.id, fallback)))); }
 
-export function MissionPanel({ group, agentCount, mission, health, supervisor, relay, send, onOpenTask, onOpenAgent }: {
-  agentCount: number;
-  group: string; mission: UnknownRecord; health: UnknownRecord; supervisor: UnknownRecord; relay: UnknownRecord; responses: Record<string, unknown>;
+export function MissionPanel({ group, agentCount, refreshVersion, health, supervisor, relay, send, onOpenTask, onOpenAgent }: {
+  agentCount: number; refreshVersion: number;
+  group: string; health: UnknownRecord; supervisor: UnknownRecord; relay: UnknownRecord;
   send: (command: TorqueCommand) => void; onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void;
 }) {
-  const [search, setSearch] = useState('');
   const runtime = useAppSelector(selectRuntime);
-  const [selected, setSelected] = useState<UnknownRecord | null>(null);
   const [supervisorAction, setSupervisorAction] = useState<null | { kind: 'restart' } | { kind: 'terminate'; sessionId: string; label: string }>(null);
-  const sections = record(mission.sections);
   const counts = record(health.counts);
   const sessions = list(supervisor.sessions);
-  const query = search.trim().toLocaleLowerCase();
-  const sectionDefs = [
-    ['needs_operator_now', 'Needs operator now', 'Human gates and decisions waiting for action.'],
-    ['at_risk_watchlist', 'At-risk watchlist', 'Risks to inspect before they block work.'],
-    ['in_flight', 'In flight', 'Healthy active work.'],
-    ['recently_completed', 'Recently completed', 'Recent outcomes for operator confidence.'],
-  ] as const;
-  const sectionItems = (key: string) => {
-    const section = record(sections[key]);
-    const rows = list(section.items ?? sections[key]);
-    return query ? rows.filter((item) => JSON.stringify(item).toLocaleLowerCase().includes(query)) : rows;
-  };
   return <div className={styles.operatorMission}>
-    <div className={styles.operatorToolbar}><label>Search Mission Control<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Gate, task, owner, evidence" /></label><Button tone="quiet" onPress={() => send({ cmd: 'get_mission_control', group, limit_per_section: 20, include_recent_completed: true })}>Refresh</Button></div>
-    <div className={styles.metrics}><article className={styles.metric}><span>Agents</span><strong>{agentCount}</strong></article><article className={styles.metric} data-tone="warning"><span>Needs attention</span><strong>{text(counts.needs_attention, text(counts.blocked, text(record(sections.needs_operator_now).count, '—')))}</strong></article><article className={styles.metric}><span>Supervisor sessions</span><strong>{text(record(runtime.supervisor).session_count, supervisor.available === true ? String(sessions.length) : '—')}</strong></article><article className={styles.metric}><span>Relay</span><strong>{text(relay.status, '—')}</strong></article></div>
-    <div className={styles.sectionGrid}>{sectionDefs.map(([key, title, subtitle]) => { const items = sectionItems(key); return <section key={key}><header><div><h2>{title}</h2><p>{subtitle}</p></div><span>{items.length}</span></header><div>{items.length ? items.map((item, index) => { const itemLabel = label(item); const itemDetail = text(item.reason, text(item.summary, text(item.recommended_next_action, 'No additional detail.'))); return <article key={text(item.id, String(index))} title={itemLabel} className={selected === item ? styles.operatorSelected : ''} onClick={() => setSelected(selected === item ? null : item)}><strong title={itemLabel}>{itemLabel}</strong><p title={itemDetail}>{itemDetail}</p><div className={styles.chips}>{[...chips(item.evidence_chips), ...chips(item.caveat_chips)].map((chip, chipIndex) => { const chipLabel = typeof chip === 'string' ? chip : label(chip); return <span key={chipIndex} title={chipLabel}>{chipLabel}</span>; })}</div><footer><Button tone="quiet" onPress={() => send({ cmd: 'mission_control_dismiss', id: text(item.id), timestamp: Date.now() / 1000 })}>Dismiss</Button>{text(item.primary_task_id) ? <Button tone="primary" onPress={() => onOpenTask(text(item.primary_task_id))}>Open task</Button> : null}{text(record(item.owner).agent_id) ? <Button tone="quiet" onPress={() => onOpenAgent(text(record(item.owner).agent_id))}>Open agent</Button> : null}</footer>{selected === item ? <pre className={styles.json}>{JSON.stringify(item, null, 2)}</pre> : null}</article>; }) : <StateSurface title="Clear" description="No visible items in this section; Torque will surface work here when it needs attention." />}</div></section>; })}</div>
+    <div className={styles.metrics}><article className={styles.metric}><span>Agents</span><strong>{agentCount}</strong></article><article className={styles.metric} data-tone="warning"><span>Needs attention</span><strong>{text(counts.needs_attention, text(counts.blocked, '—'))}</strong></article><article className={styles.metric}><span>Supervisor sessions</span><strong>{text(record(runtime.supervisor).session_count, supervisor.available === true ? String(sessions.length) : '—')}</strong></article><article className={styles.metric}><span>Relay</span><strong>{text(relay.status, '—')}</strong></article></div>
+    <MissionSummary key={group} group={group} refreshVersion={refreshVersion} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} />
     <HealthDetails group={group} runtime={runtime} />
     <section className={styles.supervisorPanel}><header><h2>PTY supervisor</h2><Button tone="danger" onPress={() => setSupervisorAction({ kind: 'restart' })}>Restart supervisor</Button></header><SupervisorDetails supervisor={supervisor} send={send} onTerminate={(sessionId, label) => setSupervisorAction({ kind: 'terminate', sessionId, label })} /></section>
     <ModalDialog title={supervisorAction?.kind === 'terminate' ? 'Terminate PTY session?' : 'Restart PTY supervisor?'} description={supervisorAction?.kind === 'terminate' ? supervisorAction.label : 'All managed PTY sessions'} size="small" isOpen={supervisorAction !== null} onOpenChange={(open) => { if (!open) setSupervisorAction(null); }}>

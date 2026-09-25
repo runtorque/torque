@@ -1,3 +1,4 @@
+import { missionSessionSlice } from '../features/mission/missionSession';
 import { aiIndexStartSlice } from '../features/ai/aiIndexStartState';
 import { relayProbeSlice } from '../features/relay/relayProbeState';
 import { classAssignmentSlice } from '../features/agents/classAssignmentState';
@@ -595,7 +596,8 @@ export function createAppStore(initialNavigation?: WorkspaceNavigation | null) {
       composer: composerSlice.reducer,
       classAssignments: classAssignmentSlice.reducer,
       relayProbe: relayProbeSlice.reducer,
-    aiIndexStart: aiIndexStartSlice.reducer,
+      aiIndexStart: aiIndexStartSlice.reducer,
+      missionSession: missionSessionSlice.reducer,
     },
     middleware: (getDefaultMiddleware) =>
       getDefaultMiddleware({
@@ -700,6 +702,7 @@ const selectAuxiliaryResponses = selectRecord('auxiliary_responses');
 // These memoized domain selectors are the public store boundary for feature
 // code. The flat projection remains private protocol-compatibility state.
 export const selectRuntime = selectRecord('runtime');
+export const selectMissionDismissals = selectRecord('mission_control_dismissed_cards');
 export const selectSupervisorUiState = selectRecord('supervisor_panel_state');
 export const selectAgentsState = createSelector(
   [selectAgentRecords, selectAgentSettings, selectResolvedAgentSettings, selectAgentDigestSettings, selectDigestBufferStats, selectDigestSentEvents, selectEngineerBufferStats, selectEngineerSentEvents],

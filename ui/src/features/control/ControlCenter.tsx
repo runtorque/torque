@@ -321,6 +321,7 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable, host =
   const setTab = (next: ControlTab) => { if (next !== tab) settingsNavigation.request(() => dispatch(workspaceUiActions.setControlTab(next))); };
   const [selectedAction, setSelectedAction] = useState('');
   const [helpRefreshVersion, setHelpRefreshVersion] = useState(0);
+  const [missionRefreshVersion, setMissionRefreshVersion] = useState(0);
   const [actionRefreshVersion, setActionRefreshVersion] = useState(0);
   const requestKey = useRef('');
   const [classRefreshVersion, setClassRefreshVersion] = useState(0);
@@ -329,22 +330,21 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable, host =
 
   const send = useCallback((command: TorqueCommand) => { if (!sendCommand(command)) onCommandUnavailable(); }, [onCommandUnavailable, sendCommand]);
   const refresh = useCallback(() => {
+    if (tab === 'mission') setMissionRefreshVersion((value) => value + 1);
     if (tab === 'help') setHelpRefreshVersion((value) => value + 1);
     if (tab === 'actions') setActionRefreshVersion((value) => value + 1);
     if (tab === 'catalog') setClassRefreshVersion((value) => value + 1);
     const requests: Partial<Record<ControlTab, TorqueCommand[]>> = {
-      mission: [{ cmd: 'get_mission_control', group }],
       activity: [{ cmd: 'get_events', limit: 100 }],
     };
     (requests[tab] || []).forEach(send);
-  }, [group, send, tab]);
+  }, [send, tab]);
 
   useEffect(() => {
     if (!group || connection.status !== 'connected') return;
     const key = `${group}:${tab}:${connection.reconnectCount}`;
     if (requestKey.current === key) return;
     requestKey.current = key;
-    if (tab === 'mission') send({ cmd: 'get_mission_control', group });
     if (tab === 'activity') send({ cmd: 'get_events', limit: 100 });
   }, [group, tab, connection.status, connection.reconnectCount, send]);
 
@@ -355,9 +355,9 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable, host =
   return <section className={styles.root} aria-label="Control Center">
     <header className={styles.header}><div><p>Workspace / {group || 'No group'}</p><h1>Control Center</h1></div><span>{agentCount} {agentCount === 1 ? 'agent' : 'agents'}{terminalCount ? ` · ${terminalCount} ${terminalCount === 1 ? 'terminal' : 'terminals'}` : ''} · {eventItems.length} events</span>{['mission', 'activity', 'actions', 'catalog', 'help'].includes(tab) ? <Button tone="quiet" onPress={refresh}>Refresh section</Button> : null}</header>
     <nav className={styles.tabs} aria-label="Control Center sections">{tabs.map((item) => <button key={item.id} aria-current={tab === item.id ? 'page' : undefined} onClick={() => setTab(item.id)}>{item.label}</button>)}</nav>
-    {lastFrame?.type === 'error' ? <div className={styles.error} role="alert">{text(lastFrame.message, 'Request failed.')}</div> : null}
+    {lastFrame?.type === 'error' && tab !== 'mission' ? <div className={styles.error} role="alert">{text(lastFrame.message, 'Request failed.')}</div> : null}
     <div className={styles.content}>
-      {tab === 'mission' ? <MissionPanel group={group} agentCount={agentCount} mission={operations.missionControl} health={operations.health} supervisor={operations.supervisor} relay={operations.relayConnection} responses={auxiliaryResponses} send={send} onOpenTask={(id) => { dispatch(workspaceUiActions.setActivePanel('board')); dispatch(workspaceUiActions.setDetailTask(id)); }} onOpenAgent={(id) => { dispatch(workspaceUiActions.setActivePanel('agents')); dispatch(workspaceUiActions.setSelectedAgent(id)); }} /> : null}
+      {tab === 'mission' ? <MissionPanel group={group} agentCount={agentCount} refreshVersion={missionRefreshVersion} health={operations.health} supervisor={operations.supervisor} relay={operations.relayConnection} send={send} onOpenTask={(id) => { dispatch(workspaceUiActions.setActivePanel('board')); dispatch(workspaceUiActions.setDetailTask(id)); }} onOpenAgent={(id) => { dispatch(workspaceUiActions.setActivePanel('agents')); dispatch(workspaceUiActions.setSelectedAgent(id)); }} /> : null}
       {tab === 'chat' ? <PeerChat threads={messages.peerThreads} agents={agents.records} /> : null}
       {tab === 'pipelines' ? <PipelineExplorer group={group} onEdit={(name) => { setSelectedAction(name); setTab('actions'); }} /> : null}
       {tab === 'logs' ? <LogViewer host={host} /> : null}
