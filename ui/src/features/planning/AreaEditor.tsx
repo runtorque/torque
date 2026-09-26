@@ -4,7 +4,8 @@ import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import { projectionActions, selectConnection } from '../../app/store';
 import { Button, ModalDialog } from '../../design/primitives';
 import type { TorqueCommand, UnknownRecord } from '../../protocol';
-import { readCommand } from '../../protocol/http';
+import { planningRequest } from './planningRequests';
+import { usePlanningMutation } from './usePlanningMutation';
 import { areaLifecycles, areaLinks, areaNoteTypes, areaRelations, type AreaTarget } from './areaModel';
 import { records, text } from './model';
 import styles from './PlanningWorkspace.module.css';
@@ -24,14 +25,12 @@ export function AreaEditor({ item, targets, onClose, readStatus }: {
   const [relation, setRelation] = useState('related');
   const [note, setNote] = useState(emptyNote);
   const [editingNote, setEditingNote] = useState('');
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState('');
+  const { run, pending, error, busy } = usePlanningMutation();
   const [loadError, setLoadError] = useState('');
   const [retry, setRetry] = useState(0);
-  const busy = useRef(false);
   useEffect(() => {
     const controller = new AbortController();
-    void readCommand({ cmd: 'area_show', id }, controller.signal).then((frame) => {
+    void planningRequest({ cmd: 'area_show', id }, controller.signal).then((frame) => {
       if (controller.signal.aborted) return;
       if (frame.type !== 'area' || frame.id !== id) throw new Error('Area detail was not returned.');
       dispatch(projectionActions.auxiliaryResourceReceived(frame));
@@ -40,16 +39,10 @@ export function AreaEditor({ item, targets, onClose, readStatus }: {
     }).catch((cause: unknown) => { if (!controller.signal.aborted) setLoadError(cause instanceof Error ? cause.message : 'Could not refresh Area details.'); });
     return () => controller.abort();
   }, [id, reconnect, retry, dispatch]);
-  const mutate = async (command: TorqueCommand, done?: () => void) => {
-    if (busy.current) return;
-    busy.current = true; setPending(true); setError('');
-    try {
-      const frame = await readCommand(command, new AbortController().signal);
-      dispatch(projectionActions.auxiliaryResourceReceived(frame));
-      done?.(); setRetry((value) => value + 1);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save. Your draft is retained.'); }
-    finally { busy.current = false; setPending(false); }
-  };
+  const mutate = (command: TorqueCommand, done?: () => void) => run(async (request) => {
+    await request(command);
+    done?.(); setRetry((value) => value + 1);
+  });
   const resetNote = () => { setNote(emptyNote); setEditingNote(''); };
   const links = areaLinks(item.links);
   const nameFor = (kind: AreaTarget, id: string) => { const target = targets[kind]?.find((entry) => text(entry.id) === id); return text(target?.title, text(target?.task, id)); };

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import { projectionActions, selectConnection } from '../../app/store';
 import type { UnknownRecord } from '../../protocol';
-import { readCommand } from '../../protocol/http';
+import { planningRequest } from './planningRequests';
 import { records, text } from './model';
 
 /** Server fields stay in the projection; local state contains only edits. */
@@ -17,7 +17,7 @@ export function usePlanningEditor(kind: 'initiative' | 'decision', item: Unknown
   const [revision, setRevision] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
-    void readCommand(kind === 'initiative' ? { cmd: 'initiative_show', id } : { cmd: 'decisions_snapshot', include_archived: true }, controller.signal).then((frame) => {
+    void planningRequest(kind === 'initiative' ? { cmd: 'initiative_show', id } : { cmd: 'decisions_snapshot', include_archived: true }, controller.signal).then((frame) => {
       if (controller.signal.aborted) return;
       const record = kind === 'initiative' && frame.type === 'initiative' ? frame : kind === 'decision' && frame.type === 'decisions_snapshot' ? records(frame.decisions).find((entry) => entry.id === id) : undefined;
       if (!record || record.id !== id) throw new Error('Planning detail was not returned.');
@@ -30,5 +30,6 @@ export function usePlanningEditor(kind: 'initiative' | 'decision', item: Unknown
     detail: item, draft, loaded, loadError,
     change: (patch: Record<string, string>) => setEdits((current) => ({ ...current, ...patch })),
     reload: () => setRevision((value) => value + 1), patch: () => edits,
+    acknowledge: (patch: Record<string, string>) => setEdits((current) => Object.fromEntries(Object.entries(current).filter(([key, value]) => !(key in patch) || value !== patch[key]))),
   };
 }

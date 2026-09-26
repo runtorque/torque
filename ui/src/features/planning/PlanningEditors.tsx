@@ -34,7 +34,7 @@ export function InitiativeEditor({ item, tasks, decisions, onClose, readStatus }
   const save = (archive = false) => { void mutation.run(async (request) => {
     if (!editor.loaded || !draft.title?.trim() || archived) return;
     const patch = editor.patch();
-    if (Object.keys(patch).length) await request({ cmd: 'initiative_update', id, ...patch });
+    if (Object.keys(patch).length) { await request({ cmd: 'initiative_update', id, ...patch }); editor.acknowledge(patch); }
     if (archive) await request({ cmd: 'initiative_archive', id });
     onClose();
   }); };

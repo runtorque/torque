@@ -3524,3 +3524,13 @@ History renders the persisted contract: role/template, input/output token counts
 - Verification: Reproduce missing double-click activation and unused preference. Component coverage checks Enter/Activity, live preference changes, traversal, one-shot focus and cancellation. Browser acceptance uses independent real PTY receivers to verify exact input target and retained composer state across activation/reconnect.
 
 - PTY handoff: Each cell/session receives a distinct terminal mount. Switching or restarting detaches the previous DOM surface immediately, even while its Strict Mode lease waits for cleanup, so that controller fails the visible-owner guard and cannot share the new terminal container. Ordinary same-session rerenders retain the mount and scrollback. Old-session activation intent cannot focus a replacement session.
+
+
+### D-187 — Planning editors bound and own request observation
+
+- Date: 2026-09-26
+- Status: accepted
+- Scope: Scratchpad, Idea Brief, Initiative, Decision and Area details; Planning create/edit/link/lifecycle operations; Initiative task-option discovery and its separate task-link acknowledgement.
+- Decision: Editor detail and task-option reads have a 15-second observation deadline; writes have a 30-second deadline. A timeout releases controls with a retry path and retains the current record, local drafts and reading state. Closing or replacing an editor cancels its observation; late responses cannot apply state, clear drafts, close another dialog or continue a dependent lifecycle sequence.
+- Constraints: A write is accepted only when its response matches the existing daemon's command-specific type and available record, owner, target and relation identity. Unknown outcomes are shown explicitly and are never replayed on reconnect. An acknowledged edit is removed from the pending edit set before a dependent archive, so retry cannot overwrite intervening external changes. A created Board task keeps its known ID until its link is confirmed; link retry reuses that ID even when the original link already persisted. Cancellation stops client observation and does not claim to reverse server work.
+- Verification: P-334–P-337 track component regressions and real-deadline browser acceptance, including retained input identity/focus/caret, malformed responses, unmount cancellation, partial archive recovery and exactly one Board task across link recovery. The top-level Planning collection timer remains independent.

@@ -19,10 +19,13 @@ describe('Area parity', () => {
     vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => {
       const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand; calls.push(command);
       if (fail) return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: false, error: 'Note rejected' }) });
+      const previousNote = notes[0];
       if (command.cmd === 'area_note_create') notes = [{ ...command, id: 17, area_id: 'a' }];
       if (command.cmd === 'area_note_update') notes = [{ ...command, id: 17, area_id: 'a' }];
       if (command.cmd === 'area_note_archive') notes = [];
-      const frame = command.cmd === 'area_show' ? { type: 'area', ...area, notes } : { type: 'area_note_created', note: notes[0] };
+      const frame = command.cmd === 'area_show' ? { type: 'area', ...area, notes }
+        : command.cmd === 'area_note_archive' ? { type: 'area_note_archived', note: { ...previousNote, archived: true } }
+          : { type: command.cmd === 'area_note_update' ? 'area_note_updated' : 'area_note_created', note: notes[0] };
       return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: frame }) });
     }));
     render(<Provider store={store}><Harness /></Provider>);

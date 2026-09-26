@@ -4,7 +4,7 @@ import { useAppSelector } from '../../app/hooks';
 import { selectConnection } from '../../app/store';
 import { Button, ModalDialog } from '../../design/primitives';
 import type { UnknownRecord } from '../../protocol';
-import { readCommand } from '../../protocol/http';
+import { planningRequest } from './planningRequests';
 import { records, text } from './model';
 import { usePlanningMutation } from './usePlanningMutation';
 import styles from './PlanningWorkspace.module.css';
@@ -37,7 +37,7 @@ export function ThinkingEditor({ kind, item, notes, onClose, readStatus }: {
   const reconnect = useAppSelector(selectConnection).reconnectCount;
   useEffect(() => {
     const controller = new AbortController();
-    void readCommand({ cmd: `${prefix}_show`, id, include_archived: true }, controller.signal).then((frame) => {
+    void planningRequest({ cmd: `${prefix}_show`, id, include_archived: true }, controller.signal).then((frame) => {
       if (controller.signal.aborted) return;
       if (frame.type !== prefix || frame.id !== id) throw new Error('Planning detail was not returned.');
       setDetail(frame);

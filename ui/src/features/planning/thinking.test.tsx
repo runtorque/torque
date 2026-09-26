@@ -20,7 +20,8 @@ function setup(kind: 'note' | 'brief' = 'brief') {
     if (!showing) {
       detail = { ...detail, ...command, ...(command.cmd === 'idea_brief_propose' ? { status: 'proposed' } : {}) };
     }
-    return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: showing ? { ...detail, type: kind === 'brief' ? 'idea_brief' : 'scratchpad_note' } : { type: `${kind === 'brief' ? 'idea_brief' : 'scratchpad_note'}_updated`, [kind === 'brief' ? 'idea_brief' : 'note']: detail } }) });
+    const suffix = ({ update: 'updated', refine: 'refined', propose: 'proposed', park: 'parked', archive: 'archived', delete: 'deleted' } as Record<string, string>)[String(command.cmd).split('_').at(-1)!];
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: showing ? { ...detail, type: kind === 'brief' ? 'idea_brief' : 'scratchpad_note' } : { type: `${kind === 'brief' ? 'idea_brief' : 'scratchpad_note'}_${suffix}`, [kind === 'brief' ? 'idea_brief' : 'note']: detail } }) });
   }));
   render(<Provider store={store}><ThinkingEditor kind={kind} item={{ id: 'brief-1', title: kind === 'brief' ? 'Brief' : 'Note' }} notes={[{ id: 'note-1', title: 'Evidence', body: 'Source text', group: 'Foundation' }]} onClose={onClose} /></Provider>);
   return { store, calls, onClose, fail: (value: boolean) => { fail = value; }, detail: () => detail };

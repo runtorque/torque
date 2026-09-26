@@ -27,10 +27,10 @@ function setup(kind: 'initiative' | 'decision') {
     else if (command.cmd === 'decisions_snapshot') data = { type: 'decisions_snapshot', decisions: { d: record } };
     else if (command.cmd === 'initiative_link_task' || command.cmd === 'initiative_unlink_task') {
       record = { ...record, links: { tasks: command.cmd === 'initiative_link_task' ? [command.task_id] : [], decisions: [] } };
-      data = { type: 'initiative_task_linked' };
+      data = command.cmd === 'initiative_link_task' ? { type: 'initiative_task_linked', link: { initiative_id: record.id, link_type: 'task', target_id: command.task_id } } : { type: 'initiative_task_unlinked', removed: true };
     } else {
       record = { ...record, ...command, ...(command.cmd === 'initiative_archive' ? { archived: true } : {}) };
-      data = kind === 'initiative' ? { type: 'initiative_updated', initiative: record } : { ...record, type: 'ok' };
+      data = kind === 'initiative' ? { type: command.cmd === 'initiative_archive' ? 'initiative_archived' : 'initiative_updated', initiative: record } : { ...record, type: 'ok' };
     }
     return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data }) });
   }));
@@ -118,6 +118,18 @@ describe('Planning editor acknowledgements and contracts', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Archive' })); await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
     expect(calls.at(-1)).toMatchObject({ cmd: 'architect_decision_update', id: 'd', architect_id: 'a', archived: true, status: 'accepted', rationale: 'Keep rationale' });
     expect((selectPlanningState(store.getState()).decisions.d as UnknownRecord).archived).toBe(true);
+  });
+  it('does not replay an acknowledged Initiative edit when archive fails and an external edit arrives', async () => {
+    const { calls, store, fail, onClose } = setup('initiative');
+    await waitFor(() => expect(screen.getByLabelText('Summary')).toHaveValue('Full summary'));
+    fireEvent.change(screen.getByLabelText('Why this matters'), { target: { value: 'Acknowledged edit' } });
+    fail('initiative_archive'); fireEvent.click(screen.getByRole('button', { name: 'Archive' }));
+    await screen.findByText('Write rejected'); expect(screen.getByLabelText('Why this matters')).toHaveValue('Acknowledged edit');
+    act(() => { store.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'initiative_updated', initiative: { ...initiative, why: 'External edit after save' } })); });
+    expect(screen.getByLabelText('Why this matters')).toHaveValue('External edit after save');
+    fail(''); fireEvent.click(screen.getByRole('button', { name: 'Archive' })); await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(calls.filter((command) => command.cmd === 'initiative_update')).toEqual([{ cmd: 'initiative_update', id: 'i', why: 'Acknowledged edit' }]);
+    expect(calls.filter((command) => command.cmd === 'initiative_archive')).toHaveLength(2);
   });
   it('scopes decisions and hides archived records until requested', () => {
     const store = createAppStore();
