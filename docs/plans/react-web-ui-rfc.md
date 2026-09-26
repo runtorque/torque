@@ -1368,3 +1368,8 @@ P-353/P-354 add bounded, owned question/parent reads and answer delivery. Accept
 ### Creation read recovery checkpoint — 2026-09-26
 
 P-355 bounds owned Agent Class and launch-default reads, retains selected classes and explicit overrides through retry/reconnect, rejects late results and avoids offline launch-default requests. D-197 and the matrix record 930 React tests and four production-browser scenarios passing. Source and HTTP concurrency audits add open P-356/P-357 for unscoped creation options and duplicated pending launches; completed receipt replay does not establish safe overlapping retry. Ledger: **357 mapped / 347 implemented or equivalent / 6 open / 4 intentionally retired**. No backend mutation behavior changed; broad settings/reconnect and independent full acceptance gates remain open.
+
+
+### Pending launch coordination checkpoint — 2026-09-26
+
+The backend portion of P-357 now shares pending keyed launch operations for all six React creation commands, survives cancellation of an HTTP waiter, rejects conflicting payloads and replays completed receipts. D-198 and the matrix record the six reproduced races, seven focused request tests and a passing standard full run of 3,220 backend tests (82 skips) plus 930 React tests. An earlier run with the installed runtime interpreter failed environment-dependent fixtures and is explicitly excluded from passing evidence. UI unknown-outcome recovery and post-creation failure handling remain open; ledger counts stay **357 / 347 implemented or equivalent / 6 open / 4 retired**.

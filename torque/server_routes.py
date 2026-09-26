@@ -586,8 +586,13 @@ def build_http_routes(
 
     pending_api_writes = PendingCommandWrites()
     # Completed receipts alone cannot deduplicate creation during awaited
-    # action resolution. A disconnected caller must not cancel the shared write.
-    coordinated_writes = ACKNOWLEDGED_WORKTREE_MUTATIONS | {'board_add_task', 'schedule_create'}
+    # action resolution or agent/PTY launch. A disconnected caller must not
+    # cancel the shared write before its durable receipt is saved.
+    coordinated_writes = ACKNOWLEDGED_WORKTREE_MUTATIONS | {
+        'board_add_task', 'schedule_create',
+        'add_worker', 'add_engineer', 'add_architect', 'add_terminal',
+        'create_agent_from_class', 'architect_engineer_hire',
+    }
 
     async def handle_api_cmd(request):
             """REST endpoint for CLI and scripting access.

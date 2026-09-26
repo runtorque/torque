@@ -3639,3 +3639,11 @@ History renders the persisted contract: role/template, input/output token counts
 - Preserve selected classes, accepted class options, explicit launch-field overrides and the editor's focus/caret through refresh and retry. A selected class cannot launch until revalidated; an unavailable explicit selection cannot silently become a default launch.
 - Reconnect refreshes accepted discovery and defaults without replaying creation. Closing cancels unfinished observations and stops hidden reconnect reads. Completed transports need no artificial abort; regression tests assert cancellation on still-pending requests.
 - This read repair does not change launch mutation semantics or make overlapping creation retries safe. Completed HTTP receipts are distinct from coordination of pending writes; P-357 must establish both before enabling timeout retries.
+
+### D-198 — Coordinate pending keyed launches
+
+- Date: 2026-09-26
+- Scope: backend portion of P-357; explicitly keyed HTTP add_worker/add_engineer/add_architect/add_terminal/create_agent_from_class/architect_engineer_hire commands.
+- A matching retry must join the same pending command operation before its completed receipt exists. Cancelling one HTTP waiter does not cancel that shared operation. Reject a changed payload under the same key while pending as well as after completion; return a distinct response object to each caller.
+- Reuse existing command hashing, pending-write coordination and persisted successful receipts. This preserves the original launch result, including a pending hire acknowledgement, rather than inventing a second target during an overlap.
+- This checkpoint does not add UI timeout retries, claim crash-safe exactly-once execution, or resolve errors after partial target creation. P-357 stays open until bounded owned UI observation, frozen reviewed payloads, known refusal versus uncertain outcome handling and live recovery acceptance are complete.

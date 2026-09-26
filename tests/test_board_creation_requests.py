@@ -84,6 +84,41 @@ class BoardCreationRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(responses[0].body, responses[1].body)
         self.assertEqual(len(self.calls), 1)
 
+    async def test_agent_creation_retries_share_pending_work_and_replay_receipts(self):
+        for index, command in enumerate((
+            'add_worker', 'add_engineer', 'add_architect', 'add_terminal',
+            'create_agent_from_class', 'architect_engineer_hire',
+        )):
+            with self.subTest(command=command):
+                self.calls.clear()
+                self.entered.clear()
+                self.release.clear()
+                payload = {'cmd': command, 'idempotency_key': f'launch-{index}'}
+                first = asyncio.create_task(self.request(**payload))
+                await self.entered.wait()
+                second = asyncio.create_task(self.request(**payload))
+                await asyncio.sleep(0)
+                first.cancel()
+                conflict = None
+                try:
+                    with self.assertRaises(asyncio.CancelledError):
+                        await first
+                    self.assertEqual(len(self.calls), 1)
+                    conflict = asyncio.create_task(self.request(**payload, task='Changed launch'))
+                    for _ in range(5):
+                        await asyncio.sleep(0)
+                    self.assertTrue(conflict.done(), 'Changed retry must refuse while launch is pending')
+                    self.assertEqual(conflict.result().status, 409)
+                    self.assertEqual(len(self.calls), 1)
+                finally:
+                    self.release.set()
+                    await asyncio.gather(second, *([conflict] if conflict else []))
+                cached = await self.request(**payload)
+                self.assertEqual(cached.body, second.result().body)
+                self.assertIsNot(cached, second.result())
+                self.assertEqual((await self.request(**payload, task='Changed launch')).status, 409)
+                self.assertEqual(len(self.calls), 1)
+
     async def test_changed_payload_cannot_join_active_creation_key(self):
         first = asyncio.create_task(self.request())
         await self.entered.wait()
