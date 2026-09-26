@@ -3714,3 +3714,12 @@ History renders the persisted contract: role/template, input/output token counts
 - Scope: P-054/P-080–P-083/P-112; Planning mutations, Agent Class assignment/clear, Engineer specialization selection and persisted Relay credentials through the direct command path.
 - A successful direct state mutation must publish its queued deltas before returning its acknowledgement. Other open clients and clean editor fields must receive the change without waiting for unrelated agent activity or periodic runtime updates. Preserve dirty fields through the existing editor ownership rules.
 - Keep explicit state-mutation manifests beside their domain commands. Read-only list/show/status commands must not flush unrelated pending changes. File-only catalog authoring does not gain a synthetic state change. Credential storage failures must not emit optimistic settings; class assignment changes desired authority without changing the effective launch snapshot. This restores the existing WebSocket update contract; it does not add durable delta replay or certify process-crash recovery.
+
+
+### D-206 — Bound composer uploads without releasing their source ownership
+
+- Date: 2026-09-26
+- Scope: P-363/P-112; inline image selection, paste and drop in the message composer.
+- Bound each upload at 30 seconds across both request and response-body reading, independently of transport abort. The source draft owns that deadline across navigation and unmounting. Expiry releases attachment/send controls while preserving text, reply, selection, accepted images, native composition and undo history; expose an inline instruction to attach again explicitly.
+- Validate complete upload acknowledgements before accepting tokens or creating preview URLs. An expired acknowledgement cannot add an image, replace a newer upload's anchor or unlock its controls. Reconnect and returning to a composer do not resend uploads. Existing successful source-cell and IME-deferred insertion behavior remains intact.
+- Uploading stores files; it does not submit a message. This deadline does not prove an unacknowledged file was never saved, provide an idempotent upload receipt, or delete unacknowledged files. Only an explicit Send submits the currently accepted image paths. Raw terminal drops have a separate owner/failure contract and remain under audit.

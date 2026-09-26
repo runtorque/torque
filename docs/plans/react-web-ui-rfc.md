@@ -1414,3 +1414,8 @@ The direct-state follow-up passed all 21 targeted browser scenarios, including t
 
 
 Final verification for this checkpoint is green: complete `make test` passed **3,263 backend tests / 82 skips**, plus **961 React tests**, lint/typecheck/build; 271 focused backend tests and 21 targeted browser scenarios passed. The matrix records exact logs/footer and cleanup evidence. No full parity or Classic-retirement claim is made: a clean complete browser rerun and the remaining settings/recovery/native/external gates are still open.
+
+
+### Composer upload deadlines — 2026-09-26
+
+P-363/D-206 adds independently bounded 30-second request/body observation to composer image uploads. Offscreen expiry releases controls while preserving drafts and accepted images; complete descriptor validation and the existing source key prevent malformed or expired acknowledgements from inserting tokens or settling a newer upload. The matrix records four reproduced component failures, 965 passing React tests, four existing composer browser passes and two new real-deadline/PTY receiver passes, with screenshots inspected and the isolated profile cleaned up. The new browser fixture's final assertion correction passed lint/typecheck. Ledger: **363 mapped / 355 implemented or equivalent / 4 open / 4 retired**. Broad settings/lazy recovery and independent acceptance remain open; no full backend run was repeated for this frontend-only repair.

@@ -94,6 +94,67 @@ describe('buffered terminal and agent composition', () => {
     fireEvent.change(container.querySelector('input[type=file]')!, { target: { files: [new File(['bad'], 'bad.png')] } });
     await act(async () => { finish({ ok: false, json: () => Promise.resolve({ ok: false, error: 'Image refused' }) }); await Promise.resolve(); }); expect(await screen.findByRole('alert')).toHaveTextContent('Image refused'); expect(screen.getByRole('button', { name: /test.png/ })).toBeVisible();
   });
+  it.each(['fetch', 'body'] as const)('bounds a stalled upload %s without changing draft, reply, selection or undo', async (phase) => {
+    vi.useFakeTimers();
+    const { container, store } = harness(terminal, null);
+    const input = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Message Shell' });
+    fireEvent.change(input, { target: { value: 'Retained image draft' } });
+    act(() => { store.dispatch(composerActions.patch({ cellId: terminal.id, changes: { selection: [2, 7], reply: { id: 'reply', agentId: terminal.id, preview: 'Question' } } })); });
+    const before = structuredClone(store.getState().composer.drafts[terminal.id]!);
+    let finish!: (value: unknown) => void; let signal: AbortSignal | undefined;
+    const pending = new Promise((resolve) => { finish = resolve; });
+    const fetch = vi.fn((_url: string, options: RequestInit) => { signal = options.signal as AbortSignal; return phase === 'fetch' ? pending : Promise.resolve({ ok: true, json: () => pending }); });
+    vi.stubGlobal('fetch', fetch); const preview = vi.fn(() => 'blob:accepted'); vi.stubGlobal('URL', class extends URL { static createObjectURL = preview; });
+    fireEvent.change(container.querySelector('input[type=file]')!, { target: { files: [new File(['image'], 'stalled.png', { type: 'image/png' })] } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(screen.getByRole('alert')).toHaveTextContent('upload timed out');
+    expect(screen.getByRole('button', { name: 'Attach' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
+    expect(store.getState().composer.drafts[terminal.id]).toMatchObject({ text: before.text, reply: before.reply, selection: before.selection, undo: before.undo, undoIndex: before.undoIndex, attachments: before.attachments, uploading: false });
+    expect(signal?.aborted).toBe(true);
+    const payload = { ok: true, data: [{ path: '/tmp/late.png', filename: 'late.png' }] };
+    await act(async () => { finish(phase === 'fetch' ? { ok: true, json: () => Promise.resolve(payload) } : payload); await Promise.resolve(); });
+    expect(store.getState().composer.drafts[terminal.id]?.attachments).toEqual([]); expect(preview).not.toHaveBeenCalled();
+    act(() => { store.dispatch(connectionActions.connected({ at: 2, reconnect: true })); });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it('expires the source upload offscreen and rejects its late reply while a new upload owns the draft', async () => {
+    vi.useFakeTimers();
+    const { container, store, show } = harness(terminal, null);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message Shell' }), { target: { value: 'Original draft' } });
+    const pending: ((value: unknown) => void)[] = [];
+    vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { pending.push(resolve); })));
+    const attach = (name: string) => fireEvent.change(container.querySelector('input[type=file]')!, { target: { files: [new File(['image'], name, { type: 'image/png' })] } });
+    attach('old.png'); show(other, other);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message Other' }), { target: { value: 'Other draft' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(store.getState().composer.drafts[terminal.id]?.uploading).toBe(false);
+    expect(screen.getByRole('textbox', { name: 'Message Other' })).toHaveValue('Other draft'); expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    show(terminal, null); attach('new.png');
+    const key = store.getState().composer.drafts[terminal.id]?.uploadAnchor?.key;
+    await act(async () => { pending[0]!({ ok: true, json: () => Promise.resolve({ ok: true, data: [{ path: '/tmp/old.png', filename: 'old.png' }] }) }); await Promise.resolve(); });
+    expect(store.getState().composer.drafts[terminal.id]).toMatchObject({ uploading: true, uploadAnchor: { key }, attachments: [] });
+    await act(async () => { pending[1]!({ ok: true, json: () => Promise.resolve({ ok: true, data: [{ path: '/tmp/new.png', filename: 'new.png' }] }) }); await Promise.resolve(); });
+    expect(store.getState().composer.drafts[terminal.id]).toMatchObject({ uploading: false, text: 'Original draft', attachments: [{ path: '/tmp/new.png', filename: 'new.png' }] });
+    expect(store.getState().composer.drafts[other.id]?.text).toBe('Other draft');
+  });
+  it('rejects malformed upload descriptors while retaining accepted images and native composition', async () => {
+    vi.useFakeTimers();
+    const { container, store } = harness(terminal, null);
+    act(() => {
+      store.dispatch(composerActions.edit({ cellId: terminal.id, text: 'Retained draft', selection: [5, 5] }));
+      store.dispatch(composerActions.startUpload({ cellId: terminal.id, key: 'accepted', selection: [5, 5] }));
+      store.dispatch(composerActions.finishUpload({ cellId: terminal.id, key: 'accepted', attachments: [{ path: '/tmp/accepted.png', filename: 'accepted.png' }] }));
+      store.dispatch(composerActions.startComposition(terminal.id));
+    });
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: [{ path: { wrong: true }, filename: 'invalid.png' }] }) })));
+    await act(async () => { fireEvent.change(container.querySelector('input[type=file]')!, { target: { files: [new File(['image'], 'invalid.png', { type: 'image/png' })] } }); await Promise.resolve(); });
+    expect(screen.getByRole('alert')).toHaveTextContent('invalid upload');
+    expect(store.getState().composer.drafts[terminal.id]).toMatchObject({ text: 'Retained draft', uploading: false, attachments: [{ path: '/tmp/accepted.png' }] });
+    expect(store.getState().composer.drafts[terminal.id]?.composition).not.toBeNull();
+    act(() => { store.dispatch(composerActions.endComposition(terminal.id)); });
+    expect(store.getState().composer.drafts[terminal.id]?.attachments).toHaveLength(1);
+  });
   it('uses Escape to restore recall, cancel reply, clear undoably, then cancel a submitted turn once', async () => {
     const { calls, reply } = harness(agent, agent, [{ id: 'question', sender_kind: 'worker', message: 'Question' }], [{ id: 'old', message: 'Earlier', sent_at: 1 }]);
     const input = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Message Worker' });

@@ -3,11 +3,12 @@ import { Button, ModalDialog } from '../../design/primitives';
 import { useAppDispatch, useAppSelector, useAppStore } from '../../app/hooks';
 import type { CommandSender } from '../board/BoardPanel';
 import type { AgentViewModel } from '../agents/model';
-import { composerActions, composerDraftLocked, composerEditKind, type ComposerEditKind, documentSnapshot, emptyComposerDraft, type ComposerAttachment } from './composerState';
+import { composerActions, composerDraftLocked, composerEditKind, type ComposerEditKind, documentSnapshot, emptyComposerDraft } from './composerState';
 import { recallMessages, rows } from './composerModel';
 import { DirectMessages } from './DirectMessages';
 import { AgentMessageLoop } from './AgentMessageLoop';
 import { useComposerDelivery } from './useComposerDelivery';
+import { uploadComposerImages } from './composerUpload';
 import { messageLoopPanel } from './messageLoopModel';
 import { selectMessagesState } from '../../app/store';
 import { useComposerCompletion } from './useComposerCompletion';
@@ -111,12 +112,9 @@ export function Conversation({ cell, target, messages, messageHistory, sendComma
     const node = composer.current; const selection = node ? editorSelection(node, current.attachments, current.selection) : current.selection;
     const key = crypto.randomUUID(); dispatch(composerActions.startUpload({ cellId: cell.id, key, selection }));
     try {
-      const body = new FormData(); body.append('agent_id', cell.id); files.forEach((file) => body.append('file', file));
-      const response = await fetch('/api/attachment/upload', { method: 'POST', body });
-      const payload = await response.json() as { ok?: boolean; error?: string; data?: ComposerAttachment[] };
-      if (!response.ok || !payload.ok || !Array.isArray(payload.data) || payload.data.length !== files.length || payload.data.some((entry) => !entry.path)) throw new Error(payload.error || 'Upload failed. The draft is retained.');
+      const uploaded = await uploadComposerImages(cell.id, files);
       if (currentDraft().uploadAnchor?.key !== key) return;
-      const attachments = payload.data.map((entry, index) => ({ ...entry, filename: files[index]!.name || entry.filename, id: crypto.randomUUID(), previewUrl: URL.createObjectURL?.(files[index]!) ?? '' }));
+      const attachments = uploaded.map((entry, index) => ({ ...entry, filename: files[index]!.name || entry.filename, id: crypto.randomUUID(), previewUrl: URL.createObjectURL?.(files[index]!) ?? '' }));
       const ownsFocus = composer.current && (document.activeElement === composer.current || document.activeElement === fileInput.current || document.activeElement?.textContent === 'Uploading…');
       dispatch(composerActions.finishUpload({ cellId: cell.id, key, attachments }));
       if (ownsFocus && activeRef.current && !currentDraft().composition) requestFocus();
