@@ -1290,3 +1290,8 @@ P-330 restores Classic's scoped text save rules without altering exact drafts, i
 ### Ownership-tree activation and terminal handoff checkpoint — 2026-09-26
 
 P-331/P-332 restore double-click/Enter terminal activation and the live Focus on click preference. Production QA additionally exposed P-333: the previous PTY briefly shared a visible container with its replacement. Cell/session-specific mounts now detach the previous surface immediately, with session-scoped one-shot focus intent. D-186 and the matrix record reproduced regressions, 107 focused tests, 825 UI tests and three passing real-PTY browser scenarios covering exact input targeting, one visible terminal, draft/reconnect retention, scrollback and preferences. Screenshots inspected and isolated QA cleaned. Main ledger: **333 behaviors: 325 implemented/equivalent dispositions, 4 open audits and 4 intentional retirements**. Broad Settings/lazy-reconnect audits and independent inventory, Planning, native/external/recovery gates remain; Phase 4 is open.
+
+
+### Planning recovery audit — 2026-09-26
+
+Source audit adds P-334–P-337 for bounded editor details, owned/validated mutation sequences, Initiative task-option discovery and the separate acknowledged-task link step. These paths bypass the top-level Planning collection timeout and still require reproduced regression tests and repair. The complete 116-scenario browser run is live on isolated port 19041; no terminal result is claimed. The matrix now tracks **337 behaviors: 325 implemented/equivalent dispositions, 8 open audits/repairs and 4 intentional retirements**. Broad field contracts, lazy/reconnect, independent inventory, Planning combinations and native/external/recovery acceptance remain; Phase 4 and Classic retirement are open.
