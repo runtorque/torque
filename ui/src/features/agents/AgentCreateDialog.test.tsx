@@ -44,17 +44,18 @@ describe('agent creation', () => {
     expect(close).not.toHaveBeenCalled(); expect(calls).toHaveLength(1);
     await act(async () => { release({ ok: false, error: 'Duplicate name' }); await Promise.resolve(); });
     expect(await screen.findByRole('alert')).toHaveTextContent('Duplicate name'); expect(screen.getByLabelText('Custom instructions')).toHaveValue('Keep this');
-    fireEvent.click(screen.getByRole('button', { name: 'Create engineer' })); expect(calls[1]).toEqual(calls[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry same creation' })); expect(calls[1]).toEqual(calls[0]);
     await act(async () => { release({ ok: true, data: { id: 'eng', name: 'Draft', kind: 'engineer' } }); await Promise.resolve(); });
     expect(close).toHaveBeenCalledOnce(); expect(created).toHaveBeenCalledWith('eng');
   });
-  it('rejects mismatched acknowledgement and gives changed drafts a different retry key', async () => {
+  it('rejects mismatched acknowledgement and freezes the reviewed request for exact recovery', async () => {
     const calls: TorqueCommand[] = [];
     vi.stubGlobal('fetch', mockFetch((_url: string, options: RequestInit) => { calls.push(commandFrom(options)); return Promise.resolve(response({ id: 'wrong', name: 'Wrong name', kind: 'worker' })); }));
     const { close } = setup('architect'); fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Original' } }); fireEvent.click(screen.getByRole('button', { name: 'Create architect' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not confirm'); expect(close).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Changed' } }); fireEvent.click(screen.getByRole('button', { name: 'Create architect' }));
-    await waitFor(() => expect(calls).toHaveLength(2)); expect(calls[1]!.idempotency_key).not.toBe(calls[0]!.idempotency_key);
+    expect(screen.getByLabelText('Name')).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry same creation' }));
+    await waitFor(() => expect(calls).toHaveLength(2)); expect(calls[1]).toEqual(calls[0]);
   });
   it('requires the nested Agent Class creation acknowledgement', async () => {
     let last: TorqueCommand | undefined;

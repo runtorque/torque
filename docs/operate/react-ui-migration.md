@@ -244,3 +244,8 @@ The worktree diff scenario also exercises real WebSocket reconnect while Changes
 ### Remaining numeric settings boundaries
 
 `settings-bounds-live.spec.ts` validates cadence, Context TTL and perceived-empty detector bounds. It closes each control's disclosure before invalid saves, checks reveal/focus and absence of writes, then saves and reloads both endpoints through real global/group commands. The Python settings-contract suite also verifies every endpoint after SQLite reload. Personal transcript replay tests may skip when their files are absent; do not count those skips as detector runtime verification.
+
+
+### Creation delivery recovery acceptance
+
+`ui/e2e/agent-creation-recovery-live.spec.ts` requires an isolated daemon and a production build from `make ui-check`. It holds the first response after creating a generic terminal, waits for the actual 30-second deadline, verifies command-navigator protection and reconnect retention, and recovers the same ID through explicit receipt replay. Its second scenario enters a malformed startup command that fails after terminal allocation, verifies the exact incomplete target, and deliberately inspects it. It removes its targets afterward. Run alongside `agent-create-live.spec.ts`, `agent-creation-reads-live.spec.ts` and `creation-roles-live.spec.ts`; inspect the compact screenshots. These tests do not certify forced page reload, daemon crash, native handoff or commercial-provider delivery.

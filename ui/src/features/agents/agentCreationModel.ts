@@ -28,3 +28,16 @@ export function createdTarget(frame: UnknownRecord, command: TorqueCommand, kind
   if (!text(result.id) || result.name !== command.name || result.kind !== kind || (kind === 'terminal' && (frame.type !== 'terminal_created' || frame.parent_id !== (command.parent_id ?? '')))) throw new Error('Could not confirm the created target. The draft is retained.');
   return text(result.id);
 }
+
+export interface IncompleteCreationTarget { type: 'agent' | 'pending_hire'; id: string; name: string; }
+export function incompleteCreationTarget(frame: UnknownRecord, command: TorqueCommand): IncompleteCreationTarget {
+  const target = record(frame.target);
+  const hire = command.cmd === 'architect_engineer_hire';
+  if (frame.command !== command.cmd || frame.idempotency_key !== command.idempotency_key || frame.requested_name !== command.name
+    || target.type !== (hire ? 'pending_hire' : 'agent') || !text(target.id) || !text(target.name)
+    || (hire ? target.architect_id !== command.architect_id || !['pending', 'approved', 'rejected'].includes(text(target.status))
+      : !['worker', 'engineer', 'architect', 'terminal'].includes(text(target.kind)))) {
+    throw new Error('Could not confirm the incomplete launch target. Retry the same request to recover its outcome.');
+  }
+  return { type: hire ? 'pending_hire' : 'agent', id: text(target.id), name: text(target.name) };
+}

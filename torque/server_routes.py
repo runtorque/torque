@@ -23,6 +23,7 @@ from aiohttp import web
 from . import profiling
 from .worktree_requests import ACKNOWLEDGED_WORKTREE_MUTATIONS
 from .pending_requests import PendingCommandWrites, CommandRequestConflict
+from .services.creation_outcomes import AGENT_CREATION_COMMANDS, CreationOutcome
 from .attachment_uploads import AttachmentUploadError, save_message_attachment_stream
 from .config import log
 from .state import hot_json_dumps_async
@@ -585,13 +586,12 @@ def build_http_routes(
             return ws
 
     pending_api_writes = PendingCommandWrites()
+    unsettled_creations: dict[str, CreationOutcome] = {}
     # Completed receipts alone cannot deduplicate creation during awaited
     # action resolution or agent/PTY launch. A disconnected caller must not
     # cancel the shared write before its durable receipt is saved.
-    coordinated_writes = ACKNOWLEDGED_WORKTREE_MUTATIONS | {
+    coordinated_writes = ACKNOWLEDGED_WORKTREE_MUTATIONS | AGENT_CREATION_COMMANDS | {
         'board_add_task', 'schedule_create',
-        'add_worker', 'add_engineer', 'add_architect', 'add_terminal',
-        'create_agent_from_class', 'architect_engineer_hire',
     }
 
     async def handle_api_cmd(request):
@@ -626,7 +626,7 @@ def build_http_routes(
                     status=guard["status"])
 
             key = str(data.get("idempotency_key", "") or "").strip()
-            if not key or cmd not in coordinated_writes:
+            if not key or (cmd not in coordinated_writes and key not in unsettled_creations):
                 return await _execute_api_command(data)
             try:
                 response = await pending_api_writes.run(
@@ -646,6 +646,9 @@ def build_http_routes(
             request_hash = ""
             if idempotency_key and is_api_write_command(cmd):
                 request_hash = api_request_hash(data)
+                unsettled = unsettled_creations.get(idempotency_key)
+                if unsettled and unsettled.request_hash != request_hash:
+                    raise CommandRequestConflict("idempotency key was reused for a different API command")
                 existing = db.load_mcp_idempotency(idempotency_key)
                 if existing:
                     if (
@@ -671,19 +674,33 @@ def build_http_routes(
                         tool_name=str(cmd or ""),
                         event="dedupe",
                     )
+                    unsettled_creations.pop(idempotency_key, None)
                     return web.json_response(cached)
 
-            try:
-                result = await handle_command(data)
-            except Exception as exc:
-                log.exception("API command '%s' failed", cmd)
-                return web.json_response(
-                    {"ok": False, "error": str(exc)}, status=500)
+            creation = None
+            if idempotency_key and cmd in AGENT_CREATION_COMMANDS:
+                creation = unsettled_creations.get(idempotency_key)
+                if creation is None:
+                    creation = CreationOutcome(cmd, idempotency_key, request_hash,
+                                               str(data.get("name", "") or ""))
+                    unsettled_creations[idempotency_key] = creation
+                    await creation.execute(handle_command, data)
+                # Keep the completed operation through verification or receipt
+                # failures. A retry resolves it instead of creating a new target.
+                result = creation.resolve(state, db)
+            else:
+                try:
+                    result = await handle_command(data)
+                except Exception as exc:
+                    log.exception("API command '%s' failed", cmd)
+                    return web.json_response(
+                        {"ok": False, "error": str(exc)}, status=500)
 
             if result and result.get("type") == "error":
                 refusal = {"ok": False, "error": result.get("message", "")}
-                if cmd == "board_add_task" and result.get("creation_refused") is True:
+                if (cmd == "board_add_task" or creation is not None) and result.get("creation_refused") is True:
                     refusal["creation_refused"] = True
+                    unsettled_creations.pop(idempotency_key, None)
                 return web.json_response(refusal)
             if result and result.get("type") == "deliverable_missing":
                 # Hard-gate refusal: surface as a CLI/REST failure so the
@@ -727,6 +744,8 @@ def build_http_routes(
                     request_hash=request_hash or api_request_hash(data),
                     response=response_payload,
                 )
+            if creation is not None:
+                unsettled_creations.pop(idempotency_key, None)
             if isinstance(payload, dict) and payload.get("type") == "state":
                 return await _hot_json_response(response_payload)
             return web.json_response(response_payload)

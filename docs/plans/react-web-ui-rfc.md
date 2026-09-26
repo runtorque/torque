@@ -1378,3 +1378,8 @@ The backend portion of P-357 now shares pending keyed launch operations for all 
 ### Creation role ownership checkpoint — 2026-09-26
 
 P-356 now provides group-owned role discovery with bounded observation, explicit retry, retained draft/selection, unavailable-role launch gating and no hidden requests. D-199 and the matrix record 938 React tests and five production-browser scenarios passing on the final build, including real cross-group roles, deletion, unrelated replies and a deadline. QA is cleaned up. Ledger: **357 mapped / 348 implemented or equivalent / 5 open / 4 intentionally retired**. P-357 launch recovery, broad settings/reconnect audits and independent acceptance gates remain open.
+
+
+### Uncertain and incomplete creation checkpoint — 2026-09-26
+
+P-357 now retains the exact reviewed launch through bounded observation, uncertain delivery, reconnect and explicit retry. Backend allocation tracking returns inspectable partial outcomes and preserves completed operations through receipt/verification failures; verified rollback permits editing. Global-navigator protection prevents losing an unresolved creation owner. D-200 and the parity matrix record 3,233 backend tests (82 skips), a final 949-test UI check and seven production-browser scenarios, including real timeout/replay and a real failure after terminal allocation. Isolated QA is stopped. Ledger: **357 mapped / 349 implemented or equivalent / 4 open / 4 intentionally retired**. Broad P-087/P-088/P-089/P-112 and independent full-browser/inventory/Planning/native/external/crash-recovery acceptance remain open; Phase 4 and Classic retirement are not complete.

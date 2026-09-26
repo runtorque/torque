@@ -1,17 +1,18 @@
 import { EngineerNotificationPreset } from '../control/EngineerNotificationPreset';
 import { SpecializationPicker } from '../control/SpecializationPicker';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { Button, ModalDialog } from '../../design/primitives';
-import { readCommand } from '../../protocol/http';
 import { settingsRequest } from '../control/settingsRequests';
 import type { TorqueCommand } from '../../protocol';
 import { useAppSelector } from '../../app/hooks';
+import { useSettingsProtection } from '../../app/settingsNavigation';
 import { selectAgentSettingsDefaults, selectConnection } from '../../app/store';
-import { createdTarget, initialLaunchDraft, resolvedLaunchDraft, validateTemplateResponse, type LaunchDraft } from './agentCreationModel';
+import { initialLaunchDraft, resolvedLaunchDraft, validateTemplateResponse, type LaunchDraft } from './agentCreationModel';
 import type { AgentViewModel } from './model';
 import { creationClassDisabledReason, creationClassLabel, useCreationClasses } from './useCreationClasses';
 import { useCreationRoles } from './useCreationRoles';
+import { useAgentCreation } from './useAgentCreation';
 import styles from './AgentWorkspace.module.css';
 
 type CreateKind = 'architect' | 'engineer' | 'worker' | 'terminal';
@@ -126,62 +127,53 @@ export function AgentCreateDialog({
   const setAutoCheckpoint = (value: LaunchDraft['autoCheckpoint']) => updateLaunch('autoCheckpoint', value);
   const setCheckpointOnProgress = (value: LaunchDraft['checkpointOnProgress']) => updateLaunch('checkpointOnProgress', value);
   const setMergeSquash = (value: LaunchDraft['mergeSquash']) => updateLaunch('mergeSquash', value);
-  const [saving, setSaving] = useState(false); const savingRef = useRef(false);
-  const [error, setError] = useState(''); const errorElement = useRef<HTMLParagraphElement>(null);
-  const creationAttempt = useRef({ fingerprint: '', key: '' });
+  const creation = useAgentCreation(open, onCreated, onClose);
+  const { saving, error, setError, locked, requestClose } = creation;
+  const lockedRef = useRef(locked);
+  useLayoutEffect(() => { lockedRef.current = locked; }, [locked]);
+  const errorElement = useRef<HTMLParagraphElement>(null);
+  const restoreCreationFocus = useCallback(() => { errorElement.current?.focus(); }, []);
+  const keepCreation = useCallback(() => {}, []);
+  useSettingsProtection({ purpose: 'creation', group, dirty: false, saving: locked, discard: keepCreation, restoreFocus: restoreCreationFocus });
   const [readRetry, setReadRetry] = useState(0);
   const [resolvedRead, setResolvedRead] = useState({ key: '', error: '' });
   const resolutionKey = JSON.stringify([group, template, kind, connection.reconnectCount, readRetry]);
   const resolving = kind === 'worker' && resolvedRead.key !== resolutionKey;
   const resolutionError = resolvedRead.key === resolutionKey ? resolvedRead.error : '';
   useEffect(() => {
-    if (!open || connection.status !== 'connected' || kind !== 'worker' || saving || resolvedRead.key === resolutionKey) return;
+    if (!open || connection.status !== 'connected' || kind !== 'worker' || locked || resolvedRead.key === resolutionKey) return;
     const controller = new AbortController();
     void settingsRequest({ cmd: 'render_template', group, name: template }, controller.signal, false, 'Launch settings').then((frame) => {
-      if (controller.signal.aborted || savingRef.current) return;
+      if (controller.signal.aborted || lockedRef.current) return;
       const next = resolvedLaunchDraft(validateTemplateResponse(frame, group, template));
       setLaunch((current) => Object.fromEntries(Object.entries(next).map(([key, value]) => [key, editedLaunch.current.has(key as keyof LaunchDraft) ? current[key as keyof LaunchDraft] : value])) as LaunchDraft);
       setResolvedRead({ key: resolutionKey, error: '' });
     }).catch((cause: unknown) => { if (!controller.signal.aborted) setResolvedRead({ key: resolutionKey, error: cause instanceof Error ? cause.message : 'Could not resolve launch settings.' }); });
     return () => controller.abort();
-  }, [open, kind, group, template, resolutionKey, resolvedRead.key, saving, connection.status]);
+  }, [open, kind, group, template, resolutionKey, resolvedRead.key, locked, connection.status]);
   useEffect(() => { if (error && !saving) errorElement.current?.focus(); }, [error, saving]);
-  const requestClose = () => { if (!savingRef.current) onClose(); };
 
   const classPickerActive = kind !== 'terminal' && !(kind === 'engineer' && hiringArchitectId);
-  const classCatalog = useCreationClasses(open && classPickerActive, group, saving);
+  const classCatalog = useCreationClasses(open && classPickerActive, group, locked);
   const classes = classCatalog.classes.filter((item) => item.base_kind === kind);
   const selectedClass = classes.find((item) => item.id === agentClassId);
   const registryError = classCatalog.issues.some((issue) => issue.severity === 'error') ? 'Fix the project Agent Class catalog errors before launching a class.' : '';
   const classError = classPickerActive && agentClassId ? classCatalog.unavailable || registryError || (selectedClass ? creationClassDisabledReason(selectedClass, kind) : 'The selected Agent Class is no longer available. Choose another class or the default.') : '';
-  const roleCatalog = useCreationRoles(group, open && kind === 'worker' && !saving);
+  const roleCatalog = useCreationRoles(group, open && kind === 'worker' && !locked);
   const roleOptions = useMemo(() => {
     const byId = new Map<string, NamedOption>();
     optionList(roleCatalog.roles).forEach((item) => { if (!byId.has(item.id)) byId.set(item.id, item); });
     return [...byId.values()];
   }, [roleCatalog.roles]);
-  const roleError = kind === 'worker' && template && !saving ? !roleCatalog.verified ? (roleCatalog.error || 'Refresh creation roles to verify the selected role.') : !roleOptions.some((item) => item.id === template) ? 'The selected role is no longer available. Choose another role or the group default.' : '' : '';
+  const roleError = kind === 'worker' && template && !locked ? !roleCatalog.verified ? (roleCatalog.error || 'Refresh creation roles to verify the selected role.') : !roleOptions.some((item) => item.id === template) ? 'The selected role is no longer available. Choose another role or the group default.' : '' : '';
   const architects = agents.filter((agent) => agent.kind === 'architect');
   const parents = agents.filter((agent) => agent.cellType === 'agent');
 
-  const create = (payload: TorqueCommand) => {
-    if (savingRef.current) return;
-    const fingerprint = JSON.stringify(payload);
-    if (creationAttempt.current.fingerprint !== fingerprint) creationAttempt.current = { fingerprint, key: `react-create-${crypto.randomUUID()}` };
-    const command = { ...payload, idempotency_key: creationAttempt.current.key };
-    savingRef.current = true; setSaving(true); setError('');
-    void readCommand(command, new AbortController().signal).then((frame) => {
-      if (frame.type === 'error') throw new Error(text(frame.message) || 'Creation refused.');
-      const id = createdTarget(frame, command, kind);
-      if (id) onCreated(id);
-      onClose();
-    }).catch((cause: unknown) => { setError(cause instanceof Error ? cause.message : 'Could not create this target. The draft is retained.'); })
-      .finally(() => { savingRef.current = false; setSaving(false); });
-  };
+  const create = (payload: TorqueCommand) => { setSpecializations(specializations); creation.create(payload, kind); };
 
   const submit = () => {
     const identity = name.trim();
-    if (savingRef.current || resolving || resolutionError || classError || roleError || !identity || !group) return;
+    if (locked || resolving || resolutionError || classError || roleError || !identity || !group) return;
     const agentSettings: Record<string, unknown> = {};
     const settingValues: Record<string, unknown> = {
       provider: provider.trim(),
@@ -270,10 +262,17 @@ export function AgentCreateDialog({
     onOpenChange={(value) => { if (!value) requestClose(); }}
   >
     {error ? <p role="alert" tabIndex={-1} ref={errorElement}>{error}</p> : null}
-    {kind === 'worker' ? <div className={styles.settingsStatus}><span aria-live="polite">{resolving ? 'Resolving launch settings…' : resolutionError ? 'Launch settings unavailable' : 'Resolved role and group settings; edited fields are retained.'}</span><Button tone="quiet" isDisabled={saving || resolving} onPress={() => setReadRetry((value) => value + 1)}>Refresh launch settings</Button></div> : null}
+    {locked && !saving ? creation.incomplete ? <section aria-label="Incomplete launch">
+      <p>{creation.incomplete.type === 'agent' ? 'The target exists, but launch did not finish.' : 'The hire request was saved, but delivery did not finish. Review it in Planning.'} {creation.incomplete.name} · {creation.incomplete.id}</p>
+      <Button tone="primary" onPress={creation.inspect}>{creation.incomplete.type === 'agent' ? 'Inspect created target' : 'Keep saved hire request'}</Button>
+    </section> : <section aria-label="Creation recovery">
+      <p>Creation is not confirmed. Your reviewed request is locked to prevent a duplicate. Retry the same request to recover its outcome.</p>
+      <Button tone="primary" onPress={creation.retry}>Retry same creation</Button>
+    </section> : null}
+    {kind === 'worker' ? <div className={styles.settingsStatus}><span aria-live="polite">{resolving ? 'Resolving launch settings…' : resolutionError ? 'Launch settings unavailable' : 'Resolved role and group settings; edited fields are retained.'}</span><Button tone="quiet" isDisabled={locked || resolving} onPress={() => setReadRetry((value) => value + 1)}>Refresh launch settings</Button></div> : null}
     {resolutionError ? <p role="alert">{resolutionError} <Button tone="quiet" onPress={() => setReadRetry((value) => value + 1)}>Retry launch settings</Button></p> : null}
     <form className={styles.creationForm} onSubmit={(event) => { event.preventDefault(); submit(); }}>
-      <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0 }}>
+      <fieldset disabled={locked} style={{ border: 0, padding: 0, margin: 0 }}>
       <section>
         <h3>Identity</h3>
         <div className={styles.formGrid}>
@@ -288,11 +287,11 @@ export function AgentCreateDialog({
       </section>
 
       {kind === 'worker' ? <section aria-label="Creation role discovery">
-        <div className={styles.settingsStatus}><span aria-live="polite">{roleCatalog.loading ? 'Loading creation roles…' : 'Roles for this creation group.'}</span><Button type="button" tone="quiet" isDisabled={saving || roleCatalog.loading} onPress={roleCatalog.refresh}>Refresh creation roles</Button></div>
+        <div className={styles.settingsStatus}><span aria-live="polite">{roleCatalog.loading ? 'Loading creation roles…' : 'Roles for this creation group.'}</span><Button type="button" tone="quiet" isDisabled={locked || roleCatalog.loading} onPress={roleCatalog.refresh}>Refresh creation roles</Button></div>
         {roleCatalog.error ? <p role="alert">{roleCatalog.error} <Button type="button" tone="quiet" onPress={roleCatalog.refresh}>Retry creation roles</Button></p> : roleError ? <p role="alert">{roleError}</p> : null}
       </section> : null}
       {classPickerActive ? <section aria-label="Agent Class discovery">
-        <div className={styles.settingsStatus}><span id="creation-class-status" aria-live="polite">{classCatalog.loading ? 'Loading project Agent Classes…' : agentClassId ? 'The selected class is frozen at launch.' : 'The default launch freezes the default class for this agent kind.'}</span><Button type="button" tone="quiet" isDisabled={saving || classCatalog.loading} onPress={classCatalog.refresh}>Refresh Agent Classes</Button></div>
+        <div className={styles.settingsStatus}><span id="creation-class-status" aria-live="polite">{classCatalog.loading ? 'Loading project Agent Classes…' : agentClassId ? 'The selected class is frozen at launch.' : 'The default launch freezes the default class for this agent kind.'}</span><Button type="button" tone="quiet" isDisabled={locked || classCatalog.loading} onPress={classCatalog.refresh}>Refresh Agent Classes</Button></div>
         {classCatalog.error ? <p role="alert">Class discovery failed. {classCatalog.error} <Button type="button" tone="quiet" onPress={classCatalog.refresh}>Retry Agent Classes</Button></p> : null}
         {classError && !classCatalog.error ? <p role="alert">{classError}</p> : null}
         {classCatalog.issues.length ? <details><summary>Agent Class catalog issues ({classCatalog.issues.length})</summary>{classCatalog.issues.map((issue, index) => <p key={index}>{text(issue.message)} <small>{text(issue.path)}</small></p>)}</details> : null}
@@ -316,7 +315,7 @@ export function AgentCreateDialog({
 
       {principal && !(kind === 'engineer' && hiringArchitectId) ? <section>
         <h3>Behavior and delivery</h3>
-        {kind === 'engineer' ? <EngineerNotificationPreset value={{ digest_verbosity: digestVerbosity || inheritedDigest.digest_verbosity, push_interval: pushInterval || inheritedDigest.push_interval, max_interval: maxInterval || inheritedDigest.max_interval, heartbeat_interval: heartbeatInterval || inheritedDigest.heartbeat_interval, enabled_events: enabledEventsDraft === null ? inheritedDigest.enabled_events : csv(enabledEvents) }} disabled={saving} onApply={(preset) => { setDigestVerbosity(preset.digest_verbosity); setPushInterval(String(preset.push_interval)); setMaxInterval(String(preset.max_interval)); setHeartbeatInterval(String(preset.heartbeat_interval)); setEnabledEvents(preset.enabled_events.join(', ')); }} /> : null}
+        {kind === 'engineer' ? <EngineerNotificationPreset value={{ digest_verbosity: digestVerbosity || inheritedDigest.digest_verbosity, push_interval: pushInterval || inheritedDigest.push_interval, max_interval: maxInterval || inheritedDigest.max_interval, heartbeat_interval: heartbeatInterval || inheritedDigest.heartbeat_interval, enabled_events: enabledEventsDraft === null ? inheritedDigest.enabled_events : csv(enabledEvents) }} disabled={locked} onApply={(preset) => { setDigestVerbosity(preset.digest_verbosity); setPushInterval(String(preset.push_interval)); setMaxInterval(String(preset.max_interval)); setHeartbeatInterval(String(preset.heartbeat_interval)); setEnabledEvents(preset.enabled_events.join(', ')); }} /> : null}
         <div className={styles.formGrid}>
           <label>Autonomy mode<input value={autonomyMode} onChange={(event) => setAutonomyMode(event.target.value)} placeholder="inherit" /></label>
           <label>Digest verbosity<input value={digestVerbosity} onChange={(event) => setDigestVerbosity(event.target.value)} placeholder="inherit" /></label>
@@ -346,7 +345,7 @@ export function AgentCreateDialog({
         </> : null}
       </section> : null}
 
-      <footer><Button tone="quiet" type="button" isDisabled={saving} onPress={requestClose}>Cancel</Button><Button tone="primary" type="submit" isDisabled={saving || resolving || Boolean(resolutionError) || Boolean(classError) || Boolean(roleError) || !name.trim()}>{saving ? 'Creating…' : kind === 'engineer' && hiringArchitectId ? 'Request hire' : `Create ${kind}`}</Button></footer>
+      <footer><Button tone="quiet" type="button" isDisabled={locked} onPress={requestClose}>Cancel</Button><Button tone="primary" type="submit" isDisabled={locked || resolving || Boolean(resolutionError) || Boolean(classError) || Boolean(roleError) || !name.trim()}>{saving ? 'Creating…' : kind === 'engineer' && hiringArchitectId ? 'Request hire' : `Create ${kind}`}</Button></footer>
       </fieldset>
     </form>
   </ModalDialog>;

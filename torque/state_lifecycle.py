@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .services.creation_outcomes import record_creation_target
+
 from .state import (
     AGENT_TOMBSTONE_RETENTION_SECONDS,
     AI_DEFAULT_EMBEDDING_MODEL,
@@ -649,6 +651,7 @@ class StateLifecycleMixin:
             icon=icon,
             parent_id=parent_id,
         )
+        record_creation_target("agent", aid)
         self.agents[aid] = cell
         if parent_id:
             self._children.setdefault(parent_id, []).append(aid)

@@ -28,7 +28,7 @@ test('Worker creation resolves templates, retains edits and retries cached creat
       if (refuseRead && data.cmd === 'render_template') { await route.fulfill({ json: { ok: false, error: 'Injected template read refusal' } }); return; }
       if (data.cmd === 'add_worker') {
         writes.push(data); attempt++;
-        if (attempt === 1) { await route.fulfill({ json: { ok: false, error: 'Injected creation refusal' } }); return; }
+        if (attempt === 1) { await route.fulfill({ json: { ok: false, error: 'Injected creation refusal', creation_refused: true } }); return; }
         const result = await route.fetch(); const body = await result.json() as { data: Row }; created.push(String(body.data.id));
         if (attempt === 2) { await new Promise<void>((resolve) => { release = resolve; }); await route.fulfill({ json: { ok: false, error: 'Simulated lost creation acknowledgement' } }); return; }
         await route.fulfill({ response: result }); return;
@@ -46,7 +46,7 @@ test('Worker creation resolves templates, retains edits and retries cached creat
     await create.click(); await expect(dialog.getByRole('alert')).toHaveText('Injected creation refusal'); await expect(model).toHaveValue('local-model'); await expect(dialog.getByRole('alert')).toBeFocused();
     await create.click(); await expect.poll(() => Boolean(release)).toBe(true); await expect(dialog.getByLabel('Name', { exact: true })).toBeDisabled(); await dialog.getByRole('button', { name: 'Close dialog' }).click(); await page.mouse.click(2, 2); await page.keyboard.press('Escape'); await expect(dialog).toBeVisible(); expect(writes).toHaveLength(2);
     release!(); await expect(dialog.getByRole('alert')).toHaveText('Simulated lost creation acknowledgement'); await page.screenshot({ animations: 'disabled', path: test.info().outputPath('creation-retry.png') });
-    await create.click(); await expect(dialog).toHaveCount(0); expect(writes).toHaveLength(3); expect(writes[0]).toEqual(writes[1]); expect(writes[1]).toEqual(writes[2]); expect(new Set(created).size).toBe(1);
+    await dialog.getByRole('button', { name: 'Retry same creation' }).click(); await expect(dialog).toHaveCount(0); expect(writes).toHaveLength(3); expect(writes[0]!.idempotency_key).not.toEqual(writes[1]!.idempotency_key); expect(writes[1]).toEqual(writes[2]); expect(new Set(created).size).toBe(1);
     const id = created[0]!; await expect(page.locator(`[role="treeitem"][data-agent-id="${id}"]`)).toHaveAttribute('aria-selected', 'true');
     await page.reload(); await page.getByRole('button', { name: /⌁ Agents/ }).click(); await expect(page.locator('[role="treeitem"]').filter({ hasText: name })).toHaveCount(1);
   } finally { rmSync(project, { recursive: true, force: true }); }
