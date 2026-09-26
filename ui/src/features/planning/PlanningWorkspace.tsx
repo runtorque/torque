@@ -1,4 +1,6 @@
 import { AreaEditor } from './AreaEditor';
+import { RejectHireDialog } from './RejectHireDialog';
+import { PlanningJournalEntry } from './PlanningJournalEntry';
 import { AreaFilterBar } from './AreaFilterBar';
 import { areaLifecycle, areaTypes, filterAreas, sortedAreas, type AreaFilters } from './areaModel';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -49,6 +51,7 @@ export function PlanningWorkspace({ group, sendCommand, onCommandUnavailable }: 
   const [description, setDescription] = useState('');
   const [architectId, setArchitectId] = useState('');
   const [selected, setSelected] = useState<{ kind: 'initiative' | 'area' | 'note' | 'brief' | 'decision'; item: Record<string, unknown> } | null>(null);
+  const [rejectHire, setRejectHire] = useState<Record<string, unknown> | null>(null);
   const createMutation = usePlanningMutation();
   const [showArchivedDecisions, setShowArchivedDecisions] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
@@ -78,7 +81,7 @@ export function PlanningWorkspace({ group, sendCommand, onCommandUnavailable }: 
   }), [planning.decisions, agents.records, group]);
   const visibleDecisions = decisions.filter((item) => showArchivedDecisions || !item.archived);
   const hires = useMemo(() => records(planning.pendingHires).filter((item) => text((agents.records[text(item.architect_id)] as Record<string, unknown> | undefined)?.group) === group), [planning.pendingHires, agents.records, group]);
-  const journals = useMemo(() => Object.entries(planning.journals).filter(([author]) => text((agents.records[author] as Record<string, unknown> | undefined)?.group) === group).flatMap(([, entries]) => records(entries)), [planning.journals, agents.records, group]);
+  const journals = useMemo(() => Object.entries(planning.journals).filter(([author]) => text((agents.records[author] as Record<string, unknown> | undefined)?.group) === group).flatMap(([author, entries]) => records(entries).map((entry) => ({ ...entry, authorName: text((agents.records[author] as Record<string, unknown> | undefined)?.name, author) }))), [planning.journals, agents.records, group]);
   const schedules = useMemo(() => records(tasks.schedules).filter((item) => !item.group || item.group === group), [tasks.schedules, group]);
   const taskItems = useMemo(() => records(tasks.records).filter((item) => !item.group || item.group === group), [tasks.records, group]);
   const agentItems = useMemo(() => records(agents.records).filter((item) => !item.group || item.group === group), [agents.records, group]);
@@ -144,11 +147,12 @@ export function PlanningWorkspace({ group, sendCommand, onCommandUnavailable }: 
       </div> : null}
       {tab === 'decisions' ? <div className={styles.grid}>{visibleDecisions.length ? visibleDecisions.map((item) => <Card key={item.id} item={item} eyebrow={text(item.status, 'decision')} onOpen={() => setSelected({ kind: 'decision', item })} />) : empty('decisions', 'Architect decisions will appear after they are recorded.')}</div> : null}
       {tab === 'team' ? <div className={styles.split}>
-        <section><header><h2>Pending hires</h2><span>{hires.length}</span></header><div className={styles.list}>{hires.length ? hires.map((item) => <article className={styles.hireCard} key={item.id}><Card item={item} eyebrow={text(item.status, 'pending')} /><div><Button tone="quiet" onPress={() => { if (!sendCommand({ cmd: 'pending_hire_reject', id: item.id, note: 'Rejected by user from Planning' })) onCommandUnavailable(); }}>Reject</Button><Button tone="primary" onPress={() => { if (!sendCommand({ cmd: 'pending_hire_approve', id: item.id })) onCommandUnavailable(); }}>Approve</Button></div></article>) : empty('pending hires', 'Architect hiring requests will appear here for review.')}</div></section>
-        <section><header><h2>Engineer journals</h2><span>{journals.length}</span></header><div className={styles.list}>{journals.length ? journals.map((item) => <Card key={item.id} item={item} eyebrow="journal" />) : empty('journal entries', 'Engineer progress journals are empty for this group.')}</div></section>
+        <section><header><h2>Pending hires</h2><span>{hires.length}</span></header><div className={styles.list}>{hires.length ? hires.map((item) => <article className={styles.hireCard} key={item.id}><Card item={item} eyebrow={text(item.status, 'pending')} /><div><Button tone="quiet" onPress={() => setRejectHire(item)}>Reject with note</Button><Button tone="primary" onPress={() => { if (!sendCommand({ cmd: 'pending_hire_approve', id: item.id })) onCommandUnavailable(); }}>Approve</Button></div></article>) : empty('pending hires', 'Architect hiring requests will appear here for review.')}</div></section>
+        <section><header><h2>Engineer journals</h2><span>{journals.length}</span></header><div className={styles.list}>{journals.length ? journals.map((item) => <PlanningJournalEntry key={item.id} entry={item} author={item.authorName} />) : empty('journal entries', 'Engineer progress journals are empty for this group.')}</div></section>
       </div> : null}
       {tab === 'schedules' ? <div className={styles.grid}>{schedules.length ? schedules.map((item) => <Card key={item.id} item={item} eyebrow={item.enabled === false ? 'paused' : 'enabled'} />) : empty('schedules', 'Create recurring work from the Board schedule editor.')}</div> : null}
     </div>
+    {rejectHire ? <RejectHireDialog key={String(rejectHire.id)} hire={rejectHire} architect={text((agents.records[text(rejectHire.architect_id)] as Record<string, unknown> | undefined)?.name, text(rejectHire.architect_id, 'Architect'))} onClose={() => setRejectHire(null)} onRejected={() => { setRejectHire(null); refresh(); }} /> : null}
     <ModalDialog title={`New ${createKind ?? 'planning item'}`} description={`Create in ${group}.`} size="small" isOpen={createKind !== null} onOpenChange={(open) => { if (!open && !createMutation.busy.current) setCreateKind(null); }}>
       <form className={styles.createForm} onSubmit={(event) => { event.preventDefault(); create(); }}>
         {readStatus}

@@ -134,7 +134,7 @@ describe('Planning editor acknowledgements and contracts', () => {
   });
   it('scopes decisions and hides archived records until requested', () => {
     const store = createAppStore();
-    store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, agents: { a: { id: 'a', kind: 'architect', group: 'Foundation' }, b: { id: 'b', kind: 'architect', group: 'Other' } }, pending_hires: { local: { id: 'local', architect_id: 'a', requested_name: 'Local hire' }, remote: { id: 'remote', architect_id: 'b', requested_name: 'Other hire' } }, engineer_journal: { a: [{ id: 'j-local', title: 'Local journal' }], b: [{ id: 'j-remote', title: 'Other journal' }] }, decisions: { d: decision, old: { ...decision, id: 'old', title: 'Archived decision', archived: true }, other: { ...decision, id: 'other', title: 'Other group decision', architect_id: 'b' } } }));
+    store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, agents: { a: { id: 'a', kind: 'architect', group: 'Foundation' }, b: { id: 'b', kind: 'architect', group: 'Other' } }, pending_hires: { local: { id: 'local', architect_id: 'a', requested_name: 'Local hire' }, remote: { id: 'remote', architect_id: 'b', requested_name: 'Other hire' } }, engineer_journal: { a: [{ id: 'j-local', entry: 'Local journal', type: 'checkpoint', timestamp: 1710000000 }], b: [{ id: 'j-remote', entry: 'Other journal', type: 'checkpoint', timestamp: 1710000000 }] }, decisions: { d: decision, old: { ...decision, id: 'old', title: 'Archived decision', archived: true }, other: { ...decision, id: 'other', title: 'Other group decision', architect_id: 'b' } } }));
     render(<Provider store={store}><PlanningWorkspace group="Foundation" sendCommand={() => true} onCommandUnavailable={vi.fn()} /></Provider>);
     fireEvent.click(screen.getByRole('button', { name: 'Decisions' }));
     const region = screen.getByRole('region', { name: 'Planning' });
@@ -145,7 +145,7 @@ describe('Planning editor acknowledgements and contracts', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Hires & journals' }));
     expect(screen.getByRole('button', { name: /Local hire/ })).toBeVisible();
     expect(screen.queryByRole('button', { name: /Other hire/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Local journal/ })).toBeVisible();
-    expect(screen.queryByRole('button', { name: /Other journal/ })).not.toBeInTheDocument();
+    expect(screen.getByText('Local journal', { selector: 'summary strong' })).toBeVisible();
+    expect(screen.queryByText('Other journal')).not.toBeInTheDocument();
   });
 });
