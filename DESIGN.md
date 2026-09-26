@@ -3768,3 +3768,13 @@ History renders the persisted contract: role/template, input/output token counts
 - Bound the entire log refresh, including response-body decoding, to 15 seconds independently of transport cancellation. On timeout, keep the last accepted lines, cursor, target, filters and reading state; expose the existing Refresh logs recovery action. Initial loading becomes an explicit unavailable state instead of lasting indefinitely.
 - Follow retains its existing two-second retry cadence after an error. A paused view remains paused and retries through Refresh logs or an active reconnect refresh.
 - An expired or cancelled response cannot append lines, advance the cursor, clear a newer error or settle a newer read. Switching targets, leaving the surface and reconnecting cancel the old read's transport and timeout. Successful reads clear the timeout and cancellation subscription.
+
+
+### D-212 — Restore native windows within the current usable desktop
+
+- Date: 2026-09-26
+- Scope: P-108/P-123/P-124 main and detached window bounds.
+- Main and detached windows share monitor selection and geometry recovery. Preserve placement on a connected secondary display, including negative origins. Prefer the display with the largest overlap; monitor names are fallback hints because they are not unique. Recenter on the named display or primary display when saved coordinates no longer intersect the desktop.
+- Use each display's physical work area and scale. Preserve captured physical pixels, legacy display-marked bounds and the main window’s historical interpretation of unmarked captures as physical; explicit logical bounds and omitted default sizes are converted once for the selected display.
+- Keep the entire restored window reachable within the selected work area, including its native decorations. Honor logical minimum sizes where they fit; reduce the native minimum on a smaller screen so it cannot defeat recovery. Move before applying the final physical size.
+- This restoration contract does not certify monitor hot-plug while a window is open, operating-system sleep recovery, or other platforms. Those native acceptance checks remain separate.

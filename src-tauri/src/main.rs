@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::json;
-use tauri::{Manager, PhysicalPosition, PhysicalSize, Position, RunEvent, Size};
+use tauri::{Manager, RunEvent};
 use torque_desktop::commands;
 use torque_desktop::commands::window::NativeWindowState;
 use torque_desktop::daemon::{self, DaemonSettings};
@@ -174,16 +174,12 @@ fn restore_main_window_bounds(window: &tauri::WebviewWindow, settings: &DaemonSe
     let Some(bounds) = fetch_main_window_bounds(settings) else {
         return;
     };
-    if let (Some(width), Some(height)) = (bounds.width, bounds.height) {
-        let width = width.max(800.0).round() as u32;
-        let height = height.max(600.0).round() as u32;
-        let _ = window.set_size(Size::Physical(PhysicalSize::new(width, height)));
-    }
-    if let (Some(x), Some(y)) = (bounds.x, bounds.y) {
-        let _ = window.set_position(Position::Physical(PhysicalPosition::new(
-            x.round() as i32,
-            y.round() as i32,
-        )));
+    if let Err(error) = commands::window::restore_window_bounds(
+        window,
+        &bounds,
+        torque_desktop::window_geometry::WindowGeometryPolicy::MAIN,
+    ) {
+        eprintln!("Unable to restore main window bounds: {error}");
     }
 }
 

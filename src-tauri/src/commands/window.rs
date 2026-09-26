@@ -10,6 +10,7 @@ use tauri::{
 
 use crate::daemon::DaemonSettings;
 use crate::menu;
+use crate::window_geometry::{restore_bounds, MonitorFrame, WindowGeometryPolicy};
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct WindowBounds {
@@ -192,7 +193,6 @@ pub fn detach_panel(
         window_state.remove_detached_by_label(&existing);
     }
 
-    let clamped = clamp_bounds(bounds.clone(), primary_monitor_frame(app)).or(bounds.clone());
     let mut builder = WebviewWindowBuilder::new(app, label.clone(), WebviewUrl::External(url))
         .title(format!("Torque — {}", panel_title(&panel)))
         .inner_size(900.0, 640.0)
@@ -204,29 +204,7 @@ pub fn detach_panel(
         builder = builder.menu(menu);
     }
     let window = builder.build().map_err(|error| error.to_string())?;
-    if let Some(ref geometry) = clamped {
-        window
-            .set_size(requested_window_size(geometry))
-            .map_err(|error| error.to_string())?;
-        // With no requested position, let Tauri center in the correct monitor units.
-        if bounds
-            .as_ref()
-            .is_some_and(|b| b.x.is_some() && b.y.is_some())
-        {
-            if let (Some(x), Some(y)) = (geometry.x, geometry.y) {
-                let position = if geometry.physical.unwrap_or(geometry.display_id.is_some()) {
-                    Position::Physical(PhysicalPosition::new(x.round() as i32, y.round() as i32))
-                } else {
-                    Position::Logical(LogicalPosition::new(x, y))
-                };
-                window
-                    .set_position(position)
-                    .map_err(|error| error.to_string())?;
-            }
-        } else {
-            let _ = window.center();
-        }
-    }
+    restore_window_bounds(&window, &bounds.unwrap_or_default(), WindowGeometryPolicy::DETACHED)?;
     window.show().map_err(|error| error.to_string())?;
     window_state.remember_detached(panel, label.clone());
     window_state.set_active_label(label.clone());
@@ -368,66 +346,72 @@ fn detached_url(
     Ok(url)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct MonitorFrame {
-    pub x: f64,
-    pub y: f64,
-    pub width: f64,
-    pub height: f64,
-}
-
-fn primary_monitor_frame(app: &AppHandle) -> Option<MonitorFrame> {
-    let monitor = app.primary_monitor().ok().flatten()?;
-    let pos = monitor.position();
-    let size = monitor.size();
-    Some(MonitorFrame {
-        x: pos.x as f64,
-        y: pos.y as f64,
-        width: size.width as f64,
-        height: size.height as f64,
-    })
-}
-
-pub fn clamp_bounds(
-    bounds: Option<WindowBounds>,
-    monitor: Option<MonitorFrame>,
-) -> Option<WindowBounds> {
-    let mut bounds = bounds?;
-    let Some(frame) = monitor else {
-        return Some(bounds);
-    };
-    let width = bounds
-        .width
-        .unwrap_or(900.0)
-        .max(420.0)
-        .min(frame.width.max(420.0));
-    let height = bounds
-        .height
-        .unwrap_or(640.0)
-        .max(300.0)
-        .min(frame.height.max(300.0));
-    bounds.width = Some(width);
-    bounds.height = Some(height);
-    let x = bounds
-        .x
-        .unwrap_or(frame.x + ((frame.width - width) / 2.0).max(0.0));
-    let y = bounds
-        .y
-        .unwrap_or(frame.y + ((frame.height - height) / 2.0).max(0.0));
-    let center_x = x + width / 2.0;
-    let center_y = y + height / 2.0;
-    let inside = center_x >= frame.x
-        && center_x <= frame.x + frame.width
-        && center_y >= frame.y
-        && center_y <= frame.y + frame.height;
-    if inside {
-        bounds.x = Some(x);
-        bounds.y = Some(y);
-        return Some(bounds);
+/// Both main and detached windows use the same current-monitor recovery path.
+pub fn restore_window_bounds(
+    window: &WebviewWindow,
+    bounds: &WindowBounds,
+    policy: WindowGeometryPolicy,
+) -> Result<(), String> {
+    let mut monitors = window.available_monitors().unwrap_or_default();
+    if let Ok(Some(primary)) = window.primary_monitor() {
+        monitors.retain(|monitor| monitor.position() != primary.position());
+        monitors.insert(0, primary);
     }
-    bounds.x = Some(frame.x + ((frame.width - width) / 2.0).max(0.0));
-    bounds.y = Some(frame.y + ((frame.height - height) / 2.0).max(0.0));
-    Some(bounds)
+    let frames: Vec<_> = monitors
+        .iter()
+        .map(|monitor| {
+            let area = monitor.work_area();
+            MonitorFrame {
+                name: monitor.name().cloned(),
+                x: area.position.x as f64,
+                y: area.position.y as f64,
+                width: area.size.width as f64,
+                height: area.size.height as f64,
+                scale: monitor.scale_factor(),
+            }
+        })
+        .collect();
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let decorations = window
+        .outer_size()
+        .ok()
+        .zip(window.inner_size().ok())
+        .map(|(outer, inner)| {
+            (
+                outer.width.saturating_sub(inner.width) as f64 / scale,
+                outer.height.saturating_sub(inner.height) as f64 / scale,
+            )
+        })
+        .unwrap_or((0.0, 0.0));
+    let restored = restore_bounds(bounds, &frames, policy, decorations);
+    let geometry = restored
+        .as_ref()
+        .map(|result| &result.bounds)
+        .unwrap_or(bounds);
+    // Move first: DPI changes must precede applying the saved physical size.
+    if let (Some(x), Some(y)) = (geometry.x, geometry.y) {
+        let position = if geometry.physical.unwrap_or(geometry.display_id.is_some()) {
+            Position::Physical(PhysicalPosition::new(x.round() as i32, y.round() as i32))
+        } else {
+            Position::Logical(LogicalPosition::new(x, y))
+        };
+        window
+            .set_position(position)
+            .map_err(|error| error.to_string())?;
+    } else {
+        window.center().map_err(|error| error.to_string())?;
+    }
+    if let Some(ref result) = restored {
+        window
+            .set_min_size(Some(Size::Physical(PhysicalSize::new(
+                result.minimum_size.0.round() as u32,
+                result.minimum_size.1.round() as u32,
+            ))))
+            .map_err(|error| error.to_string())?;
+    }
+    window
+        .set_size(requested_window_size(geometry))
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -544,25 +528,57 @@ mod tests {
     }
 
     #[test]
+    fn restoration_keeps_titlebar_reachable() {
+        let restored = restore_bounds(
+            &WindowBounds {
+                physical: Some(true),
+                x: Some(100.0),
+                y: Some(-100.0),
+                width: Some(600.0),
+                height: Some(400.0),
+                ..Default::default()
+            },
+            &[MonitorFrame {
+                name: None,
+                scale: 1.0,
+                x: 0.0,
+                y: 24.0,
+                width: 1200.0,
+                height: 776.0,
+            }],
+            WindowGeometryPolicy::DETACHED,
+            (0.0, 0.0),
+        )
+        .unwrap()
+        .bounds;
+        assert_eq!(restored.y, Some(24.0));
+    }
+
+    #[test]
     fn clamp_recenters_offscreen_bounds() {
         let monitor = MonitorFrame {
+            name: None,
+            scale: 1.0,
             x: 0.0,
             y: 0.0,
             width: 1200.0,
             height: 800.0,
         };
-        let clamped = clamp_bounds(
-            Some(WindowBounds {
+        let clamped = restore_bounds(
+            &WindowBounds {
                 physical: None,
                 x: Some(5000.0),
                 y: Some(5000.0),
                 width: Some(600.0),
                 height: Some(400.0),
                 display_id: None,
-            }),
-            Some(monitor),
+            },
+            &[monitor],
+            WindowGeometryPolicy::DETACHED,
+            (0.0, 0.0),
         )
-        .expect("bounds");
+        .expect("bounds")
+        .bounds;
         assert_eq!(clamped.x, Some(300.0));
         assert_eq!(clamped.y, Some(200.0));
     }

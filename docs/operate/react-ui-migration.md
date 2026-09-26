@@ -287,3 +287,8 @@ Run `workspace-navigation-recovery-live.spec.ts` alongside `workspace-navigation
 ### Ownership-tree navigation retention acceptance
 
 `parity.spec.ts` now extends the hierarchy/draft fixture across Board and Control navigation and keyboard expansion after return, and adds group-scoped Expand all acceptance. Use an isolated production-build daemon; these hierarchy scenarios supply protocol fixtures and do not launch provider sessions. Inspect `retained-ownership-collapse.png` at compact width. Run the complete parity fixture file so corrected workspace-save acknowledgement metadata is also exercised in attention review. The actual daemon-backed Area/Thinking scenarios remain in that file and should pass unchanged.
+
+
+### Native window restoration QA
+
+From a graphical desktop session, run `cargo run --offline --manifest-path src-tauri/Cargo.toml --example window_restore_qa` for an isolated native geometry check. It creates and destroys blank windows with a separate application identifier; it does not start or connect to a Torque daemon. It checks main and detached sizing policies, physical/legacy captures, offscreen and oversized recovery, then serialized bounds after window recreation. The command prints requested and observed geometry and exits nonzero on failure. Pure multi-monitor/negative-origin/mixed-scale cases run in the normal Rust suite. This smoke test does not replace physical cross-monitor, sleep/crash, or other-platform acceptance.
