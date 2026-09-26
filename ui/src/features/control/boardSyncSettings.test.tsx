@@ -13,7 +13,7 @@ function Form() {
   return <><BoardSyncSettings group="QA" settings={settings} onChange={change} /><button onClick={() => change({ ...initial.board_sync_github, github_repo: 'edited/repo', github_lane_status_map: { Review: 'Manual' } })}>Edit during check</button><output aria-label="Settings draft">{JSON.stringify(settings)}</output></>;
 }
 function savedDraft() { return JSON.parse(screen.getByLabelText('Settings draft').textContent) as typeof initial; }
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 it('discovers projects from unsaved settings, resolves selection, and fills only the empty lane map', async () => {
   const calls: UnknownRecord[] = [];
   vi.stubGlobal('fetch', vi.fn((_url, options: RequestInit) => {
@@ -71,4 +71,47 @@ it('cancels draft checks when a save starts, so late suggestions cannot become u
   await act(async () => { resolve(reply(frame({ lane_status_map_suggestion: { Todo: 'Ready' } }))); await Promise.resolve(); }); expect(onChange).not.toHaveBeenCalled();
   view.rerender(<BoardSyncSettings group="QA" settings={initial} onChange={onChange} />);
   expect(screen.getByRole('button', { name: 'Test GitHub connection' })).toBeEnabled(); expect(screen.getByRole('status')).toHaveTextContent('Check canceled');
+});
+
+it.each(['Load GitHub projects', 'Test GitHub connection', 'Use current repository'])('settles the deadline independently of cancellation and retries %s without accepting late results', async (label) => {
+  vi.useFakeTimers();
+  const pending: { signal: AbortSignal; resolve: (response: Response) => void }[] = [];
+  vi.stubGlobal('fetch', vi.fn((_url, options: RequestInit) => new Promise<Response>((resolve) => pending.push({ signal: options.signal!, resolve }))));
+  const change = vi.fn(); render(<BoardSyncSettings group="QA" settings={initial} onChange={change} />);
+  fireEvent.click(screen.getByRole('button', { name: label }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+  expect(pending[0]!.signal.aborted).toBe(true);
+  expect(screen.getByRole('alert')).toHaveTextContent('GitHub check timed out');
+  expect(screen.queryByText('Checking GitHub…')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: label })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: label }));
+  const result = label === 'Load GitHub projects' ? { type: 'board_sync_list_projects', group: 'QA', provider: 'github', ok: true, projects: [project] } : frame({ project_owner: 'late-owner', project_id: 'late-id', project_number: 9 });
+  await act(async () => { pending[0]!.resolve(reply(result)); await Promise.resolve(); });
+  expect(change).not.toHaveBeenCalled(); expect(screen.queryByRole('option', { name: /Delivery/ })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: label })).toBeDisabled();
+  await act(async () => { pending[1]!.resolve(reply(label === 'Load GitHub projects' ? { ...result, projects: [] } : frame())); await Promise.resolve(); });
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument(); expect(screen.getByRole('button', { name: label })).toBeEnabled();
+  expect(screen.queryByText('Checking GitHub…')).not.toBeInTheDocument();
+});
+it('retains accepted project choices and the unsaved selection through a stalled reload', async () => {
+  vi.useFakeTimers();
+  let finish: (response: Response) => void = () => {};
+  const fetcher = vi.fn().mockResolvedValueOnce(reply({ type: 'board_sync_list_projects', ok: true, group: 'QA', provider: 'github', projects: [project] })).mockImplementation(() => new Promise<Response>((resolve) => { finish = resolve; }));
+  vi.stubGlobal('fetch', fetcher); render(<BoardSyncSettings group="QA" settings={{ ...initial, board_sync_github: { ...initial.board_sync_github, github_project_number: 7, github_project_id: 'P7' } }} onChange={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Load GitHub projects' })); await act(async () => { await Promise.resolve(); });
+  const picker = screen.getByRole('combobox'); expect(screen.getByRole('option', { name: /Delivery/ })).toBeInTheDocument(); picker.focus();
+  fireEvent.click(screen.getByRole('button', { name: 'Load GitHub projects' })); await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+  expect(screen.getByRole('alert')).toHaveTextContent('timed out'); expect(picker).toHaveFocus(); expect(picker).toHaveValue(JSON.stringify(['team', 7, 'P7'])); expect(screen.getByRole('option', { name: /Delivery/ })).toBeInTheDocument();
+  await act(async () => { finish(reply({ type: 'board_sync_list_projects', ok: true, group: 'QA', provider: 'github', projects: [] })); await Promise.resolve(); });
+  expect(screen.getByRole('option', { name: /Delivery/ })).toBeInTheDocument(); expect(screen.getByRole('alert')).toHaveTextContent('timed out');
+});
+it('cancels an old group check without promoting its options or replaying in the new group', async () => {
+  let finish: (response: Response) => void = () => {}; let signal: AbortSignal | null | undefined;
+  const fetcher = vi.fn((_url, options: RequestInit) => { signal = options.signal; return new Promise<Response>((resolve) => { finish = resolve; }); });
+  vi.stubGlobal('fetch', fetcher); const change = vi.fn();
+  const view = render(<BoardSyncSettings group="QA" settings={initial} onChange={change} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Load GitHub projects' }));
+  view.rerender(<BoardSyncSettings group="Other" settings={initial} onChange={change} />); expect(signal?.aborted).toBe(true);
+  await act(async () => { finish(reply({ type: 'board_sync_list_projects', ok: true, group: 'QA', provider: 'github', projects: [project] })); await Promise.resolve(); });
+  expect(fetcher).toHaveBeenCalledOnce(); expect(screen.queryByRole('option', { name: /Delivery/ })).not.toBeInTheDocument(); expect(change).not.toHaveBeenCalled(); expect(screen.getByRole('button', { name: 'Load GitHub projects' })).toBeEnabled();
 });

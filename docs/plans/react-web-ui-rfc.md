@@ -1383,3 +1383,8 @@ P-356 now provides group-owned role discovery with bounded observation, explicit
 ### Uncertain and incomplete creation checkpoint — 2026-09-26
 
 P-357 now retains the exact reviewed launch through bounded observation, uncertain delivery, reconnect and explicit retry. Backend allocation tracking returns inspectable partial outcomes and preserves completed operations through receipt/verification failures; verified rollback permits editing. Global-navigator protection prevents losing an unresolved creation owner. D-200 and the parity matrix record 3,233 backend tests (82 skips), a final 949-test UI check and seven production-browser scenarios, including real timeout/replay and a real failure after terminal allocation. Isolated QA is stopped. Ledger: **357 mapped / 349 implemented or equivalent / 4 open / 4 intentionally retired**. Broad P-087/P-088/P-089/P-112 and independent full-browser/inventory/Planning/native/external/crash-recovery acceptance remain open; Phase 4 and Classic retirement are not complete.
+
+
+### GitHub draft-check recovery checkpoint — 2026-09-26
+
+P-358 now settles GitHub discovery/preflight deadlines independently of fetch cancellation and rejects late suggestions while retaining the selected project, draft and editor state. D-201 and the matrix record four reproduced failures, a passing 954-test UI check and three production-browser scenarios using the read-only gh fixture, including the actual 30-second deadline and explicit save verification. Isolated QA is stopped. Ledger: **358 mapped / 350 implemented or equivalent / 4 open / 4 retired**; broad settings/reconnect audits and independent migration acceptance remain open.

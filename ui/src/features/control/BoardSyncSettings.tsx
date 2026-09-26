@@ -27,14 +27,21 @@ export function BoardSyncSettings({ group, settings, onChange, disabled = false 
   // late response cannot overwrite typing, a reset, or a different group.
   useEffect(() => {
     if (disabled || !request || request.key !== key || request.source.board_sync_provider !== 'github') return;
-    const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 30000);
-    let disposed = false;
+    const controller = new AbortController(); let disposed = false;
+    // Settle observation even when the transport ignores abort. Retain the
+    // accepted choices and draft, and prevent an expired response applying them.
+    const timer = setTimeout(() => {
+      if (disposed) return;
+      controller.abort();
+      setResult({ key, error: 'GitHub check timed out. Retry when the connection is available.' });
+      setRequest((current) => current === request ? null : current);
+    }, 30_000);
     const run = async () => {
       try {
         const config = record(request.source.board_sync_github);
         const command = request.mode === 'projects' ? 'board_sync_list_projects' : 'board_sync_preflight';
         const frame = await readCommand({ cmd: command, group, provider: 'github', settings: request.settings, ...(request.mode === 'projects' ? { owner: text(config.github_project_owner).trim() } : {}) }, controller.signal);
-        if (disposed) return;
+        if (disposed || controller.signal.aborted) return;
         if (frame.type !== command || frame.group !== group || frame.provider !== 'github' || frame.ok !== true) throw new Error(failure(frame));
         if (request.mode === 'projects') {
           if (!Array.isArray(frame.projects)) throw new Error('GitHub project response was invalid.');

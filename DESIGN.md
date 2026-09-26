@@ -3669,3 +3669,12 @@ History renders the persisted contract: role/template, input/output token counts
 - An incomplete agent requires deliberate Inspect created target; a saved hire displays its exact identity and can be retained for review in Planning without claiming an Engineer exists. Neither case automatically reports successful launch. Locked Create and Cancel controls must also look disabled.
 - Use the existing workspace navigation protection with creation-specific text. Command-navigator panel/group changes cannot discard the unresolved request. Return to creation keeps recovery active; closing a recovered owner clears queued navigation protection. Existing Settings confirmation behavior remains unchanged.
 - These guarantees apply to the live daemon and owned UI session. Process-local unsettled outcomes are not crash-safe transactions, and forced page/process reload does not persist the dialog draft. Independent crash/restart/native recovery acceptance remains required before Classic retirement.
+
+
+### D-201 — Settle GitHub check deadlines independently
+
+- Date: 2026-09-26
+- Scope: P-358; draft-only GitHub project discovery, connection checks and repository detection in Settings.
+- Keep the existing 30-second observation limit, but settle the UI and release the check controls at that deadline independently of whether fetch honors cancellation. Retain accepted project choices, selected identity and all unsaved settings.
+- An expired, replaced, hidden or wrong-group response cannot apply repository/project/lane suggestions or replace the accepted project list. In particular, completion of an old request must not clear a newer request's pending state. Retry remains an explicit check of the current draft; no timeout writes settings or replays on reconnect.
+- Preserve editor focus/caret and existing non-empty lane mappings. Save remains the separate acknowledged persistence boundary. Controlled read-only gh fixtures verify this UI contract without claiming live external GitHub acceptance.
