@@ -115,3 +115,10 @@ it.each([
     fireEvent.change(input, { target: { value: draft } }); expect(input).toBeInvalid(); expect(input).toHaveValue(draft ? Number(draft) : null);
   }
 });
+
+it('excludes the inert automatic-terminal fallback from editable values and changes without resetting stored data', () => {
+  const stored = { auto_terminals: 7, max_agents: 3, terminals: [{ name: 'watch', command: 'make watch' }] };
+  expect(editableSettings(stored)).toEqual({ max_agents: 3, terminals: stored.terminals });
+  expect(changedSettings(stored, { ...stored, auto_terminals: 0, max_agents: 4 })).toEqual({ max_agents: 4 });
+  expect(resetSettings(stored, { auto_terminals: 0, max_agents: 0 })).toEqual({ ...stored, max_agents: 0 });
+});

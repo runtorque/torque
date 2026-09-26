@@ -1,8 +1,10 @@
 import type { UnknownRecord } from '../../protocol';
 
 export const runtimeSettingKeys = ['group', 'engineer_agent_id', 'engineer_hint_snoozes', 'default_lanes'];
+// Persisted for old profiles; agent launch intentionally ignores this fallback.
+const compatibilitySettingKeys = ['auto_terminals'];
 export function editableSettings(values: UnknownRecord, omit: string[] = []): UnknownRecord {
-  return Object.fromEntries(Object.entries(values).filter(([key]) => !runtimeSettingKeys.includes(key) && !key.startsWith('pending_') && !omit.includes(key)));
+  return Object.fromEntries(Object.entries(values).filter(([key]) => !runtimeSettingKeys.includes(key) && !compatibilitySettingKeys.includes(key) && !key.startsWith('pending_') && !omit.includes(key)));
 }
 export function settingsEqual(left: unknown, right: unknown): boolean {
   if (Object.is(left, right)) return true;

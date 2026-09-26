@@ -353,7 +353,7 @@ Sources below are relative to `static/js/`; React owners are under `ui/src/`. Al
 | P-326 | Context: bounded mutation observation | Required | ContextPanel acknowledged publish/pin/unpin lifecycle | ContextPanel bounded mutations; D-182 | Bound observation, retain drafts and controls, distinguish unknown outcome, refresh current entries without replay and ignore late/unmounted acknowledgements. |
 | P-327 | Supervisor: bounded session polling recovery | Required | SupervisorDetails auto-refresh and manual/reconnect recovery | SupervisorDetails bounded polling; D-182 | Bound each poll, retain accepted sessions/disclosures/sort/scroll, expose failure, resume configured polling and cancel hidden or replaced observations. |
 | P-328 | Context: bounded pane-width persistence and queue recovery | Required | D-115 ContextSplit acknowledged resize lifecycle | ContextSplit bounded writes and failed-queue stop; D-183 | Bound write observation, retain the latest visible ratio/draft/caret, clear saving state on unknown outcome, avoid automatic replay after failure, permit explicit retry and ignore late/unmounted acknowledgements. |
-| P-329 | Group Settings: exclude inert automatic-terminal fallback | Present but behaviorally degraded | Classic group settings omit auto_terminals; agent_operations explicitly removes its launch fallback | editableSettings/StructuredSettings still expose Auto terminals from GroupSettings | Remove the misleading editable control without changing stored compatibility data or explicit companion-terminal launch configuration; verify Settings save/reset never writes the inert field. |
+| P-329 | Group Settings: exclude inert automatic-terminal fallback | Required | Classic group settings omit auto_terminals; agent_operations explicitly removes its launch fallback | settingsModel compatibility filtering; D-184 | Remove the misleading editable control without changing stored compatibility data or explicit companion-terminal launch configuration; verify Settings save/reset never writes the inert field. |
 
 
 
@@ -807,7 +807,7 @@ Acceptance for **each field**: hydrate its server value, change it using the lis
 | `default_terminal_backend` | Group | Text | Server value/default |
 | `profile` | Group | Text | Server value/default |
 | `tab_color` | Group | Text | Server value/default |
-| `auto_terminals` | Group | Number | Server value/default |
+| `auto_terminals` | Group | Compatibility-only; no editable control | Preserved in stored profiles; omitted from search, save and reset. Explicit companion terminals remain supported. |
 | `agent_terminal_profile` | Group | Text | Server value/default |
 | `agent_tab_color` | Group | Text | Server value/default |
 | `worktree_auto_checkpoint` | Group | Enabled/Disabled | auto-checkpoint on agent stop |
@@ -1975,3 +1975,12 @@ Each action below is an independent Required acceptance row. A replacement toolb
 - Expanded production acceptance passed **1 scenario / 40.5 seconds** (`/private/tmp/context-split-deadline-browser.log`). The daemon persisted a 60% width but its acknowledgement was withheld past 30 seconds while the operator queued 58%. The UI retained 58%, unlocked after an unknown outcome, sent no queued/reconnect replay, ignored the late acknowledgement and saved 58% only after explicit retry. Existing pointer/keyboard, draft/caret, compact-layout, refusal and final 30% reload checks also passed. All three screenshots were inspected.
 - Isolated QA used port **19037**, profile `react-context-split-deadline-20260926`, daemon **31509**, identity `544ea0753ea044d594b03093c4d12092`. Fresh runtime showed zero PTY sessions before SIGTERM; launcher exited 0 and exact-profile ingest **31527** / supervisor **31532** were stopped. Default runtime was untouched.
 - Field-contract audit adds P-329: the generic React group form exposes auto_terminals even though Classic has no control and the launch handler explicitly stopped using this compatibility field. Main ledger: **329 behaviors: 319 implemented/equivalent dispositions, 6 open repairs and 4 intentional retirements**. Open: broad P-087–P-090/P-112 and P-329, plus independent inventory/native/external/recovery acceptance. No backend/protocol semantics changed; full `make test`, full Playwright and native/external gates were not rerun or certified. Phase 4 and Classic retirement remain open.
+
+
+### Compatibility-only terminal setting checkpoint — 2026-09-26
+
+- P-329 excludes the inert auto_terminals fallback from editable controls, search, sparse saves and resets, while preserving its stored value and explicit companion-terminal definitions. D-184 records the contract.
+- Two new regressions failed before repair. Focused Settings coverage passed **32 tests / 2 files**; backend terminal guard and settings persistence coverage passed **14 tests**. `make ui-check` passed lint, typecheck, **94 files / 813 tests**, production build and verification (`/private/tmp/legacy-terminal-setting-ui-check.log`).
+- Production browser acceptance passed **1 scenario / 1.4 seconds** (`/private/tmp/legacy-terminal-setting-browser-final.log`): seed compatibility value 7, edit max agents, reset group defaults, verify exact sparse payloads and preserved server value, reload and verify absent search/control. The initial browser run completed persistence checks but failed on a textbox locator for the actual searchbox; the corrected fixture passed. Screenshot inspected.
+- QA port **19038**, profile `react-settings-compatibility-20260926`, daemon **33987**, identity `d53f906ec28c4aab9ac67f8d8e7e5dd3`: fresh runtime reported zero PTYs, daemon launcher exited 0, and exact-profile ingest **34001** / supervisor **34002** were stopped. Default daemon untouched.
+- Main ledger: **329 behaviors: 320 implemented/equivalent dispositions, 5 open audits and 4 intentional retirements**. Broad P-087–P-090/P-112 and independent inventory/native/external/recovery acceptance remain. No backend/protocol semantics changed; full `make test`, full Playwright and native/external gates were not rerun or certified. Phase 4 and Classic retirement remain open.

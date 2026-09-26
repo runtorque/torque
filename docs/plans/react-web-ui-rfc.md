@@ -1275,3 +1275,8 @@ P-322–P-327 now bound visible Pipeline/History/Help/Context/Supervisor reads a
 ### Context pane-width recovery checkpoint — 2026-09-26
 
 P-328 now bounds width persistence and stops queued writes after refusal or unknown outcome while retaining the latest visible ratio for explicit retry. D-183 and the matrix record two reproduced regressions, 20 focused tests, 811 UI tests and live persisted-but-withheld acknowledgement acceptance with compact layout and reload. Screenshots were inspected and isolated QA cleaned. Field audit maps the misleading inert Auto terminals group control as P-329. Main ledger: **329 behaviors: 319 implemented/equivalent dispositions, 6 open repairs and 4 intentional retirements**. Broad audits and independent inventory/native/external/recovery acceptance remain; Phase 4 is open.
+
+
+### Compatibility-only terminal setting checkpoint — 2026-09-26
+
+P-329 now hides the ignored automatic-terminal fallback and preserves compatibility data through edit/reset/reload. D-184 and the matrix record two reproduced regressions, 32 focused Settings tests, 14 backend guard/persistence tests, 813 UI tests and passing isolated production-browser acceptance. Screenshot inspected and isolated QA cleaned. Main ledger: **329 behaviors: 320 implemented/equivalent dispositions, 5 open audits and 4 intentional retirements**. Broad Settings/lazy-reconnect audits and independent inventory/native/external/recovery gates remain; Phase 4 is open.

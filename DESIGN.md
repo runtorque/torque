@@ -3493,3 +3493,12 @@ History renders the persisted contract: role/template, input/output token counts
 - Bound observation: Observe each pane-width write for at most 30 seconds and cancel observation when hidden. A missing acknowledgement means an unknown outcome, not proof that the daemon did not persist it. Release the saving indicator while retaining the latest visible ratio and editor state.
 - Queue: Continue coalescing rapid commits after successful acknowledgements. After refusal or timeout, stop and clear the queued writes while retaining the latest local ratio as dirty. Later snapshots cannot overwrite that intent. Retry pane width or another explicit resize submits the current intent; reconnect and late replies do not replay it or clear the error.
 - Verification: Reproduce stalled saving and queue continuation after refusal. Component/browser acceptance covers current ratio and draft/caret retention, actual persisted-but-withheld acknowledgement, explicit retry, ordinary successful coalescing, compact transitions, reload and hidden cancellation.
+
+
+### D-184 — Compatibility-only automatic terminal counts are not editable Settings
+
+- Date: 2026-09-26
+- Scope: Group Settings auto_terminals; P-329.
+- Contract: Classic no longer exposes this field and agent launch explicitly ignores it as an implicit companion-terminal fallback. Keep the persisted field for profile compatibility, but exclude it from React's editable settings, search controls, changed-value payloads and section resets. Do not silently reset or migrate its stored value.
+- Explicit companions: Role/template/action launch definitions retain their explicit terminals configuration and supported creation behavior. Removing an inert group control does not retire companion terminals.
+- Verification: Reproduce the exposed field and reset contamination, then verify mounted Settings and helper behavior, sparse save and whole-group reset through the daemon, reload persistence, and the existing backend explicit-companion/no-fallback guard tests.

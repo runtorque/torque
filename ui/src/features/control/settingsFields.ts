@@ -909,10 +909,6 @@ export const settingFields: Record<string, SettingField> = {
     "label": "Tab color",
     "kind": "str"
   },
-  "auto_terminals": {
-    "label": "Auto terminals",
-    "kind": "int"
-  },
   "agent_terminal_profile": {
     "label": "Agent terminal profile",
     "kind": "str"

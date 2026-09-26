@@ -17,13 +17,13 @@ beforeEach(() => {
   applyAppearance(appearanceDefaults);
 });
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-async function setup() {
-  let group: UnknownRecord = { default_directory: '/saved', max_agents: 3 }; const global = { xterm_scrollback: 5000 };
+async function setup(legacyTerminals?: number) {
+  let group: UnknownRecord = { default_directory: '/saved', max_agents: 3, ...(legacyTerminals === undefined ? {} : { auto_terminals: legacyTerminals }) }; const global = { xterm_scrollback: 5000 };
   const commands: TorqueCommand[] = [];
   let handle: (command: TorqueCommand) => Promise<AuxiliaryFrame> = (command) => { group = { ...group, ...command.settings as UnknownRecord }; return Promise.resolve({ type: 'group_settings', group: 'Foundation', settings: group }); };
   read.mockImplementation((command) => {
     if (command.cmd === 'get_global_settings') return Promise.resolve({ type: 'global_settings', settings: global, defaults: global });
-    if (command.cmd === 'get_group_settings') return Promise.resolve({ type: 'group_settings', group: 'Foundation', settings: group, defaults: group, engineer_settings: {}, architect_settings: {} });
+    if (command.cmd === 'get_group_settings') return Promise.resolve({ type: 'group_settings', group: 'Foundation', settings: group, defaults: { ...group, ...(legacyTerminals === undefined ? {} : { auto_terminals: 0 }) }, engineer_settings: {}, architect_settings: {} });
     if (command.cmd === 'get_ai_settings') return Promise.resolve({ type: 'ai_settings', settings: {} });
     if (!/^(update_|engineer_update_)/.test(String(command.cmd))) return Promise.resolve({ type: 'ok' });
     commands.push(command); return handle(command);
@@ -141,4 +141,9 @@ it('keeps earlier acknowledgements after a later scope times out and retries onl
   expect(commands.filter((command) => command.cmd === 'update_global_settings')).toHaveLength(1); expect(commands.filter((command) => command.cmd === 'update_group_settings')).toHaveLength(2);
   expect(screen.getByText('Saved', { exact: true })).toBeVisible();
   await act(async () => { finish({ type: 'error', message: 'Late obsolete refusal' }); await Promise.resolve(); }); expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+it('omits the inert terminal fallback from mounted Settings, sparse saves and whole-group reset writes', async () => {
+  const { commands, store } = await setup(7); expect(screen.queryByLabelText('Auto terminals')).not.toBeInTheDocument(); edit('Default directory', '/updated'); fireEvent.click(save()); await screen.findByText('Saved', { exact: true }); expect(commands).toHaveLength(1); expect(commands[0]?.settings).toEqual({ default_directory: '/updated' });
+  fireEvent.click(screen.getByRole('button', { name: 'Reset group defaults' })); fireEvent.click(save()); await waitFor(() => expect(save()).toBeDisabled()); expect(commands).toHaveLength(2); expect(commands[1]?.settings).not.toHaveProperty('auto_terminals'); act(() => { store.dispatch(connectionActions.connected({ at: 4000, reconnect: true })); }); await waitFor(() => expect(read.mock.calls.filter(([command]) => command.cmd === 'get_group_settings').length).toBeGreaterThan(2)); expect(screen.queryByLabelText('Auto terminals')).not.toBeInTheDocument();
 });
