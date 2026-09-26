@@ -16,7 +16,7 @@ function renderShell(host = browserHost, frame: StateFrame = compactStateFixture
     const command = JSON.parse(typeof options?.body === 'string' ? options.body : '{}') as TorqueCommand;
     // Task hydration frames are supplied explicitly by the shell integration tests.
     if (command.cmd === 'task_detail') { detailReads.push(command); return new Promise<Response>(() => {}); }
-    if (command.cmd === 'ui_set_react_workspace_state') return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: 'react_workspace_state', state: command.state } }) });
+    if (command.cmd === 'ui_set_react_workspace_state') return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: 'react_workspace_state', state: command.state, writer_id: command.writer_id, revision: command.revision } }) });
     return featureFetch(input, options);
   });
   const appStore = createAppStore();

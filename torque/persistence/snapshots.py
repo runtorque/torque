@@ -43,6 +43,41 @@ class SnapshotPersistenceMixin:
             "ui_state", "save_ui_state", key, value,
         )
 
+    def save_ordered_react_workspace_state(self, writer_id, revision, preference):
+        """Atomically save a window's newest intent and its replay receipt."""
+        payload = json.dumps(preference, sort_keys=True)
+        try:
+            self._conn.execute("BEGIN IMMEDIATE")
+            row = self._conn.execute(
+                "SELECT revision, preference_json FROM react_workspace_writers WHERE writer_id=?",
+                (writer_id,),
+            ).fetchone()
+            if row and revision <= row[0]:
+                self._conn.rollback()
+                if revision < row[0]:
+                    return "superseded"
+                return "replay" if payload == row[1] else "conflict"
+            self._conn.execute(
+                "INSERT OR REPLACE INTO ui_state (key, value) VALUES (?, ?)",
+                ("react_workspace_state", payload),
+            )
+            self._conn.execute(
+                "INSERT OR REPLACE INTO react_workspace_writers "
+                "(writer_id, revision, preference_json) VALUES (?, ?, ?)",
+                (writer_id, revision, payload),
+            )
+            self._conn.commit()
+            return "applied"
+        except Exception:
+            self._conn.rollback()
+            raise
+
+    async def save_ordered_react_workspace_state_durable(self, writer_id, revision, preference):
+        return await self._enqueue_async_write(
+            "ui_state", "save_ordered_react_workspace_state",
+            writer_id, revision, _snapshot_db_payload(preference),
+        )
+
     def save_task_and_agents(self, task, agents) -> None:
         """Atomically persist one task and its linked worker snapshots."""
         agent_rows = list(agents or [])

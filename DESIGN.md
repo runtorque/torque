@@ -3732,3 +3732,13 @@ History renders the persisted contract: role/template, input/output token counts
 - Upload images independently and keep successful paths in drop order, shell-quoted. A failed file must not discard another successful image; an empty result must send no terminal input. Reject malformed and control-character paths.
 - Bound each request and body observation to 30 seconds independently of abort support. Show pending feedback, then identify failed filenames and instruct the user to drop only failed images again. Preserve the usable terminal and Tail control; keep long feedback scrollable at compact sizes. Do not retry automatically or imply an expired upload saved no file.
 - Bind results to the original active controller lease, not merely a reusable controller instance or session ID. Leaving, replacing or unmounting the pane cancels its observation. Old completions must never paste or steal focus after return. Restore terminal focus only for the original active pane.
+
+
+### D-208 — Bound workspace saves without reverting newer navigation
+
+- Date: 2026-09-26
+- Scope: P-365; main-window active panel and Control tab persistence.
+- Retain visible navigation during a request/body stall. At 30 seconds release save observation independently of transport abort, expose the existing Retry workspace save action, and permit the newest queued navigation to save. Do not replay on unrelated state updates or let an expired acknowledgement settle a newer request.
+- Bind each window lifetime to a random writer ID and each local navigation intent to a positive increasing revision. Exact retries reuse both. Persist the highest accepted revision and its preference atomically with the preference; reject older revisions or changed payloads reusing a revision. An exact replay acknowledges its original result without overriding a later save from another window.
+- Serialize durable saves and publication through a daemon-owned task that survives caller cancellation. Keep unversioned Classic/API callers compatible. Fresh windows restore the current saved preference; active windows retain their local navigation when another window saves. Detached windows continue to own their own navigation.
+- Durable receipts survive daemon restart and full snapshots. They retain one small record per window lifetime, not one per click or retry; do not expire them while arbitrarily delayed requests could still arrive. Window IDs and revision metadata are transport/persistence details, not product controls.

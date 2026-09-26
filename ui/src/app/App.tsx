@@ -589,7 +589,7 @@ function WorkspaceShellContent({ host, sendCommand }: WorkspaceShellProps) {
           </DialogTrigger>
         </header>
 
-        {navigation.error ? <div className={styles.connectionBanner} role="alert">Last workspace could not be saved: {navigation.error} <Button tone="quiet" onPress={navigation.retry}>Retry workspace save</Button></div> : null}
+        {navigation.error ? <div className={styles.connectionBanner} role="alert">Last workspace save is unconfirmed: {navigation.error} <Button tone="quiet" onPress={navigation.retry}>Retry workspace save</Button></div> : null}
         {connection.status === 'disconnected' ? <div className={styles.connectionBanner}>Connection lost. Torque will reconnect automatically.</div> : null}
         {workspaceUi.activePanel === 'board' && !activeDetachedLabel ? <BoardPanel group={activeGroup} sendCommand={sendCommand} onCommandUnavailable={commandUnavailable} /> : null}
         {activeDetachedLabel ? <StateSurface title={`${workspaceUi.activePanel[0]?.toUpperCase()}${workspaceUi.activePanel.slice(1)} workspace detached`} description="This workspace is open in its native window." action={<><Button onPress={() => { void host.focusWindow(activeDetachedLabel).catch(commandUnavailable); }}>Focus detached workspace</Button><Button onPress={() => { void reattachActive(); }}>Reattach workspace</Button></>} /> : null}

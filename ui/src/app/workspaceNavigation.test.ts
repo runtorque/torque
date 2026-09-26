@@ -14,7 +14,7 @@ function setup(hydrate = true) {
   const snapshot = (saved: WorkspaceNavigation = preference) => { const frame = { ...compactStateFixture, react_workspace_state: saved }; store.dispatch(projectionActions.snapshotReceived(frame)); store.dispatch(connectionActions.snapshotAccepted(frame)); };
   store.dispatch(connectionActions.connected({ at: 1, reconnect: false })); if (hydrate) snapshot();
   const persistence = installWorkspaceNavigation(store, errors); cleanups.push(persistence.dispose);
-  const ack = async (index: number) => { calls[index]!.resolve({ type: 'react_workspace_state', state: calls[index]!.command.state }); await flush(); };
+  const ack = async (index: number) => { calls[index]!.resolve({ type: 'react_workspace_state', state: calls[index]!.command.state, writer_id: calls[index]!.command.writer_id, revision: calls[index]!.command.revision }); await flush(); };
   return { store, errors, calls, snapshot, ack, ...persistence };
 }
 describe('workspace preference projection', () => {
@@ -78,4 +78,59 @@ describe('workspace preference projection', () => {
     h.store.dispatch(connectionActions.connected({ at: 2, reconnect: true })); h.snapshot(); await flush(); expect(h.calls).toHaveLength(2); await h.ack(1);
     h.store.dispatch(workspaceUiActions.setActivePanel('planning')); h.dispose(); await flush(); expect(h.calls).toHaveLength(2);
   });
+});
+
+it.each(['request', 'body'])('releases stalled %s saves, retains navigation and ignores late acknowledgement during retry', async (phase) => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const h = setup(); await flush();
+    let releaseBody!: (value: unknown) => void;
+    if (phase === 'body') vi.mocked(fetch).mockImplementationOnce(() => Promise.resolve({ ok: true, json: () => new Promise((resolve) => { releaseBody = resolve; }) } as Response));
+    h.store.dispatch(workspaceUiActions.setActivePanel('agents')); await flush();
+    await vi.advanceTimersByTimeAsync(30_001); await flush();
+    expect(h.errors).toHaveBeenLastCalledWith(expect.stringContaining('timed out'));
+    expect(h.store.getState().workspaceUi.activePanel).toBe('agents');
+    const before = h.calls.length; h.retry(); await flush(); expect(h.calls).toHaveLength(before + 1);
+    if (phase === 'request') await h.ack(0);
+    else { releaseBody({ ok: true, data: { type: 'react_workspace_state', state: { ...preference, activePanel: 'agents' } } }); await flush(); }
+    h.store.dispatch(workspaceUiActions.setActivePanel('planning')); await flush(); expect(h.calls).toHaveLength(before + 1);
+    await h.ack(before); expect(h.calls).toHaveLength(before + 2);
+    expect(h.calls.at(-1)?.command.state).toMatchObject({ activePanel: 'planning' }); await h.ack(before + 1);
+  } finally { vi.useRealTimers(); }
+});
+it('persists the newest navigation after expiry without replaying on unrelated snapshots', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const h = setup(); await flush(); h.store.dispatch(workspaceUiActions.setActivePanel('agents')); await flush();
+    h.store.dispatch(workspaceUiActions.setActivePanel('planning')); await flush();
+    await vi.advanceTimersByTimeAsync(30_001); await flush();
+    expect(h.calls).toHaveLength(2); expect(h.calls[1]!.command.state).toMatchObject({ activePanel: 'planning' });
+    expect(h.calls[1]!.command.writer_id).toBe(h.calls[0]!.command.writer_id);
+    expect(h.calls[1]!.command.revision).toBeGreaterThan(h.calls[0]!.command.revision as number);
+    await h.ack(1); await h.ack(0); h.snapshot(); await flush(); expect(h.calls).toHaveLength(2);
+  } finally { vi.useRealTimers(); }
+});
+it('rejects acknowledgements for another window or revision', async () => {
+  const h = setup(); await flush(); h.store.dispatch(workspaceUiActions.setActivePanel('agents')); await flush();
+  h.calls[0]!.resolve({ type: 'react_workspace_state', state: h.calls[0]!.command.state, writer_id: 'other', revision: h.calls[0]!.command.revision }); await flush();
+  expect(h.errors).toHaveBeenLastCalledWith('Could not confirm the saved workspace preference.');
+  h.retry(); await flush(); h.calls[1]!.resolve({ type: 'react_workspace_state', state: h.calls[1]!.command.state, writer_id: h.calls[1]!.command.writer_id, revision: 999 }); await flush();
+  expect(h.errors).toHaveBeenLastCalledWith('Could not confirm the saved workspace preference.');
+});
+it('retries timed-out navigation after reconnect and never on unrelated state', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const h = setup(); await flush(); h.store.dispatch(workspaceUiActions.setActivePanel('agents')); await flush();
+    await vi.advanceTimersByTimeAsync(30_001); await flush(); h.snapshot(); await flush(); expect(h.calls).toHaveLength(1);
+    h.store.dispatch(connectionActions.connected({ at: 2, reconnect: true })); h.snapshot(); await flush();
+    expect(h.calls).toHaveLength(2); expect(h.calls[1]!.command).toEqual(h.calls[0]!.command); await h.ack(1);
+  } finally { vi.useRealTimers(); }
+});
+it('disposes pending observation without a later error or retry', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const h = setup(); await flush(); h.store.dispatch(workspaceUiActions.setActivePanel('agents')); await flush();
+    const before = h.errors.mock.calls.length; h.dispose(); await flush(); await vi.advanceTimersByTimeAsync(30_001); await h.ack(0);
+    expect(h.errors).toHaveBeenCalledTimes(before); expect(h.calls).toHaveLength(1); expect(vi.getTimerCount()).toBe(0);
+  } finally { vi.useRealTimers(); }
 });

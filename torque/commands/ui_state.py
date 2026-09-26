@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import sqlite3
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -574,14 +576,48 @@ async def _handle_react_workspace_state_command(data: dict, state: MatrixState):
         return {"type": "error", "message": "Invalid React workspace preference"}
     if not state.db:
         return {"type": "error", "message": "Workspace preference storage is unavailable"}
-    try:
-        await state.db.save_ui_state_durable("react_workspace_state", json.dumps(preference))
-    except (sqlite3.Error, OSError, RuntimeError):
-        logging.getLogger(__name__).exception("Failed to persist React workspace preference")
-        return {"type": "error", "message": "Workspace preference could not be saved"}
-    state.react_workspace_state = preference
-    state._emit("ui_update", key="react_workspace_state", value=preference)
-    return {"type": "react_workspace_state", "state": preference}
+    ordered = "writer_id" in data or "revision" in data
+    writer_id, revision = data.get("writer_id"), data.get("revision")
+    if ordered:
+        try:
+            valid_writer = isinstance(writer_id, str) and str(uuid.UUID(writer_id)) == writer_id
+        except (ValueError, AttributeError):
+            valid_writer = False
+        if not valid_writer or type(revision) is not int or not 1 <= revision <= 9007199254740991:
+            return {"type": "error", "message": "Invalid workspace save revision"}
+    # The lock includes publication, so a delayed committed operation cannot
+    # publish after a newer one. Keep it through caller cancellation as well.
+    lock = getattr(state, "_react_workspace_save_lock", None)
+    if lock is None:
+        lock = state._react_workspace_save_lock = asyncio.Lock()
+        state._react_workspace_save_tasks = set()
+
+    async def persist():
+        async with lock:
+            try:
+                outcome = "applied"
+                if ordered:
+                    outcome = await state.db.save_ordered_react_workspace_state_durable(writer_id, revision, preference)
+                else:
+                    await state.db.save_ui_state_durable("react_workspace_state", json.dumps(preference))
+            except (sqlite3.Error, OSError, RuntimeError):
+                logging.getLogger(__name__).exception("Failed to persist React workspace preference")
+                return {"type": "error", "message": "Workspace preference could not be saved"}
+            if outcome in {"superseded", "conflict"}:
+                return {"type": "error", "message": "Workspace save revision was superseded or reused with different navigation"}
+            if outcome == "applied":
+                state.react_workspace_state = preference
+                state._emit("ui_update", key="react_workspace_state", value=preference)
+                await state.broadcast()
+            frame = {"type": "react_workspace_state", "state": preference}
+            if ordered:
+                frame.update(writer_id=writer_id, revision=revision)
+            return frame
+
+    task = asyncio.create_task(persist())
+    state._react_workspace_save_tasks.add(task)
+    task.add_done_callback(state._react_workspace_save_tasks.discard)
+    return await asyncio.shield(task)
 
 
 _UI_STATE_COMMAND_REGISTRY = AsyncHandlerRegistry()

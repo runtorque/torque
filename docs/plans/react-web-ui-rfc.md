@@ -1427,3 +1427,11 @@ P-364 maps the reproduced raw terminal drop failures: empty paste on refusal, se
 
 
 P-364 acceptance is complete: full UI validation passed **109 files / 981 tests**, and all four isolated real-PTY browser scenarios passed, including request/body timeouts, partial success, original-pane ownership, scrollback and live preferences. The compact recovery screenshot was inspected and the six QA sessions closed. Ledger: **364 mapped / 356 implemented or equivalent / 4 open / 4 intentional retirements**. The three broad Settings audits, P-112 and independent complete-browser/native/external/crash gates remain open.
+
+
+### Workspace navigation save recovery (2026-09-26, acceptance pending)
+
+P-365 repairs unbounded navigation persistence and prevents timeout recovery from letting old requests overwrite newer choices. Durable per-window revisions atomically guard persistence; exact replay preserves another window's later save, and accepted writes publish even after caller cancellation. D-208 and schema migration 31 define the contract. The full UI check passed 987 tests; full backend and real daemon browser acceptance remain pending. This does not close the broad settings/recovery or independent acceptance gates.
+
+
+P-365 is accepted: full regression passed **3,270 backend tests / 82 skips** and **987 React tests**, final production build verified, and all three final-build navigation browser scenarios passed. Compact error wording now reflects an unconfirmed outcome. Ledger: **365 mapped / 357 implemented or equivalent / 4 open / 4 intentional retirements**. Broad Settings and P-112 plus independent full-browser/native/external/crash gates remain open.
