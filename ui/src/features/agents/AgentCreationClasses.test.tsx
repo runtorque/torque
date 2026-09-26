@@ -38,10 +38,10 @@ describe('project Agent Class creation discovery', () => {
     reconnect(); expect(reads).toHaveLength(3); unmount(); expect(reads[2]!.signal.aborted).toBe(true);
   });
   it('retains selection and caret through reconnect, rejects archived classes and preserves default launch', async () => {
-    const { reads, reply, reconnect, writes } = setup(); await reply(0, catalogFrame());
+    const { reply, reconnect, writes } = setup(); await reply(0, catalogFrame());
     fireEvent.change(screen.getByLabelText('Agent Class'), { target: { value: 'local' } });
     const name = screen.getByLabelText<HTMLInputElement>('Name'); name.focus(); name.setSelectionRange(1, 3);
-    reconnect(); expect(reads[0]!.signal.aborted).toBe(true);
+    reconnect();
     expect(screen.getByRole('button', { name: 'Create engineer' })).toBeDisabled(); expect(screen.getByLabelText('Agent Class')).toHaveValue('local');
     await reply(1, catalogFrame([{ ...available, archived: true }]));
     expect(await screen.findByRole('alert')).toHaveTextContent('Archived or disabled');

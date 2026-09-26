@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, ModalDialog } from '../../design/primitives';
 import type { CommandSender } from '../board/BoardPanel';
 import { readCommand } from '../../protocol/http';
+import { settingsRequest } from '../control/settingsRequests';
 import type { TorqueCommand } from '../../protocol';
 import { useAppSelector } from '../../app/hooks';
 import { selectAgentSettingsDefaults, selectConnection } from '../../app/store';
@@ -149,16 +150,16 @@ export function AgentCreateDialog({
   const resolving = kind === 'worker' && resolvedRead.key !== resolutionKey;
   const resolutionError = resolvedRead.key === resolutionKey ? resolvedRead.error : '';
   useEffect(() => {
-    if (!open || kind !== 'worker' || saving || resolvedRead.key === resolutionKey) return;
+    if (!open || connection.status !== 'connected' || kind !== 'worker' || saving || resolvedRead.key === resolutionKey) return;
     const controller = new AbortController();
-    void readCommand({ cmd: 'render_template', group, name: template }, controller.signal).then((frame) => {
+    void settingsRequest({ cmd: 'render_template', group, name: template }, controller.signal, false, 'Launch settings').then((frame) => {
       if (controller.signal.aborted || savingRef.current) return;
       const next = resolvedLaunchDraft(validateTemplateResponse(frame, group, template));
       setLaunch((current) => Object.fromEntries(Object.entries(next).map(([key, value]) => [key, editedLaunch.current.has(key as keyof LaunchDraft) ? current[key as keyof LaunchDraft] : value])) as LaunchDraft);
       setResolvedRead({ key: resolutionKey, error: '' });
     }).catch((cause: unknown) => { if (!controller.signal.aborted) setResolvedRead({ key: resolutionKey, error: cause instanceof Error ? cause.message : 'Could not resolve launch settings.' }); });
     return () => controller.abort();
-  }, [open, kind, group, template, resolutionKey, resolvedRead.key, saving]);
+  }, [open, kind, group, template, resolutionKey, resolvedRead.key, saving, connection.status]);
   useEffect(() => { if (error && !saving) errorElement.current?.focus(); }, [error, saving]);
   const requestClose = () => { if (!savingRef.current) onClose(); };
 

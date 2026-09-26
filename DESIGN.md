@@ -3630,3 +3630,12 @@ History renders the persisted contract: role/template, input/output token counts
 - Bound answer-delivery observation at 30 seconds and validate command/request correlation, any returned task/recipient IDs, and delivery state. Late or cancelled results cannot clear a draft or affect another question. An ordinary explicit refusal retains an editable draft.
 - An unknown delivery outcome freezes the exact submitted command and reply target. A read started after uncertainty must complete successfully before explicit retry; a read already in flight is insufficient. Reconnect may perform that read but never resends the answer. Retry reuses the reviewed payload; a changed reply target blocks retry and explains that the original delivery needs inspection.
 - The backend serializes resolution by task and rejects already closed questions. The request ID correlates responses; it is not a durable delivery idempotency receipt. Concurrent/replayed live delivery is tested, but process-crash exactly-once delivery is not certified.
+
+### D-197 — Creation discovery observation limits
+
+- Date: 2026-09-26
+- Scope: P-355; existing owned Agent Class discovery and worker launch-default resolution. Role/template option ownership and launch-write recovery are separate open requirements P-356/P-357.
+- Bound each class/default read at 15 seconds independently of transport cancellation. Expose the existing explicit retry on timeout; reject late results from expired, replaced or closed owners. Resolve launch defaults only while connected and visible.
+- Preserve selected classes, accepted class options, explicit launch-field overrides and the editor's focus/caret through refresh and retry. A selected class cannot launch until revalidated; an unavailable explicit selection cannot silently become a default launch.
+- Reconnect refreshes accepted discovery and defaults without replaying creation. Closing cancels unfinished observations and stops hidden reconnect reads. Completed transports need no artificial abort; regression tests assert cancellation on still-pending requests.
+- This read repair does not change launch mutation semantics or make overlapping creation retries safe. Completed HTTP receipts are distinct from coordination of pending writes; P-357 must establish both before enabling timeout retries.

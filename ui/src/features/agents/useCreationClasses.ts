@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAppSelector } from '../../app/hooks';
 import { selectConnection } from '../../app/store';
-import { readCommand } from '../../protocol/http';
+import { settingsRequest } from '../control/settingsRequests';
 import type { UnknownRecord } from '../../protocol';
 
 const record = (value: unknown): UnknownRecord => value && typeof value === 'object' && !Array.isArray(value) ? value as UnknownRecord : {};
@@ -26,7 +26,7 @@ export function useCreationClasses(active: boolean, group: string, paused: boole
   useEffect(() => {
     if (!active || !connected || paused || result.key === key) return;
     const controller = new AbortController();
-    void readCommand({ cmd: 'agent_class_list', group }, controller.signal).then((frame) => {
+    void settingsRequest({ cmd: 'agent_class_list', group }, controller.signal, false, 'Agent Classes').then((frame) => {
       if (controller.signal.aborted) return;
       if (frame.type === 'error') throw new Error(text(frame.message) || 'Could not load Agent Classes.');
       if (frame.type !== 'agent_classes' || frame.group !== group || !Array.isArray(frame.classes)) throw new Error('The Agent Class response did not match this creation group.');

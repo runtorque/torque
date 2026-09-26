@@ -90,7 +90,7 @@ describe('agent creation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry launch settings' }));
     await act(async () => { reads[2]!.resolve(rendered('review', { model: 'review-model' })); await Promise.resolve(); });
     await act(async () => { reads[0]!.resolve(rendered('', { model: 'stale' })); await Promise.resolve(); });
-    expect(screen.getByLabelText('Model')).toHaveValue('review-model'); expect(screen.getByLabelText('Name')).toHaveValue('Draft'); expect(screen.getByRole('button', { name: 'Create worker' })).toBeEnabled(); unmount(); expect(reads[2]!.signal.aborted).toBe(true);
+    expect(screen.getByLabelText('Model')).toHaveValue('review-model'); expect(screen.getByLabelText('Name')).toHaveValue('Draft'); expect(screen.getByRole('button', { name: 'Create worker' })).toBeEnabled(); fireEvent.change(screen.getByLabelText('Role / template'), { target: { value: 'build' } }); unmount(); expect(reads[3]!.signal.aborted).toBe(true);
   });
 });
 

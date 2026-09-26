@@ -1363,3 +1363,8 @@ P-351/P-352 restore Classic extension/MIME classification and legacy storage han
 ### Attention recovery checkpoint — 2026-09-26
 
 P-353/P-354 add bounded, owned question/parent reads and answer delivery. Accepted context and editor state survive refresh; an uncertain answer retains its exact payload and recipient until a fresh read permits explicit retry. Reconnect never resends; changed targets and contradictory acknowledgements cannot silently clear the draft. D-196 and the parity matrix record 927 passing React tests and four production-browser scenarios, including real deadlines, concurrent resolution and one PTY delivery. The isolated runtime was cleaned up. Ledger: **354 mapped / 346 implemented or equivalent / 4 open / 4 intentionally retired**. Broad settings/reconnect audits and complete browser/inventory/Planning/native/external/recovery acceptance remain; Phase 4 and Classic retirement remain open.
+
+
+### Creation read recovery checkpoint — 2026-09-26
+
+P-355 bounds owned Agent Class and launch-default reads, retains selected classes and explicit overrides through retry/reconnect, rejects late results and avoids offline launch-default requests. D-197 and the matrix record 930 React tests and four production-browser scenarios passing. Source and HTTP concurrency audits add open P-356/P-357 for unscoped creation options and duplicated pending launches; completed receipt replay does not establish safe overlapping retry. Ledger: **357 mapped / 347 implemented or equivalent / 6 open / 4 intentionally retired**. No backend mutation behavior changed; broad settings/reconnect and independent full acceptance gates remain open.
