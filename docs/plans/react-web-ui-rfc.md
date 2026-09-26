@@ -1230,3 +1230,8 @@ P-294/P-295 now apply live appearance and normalized saved scrollback to existin
 ### Mission Control inspection and dismissal checkpoint — 2026-09-25
 
 P-296–P-299 restore group-owned reads, retained disclosure/search/selection, readable evidence/source freshness and acknowledged persisted dismissal, restoring P-078. D-174 and the matrix record 13 focused tests, 693 UI tests and three passing isolated browser scenarios including real task dismissal persistence and external updates; desktop/narrow screenshots were inspected and QA was cleaned. The initial browser locator ambiguity between an ask and a health-risk card is corrected with explicit evidence that dismissal preserves the other card. Main ledger: **299 behaviors: 290 implemented/equivalent dispositions, 5 open repairs and 4 intentional retirements**. Broad Settings/lazy-reconnect audits and independent native/external/recovery acceptance remain; Phase 4 is not complete.
+
+
+### Settings bounded request and acknowledgement checkpoint — 2026-09-25
+
+P-300–P-302 repair false success on unrelated responses and indefinitely pending reads/saves. D-175 and the parity matrix record bounded observation, validated snapshots/acknowledgements, retained partial baselines, navigation recovery and no automatic retry. Acceptance passed 33 focused tests, 709 UI tests and three isolated browser scenarios using real deadlines and persisted daemon settings; QA was cleaned. Separate source audit adds Agent Settings read and save ownership repairs P-303/P-304. Main ledger: **304 behaviors: 293 implemented/equivalent dispositions, 7 open repairs and 4 intentional retirements**. Broad field/lifecycle and native/external/recovery gates remain; Phase 4 is not complete.

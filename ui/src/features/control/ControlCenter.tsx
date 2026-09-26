@@ -23,7 +23,7 @@ import { records, text } from '../planning/model';
 import { AgentClassLibrary } from './AgentClassLibrary';
 import { BehaviorOverlayEditor, CatalogEditor } from './CatalogEditors';
 import { browserHost, type DesktopHost } from '../../host';
-import { readCommand } from '../../protocol/http';
+import { settingsRequest, validateSettingsAcknowledgement, validateSettingsRead } from './settingsRequests';
 import { projectionActions } from '../../app/store';
 import { AiSecretSetting } from './AiSecretSetting';
 import { aiRebuildPrompt, redactAiSaveError } from './aiSettingsSafety';
@@ -217,14 +217,14 @@ function SettingsPanel({ group, snapshot, onSavingChange, onDiscard }: { onDisca
     if (Object.keys(aiChanges).length || Object.values(aiSecrets).some((value) => value.trim()) || clearAiSecrets.length) commands.push({ scope: 'ai', command: { cmd: 'update_ai_settings', settings: aiChanges, secrets: Object.fromEntries(Object.entries(aiSecrets).filter(([, value]) => value.trim())), clear_secrets: clearAiSecrets, ...(confirmed ? { confirm_embedding_rebuild: true } : {}) } });
     try {
       for (const { scope, command } of commands) {
-        const response = await readCommand(command, controller.signal);
+        const response = await settingsRequest(command, controller.signal, true);
         if (controller.signal.aborted) return;
         if (response.type === 'error') throw new Error(text(response.message, 'Settings save failed.'));
         if (scope === 'ai' && response.type === 'ai_settings_requires_confirmation') {
           setAiConfirmation({ key: aiConfirmationKey, message: redactAiSaveError(text(response.message, 'Changing embedding settings requires rebuilding the index. Continue?'), aiSecrets) });
           return;
         }
-        if (scope === 'ai' && (response.type !== 'ai_settings' || !response.settings || typeof response.settings !== 'object' || Array.isArray(response.settings))) throw new Error('The daemon returned an invalid AI settings acknowledgement; the outcome is unknown');
+        validateSettingsAcknowledgement(response, scope, group);
         if (response.type !== 'state') settingsDispatch(projectionActions.auxiliaryResourceReceived(response));
         setBaseline((current) => ({ ...current, [scope]: next[scope] })); setResetScopes((current) => { const pending = new Set(current); pending.delete(scope); return pending; });
         if (scope === 'global') setRelayTouched([]);
@@ -288,10 +288,10 @@ function SettingsWorkspace({ group }: { group: string }) {
   useEffect(() => {
     if (busy || connection.status !== 'connected') return;
     const controller = new AbortController();
-    void Promise.all([{ cmd: 'get_global_settings' }, { cmd: 'get_group_settings', group }, { cmd: 'get_ai_settings' }].map((command) => readCommand(command, controller.signal))).then((frames) => {
+    void Promise.all([{ cmd: 'get_global_settings' }, { cmd: 'get_group_settings', group }, { cmd: 'get_ai_settings' }].map((command) => settingsRequest(command, controller.signal))).then((frames) => {
       if (controller.signal.aborted || busyRef.current) return;
       const [global, groupFrame, ai] = frames;
-      if (global?.type !== 'global_settings' || groupFrame?.type !== 'group_settings' || ai?.type !== 'ai_settings' || groupFrame.group !== group) throw new Error('Could not load matching settings. Retry the refresh.');
+      validateSettingsRead(global, 'global_settings'); validateSettingsRead(groupFrame, 'group_settings', group); validateSettingsRead(ai, 'ai_settings');
       frames.forEach((frame) => dispatch(projectionActions.auxiliaryResourceReceived(frame)));
       setSnapshot({ global, group: groupFrame, ai }); setError('');
     }).catch((cause: unknown) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Settings unavailable'); });

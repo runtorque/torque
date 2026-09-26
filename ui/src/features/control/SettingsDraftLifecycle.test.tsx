@@ -16,7 +16,7 @@ beforeEach(() => {
   vi.stubGlobal('localStorage', { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } });
   applyAppearance(appearanceDefaults);
 });
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 async function setup() {
   let group: UnknownRecord = { default_directory: '/saved', max_agents: 3 }; const global = { xterm_scrollback: 5000 };
   const commands: TorqueCommand[] = [];
@@ -96,4 +96,49 @@ it('protects appearance and prevents navigation while a coordinated save is pend
   expect(screen.queryByRole('button', { name: 'Discard changes' })).not.toBeInTheDocument(); expect(screen.getByLabelText('Contrast')).toBeDisabled(); expect(localStorage.getItem(appearanceKey)).toBeNull();
   await act(async () => { finish({ type: 'group_settings', group: 'Foundation', settings: {} }); await Promise.resolve(); });
   await screen.findByRole('dialog', { name: 'Leave Settings?' }); fireEvent.click(screen.getByRole('button', { name: 'Continue navigation' })); expect(readAppearance().accent).toBe('violet'); expect(commands).toHaveLength(1);
+});
+
+it('rejects an unrelated save response without claiming success or clearing the draft', async () => {
+  const { setHandler, commands } = await setup();
+  setHandler(() => Promise.resolve({ type: 'mission_control_summary', group: 'Foundation', sections: {} }));
+  edit('Default directory', '/must-remain'); fireEvent.click(save());
+  expect(await screen.findByRole('alert')).toHaveTextContent('invalid group settings acknowledgement');
+  expect(screen.queryByText('Saved', { exact: true })).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Default directory')).toHaveValue('/must-remain'); expect(save()).toBeEnabled(); expect(commands).toHaveLength(1);
+});
+it('releases a stalled save without accepting its late response or automatically retrying', async () => {
+  const { setHandler, commands, store } = await setup(); let finish!: (frame: AuxiliaryFrame) => void;
+  setHandler(() => new Promise((resolve) => { finish = resolve; })); edit('Default directory', '/pending');
+  vi.useFakeTimers(); fireEvent.click(save());
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_001); });
+  expect(screen.getByRole('alert')).toHaveTextContent('outcome is unknown'); expect(save()).toBeEnabled();
+  act(() => { store.dispatch(connectionActions.connected({ at: 2000, reconnect: true })); });
+  await act(async () => { finish({ type: 'group_settings', group: 'Foundation', settings: { default_directory: '/pending' } }); await Promise.resolve(); });
+  expect(commands).toHaveLength(1); expect(screen.queryByText('Saved', { exact: true })).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Default directory')).toHaveValue('/pending');
+});
+it('keeps draft, DOM focus and caret through a timed-out refresh, then retries without accepting the old read', async () => {
+  const { store } = await setup(); const input = screen.getByLabelText<HTMLInputElement>('Default directory');
+  edit('Default directory', '/kept'); input.focus(); input.setSelectionRange(1, 3);
+  const original = read.getMockImplementation()!; let finish!: (frame: AuxiliaryFrame) => void; let signal: AbortSignal | undefined;
+  read.mockImplementation((command, currentSignal) => command.cmd === 'get_global_settings' ? (signal = currentSignal, new Promise((resolve) => { finish = resolve; })) : original(command, currentSignal));
+  vi.useFakeTimers(); act(() => { store.dispatch(connectionActions.connected({ at: 2000, reconnect: true })); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(15_001); });
+  expect(screen.getByRole('alert')).toHaveTextContent('Settings refresh timed out'); expect(signal?.aborted).toBe(true);
+  expect(screen.getByLabelText('Default directory')).toBe(input); expect(input).toHaveFocus(); expect([input.selectionStart, input.selectionEnd]).toEqual([1, 3]);
+  await act(async () => { finish({ type: 'global_settings', settings: { xterm_scrollback: 9999 } }); await Promise.resolve(); });
+  expect(screen.getByLabelText('Terminal scrollback')).toHaveValue(5000);
+  read.mockImplementation(original); await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Retry settings' })); await Promise.resolve(); });
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument(); expect(input).toHaveValue('/kept'); expect(save()).toBeEnabled();
+});
+it('keeps earlier acknowledgements after a later scope times out and retries only the unfinished scope', async () => {
+  const { commands, setHandler } = await setup(); let finish!: (frame: AuxiliaryFrame) => void;
+  setHandler((command) => command.cmd === 'update_global_settings' ? Promise.resolve({ type: 'state' }) : new Promise((resolve) => { finish = resolve; }));
+  edit('Terminal scrollback', '6000'); edit('Default directory', '/unfinished'); vi.useFakeTimers();
+  await act(async () => { fireEvent.click(save()); await Promise.resolve(); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_001); }); expect(screen.getByRole('alert')).toHaveTextContent('outcome is unknown');
+  setHandler(() => Promise.resolve({ type: 'ok' })); await act(async () => { fireEvent.click(save()); await Promise.resolve(); });
+  expect(commands.filter((command) => command.cmd === 'update_global_settings')).toHaveLength(1); expect(commands.filter((command) => command.cmd === 'update_group_settings')).toHaveLength(2);
+  expect(screen.getByText('Saved', { exact: true })).toBeVisible();
+  await act(async () => { finish({ type: 'error', message: 'Late obsolete refusal' }); await Promise.resolve(); }); expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });
