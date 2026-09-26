@@ -3,7 +3,7 @@ import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import { projectionActions, selectAgentsState, selectAgentSettingsDefaults, selectConnection, selectProviders } from '../../app/store';
 import { Button, ModalDialog } from '../../design/primitives';
 import type { TorqueCommand } from '../../protocol';
-import { readCommand } from '../../protocol/http';
+import { settingsRequest } from '../control/settingsRequests';
 import { EngineerNotificationPreset } from '../control/EngineerNotificationPreset';
 import { SpecializationPicker } from '../control/SpecializationPicker';
 import { providerChoices } from '../control/providerChoices';
@@ -12,6 +12,10 @@ import { acceptSettings, createSettingsEditor, digestSettingFields, editSetting,
 import styles from './AgentWorkspace.module.css';
 
 export function AgentSettingsDialog({ target, onClose }: { target: AgentViewModel; onClose: () => void }) {
+  return <AgentSettingsEditor key={target.id} target={target} onClose={onClose} />;
+}
+
+function AgentSettingsEditor({ target, onClose }: { target: AgentViewModel; onClose: () => void }) {
   const dispatch = useAppDispatch();
   const sources = useAppSelector(selectAgentsState);
   const defaults = useAppSelector(selectAgentSettingsDefaults);
@@ -21,6 +25,8 @@ export function AgentSettingsDialog({ target, onClose }: { target: AgentViewMode
   const principal = ['engineer', 'architect'].includes(agent.kind);
   const [editor, setEditor] = useState(() => createSettingsEditor(agent, sources.settings[agent.id], sources.digestSettings[agent.id], sources.resolvedSettings[agent.id]));
   const [saving, setSaving] = useState(false); const savingRef = useRef(false);
+  const saveController = useRef<AbortController | null>(null);
+  useEffect(() => () => { saveController.current?.abort(); saveController.current = null; }, []);
   const [hydrated, setHydrated] = useState(!principal);
   const [readStatus, setReadStatus] = useState({ key: '', error: '' }); const [retry, setRetry] = useState(0);
   const [saveError, setSaveError] = useState(''); const saveErrorElement = useRef<HTMLParagraphElement>(null);
@@ -40,7 +46,7 @@ export function AgentSettingsDialog({ target, onClose }: { target: AgentViewMode
   useEffect(() => {
     if (!principal || saving || connection.status !== 'connected') return;
     const controller = new AbortController();
-    void readCommand({ cmd: 'get_agent_settings', agent_id: agent.id }, controller.signal).then((frame) => {
+    void settingsRequest({ cmd: 'get_agent_settings', agent_id: agent.id }, controller.signal).then((frame) => {
       if (controller.signal.aborted || savingRef.current) return;
       validateSettingsFrame(frame, agent.id);
       const metadata = asRecord(frame.resolved);
@@ -89,11 +95,14 @@ export function AgentSettingsDialog({ target, onClose }: { target: AgentViewMode
     catch (cause) { setSaveError(cause instanceof Error ? cause.message : 'Check the settings values.'); return; }
     if (!commands.length) return;
     savingRef.current = true; setSaving(true); setSaveError('');
+    const controller = new AbortController(); saveController.current = controller;
     void (async () => {
       let saved = false;
       try {
         for (const command of commands) {
-          const frame = await readCommand(command, new AbortController().signal);
+          if (controller.signal.aborted || saveController.current !== controller) return;
+          const frame = await settingsRequest(command, controller.signal, true);
+          if (controller.signal.aborted || saveController.current !== controller) return;
           if (frame.type === 'error') throw new Error(text(frame.message) || 'Could not save settings.');
           if (command.cmd === 'rename_engineer') {
             if (frame.id !== agent.id || frame.name !== command.new_name || frame.kind !== 'engineer') throw new Error('Could not confirm the Engineer rename. Your changes are retained.');
@@ -111,9 +120,9 @@ export function AgentSettingsDialog({ target, onClose }: { target: AgentViewMode
           saved = true;
           if (frame.type !== 'state') dispatch(projectionActions.auxiliaryResourceReceived(frame));
         }
-        onClose();
-      } catch (cause) { setSaveError(`${saved ? 'Some changes were saved. ' : ''}${cause instanceof Error ? cause.message : 'Could not save settings. Your changes are retained.'}`); }
-      finally { savingRef.current = false; setSaving(false); }
+        if (!controller.signal.aborted && saveController.current === controller) onClose();
+      } catch (cause) { if (!controller.signal.aborted && saveController.current === controller) setSaveError(`${saved ? 'Some changes were saved. ' : ''}${cause instanceof Error ? cause.message : 'Could not save settings. Your changes are retained.'}`); }
+      finally { if (saveController.current === controller) { saveController.current = null; savingRef.current = false; if (!controller.signal.aborted) setSaving(false); } }
     })();
   };
   return <>

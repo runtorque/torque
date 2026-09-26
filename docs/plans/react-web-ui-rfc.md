@@ -1235,3 +1235,8 @@ P-296–P-299 restore group-owned reads, retained disclosure/search/selection, r
 ### Settings bounded request and acknowledgement checkpoint — 2026-09-25
 
 P-300–P-302 repair false success on unrelated responses and indefinitely pending reads/saves. D-175 and the parity matrix record bounded observation, validated snapshots/acknowledgements, retained partial baselines, navigation recovery and no automatic retry. Acceptance passed 33 focused tests, 709 UI tests and three isolated browser scenarios using real deadlines and persisted daemon settings; QA was cleaned. Separate source audit adds Agent Settings read and save ownership repairs P-303/P-304. Main ledger: **304 behaviors: 293 implemented/equivalent dispositions, 7 open repairs and 4 intentional retirements**. Broad field/lifecycle and native/external/recovery gates remain; Phase 4 is not complete.
+
+
+### Agent Settings owned requests checkpoint — 2026-09-25
+
+P-303/P-304 now bound per-agent reads and sequential saves to a target-keyed dialog owner. D-176 and the matrix record 18 focused tests, 713 UI tests and two isolated browser scenarios proving timeout recovery, retained drafts, partial acknowledgements and persisted retry results; unmount and target replacement have component coverage. Generic PTY fixtures and isolated QA were cleaned. Further source audit reopens P-098 and maps P-305–P-308 for Behavior Overlay scope ownership, independent drafts, draft diff preview and base-version-guarded submission. Main ledger: **308 behaviors: 294 implemented/equivalent dispositions, 10 open repairs and 4 intentional retirements**. Broad audits and native/external/recovery acceptance keep Phase 4 open.

@@ -26,7 +26,7 @@ function requests() {
   return { calls, replace: (value: UnknownRecord) => { current = value; }, fail: (value: string) => { error = value; } };
 }
 const ready = () => waitFor(() => expect(screen.queryByText('Refreshing agent settings…')).not.toBeInTheDocument());
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('Agent settings lifecycle', () => {
   it('reconciles defaults and reconnect reads without replacing drafts, focus or reset intent', async () => {
     const api = requests(); const { store, unmount } = setup(); await ready();
@@ -139,4 +139,59 @@ it('retains a selected notification preset through a refused save and acknowledg
   fireEvent.change(picker, { target: { value: 'quiet' } }); fireEvent.click(screen.getByRole('button', { name: 'Save settings' })); expect(await screen.findByRole('alert')).toHaveTextContent('Digest preset refused'); expect(picker).toHaveValue('quiet');
   await ready(); refuse = false; fireEvent.click(screen.getByRole('button', { name: 'Save settings' })); await waitFor(() => expect(close).toHaveBeenCalledOnce());
   expect(writes).toEqual(Array.from({ length: 2 }, () => ({ cmd: 'update_agent_digest_settings', agent_id: 'eng', settings: { digest_verbosity: 'compact', push_interval: 120, max_interval: 600, heartbeat_interval: 0, enabled_events: ['task_derived', 'task_health_alert'] } })));
+});
+
+it('bounds initial reads and retries while retaining identity drafts and rejecting the obsolete reply', async () => {
+  let finish!: (value: ReturnType<typeof response>) => void; let signal: AbortSignal | undefined; let hold = true;
+  vi.stubGlobal('fetch', vi.fn((_url, options: RequestInit) => hold ? (signal = options.signal!, new Promise((resolve) => { finish = resolve; })) : Promise.resolve(response({ type: 'agent_settings', agent_id: 'eng', settings: {}, resolved: metadata() }))));
+  vi.useFakeTimers(); setup(); fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Retained name' } });
+  await act(async () => { await vi.advanceTimersByTimeAsync(15_001); });
+  expect(screen.getByRole('alert')).toHaveTextContent('timed out'); expect(signal?.aborted).toBe(true); expect(screen.getByRole('button', { name: 'Save settings' })).toBeDisabled();
+  hold = false; await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Retry settings' })); await Promise.resolve(); });
+  expect(screen.getByRole('button', { name: 'Save settings' })).toBeEnabled(); expect(screen.getByLabelText('Name')).toHaveValue('Retained name');
+  await act(async () => { finish(response({ type: 'agent_settings', agent_id: 'eng', settings: {}, resolved: { model: { value: 'obsolete', origin: 'group' } } })); await Promise.resolve(); });
+  expect(screen.getByLabelText('Model')).toHaveValue('override');
+});
+it('ends an unmounted save owner without continuing digest or relaunch writes after a late acknowledgement', async () => {
+  let finish!: (value: ReturnType<typeof response>) => void; let signal: AbortSignal | undefined; const writes: TorqueCommand[] = [];
+  vi.stubGlobal('fetch', vi.fn((_url, options: RequestInit) => {
+    const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand;
+    if (command.cmd !== 'get_agent_settings') { writes.push(command); signal = options.signal!; return new Promise((resolve) => { finish = resolve; }); }
+    return Promise.resolve(response({ type: 'agent_settings', agent_id: 'eng', settings: {}, resolved: metadata() }));
+  }));
+  const { unmount, close } = setup(); await ready(); fireEvent.change(screen.getByLabelText('Model'), { target: { value: 'submitted' } }); fireEvent.change(screen.getByLabelText('Heartbeat interval (seconds)'), { target: { value: '0' } }); fireEvent.click(screen.getByRole('checkbox', { name: 'Relaunch after saving launch-bound changes' })); fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+  unmount(); expect(signal?.aborted).toBe(true);
+  await act(async () => { finish(response({ type: 'agent_settings', agent_id: 'eng', settings: {}, resolved: metadata() })); await Promise.resolve(); });
+  expect(writes.map((command) => command.cmd)).toEqual(['update_agent_settings']); expect(close).not.toHaveBeenCalled();
+});
+it('unlocks a timed-out partial save and retries only pending digest and relaunch intent', async () => {
+  let finish!: (value: ReturnType<typeof response>) => void; let hold = true; let resolved: UnknownRecord = metadata(); const writes: TorqueCommand[] = [];
+  vi.stubGlobal('fetch', vi.fn((_url, options: RequestInit) => {
+    const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand;
+    if (command.cmd !== 'get_agent_settings') writes.push(command);
+    if (command.cmd === 'update_agent_settings') resolved = { ...resolved, model: { value: 'saved-model', origin: 'per-agent' } };
+    if (command.cmd === 'update_agent_digest_settings' && hold) return new Promise((resolve) => { finish = resolve; });
+    return Promise.resolve(response(command.cmd === 'relaunch_agent' ? { type: 'ok' } : { type: 'agent_settings', agent_id: 'eng', settings: {}, resolved }));
+  }));
+  const { store, close } = setup(); await ready(); fireEvent.change(screen.getByLabelText('Model'), { target: { value: 'saved-model' } }); fireEvent.change(screen.getByLabelText('Heartbeat interval (seconds)'), { target: { value: '0' } }); fireEvent.click(screen.getByRole('checkbox', { name: 'Relaunch after saving launch-bound changes' }));
+  vi.useFakeTimers(); await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save settings' })); await Promise.resolve(); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_001); });
+  expect(screen.getByRole('alert')).toHaveTextContent('Some changes were saved.'); expect(screen.getByRole('alert')).toHaveTextContent('outcome is unknown'); expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled();
+  await act(async () => { store.dispatch(connectionActions.connected({ at: 2000, reconnect: true })); await Promise.resolve(); }); expect(writes).toHaveLength(2); expect(screen.getByLabelText('Model')).toHaveValue('saved-model'); expect(screen.getByLabelText('Heartbeat interval (seconds)')).toHaveValue(0);
+  hold = false; await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save settings' })); await Promise.resolve(); });
+  expect(writes.map((command) => command.cmd)).toEqual(['update_agent_settings', 'update_agent_digest_settings', 'update_agent_digest_settings', 'relaunch_agent']); expect(close).toHaveBeenCalledOnce();
+  await act(async () => { finish(response({ type: 'error', message: 'Late failure' })); await Promise.resolve(); }); expect(close).toHaveBeenCalledOnce(); expect(screen.queryByText(/Late failure/)).not.toBeInTheDocument();
+});
+it('replaces the editor and aborts the old save when its target changes', async () => {
+  let finish!: (value: ReturnType<typeof response>) => void; let signal: AbortSignal | undefined; const writes: TorqueCommand[] = [];
+  vi.stubGlobal('fetch', vi.fn((_url, options: RequestInit) => {
+    const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand;
+    if (command.cmd !== 'get_agent_settings') { writes.push(command); signal = options.signal!; return new Promise((resolve) => { finish = resolve; }); }
+    return Promise.resolve(response({ type: 'agent_settings', agent_id: command.agent_id, settings: {}, resolved: metadata() }));
+  }));
+  const { rerender, store, close } = setup(); await ready(); fireEvent.change(screen.getByLabelText('Model'), { target: { value: 'old-target-draft' } }); fireEvent.change(screen.getByLabelText('Heartbeat interval (seconds)'), { target: { value: '0' } }); fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+  rerender(<Provider store={store}><AgentSettingsDialog target={toAgentViewModel('next', { ...agent, id: 'next', name: 'Next Engineer' })} onClose={close} /></Provider>); await ready();
+  expect(signal?.aborted).toBe(true); expect(screen.getByLabelText('Name')).toHaveValue('Next Engineer'); expect(screen.getByLabelText('Model')).toHaveValue('override');
+  await act(async () => { finish(response({ type: 'agent_settings', agent_id: 'eng', settings: {}, resolved: metadata() })); await Promise.resolve(); });
+  expect(writes).toHaveLength(1); expect(close).not.toHaveBeenCalled(); expect(screen.getByLabelText('Name')).toHaveValue('Next Engineer');
 });
