@@ -61,3 +61,28 @@ test('Context reconnect preserves edits and filters, retries failed writes and p
   await page.screenshot({ path: test.info().outputPath('context-acknowledged.png'), fullPage: true });
   await page.getByRole('button', { name: 'Mission Control', exact: true }).click(); const hidden = commands.length; await reconnect(); expect(commands).toHaveLength(hidden);
 });
+
+test('Context bounds stalled refresh and an already-persisted save without replay or draft loss', async ({ page, request }) => {
+  test.setTimeout(90_000);
+  const runtime = (await (await request.get('/api/runtime')).json() as { data: { runtime: Row } }).data.runtime;
+  expect(runtime.port).not.toBe(18932); expect(runtime.profile).not.toBe('default');
+  const group = `Context deadlines ${Date.now()}`; await command(request, { cmd: 'add_group', group }); await command(request, { cmd: 'ui_select_group', group }); await command(request, { cmd: 'ui_set_react_workspace_state', state: { version: 1, activePanel: 'control', controlTab: 'context' } });
+  const entry = (await command(request, { cmd: 'memory_publish', scope_kind: 'group', scope_ref: group, entry_type: 'note', title: 'Deadline context', content: 'Original content', source_kind: 'manual' })).entry as Row;
+  let socket: WebSocketRoute | undefined; let connections = 0; let holdRead = false; let holdSave = true; let writeHeld = false; const releases: (() => void)[] = []; let releaseWrite = () => {}; const writes: Row[] = [];
+  await page.routeWebSocket(/\/ws\?/, (route) => { route.connectToServer(); socket = route; connections++; });
+  const reconnect = async () => { const previous = connections; await socket!.close({ code: 1012, reason: 'Context deadline acceptance' }); await expect.poll(() => connections).toBeGreaterThan(previous); };
+  await page.route('**/api/cmd', async (route) => { const data = route.request().postDataJSON() as Row;
+    if (data.cmd === 'memory_list' && holdRead) await new Promise<void>((resolve) => { releases.push(resolve); });
+    if (data.cmd === 'memory_publish') { writes.push(data); if (holdSave) { const response = await route.fetch(); writeHeld = true; await new Promise<void>((resolve) => { releaseWrite = resolve; }); await route.fulfill({ response }).catch(() => {}); return; } }
+    await route.continue().catch(() => {});
+  });
+  try {
+    await page.goto('/'); await page.getByRole('button', { name: 'Edit', exact: true }).click(); const body = page.getByRole('textbox', { name: 'Content', exact: true }); await body.fill('Retained Context draft'); await body.evaluate((node: HTMLTextAreaElement) => { node.dataset.contextDeadline = 'same'; node.setSelectionRange(2, 7); });
+    holdRead = true; await reconnect(); await expect(page.getByRole('alert')).toContainText('Context refresh timed out', { timeout: 20_000 }); await expect(body).toBeFocused(); await expect(body).toHaveValue('Retained Context draft'); expect(await body.evaluate((node: HTMLTextAreaElement) => [node.selectionStart, node.selectionEnd])).toEqual([2, 7]);
+    holdRead = false; releases.forEach((release) => release()); await page.getByRole('button', { name: 'Retry context', exact: true }).click(); await expect(page.getByRole('alert')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Save context', exact: true }).click(); await expect.poll(() => writeHeld).toBe(true); await expect(body).toBeDisabled(); await reconnect(); expect(writes).toHaveLength(1); await expect(page.getByRole('alert')).toContainText('outcome is unknown', { timeout: 35_000 }); await expect(body).toBeEnabled(); await expect(body).toHaveAttribute('data-context-deadline', 'same'); releaseWrite(); await expect(body).toHaveValue('Retained Context draft');
+    await body.focus(); await body.evaluate((node: HTMLTextAreaElement) => node.setSelectionRange(2, 7)); await reconnect(); expect(writes).toHaveLength(1); await expect(body).toBeFocused(); expect(await body.evaluate((node: HTMLTextAreaElement) => [node.selectionStart, node.selectionEnd])).toEqual([2, 7]); await page.screenshot({ path: test.info().outputPath('context-unknown-outcome.png') });
+    expect((await command(request, { cmd: 'memory_read', entry_id: entry.id })).entry).toMatchObject({ content: 'Retained Context draft' }); holdSave = false; await body.fill('Explicitly saved after review'); await page.getByRole('button', { name: 'Save context', exact: true }).click(); await expect(page.getByRole('button', { name: 'Edit', exact: true })).toBeVisible(); expect(writes).toHaveLength(2);
+    await page.reload(); await page.getByRole('button', { name: 'Edit', exact: true }).click(); await expect(body).toHaveValue('Explicitly saved after review');
+  } finally { releases.forEach((release) => release()); releaseWrite(); }
+});

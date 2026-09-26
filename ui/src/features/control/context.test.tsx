@@ -13,7 +13,7 @@ const contextFixture = { ...compactStateFixture, board_tasks: taskRecords, agent
 function setup() {
   const commands: TorqueCommand[] = []; const signals: AbortSignal[] = [];
   let entries: UnknownRecord[] = [{ id: 'memory-1', title: 'Original title', content: 'Original body', entry_type: 'note', scope_kind: 'group', scope_ref: 'Foundation', pinned: false, source_kind: 'agent', source_name: '', source_id: 'author' }];
-  let failure = ''; let mismatch = false;
+  let failure = ''; let mismatch = false; let hold = false;
   const fetcher = vi.fn((_url: string, options?: RequestInit) => {
     const command = JSON.parse(typeof options?.body === 'string' ? options.body : '{}') as TorqueCommand; commands.push(command); signals.push(options?.signal as AbortSignal);
     let data: UnknownRecord;
@@ -26,7 +26,7 @@ function setup() {
       if (!mismatch) entries = [entry, ...entries.filter((item) => item.id !== entry.id)];
       data = { type: 'memory_entry', entry };
     }
-    return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data }) });
+    return hold ? new Promise(() => {}) : Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data }) });
   });
   vi.stubGlobal('fetch', fetcher); const store = createAppStore();
   store.dispatch(projectionActions.snapshotReceived(contextFixture));
@@ -34,7 +34,7 @@ function setup() {
   const onOpenTarget = vi.fn();
   const view = render(<Provider store={store}><ContextPanel group="Foundation" agents={[{ id: 'agent-1', name: 'Agent One', group: 'Foundation' }]} onOpenTarget={onOpenTarget} /></Provider>);
   const reconnect = async () => { await act(async () => { store.dispatch(projectionActions.snapshotReceived(contextFixture)); store.dispatch(connectionActions.connected({ at: 2, reconnect: true })); await Promise.resolve(); }); };
-  return { ...view, store, onOpenTarget, commands, signals, fetcher, reconnect, fail: (cmd: string) => { failure = cmd; }, mismatch: (value: boolean) => { mismatch = value; }, remote: (patch: UnknownRecord) => { entries = [{ ...entries[0], ...patch }]; } };
+  return { ...view, store, onOpenTarget, commands, signals, fetcher, reconnect, hold: () => { hold = true; }, fail: (cmd: string) => { failure = cmd; }, mismatch: (value: boolean) => { mismatch = value; }, remote: (patch: UnknownRecord) => { entries = [{ ...entries[0], ...patch }]; } };
 }
 
 it('refreshes applied filters on reconnect while retaining edited content, caret and unapplied search', async () => {
@@ -66,12 +66,13 @@ it('retains edits on read/write errors, rejects mismatched acknowledgements and 
 });
 
 it('captures a new entry agent link before filter changes and aborts reads when hidden', async () => {
-  const { commands, signals, unmount, store } = setup(); await screen.findByRole('heading', { name: 'Original title' });
+  const { commands, signals, unmount, store, hold } = setup(); await screen.findByRole('heading', { name: 'Original title' });
   fireEvent.change(screen.getByLabelText('Focus'), { target: { value: 'agent' } }); fireEvent.change(screen.getByLabelText('Agent'), { target: { value: 'agent-1' } });
   fireEvent.click(screen.getByRole('button', { name: '＋ Add context' })); fireEvent.change(screen.getByRole('textbox', { name: 'Content' }), { target: { value: 'New context' } });
   fireEvent.change(screen.getByLabelText('Focus'), { target: { value: 'group' } }); fireEvent.click(screen.getByRole('button', { name: 'Publish context' })); await screen.findByRole('button', { name: 'Edit' });
   expect(commands.find((item) => item.cmd === 'memory_publish')).toMatchObject({ scope_kind: 'group', scope_ref: 'Foundation', content: 'New context', link_targets: [{ target_kind: 'agent', target_ref: 'agent-1' }] });
   await waitFor(() => expect(commands.filter((command) => command.cmd === 'memory_list')).toHaveLength(2));
+  hold(); fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
   unmount(); const count = commands.length; expect(signals.at(-1)?.aborted).toBe(true);
   await act(async () => { store.dispatch(connectionActions.connected({ at: 3, reconnect: true })); await Promise.resolve(); }); expect(commands).toHaveLength(count);
 });

@@ -1,4 +1,4 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { expect, test, type APIRequestContext, type WebSocketRoute } from '@playwright/test';
 type Row = Record<string, unknown>;
 async function command(request: APIRequestContext, data: Row) {
@@ -23,7 +23,7 @@ test('pipeline reconnect retains the zoomed graph and node focus through a held 
     reads++;
     if (hold) { hold = false; await new Promise<void>((resolve) => { release = resolve; }); }
     if (refuse) await route.fulfill({ json: { ok: false, error: 'Injected pipeline refusal' } });
-    else { const response = await route.fetch(); await route.fulfill({ response }); }
+    else { const response = await route.fetch(); await route.fulfill({ response }).catch(() => {}); }
     completed++;
   });
   try {
@@ -35,7 +35,8 @@ test('pipeline reconnect retains the zoomed graph and node focus through a held 
     await saveBuild('After reconnect'); hold = true; const before = connections; await socket!.close({ code: 1012, reason: 'Pipeline continuity' });
     await expect.poll(() => connections).toBeGreaterThan(before); await expect.poll(() => Boolean(release)).toBe(true);
     await expect(graph).toBeVisible(); expect(await graph.evaluate((element, previous) => element === previous, original)).toBe(true); await expect(graph).toHaveAttribute('viewBox', viewBox!); await expect(node).toBeFocused(); await expect(picker).toHaveValue('continuity/build');
-    release!(); release = undefined; await expect(page.getByLabel('Pipeline transitions')).toContainText('After reconnect');
+    await expect(page.getByRole('alert')).toContainText('refresh timed out', { timeout: 20_000 }); await expect(node).toBeFocused(); await expect(graph).toHaveAttribute('viewBox', viewBox!);
+    release!(); release = undefined; await page.getByRole('button', { name: 'Discover pipelines', exact: true }).click(); await node.focus(); await expect(page.getByLabel('Pipeline transitions')).toContainText('After reconnect');
     await expect(node).toBeFocused(); await expect(node).toHaveAttribute('aria-pressed', 'true'); await expect(graph).toHaveAttribute('viewBox', viewBox!);
     refuse = true; await page.getByRole('button', { name: 'Discover pipelines', exact: true }).click(); await expect(page.getByRole('alert')).toContainText('Injected pipeline refusal');
     await expect(graph).toHaveAttribute('viewBox', viewBox!); refuse = false; const retry = completed;
@@ -45,5 +46,5 @@ test('pipeline reconnect retains the zoomed graph and node focus through a held 
     await page.getByRole('button', { name: 'Help', exact: true }).click(); await expect(page.getByLabel('Search documentation')).toBeVisible();
     const hidden = reads; const connected = connections; await socket!.close({ code: 1012, reason: 'Hidden pipeline' }); await expect.poll(() => connections).toBeGreaterThan(connected);
     await expect(page.getByRole('button', { name: 'Torque README.md', exact: true })).toBeVisible(); expect(reads).toBe(hidden);
-  } finally { release?.(); }
+  } finally { release?.(); await rm(directory, { recursive: true, force: true }); }
 });

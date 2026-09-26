@@ -5,15 +5,16 @@ async function command(request: APIRequestContext, data: Row) {
   expect(response.ok, response.error).toBe(true); return response.data;
 }
 test('Help reads maintained docs with search reset, source navigation, reconnect continuity and compact browsing', async ({ page, request }) => {
+  test.setTimeout(60_000);
   const runtime = (await (await request.get('/api/runtime')).json() as { data: { runtime: { port: number; profile: string } } }).data.runtime;
   expect(runtime.port).not.toBe(18932); expect(runtime.profile).not.toBe('default');
   const group = `Help ${Date.now()}`; await command(request, { cmd: 'add_group', group }); await command(request, { cmd: 'ui_select_group', group });
   const topics = (await command(request, { cmd: 'help_list', audience: '' })).topics as Row[];
   const topic = topics.find((item) => item.source_path === 'README.md')!; expect(topic).toBeTruthy();
   const detail = await command(request, { cmd: 'help_show', topic: 'README.md', max_chars: 16000 }); const section = (detail.sections as Row[]).find((item) => Number(item.level) === 2)!; expect(section).toBeTruthy();
-  let socket: WebSocketRoute | undefined; let connections = 0; let refusal = ''; const calls: Row[] = [];
+  let socket: WebSocketRoute | undefined; let connections = 0; let refusal = ''; const calls: Row[] = []; let hold = false; const releases: (() => void)[] = [];
   await page.routeWebSocket(/\/ws\?/, (connection) => { connection.connectToServer(); socket = connection; connections++; });
-  await page.route('**/api/cmd', async (route) => { const data = route.request().postDataJSON() as Row; calls.push(data); if (data.cmd === refusal) await route.fulfill({ json: { ok: false, error: 'Injected Help refusal' } }); else await route.continue(); });
+  await page.route('**/api/cmd', async (route) => { const data = route.request().postDataJSON() as Row; calls.push(data); if (hold && String(data.cmd).startsWith('help_')) await new Promise<void>((resolve) => { releases.push(resolve); }); if (data.cmd === refusal) await route.fulfill({ json: { ok: false, error: 'Injected Help refusal' } }); else await route.continue().catch(() => {}); });
   const reconnect = async () => { const before = connections; await socket!.close({ code: 1012, reason: 'Help reconnect' }); await expect.poll(() => connections).toBeGreaterThan(before); };
   await page.goto('/'); await page.getByRole('button', { name: /◎ Control/ }).click(); await page.getByRole('button', { name: 'Help', exact: true }).click();
   const help = page.getByRole('region', { name: 'Torque Help', exact: true }); const list = help.getByRole('complementary', { name: 'Help topics' }); const article = help.getByRole('article', { name: 'Help document' });
@@ -33,6 +34,8 @@ test('Help reads maintained docs with search reset, source navigation, reconnect
   const reads = calls.filter((call) => call.cmd === 'help_show').length; await reconnect(); await expect.poll(() => calls.filter((call) => call.cmd === 'help_show').length).toBeGreaterThan(reads); await expect(article.getByText('Refreshing document…', { exact: true })).toHaveCount(0);
   await expect(question).toHaveValue('Unsubmitted question'); await expect(question).toBeFocused(); await expect(question).toHaveAttribute('data-help-anchor', 'original'); expect(await question.evaluate((node: HTMLInputElement) => [node.selectionStart, node.selectionEnd])).toEqual([2, 7]); await expect(search).toHaveValue('Unsubmitted search'); await expect(freshness).toHaveAttribute('open', ''); expect(await article.evaluate((node) => node.scrollTop)).toBeCloseTo(scroll, 0);
   expect(calls.filter((call) => call.cmd === 'help_show').at(-1)).toMatchObject({ topic: selectedRef }); expect(calls.filter((call) => call.cmd === 'help_search').at(-1)).toMatchObject({ query: 'worktree' }); expect(calls.filter((call) => call.cmd === 'help_query').at(-1)).toMatchObject({ question: 'How do worktrees merge?' });
+  hold = true; await reconnect(); await expect(help.getByRole('alert')).toHaveCount(4, { timeout: 20_000 }); for (const alert of await help.getByRole('alert').all()) await expect(alert).toContainText('refresh timed out'); await expect(question).toBeFocused(); await expect(question).toHaveValue('Unsubmitted question'); await expect(freshness).toHaveAttribute('open', '');
+  hold = false; releases.forEach((release) => release()); for (const name of ['Retry topics', 'Retry detail', 'Retry search', 'Retry answer']) await help.getByRole('button', { name, exact: true }).click(); await expect(help.getByRole('alert')).toHaveCount(0);
   refusal = 'help_show'; await reconnect(); await expect(article.getByRole('alert')).toContainText('Injected Help refusal'); refusal = ''; await article.getByRole('button', { name: 'Retry detail', exact: true }).click(); await expect(article.getByRole('alert')).toHaveCount(0);
   await help.getByRole('button', { name: 'Clear answer', exact: true }).click(); await help.getByRole('button', { name: 'All topics', exact: true }).click();
   const audience = help.getByLabel('Audience for topics'); expect(await audience.locator('option').count()).toBe(8); await audience.selectOption('maintainer'); await expect.poll(() => calls.filter((call) => call.cmd === 'help_list').at(-1)?.audience).toBe('maintainer'); await audience.selectOption('');

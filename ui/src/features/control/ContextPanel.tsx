@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useAppSelector } from '../../app/hooks';
 import { selectConnection, selectTasksState, selectAgentsState } from '../../app/store';
-import { readCommand } from '../../protocol/http';
+import { settingsRequest } from './settingsRequests';
 
 import { Button, StateSurface } from '../../design/primitives';
 import type { TorqueCommand, UnknownRecord } from '../../protocol';
@@ -107,7 +107,7 @@ export function ContextPanel({ group, agents, onOpenTarget }: ContextPanelProps)
   useEffect(() => {
     if (connection.status !== 'connected' || busy) return;
     const controller = new AbortController(); activeRead.current = controller;
-    void readCommand(query, controller.signal).then((frame) => {
+    void settingsRequest(query, controller.signal, false, 'Context').then((frame) => {
       if (controller.signal.aborted || mutation.current) return;
       if (frame.type !== 'memory_entries' || !Array.isArray(frame.entries) || frame.group_name !== group) throw new Error(text(frame.message, 'Could not load matching shared context.'));
       setEntries(list(frame.entries)); setLoaded(true); setReadError('');
@@ -120,7 +120,7 @@ export function ContextPanel({ group, agents, onOpenTarget }: ContextPanelProps)
     activeRead.current?.abort();
     const controller = new AbortController(); mutation.current = controller; setBusy(true); setWriteError('');
     try {
-      const frame = await readCommand(command, controller.signal);
+      const frame = await settingsRequest(command, controller.signal, true, 'Context');
       if (controller.signal.aborted) return;
       const entry = record(frame.entry);
       if (frame.type !== 'memory_entry' || !text(entry.id) || (command.entry_id && entry.id !== command.entry_id)) throw new Error(text(frame.message, 'The context update was not acknowledged.'));

@@ -3,7 +3,7 @@ import { useAppSelector } from '../../app/hooks';
 import { selectConnection } from '../../app/store';
 import { Button } from '../../design/primitives';
 import type { TorqueCommand, UnknownRecord } from '../../protocol';
-import { readCommand } from '../../protocol/http';
+import { settingsRequest } from './settingsRequests';
 import { HelpMarkdown } from './HelpMarkdown';
 import { display, record, reference, rows, string, validateHelp } from './helpModel';
 import styles from './HelpPanel.module.css';
@@ -17,7 +17,7 @@ function useHelpRead(command: TorqueCommand | null, refresh: string, onAccepted?
   useEffect(() => {
     if (!key || connection.status !== 'connected') return;
     const controller = new AbortController(); const current = JSON.parse(key) as TorqueCommand;
-    void readCommand(current, controller.signal).then((frame) => {
+    void settingsRequest(current, controller.signal, false, 'Help').then((frame) => {
       if (controller.signal.aborted) return;
       validateHelp(current, frame); setAccepted({ key, frame }); onAccepted?.(frame); setSettled({ request, error: '' });
     }).catch((cause: unknown) => { if (!controller.signal.aborted) setSettled({ request, error: cause instanceof Error ? cause.message : 'Help unavailable.' }); });

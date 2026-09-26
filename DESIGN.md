@@ -3474,3 +3474,13 @@ History renders the persisted contract: role/template, input/output token counts
 - Discovery: Keep on-demand loading and group-scoped reconnect refresh. Bound each read to 15 seconds independently of transport cancellation. A stalled discovery exposes an actionable error and re-enables Refresh specializations.
 - Continuity: Preserve accepted options, exact ordered selections including unavailable slugs, manual text, input DOM, focus and caret through timeout. Do not infer an empty catalog from a failed read. Late responses cannot replace an accepted retry, and unmount/disable/group change ends observation.
 - Verification: Reproduce stalled initial/reconnect reads, then verify explicit retry, stale-result rejection and hidden cancellation. Exercise the shared control in production browser creation, per-agent settings and group defaults, with persisted ordering through reload.
+
+
+### D-182 — Operational panels bound visible reads and Context mutations
+
+- Date: 2026-09-26
+- Scope: Pipeline discovery, History list/detail, Help topics/document/search/query, Context list/publish/pin/unpin and Supervisor polling; P-322–P-327.
+- Read recovery: Observe each read for at most 15 seconds independently of transport cancellation. A timeout retains the last accepted graph, article, run, entries or sessions and exposes retry. Preserve selection, disclosure, view position, focus/caret and unsubmitted drafts. Independently owned requests settle independently; late results cannot replace current content.
+- Polling: A Supervisor timeout is a failed observation, not an empty session list. Retain accepted rows and resume the configured polling cadence after the failure; pausing, replacing or hiding the view cancels pending observation and future polls.
+- Context writes: Bound mutation observation to 30 seconds. An unacknowledged outcome releases busy controls and retains the editor/intent; ordinary scoped refresh may reveal persisted changes. Never replay a mutation on timeout or reconnect, and never let a late response close the editor or erase newer edits. Explicit publication of a new entry after an unknown outcome requires reviewing refreshed entries first; the UI does not claim backend deduplication.
+- Verification: Reproduce stalls before repair, then test initial load, accepted-state retention, independent retries, delayed settlements, polling recovery and cancellation. Isolated production browser acceptance must exercise actual deadlines and persisted Context outcomes alongside existing panel lifecycle regressions.

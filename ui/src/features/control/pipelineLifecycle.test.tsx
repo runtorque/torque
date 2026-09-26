@@ -40,7 +40,8 @@ describe('pipeline read lifecycle', () => {
     await h.reply(2, { type: 'pipelines', pipelines: [{ ...pipeline, name: 'Other pipeline' }] });
     await h.reply(1, { type: 'pipelines', pipelines: [{ ...pipeline, name: 'Obsolete pipeline' }] });
     expect(screen.getByLabelText('Pipeline')).toHaveValue('Other pipeline'); expect(screen.queryByText('Obsolete pipeline')).not.toBeInTheDocument();
-    h.view.unmount(); act(() => { h.store.dispatch(connectionActions.connected({ at: 4, reconnect: true })); h.snapshot(); }); await settle(); expect(h.pending).toHaveLength(3); expect(h.pending[2]!.signal.aborted).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Discover pipelines' })); await settle();
+    h.view.unmount(); act(() => { h.store.dispatch(connectionActions.connected({ at: 4, reconnect: true })); h.snapshot(); }); await settle(); expect(h.pending).toHaveLength(4); expect(h.pending[3]!.signal.aborted).toBe(true);
   });
   it('waits for synchronization and preserves accepted content through disconnect and in-place resync', async () => {
     const h = harness(); await h.reply(0); const graph = screen.getByRole('group', { name: 'Pipeline graph' });

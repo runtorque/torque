@@ -29,13 +29,14 @@ with sqlite3.connect(path + '/torque.db') as db:
    db.execute('INSERT INTO agent_messages (agent_id, task_id, timestamp, action, message) VALUES (?,?,?,?,?)', (agent, task, time.time()-i, 'done' if i == 0 else 'progress', 'Original persistent message' if i == 0 else 'Recorded progress ' + str(i) + ': ' + 'History reading content. '*8))
 `, runtime.data_dir, group, id, task, String(refresh)]);
   seed();
-  let socket: WebSocketRoute | undefined; let connections = 0; let refusal = ''; const reads: Row[] = [];
+  let socket: WebSocketRoute | undefined; let connections = 0; let refusal = ''; const reads: Row[] = []; let hold = false; const releases: (() => void)[] = [];
   await page.routeWebSocket(/\/ws\?/, (connection) => { connection.connectToServer(); socket = connection; connections += 1; });
   const reconnect = async () => { const before = connections; await socket!.close({ code: 1012, reason: 'History acceptance' }); await expect.poll(() => connections).toBeGreaterThan(before); };
   await page.route('**/api/cmd', async (route) => {
     const data = route.request().postDataJSON() as Row;
     if (String(data.cmd).startsWith('get_agent_history')) reads.push(data);
-    if (data.cmd === refusal) await route.fulfill({ json: { ok: true, data: { type: 'error', message: 'Injected history refusal' } } }); else await route.continue();
+    if (hold && String(data.cmd).startsWith('get_agent_history')) await new Promise<void>((resolve) => { releases.push(resolve); });
+    if (data.cmd === refusal) await route.fulfill({ json: { ok: true, data: { type: 'error', message: 'Injected history refusal' } } }); else await route.continue().catch(() => {});
   });
   await page.goto('/'); await page.getByRole('button', { name: /◎ Control/ }).click(); await page.getByRole('button', { name: 'History', exact: true }).click();
   const runs = page.getByRole('region', { name: 'Agent runs', exact: true }); const detail = page.getByRole('region', { name: 'Run detail', exact: true });
@@ -50,6 +51,8 @@ with sqlite3.connect(path + '/torque.db') as db:
   expect(reads.slice(before)).toEqual([{ cmd: 'get_agent_history', status: 'merged', limit: 100 }, { cmd: 'get_agent_history_detail', agent_id: id, message_limit: 100 }]);
   await expect(search).toBeFocused(); await expect(search).toHaveAttribute('data-history-anchor', 'original'); await expect(search).toHaveValue('History'); expect(await search.evaluate((node: HTMLInputElement) => [node.selectionStart, node.selectionEnd])).toEqual([1, 5]);
   expect(await runs.evaluate((node) => node.scrollTop)).toBe(200); expect(await detail.evaluate((node) => node.scrollTop)).toBe(500); await expect(runs.getByRole('button', { name: /^History worker 0 / })).toHaveAttribute('aria-current', 'true');
+  hold = true; await reconnect(); await expect(page.getByRole('alert')).toHaveCount(2, { timeout: 20_000 }); for (const alert of await page.getByRole('alert').all()) await expect(alert).toContainText('refresh timed out'); await expect(search).toBeFocused(); await expect(disclosure).toHaveAttribute('open', ''); await expect(detail.getByText('Refreshed persistent message', { exact: true })).toHaveCount(1);
+  hold = false; releases.forEach((release) => release()); await page.getByRole('button', { name: 'Retry history', exact: true }).click(); await expect(page.getByRole('alert')).toHaveCount(0);
   refusal = 'get_agent_history'; await reconnect(); await expect(page.getByRole('alert')).toContainText('History refresh failed'); await expect(runs.getByRole('button')).toHaveCount(45);
   refusal = ''; await page.getByRole('button', { name: 'Retry history', exact: true }).click(); await expect(page.getByRole('alert')).toHaveCount(0);
   refusal = 'get_agent_history_detail'; await reconnect(); await expect(page.getByRole('alert')).toContainText('Run refresh failed'); await expect(detail.getByText('Refreshed persistent message', { exact: true })).toHaveCount(1);

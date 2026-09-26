@@ -1265,3 +1265,8 @@ P-314–P-320 now bound Catalog/Actions/Agent Classes reads, previews, validatio
 ### Shared specialization recovery checkpoint — 2026-09-26
 
 P-321 now bounds on-demand/reconnect discovery while preserving ordered selections, manual edits and retry ownership. D-181 and the matrix record two reproduced failures, 18 passing focused tests, 785 UI tests and one integrated live browser scenario exercising real timeouts across creation, per-agent settings and group defaults with persisted ordering. Screenshots were inspected and isolated QA cleaned. Further source audit maps unbounded Pipeline/History/Help/Context/Supervisor observations as P-322–P-327. Main ledger: **327 behaviors: 312 implemented/equivalent dispositions, 11 open repairs and 4 intentional retirements**. Broad audits and independent inventory/native/external/recovery acceptance keep Phase 4 open.
+
+
+### Operational panel recovery checkpoint — 2026-09-26
+
+P-322–P-327 now bound visible Pipeline/History/Help/Context/Supervisor reads and Context mutation observation, preserving accepted state and independent retry without replay. D-182 and the matrix record reproduced stalls, 72 focused tests, 809 UI tests and six passing production browser scenarios with actual deadlines and persisted Context recovery. Screenshots were inspected and isolated QA cleaned. Source audit maps Context pane-width queue recovery as P-328. Main ledger: **328 behaviors: 318 implemented/equivalent dispositions, 6 open repairs and 4 intentional retirements**. Broad audits and independent inventory/native/external/recovery acceptance keep Phase 4 open.

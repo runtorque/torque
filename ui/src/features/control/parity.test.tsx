@@ -131,7 +131,8 @@ describe('operational depth', () => {
     const persisted = send.mock.calls.at(-1)?.[0] as { cmd: string; state: Record<string, unknown> };
     expect(persisted.cmd).toBe('ui_set_supervisor_panel_state');
     expect(persisted.state).toMatchObject({ sortKey: 'pid', sortDirection: 'desc', expandedSessionId: 'b' });
-    view.unmount(); expect(signals[0]?.aborted).toBe(true);
+    vi.mocked(fetch).mockImplementationOnce((_url, options) => { if (options?.signal) signals.push(options.signal); return new Promise<Response>(() => {}); });
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh sessions' })); view.unmount(); expect(signals.at(-1)?.aborted).toBe(true);
   });
   it('uses supported health windows and scoped workflow series with accessible samples', async () => {
     const { HealthDetails } = await import('./OperationalDetails');

@@ -3,7 +3,7 @@ import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import { selectConnection, selectTasksState, workspaceUiActions } from '../../app/store';
 import { Button, StateSurface } from '../../design/primitives';
 import type { TorqueCommand, UnknownRecord } from '../../protocol';
-import { readCommand } from '../../protocol/http';
+import { settingsRequest } from './settingsRequests';
 import { text } from '../planning/model';
 import styles from './ControlCenter.module.css';
 
@@ -41,7 +41,7 @@ export function HistoryPanel({ group, send }: {
   useEffect(() => {
     if (connection.status !== 'connected') return;
     const controller = new AbortController();
-    void readCommand({ cmd: 'get_agent_history', status, limit: 100 }, controller.signal).then((frame) => {
+    void settingsRequest({ cmd: 'get_agent_history', status, limit: 100 }, controller.signal, false, 'History').then((frame) => {
       if (controller.signal.aborted) return;
       if (frame.type !== 'agent_history_list' || !Array.isArray(frame.records)) throw new Error(text(frame.message, 'Invalid history response.'));
       setListFrame(frame); setListError('');
@@ -51,7 +51,7 @@ export function HistoryPanel({ group, send }: {
   useEffect(() => {
     if (!selectedId || connection.status !== 'connected') return;
     const controller = new AbortController();
-    void readCommand({ cmd: 'get_agent_history_detail', agent_id: selectedId, message_limit: 100 }, controller.signal).then((frame) => {
+    void settingsRequest({ cmd: 'get_agent_history_detail', agent_id: selectedId, message_limit: 100 }, controller.signal, false, 'History').then((frame) => {
       if (controller.signal.aborted) return;
       if (frame.type !== 'agent_history_detail' || record(frame.record).id !== selectedId || !Array.isArray(frame.tasks) || !Array.isArray(frame.messages)) throw new Error(text(frame.message, 'Could not load the selected run.'));
       setDetail(frame); setDetailError('');

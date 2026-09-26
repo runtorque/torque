@@ -3,7 +3,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import { projectionActions, selectAuxiliaryResponseState } from '../../app/store';
 import { Button } from '../../design/primitives';
-import { readCommand } from '../../protocol/http';
+import { settingsRequest } from './settingsRequests';
 import { layoutPipeline, parsePipelines, type Pipeline } from './pipelineModel';
 import styles from './ParityPanels.module.css';
 
@@ -49,7 +49,7 @@ export function PipelineExplorer({ group, onEdit }: { group: string; onEdit: (na
   useEffect(() => {
     if (!ready) return;
     const controller = new AbortController();
-    void readCommand({ cmd: 'discover_pipelines', group }, controller.signal).then((result) => {
+    void settingsRequest({ cmd: 'discover_pipelines', group }, controller.signal, false, 'Pipeline discovery').then((result) => {
       if (controller.signal.aborted) return;
       if (result.type === 'error') throw new Error(typeof result.message === 'string' ? result.message : 'Pipeline discovery failed.');
       const next = parsePipelines(result.pipelines);

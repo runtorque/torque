@@ -4,7 +4,7 @@ import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import { selectSupervisorUiState, workspaceUiActions, type WorkspaceUiState } from '../../app/store';
 import { Button } from '../../design/primitives';
 import type { TorqueCommand, UnknownRecord } from '../../protocol';
-import { readCommand } from '../../protocol/http';
+import { settingsRequest } from './settingsRequests';
 import styles from './ParityPanels.module.css';
 import { HealthLiveMetrics } from './HealthLiveMetrics';
 import { useHealthHistory } from './useHealthHistory';
@@ -45,7 +45,7 @@ export function SupervisorDetails({ supervisor, send, onTerminate }: { superviso
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
       try {
-        const frame = await readCommand({ cmd: 'supervisor_sessions_list' }, controller.signal);
+        const frame = await settingsRequest({ cmd: 'supervisor_sessions_list' }, controller.signal, false, 'Supervisor');
         if (controller.signal.aborted) return;
         if (frame.available === false) throw new Error(text(frame.message, 'Supervisor unavailable'));
         setSessions(list(frame.sessions)); setError(''); setUpdated(new Date().toLocaleTimeString());
