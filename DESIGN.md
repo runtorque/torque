@@ -3512,3 +3512,15 @@ History renders the persisted contract: role/template, input/output token counts
 - Boundaries: Do not generically trim every string or recurse through arbitrary maps. Instructions, environment values, map keys/values and unknown fields remain exact in client payloads. Existing backend normalizers retain their authority, including Architect instruction normalization.
 - Lifecycle: Refusal preserves the exact authored draft. Sparse writes and partial acknowledgements remain scoped; retry does not replay a previously acknowledged scope. Successful rereads/reload display authoritative stored values.
 - Verification: Mounted regression reproduces the untrimmed path payload. Model tests cover all four scopes, explicit empty defaults, unchanged inputs and protected text/maps; production acceptance exercises four-scope partial failure, payloads, persistence and reload.
+
+
+### D-186 — Ownership-tree terminal activation is explicit and scoped
+
+- Date: 2026-09-26
+- Scope: Agent/terminal ownership rows, Live/Activity, focus_on_click and the visible xterm owner; P-331/P-332/P-333.
+- Activation: Double-clicking a row or pressing Enter selects its agent, opens Live, sends the canonical focus_agent command and places keyboard input into that row's visible terminal. The same action works when the row was already selected. Embedded controls such as collapse/menu buttons do not trigger double-click activation.
+- Selection: Ordinary selection retains Activity unless the existing Focus on click preference is enabled (standalone terminals continue to open Live). Keyboard focus and arrow traversal alone select no PTY. React applies live preference changes; no restart is required. This retains the ownership tree's inspection behavior while making the advertised preference effective.
+- Ownership: Local terminal focus is a one-shot request tied to the selected cell and session. Consume it after visible layout; cancel scheduled work on hide/unmount. Reconnect, routine data updates and later Live/Activity toggles do not replay consumed focus intent or steal focus from a draft. The terminal controller's visible/active ownership guard remains authoritative.
+- Verification: Reproduce missing double-click activation and unused preference. Component coverage checks Enter/Activity, live preference changes, traversal, one-shot focus and cancellation. Browser acceptance uses independent real PTY receivers to verify exact input target and retained composer state across activation/reconnect.
+
+- PTY handoff: Each cell/session receives a distinct terminal mount. Switching or restarting detaches the previous DOM surface immediately, even while its Strict Mode lease waits for cleanup, so that controller fails the visible-owner guard and cannot share the new terminal container. Ordinary same-session rerenders retain the mount and scrollback. Old-session activation intent cannot focus a replacement session.

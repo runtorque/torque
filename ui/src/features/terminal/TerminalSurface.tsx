@@ -57,9 +57,10 @@ function quoteShellPath(path: string): string {
 interface TerminalMountProps {
   cell: AgentViewModel;
   active: boolean;
+  focusRequest: number;
 }
 
-function TerminalMount({ cell, active }: TerminalMountProps) {
+function TerminalMount({ cell, active, focusRequest }: TerminalMountProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<TerminalController | null>(null);
   const [status, setStatus] = useState<TerminalConnectionStatus>('connecting');
@@ -94,6 +95,19 @@ function TerminalMount({ cell, active }: TerminalMountProps) {
       lease?.release();
     };
   }, [active, cell.id, cell.sessionId]);
+
+  const consumedFocus = useRef(0);
+  useEffect(() => {
+    if (!active || !cell.sessionId || !focusRequest || consumedFocus.current === focusRequest) return;
+    // Wait for the visible pane's layout, then consume this explicit intent.
+    // Routine rerenders, reconnect and revisiting Live cannot steal focus.
+    const frame = requestAnimationFrame(() => {
+      if (!controllerRef.current) return;
+      consumedFocus.current = focusRequest;
+      controllerRef.current.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [active, cell.id, cell.sessionId, focusRequest]);
 
   if (!cell.sessionId) {
     return <StateSurface title="Terminal stopped" description="Relaunch this agent to create a new PTY session." />;
@@ -148,9 +162,10 @@ interface TerminalWorkspaceProps {
   active?: boolean;
   directMessagesHeight?: number;
   composeHeight?: number;
+  focusRequest?: number;
 }
 
-export function TerminalWorkspace({ agent, terminal, messages, messageHistory, messageTarget, sendCommand, onUnavailable, showConversation = true, active = true, directMessagesHeight = 0, composeHeight = 0 }: TerminalWorkspaceProps) {
+export function TerminalWorkspace({ agent, terminal, messages, messageHistory, messageTarget, sendCommand, onUnavailable, showConversation = true, active = true, directMessagesHeight = 0, composeHeight = 0, focusRequest = 0 }: TerminalWorkspaceProps) {
   const workspace = useRef<HTMLDivElement>(null);
   const [workspaceHeight, setWorkspaceHeight] = useState(0);
   const [requestedConversationHeight, setRequestedConversationHeight] = useState<number | null>(null);
@@ -189,7 +204,7 @@ export function TerminalWorkspace({ agent, terminal, messages, messageHistory, m
 
   return (
     <div ref={workspace} className={`${styles.workspace} ${showConversation ? '' : styles.workspace_terminalOnly}`} style={workspaceStyle}>
-      <TerminalMount cell={terminal} active={active} />
+      <TerminalMount key={`${terminal.id}:${terminal.sessionId}`} cell={terminal} active={active} focusRequest={focusRequest} />
       {showConversation ? <>
         <VerticalResizeHandle
           label="Resize terminal and direct messages"

@@ -7,6 +7,7 @@ import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import {
   selectAuxiliaryResponseState,
   selectAgentsState,
+  selectAgentSettingsDefaults,
   selectCatalogState,
   selectGroupsState,
   selectMessagesState,
@@ -66,6 +67,7 @@ interface AgentTreeRowProps {
   collapsed: boolean;
   onToggle: () => void;
   onSelect: () => void;
+  onActivate: () => void;
   onFocus: () => void;
   onRestart: () => void;
   onRelaunch: () => void;
@@ -77,7 +79,7 @@ interface AgentTreeRowProps {
   onRemove: () => void;
 }
 
-function AgentTreeRow({ row, selected, focused, taskTitle, collapsed, onToggle, onSelect, onFocus, onRestart, onRelaunch, onClearContext, onInspectWorktree, onOrganize, onCopyId, onCopyName, onRemove }: AgentTreeRowProps) {
+function AgentTreeRow({ row, selected, focused, taskTitle, collapsed, onToggle, onSelect, onActivate, onFocus, onRestart, onRelaunch, onClearContext, onInspectWorktree, onOrganize, onCopyId, onCopyName, onRemove }: AgentTreeRowProps) {
   const { agent } = row;
   return (
     <div
@@ -89,7 +91,7 @@ function AgentTreeRow({ row, selected, focused, taskTitle, collapsed, onToggle, 
       data-agent-id={agent.id}
       tabIndex={focused ? 0 : -1}
       onClick={onSelect}
-      onDoubleClick={onFocus}
+      onDoubleClick={(event) => { if (!(event.target as HTMLElement).closest('button, input, textarea, a, [role="menuitem"]')) onActivate(); }}
       onFocus={onFocus}
       aria-label={`${agent.name}, ${agent.kind}, ${agent.status}`}
       style={{ '--tree-depth': row.depth } as CSSProperties}
@@ -184,9 +186,10 @@ interface FocusPanelProps {
   terminalOnly?: boolean;
   directMessagesHeight?: number;
   composeHeight?: number;
+  focusRequest?: number;
 }
 
-function FocusPanel({ agent, terminal, detachedTerminal, messages, messageTarget = null, messageHistory, host, sendCommand, onUnavailable, onDetachAgent, onInspectWorktree, onCreateWorktree, onCheckpoint, worktreeDisabled, onOrganize, onRemove, active = true, terminalOnly = false, directMessagesHeight = 0, composeHeight = 0 }: FocusPanelProps) {
+function FocusPanel({ agent, terminal, detachedTerminal, messages, messageTarget = null, messageHistory, host, sendCommand, onUnavailable, onDetachAgent, onInspectWorktree, onCreateWorktree, onCheckpoint, worktreeDisabled, onOrganize, onRemove, active = true, terminalOnly = false, directMessagesHeight = 0, composeHeight = 0, focusRequest = 0 }: FocusPanelProps) {
   const [settingsTarget, setSettingsTarget] = useState<AgentViewModel | null>(null);
   const run = (command: Record<string, unknown>) => { if (!sendCommand(command as { cmd: string })) onUnavailable(); };
   const focusDetached = () => {
@@ -232,7 +235,7 @@ function FocusPanel({ agent, terminal, detachedTerminal, messages, messageTarget
       <div className={styles.terminalHost}>
         {detachedTerminal && !terminalOnly
           ? <StateSurface title="Terminal detached" description="The PTY is owned by its native window, preventing competing focus and resize events." action={<Button tone="primary" onPress={focusDetached}>Focus terminal window</Button>} />
-          : <TerminalWorkspace agent={agent} terminal={terminal} messages={messages} messageTarget={messageTarget} messageHistory={messageHistory} sendCommand={sendCommand} onUnavailable={onUnavailable} showConversation={!terminalOnly} active={active} directMessagesHeight={directMessagesHeight} composeHeight={composeHeight} />}
+          : <TerminalWorkspace agent={agent} terminal={terminal} messages={messages} messageTarget={messageTarget} messageHistory={messageHistory} sendCommand={sendCommand} onUnavailable={onUnavailable} showConversation={!terminalOnly} active={active} focusRequest={focusRequest} directMessagesHeight={directMessagesHeight} composeHeight={composeHeight} />}
       </div>
 
       {settingsTarget ? <AgentSettingsDialog target={settingsTarget} onClose={() => setSettingsTarget(null)} /> : null}
@@ -252,6 +255,9 @@ export interface AgentWorkspaceProps {
 export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable, terminalOnly = false, active = true }: AgentWorkspaceProps) {
   const dispatch = useAppDispatch();
   const worktreeToolbar = useWorktreeToolbar(active);
+  const focusOnClick = useAppSelector(selectAgentSettingsDefaults).global.focus_on_click === true;
+  const activationSequence = useRef(0);
+  const [activation, setActivation] = useState<{ id: string; sessionId: AgentViewModel['sessionId']; token: number } | null>(null);
   const { records, digestSettings, digestBufferStats, digestSentEvents, engineerBufferStats, engineerSentEvents } = useAppSelector(selectAgentsState);
   const groupsState = useAppSelector(selectGroupsState);
   const catalog = useAppSelector(selectCatalogState);
@@ -300,10 +306,11 @@ export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable,
 
   const selectAgent = (agent: AgentViewModel, focusPty = false) => {
     dispatch(workspaceUiActions.setSelectedAgent(agent.id));
-    if (agent.cellType === 'terminal' && workspaceUi.agentsViewMode === 'activity') {
+    if (focusPty || (agent.cellType === 'terminal' && workspaceUi.agentsViewMode === 'activity')) {
       dispatch(workspaceUiActions.setAgentsViewMode('live'));
     }
     setFocusedId(agent.id);
+    setActivation(focusPty ? { id: agent.id, sessionId: agent.sessionId, token: ++activationSequence.current } : null);
     if (!sendCommand({ cmd: 'ui_select_agent', id: agent.id })) onCommandUnavailable();
     if (focusPty && !sendCommand({ cmd: 'focus_agent', id: agent.id })) onCommandUnavailable();
   };
@@ -334,7 +341,7 @@ export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable,
   const taskTitle = (agent: AgentViewModel) => text(asRecord(tasks[agent.currentTaskId]).task);
   const renderTreeRow = (row: VisibleAgentTreeRow) => {
     const { agent } = row;
-    return <AgentTreeRow key={agent.id} row={row} collapsed={collapsedIds.has(agent.id)} selected={selected?.id === agent.id} focused={effectiveFocusedId === agent.id} taskTitle={taskTitle(agent)} onToggle={() => setCollapsedIds((current) => { const next = new Set(current); if (next.has(agent.id)) next.delete(agent.id); else next.add(agent.id); return next; })} onSelect={() => selectAgent(agent)} onFocus={() => setFocusedId(agent.id)} onRestart={() => { if (!sendCommand({ cmd: 'restart_agent', id: agent.id })) onCommandUnavailable(); }} onRelaunch={() => { if (!sendCommand({ cmd: 'relaunch_agent', id: agent.id })) onCommandUnavailable(); }} onClearContext={() => { if (!sendCommand({ cmd: 'clear_agent_context', id: agent.id })) onCommandUnavailable(); }} onInspectWorktree={() => setWorktreeTarget(agent)} onOrganize={() => setOrganizationTarget(agent)} onCopyId={() => { void navigator.clipboard.writeText(agent.id); }} onCopyName={() => { void navigator.clipboard.writeText(agent.name); }} onRemove={() => setRemoveTarget(agent)} />;
+    return <AgentTreeRow key={agent.id} row={row} collapsed={collapsedIds.has(agent.id)} selected={selected?.id === agent.id} focused={effectiveFocusedId === agent.id} taskTitle={taskTitle(agent)} onToggle={() => setCollapsedIds((current) => { const next = new Set(current); if (next.has(agent.id)) next.delete(agent.id); else next.add(agent.id); return next; })} onSelect={() => selectAgent(agent, focusOnClick)} onActivate={() => selectAgent(agent, true)} onFocus={() => setFocusedId(agent.id)} onRestart={() => { if (!sendCommand({ cmd: 'restart_agent', id: agent.id })) onCommandUnavailable(); }} onRelaunch={() => { if (!sendCommand({ cmd: 'relaunch_agent', id: agent.id })) onCommandUnavailable(); }} onClearContext={() => { if (!sendCommand({ cmd: 'clear_agent_context', id: agent.id })) onCommandUnavailable(); }} onInspectWorktree={() => setWorktreeTarget(agent)} onOrganize={() => setOrganizationTarget(agent)} onCopyId={() => { void navigator.clipboard.writeText(agent.id); }} onCopyName={() => { void navigator.clipboard.writeText(agent.name); }} onRemove={() => setRemoveTarget(agent)} />;
   };
 
   const setViewMode = (mode: 'live' | 'activity') => {
@@ -383,7 +390,7 @@ export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable,
         <div className={styles.detailHost}>
           {selected ? <header className={styles.detailViewBar}><span>Agent view</span>{viewControl(selected)}</header> : null}
           <div className={`${styles.detailPane} ${workspaceUi.agentsViewMode === 'live' ? '' : styles.workspaceHidden}`} aria-hidden={workspaceUi.agentsViewMode !== 'live'}>
-            {selected ? <FocusPanel agent={selected} terminal={selected} detachedTerminal={terminalEntry} messages={messageTarget ? messagesState.direct[messageTarget.id] : []} messageTarget={messageTarget} messageHistory={messagesState.history[selected.id]} host={host} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onDetachAgent={() => { void detachAgents(); }} onInspectWorktree={() => setWorktreeTarget(selected)} onCreateWorktree={() => worktreeToolbar.begin(selected, 'create')} onCheckpoint={() => worktreeToolbar.begin(selected, 'checkpoint')} worktreeDisabled={!worktreeToolbar.ready || worktreeToolbar.blocked} onOrganize={() => setOrganizationTarget(selected)} onRemove={() => setRemoveTarget(selected)} directMessagesHeight={Number(workspace.terminalDirectMessagesHeight) || 0} composeHeight={Number(workspace.terminalComposeHeight) || 0} active={active && workspaceUi.agentsViewMode === 'live'} /> : <StateSurface title="Select an agent" description="Choose an agent to inspect status, worktree, settings, messages, and terminal." />}
+            {selected ? <FocusPanel agent={selected} terminal={selected} detachedTerminal={terminalEntry} messages={messageTarget ? messagesState.direct[messageTarget.id] : []} messageTarget={messageTarget} messageHistory={messagesState.history[selected.id]} host={host} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} onDetachAgent={() => { void detachAgents(); }} onInspectWorktree={() => setWorktreeTarget(selected)} onCreateWorktree={() => worktreeToolbar.begin(selected, 'create')} onCheckpoint={() => worktreeToolbar.begin(selected, 'checkpoint')} worktreeDisabled={!worktreeToolbar.ready || worktreeToolbar.blocked} onOrganize={() => setOrganizationTarget(selected)} onRemove={() => setRemoveTarget(selected)} directMessagesHeight={Number(workspace.terminalDirectMessagesHeight) || 0} composeHeight={Number(workspace.terminalComposeHeight) || 0} active={active && workspaceUi.agentsViewMode === 'live'} focusRequest={activation?.id === selected.id && activation.sessionId === selected.sessionId ? activation.token : 0} /> : <StateSurface title="Select an agent" description="Choose an agent to inspect status, worktree, settings, messages, and terminal." />}
           </div>
           <div className={`${styles.detailPane} ${workspaceUi.agentsViewMode === 'activity' ? '' : styles.workspaceHidden}`} aria-hidden={workspaceUi.agentsViewMode !== 'activity'}>
             {workspaceUi.agentsViewMode === 'activity' ? selected?.cellType === 'agent' ? <AgentDetailWorkspace active={active} key={selected.id} agent={selected} group={group} responses={auxiliaryResponses} tasks={tasks} directMessages={messagesState.direct[selected.id]} peerThreads={messagesState.peerThreads} digestSettings={digestSettings[selected.id]} digestBufferStats={digestBufferStats[selected.id] ?? engineerBufferStats[group]} digestSentEvents={digestSentEvents[selected.id] ?? engineerSentEvents[group]} sendCommand={sendCommand} onUnavailable={onCommandUnavailable} /> : <StateSurface title="Select an agent" description="Activity is available for Architects, Engineers, and Workers rather than standalone terminals." /> : null}

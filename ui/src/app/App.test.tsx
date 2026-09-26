@@ -1701,3 +1701,28 @@ it('does not detach a dirty settings workspace before explicit discard at the ho
   await waitFor(() => expect(invoke).toHaveBeenCalledWith('detach', { panel: 'control', section: 'settings', bounds: { width: 1080, height: 740 } }));
   expect(sendCommand.mock.calls.filter(([command]) => command.cmd === 'ui_set_detached_panels')).toHaveLength(1);
 });
+
+
+it('activates the selected terminal on double click and Enter while ordinary tree navigation preserves Activity', () => {
+  const { sendCommand } = renderShell();
+  fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
+  const row = screen.getByRole('treeitem', { name: 'Foundation Worker, worker, running' });
+  fireEvent.click(screen.getByRole('tab', { name: 'Activity' }));
+  fireEvent.click(row); expect(screen.getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'true');
+  sendCommand.mockClear(); fireEvent.doubleClick(row);
+  expect(sendCommand).toHaveBeenCalledWith({ cmd: 'focus_agent', id: 'agent-1' });
+  expect(screen.getByRole('tab', { name: 'Live' })).toHaveAttribute('aria-selected', 'true');
+  fireEvent.click(screen.getByRole('tab', { name: 'Activity' })); sendCommand.mockClear();
+  fireEvent.keyDown(row, { key: 'Enter' });
+  expect(sendCommand).toHaveBeenCalledWith({ cmd: 'focus_agent', id: 'agent-1' });
+  expect(screen.getByRole('tab', { name: 'Live' })).toHaveAttribute('aria-selected', 'true');
+});
+it('applies live Focus on click changes without activating a row merely receiving keyboard focus', () => {
+  const { appStore, sendCommand } = renderShell(browserHost, { ...compactStateFixture, global_settings: { focus_on_click: false } });
+  fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
+  const row = screen.getByRole('treeitem', { name: 'Foundation Worker, worker, running' });
+  sendCommand.mockClear(); fireEvent.click(row); expect(sendCommand).not.toHaveBeenCalledWith({ cmd: 'focus_agent', id: 'agent-1' });
+  act(() => { appStore.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'global_settings', settings: { focus_on_click: true } })); });
+  sendCommand.mockClear(); fireEvent.focus(row); expect(sendCommand).not.toHaveBeenCalled();
+  fireEvent.click(row); expect(sendCommand).toHaveBeenCalledWith({ cmd: 'focus_agent', id: 'agent-1' });
+});
