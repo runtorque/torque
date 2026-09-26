@@ -13,3 +13,14 @@
 .diff { white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; background: var(--surface); border: 1px solid var(--border); font-size: 11px; }
 .root [role='alert'] { color: var(--danger); }
 @media (max-width: 950px) { .columns { grid-template-columns: minmax(0, 1fr); } }
+
+.provenance { display: grid; gap: 6px; font-size: 11px; }
+.provenance > div { display: grid; grid-template-columns: minmax(80px, 1fr) minmax(0, 3fr); gap: 8px; }
+.provenance dt { color: var(--text-dim); }
+.provenance dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.root summary, .historyReview summary { cursor: pointer; margin: 8px 0; font-size: 11px; }
+.historyReview { min-width: 0; font-size: 12px; overflow-wrap: anywhere; }
+.historyReview label { display: grid; gap: 6px; }
+.historyReview textarea { min-height: 80px; }
+.historyReview footer { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.historyReview [role='alert'] { color: var(--danger); }

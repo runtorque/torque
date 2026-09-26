@@ -2,13 +2,15 @@ import { useEffect, useRef, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import { projectionActions } from '../../app/store';
 import { Button, StateSurface } from '../../design/primitives';
-import type { TorqueCommand, UnknownRecord } from '../../protocol';
-import { BehaviorReview, BehaviorVersionReview } from '../attention/BehaviorReview';
+import type { UnknownRecord } from '../../protocol';
+import { BehaviorReview } from '../attention/BehaviorReview';
 import { settingsRequest } from '../control/settingsRequests';
 import { behaviorActions } from './session';
 import { draftDiff, matchesScope, record, scopeArgs, scopeKey, text, type Scope } from './model';
 import { useBehaviorScope } from './useBehaviorScope';
 import { BehaviorProposalOverview } from './BehaviorProposalOverview';
+import { BehaviorVersionHistory } from './BehaviorVersionHistory';
+import { BehaviorHistoryReview } from './BehaviorHistoryReview';
 import styles from './BehaviorOverlayEditor.module.css';
 export function BehaviorOverlayEditor({ group, active, proposals, agents, refreshVersion = 0 }: { group: string; active: unknown; proposals: unknown; agents: UnknownRecord[]; refreshVersion?: number }) {
   const dispatch = useAppDispatch(); const selected = useAppSelector((state) => state.behaviorSession.selections[group]);
@@ -24,7 +26,7 @@ export function BehaviorOverlayEditor({ group, active, proposals, agents, refres
 }
 function ScopeEditor({ scope, activeVersion, proposals, refreshVersion }: { scope: Scope; activeVersion: string; proposals: unknown; refreshVersion: number }) {
   const dispatch = useAppDispatch(); const key = scopeKey(scope); const draft = useAppSelector((state) => state.behaviorSession.drafts[key]); const read = useBehaviorScope(scope, activeVersion, refreshVersion);
-  const [preview, setPreview] = useState(false); const [selectedProposal, setSelectedProposal] = useState(''); const [versionCommand, setVersionCommand] = useState<TorqueCommand | null>(null);
+  const [preview, setPreview] = useState(false); const [selectedProposal, setSelectedProposal] = useState(''); const [selectedVersion, setSelectedVersion] = useState('');
   const [pending, setPending] = useState(false); const [error, setError] = useState(''); const owner = useRef<AbortController | null>(null);
   useEffect(() => () => { owner.current?.abort(); owner.current = null; }, []);
   const base = text(record(read.accepted?.read.version).id); const signature = JSON.stringify([base, draft?.text ?? '', draft?.rationale ?? '']); const submitted = draft?.submitted?.signature === signature ? draft.submitted : null;
@@ -54,9 +56,9 @@ function ScopeEditor({ scope, activeVersion, proposals, refreshVersion }: { scop
       <div className={styles.toolbar}><Button onPress={() => setPreview((value) => !value)} aria-expanded={preview}>{preview ? 'Hide draft preview' : 'Preview draft diff'}</Button><Button tone="primary" isDisabled={!read.ready || pending || !!submitted} onPress={() => { void submit(); }}>{pending ? 'Submitting proposal…' : 'Propose change'}</Button></div>
       {preview ? <pre className={styles.diff} aria-label="Behavior draft diff">{draftDiff(text(read.accepted.read.text), draft.text) || 'No text changes.'}</pre> : null}
       {error ? <p role="alert">{error}</p> : null}{submitted ? <p role="status">Proposal submitted: {submitted.id}. Required review is still separate.</p> : null}
-      <h3>Versions</h3>{read.accepted.versions.length ? read.accepted.versions.map((version) => <Button key={text(version.id)} tone="quiet" onPress={() => setVersionCommand({ cmd: 'behavior_overlay_diff', ...scopeArgs(scope), from_version_id: base, to_version_id: version.id })}>Version {String(version.version_number ?? version.id)} · {text(version.author_kind) || 'system'}</Button>) : <p>No versions returned.</p>}
+      <BehaviorVersionHistory versions={read.accepted.versions} activeId={base} ready={read.ready && !pending} onInspect={setSelectedVersion} />
     </section><section><h3>Approval queue</h3>{openProposals.length ? openProposals.map((proposal) => <article key={text(proposal.id)}><strong>{text(proposal.id)}</strong><p>{text(proposal.status)} · next {text(proposal.next_actor_kind) || 'none'}</p><p>{text(proposal.rationale) || 'No rationale.'}</p><Button onPress={() => setSelectedProposal(text(proposal.id))}>Review behavior diff</Button></article>) : <p>No open proposals for this scope.</p>}</section></div> : null}
     {selectedProposal ? <BehaviorReview key={selectedProposal} proposalId={selectedProposal} onClose={() => { setSelectedProposal(''); read.refresh(); }} /> : null}
-    {versionCommand ? <BehaviorVersionReview command={versionCommand} onClose={() => setVersionCommand(null)} /> : null}
+    {selectedVersion ? <BehaviorHistoryReview key={selectedVersion} scope={scope} base={base} target={selectedVersion} scopeReady={read.ready} refreshScope={read.refresh} onClose={() => setSelectedVersion('')} /> : null}
   </>;
 }
