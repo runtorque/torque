@@ -71,6 +71,19 @@ class BoardCreationRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(cached.body), response)
         self.assertEqual(len(self.calls), 1)
 
+    async def test_schedule_creation_retry_joins_pending_creation(self):
+        first = asyncio.create_task(self.request(cmd='schedule_create'))
+        await self.entered.wait()
+        second = asyncio.create_task(self.request(cmd='schedule_create'))
+        await asyncio.sleep(0)
+        try:
+            self.assertEqual(len(self.calls), 1)
+        finally:
+            self.release.set()
+            responses = await asyncio.gather(first, second)
+        self.assertEqual(responses[0].body, responses[1].body)
+        self.assertEqual(len(self.calls), 1)
+
     async def test_changed_payload_cannot_join_active_creation_key(self):
         first = asyncio.create_task(self.request())
         await self.entered.wait()

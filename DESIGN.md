@@ -3587,3 +3587,16 @@ History renders the persisted contract: role/template, input/output token counts
 - Once the user starts discarding staged uploads, keep that discard intent through an unknown cleanup outcome. Retain the displayed draft but disable creation and evidence edits; only explicit cleanup retry may finish closing, since the files may already have been removed.
 
 - Pending single-file removal also blocks creation and evidence edits until explicit Retry removal acknowledges it. Cancel may discard the entire draft. The retained row is an unresolved operation, not proof that the file still exists.
+
+
+### D-193 — Schedule authoring and lifecycle parity
+
+- Date: 2026-09-26
+- Scope: Board schedule listing, authoring, execution and removal; P-043/P-346–P-350 and the schedule portion of P-345.
+- The list spans all groups, sorts by name, and has an explicit group filter. Show the slug/group/enabled state, task template, action/role, trigger/timezone, next run and run count. Format trigger and next-run timestamps in the displayed schedule timezone (UTC by default), with an explicit timezone suffix; invalid legacy timezone values fall back to the original ISO instant. Keep keyed cards mounted through routine updates.
+- Author recurring and one-time triggers with explicit modes and six Classic cron presets. Keep both local mode drafts, but send an empty inactive trigger. One-time inputs use the browser local timezone and preserve the original ISO instant, including seconds, when unchanged. The timezone field supplies cron scheduling.
+- Group reassignment requests that group's action and role catalogs. Named variables exclude TASK/torque, support defaults and retain per-action drafts; Advanced variables remains available for structured values. Represent unavailable saved selections explicitly.
+- Visible schedules own bounded 15-second catalog/list reads; reconnect refresh retains accepted choices, editor nodes and drafts. Hidden schedules issue no reads. Invalid, late, cancelled or wrong-group catalog replies cannot replace accepted options. Each failure has an explicit retry.
+- Schedule mutations have a retained owner and 30-second observation deadline, validated command-specific acknowledgements, and no reconnect replay. Keep failed edits. Creation freezes its reviewed payload/key on an unknown outcome; explicit retry shares the same pending/completed HTTP operation. Until acknowledged/refused, keep its editor mounted and prevent closing or switching schedules. This does not certify process-crash exactly-once behavior.
+- Removal uses a custom confirmation with captured schedule name/group/ID. Live list updates cannot retarget the confirmation; cancellation sends no write.
+- Run now uses injected dispatch/event callbacks and records the resulting task, timestamp and run count. Validate with an isolated generic worker, not a commercial provider invocation.

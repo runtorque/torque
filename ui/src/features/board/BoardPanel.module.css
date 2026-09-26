@@ -220,3 +220,9 @@
 .taskCreateScroll > p { margin: 0; }
 .taskCreateForm > .formError { grid-row: 2; }
 .taskCreateForm > .detailFooter { grid-row: 3; }
+
+/* Schedule cards keep metadata readable and controls reachable in compact windows. */
+.scheduleList article { flex-wrap: wrap; }
+.scheduleList article > div:last-child { flex-wrap: wrap; }
+.scheduleForm fieldset { display: grid; gap: 12px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.scheduleForm h3 { margin: 0; }

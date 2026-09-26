@@ -1339,3 +1339,12 @@ P-340 now has production acceptance for exact-intent creation retry, overlapping
 Final validation: **869 UI tests / 101 files**, lint/typecheck/build verification, **12 targeted production browser scenarios / 5.6 minutes**, and the unchanged backend's frozen **3,217-test full suite / 82 skips**. The first new browser file check incorrectly used a filesystem path as a URL; canonical-route inspection and the corrected full targeted run passed. Recovery screenshots were inspected and preserved.
 
 Current ledger: **350 mapped / 335 implemented or equivalent / 11 open / 4 retired**. Schedules P-043/P-346–P-350, Board catalog recovery P-345, broad Settings P-087–P-089 and lazy/reconnect P-112 remain open. Schedule Run now also needs a handler-callback regression: source still references pre-extraction names. Complete browser/inventory/Planning/native/external/recovery acceptance, Phase 4 and Classic retirement remain open.
+
+
+### Schedule parity accepted — 2026-09-26
+
+P-043/P-346–P-350 now have implementation and production acceptance: trigger modes and six presets, named variables, all-group discovery/reassignment, operational metadata with explicit timezone formatting, and reviewed removal. Run now's extracted handler now uses its injected dispatch/event callbacks. Visible schedule catalogs/read recovery is implemented; the remaining Board create/edit/batch catalog consumers keep P-345 open. D-193 and the matrix record behavior and evidence.
+
+Validation: **879 UI tests / 102 files**, lint/typecheck/build verification; **3,219 full regression tests / 82 skips**; **2 final production browser scenarios / 53.8 seconds** with actual generic-worker dispatch, all lifecycle operations, persisted mode/group/variable changes, confirmed deletion, unknown creation recovery without duplication, and hidden-panel reconnect checks. Final screenshots were inspected. The final CSS-only cleanup has separate build and browser verification; backend source did not change after its full pass.
+
+Ledger: **350 mapped / 341 implemented or equivalent / 5 open / 4 retired**. Open items are P-087/P-088/P-089/P-112/P-345. Full browser/inventory/Planning/native/external/recovery gates, Phase 4 and Classic retirement remain open; these counts are implementation dispositions, not complete migration certification.

@@ -319,6 +319,7 @@ describe('workspace shell', () => {
       target: { value: 'Ship Phase 2' },
     });
     fireEvent.click(screen.getByText('Advanced variables'));
+    fireEvent.click(screen.getByText('Advanced variables'));
     fireEvent.change(screen.getByRole('textbox', { name: 'Action variables (JSON)' }), { target: { value: '[]' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create task' }));
     await screen.findByText('Action variables must be a JSON object.');
@@ -353,23 +354,30 @@ describe('workspace shell', () => {
     expect(inlineTitle.compareDocumentPosition(firstTask) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('reports invalid schedule variables instead of silently discarding the submission', () => {
-    const { sendCommand } = renderShell();
+  it('reports invalid schedule variables instead of silently discarding the submission', async () => {
+    const commands: TorqueCommand[] = [];
+    vi.stubGlobal('fetch', (_input: unknown, options?: RequestInit) => {
+      const command = JSON.parse(typeof options?.body === 'string' ? options.body : '{}') as TorqueCommand; commands.push(command);
+      const data = command.cmd === 'list_actions' ? { type: 'actions', group: command.group, actions: [] } : command.cmd === 'list_roles' ? { type: 'roles', roles: [] } : command.cmd === 'schedule_list' ? { type: 'schedule_list', schedules: [] } : { type: 'ok', schedule_id: 'new' };
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data }) });
+    });
+    renderShell();
     fireEvent.click(screen.getByRole('button', { name: 'Schedules' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), { target: { value: 'Daily audit' } });
     fireEvent.change(screen.getByRole('textbox', { name: 'Task title' }), { target: { value: 'Review Board health' } });
     fireEvent.change(screen.getByRole('textbox', { name: 'Cron' }), { target: { value: '0 9 * * 1-5' } });
+    fireEvent.click(screen.getByText('Advanced variables'));
     fireEvent.change(screen.getByRole('textbox', { name: 'Action variables (JSON)' }), { target: { value: '[]' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create schedule' }));
 
-    expect(screen.getByText('Action variables must be a valid JSON object.')).toBeVisible();
-    expect(sendCommand).not.toHaveBeenCalledWith(expect.objectContaining({ cmd: 'schedule_create' }));
+    expect(screen.getByText('Action variables must be a JSON object.')).toBeVisible();
+    expect(commands.some((command) => command.cmd === 'schedule_create')).toBe(false);
 
     fireEvent.change(screen.getByRole('textbox', { name: 'Action variables (JSON)' }), { target: { value: '{}' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create schedule' }));
-    expect(sendCommand).toHaveBeenCalledWith(expect.objectContaining({
+    await waitFor(() => expect(commands).toContainEqual(expect.objectContaining({
       cmd: 'schedule_create', name: 'Daily audit', task_template: 'Review Board health', cron_expr: '0 9 * * 1-5',
-    }));
+    })));
   });
 
   it('right-aligns status details without duplicating host branding', () => {

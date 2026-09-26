@@ -1,3 +1,4 @@
+import { SchedulesPanel } from './SchedulesPanel';
 import { useBoardTaskDetail } from './useBoardTaskDetail';
 import { StaleDoneArchive } from './StaleDoneArchive';
 import { TaskActivity } from './TaskActivity';
@@ -114,12 +115,6 @@ function actionItems(value: unknown): Record<string, unknown>[] {
 
 function roleItems(value: unknown): Record<string, unknown>[] {
   return uniqueRecordItems(value, (item) => textValue(item.slug, textValue(item.name)));
-}
-
-function parseJsonObject(value: string): Record<string, unknown> {
-  const parsed: unknown = JSON.parse(value || '{}');
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Expected a JSON object');
-  return parsed as Record<string, unknown>;
 }
 
 function sendOrNotify(sendCommand: CommandSender, command: TorqueCommand, unavailable: () => void) {
@@ -706,86 +701,12 @@ function LaneManager({ lanes, sendCommand, onCommandUnavailable, onClose }: { la
   return <div className={styles.laneManager}><form onSubmit={(event) => { event.preventDefault(); if (!newLane.trim()) return; sendOrNotify(sendCommand, { cmd: 'board_add_lane', name: newLane.trim() }, onCommandUnavailable); setNewLane(''); }}><label>New lane<input value={newLane} onChange={(event) => setNewLane(event.target.value)} /></label><Button tone="primary" type="submit" isDisabled={!newLane.trim()}>Add lane</Button></form><section>{lanes.filter((lane) => lane !== 'Archived').map((lane, index) => <article key={lane}>{editing === lane ? <input value={rename} onChange={(event) => setRename(event.target.value)} aria-label={`Rename ${lane}`} /> : <strong>{lane}</strong>}<Button tone="quiet" aria-label={`Move ${lane} left`} onPress={() => reorder(lane, -1)} isDisabled={index === 0}>←</Button><Button tone="quiet" aria-label={`Move ${lane} right`} onPress={() => reorder(lane, 1)} isDisabled={index === lanes.length - 2}>→</Button>{reserved.has(lane) ? <span>reserved</span> : editing === lane ? <><Button tone="primary" onPress={() => { if (rename.trim()) sendOrNotify(sendCommand, { cmd: 'board_rename_lane', old_name: lane, new_name: rename.trim() }, onCommandUnavailable); setEditing(''); }}>Save</Button><Button tone="quiet" onPress={() => setEditing('')}>Cancel</Button></> : <><Button tone="quiet" onPress={() => { setEditing(lane); setRename(lane); }}>Rename</Button><Button tone="danger" onPress={() => { setRemoving(lane); setFallback(lanes.find((item) => item !== lane && item !== 'Archived') ?? 'Backlog'); }}>Remove…</Button></>}</article>)}</section>{removing ? <div className={styles.laneRemove}><p>Move tasks from <strong>{removing}</strong> before removing it.</p><label>Move tasks to<select value={fallback} onChange={(event) => setFallback(event.target.value)}>{lanes.filter((lane) => lane !== removing && lane !== 'Archived').map((lane) => <option key={lane}>{lane}</option>)}</select></label><Button tone="danger" onPress={() => { sendOrNotify(sendCommand, { cmd: 'board_remove_lane', name: removing, move_tasks_to: fallback }, onCommandUnavailable); setRemoving(''); }}>Remove lane</Button><Button tone="quiet" onPress={() => setRemoving('')}>Cancel</Button></div> : null}<footer><Button tone="quiet" onPress={onClose}>Done</Button></footer></div>;
 }
 
-interface SchedulesPanelProps {
-  group: string;
-  schedules: Record<string, unknown>;
-  actions: unknown;
-  roles: unknown;
-  sendCommand: CommandSender;
-  onCommandUnavailable: () => void;
-  onClose: () => void;
-}
-
-function SchedulesPanel({ group, schedules, actions, roles, sendCommand, onCommandUnavailable, onClose }: SchedulesPanelProps) {
-  const [editingId, setEditingId] = useState('');
-  const [name, setName] = useState('');
-  const [template, setTemplate] = useState('');
-  const [description, setDescription] = useState('');
-  const [actionName, setActionName] = useState('');
-  const [actionVars, setActionVars] = useState('{}');
-  const [role, setRole] = useState('');
-  const [labels, setLabels] = useState('');
-  const [cron, setCron] = useState('');
-  const [scheduledAt, setScheduledAt] = useState('');
-  const [timezone, setTimezone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
-  const [formError, setFormError] = useState('');
-  const groupSchedules = Object.values(schedules).map(record).filter((schedule) => schedule.group === group);
-  const reset = () => { setEditingId(''); setName(''); setTemplate(''); setDescription(''); setActionName(''); setActionVars('{}'); setRole(''); setLabels(''); setCron(''); setScheduledAt(''); setTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone); setFormError(''); };
-  const edit = (schedule: Record<string, unknown>) => { setEditingId(textValue(schedule.id)); setName(textValue(schedule.name)); setTemplate(textValue(schedule.task_template)); setDescription(textValue(schedule.description)); setActionName(textValue(schedule.action_name)); setActionVars(JSON.stringify(record(schedule.action_vars), null, 2)); setRole(textValue(schedule.agent_template)); setLabels(Array.isArray(schedule.labels) ? schedule.labels.join(', ') : ''); setCron(textValue(schedule.cron_expr)); setScheduledAt(textValue(schedule.scheduled_at).slice(0, 16)); setTimezone(textValue(schedule.timezone, Intl.DateTimeFormat().resolvedOptions().timeZone)); setFormError(''); };
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    let parsedVars: Record<string, unknown>;
-    try { parsedVars = parseJsonObject(actionVars); }
-    catch { setFormError('Action variables must be a valid JSON object.'); return; }
-    setFormError('');
-    sendOrNotify(sendCommand, {
-      cmd: editingId ? 'schedule_update' : 'schedule_create', ...(editingId ? { id: editingId } : {}), name: name.trim(), task_template: template.trim(), description, group,
-      action_name: actionName, action_vars: parsedVars, agent_template: role, labels: labels.split(',').map((item) => item.trim()).filter(Boolean),
-      cron_expr: cron.trim(), scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : '',
-      timezone,
-    }, onCommandUnavailable);
-    reset();
-  };
-  return (
-    <div className={styles.schedulesPanel}>
-      <form onSubmit={submit} className={styles.scheduleForm}>
-        <header><h3>{editingId ? 'Edit schedule' : 'New schedule'}</h3>{editingId ? <Button tone="quiet" type="button" onPress={reset}>Cancel edit</Button> : null}</header>
-        <label>Name<input value={name} onChange={(event) => setName(event.target.value)} required /></label>
-        <label>Task title<input value={template} onChange={(event) => setTemplate(event.target.value)} required placeholder="Daily review {date}" /></label>
-        <label>Description<textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} /></label>
-        <div className={styles.formGrid}>
-          <label>Cron<input value={cron} onChange={(event) => setCron(event.target.value)} placeholder="0 9 * * 1-5" /></label>
-          <label>Or one-time<input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} /></label>
-          <label>Timezone<input value={timezone} onChange={(event) => setTimezone(event.target.value)} /></label>
-          <label>Labels<input value={labels} onChange={(event) => setLabels(event.target.value)} placeholder="scheduled, review" /></label>
-          <label>Action<select value={actionName} onChange={(event) => setActionName(event.target.value)}><option value="">Group default</option>{actionItems(actions).map((item) => <option key={textValue(item.name)} value={textValue(item.name)}>{textValue(item.name)}</option>)}</select></label>
-          <label>Worker role<select value={role} onChange={(event) => setRole(event.target.value)}><option value="">Action/default role</option>{roleItems(roles).map((item) => <option key={textValue(item.slug, textValue(item.name))} value={textValue(item.slug, textValue(item.name))}>{textValue(item.name, textValue(item.slug))}</option>)}</select></label>
-        </div>
-        <label>Action variables (JSON)<textarea value={actionVars} onChange={(event) => { setActionVars(event.target.value); setFormError(''); }} rows={3} spellCheck={false} /></label>
-        {formError ? <p className={styles.formError}>{formError}</p> : null}
-        <Button tone="primary" type="submit" isDisabled={!cron && !scheduledAt}>{editingId ? 'Save schedule' : 'Create schedule'}</Button>
-      </form>
-      <section className={styles.scheduleList} aria-label="Existing schedules">
-        {groupSchedules.length ? groupSchedules.map((schedule) => {
-          const id = textValue(schedule.id);
-          const enabled = schedule.enabled !== false;
-          return <article key={id}>
-            <div><strong>{textValue(schedule.name, 'Untitled')}</strong><span>{textValue(schedule.cron_expr, textValue(schedule.scheduled_at))}</span></div>
-            <div><Button tone="quiet" onPress={() => edit(schedule)}>Edit</Button><Button tone="quiet" onPress={() => sendOrNotify(sendCommand, { cmd: 'schedule_run', id }, onCommandUnavailable)}>Run</Button><Button tone="quiet" onPress={() => sendOrNotify(sendCommand, { cmd: enabled ? 'schedule_disable' : 'schedule_enable', id }, onCommandUnavailable)}>{enabled ? 'Disable' : 'Enable'}</Button><Button tone="danger" onPress={() => sendOrNotify(sendCommand, { cmd: 'schedule_remove', id }, onCommandUnavailable)}>Remove</Button></div>
-          </article>;
-        }) : <StateSurface title="No schedules" description="Create a recurring or one-time task dispatch for this group." />}
-      </section>
-      <footer className={styles.detailFooter}><span /><Button tone="quiet" onPress={onClose}>Close</Button></footer>
-    </div>
-  );
-}
-
 export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPanelProps) {
   const [initialTaskTab, setInitialTaskTab] = useState<'execution' | 'activity'>('execution');
   const taskEditBusy = useRef(false);
   const taskEditClose = useRef<(() => void) | null>(null);
   const dispatch = useAppDispatch();
-  const { records, lanes: rawLanes, schedules, archived } = useAppSelector(selectTasksState);
+  const { records, lanes: rawLanes, archived } = useAppSelector(selectTasksState);
   const connection = useAppSelector(selectConnection);
   const { records: agents } = useAppSelector(selectAgentsState);
   const groupsState = useAppSelector(selectGroupsState);
@@ -796,6 +717,7 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPa
   const [filtersByGroup, setFiltersByGroup] = useState<Record<string, BoardFilterState>>({});
   const [removeTaskId, setRemoveTaskId] = useState<string | null>(null);
   const [schedulesOpen, setSchedulesOpen] = useState(false);
+  const [schedulesLocked, setSchedulesLocked] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importRef, setImportRef] = useState('');
@@ -1085,7 +1007,7 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPa
         <div><p>Workspace / {group}</p><h1 id="board-heading">Board</h1></div>
         <span className={styles.boardCount}>{filteredTasks.length} visible · {surfaceTasks.length} total</span>
         <div className={styles.headerActions}>
-          <Button onPress={() => { setSchedulesOpen(true); [{ cmd: 'schedule_list' }, { cmd: 'list_actions', group }, { cmd: 'list_roles', group }].forEach((command) => sendOrNotify(sendCommand, command, onCommandUnavailable)); }}>Schedules</Button>
+          <Button onPress={() => setSchedulesOpen(true)}>Schedules</Button>
           <Button onPress={() => setLanesOpen(true)}>Lanes</Button>
           <Button onPress={() => setImportOpen(true)}>Import external</Button>
           <Button onPress={() => { const next = !showArchived; setShowArchived(next); clearSelection(); if (next) sendOrNotify(sendCommand, { cmd: 'archived_tasks', group }, onCommandUnavailable); }}>{showArchived ? 'Active board' : 'Archive'}</Button>
@@ -1201,8 +1123,8 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPa
         </div>
       </ModalDialog>
       {workspaceUi.createTaskDialogOpen ? <TaskCreateDialog key={group} group={group} lanes={lanes} actions={catalog.actions} roles={catalog.roles} onClose={() => dispatch(workspaceUiActions.setCreateTaskDialogOpen(false))} /> : null}
-      <ModalDialog title="Schedules" description={`Automated task dispatches for ${group}`} size="large" isOpen={schedulesOpen} onOpenChange={setSchedulesOpen}>
-        <SchedulesPanel group={group} schedules={schedules} actions={catalog.actions} roles={catalog.roles} sendCommand={sendCommand} onCommandUnavailable={onCommandUnavailable} onClose={() => setSchedulesOpen(false)} />
+      <ModalDialog title="Schedules" description="Recurring and one-time dispatches across your groups" size="large" isOpen={schedulesOpen} onOpenChange={(open) => { if (open || !schedulesLocked) setSchedulesOpen(open); }}>
+        {schedulesOpen ? <SchedulesPanel group={group} onLockChange={setSchedulesLocked} onClose={() => setSchedulesOpen(false)} /> : null}
       </ModalDialog>
       <ModalDialog title="Manage Board lanes" description="Add or order lanes. Torque's five reserved lifecycle lanes cannot be renamed or removed." size="medium" isOpen={lanesOpen} onOpenChange={setLanesOpen}>
         <LaneManager lanes={rawLanes.filter((lane): lane is string => typeof lane === 'string')} sendCommand={sendCommand} onCommandUnavailable={onCommandUnavailable} onClose={() => setLanesOpen(false)} />

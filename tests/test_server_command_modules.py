@@ -542,6 +542,32 @@ class ScheduleCommandModuleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1, len(listed["schedules"]))
 
 
+    async def test_run_dispatches_and_records_schedule_through_injected_callbacks(self):
+        from unittest.mock import AsyncMock, Mock
+        state = importlib.import_module("torque.state").MatrixState()
+        state.groups["Torque"] = []
+        schedule = state.schedule_add(
+            "Review", "Torque", task_template="Review {date}",
+            description="Scheduled context", action_name="review",
+            action_vars={"SCOPE": "repo"}, labels=["scheduled"],
+        )
+        dispatch = AsyncMock(return_value=None)
+        event = Mock()
+        result = await self.commands._handle_schedule_command(
+            {"cmd": "schedule_run", "id": schedule.id}, state,
+            dispatch_command=dispatch, panel_event=event,
+        )
+        self.assertEqual("ok", result["type"])
+        task = state.board_tasks[result["task_id"]]
+        dispatch.assert_awaited_once_with({"cmd": "dispatch_task", "id": task.id, "create_agent": True})
+        self.assertEqual(schedule.last_task_id, task.id)
+        self.assertEqual(schedule.run_count, 1)
+        self.assertTrue(schedule.last_run_at)
+        self.assertNotIn("{date}", task.task)
+        self.assertEqual(task.action_vars, {"SCOPE": "repo"})
+        self.assertEqual(task.description, "Scheduled context")
+        event.assert_called_once_with("schedule_fired", "", "Review", "Torque", task.task, task_id=task.id)
+
 class AgentClassCommandModuleTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
