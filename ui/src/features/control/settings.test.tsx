@@ -122,3 +122,26 @@ it('excludes the inert automatic-terminal fallback from editable values and chan
   expect(changedSettings(stored, { ...stored, auto_terminals: 0, max_agents: 4 })).toEqual({ max_agents: 4 });
   expect(resetSettings(stored, { auto_terminals: 0, max_agents: 0 })).toEqual({ ...stored, max_agents: 0 });
 });
+
+it.each([
+  ['focus_new_tabs', 'Focus new tabs', false, true],
+  ['terminal_always_custom_dialog', 'Terminal always custom dialog', true, false],
+  ['worktree_merge_instructions', 'Worktree merge instructions', 'Retain this legacy text', ''],
+] as const)('preserves inactive compatibility field %s without presenting or resetting it', (key, label, storedValue, defaultValue) => {
+  const stored = { [key]: storedValue, max_agents: 3 };
+  const editable = editableSettings(stored);
+  expect(editable).toEqual({ max_agents: 3 });
+  expect(changedSettings(stored, { ...stored, [key]: defaultValue, max_agents: 4 })).toEqual({ max_agents: 4 });
+  expect(resetSettings(stored, { [key]: defaultValue, max_agents: 0 })).toEqual({ ...stored, max_agents: 0 });
+  render(<StructuredSettings value={editable} onChange={() => undefined} />);
+  expect(screen.queryByLabelText(label)).not.toBeInTheDocument();
+});
+
+it('explains the Classic-only scope of active layout compatibility settings', () => {
+  const change = vi.fn();
+  render(<StructuredSettings value={{ filter_by_window: true, collapsed_default: true }} onChange={change} />);
+  expect(screen.getByLabelText('Filter by window')).toHaveAccessibleDescription(/Classic workspace only/i);
+  expect(screen.getByLabelText('Collapsed default')).toHaveAccessibleDescription(/Classic workspace only/i);
+  fireEvent.change(screen.getByLabelText('Collapsed default'), { target: { value: 'false' } });
+  expect(change).toHaveBeenCalledWith({ filter_by_window: true, collapsed_default: false });
+});

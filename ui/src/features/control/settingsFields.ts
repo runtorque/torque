@@ -17,7 +17,7 @@ export const settingFields: Record<string, SettingField> = {
   "filter_by_window": {
     "label": "Filter by window",
     "kind": "bool",
-    "description": "global default for window filtering"
+    "description": "Classic workspace only: filter agents and terminals by the focused terminal window. The React workspace shows the selected group."
   },
   "focus_new_tabs": {
     "label": "Focus new tabs",
@@ -632,6 +632,7 @@ export const settingFields: Record<string, SettingField> = {
   },
   "collapsed_default": {
     "label": "Collapsed default",
+    "description": "Classic workspace only: start this group collapsed. The React ownership tree retains your explicit branch choices for this window.",
     "kind": "bool"
   },
   "agent_env_vars": {

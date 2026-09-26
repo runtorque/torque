@@ -729,15 +729,15 @@ Inventory includes every first-party classic module, inline modal and registered
 
 P-330/D-185 defines the save-boundary text contract across these fields: known commands, model/reasoning overrides, paths and task defaults use Classic outer-whitespace normalization. Empty worktree base/dispatch/journal fields use their explicit defaults. Instruction payloads and arbitrary maps remain exact; server normalizers still govern stored values. This does not certify every field or runtime effect.
 
-Each row is a Required field contract, implemented by `StructuredSettings.tsx` or its explicit Settings panel control. Defaults are hydrated from the daemon; descriptions retain dataclass inheritance/unit notes. Opening the form waits for all settings responses. An unchanged inherited relay value is not promoted to an explicit override. Choices/min/max originate from the classic form and are server-validated on save. Daemon provider/model/reasoning choices and per-agent reset/override intent now have focused coverage. Daemon-backed section/field resets and sparse saves now have named coverage below. The original 163-row inventory includes runtime records and the classic `provider` alias; those are identified below rather than presented as editable defaults. Nested GitHub number/maps omitted by the original inventory are included. Exhaustive non-default boundary/enum and runtime-effect checks remain open; default write/reload and typed-control coverage do not certify those effects.
+Except for explicitly identified runtime and compatibility-only records, each row is a Required field contract, implemented by `StructuredSettings.tsx` or its explicit Settings panel control. Defaults are hydrated from the daemon; descriptions retain dataclass inheritance/unit notes. Opening the form waits for all settings responses. An unchanged inherited relay value is not promoted to an explicit override. Choices/min/max originate from the classic form and are server-validated on save. Daemon provider/model/reasoning choices and per-agent reset/override intent now have focused coverage. Daemon-backed section/field resets and sparse saves now have named coverage below. The original 163-row inventory includes runtime records and the classic `provider` alias; those are identified below rather than presented as editable defaults. Nested GitHub number/maps omitted by the original inventory are included. Exhaustive non-default boundary/enum and runtime-effect checks remain open; default write/reload and typed-control coverage do not certify those effects.
 
 Acceptance for **each field**: hydrate its server value, change it using the listed control, save, reopen and compare; exercise its boundary/enum validation and verify unrelated incoming data preserves draft/focus. Generic control and coordinated-save tests cover shared mechanics, not every field's backend effect.
 
 | Field | Scope | Control / choices | Description / constraints |
 | --- | --- | --- | --- |
 | `default_command` | Global | Text | empty = use config.DEFAULT_COMMAND (env var fallback) |
-| `filter_by_window` | Group, Global | Enabled/Disabled | global default for window filtering |
-| `focus_new_tabs` | Global | Enabled/Disabled | switch focus to newly created tabs |
+| `filter_by_window` | Group, Global | Enabled/Disabled; Classic-only scope guidance | Active Classic grid filtering by focused terminal window; React selected-group scope is unchanged (D-213). |
+| `focus_new_tabs` | Global | Compatibility-only · excluded from edit/reset | No current runtime consumer. Preserve stored values through unrelated edits and resets; D-213. |
 | `focus_on_click` | Global | Enabled/Disabled | Live preference controls ownership-row terminal activation; P-332/D-186. |
 | `max_pipeline_depth` | Global | Number | 0 = unlimited; min=0 |
 | `max_event_log` | Global | Number | max persisted panel events; min=50, max=10000 |
@@ -793,7 +793,7 @@ Acceptance for **each field**: hydrate its server value, change it using the lis
 | `env_vars` | Group | Nested named fields | Server value/default |
 | `env_file` | Group | Text | Server value/default |
 | `max_agents` | Group | Number | Server value/default; min=0, max=100 |
-| `collapsed_default` | Group | Enabled/Disabled | Server value/default |
+| `collapsed_default` | Group | Enabled/Disabled; Classic-only scope guidance | Active Classic group disclosure default; distinct from React explicit agent-branch disclosure (D-209/D-213). |
 | `agent_env_vars` | Group | Nested named fields | Server value/default |
 | `agent_env_file` | Group | Text | Server value/default |
 | `git_worktree` | Group | Enabled/Disabled | Server value/default |
@@ -834,7 +834,7 @@ Acceptance for **each field**: hydrate its server value, change it using the lis
 | `agent_tab_color` | Group | Text | Server value/default |
 | `worktree_auto_checkpoint` | Group | Enabled/Disabled | auto-checkpoint on agent stop |
 | `checkpoint_on_progress` | Group | Enabled/Disabled | auto-checkpoint on torque ai progress/done |
-| `worktree_merge_instructions` | Group | Text | additional instructions appended to merge prompt |
+| `worktree_merge_instructions` | Group | Compatibility-only · excluded from edit/reset | No current merge-prompt consumer; Classic save also omits it. Preserve stored text; D-213. |
 | `worktree_symlinks` | Group | One value per line | repo-relative paths or glob patterns to symlink from repo root |
 | `worktree_submodules` | Group | One value per line | repo-relative submodule paths to materialize as nested linked worktrees |
 | `guidance_hint_cadence` | Group | Number | 0=every time; otherwise 1st, then every N |
@@ -850,7 +850,7 @@ Acceptance for **each field**: hydrate its server value, change it using the lis
 | `terminal_tab_color` | Group | Text | Server value/default |
 | `terminal_env_vars` | Group | Nested named fields | Server value/default |
 | `terminal_env_file` | Group | Text | Server value/default |
-| `terminal_always_custom_dialog` | Group | Enabled/Disabled | Server value/default |
+| `terminal_always_custom_dialog` | Group | Compatibility-only · excluded from edit/reset | No current terminal-dialog consumer. Preserve stored value; D-213. |
 | `terminal_close_on_disconnect` | Group | Enabled/Disabled | remove terminal from Torque when tab closed |
 | `board_sync_github` | Group | Nested named fields | GitHub adapter settings |
 | `engineer_agent_id` | Group | Runtime record · read-only in this inventory | Managed by group/agent identity, attention or hint workflows; excluded from reset/save. |
@@ -2383,3 +2383,11 @@ Native bounds checkpoint (2026-09-26, D-212): a failing titlebar-accessibility r
 
 
 Final native-bounds validation: `make ui-check` passed lint/typecheck, **110 files / 1,001 tests**, production build and build verification. `make lint-docs-contract` checked 72 Markdown files and `git diff --check` passed. The final full Rust rerun passed **35 unit tests / two binary integration tests** (`/private/tmp/native-bounds-rust-verified-20260926.log`). An earlier concurrent run had one existing mock-daemon profile-mismatch test receive no runtime response; all geometry tests passed in that run, and the unchanged full suite passed on the subsequent run. Final visible-window QA passed all **ten** cases (`/private/tmp/native-bounds-visible-final-20260926.log`), including exact physical-size assertions for legacy main/detached captures. No backend/protocol changes; full `make test` and the complete browser suite were not repeated for this native checkpoint. Counts remain 366 mapped / 358 implemented or equivalent / four open / four intentional retirements.
+
+
+Settings compatibility checkpoint (2026-09-26, acceptance pending): fresh consumer audit confirmed three inactive profile fields (`focus_new_tabs`, `terminal_always_custom_dialog`, `worktree_merge_instructions`) were exposed as effective controls and could be overwritten by section resets. Four failing regressions reproduce that mismatch and missing Classic-only scope guidance. D-213 excludes the inactive fields while preserving their stored values and keeps the active Classic `filter_by_window`/`collapsed_default` controls editable with explicit descriptions. This changes the canonical editable-field audit from 145 to 142 entries (33 global / 67 group / 23 Engineer / 19 Architect), with three additional documented compatibility records; it does not silently remove inventory entries. The broad Settings/P-112 acceptance gates remain open.
+
+
+D-213 acceptance (2026-09-26): four reproduced failures became **29 passing focused tests**. Full UI validation passed **110 files / 1,005 tests**, lint/typecheck and production build/verification. Five real-daemon browser scenarios passed compatibility preservation, search, reconnect/drafts/caret, numeric validation and partial-scope retry. A compact screenshot exposed help text flowing beside reset buttons; the final scoped layout repair passed a new production build and all three compatibility/layout browser scenarios at 1280/960/760px. The final compact screenshot was inspected. Logs: `/private/tmp/settings-compatibility-{red,focused,ui-check,browser,browser-final}-20260926.log`. The isolated profile on port 19067 ended with zero PTY sessions; daemon/children were removed and the port verified free.
+
+Additional numeric storage audit: **73/73 cases across all 20 top-level numeric fields** persisted and reloaded unchanged in disposable SQLite-backed state, covering declared minima/maxima, every offered numeric choice, defaults, and the largest safe integer for unbounded controls (`/private/tmp/settings-numeric-boundary-results-20260926.json`). This is storage evidence, not UI round-trip or live-effect certification for every value. Current canonical field projection was regenerated from actual defaults and `editableSettings`: **142 editable fields** plus the documented compatibility/runtime records. Full backend and complete browser suites were not repeated for this frontend-only change. Ledger remains **366 mapped / 358 implemented or equivalent / four open / four intentional retirements**; P-087/P-088/P-089/P-112 and independent native/external/crash/inventory gates remain open.

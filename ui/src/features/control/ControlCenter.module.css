@@ -232,6 +232,7 @@
 .structuredSettings legend, .structuredSettings label > span { overflow-wrap: anywhere; }
 .structuredSettings fieldset { grid-column: 1 / -1; min-width: 0; border: 1px solid var(--border); padding: 12px; }
 .structuredSettings small { color: var(--text-dim); font-size: 10px; line-height: 1.5; }
+.structuredSettings > div > small { display: block; margin-top: 3px; }
 
 .settingsFields { border: 0; padding: 0; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
 .settingsFields > section { min-width: 0; }

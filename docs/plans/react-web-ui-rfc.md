@@ -1450,3 +1450,9 @@ Logs recovery checkpoint (2026-09-26): D-211 extends existing P-006/P-112 with a
 
 
 Native bounds recovery checkpoint (2026-09-26): D-212 extends P-108/P-123/P-124 with shared main/detached restoration against connected display work areas. The titlebar regression, eleven new geometry cases, full Rust suite (35 unit/two integration tests) and ten isolated visible native-window scenarios support the repair. Physical multi-monitor, sleep/crash and other-platform acceptance remain open; this does not certify complete native or Phase 4 parity.
+
+
+Settings compatibility checkpoint (2026-09-26, acceptance pending): D-213 distinguishes three inactive legacy fields from active Classic layout preferences. Inactive stored values are preserved through React edits/reset/reload rather than represented by controls with no runtime effect. Classic window filtering and group collapse remain editable and explicitly scoped. This repairs existing P-087/P-088 contracts; the broader field-by-field Settings and P-112 audits remain open.
+
+
+D-213 acceptance passed: four red regressions, 29 focused tests, the full 1,005-test UI gate, five functional browser scenarios and three final compatibility/layout scenarios support the Settings repair. All 73 numeric storage-audit cases passed; runtime effects and complete field-by-field/browser/native acceptance remain separate. The three broad Settings rows and P-112 are still open.

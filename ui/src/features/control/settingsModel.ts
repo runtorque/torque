@@ -1,8 +1,9 @@
 import type { UnknownRecord } from '../../protocol';
 
 export const runtimeSettingKeys = ['group', 'engineer_agent_id', 'engineer_hint_snoozes', 'default_lanes'];
-// Persisted for old profiles; agent launch intentionally ignores this fallback.
-const compatibilitySettingKeys = ['auto_terminals'];
+// Persisted for old profiles, but no active launch/layout/merge behavior reads
+// these keys. Preserve them through sparse saves and section resets (D-213).
+const compatibilitySettingKeys = ['auto_terminals', 'focus_new_tabs', 'terminal_always_custom_dialog', 'worktree_merge_instructions'];
 export function editableSettings(values: UnknownRecord, omit: string[] = []): UnknownRecord {
   return Object.fromEntries(Object.entries(values).filter(([key]) => !runtimeSettingKeys.includes(key) && !compatibilitySettingKeys.includes(key) && !key.startsWith('pending_') && !omit.includes(key)));
 }

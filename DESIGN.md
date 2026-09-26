@@ -3778,3 +3778,12 @@ History renders the persisted contract: role/template, input/output token counts
 - Use each display's physical work area and scale. Preserve captured physical pixels, legacy display-marked bounds and the main window’s historical interpretation of unmarked captures as physical; explicit logical bounds and omitted default sizes are converted once for the selected display.
 - Keep the entire restored window reachable within the selected work area, including its native decorations. Honor logical minimum sizes where they fit; reduce the native minimum on a smaller screen so it cannot defeat recovery. Move before applying the final physical size.
 - This restoration contract does not certify monitor hot-plug while a window is open, operating-system sleep recovery, or other platforms. Those native acceptance checks remain separate.
+
+
+### D-213 — Separate inactive profile fields from Classic layout preferences
+
+- Date: 2026-09-26
+- Scope: P-087/P-088 Settings field contracts; extends D-184 compatibility preservation.
+- Current standalone/desktop behavior does not read `focus_new_tabs`, `terminal_always_custom_dialog` or `worktree_merge_instructions`. Keep their persisted values for old profiles, but exclude them from React controls, search, changed-value writes and section resets. Do not promise focus, dialog or merge behavior through controls with no effect, and do not reset or migrate stored values while editing another setting.
+- `filter_by_window` (global/group) and `collapsed_default` (group) still control the Classic grid. Keep their typed controls editable, with accessible descriptions that explicitly identify their Classic-only scope. Place field guidance on its own line so it is not read as part of a Reset button. The React fixed workspace selects one group; its ownership-tree disclosure follows explicit window-local choices under D-077/D-209. A Classic group default must not silently become an agent-branch default.
+- This is a documented compatibility disposition for inactive fields, not removal of active launch, terminal, worktree or Classic layout workflows. Metadata and daemon schema remain available for profile compatibility. Boundary, provider and other runtime-effect acceptance remains independent.
