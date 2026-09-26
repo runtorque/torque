@@ -3687,3 +3687,12 @@ History renders the persisted contract: role/template, input/output token counts
 - The shared composer store owns a started cancellation for its captured agent and exact loop ID. Changing selection or unmounting that panel must not lose its pending/result state or affect the unrelated draft. Bound observation at 30 seconds independently of transport cancellation, settle timeout into an unknown-outcome error, and leave explicit retry available even if the projection already shows the loop stopped.
 - Retry the identical guarded command and idempotency key. Reconnect and returning to the agent do not replay the write. Expired replies cannot settle a newer retry. Continue requiring the matching cancelled-loop acknowledgement and audit identity before reporting this request as confirmed.
 - Keep the existing displayed-loop backend guard: a replacement loop is never cancelled by an old request. This UI deadline does not establish crash-safe receipt recovery or change ordinary message, upload or turn-cancellation delivery semantics.
+
+
+### D-203 — Coordinate terminal effects and acknowledge actual delivery
+
+- Date: 2026-09-26
+- Scope: P-360/P-362; keyed HTTP terminal submission and cancellation of a submitted user DM turn.
+- Matching overlapping requests share one shielded backend operation. Losing a caller must not cancel its delivery. A completed handler acknowledgement survives receipt-save failure in memory until exact retry persists it; changed payloads cannot take over that retained result. Keep existing durable replay after receipt persistence and distinct execution for distinct message keys.
+- Treat an explicit False from the terminal adapter as a verified unavailable-session failure. Restore optimistic running state under the existing freshness guards, record no sent history or success receipt, and let the composer retain its draft through the existing failure path.
+- These changes do not certify handler-error or process-crash recovery. In particular, an error after input or interrupt delivery is not evidence that nothing happened. P-361 retains the requirement for frozen submitted intent, bounded UI observation and truthful recovery; do not add automatic retries or claim an uncertain interrupt left a turn unchanged.

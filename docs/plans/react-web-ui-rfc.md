@@ -1393,3 +1393,8 @@ P-358 now settles GitHub discovery/preflight deadlines independently of fetch ca
 ### Retained loop-cancellation recovery checkpoint — 2026-09-26
 
 P-359 now bounds loop cancellation at 30 seconds while retaining its captured agent/loop/key in the shared composer store. Selection and reconnect do not replay it; expired responses cannot settle a retry, and unrelated drafts and replacement loops remain protected. D-202 and the matrix record two reproduced failures, 30 focused UI tests, six backend loop regressions, a 956-test UI check and two real-daemon browser scenarios. QA is stopped. Ledger: **359 mapped / 351 implemented or equivalent / 4 open / 4 retired**. Broad audits and independent full migration acceptance remain open.
+
+
+### Terminal delivery and receipt checkpoint — 2026-09-26
+
+P-360 now coordinates overlapping keyed terminal sends and turn cancellations, shields delivery from caller disconnects and retains successful results through failed receipt persistence. P-362 prevents absent/closed PTYs from being reported as sent. D-203 and the matrix record reproduced failures and 297 passing focused backend tests using actual command, turn-service and PTY-adapter paths. A complete make test run passed 956 React tests but had one footer-fixture failure among 3,242 backend tests (82 skips); that exact fixture passed on a diagnostic rerun, without establishing a clean final full run. P-361 keeps uncertain post-effect submission/cancellation recovery explicitly open. Ledger: **362 mapped / 353 implemented or equivalent / 5 open / 4 retired**. Broad settings/reconnect audits and independent migration acceptance remain open.

@@ -53,6 +53,7 @@ from .config import (
     log,
 )
 from .db import TorqueDB, canonical_user_agent_thread_id
+from .terminal_adapter import TerminalInputUnavailableError
 from .daemon_owner import ProfileDaemonOwner
 from .deploy_state import architect_deploy_state_payload, capture_deploy_boot_state
 from .mission_control import build_mission_control_summary
@@ -1973,7 +1974,10 @@ async def _handle_send_user_message_command(data, state: MatrixState,
     try:
         if state.agents.get(cell_id) is not cell or cell.session_id != session_id:
             raise RuntimeError("The terminal session changed before delivery. Review the draft before retrying.")
-        await bridge.send_text(session_id, text)
+        delivered = await bridge.send_text(session_id, text)
+        if delivered is False:
+            raise TerminalInputUnavailableError(
+                "The terminal session is unavailable. No message was sent.")
     except Exception:
         if (
             optimistic_marked
