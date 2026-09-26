@@ -58,3 +58,53 @@ test('Board uploads reject unrelated metadata and retain accepted evidence throu
     const saved = (await command(request, { cmd: 'task_detail', id })).task as Row; expect((saved.attachments as Row[]).map((item) => item.filename)).toEqual(['original.png']); expect((await request.get(`/attachments/${encodeURIComponent(id)}/accepted.png`)).status()).toBe(404); expect((await request.get(`/attachments/${encodeURIComponent(id)}/original.png`)).status()).toBe(200);
   } finally { release(); }
 });
+
+test('Closing after an unacknowledged committed save preserves the task upload', async ({ page, request }) => {
+  test.setTimeout(60_000); const title = 'Preserve uncertain save upload'; const { id } = await fixture(request, title);
+  let committed = false; let release = () => {}; const removals: Row[] = [];
+  await page.route('**/api/cmd', async (route) => {
+    const data = route.request().postDataJSON() as Row;
+    if (data.cmd === 'remove_attachment') removals.push(data);
+    if (data.cmd === 'board_update_task') {
+      const response = await route.fetch(); expect((await response.json() as { ok: boolean }).ok).toBe(true); committed = true;
+      await new Promise<void>((resolve) => { release = resolve; }); await route.fulfill({ response }); return;
+    }
+    await route.continue();
+  });
+  try {
+    await page.goto('/'); await page.getByText(title, { exact: true }).dblclick();
+    const dialog = page.getByRole('dialog', { name: title, exact: true }); await dialog.getByRole('tab', { name: 'Evidence', exact: true }).click();
+    await dialog.getByLabel('Upload evidence files', { exact: true }).setInputFiles({ name: 'preserved.png', mimeType: 'image/png', buffer: Buffer.from('committed evidence') });
+    await expect(dialog.getByRole('button', { name: 'Remove attachment preserved.png', exact: true })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Save task', exact: true }).click(); await expect.poll(() => committed).toBe(true);
+    await expect(dialog.getByRole('alert')).toContainText('Closing preserves uploaded files', { timeout: 35_000 });
+    await page.screenshot({ path: test.info().outputPath('board-unknown-save-preserves-files.png') });
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click(); await expect(dialog).toHaveCount(0); release();
+    const saved = (await command(request, { cmd: 'task_detail', id })).task as Row;
+    const upload = (saved.attachments as Row[]).find((item) => item.filename === 'preserved.png'); expect(upload).toBeTruthy();
+    expect((await request.get(`/attachments/${encodeURIComponent(id)}/${encodeURIComponent(String(upload!.filename))}`)).status()).toBe(200); expect(removals).toEqual([]);
+  } finally { release(); }
+});
+
+test('Unconfirmed task upload discard blocks saving until Cancel cleanup is retried', async ({ page, request }) => {
+  test.setTimeout(60_000); const title = 'Confirm task upload discard'; const { id } = await fixture(request, title); let release = () => {}; let removals = 0;
+  await page.route('**/api/cmd', async (route) => {
+    const data = route.request().postDataJSON() as Row;
+    if (data.cmd === 'remove_attachment' && ++removals === 1) {
+      const response = await route.fetch(); await new Promise<void>((resolve) => { release = resolve; }); await route.fulfill({ response }); return;
+    }
+    await route.continue();
+  });
+  try {
+    await page.goto('/'); await page.getByText(title, { exact: true }).dblclick(); const dialog = page.getByRole('dialog', { name: title, exact: true });
+    await dialog.getByRole('tab', { name: 'Evidence', exact: true }).click(); await dialog.getByLabel('Upload evidence files').setInputFiles({ name: 'discard.png', mimeType: 'image/png', buffer: Buffer.from('discard upload') });
+    await expect(dialog.getByRole('button', { name: 'Remove attachment discard.png', exact: true })).toBeVisible(); await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(dialog.getByRole('alert')).toContainText('Could not discard new uploads', { timeout: 35_000 });
+    await expect(dialog.getByRole('button', { name: 'Save task', exact: true })).toBeDisabled(); await expect(dialog.getByLabel('Title', { exact: true })).toBeDisabled();
+    expect((await request.get(`/attachments/${encodeURIComponent(id)}/discard.png`)).status()).toBe(404);
+    await page.setViewportSize({ width: 760, height: 600 }); await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeInViewport(); await page.screenshot({ path: test.info().outputPath('board-edit-discard-unknown.png') }); release();
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click(); await expect(dialog).toHaveCount(0); expect(removals).toBe(2);
+    const saved = (await command(request, { cmd: 'task_detail', id })).task as Row; expect((saved.attachments as Row[]).map((row) => row.filename)).toEqual(['original.png']);
+    expect((await request.get(`/attachments/${encodeURIComponent(id)}/original.png`)).status()).toBe(200);
+  } finally { release(); }
+});

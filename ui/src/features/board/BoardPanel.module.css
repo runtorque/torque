@@ -212,3 +212,11 @@
 .taskDetailHost { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .taskDetailHost > [role="alert"] { flex: none; padding-bottom: 12px; }
 .taskDetailHost > .taskDetailForm { flex: 1; height: auto; min-height: 0; }
+
+.taskCreateHost { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.taskCreateHost > [role="alert"] { flex: none; margin-top: 0; }
+.taskCreateForm { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr) auto auto; overflow: hidden; }
+.taskCreateScroll { grid-row: 1; display: grid; align-content: start; gap: 12px; min-width: 0; min-height: 0; overflow: auto; }
+.taskCreateScroll > p { margin: 0; }
+.taskCreateForm > .formError { grid-row: 2; }
+.taskCreateForm > .detailFooter { grid-row: 3; }

@@ -305,7 +305,7 @@ describe('workspace shell', () => {
     const commands: TorqueCommand[] = [];
     vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => {
       commands.push(JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand);
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: 'board_task_added', task_id: 'created' } }) });
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: 'board_task_added', task_id: 'created', title: commands.at(-1)?.task } }) });
     }));
     const { appStore } = renderShell();
     act(() => { appStore.dispatch(projectionActions.auxiliaryResourceReceived({

@@ -22,7 +22,7 @@ function setup(actions: unknown = [], defaultAction = '') {
     if (url === '/api/upload/cleanup') { cleanups.push(typeof options.body === 'string' ? options.body : '{}' ); return response(fail === 'cleanup' ? { ok: false, error: 'Cleanup failed' } : { ok: true }); }
     const cmd = JSON.parse(typeof options.body === 'string' ? options.body : '{}' ) as TorqueCommand; calls.push(cmd);
     if (cmd.cmd === 'preview_prompt' && !fail) return response({ ok: true, data: { type: 'prompt_preview', prompt: 'Rendered unsaved prompt', warning: 'Preview warning' } });
-    return response(fail === cmd.cmd ? { ok: false, error: 'Write rejected' } : { ok: true, data: { type: cmd.cmd === 'board_add_task' ? 'board_task_added' : 'ok', task_id: 'created' } });
+    return response(fail === cmd.cmd ? { ok: false, creation_refused: true, error: 'Write rejected' } : { ok: true, data: { type: cmd.cmd === 'board_add_task' ? 'board_task_added' : 'state', task_id: 'created', title: cmd.task, seq: 10, board_tasks: {} } });
   }));
   const view = (catalog: unknown) => <Provider store={store}><TaskCreateDialog group="Foundation" lanes={['Backlog']} actions={catalog} roles={[]} onClose={onClose} /></Provider>;
   const rendered = render(view(actions));
@@ -126,7 +126,7 @@ describe('reviewed task creation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
     fireEvent.click(screen.getByRole('button', { name: 'Create task' }));
     expect(onClose).not.toHaveBeenCalled(); expect(fetcher).toHaveBeenCalledOnce();
-    await act(async () => { complete({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: 'board_task_added', task_id: 'once' } }) }); await Promise.resolve(); });
+    await act(async () => { complete({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: 'board_task_added', task_id: 'once', title: 'Once' } }) }); await Promise.resolve(); });
     expect(onClose).toHaveBeenCalledOnce();
   });
 });

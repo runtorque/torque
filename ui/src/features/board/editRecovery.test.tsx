@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { connectionActions, createAppStore, projectionActions, workspaceUiActions } from '../../app/store';
 import { compactStateFixture } from '../../protocol/fixtures';
 import { readCommand } from '../../protocol/http';
-import type { AuxiliaryFrame, TorqueCommand } from '../../protocol';
+import type { AuxiliaryFrame, TorqueCommand, UnknownRecord } from '../../protocol';
 import { BoardPanel } from './BoardPanel';
 vi.mock('../../protocol/http', () => ({ readCommand: vi.fn() }));
 const read = vi.mocked(readCommand);
@@ -62,4 +62,42 @@ it('rejects upload metadata owned by another task', async () => {
   await setup(() => Promise.resolve(ack)); vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: [{ filename: 'wrong.png', path: '/attachments/other/wrong.png', mime_type: 'image/png' }] }) })));
   fireEvent.click(screen.getByRole('tab', { name: 'Evidence' })); fireEvent.change(screen.getByLabelText('Upload evidence files'), { target: { files: [new File(['x'], 'wrong.png', { type: 'image/png' })] } }); await flush();
   expect(screen.getByRole('alert')).toHaveTextContent('invalid upload acknowledgement'); expect(screen.queryByRole('button', { name: 'Remove attachment wrong.png' })).not.toBeInTheDocument();
+});
+
+it.each(['close', 'restore draft', 'retry revised draft'])('preserves files from an unknown save when choosing %s', async (choice) => {
+  const pending = held<AuxiliaryFrame>(); const { writes } = await setup(() => Promise.resolve(ack)); let latest: UnknownRecord = { ...task }; let firstSave: UnknownRecord | undefined;
+  read.mockImplementation((command) => {
+    if (command.cmd === 'task_detail') return Promise.resolve({ type: 'task_detail', id: 'task', task: latest });
+    writes.push(command);
+    if (command.cmd === 'board_update_task') { latest = { ...latest, ...command }; if (!firstSave) { firstSave = latest; return pending.promise; } }
+    if (command.cmd === 'remove_attachment') latest = { ...latest, attachments: (latest.attachments as UnknownRecord[]).filter((item) => item.filename !== command.filename) };
+    return Promise.resolve({ type: 'state', seq: 13, board_tasks: { task: latest } });
+  });
+  vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: [{ filename: 'new.png', path: '/attachments/task/new.png', mime_type: 'image/png' }] }) })));
+  fireEvent.click(screen.getByRole('tab', { name: 'Evidence' })); fireEvent.change(screen.getByLabelText('Upload evidence files'), { target: { files: [new File(['a'], 'new.png', { type: 'image/png' })] } }); await flush();
+  fireEvent.click(screen.getByRole('button', { name: 'Save task' })); await deadline(); expect(screen.getByRole('alert')).toHaveTextContent('outcome is unknown');
+  if (choice === 'close') fireEvent.click(screen.getByRole('button', { name: /^Close$/ }));
+  else {
+    fireEvent.click(screen.getByRole('button', { name: 'Remove attachment new.png' }));
+    if (choice === 'retry revised draft') fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), { target: { value: 'Revised title' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save task' }));
+  }
+  await flush(); expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  // The first write can complete after a later retry; neither path may delete its files.
+  latest = firstSave!;
+  expect(latest.attachments).toEqual(expect.arrayContaining([expect.objectContaining({ filename: 'new.png' })]));
+  expect(writes.filter((command) => command.cmd === 'remove_attachment')).toHaveLength(0);
+  pending.resolve({ type: 'state', seq: 12, board_tasks: { task: latest } }); await flush();
+});
+
+it('locks task edits after an uncertain discard until cleanup is retried', async () => {
+  const pending = held<AuxiliaryFrame>(); let removals = 0;
+  await setup((command) => command.cmd === 'remove_attachment' && ++removals === 1 ? pending.promise : Promise.resolve(ack));
+  vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: [{ filename: 'new.png', path: '/attachments/task/new.png', mime_type: 'image/png' }] }) })));
+  fireEvent.click(screen.getByRole('tab', { name: 'Evidence' })); fireEvent.change(screen.getByLabelText('Upload evidence files'), { target: { files: [new File(['a'], 'new.png', { type: 'image/png' })] } }); await flush();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' })); await deadline();
+  expect(screen.getByRole('alert')).toHaveTextContent('Could not discard new uploads');
+  expect(screen.getByRole('button', { name: 'Save task' })).toBeDisabled(); expect(screen.getByRole('textbox', { name: 'Title' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' })); await flush(); expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  pending.resolve(ack); await flush(); expect(removals).toBe(2);
 });

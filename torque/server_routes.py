@@ -21,9 +21,8 @@ from typing import Any
 from aiohttp import web
 
 from . import profiling
-from .worktree_requests import (
-    ACKNOWLEDGED_WORKTREE_MUTATIONS, PendingWorktreeWrites, WorktreeRequestConflict,
-)
+from .worktree_requests import ACKNOWLEDGED_WORKTREE_MUTATIONS
+from .pending_requests import PendingCommandWrites, CommandRequestConflict
 from .attachment_uploads import AttachmentUploadError, save_message_attachment_stream
 from .config import log
 from .state import hot_json_dumps_async
@@ -585,7 +584,10 @@ def build_http_routes(
                 terminal_clients.get(cell_id, set()).discard(ws)
             return ws
 
-    pending_worktree_writes = PendingWorktreeWrites()
+    pending_api_writes = PendingCommandWrites()
+    # Completed receipts alone cannot deduplicate creation during awaited
+    # action resolution. A disconnected caller must not cancel the shared write.
+    coordinated_writes = ACKNOWLEDGED_WORKTREE_MUTATIONS | {'board_add_task'}
 
     async def handle_api_cmd(request):
             """REST endpoint for CLI and scripting access.
@@ -619,17 +621,17 @@ def build_http_routes(
                     status=guard["status"])
 
             key = str(data.get("idempotency_key", "") or "").strip()
-            if not key or cmd not in ACKNOWLEDGED_WORKTREE_MUTATIONS:
+            if not key or cmd not in coordinated_writes:
                 return await _execute_api_command(data)
             try:
-                response = await pending_worktree_writes.run(
+                response = await pending_api_writes.run(
                     key, api_request_hash(data),
                     lambda: _execute_api_command(data),
                 )
-            except WorktreeRequestConflict as exc:
+            except CommandRequestConflict as exc:
                 return web.json_response({"ok": False, "error": str(exc)}, status=409)
             # Each HTTP caller gets a distinct response object; only the
-            # completed body from its keyed worktree operation is shared.
+            # completed body from its keyed command operation is shared.
             return web.Response(body=response.body, status=response.status,
                                 headers=response.headers.copy())
 
@@ -674,8 +676,10 @@ def build_http_routes(
                     {"ok": False, "error": str(exc)}, status=500)
 
             if result and result.get("type") == "error":
-                return web.json_response(
-                    {"ok": False, "error": result.get("message", "")})
+                refusal = {"ok": False, "error": result.get("message", "")}
+                if cmd == "board_add_task" and result.get("creation_refused") is True:
+                    refusal["creation_refused"] = True
+                return web.json_response(refusal)
             if result and result.get("type") == "deliverable_missing":
                 # Hard-gate refusal: surface as a CLI/REST failure so the
                 # documented `torque ai done`/`ready` paths see the same outcome

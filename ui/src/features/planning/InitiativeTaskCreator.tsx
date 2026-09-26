@@ -62,6 +62,6 @@ export function InitiativeTaskCreator({ initiative, disabled, onLinked }: {
   return <>
     {createdTaskId ? <p role="status">Task {createdTaskId} exists, but its link has not been confirmed. Resume to retry the link, or inspect it later from the Board task selector.</p> : null}
     <Button isDisabled={disabled} onPress={() => setPrefill(initiativeTaskPrefill(initiative))}>{createdTaskId ? 'Resume task link' : 'Create Board task'}</Button>
-    {prefill ? <TaskCreateDialog group={group} lanes={lanes.filter((lane): lane is string => typeof lane === 'string' && lane !== 'Archived')} actions={catalog.actions} roles={catalog.roles} initialValues={prefill} notice={catalogError ? <p role="alert">{catalogError} <Button onPress={() => setCatalogRevision((value) => value + 1)}>Retry task options</Button></p> : null} createdTaskId={createdTaskId} onCreated={setCreatedTaskId} afterCreate={link} onClose={() => setPrefill(null)} /> : null}
+    {prefill ? <TaskCreateDialog key={`${id}:${group}`} group={group} lanes={lanes.filter((lane): lane is string => typeof lane === 'string' && lane !== 'Archived')} actions={catalog.actions} roles={catalog.roles} initialValues={prefill} notice={catalogError ? <p role="alert">{catalogError} <Button onPress={() => setCatalogRevision((value) => value + 1)}>Retry task options</Button></p> : null} createdTaskId={createdTaskId} onCreated={setCreatedTaskId} afterCreate={link} onClose={() => setPrefill(null)} /> : null}
   </>;
 }

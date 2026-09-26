@@ -1,9 +1,11 @@
-import { useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { useAppDispatch, useAppSelector } from '../../app/hooks';
-import { projectionActions, selectGroupsState, selectTasksState } from '../../app/store';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useAppSelector } from '../../app/hooks';
+import { selectGroupsState, selectTasksState } from '../../app/store';
 import { Button, ModalDialog } from '../../design/primitives';
 import type { TorqueCommand, UnknownRecord } from '../../protocol';
-import { readCommand } from '../../protocol/http';
+import { CommandResponseError } from '../../protocol/http';
+import { boardWriteRequest, observeBoardRequest } from './boardReadRequest';
+import { uploadBoardFile } from './boardEditRequests';
 import { VerificationFields, type VerificationDraft } from './VerificationFields';
 import { TaskEvidenceEditor } from './TaskEvidenceEditor';
 import { taskText } from './taskCreationModel';
@@ -27,7 +29,6 @@ export interface TaskCreateDialogProps {
   afterCreate?: (id: string) => Promise<void>;
 }
 export function TaskCreateDialog({ group, lanes, actions, roles, onClose, initialValues, createdTaskId = '', onCreated, afterCreate, notice }: TaskCreateDialogProps) {
-  const dispatch = useAppDispatch();
   const { records: taskRecords } = useAppSelector(selectTasksState);
   const [title, setTitle] = useState(initialValues?.title ?? '');
   const [description, setDescription] = useState(initialValues?.description ?? '');
@@ -47,65 +48,96 @@ export function TaskCreateDialog({ group, lanes, actions, roles, onClose, initia
   const [draftId] = useState(() => `draft-${crypto.randomUUID()}`);
   const uploaded = useRef(false); const busy = useRef(false); const created = useRef(createdTaskId);
   const [createdId, setCreatedId] = useState(createdTaskId); const [pending, setPending] = useState(false); const [error, setError] = useState('');
-  const request = async (command: TorqueCommand) => {
-    const frame = await readCommand(command, new AbortController().signal);
-    if (frame.type === 'error') throw new Error(taskText(frame.message || 'The request failed.'));
-    dispatch(projectionActions.auxiliaryResourceReceived(frame)); return frame;
-  };
-  const run = async (operation: () => Promise<void>) => {
+  const activeOperation = useRef<AbortController | null>(null);
+  const submitted = useRef<TorqueCommand | null>(null);
+  const [uncertain, setUncertain] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
+  const [pendingRemoval, setPendingRemoval] = useState<{ kind: 'artifact' | 'attachment'; index: number } | null>(null);
+  useEffect(() => () => { activeOperation.current?.abort(); activeOperation.current = null; }, []);
+  const owns = (controller: AbortController) => activeOperation.current === controller && !controller.signal.aborted;
+  const assertOwned = (controller: AbortController) => { if (!owns(controller)) throw new DOMException('Task creation closed', 'AbortError'); };
+  const run = async (operation: (controller: AbortController) => Promise<void>) => {
     if (busy.current) return;
+    const controller = new AbortController(); activeOperation.current = controller;
     busy.current = true; setPending(true); setError('');
-    try { await operation(); } catch (cause) { setError(cause instanceof Error ? cause.message : 'The request failed. Your draft is retained.'); }
-    finally { busy.current = false; setPending(false); }
+    try { await operation(controller); } catch (cause) { if (owns(controller)) setError(cause instanceof Error ? cause.message : 'The request failed. Your draft is retained.'); }
+    finally { if (owns(controller)) { activeOperation.current = null; busy.current = false; setPending(false); } }
   };
-  const close = () => { void run(async () => {
+  const close = () => { void run(async (controller) => {
+    if (submitted.current && !created.current) throw new Error('Creation has an unknown outcome. Use Retry creation to recover its result before closing or discarding uploads.');
     if (!created.current && uploaded.current) {
-      const response = await fetch('/api/upload/cleanup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task_id: draftId }) });
-      const result = await response.json() as { ok?: boolean; error?: string };
-      if (!response.ok || !result.ok) throw new Error(result.error || 'Could not discard draft uploads. Retry closing.');
+      setDiscarding(true);
+      await observeBoardRequest(async (signal) => {
+        const response = await fetch('/api/upload/cleanup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task_id: draftId }), signal });
+        const result = await response.json() as { ok?: boolean; error?: string };
+        if (!response.ok || result.ok !== true) throw new Error(result.error || 'Could not discard draft uploads. Retry closing.');
+      }, controller.signal);
+      assertOwned(controller);
     }
     onClose();
   }); };
-  const upload = (files: File[]) => { if (!files.length || created.current) return; void run(async () => {
+  const upload = (files: File[]) => { if (!files.length || created.current || submitted.current || discarding || pendingRemoval) return; void run(async (controller) => {
     for (const file of files) {
-      const body = new FormData(); body.append('task_id', draftId); body.append('file', file); uploaded.current = true;
-      const response = await fetch('/api/upload', { method: 'POST', body });
-      const result = await response.json() as { ok?: boolean; error?: string; data?: UnknownRecord[] };
-      if (!response.ok || !result.ok || !result.data?.length) throw new Error(result.error || `Could not upload ${file.name}.`);
-      for (const entry of result.data) {
-        const prepared = await uploadedEvidence(entry, file);
+      assertOwned(controller); uploaded.current = true;
+      const entries = await uploadBoardFile(draftId, file, controller.signal); assertOwned(controller);
+      for (const entry of entries) {
+        const prepared = await observeBoardRequest(() => uploadedEvidence(entry, file), controller.signal); assertOwned(controller);
         if (prepared.kind === 'attachment') setAttachments((current) => [...current, prepared.item]);
         else setArtifacts((current) => [...current, prepared.item]);
       }
     }
   }); };
-  const remove = (kind: 'artifact' | 'attachment', index: number) => { void run(async () => {
+  const remove = (kind: 'artifact' | 'attachment', index: number) => { if (created.current || submitted.current || discarding) return; void run(async (controller) => {
     const item = (kind === 'artifact' ? artifacts : attachments)[index];
-    if (item?.filename) await request({ cmd: 'remove_attachment', task_id: draftId, filename: item.filename });
+    if (item?.filename) {
+      setPendingRemoval({ kind, index });
+      const frame = await boardWriteRequest({ cmd: 'remove_attachment', task_id: draftId, filename: item.filename }, controller.signal); assertOwned(controller);
+      // Draft tokens have no Board record; the correlated cleanup returns full state.
+      if (frame.type !== 'state' || typeof frame.seq !== 'number' || !Number.isFinite(frame.seq) || !frame.board_tasks || typeof frame.board_tasks !== 'object' || Array.isArray(frame.board_tasks)) throw new Error('Board returned an invalid cleanup acknowledgement; its outcome is unknown. Retry removal.');
+    }
+    setPendingRemoval(null);
     if (kind === 'artifact') setArtifacts((current) => current.filter((_, i) => i !== index));
     else setAttachments((current) => current.filter((_, i) => i !== index));
   }); };
   const submit = (event: FormEvent) => {
     event.preventDefault(); event.stopPropagation();
-    if (busy.current || artifactEditing || (!created.current && !title.trim())) return;
-    void run(async () => {
+    if (busy.current || discarding || pendingRemoval || artifactEditing || (!created.current && !title.trim())) return;
+    void run(async (controller) => {
       if (!created.current) {
-        const parsed = resolveActionVariables(actionVars, definitions);
-        const result = await request({ cmd: 'board_add_task', id: draftId, task: title.trim(), description: description.trim(), group, lane, labels: labels.split(',').map((value) => value.trim()).filter(Boolean), action_name: actionName, agent_template: role, action_vars: parsed, provider: provider.trim(), external_id: externalId.trim(), external_url: externalUrl.trim(), scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : '', depends_on: dependsOn, verification_mode: verification.mode, verification_state: verification.state, verification_notes: verification.notes, verification_summary: verification.summary, attachments, artifacts });
-        const id = typeof result.task_id === 'string' ? result.task_id : '';
-        if (!id) throw new Error('Task creation returned no ID. Check the Board before retrying.');
-        created.current = id; setCreatedId(id); onCreated?.(id);
+        if (!submitted.current) {
+          const parsed = resolveActionVariables(actionVars, definitions);
+          submitted.current = { cmd: 'board_add_task', idempotency_key: `board-create:${crypto.randomUUID()}`, id: draftId, task: title.trim(), description: description.trim(), group, lane, labels: labels.split(',').map((value) => value.trim()).filter(Boolean), action_name: actionName, agent_template: role, action_vars: parsed, provider: provider.trim(), external_id: externalId.trim(), external_url: externalUrl.trim(), scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : '', depends_on: dependsOn, verification_mode: verification.mode, verification_state: verification.state, verification_notes: verification.notes, verification_summary: verification.summary, attachments, artifacts };
+        }
+        setUncertain(true);
+        let result;
+        try { result = await boardWriteRequest(submitted.current, controller.signal); }
+        catch (cause) {
+          assertOwned(controller);
+          // A returned refusal permits correcting the draft. Transport errors,
+          // server failures and key conflicts retain the exact submitted intent.
+          if (cause instanceof CommandResponseError && cause.creationRefused && cause.status < 500 && cause.status !== 409) { submitted.current = null; setUncertain(false); }
+          throw cause;
+        }
+        assertOwned(controller);
+        if (!['board_task_added', 'external_imported'].includes(result.type) || typeof result.task_id !== 'string' || !result.task_id.trim() || result.title !== submitted.current.task) throw new Error('Board returned an invalid creation acknowledgement; its outcome is unknown. Use Retry creation to recover the submitted task.');
+        const id = result.task_id; created.current = id; setCreatedId(id); submitted.current = null; setUncertain(false); onCreated?.(id);
       }
-      await afterCreate?.(created.current);
-      onClose();
+      assertOwned(controller);
+      if (afterCreate) await observeBoardRequest(() => afterCreate(created.current), controller.signal);
+      assertOwned(controller); onClose();
     });
   };
   const matches = Object.entries(taskRecords).map<UnknownRecord & { id: string }>(([id, value]) => ({ ...record(value), id })).filter((task) => !dependsOn.includes(task.id) && `${task.id} ${taskText(task.task ?? '')}`.toLowerCase().includes(search.toLowerCase()));
-  return <ModalDialog title={initialValues ? 'Create Board task' : 'Create task'} description={`Add work to ${group}`} size="large" isOpen onOpenChange={(open) => { if (!open) close(); }}>
+  return <ModalDialog title={initialValues ? 'Create Board task' : 'Create task'} description={`Add work to ${group}`} size="large" bodyLayout="fit" isOpen onOpenChange={(open) => { if (!open) close(); }}>
+    <div className={styles.taskCreateHost}>
     {notice}
-    <form className={styles.detailForm} onSubmit={submit} onPaste={(event) => { if (event.clipboardData.files.length) { event.preventDefault(); upload([...event.clipboardData.files]); } }}>
+    <form className={`${styles.detailForm} ${styles.taskCreateForm}`} onSubmit={submit} onPaste={(event) => { if (event.clipboardData.files.length) { event.preventDefault(); upload([...event.clipboardData.files]); } }}>
+      <div className={styles.taskCreateScroll}>
+      {uncertain && !pending ? <p role="status">Creation has not been confirmed. Retry creation checks the original submitted task; its fields and uploads are retained.</p> : null}
+      {discarding && !pending ? <p role="status">Discard has not been confirmed. Retry Cancel to finish discarding; creation is disabled because the staged files may already be gone.</p> : null}
+      {pendingRemoval && !pending ? <p role="status">File removal has not been confirmed. Retry removal before creating the task. <Button onPress={() => remove(pendingRemoval.kind, pendingRemoval.index)}>Retry removal</Button></p> : null}
       {createdId ? <p role="status">Task {createdId} was created. Retry linking this task to the Initiative.</p> : null}
-      <fieldset className={styles.createFields} disabled={pending || Boolean(createdId)}>
+      <fieldset className={styles.createFields} disabled={pending || uncertain || discarding || Boolean(pendingRemoval) || Boolean(createdId)}>
         <label>Title<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} /></label>
         <label>Description<textarea rows={4} value={description} onChange={(event) => setDescription(event.target.value)} /></label>
         <div className={styles.formGrid}>
@@ -126,9 +158,11 @@ export function TaskCreateDialog({ group, lanes, actions, roles, onClose, initia
         <details><summary>Verification</summary><div className={styles.detailSection}><VerificationFields value={verification} onChange={setVerification} /></div></details>
         <details><summary>Attachments and artifacts · {attachments.length + artifacts.length}</summary><TaskEvidenceEditor artifacts={artifacts} attachments={attachments} draftId={createdId || draftId} onChange={setArtifacts} onRemove={remove} onUpload={upload} onEditingChange={setArtifactEditing} /></details>
       </fieldset>
-      {!createdId ? <TaskPromptPreview disabled={pending || artifactEditing || !title.trim()} inputsKey={JSON.stringify([title, description, effectiveAction, role, actionVars, definitions, group, attachments, artifacts])} command={() => ({ cmd: 'preview_prompt', task: title.trim(), description: description.trim(), action_name: effectiveAction, agent_template: role, action_vars: resolveActionVariables(actionVars, definitions), group, attachments, artifacts })} /> : null}
+      {!createdId ? <TaskPromptPreview disabled={pending || uncertain || discarding || Boolean(pendingRemoval) || artifactEditing || !title.trim()} inputsKey={JSON.stringify([title, description, effectiveAction, role, actionVars, definitions, group, attachments, artifacts])} command={() => ({ cmd: 'preview_prompt', task: title.trim(), description: description.trim(), action_name: effectiveAction, agent_template: role, action_vars: resolveActionVariables(actionVars, definitions), group, attachments, artifacts })} /> : null}
+      </div>
       {error ? <p role="alert" className={styles.formError}>{error}</p> : null}
-      <footer className={styles.detailFooter}><span /><Button isDisabled={pending} onPress={close}>{createdId ? 'Close' : 'Cancel'}</Button><Button tone="primary" type="submit" isDisabled={pending || artifactEditing || (!createdId && !title.trim())}>{createdId ? 'Retry link' : 'Create task'}</Button></footer>
+      <footer className={styles.detailFooter}><span /><Button isDisabled={pending} onPress={close}>{createdId ? 'Close' : 'Cancel'}</Button><Button tone="primary" type="submit" isDisabled={pending || discarding || Boolean(pendingRemoval) || artifactEditing || (!createdId && !title.trim())}>{createdId ? 'Retry link' : uncertain && !pending ? 'Retry creation' : 'Create task'}</Button></footer>
     </form>
+    </div>
   </ModalDialog>;
 }

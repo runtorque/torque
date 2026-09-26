@@ -174,7 +174,7 @@ describe('Planning request recovery', () => {
       calls.push(command);
       if (command.cmd === 'list_actions') return Promise.resolve({ type: 'actions', actions: [] });
       if (command.cmd === 'list_roles') return Promise.resolve({ type: 'roles', roles: [] });
-      if (command.cmd === 'board_add_task') return Promise.resolve({ type: 'board_task_added', task_id: 'created-task' });
+      if (command.cmd === 'board_add_task') return Promise.resolve({ type: 'board_task_added', task_id: 'created-task', title: command.task });
       if (++linkCount === 1) return held.promise;
       if (linkCount === 2) return Promise.resolve({ type: 'initiative_task_linked', link: { initiative_id: 'record', link_type: 'task', target_id: 'wrong-task' } });
       return Promise.resolve({ type: 'initiative_task_linked', link: { initiative_id: 'record', link_type: 'task', target_id: 'created-task' } });

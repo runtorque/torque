@@ -125,7 +125,7 @@ test('Initiative task creation reviews unsaved scope and recovers a failed link 
   let createAttempts = 0; let linkAttempts = 0;
   await page.route('**/api/cmd', async (route) => {
     const data = route.request().postDataJSON() as Row;
-    if (data.cmd === 'board_add_task' && ++createAttempts === 1) await route.fulfill({ json: { ok: false, error: 'Injected task failure' } });
+    if (data.cmd === 'board_add_task' && ++createAttempts === 1) await route.fulfill({ json: { ok: false, creation_refused: true, error: 'Injected task failure' } });
     else if (data.cmd === 'initiative_link_task' && ++linkAttempts === 1) await route.fulfill({ json: { ok: false, error: 'Injected link failure' } });
     else await route.continue();
   });

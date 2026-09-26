@@ -1323,3 +1323,19 @@ Main ledger: **344 mapped / 334 implemented or equivalent / 6 open / 4 retired**
 P-341 now retains ownership across bounded save/upload/evidence/cleanup operations, validates acknowledgements and preserves accepted edits when later cleanup fails. Explicit retry performs only remaining cleanup, late results cannot affect a replacement editor, and reconnect never replays mutations. D-191 and the matrix record six reproduced failures, 116 focused tests, 857 passing UI tests and 11 passing production browser scenarios in 3.3 minutes. Recovery screenshots were inspected, including compact-window footer visibility.
 
 Main ledger: **344 mapped / 335 implemented or equivalent / 5 open / 4 retired**. P-340 creation/upload recovery and broad Settings/lazy-reconnect audits remain. Existing creation receipts need concurrent-retry verification because pending HTTP coalescing is currently limited to worktree writes. A clean full browser run, inventory/Planning combinations and native/external/recovery acceptance remain; Phase 4 and Classic retirement are open.
+
+
+### Schedule source audit correction and creation acceptance — 2026-09-26
+
+The schedule row P-043 is reopened: React omits next-run state despite the existing acceptance requirement. Source comparison adds P-345–P-350 for Board authoring catalog recovery, schedule named variables, trigger modes/presets, operational metadata/order, cross-group discovery/reassignment and deletion confirmation. The earlier coarse schedule disposition overstated implementation. Current corrected ledger: **350 mapped / 334 implemented or equivalent / 12 open / 4 retired** while creation recovery P-340 remains under browser acceptance.
+
+Creation's frozen implementation passed 865 UI tests and the full 3,217-test regression suite (82 skips). Browser QA exposed creation actions outside the visible compact dialog; repair and browser revalidation remain required. Full migration acceptance, Phase 4 and Classic retirement are open.
+
+
+### Board creation and cleanup recovery accepted — 2026-09-26
+
+P-340 now has production acceptance for exact-intent creation retry, overlapping keyed-request coalescing, bounded uploads/removal/discard and compact-dialog recovery. P-341 additionally preserves possibly committed uploads after a lost save acknowledgement and prevents saving evidence while Cancel cleanup is uncertain. Draft single-file removal requires acknowledged retry before creation. D-191/D-192 and the parity matrix record the reproduced failures and limits.
+
+Final validation: **869 UI tests / 101 files**, lint/typecheck/build verification, **12 targeted production browser scenarios / 5.6 minutes**, and the unchanged backend's frozen **3,217-test full suite / 82 skips**. The first new browser file check incorrectly used a filesystem path as a URL; canonical-route inspection and the corrected full targeted run passed. Recovery screenshots were inspected and preserved.
+
+Current ledger: **350 mapped / 335 implemented or equivalent / 11 open / 4 retired**. Schedules P-043/P-346–P-350, Board catalog recovery P-345, broad Settings P-087–P-089 and lazy/reconnect P-112 remain open. Schedule Run now also needs a handler-callback regression: source still references pre-extraction names. Complete browser/inventory/Planning/native/external/recovery acceptance, Phase 4 and Classic retirement remain open.

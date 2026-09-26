@@ -18,12 +18,12 @@ function setup(kind: 'initiative' | 'decision') {
   store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, initiatives: { i: { id: 'i', title: 'Roadmap' } }, decisions: { d: { id: 'd', title: 'Decision', architect_id: 'a' } } }));
   vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => {
     const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand; calls.push(command);
-    if (command.cmd === fail) return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: false, error: 'Write rejected' }) });
+    if (command.cmd === fail) return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: false, creation_refused: command.cmd === 'board_add_task', error: 'Write rejected' }) });
     let data: UnknownRecord;
     if (command.cmd === 'initiative_show') data = { ...record, type: 'initiative' };
     else if (command.cmd === 'list_actions') data = { type: 'actions', actions: [] };
     else if (command.cmd === 'list_roles') data = { type: 'roles', roles: [] };
-    else if (command.cmd === 'board_add_task') data = { type: 'board_task_added', task_id: 'new-task' };
+    else if (command.cmd === 'board_add_task') data = { type: 'board_task_added', task_id: 'new-task', title: command.task };
     else if (command.cmd === 'decisions_snapshot') data = { type: 'decisions_snapshot', decisions: { d: record } };
     else if (command.cmd === 'initiative_link_task' || command.cmd === 'initiative_unlink_task') {
       record = { ...record, links: { tasks: command.cmd === 'initiative_link_task' ? [command.task_id] : [], decisions: [] } };

@@ -71,7 +71,7 @@ test('task creation persists dependencies, verification and mixed evidence and c
   await dialog.getByRole('button', { name: 'Save artifact', exact: true }).click();
   let reject = true;
   await page.route('**/api/cmd', async (route) => {
-    if (reject && (route.request().postDataJSON() as Row).cmd === 'board_add_task') { reject = false; await route.fulfill({ json: { ok: false, error: 'Injected creation rejection' } }); }
+    if (reject && (route.request().postDataJSON() as Row).cmd === 'board_add_task') { reject = false; await route.fulfill({ json: { ok: false, creation_refused: true, error: 'Injected creation rejection' } }); }
     else await route.continue();
   });
   await dialog.getByRole('button', { name: 'Create task', exact: true }).click();

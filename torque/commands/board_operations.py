@@ -335,6 +335,11 @@ async def handle_board_operation_command(
                         reason="task_create",
                     )
 
+        # Only normal pre-creation refusals reach this point. Exceptions after
+        # mutation propagate without this marker, retaining client uncertainty.
+        if result and result.get("type") == "error":
+            result["creation_refused"] = True
+
     elif cmd == "board_archive_task":
         result = _handle_board_archive_command(state, data)
         if not (isinstance(result, dict)
