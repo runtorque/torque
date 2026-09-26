@@ -65,6 +65,7 @@ function mockSettingsRequests(failSave = false) {
     if (command.cmd === 'update_group_settings') update('get_group_settings', 'settings', command.settings);
     if (command.cmd === 'engineer_update_settings') update('get_group_settings', 'engineer_settings', Object.fromEntries(Object.entries(command).filter(([key]) => key !== 'cmd' && key !== 'group')));
     if (command.cmd === 'update_architect_settings') update('get_group_settings', 'architect_settings', command.settings);
+    if (command.cmd === 'board_update_task' || command.cmd === 'remove_attachment') { const id = String(command.id ?? command.task_id); return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: 'state', seq: 10, board_tasks: { [id]: { id } } } }) }); }
     const frame = structuredClone(snapshots[String(command.cmd)] ?? (command.cmd === 'update_ai_settings' ? snapshots.get_ai_settings! : { type: 'ok' }));
     return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: frame }) });
   });

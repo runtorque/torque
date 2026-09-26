@@ -5,7 +5,8 @@ import { TaskEvidenceEditor } from './TaskEvidenceEditor';
 import { evidenceFilename, uploadedEvidence } from './taskEvidenceModel';
 import { TaskPromptPreview } from './TaskPromptPreview';
 import { localSchedule, taskEditChanges } from './taskEditModel';
-import { readCommand } from '../../protocol/http';
+import { boardWriteRequest, observeBoardRequest } from './boardReadRequest';
+import { uploadBoardFile, validateBoardEditAcknowledgement } from './boardEditRequests';
 import { ActionVariableFields } from './ActionVariableFields';
 import { actionVariableDefinitions, resolveActionVariables, useActionVariables } from './actionVariables';
 import { AskResponse } from '../attention/AskResponse';
@@ -452,7 +453,6 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
   const pullPreview = pullRequested && pullResponse !== pullBaseline ? record(pullResponse) : {};
   const pullChanges = record(pullPreview.changes ?? record(pullPreview.preview).changes);
   const attribution = taskAttribution(task, agents);
-  const dispatch = useAppDispatch();
   const [saving, setSaving] = useState(false);
   const draftFields = () => ({
     task: title.trim(), group: targetGroup, description,
@@ -466,44 +466,44 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
   });
   const baseline = useRef(draftFields());
   const savedEvidence = useRef({ attachments: task.attachments, artifacts: task.artifacts });
-  useEffect(() => () => { busyRef.current = false; }, [busyRef]);
-  const request = async (command: TorqueCommand) => {
-    const frame = await readCommand(command, new AbortController().signal);
-    if (frame.type === 'error' || frame.type === 'finalization_blocked') throw new Error(textValue(frame.message, frame.type === 'finalization_blocked' ? 'Task changes are blocked by unfinished finalization gates.' : 'The request failed.'));
-    // Mutation acknowledgements may contain a full snapshot. Live deltas remain
-    // authoritative; a targeted detail refresh avoids replacing newer projections.
-    if (frame.type !== 'state') dispatch(projectionActions.auxiliaryResourceReceived(frame));
+  const activeOperation = useRef<AbortController | null>(null);
+  useEffect(() => () => { activeOperation.current?.abort(); activeOperation.current = null; busyRef.current = false; }, [busyRef]);
+  const owns = (controller: AbortController) => activeOperation.current === controller && !controller.signal.aborted;
+  const assertOwned = (controller: AbortController) => { if (!owns(controller)) throw new DOMException('Task editor closed', 'AbortError'); };
+  const request = async (command: TorqueCommand, controller: AbortController) => {
+    assertOwned(controller);
+    const frame = await boardWriteRequest(command, controller.signal);
+    assertOwned(controller); validateBoardEditAcknowledgement(command, frame);
+    // Live deltas stay authoritative; do not replace newer state with a write snapshot.
     return frame;
   };
 
 
   const upload = async (files: File[]) => {
     if (!files.length || busyRef.current || artifactEditing) return;
+    const controller = new AbortController(); activeOperation.current = controller;
     busyRef.current = true;
     setUploading(true);
     setFormError('');
     try {
       for (const file of files) {
-        const body = new FormData();
-        body.append('task_id', task.id);
-        body.append('file', file);
-        const response = await fetch('/api/upload', { method: 'POST', body });
-        const payload = await response.json() as { ok?: boolean; error?: string; data?: unknown[] };
-        if (!response.ok || !payload.ok) throw new Error(payload.error || 'Upload failed');
-        for (const entry of (payload.data ?? []).map(record)) {
-          if (entry.filename) uncommittedUploads.current.add(textValue(entry.filename));
-          const prepared = await uploadedEvidence(entry, file);
+        assertOwned(controller);
+        const entries = await uploadBoardFile(task.id, file, controller.signal); assertOwned(controller);
+        for (const entry of entries) {
+          uncommittedUploads.current.add(textValue(entry.filename));
+          const prepared = await observeBoardRequest(() => uploadedEvidence(entry, file), controller.signal); assertOwned(controller);
           if (prepared.kind === 'attachment') setAttachments((current) => [...current, prepared.item]);
           else setArtifacts((current) => [...current, prepared.item]);
         }
       }
-    } catch (error) { setFormError(error instanceof Error ? error.message : 'Upload failed'); }
-    finally { busyRef.current = false; setUploading(false); }
+    } catch (error) { if (owns(controller)) setFormError(error instanceof Error ? error.message : 'Upload failed'); }
+    finally { if (owns(controller)) { activeOperation.current = null; busyRef.current = false; setUploading(false); } }
   };
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (busyRef.current || artifactEditing || !title.trim()) return;
+    const controller = new AbortController(); activeOperation.current = controller;
     busyRef.current = true; setSaving(true); setFormError('');
     void (async () => {
       let saved = false;
@@ -511,7 +511,7 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
         const draft = draftFields();
         const fields = taskEditChanges(baseline.current, draft, definitions, task.raw);
         if (Object.keys(fields).length) {
-          await request({ cmd: 'board_update_task', id: task.id, ...fields, enforce_dispatch_edit_gate: true });
+          await request({ cmd: 'board_update_task', id: task.id, ...fields, enforce_dispatch_edit_gate: true }, controller);
           baseline.current = draft;
           for (const key of ['attachments', 'artifacts'] as const) {
             if (key in fields) savedEvidence.current[key] = fields[key] as typeof artifacts;
@@ -521,16 +521,17 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
         }
         const kept = new Set([...savedEvidence.current.attachments, ...savedEvidence.current.artifacts].map(evidenceFilename));
         for (const filename of removedAttachments.filter((name) => !kept.has(name))) {
-          await request({ cmd: 'remove_attachment', task_id: task.id, filename });
+          await request({ cmd: 'remove_attachment', task_id: task.id, filename }, controller);
           uncommittedUploads.current.delete(filename);
           setRemovedAttachments((current) => current.filter((name) => name !== filename));
         }
         sendOrNotify(sendCommand, { cmd: 'task_detail', id: task.id }, onCommandUnavailable);
         onClose();
       } catch (cause) {
+        if (!owns(controller)) return;
         const message = cause instanceof Error ? cause.message : 'The request failed.';
         setFormError(`${saved ? 'Task changes saved, but attachment cleanup failed. ' : ''}${message}`);
-      } finally { busyRef.current = false; setSaving(false); }
+      } finally { if (owns(controller)) { activeOperation.current = null; busyRef.current = false; setSaving(false); } }
     })();
   };
 
@@ -544,21 +545,22 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
   };
   const close = () => {
     if (busyRef.current) return;
+    const controller = new AbortController(); activeOperation.current = controller;
     busyRef.current = true; setSaving(true); setFormError('');
     void (async () => {
       try {
         const kept = new Set([...savedEvidence.current.attachments, ...savedEvidence.current.artifacts].map(evidenceFilename));
         const discarded = new Set([...uncommittedUploads.current, ...removedAttachments.filter((name) => !kept.has(name))]);
         for (const filename of discarded) {
-          await request({ cmd: 'remove_attachment', task_id: task.id, filename });
+          await request({ cmd: 'remove_attachment', task_id: task.id, filename }, controller);
           uncommittedUploads.current.delete(filename);
           setRemovedAttachments((current) => current.filter((name) => name !== filename));
           setAttachments((current) => current.filter((item) => evidenceFilename(item) !== filename));
           setArtifacts((current) => current.filter((item) => evidenceFilename(item) !== filename));
         }
         onClose();
-      } catch (cause) { setFormError(`Could not discard new uploads. ${cause instanceof Error ? cause.message : 'Retry closing.'}`); }
-      finally { busyRef.current = false; setSaving(false); }
+      } catch (cause) { if (owns(controller)) setFormError(`Could not discard new uploads. ${cause instanceof Error ? cause.message : 'Retry closing.'}`); }
+      finally { if (owns(controller)) { activeOperation.current = null; busyRef.current = false; setSaving(false); } }
     })();
   };
   useEffect(() => { closeRef.current = close; return () => { closeRef.current = null; }; });

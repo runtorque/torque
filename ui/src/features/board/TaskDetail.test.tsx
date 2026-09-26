@@ -21,7 +21,7 @@ function setup(extra: UnknownRecord = {}) {
     if (command.cmd === 'task_detail') { detailReads.push(command); return new Promise(() => {}); }
     calls.push(command);
     if (deferred) return deferred(command);
-    return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: command.cmd === failure ? { type: 'error', message: 'Task has active work in its assigned worker. Stop or complete that worker before editing.' } : command.cmd === 'preview_prompt' ? { type: 'prompt_preview', task_id: 'task', prompt: 'Correct draft preview' } : { type: 'state', seq: 10, board_tasks: {} } }) });
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: command.cmd === failure ? { type: 'error', message: 'Task has active work in its assigned worker. Stop or complete that worker before editing.' } : command.cmd === 'preview_prompt' ? { type: 'prompt_preview', task_id: 'task', prompt: 'Correct draft preview' } : { type: 'state', seq: 10, board_tasks: { task: { id: 'task' } } } }) });
   }));
   const send = vi.fn(() => true);
   render(<Provider store={store}><BoardPanel group="Foundation" sendCommand={send} onCommandUnavailable={vi.fn()} /></Provider>);
@@ -50,7 +50,7 @@ it('blocks duplicate saves, close and mutation controls until acknowledgement', 
   expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
   expect(screen.getByRole('textbox', { name: 'Title' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Dispatch task' })).toBeDisabled();
-  await act(async () => { complete({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: 'state' } }) }); await Promise.resolve(); });
+  await act(async () => { complete({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: 'state', seq: 10, board_tasks: { task: { id: 'task' } } } }) }); await Promise.resolve(); });
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
 it('cleans removed files only after a successful save and retries cleanup without repeating the edit', async () => {
