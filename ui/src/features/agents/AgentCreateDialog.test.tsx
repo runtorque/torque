@@ -10,14 +10,14 @@ const response = (data: UnknownRecord) => ({ ok: true, json: () => Promise.resol
 const rendered = (name = '', config: UnknownRecord = {}) => response({ type: 'template_rendered', group: 'Foundation', name, config });
 function setup(kind: 'worker' | 'architect' | 'engineer' | 'terminal' = 'worker') {
   const store = createAppStore(); store.dispatch(connectionActions.connected({ at: 1, reconnect: false }));
-  const close = vi.fn(); const created = vi.fn(); const send = vi.fn<(command: TorqueCommand) => boolean>(() => true);
-  const content = (empty = false) => <Provider store={store}><AgentCreateDialog open initialKind={kind} group="Foundation" catalog={empty ? { agentClasses: [], roles: [], templates: [], specializations: [] } : { agentClasses: [{ id: 'worker-class', name: 'Worker Class', base_kind: 'worker' }], roles: [{ name: 'build', display_name: 'Project build' }, { name: 'build', display_name: 'Shadowed global build' }, { name: 'review' }], templates: [], specializations: [] }} agents={[toAgentViewModel('arch', { kind: 'architect', name: 'Architect', group: 'Foundation' })]} onClose={close} onCreated={created} sendCommand={send} /></Provider>;
+  const close = vi.fn(); const created = vi.fn();
+  const content = () => <Provider store={store}><AgentCreateDialog open initialKind={kind} group="Foundation" agents={[toAgentViewModel('arch', { kind: 'architect', name: 'Architect', group: 'Foundation' })]} onClose={close} onCreated={created} /></Provider>;
   const view = render(content());
-  return { store, close, created, send, refreshCatalog: () => view.rerender(content(true)), ...view };
+  return { store, close, created, refreshCatalog: () => { act(() => { store.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'roles', group: 'Other', roles: [{ name: 'foreign' }] })); }); }, ...view };
 }
 const ready = () => waitFor(() => { expect(screen.queryByText('Resolving launch settings…')).not.toBeInTheDocument(); expect(screen.queryByText('Loading project Agent Classes…')).not.toBeInTheDocument(); });
 const classResponse = () => response({ type: 'agent_classes', group: 'Foundation', classes: [{ id: 'worker-class', name: 'Worker Class', base_kind: 'worker', launchable: true }], issues: [] });
-const mockFetch = (handler: (url: string, options: RequestInit) => unknown) => vi.fn((url: string, options: RequestInit) => commandFrom(options).cmd === 'agent_class_list' ? Promise.resolve(classResponse()) : handler(url, options));
+const mockFetch = (handler: (url: string, options: RequestInit) => unknown) => vi.fn((url: string, options: RequestInit) => commandFrom(options).cmd === 'list_roles' ? Promise.resolve(response({ type: 'roles', group: 'Foundation', roles: [{ name: 'build', display_name: 'Project build' }, { name: 'build', display_name: 'Shadowed global build' }, { name: 'review' }] })) : commandFrom(options).cmd === 'agent_class_list' ? Promise.resolve(classResponse()) : handler(url, options));
 const commandFrom = (options: RequestInit) => JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand;
 afterEach(() => vi.unstubAllGlobals());
 describe('agent creation', () => {
@@ -72,19 +72,19 @@ describe('agent creation', () => {
   it('loads resolved template fields, preserving explicit overrides across selection and reconnect', async () => {
     const calls: TorqueCommand[] = [];
     vi.stubGlobal('fetch', mockFetch((_url: string, options: RequestInit) => { const command = commandFrom(options); calls.push(command); return Promise.resolve(rendered(String(command.name), { provider: 'generic', command: '/bin/cat', model: command.name || 'group-model', shell: 'bash', env_vars: { MODE: 'qa' }, worktree: true, worktree_base_branch: 'main', worktree_merge_squash: false })); }));
-    const { store, send, refreshCatalog } = setup(); await ready();
+    const { store, refreshCatalog } = setup(); await ready();
     expect(screen.getByLabelText('Provider')).toHaveValue('generic'); expect(screen.getByLabelText('Environment variables')).toHaveValue('MODE=qa'); expect(screen.getByLabelText('Create an isolated worktree')).toBeChecked(); expect(screen.getByLabelText('Squash merge')).not.toBeChecked();
     const model = screen.getByLabelText<HTMLInputElement>('Model'); fireEvent.change(model, { target: { value: 'explicit-model' } }); model.focus(); model.setSelectionRange(1, 4);
     fireEvent.change(screen.getByLabelText('Role / template'), { target: { value: 'build' } }); await ready(); expect(model).toHaveValue('explicit-model'); expect(model).toHaveFocus(); expect([model.selectionStart, model.selectionEnd]).toEqual([1, 4]);
     expect(screen.getByRole('option', { name: 'Project build' })).toBeInTheDocument(); expect(screen.queryByRole('option', { name: 'Shadowed global build' })).not.toBeInTheDocument();
     refreshCatalog(); expect(screen.getByLabelText('Role / template')).toHaveValue('build');
-    act(() => { store.dispatch(connectionActions.connected({ at: 2, reconnect: true })); }); await ready(); expect(model).toHaveValue('explicit-model'); expect(calls).toHaveLength(3); expect(send.mock.calls.filter(([command]) => command.cmd === 'list_roles')).toHaveLength(2);
+    act(() => { store.dispatch(connectionActions.connected({ at: 2, reconnect: true })); }); await ready(); expect(model).toHaveValue('explicit-model'); expect(calls).toHaveLength(3);
   });
   it('ignores aborted template replies, blocks failed resolution and retries in place', async () => {
     const reads: { command: TorqueCommand; signal: AbortSignal; resolve: (response: ReturnType<typeof rendered>) => void }[] = [];
     vi.stubGlobal('fetch', mockFetch((_url: string, options: RequestInit) => new Promise((resolve) => reads.push({ command: commandFrom(options), signal: options.signal!, resolve }))));
     const { unmount } = setup(); fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Draft' } });
-    fireEvent.change(screen.getByLabelText('Role / template'), { target: { value: 'review' } }); expect(reads[0]!.signal.aborted).toBe(true);
+    await screen.findByRole('option', { name: 'review' }); fireEvent.change(screen.getByLabelText('Role / template'), { target: { value: 'review' } }); expect(reads[0]!.signal.aborted).toBe(true);
     await act(async () => { reads[1]!.resolve(rendered('wrong')); await Promise.resolve(); });
     expect(await screen.findByRole('alert')).toHaveTextContent('did not match'); expect(screen.getByRole('button', { name: 'Create worker' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Retry launch settings' }));

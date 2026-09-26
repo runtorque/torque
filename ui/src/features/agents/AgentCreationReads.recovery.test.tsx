@@ -7,15 +7,14 @@ import { readCommand } from '../../protocol/http';
 import type * as httpModule from '../../protocol/http';
 import { AgentCreateDialog } from './AgentCreateDialog';
 vi.mock('../../protocol/http', async (original) => ({ ...await original<typeof httpModule>(), readCommand: vi.fn() }));
-const catalog = { agentClasses: [], roles: [], templates: [], specializations: [] };
 const classes = { type: 'agent_classes', group: 'Foundation', classes: [{ id: 'local', base_kind: 'worker', name: 'Local worker', launchable: true }], issues: [] } as AuxiliaryFrame;
 const launch = (model = 'accepted') => ({ type: 'template_rendered', group: 'Foundation', name: '', config: { model } }) as AuxiliaryFrame;
 const tick = async (time = 0) => act(async () => { await vi.advanceTimersByTimeAsync(time); });
 function setup(connected = true) {
   const store = createAppStore(); if (connected) store.dispatch(connectionActions.connected({ at: 1, reconnect: false }));
   const reads: { command: TorqueCommand; signal: AbortSignal; resolve: (frame: AuxiliaryFrame) => void }[] = [];
-  vi.mocked(readCommand).mockImplementation((command, signal) => new Promise((resolve) => { reads.push({ command, signal, resolve }); }));
-  const view = render(<Provider store={store}><AgentCreateDialog open group="Foundation" catalog={catalog} agents={[]} sendCommand={() => true} onClose={vi.fn()} onCreated={vi.fn()} /></Provider>);
+  vi.mocked(readCommand).mockImplementation((command, signal) => command.cmd === 'list_roles' ? Promise.resolve({ type: 'roles', group: 'Foundation', roles: [] }) : new Promise((resolve) => { reads.push({ command, signal, resolve }); }));
+  const view = render(<Provider store={store}><AgentCreateDialog open group="Foundation" agents={[]} onClose={vi.fn()} onCreated={vi.fn()} /></Provider>);
   return { store, reads, ...view };
 }
 afterEach(() => { vi.useRealTimers(); vi.resetAllMocks(); });

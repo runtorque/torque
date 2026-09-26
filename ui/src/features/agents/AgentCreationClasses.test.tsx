@@ -17,7 +17,7 @@ function setup() {
     if (command.cmd === 'agent_class_list') return new Promise((resolve) => reads.push({ command, signal: options.signal!, resolve: (data) => resolve(response(data)) }));
     writes.push(command); return Promise.resolve(response({ type: 'error', message: 'Creation refused' }));
   }));
-  const view = render(<Provider store={store}><AgentCreateDialog open initialKind="engineer" group="Foundation" catalog={{ agentClasses: [{ ...available, id: 'foreign', display_name: 'Wrong project' }], roles: [], templates: [], specializations: [] }} agents={[]} sendCommand={() => true} onClose={vi.fn()} onCreated={vi.fn()} /></Provider>);
+  const view = render(<Provider store={store}><AgentCreateDialog open initialKind="engineer" group="Foundation" agents={[]} onClose={vi.fn()} onCreated={vi.fn()} /></Provider>);
   fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Draft' } });
   const reply = async (index: number, frame: UnknownRecord) => { await act(async () => { reads[index]!.resolve(frame); await Promise.resolve(); }); };
   const reconnect = () => act(() => { store.dispatch(connectionActions.connected({ at: Date.now(), reconnect: true })); });

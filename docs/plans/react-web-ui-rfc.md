@@ -1373,3 +1373,8 @@ P-355 bounds owned Agent Class and launch-default reads, retains selected classe
 ### Pending launch coordination checkpoint — 2026-09-26
 
 The backend portion of P-357 now shares pending keyed launch operations for all six React creation commands, survives cancellation of an HTTP waiter, rejects conflicting payloads and replays completed receipts. D-198 and the matrix record the six reproduced races, seven focused request tests and a passing standard full run of 3,220 backend tests (82 skips) plus 930 React tests. An earlier run with the installed runtime interpreter failed environment-dependent fixtures and is explicitly excluded from passing evidence. UI unknown-outcome recovery and post-creation failure handling remain open; ledger counts stay **357 / 347 implemented or equivalent / 6 open / 4 retired**.
+
+
+### Creation role ownership checkpoint — 2026-09-26
+
+P-356 now provides group-owned role discovery with bounded observation, explicit retry, retained draft/selection, unavailable-role launch gating and no hidden requests. D-199 and the matrix record 938 React tests and five production-browser scenarios passing on the final build, including real cross-group roles, deletion, unrelated replies and a deadline. QA is cleaned up. Ledger: **357 mapped / 348 implemented or equivalent / 5 open / 4 intentionally retired**. P-357 launch recovery, broad settings/reconnect audits and independent acceptance gates remain open.

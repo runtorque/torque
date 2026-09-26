@@ -3,7 +3,6 @@ import { SpecializationPicker } from '../control/SpecializationPicker';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Button, ModalDialog } from '../../design/primitives';
-import type { CommandSender } from '../board/BoardPanel';
 import { readCommand } from '../../protocol/http';
 import { settingsRequest } from '../control/settingsRequests';
 import type { TorqueCommand } from '../../protocol';
@@ -12,24 +11,16 @@ import { selectAgentSettingsDefaults, selectConnection } from '../../app/store';
 import { createdTarget, initialLaunchDraft, resolvedLaunchDraft, validateTemplateResponse, type LaunchDraft } from './agentCreationModel';
 import type { AgentViewModel } from './model';
 import { creationClassDisabledReason, creationClassLabel, useCreationClasses } from './useCreationClasses';
+import { useCreationRoles } from './useCreationRoles';
 import styles from './AgentWorkspace.module.css';
 
 type CreateKind = 'architect' | 'engineer' | 'worker' | 'terminal';
-
-interface CatalogBundle {
-  agentClasses: unknown;
-  roles: unknown;
-  specializations: unknown;
-  templates: unknown;
-}
 
 interface AgentCreateDialogProps {
   open: boolean;
   initialKind?: CreateKind;
   group: string;
   agents: AgentViewModel[];
-  catalog: CatalogBundle;
-  sendCommand: CommandSender;
   onCreated: (id: string) => void;
   onClose: () => void;
 }
@@ -85,8 +76,6 @@ export function AgentCreateDialog({
   initialKind = 'worker',
   group: initialGroup,
   agents,
-  catalog,
-  sendCommand,
   onCreated,
   onClose,
 }: AgentCreateDialogProps) {
@@ -112,10 +101,6 @@ export function AgentCreateDialog({
   const enabledEvents = enabledEventsDraft ?? '';
   const inheritedDigest = record(defaults.engineers[group]);
 
-  useEffect(() => {
-    if (!open || connection.status !== 'connected') return;
-    for (const cmd of ['list_roles', 'list_templates', 'list_specializations']) sendCommand({ cmd, group });
-  }, [open, group, connection.status, connection.reconnectCount, sendCommand]);
 
   const [launch, setLaunch] = useState(initialLaunchDraft);
   const editedLaunch = useRef(new Set<keyof LaunchDraft>());
@@ -169,11 +154,13 @@ export function AgentCreateDialog({
   const selectedClass = classes.find((item) => item.id === agentClassId);
   const registryError = classCatalog.issues.some((issue) => issue.severity === 'error') ? 'Fix the project Agent Class catalog errors before launching a class.' : '';
   const classError = classPickerActive && agentClassId ? classCatalog.unavailable || registryError || (selectedClass ? creationClassDisabledReason(selectedClass, kind) : 'The selected Agent Class is no longer available. Choose another class or the default.') : '';
+  const roleCatalog = useCreationRoles(group, open && kind === 'worker' && !saving);
   const roleOptions = useMemo(() => {
     const byId = new Map<string, NamedOption>();
-    [...optionList(catalog.roles), ...optionList(catalog.templates)].forEach((item) => { if (!byId.has(item.id)) byId.set(item.id, item); });
+    optionList(roleCatalog.roles).forEach((item) => { if (!byId.has(item.id)) byId.set(item.id, item); });
     return [...byId.values()];
-  }, [catalog.roles, catalog.templates]);
+  }, [roleCatalog.roles]);
+  const roleError = kind === 'worker' && template && !saving ? !roleCatalog.verified ? (roleCatalog.error || 'Refresh creation roles to verify the selected role.') : !roleOptions.some((item) => item.id === template) ? 'The selected role is no longer available. Choose another role or the group default.' : '' : '';
   const architects = agents.filter((agent) => agent.kind === 'architect');
   const parents = agents.filter((agent) => agent.cellType === 'agent');
 
@@ -194,7 +181,7 @@ export function AgentCreateDialog({
 
   const submit = () => {
     const identity = name.trim();
-    if (savingRef.current || resolving || resolutionError || classError || !identity || !group) return;
+    if (savingRef.current || resolving || resolutionError || classError || roleError || !identity || !group) return;
     const agentSettings: Record<string, unknown> = {};
     const settingValues: Record<string, unknown> = {
       provider: provider.trim(),
@@ -293,13 +280,17 @@ export function AgentCreateDialog({
           <label>Kind<select aria-label="Agent kind" value={kind} onChange={(event) => { setKind(event.target.value as CreateKind); setAgentClassId(''); }}><option value="architect">Architect</option><option value="engineer">Engineer</option><option value="worker">Worker</option><option value="terminal">Terminal</option></select></label>
           <label>Name<input autoFocus value={name} onChange={(event) => setName(event.target.value)} required /></label>
           {classPickerActive ? <label>Agent Class<select value={agentClassId} aria-describedby="creation-class-status" onChange={(event) => setAgentClassId(event.target.value)}><option value="">Default (no explicit Agent Class)</option>{agentClassId && !selectedClass ? <option value={agentClassId} disabled>Previously selected: {agentClassId}</option> : null}{classes.map((item) => <option key={text(item.id)} value={text(item.id)} disabled={Boolean(classCatalog.unavailable || registryError || creationClassDisabledReason(item, kind))}>{creationClassLabel(item)} · {text(item.version) || '1'} · {item.builtin ? 'built-in' : 'project'}{creationClassDisabledReason(item, kind) ? ' (unavailable)' : ''}</option>)}</select></label> : null}
-          {kind === 'worker' ? <label>Role / template<select value={template} onChange={(event) => setTemplate(event.target.value)}><option value="">Group default</option>{template && !roleOptions.some((item) => item.id === template) ? <option value={template}>{template}</option> : null}{roleOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label> : null}
+          {kind === 'worker' ? <label>Role / template<select value={template} onChange={(event) => setTemplate(event.target.value)}><option value="">Group default</option>{template && !roleOptions.some((item) => item.id === template) ? <option value={template} disabled>Unavailable: {template}</option> : null}{roleOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label> : null}
           {kind === 'engineer' && architects.length ? <label>Hiring Architect<select value={hiringArchitectId} onChange={(event) => setHiringArchitectId(event.target.value)}><option value="">User-owned Engineer</option>{architects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label> : null}
           {kind === 'terminal' ? <label>Parent agent<select value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">Unattached</option>{parents.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label> : null}
           <label>Icon<input value={icon} onChange={(event) => setIcon(event.target.value)} placeholder="optional icon" /></label>
         </div>
       </section>
 
+      {kind === 'worker' ? <section aria-label="Creation role discovery">
+        <div className={styles.settingsStatus}><span aria-live="polite">{roleCatalog.loading ? 'Loading creation roles…' : 'Roles for this creation group.'}</span><Button type="button" tone="quiet" isDisabled={saving || roleCatalog.loading} onPress={roleCatalog.refresh}>Refresh creation roles</Button></div>
+        {roleCatalog.error ? <p role="alert">{roleCatalog.error} <Button type="button" tone="quiet" onPress={roleCatalog.refresh}>Retry creation roles</Button></p> : roleError ? <p role="alert">{roleError}</p> : null}
+      </section> : null}
       {classPickerActive ? <section aria-label="Agent Class discovery">
         <div className={styles.settingsStatus}><span id="creation-class-status" aria-live="polite">{classCatalog.loading ? 'Loading project Agent Classes…' : agentClassId ? 'The selected class is frozen at launch.' : 'The default launch freezes the default class for this agent kind.'}</span><Button type="button" tone="quiet" isDisabled={saving || classCatalog.loading} onPress={classCatalog.refresh}>Refresh Agent Classes</Button></div>
         {classCatalog.error ? <p role="alert">Class discovery failed. {classCatalog.error} <Button type="button" tone="quiet" onPress={classCatalog.refresh}>Retry Agent Classes</Button></p> : null}
@@ -355,7 +346,7 @@ export function AgentCreateDialog({
         </> : null}
       </section> : null}
 
-      <footer><Button tone="quiet" type="button" isDisabled={saving} onPress={requestClose}>Cancel</Button><Button tone="primary" type="submit" isDisabled={saving || resolving || Boolean(resolutionError) || Boolean(classError) || !name.trim()}>{saving ? 'Creating…' : kind === 'engineer' && hiringArchitectId ? 'Request hire' : `Create ${kind}`}</Button></footer>
+      <footer><Button tone="quiet" type="button" isDisabled={saving} onPress={requestClose}>Cancel</Button><Button tone="primary" type="submit" isDisabled={saving || resolving || Boolean(resolutionError) || Boolean(classError) || Boolean(roleError) || !name.trim()}>{saving ? 'Creating…' : kind === 'engineer' && hiringArchitectId ? 'Request hire' : `Create ${kind}`}</Button></footer>
       </fieldset>
     </form>
   </ModalDialog>;

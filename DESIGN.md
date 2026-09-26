@@ -3647,3 +3647,13 @@ History renders the persisted contract: role/template, input/output token counts
 - A matching retry must join the same pending command operation before its completed receipt exists. Cancelling one HTTP waiter does not cancel that shared operation. Reject a changed payload under the same key while pending as well as after completion; return a distinct response object to each caller.
 - Reuse existing command hashing, pending-write coordination and persisted successful receipts. This preserves the original launch result, including a pending hire acknowledgement, rather than inventing a second target during an overlap.
 - This checkpoint does not add UI timeout retries, claim crash-safe exactly-once execution, or resolve errors after partial target creation. P-357 stays open until bounded owned UI observation, frozen reviewed payloads, known refusal versus uncertain outcome handling and live recovery acceptance are complete.
+
+### D-199 — Group-owned creation roles
+
+- Date: 2026-09-26
+- Scope: P-356; Worker role/template choices in AgentCreateDialog. Class discovery and resolved launch fields retain D-197's ownership and observation limits.
+- Request list_roles for the dialog's captured creation group through an owned HTTP read. list_templates is a compatibility alias of the same role-manager list; do not combine competing global projections or duplicate alias requests. Project roles precede shadowed user roles, with one option per identity.
+- Only visible Worker controls request these options. Pause discovery while creating, cancel on closure/kind change, and issue no hidden reconnect reads. SpecializationPicker owns its own discovery; the dialog must not send unused background specialization requests.
+- Bound observation at 15 seconds. Validate response type, exact group, collection and entry names; retain accepted options, selected role, explicit launch fields and editor focus/caret through failures and reconnect. Late/foreign/malformed responses cannot replace accepted choices. Provide explicit refresh/retry beside the picker.
+- Preserve a removed selection as an unavailable option and block its launch until it is available and revalidated or the user explicitly chooses another role/default. Do not show a new verification warning while a reviewed launch is pending merely because discovery is paused.
+- These rules govern option discovery only. P-357 remains open for owned launch observation and uncertain/post-creation outcomes.

@@ -8,7 +8,6 @@ import {
   selectAuxiliaryResponseState,
   selectAgentsState,
   selectAgentSettingsDefaults,
-  selectCatalogState,
   selectGroupsState,
   selectMessagesState,
   selectTasksState,
@@ -260,7 +259,6 @@ export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable,
   const [activation, setActivation] = useState<{ id: string; sessionId: AgentViewModel['sessionId']; token: number } | null>(null);
   const { records, digestSettings, digestBufferStats, digestSentEvents, engineerBufferStats, engineerSentEvents } = useAppSelector(selectAgentsState);
   const groupsState = useAppSelector(selectGroupsState);
-  const catalog = useAppSelector(selectCatalogState);
   const auxiliaryResponses = useAppSelector(selectAuxiliaryResponseState);
   const messagesState = useAppSelector(selectMessagesState);
   const tasks = useAppSelector(selectTasksState).records;
@@ -402,7 +400,7 @@ export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable,
       <ModalDialog title="Delete agent?" description={removeTarget ? `${removeTarget.name} · ${removeTarget.kind}` : ''} size="small" isOpen={Boolean(removeTarget)} onOpenChange={(open) => { if (!open) setRemoveTarget(null); }}>
         <div className={styles.removeDialog}><p>This stops the live session and moves supported principals into Torque’s restore window. Worktree safety rules still apply.</p><footer><Button tone="quiet" onPress={() => setRemoveTarget(null)}>Cancel</Button><Button tone="danger" onPress={() => { if (removeTarget && !sendCommand({ cmd: 'remove_agent', id: removeTarget.id })) onCommandUnavailable(); setRemoveTarget(null); }}>Delete agent</Button></footer></div>
       </ModalDialog>
-      {workspaceUi.createAgentKind ? <AgentCreateDialog key={workspaceUi.createAgentKind} open initialKind={workspaceUi.createAgentKind} group={group} agents={hierarchy.all} catalog={catalog} sendCommand={sendCommand} onCreated={(id) => { dispatch(workspaceUiActions.setSelectedAgent(id)); dispatch(workspaceUiActions.setAgentsViewMode('live')); if (!sendCommand({ cmd: 'ui_select_agent', id })) onCommandUnavailable(); }} onClose={() => dispatch(workspaceUiActions.setCreateAgentKind(null))} /> : null}
+      {workspaceUi.createAgentKind ? <AgentCreateDialog key={workspaceUi.createAgentKind} open initialKind={workspaceUi.createAgentKind} group={group} agents={hierarchy.all} onCreated={(id) => { dispatch(workspaceUiActions.setSelectedAgent(id)); dispatch(workspaceUiActions.setAgentsViewMode('live')); if (!sendCommand({ cmd: 'ui_select_agent', id })) onCommandUnavailable(); }} onClose={() => dispatch(workspaceUiActions.setCreateAgentKind(null))} /> : null}
       <WorktreeOperationDialog controller={worktreeToolbar} active={active} />
       {worktreeTarget ? <WorktreeInspector key={worktreeTarget.id} agent={inspectorAgent && !Number(inspectorAgent.raw.deleted_at) ? inspectorAgent : null} active={active} responses={auxiliaryResponses} onClose={() => setWorktreeTarget(null)} /> : null}
       <ModalDialog title="Move or reorder agent" description={organizationTarget ? `${organizationTarget.name} · ${organizationTarget.kind}` : ''} size="small" isOpen={Boolean(organizationTarget)} onOpenChange={(open) => { if (!open) setOrganizationTarget(null); }}>
