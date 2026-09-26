@@ -60,7 +60,7 @@ export function ModalDialog({
         {...(trigger || !onOpenChange ? {} : { onOpenChange })}
       >
         <Modal className={`${styles.modal ?? ''} ${styles[`modal_${size}`] ?? ''} ${bodyLayout === 'fit' ? styles.modal_fit ?? '' : ''}`}>
-          <Dialog className={styles.dialog ?? ''}>
+          <Dialog aria-label={title} className={styles.dialog ?? ''}>
             {({ close }) => (
               <>
                 <header className={styles.dialogHeader ?? ''}>

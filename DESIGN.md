@@ -3534,3 +3534,20 @@ History renders the persisted contract: role/template, input/output token counts
 - Decision: Editor detail and task-option reads have a 15-second observation deadline; writes have a 30-second deadline. A timeout releases controls with a retry path and retains the current record, local drafts and reading state. Closing or replacing an editor cancels its observation; late responses cannot apply state, clear drafts, close another dialog or continue a dependent lifecycle sequence.
 - Constraints: A write is accepted only when its response matches the existing daemon's command-specific type and available record, owner, target and relation identity. Unknown outcomes are shown explicitly and are never replayed on reconnect. An acknowledged edit is removed from the pending edit set before a dependent archive, so retry cannot overwrite intervening external changes. A created Board task keeps its known ID until its link is confirmed; link retry reuses that ID even when the original link already persisted. Cancellation stops client observation and does not claim to reverse server work.
 - Verification: P-334–P-337 track component regressions and real-deadline browser acceptance, including retained input identity/focus/caret, malformed responses, unmount cancellation, partial archive recovery and exactly one Board task across link recovery. The top-level Planning collection timer remains independent.
+
+### D-188 — Board activity and prompt-preview read recovery
+
+- Date: 2026-09-26
+- Status: accepted
+- Scope: Compact task activity hydration and task-authoring prompt preview.
+- Decision: Both reads stop waiting after 15 seconds, expose an explicit retry and cancel observation on unmount. Hidden activity cancels its read; a changed task gets a fresh history owner. Activity validates the response type and task identity before showing rows. Unloaded history has a loading state instead of claiming that no activity exists.
+- Retention: A refresh failure retains loaded messages, the current reading window and the surrounding task draft. New messages remain behind the existing Show new messages action. Preview results remain tied to the exact draft inputs that produced them; late or cancelled replies cannot replace a successful retry. Reads never save task changes.
+- Verification: Component regressions and isolated production-browser checks exercise real deadlines, wrong task identity, late replies, retry, hidden/unmounted cancellation and retained DOM/focus/caret/reading position. Board creation, edits, upload cleanup and bulk archive require their separate mutation recovery acceptance.
+
+### D-189 — Dialog titles remain accessible through content updates
+
+- Date: 2026-09-26
+- Status: accepted
+- Scope: Shared ModalDialog, including Board activity/task editing.
+- Decision: The dialog explicitly uses its visible title as its accessible label. A child draft update must not make the dialog unnamed when the component library's generated heading association changes. Keep the visible heading, focus containment and mounted draft unchanged; title changes update the accessible name too.
+- Evidence: The Board activity browser scenario initially found the named dialog, then lost that accessible name immediately after filling Description while the heading, dialog and focused draft remained visible. The trace and snapshot are preserved in `/private/tmp/board-read-browser-initial-evidence-20260926`. Acceptance retains the named-dialog locator through real timeout/retry and draft edits rather than weakening it to an unnamed selector.
