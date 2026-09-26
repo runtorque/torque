@@ -3465,3 +3465,12 @@ History renders the persisted contract: role/template, input/output token counts
 - Selection: Bind the initially displayed Agent Class to its stable ID. Catalog reorder/insertion on refresh cannot replace its editor or draft. Explicit selection and acknowledged mutations remain the selection-changing paths.
 - Draft reconciliation: Preserve the existing three-way merge of untouched server fields and local edits, stable input DOM/caret/disclosure, and acknowledged original name/scope through rename or scope changes. Newly discovered persisted data is distinct from a mutation acknowledgement.
 - Verification: Reproduce stalled requests before repair. Focused tests cover all three catalog kinds, action preview, class validation, mutation types, late replies and unmount; isolated production browser scenarios verify real deadlines, draft continuity, explicit retry and persisted results.
+
+
+### D-181 — Shared specialization discovery has bounded recovery
+
+- Date: 2026-09-26
+- Scope: D-141's shared picker in Engineer creation/hiring, per-agent settings and group defaults; P-321.
+- Discovery: Keep on-demand loading and group-scoped reconnect refresh. Bound each read to 15 seconds independently of transport cancellation. A stalled discovery exposes an actionable error and re-enables Refresh specializations.
+- Continuity: Preserve accepted options, exact ordered selections including unavailable slugs, manual text, input DOM, focus and caret through timeout. Do not infer an empty catalog from a failed read. Late responses cannot replace an accepted retry, and unmount/disable/group change ends observation.
+- Verification: Reproduce stalled initial/reconnect reads, then verify explicit retry, stale-result rejection and hidden cancellation. Exercise the shared control in production browser creation, per-agent settings and group defaults, with persisted ordering through reload.

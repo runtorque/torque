@@ -1260,3 +1260,8 @@ P-311–P-313 now provide bounded proposal review/decision ownership, retained c
 ### Catalog authoring recovery checkpoint — 2026-09-26
 
 P-314–P-320 now bound Catalog/Actions/Agent Classes reads, previews, validation and mutation observation, preserve unknown-outcome drafts without replay, and retain the initially selected class through catalog reordering. D-180 and the matrix record reproduced regressions, 58 focused tests, 783 UI tests and ten passing isolated browser scenarios across new real-deadline and existing lifecycle acceptance. Screenshots were inspected and isolated QA cleaned. Main ledger: **320 behaviors: 311 implemented/equivalent dispositions, 5 open repairs and 4 intentional retirements**. A further source audit found an unbounded shared specialization-picker read. Broad Settings/lazy-reconnect and independent inventory/native/external/recovery acceptance remain; Phase 4 is not complete.
+
+
+### Shared specialization recovery checkpoint — 2026-09-26
+
+P-321 now bounds on-demand/reconnect discovery while preserving ordered selections, manual edits and retry ownership. D-181 and the matrix record two reproduced failures, 18 passing focused tests, 785 UI tests and one integrated live browser scenario exercising real timeouts across creation, per-agent settings and group defaults with persisted ordering. Screenshots were inspected and isolated QA cleaned. Further source audit maps unbounded Pipeline/History/Help/Context/Supervisor observations as P-322–P-327. Main ledger: **327 behaviors: 312 implemented/equivalent dispositions, 11 open repairs and 4 intentional retirements**. Broad audits and independent inventory/native/external/recovery acceptance keep Phase 4 open.

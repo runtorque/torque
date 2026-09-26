@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useAppSelector } from '../../app/hooks';
 import { selectConnection } from '../../app/store';
 import { Button } from '../../design/primitives';
-import { readCommand } from '../../protocol/http';
+import { settingsRequest } from './settingsRequests';
 import { record, text } from './agentClassesModel';
 import { settingsEqual } from './settingsModel';
 import styles from './ControlCenter.module.css';
@@ -24,7 +24,7 @@ export function SpecializationPicker({ group, value, onChange, label = 'Ordered 
   useEffect(() => {
     if (!requested || disabled || connection.status !== 'connected') return;
     const controller = new AbortController();
-    void readCommand({ cmd: 'list_specializations', group }, controller.signal).then((frame) => {
+    void settingsRequest({ cmd: 'list_specializations', group }, controller.signal, false, 'Specialization catalog').then((frame) => {
       if (controller.signal.aborted) return;
       if (frame.type !== 'specializations' || frame.group !== group || !Array.isArray(frame.specializations)) throw new Error(text(frame.message, 'Specialization list did not match this group.'));
       const names = normalize(frame.specializations.map(record).filter((item) => item.shadowed !== true).map((item) => text(item.name)));
