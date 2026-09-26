@@ -252,3 +252,6 @@ The worktree diff scenario also exercises real WebSocket reconnect while Changes
 
 
 The GitHub settings suite also verifies deadline recovery using a browser transport that deliberately ignores cancellation. It retains real fixture project choices and an unsaved repository draft through the 30-second deadline, retries, delivers the expired result, and checks that only explicit Save persists settings. Start the isolated daemon with the existing `ui/e2e/fixtures/github-settings` directory prepended to PATH and `TORQUE_GITHUB_SETTINGS_FIXTURE=1`; pass that flag to Playwright as well. This fixture never calls external GitHub.
+
+
+`message-loop-live.spec.ts` now includes a real 30-second cancellation deadline. It uses only generic local targets, holds the response after actual cancellation, changes selection, reconnects, and verifies explicit replay returns the same cancellation record without changing the unrelated composer draft. It also retains the replacement-loop guard scenario. Run against an isolated PTY-enabled daemon after `make ui-check`; inspect the compact timeout screenshot. Created targets are removed, and no commercial-provider loop delivery is exercised.

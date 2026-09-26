@@ -1,7 +1,7 @@
 import { useAppDispatch, useAppSelector, useAppStore } from '../../app/hooks';
 import { selectMessagesState } from '../../app/store';
 import { Button } from '../../design/primitives';
-import { readCommand } from '../../protocol/http';
+import { settingsRequest } from '../control/settingsRequests';
 import { composerActions } from './composerState';
 import { text } from './composerModel';
 import { assertLoopCancelled, loopInterval, loopNextRun, messageLoopPanel } from './messageLoopModel';
@@ -15,8 +15,10 @@ export function AgentMessageLoop({ agentId, disabled }: { agentId: string; disab
     const previous = store.getState().composer.loopCancellations[loopId]; if (disabled || previous?.pending || previous?.notice) return;
     const key = previous?.key || `react-loop-cancel-${crypto.randomUUID()}`;
     dispatch(composerActions.loopCancellation({ loopId, operation: { agentId, loop, key, pending: true, error: '', notice: '' } }));
+    // The retained store owns this operation across agent selection/unmount.
+    // Bound observation without making an old acknowledgement settle a retry.
     try {
-      const frame = await readCommand({ cmd: 'user_agent_message', agent_id: agentId, thread_id: `user-agent:user:${agentId}`, message: '/loop cancel', expected_loop_id: loopId, idempotency_key: key }, new AbortController().signal);
+      const frame = await settingsRequest({ cmd: 'user_agent_message', agent_id: agentId, thread_id: `user-agent:user:${agentId}`, message: '/loop cancel', expected_loop_id: loopId, idempotency_key: key }, new AbortController().signal, true, 'Loop cancellation', 'Loop cancellation timed out; its outcome is unknown. Retry to recover the same loop request.');
       assertLoopCancelled(frame, agentId, loopId);
       dispatch(composerActions.settleLoopCancellation({ loopId, key, notice: 'Message loop cancelled.' }));
     } catch (cause) { dispatch(composerActions.settleLoopCancellation({ loopId, key, error: cause instanceof Error ? cause.message : 'Loop cancellation failed.' })); }

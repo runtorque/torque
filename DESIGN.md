@@ -3678,3 +3678,12 @@ History renders the persisted contract: role/template, input/output token counts
 - Keep the existing 30-second observation limit, but settle the UI and release the check controls at that deadline independently of whether fetch honors cancellation. Retain accepted project choices, selected identity and all unsaved settings.
 - An expired, replaced, hidden or wrong-group response cannot apply repository/project/lane suggestions or replace the accepted project list. In particular, completion of an old request must not clear a newer request's pending state. Retry remains an explicit check of the current draft; no timeout writes settings or replays on reconnect.
 - Preserve editor focus/caret and existing non-empty lane mappings. Save remains the separate acknowledged persistence boundary. Controlled read-only gh fixtures verify this UI contract without claiming live external GitHub acceptance.
+
+
+### D-202 — Retain bounded loop-cancellation observation
+
+- Date: 2026-09-26
+- Scope: P-359; AgentMessageLoop cancellation delivery and retained composer state.
+- The shared composer store owns a started cancellation for its captured agent and exact loop ID. Changing selection or unmounting that panel must not lose its pending/result state or affect the unrelated draft. Bound observation at 30 seconds independently of transport cancellation, settle timeout into an unknown-outcome error, and leave explicit retry available even if the projection already shows the loop stopped.
+- Retry the identical guarded command and idempotency key. Reconnect and returning to the agent do not replay the write. Expired replies cannot settle a newer retry. Continue requiring the matching cancelled-loop acknowledgement and audit identity before reporting this request as confirmed.
+- Keep the existing displayed-loop backend guard: a replacement loop is never cancelled by an old request. This UI deadline does not establish crash-safe receipt recovery or change ordinary message, upload or turn-cancellation delivery semantics.

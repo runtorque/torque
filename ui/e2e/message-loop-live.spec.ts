@@ -46,3 +46,37 @@ test('message loops display scoped timing and cancel with acknowledged retry wit
   await page.setViewportSize({ width: 760, height: 720 }); const split = page.getByRole('separator', { name: 'Resize terminal and direct messages', exact: true }); await split.focus(); await split.press('End'); await panel.scrollIntoViewIfNeeded(); await expect(panel.getByRole('button', { name: 'Cancel loop', exact: true })).toBeInViewport(); await page.screenshot({ animations: 'disabled', path: test.info().outputPath('message-loop-compact.png') });
   await page.reload(); await page.getByRole('button', { name: /⌁ Agents/ }).click(); await expect(panel).toContainText('Replacement stays active');
 });
+
+test('message-loop cancellation times out without losing its owner and retries one durable cancellation', async ({ page, request }) => {
+  test.setTimeout(75_000);
+  const runtime = (await (await request.get('/api/runtime')).json() as { data: { runtime: Row } }).data.runtime;
+  expect(runtime.port).not.toBe(18932); expect(runtime.profile).not.toBe('default');
+  const group = `Loop deadline ${Date.now()}`; await command(request, { cmd: 'add_group', group });
+  await command(request, { cmd: 'update_group_settings', group, settings: { default_directory: '/private/tmp', git_worktree: false, agent_provider: 'generic' } });
+  const add = async (name: string) => { const frame = await command(request, { cmd: 'add_worker', group, name, provider: 'generic', command: '/bin/cat', directory: '/private/tmp', shell: '/bin/sh', worktree: false }); const id = String(frame.id); created.push(id); return id; };
+  const worker = await add('Deadline worker'); const other = await add('Other deadline worker');
+  const loop = (await command(request, { cmd: 'user_agent_message', agent_id: worker, message: '/loop every 1h Deadline loop', idempotency_key: `loop-create-${Date.now()}` })).loop as Row;
+  await command(request, { cmd: 'ui_select_group', group }); await command(request, { cmd: 'ui_select_agent', id: worker });
+  const writes: Row[] = []; const replies: Row[] = []; let socket: WebSocketRoute | undefined; let connections = 0;
+  await page.routeWebSocket(/\/ws\?/, (connection) => { connection.connectToServer(); socket = connection; connections++; });
+  await page.route('**/api/cmd', async (route) => {
+    const data = route.request().postDataJSON() as Row;
+    if (data.cmd !== 'user_agent_message' || data.message !== '/loop cancel') { await route.continue(); return; }
+    writes.push(data); const response = await route.fetch(); replies.push(await response.json() as Row);
+    if (writes.length === 1) await new Promise<void>((resolve) => { release = resolve; });
+    await route.fulfill({ response });
+  });
+  await page.goto('/'); await page.getByRole('button', { name: /⌁ Agents/ }).click();
+  const panel = page.getByRole('region', { name: 'Scheduled message loop' }); const input = page.getByRole('textbox', { name: 'Message Deadline worker', exact: true });
+  await input.fill('Retained through cancellation'); await input.evaluate((node: HTMLTextAreaElement) => node.setSelectionRange(2, 8));
+  await panel.getByRole('button', { name: 'Cancel loop', exact: true }).click(); await expect.poll(() => Boolean(release)).toBe(true);
+  await page.locator(`[role="treeitem"][data-agent-id="${other}"]`).click(); await expect(panel).toHaveCount(0);
+  await page.locator(`[role="treeitem"][data-agent-id="${worker}"]`).click(); await expect(panel.getByRole('button', { name: 'Cancelling loop…' })).toBeDisabled();
+  await expect(panel.getByRole('alert')).toContainText('outcome is unknown', { timeout: 35_000 });
+  const before = connections; await socket!.close({ code: 1012, reason: 'Unknown loop cancellation' }); await expect.poll(() => connections).toBeGreaterThan(before);
+  await expect(panel.getByRole('alert')).toContainText('outcome is unknown'); expect(writes).toHaveLength(1); await expect(input).toHaveValue('Retained through cancellation');
+  await page.setViewportSize({ width: 760, height: 720 }); const split = page.getByRole('separator', { name: 'Resize terminal and direct messages', exact: true }); await split.focus(); await split.press('End'); await panel.scrollIntoViewIfNeeded(); await page.screenshot({ animations: 'disabled', path: test.info().outputPath('loop-cancellation-timeout.png') });
+  release!(); release = undefined; await panel.getByRole('button', { name: 'Retry loop cancellation' }).click();
+  await expect(panel.getByRole('status')).toHaveText('Message loop cancelled.'); expect(writes).toHaveLength(2); expect(writes[0]).toMatchObject({ expected_loop_id: loop.id, agent_id: worker }); expect(writes[1]).toEqual(writes[0]); expect(replies[1]).toEqual(replies[0]);
+  await expect(input).toHaveValue('Retained through cancellation'); expect(await input.evaluate((node: HTMLTextAreaElement) => [node.selectionStart, node.selectionEnd])).toEqual([2, 8]);
+});

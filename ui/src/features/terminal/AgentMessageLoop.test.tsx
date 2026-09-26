@@ -11,15 +11,15 @@ const agent = toAgentViewModel('worker', { kind: 'worker', name: 'Worker', group
 const other = toAgentViewModel('other', { kind: 'worker', name: 'Other', group: 'two', session_id: 'other-session' });
 const loop = { id: 'loop-one', agent_id: agent.id, status: 'active', message: 'Review progress\nand blockers', interval_seconds: 600, next_run_at: 1_900_000_000, created_at: 10 };
 function setup() {
-  const store = createAppStore(); const calls: { command: TorqueCommand; resolve: (frame: UnknownRecord) => void }[] = [];
+  const store = createAppStore(); const calls: { command: TorqueCommand; signal: AbortSignal; resolve: (frame: UnknownRecord) => void }[] = [];
   const snapshot = (loops: UnknownRecord = { [loop.id]: loop }) => { store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, agent_message_loops: loops })); };
-  snapshot(); vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => new Promise((resolve) => calls.push({ command: JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand, resolve: (frame) => resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: frame }) }) }))));
+  snapshot(); vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => new Promise((resolve) => calls.push({ signal: options.signal!, command: JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand, resolve: (frame) => resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: frame }) }) }))));
   const content = (cell = agent, target: typeof agent | null = cell) => <Provider store={store}><Conversation key={cell.id} cell={cell} target={target} messages={[]} sendCommand={() => true} onUnavailable={vi.fn()} /></Provider>;
   const view = render(content()); const show = (cell = agent, target: typeof agent | null = cell) => view.rerender(content(cell, target));
   const finish = async (index: number, frame: UnknownRecord) => { await act(async () => { calls[index]!.resolve(frame); await Promise.resolve(); }); };
   return { store, calls, snapshot, show, finish };
 }
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('agent message loop controls', () => {
   it('projects scoped active/deferred loops and follows external stop without inventing status', () => {
     const { snapshot, show } = setup(); expect(screen.getByRole('region', { name: 'Scheduled message loop' })).toHaveTextContent('Every 10m'); expect(screen.getByText(/Next /)).toBeVisible();
@@ -50,4 +50,27 @@ describe('agent message loop controls', () => {
     const good = { type: 'agent_message_loop', loop: { ...loop, status: 'cancelled' }, audit_message_id: 'audit' }; expect(() => assertLoopCancelled(good, agent.id, loop.id)).not.toThrow();
     for (const changed of [{ ...good, audit_message_id: '' }, { ...good, loop: { ...loop, status: 'active' } }, { ...good, loop: { ...loop, status: 'cancelled', agent_id: 'other' } }, { ...good, type: 'ok' }]) expect(() => assertLoopCancelled(changed, agent.id, loop.id)).toThrow('confirm');
   });
+});
+
+it('bounds cancellation observation and retries the captured loop without accepting an expired result', async () => {
+  vi.useFakeTimers(); const { calls, finish, snapshot } = setup();
+  const input = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Message Worker' }); fireEvent.change(input, { target: { value: 'Retained draft' } }); input.setSelectionRange(1, 5); fireEvent.select(input);
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel loop' }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+  expect(calls[0]!.signal.aborted).toBe(true); expect(screen.getByRole('alert')).toHaveTextContent('outcome is unknown');
+  expect(screen.getByRole('button', { name: 'Retry loop cancellation' })).toBeEnabled(); expect(input).toHaveValue('Retained draft');
+  act(() => snapshot({ [loop.id]: { ...loop, status: 'cancelled' } }));
+  fireEvent.click(screen.getByRole('button', { name: 'Retry loop cancellation' })); expect(calls[1]!.command).toEqual(calls[0]!.command);
+  await finish(0, { type: 'agent_message_loop', loop: { ...loop, status: 'cancelled' }, audit_message_id: 'expired' });
+  expect(screen.getByRole('button', { name: 'Cancelling loop…' })).toBeDisabled(); expect(screen.queryByText('Message loop cancelled.')).not.toBeInTheDocument();
+  await finish(1, { type: 'agent_message_loop', loop: { ...loop, status: 'cancelled' }, audit_message_id: 'accepted' });
+  expect(screen.getByRole('status')).toHaveTextContent('Message loop cancelled.'); expect([input.selectionStart, input.selectionEnd]).toEqual([1, 5]);
+});
+it('settles an offscreen loop deadline in its retained store without replaying on return', async () => {
+  vi.useFakeTimers(); const { calls, show, store } = setup();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel loop' })); show(other);
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+  expect(store.getState().composer.loopCancellations[loop.id]).toMatchObject({ pending: false, error: expect.stringContaining('outcome is unknown') as unknown });
+  show(); expect(screen.getByRole('alert')).toHaveTextContent('outcome is unknown'); expect(calls).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Retry loop cancellation' })); expect(calls[1]!.command).toEqual(calls[0]!.command);
 });

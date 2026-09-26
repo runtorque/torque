@@ -1388,3 +1388,8 @@ P-357 now retains the exact reviewed launch through bounded observation, uncerta
 ### GitHub draft-check recovery checkpoint — 2026-09-26
 
 P-358 now settles GitHub discovery/preflight deadlines independently of fetch cancellation and rejects late suggestions while retaining the selected project, draft and editor state. D-201 and the matrix record four reproduced failures, a passing 954-test UI check and three production-browser scenarios using the read-only gh fixture, including the actual 30-second deadline and explicit save verification. Isolated QA is stopped. Ledger: **358 mapped / 350 implemented or equivalent / 4 open / 4 retired**; broad settings/reconnect audits and independent migration acceptance remain open.
+
+
+### Retained loop-cancellation recovery checkpoint — 2026-09-26
+
+P-359 now bounds loop cancellation at 30 seconds while retaining its captured agent/loop/key in the shared composer store. Selection and reconnect do not replay it; expired responses cannot settle a retry, and unrelated drafts and replacement loops remain protected. D-202 and the matrix record two reproduced failures, 30 focused UI tests, six backend loop regressions, a 956-test UI check and two real-daemon browser scenarios. QA is stopped. Ledger: **359 mapped / 351 implemented or equivalent / 4 open / 4 retired**. Broad audits and independent full migration acceptance remain open.
