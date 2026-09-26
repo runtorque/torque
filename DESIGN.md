@@ -3723,3 +3723,12 @@ History renders the persisted contract: role/template, input/output token counts
 - Bound each upload at 30 seconds across both request and response-body reading, independently of transport abort. The source draft owns that deadline across navigation and unmounting. Expiry releases attachment/send controls while preserving text, reply, selection, accepted images, native composition and undo history; expose an inline instruction to attach again explicitly.
 - Validate complete upload acknowledgements before accepting tokens or creating preview URLs. An expired acknowledgement cannot add an image, replace a newer upload's anchor or unlock its controls. Reconnect and returning to a composer do not resend uploads. Existing successful source-cell and IME-deferred insertion behavior remains intact.
 - Uploading stores files; it does not submit a message. This deadline does not prove an unacknowledged file was never saved, provide an idempotent upload receipt, or delete unacknowledged files. Only an explicit Send submits the currently accepted image paths. Raw terminal drops have a separate owner/failure contract and remain under audit.
+
+
+### D-207 — Recover terminal image drops within the original active pane
+
+- Date: 2026-09-26
+- Scope: P-364, raw image drops into xterm.
+- Upload images independently and keep successful paths in drop order, shell-quoted. A failed file must not discard another successful image; an empty result must send no terminal input. Reject malformed and control-character paths.
+- Bound each request and body observation to 30 seconds independently of abort support. Show pending feedback, then identify failed filenames and instruct the user to drop only failed images again. Preserve the usable terminal and Tail control; keep long feedback scrollable at compact sizes. Do not retry automatically or imply an expired upload saved no file.
+- Bind results to the original active controller lease, not merely a reusable controller instance or session ID. Leaving, replacing or unmounting the pane cancels its observation. Old completions must never paste or steal focus after return. Restore terminal focus only for the original active pane.

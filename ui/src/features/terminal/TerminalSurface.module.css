@@ -45,3 +45,6 @@
 .historyList button { padding: 8px; border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); background: var(--surface-raised); text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .conversation[data-has-loop='true'] .composer { max-height: calc(100% - 148px); }
+
+.dropFeedback { flex: 0 0 auto; max-height: 72px; overflow-y: auto; margin: 0; padding: 5px 7px; font-size: 10px; color: var(--text-dim); overflow-wrap: anywhere; }
+.dropFeedback[role="alert"] { color: var(--danger); }

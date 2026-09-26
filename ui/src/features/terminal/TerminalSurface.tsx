@@ -21,13 +21,7 @@ import { Conversation } from './Conversation';
 import { messageLoopPanel } from './messageLoopModel';
 import { selectAgentSettingsDefaults, selectMessagesState } from '../../app/store';
 import { VerticalResizeHandle } from './VerticalResizeHandle';
-
-interface UploadedAttachment {
-  path: string;
-  filename: string;
-  mime_type?: string;
-  size_bytes?: number;
-}
+import { uploadTerminalImages } from './terminalDropUpload';
 
 const DEFAULT_CONVERSATION_HEIGHT = 180;
 const MIN_CONVERSATION_HEIGHT = 176;
@@ -63,6 +57,9 @@ interface TerminalMountProps {
 function TerminalMount({ cell, active, focusRequest }: TerminalMountProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<TerminalController | null>(null);
+  const dropOwner = useRef<{ controller: TerminalController; uploads: Set<AbortController> } | null>(null);
+  const latestDrop = useRef<AbortController | null>(null);
+  const [dropFeedback, setDropFeedback] = useState<{ pending: boolean; text: string } | null>(null);
   const [status, setStatus] = useState<TerminalConnectionStatus>('connecting');
   const scrollback = useAppSelector((state) => terminalScrollback(selectAgentSettingsDefaults(state).global.xterm_scrollback));
   const scrollbackRef = useRef(scrollback);
@@ -86,11 +83,16 @@ function TerminalMount({ cell, active, focusRequest }: TerminalMountProps) {
         scrollback: scrollbackRef.current,
       });
       controllerRef.current = lease.controller;
+      dropOwner.current = { controller: lease.controller, uploads: new Set() };
       lease.controller.setScrollback(scrollbackRef.current);
     } catch {
       queueMicrotask(() => setStatus('unavailable'));
     }
     return () => {
+      dropOwner.current?.uploads.forEach((upload) => upload.abort());
+      dropOwner.current = null;
+      latestDrop.current = null;
+      setDropFeedback(null);
       controllerRef.current = null;
       lease?.release();
     };
@@ -114,18 +116,24 @@ function TerminalMount({ cell, active, focusRequest }: TerminalMountProps) {
   }
 
   const uploadDroppedImages = async (files: File[]) => {
+    const owner = dropOwner.current;
+    if (!owner) return;
     const images = files.filter((file) => file.type.startsWith('image/'));
-    if (!images.length) return;
-    const paths: string[] = [];
-    for (const file of images) {
-      const body = new FormData();
-      body.append('task_id', `react-terminal-${cell.id}-${cell.sessionId}`);
-      body.append('file', file);
-      const response = await fetch('/api/upload', { method: 'POST', body });
-      const payload = await response.json() as { ok?: boolean; data?: UploadedAttachment[] };
-      if (payload.ok) paths.push(...(payload.data ?? []).map((entry) => entry.path));
-    }
-    controllerRef.current?.paste(`${paths.map(quoteShellPath).join(' ')} `);
+    if (!images.length) { owner.controller.focus(); return; }
+    const upload = new AbortController();
+    owner.uploads.add(upload); latestDrop.current = upload;
+    setDropFeedback({ pending: true, text: 'Uploading terminal images…' });
+    const result = await uploadTerminalImages(`react-terminal-${cell.id}-${cell.sessionId}`, images, upload.signal);
+    owner.uploads.delete(upload);
+    // Controller instances may be reused on reacquisition; the lease identity is
+    // what binds a drop to the original active pane.
+    if (dropOwner.current !== owner) return;
+    if (result.paths.length) owner.controller.paste(`${result.paths.map(quoteShellPath).join(' ')} `);
+    if (latestDrop.current === upload) setDropFeedback(result.failures.length ? {
+      pending: false,
+      text: `${result.failures.join(' ')} ${result.paths.length ? 'Successful image paths were pasted. ' : ''}Drop the failed images again to retry.`,
+    } : null);
+    owner.controller.focus();
   };
 
   return (
@@ -136,6 +144,7 @@ function TerminalMount({ cell, active, focusRequest }: TerminalMountProps) {
         <span className={styles.session}>{cell.sessionId.slice(0, 10)}</span>
         <Button tone="quiet" onPress={() => controllerRef.current?.scrollToTail()}>Tail</Button>
       </header>
+      {dropFeedback ? <p className={styles.dropFeedback} role={dropFeedback.pending ? 'status' : 'alert'}>{dropFeedback.text}</p> : null}
       <div
         ref={surfaceRef}
         className={styles.terminalSurface}

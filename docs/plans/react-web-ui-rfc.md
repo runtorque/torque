@@ -1419,3 +1419,11 @@ Final verification for this checkpoint is green: complete `make test` passed **3
 ### Composer upload deadlines — 2026-09-26
 
 P-363/D-206 adds independently bounded 30-second request/body observation to composer image uploads. Offscreen expiry releases controls while preserving drafts and accepted images; complete descriptor validation and the existing source key prevent malformed or expired acknowledgements from inserting tokens or settling a newer upload. The matrix records four reproduced component failures, 965 passing React tests, four existing composer browser passes and two new real-deadline/PTY receiver passes, with screenshots inspected and the isolated profile cleaned up. The new browser fixture's final assertion correction passed lint/typecheck. Ledger: **363 mapped / 355 implemented or equivalent / 4 open / 4 retired**. Broad settings/lazy recovery and independent acceptance remain open; no full backend run was repeated for this frontend-only repair.
+
+
+### Raw terminal image-drop recovery (2026-09-26, acceptance pending)
+
+P-364 maps the reproduced raw terminal drop failures: empty paste on refusal, serial file failure propagation, unbounded request/body observation and stale paste after pane reacquisition. Per-file bounded upload results preserve successful paths and explicit retry; original-lease ownership prevents late paste/focus. D-207 records the behavior. Full UI and real-PTY browser acceptance are pending; broad settings/recovery and independent full-browser/native/external/crash gates remain open.
+
+
+P-364 acceptance is complete: full UI validation passed **109 files / 981 tests**, and all four isolated real-PTY browser scenarios passed, including request/body timeouts, partial success, original-pane ownership, scrollback and live preferences. The compact recovery screenshot was inspected and the six QA sessions closed. Ledger: **364 mapped / 356 implemented or equivalent / 4 open / 4 intentional retirements**. The three broad Settings audits, P-112 and independent complete-browser/native/external/crash gates remain open.
