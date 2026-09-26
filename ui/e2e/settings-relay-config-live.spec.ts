@@ -1,4 +1,5 @@
-import { expect, test, type APIRequestContext, type WebSocketRoute } from '@playwright/test';
+import { expect, type APIRequestContext, type WebSocketRoute } from '@playwright/test';
+import { test } from './relay-profile-fixture';
 type Row = Record<string, unknown>;
 async function command(request: APIRequestContext, data: Row) {
   const result = await (await request.post('/api/cmd', { data })).json() as { ok: boolean; error?: string; data: Row };
@@ -7,7 +8,7 @@ async function command(request: APIRequestContext, data: Row) {
 test('resolved Relay fields preserve inheritance, focused drafts and sparse writes under real updates', async ({ page, request }) => {
   test.setTimeout(90_000);
   const runtime = (await (await request.get('/api/runtime')).json() as { data: { runtime: Row } }).data.runtime;
-  expect(runtime.port).not.toBe(18932); expect(runtime.profile).toBe('react-relay-config-20260923');
+  expect(runtime.port).not.toBe(18932); expect(runtime.profile).toMatch(/^qa-relay-config-/);
   const initial = await command(request, { cmd: 'get_global_settings' }); const original = initial.settings as Row;
   const resolved = initial.relay_config as { config: Row; sources: Record<string, Row> };
   expect(resolved.sources.enabled).toEqual({ source: 'env', value: true });

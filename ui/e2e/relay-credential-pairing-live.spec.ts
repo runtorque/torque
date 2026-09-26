@@ -11,7 +11,16 @@ test('Relay pairing retains drafts through confirmation, pending reconnect, reco
   let credentialId = 'existing-fixture-credential'; const pairings: Row[] = []; let reads = 0; let socket: WebSocketRoute | undefined; let connections = 0;
   let release!: () => void; const held = new Promise<void>((resolve) => { release = resolve; });
   const resolvedConfig = () => ({ config: { enabled: false, relay_url: 'https://relay.invalid', daemon_id: 'fixture-daemon', credential_id: credentialId, private_key_path: '/private/tmp/fixture-key.pem' }, sources: { relay_url: { source: 'env', value: 'https://relay.invalid' }, daemon_id: { source: 'env', value: 'fixture-daemon' }, credential_id: { source: 'settings', value: credentialId }, private_key_path: { source: 'settings', value: '/private/tmp/fixture-key.pem' } } });
-  await page.routeWebSocket(/\/ws\?/, (connection) => { connection.connectToServer(); socket = connection; connections += 1; });
+  await page.routeWebSocket(/\/ws\?/, (connection) => {
+    const server = connection.connectToServer(); socket = connection; connections += 1;
+    // Both transports represent the same fixture configuration, including resync.
+    server.onMessage((message) => {
+      const frame = JSON.parse(String(message)) as Row;
+      if (frame.type === 'state') frame.relay_config = resolvedConfig();
+      if (frame.type === 'delta' && Array.isArray(frame.ops)) frame.ops = (frame.ops as Row[]).map((op) => op.op === 'relay_config' ? { ...op, ...resolvedConfig() } : op);
+      connection.send(JSON.stringify(frame));
+    });
+  });
   await page.route('**/api/cmd', async (route) => {
     const data = route.request().postDataJSON() as Row;
     if (data.cmd === 'get_global_settings') {

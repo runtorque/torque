@@ -16,7 +16,7 @@ test.afterEach(async ({ request }) => {
 });
 test('reviewed unlink preserves a live peer and lost-ack retry; physical removal retains an unmerged branch', async ({ page, request }) => {
   const runtime = (await (await request.get('/api/runtime')).json() as { data: { runtime: Row } }).data.runtime;
-  expect(runtime.profile).toBe('react-worktree-removal-20260923'); expect(runtime.port).toBe(19005);
+  expect(runtime.profile).not.toBe('default'); expect(runtime.port).not.toBe(18932);
   const root = mkdtempSync(join(tmpdir(), 'torque-removal-live-')); fixture.root = root;
   const git = (directory: string, ...args: string[]) => execFileSync('git', ['-C', directory, ...args], { encoding: 'utf8' }).trim();
   git(root, 'init', '-b', 'main'); git(root, 'config', 'user.name', 'Torque QA'); git(root, 'config', 'user.email', 'torque-qa@example.invalid');

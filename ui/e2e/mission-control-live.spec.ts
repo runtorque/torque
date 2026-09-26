@@ -34,7 +34,12 @@ test('Mission Control dismisses real asks with refusal/retry, retained pending o
     const before = connections; await socket!.close({ code: 1012, reason: 'Pending Mission dismissal' }); await expect.poll(() => connections).toBeGreaterThan(before); await expect(button).toBeDisabled(); expect(dismissals).toHaveLength(1); release(); await expect(card.getByRole('alert')).toContainText('Fixture dismissal refused'); await expect(button).toBeEnabled();
     refuse = false; await button.click(); await expect(card).toHaveCount(0); await expect(region.getByRole('region', { name: 'At-risk watchlist', exact: true }).getByRole('article', { name: 'Mission ask one', exact: true })).toBeVisible(); expect(dismissals).toHaveLength(2); expect(dismissals[1]?.id).toBe(firstId); await expect(region.getByRole('button', { name: 'Toggle Needs operator now', exact: true })).toBeFocused(); await expect(region.getByRole('heading', { name: 'Read-only detail', exact: true })).toBeVisible();
     const summary = await command(request, { cmd: 'get_mission_control', group }); expect(JSON.stringify(summary.sections)).not.toContain(firstId); expect(JSON.stringify(summary.sections)).toContain(secondId);
-    await page.reload(); await expect(asks.getByRole('article', { name: 'Mission ask two', exact: true })).toBeVisible(); await expect(card).toHaveCount(0); await command(request, { cmd: 'mission_control_dismiss', id: secondId }); await expect(asks.getByRole('article', { name: 'Mission ask two', exact: true })).toHaveCount(0); await expect(region.getByRole('region', { name: 'Needs operator now', exact: true })).toContainText('No operator gates are waiting right now.');
-    expect(JSON.stringify((await command(request, { cmd: 'get_mission_control', group })).sections)).not.toContain(secondId);
+    await page.reload(); await expect(asks.getByRole('article', { name: 'Mission ask two', exact: true })).toBeVisible(); await expect(card).toHaveCount(0); await command(request, { cmd: 'mission_control_dismiss', id: secondId }); await expect(asks.getByRole('article', { name: 'Mission ask two', exact: true })).toHaveCount(0);
+    const after = await command(request, { cmd: 'get_mission_control', group });
+    expect(JSON.stringify(after.sections)).not.toContain(firstId); expect(JSON.stringify(after.sections)).not.toContain(secondId);
+    const remaining = ((after.sections as Row).needs_operator_now as { items: Row[] }).items;
+    // Dismissing these asks must retain unrelated gates, such as pending deploys.
+    if (!remaining.length) await expect(asks).toContainText('No operator gates are waiting right now.');
+    else for (const item of remaining) await expect(asks.getByRole('article', { name: String(item.title), exact: true })).toBeVisible();
   } finally { release(); }
 });

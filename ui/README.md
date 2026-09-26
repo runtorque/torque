@@ -31,14 +31,34 @@ The source boundaries are deliberate:
 - `src/features/` owns Board, Agents, terminal, Planning, and Control Center
   product slices; cross-feature state stays in the app projection.
 
-The Board browser suite expects an isolated daemon and Vite proxy. Point
-`TORQUE_UI_BASE_URL` at Vite and set `TORQUE_PLAYWRIGHT_CHANNEL=chrome` when
+The browser suite expects an isolated daemon/profile. Point
+`TORQUE_UI_BASE_URL` at its production UI or Vite proxy and set
+`TORQUE_PLAYWRIGHT_CHANNEL=chrome` when
 using an installed Chrome instead of Playwright's bundled Chromium:
 
 ```bash
 TORQUE_UI_BASE_URL=http://127.0.0.1:5174 \
 TORQUE_PLAYWRIGHT_CHANNEL=chrome npm --prefix ui run test:e2e
 ```
+
+
+Keep the implementation, browser fixtures and Git HEAD fixed during a full run:
+Mission Control derives pending-deploy evidence from commits since daemon boot.
+The tests run serially because most scenarios share the selected profile.
+
+Real PTY scenarios opt in through `TORQUE_PTY_PYTHON` and
+`TORQUE_ATTENTION_PYTHON`, pointing to an absolute Python executable available to
+the disposable daemon. The GitHub Settings discovery fixture requires
+`TORQUE_GITHUB_SETTINGS_FIXTURE=1` in both test and daemon environments and
+`ui/e2e/fixtures/github-settings` at the front of the daemon's `PATH`.
+
+The Relay file/environment inheritance scenario starts and cleans up its own
+temporary daemon with a dynamic port. Its Python interpreter comes from
+`TORQUE_QA_PYTHON`, then `TORQUE_PTY_PYTHON`, then `python3`; it must have Torque's
+runtime dependencies. The fixture verifies the daemon identity and zero PTY
+sessions, prevents connector loading, and stops only helpers whose live commands
+reference its temporary data directory. It tests real configuration precedence
+without contacting Relay. No test requires a historically named QA profile.
 
 ## Dependency updates
 

@@ -1295,3 +1295,8 @@ P-331/P-332 restore double-click/Enter terminal activation and the live Focus on
 ### Planning recovery audit — 2026-09-26
 
 Source audit adds P-334–P-337 for bounded editor details, owned/validated mutation sequences, Initiative task-option discovery and the separate acknowledged-task link step. These paths bypass the top-level Planning collection timeout and still require reproduced regression tests and repair. The complete 116-scenario browser run is live on isolated port 19041; no terminal result is claimed. The matrix now tracks **337 behaviors: 325 implemented/equivalent dispositions, 8 open audits/repairs and 4 intentional retirements**. Broad field contracts, lazy/reconnect, independent inventory, Planning combinations and native/external/recovery acceptance remain; Phase 4 and Classic retirement are open.
+
+
+### Complete browser run and fixture corrections — 2026-09-26
+
+The complete 116-scenario browser run finished with 111 passing and five failing scenarios, with no skips. Investigation identified stale acknowledgement/transport fixtures, historical QA profile assumptions and an assertion that erased unrelated Mission gates from its expected result. All five corrected scenarios then passed against isolated runtimes, including a self-contained real Relay file/environment fixture. A clean complete-suite rerun remains required; targeted reruns are not substituted for it. The matrix records logs, screenshots and verified QA cleanup. The implementation count remains 337 mapped / 325 implemented or equivalent / 8 open / 4 retired, and P-334–P-337 Planning recovery is still the next application repair. Phase 4 remains open.

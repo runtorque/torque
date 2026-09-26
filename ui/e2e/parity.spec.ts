@@ -155,7 +155,7 @@ test('attention review gates approval on a fetched diff and retains a rejected r
     const data = command.cmd === 'ui_set_react_workspace_state' ? { type: 'react_workspace_state', state: command.state }
       : command.cmd === 'task_detail' ? { type: 'task_detail', id: command.id, task: command.id === 'ask' ? ask : command.id === 'approval' ? approval : parent }
       : command.cmd === 'behavior_overlay_diff' ? { type: 'behavior_overlay_diff', proposal: { id: 'proposal', status: 'approved', next_actor_kind: 'user', proposed_text_sha256: 'reviewed-hash', base_version_id: 'base', rationale: 'Bounded change' }, diff: '-old rule\n+new rule' }
-        : command.cmd === 'behavior_overlay_user_reject' ? { type: 'behavior_overlay_proposal', proposal_id: 'proposal', proposal: { id: 'proposal', status: 'rejected' } } : { type: 'ok' };
+        : command.cmd === 'behavior_overlay_user_reject' ? { type: 'behavior_overlay_proposal', proposal_id: 'proposal', proposal: { id: 'proposal', status: 'rejected', proposed_text_sha256: 'reviewed-hash', base_version_id: 'base' } } : { type: 'ok' };
     await route.fulfill({ json: { ok: true, data } });
   });
   await fixtureWorkspace(page, false, { agents: { w: { id: 'w', name: 'Wren', group: 'Foundation', kind: 'worker', cell_type: 'agent', session_id: 'fixture-session', status: 'running' } }, board_tasks: { ask, approval, parent } });
