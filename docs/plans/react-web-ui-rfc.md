@@ -1435,3 +1435,11 @@ P-365 repairs unbounded navigation persistence and prevents timeout recovery fro
 
 
 P-365 is accepted: full regression passed **3,270 backend tests / 82 skips** and **987 React tests**, final production build verified, and all three final-build navigation browser scenarios passed. Compact error wording now reflects an unconfirmed outcome. Ledger: **365 mapped / 357 implemented or equivalent / 4 open / 4 intentional retirements**. Broad Settings and P-112 plus independent full-browser/native/external/crash gates remain open.
+
+
+### Ownership-tree navigation retention (2026-09-26, acceptance pending)
+
+P-366 repairs two reproduced losses of operator disclosure: remounting Agents expanded every branch, and Expand all cleared hidden groups' choices. Window-local workspace state now retains explicit collapse with selection/drafts, while expansion is scoped to the displayed group. D-209 keeps this distinct from the Classic group-level collapsed-default setting. Focused shell regressions pass; full UI and production browser acceptance remain pending.
+
+
+P-366 is accepted: full UI validation passed **989 tests**, and all **11 adjacent browser parity scenarios** passed. Explicit ownership disclosure now survives navigation and preserves other groups during Expand all. Compact screenshot inspected and isolated QA stopped. Ledger: **366 mapped / 358 implemented or equivalent / 4 open / 4 intentional retirements**. A fresh complete browser run and broad Settings/recovery/native/external/crash acceptance remain outstanding.

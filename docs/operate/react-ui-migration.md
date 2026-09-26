@@ -282,3 +282,8 @@ Run `board-read-recovery-live.spec.ts` before `board.spec.ts` to retain the cros
 ### Workspace navigation save recovery acceptance
 
 Run `workspace-navigation-recovery-live.spec.ts` alongside `workspace-navigation-live.spec.ts` against an isolated production-build daemon. The request case holds the old request before it reaches the daemon, waits the real 30-second deadline, commits a newer navigation, and then delivers the old request to prove persistent stale-write rejection. The body case holds an actual acknowledgement, explicitly retries the same revision, queues newer navigation, and releases the expired body during retry. Both reconnect without replay, retain local navigation and reload the final saved destination. Inspect `workspace-request-timeout.png` and `workspace-body-timeout.png` at compact width. Backend tests in `test_react_workspace_state.py` additionally cover actual database reopen, schema-30 upgrade, transactional failure/retry, cross-window exact replay and cancellation-safe subscriber publication. Do not infer a general daemon-crash delivery guarantee from these preference-specific tests.
+
+
+### Ownership-tree navigation retention acceptance
+
+`parity.spec.ts` now extends the hierarchy/draft fixture across Board and Control navigation and keyboard expansion after return, and adds group-scoped Expand all acceptance. Use an isolated production-build daemon; these hierarchy scenarios supply protocol fixtures and do not launch provider sessions. Inspect `retained-ownership-collapse.png` at compact width. Run the complete parity fixture file so corrected workspace-save acknowledgement metadata is also exercised in attention review. The actual daemon-backed Area/Thinking scenarios remain in that file and should pass unchanged.

@@ -382,6 +382,8 @@ Sources below are relative to `static/js/`; React owners are under `ui/src/`. Al
 
 | P-365 | Workspace: bounded saves with durable latest-intent ordering | Required | React navigation persistence; P-112 recovery audit | workspaceNavigationPersistence; ui_state handler; schema migration 31; D-208; durable ordering and final-build browser acceptance | Recover request/body stalls without losing navigation; explicit retry and newer intent after timeout; reject delayed older writes even after restart; exact replay must not override another window; publish accepted writes after caller cancellation. |
 
+| P-366 | Agents: retained ownership-tree disclosure across navigation | Required | `render.js::collapsedGroups`; P-019 and live UI state contract | workspaceUi collapsedAgentIds; AgentWorkspace; D-209; shell and production-browser navigation acceptance | Collapse a team, leave/reopen Agents and resync without losing disclosure, selection or draft; keyboard expand/collapse still works; Expand all affects only the displayed group. |
+
 ## Command inventory
 
 Each literal classic transport command is inventoried independently. Dynamic command families and native operations are covered by the behavior rows and the source inventory below. A React occurrence does not establish a discoverable control, correct payload, response handling or parity. These are required verification rows unless a specific retirement decision says otherwise.
@@ -2341,3 +2343,18 @@ The expanded ledger has **343 behaviors: 329 implemented/equivalent dispositions
 - Final production-browser confirmation passed **3/3 scenarios** in 1.2 minutes (`/private/tmp/workspace-save-browser-final-20260926.log`), including both actual 30-second deadlines, delayed stale writes, exact retry, local navigation, reload, multiple windows and detached navigation. Inspected the final compact screenshot: accurate unconfirmed-save wording and Retry remain visible.
 - Fresh QA19062/profile `react-workspace-save-final-20260926` used zero PTY sessions; daemon and exact sidecars were stopped. No deployment, external-provider operation or native lifecycle test was performed.
 - Ledger: **365 mapped / 357 implemented or equivalent / 4 open / 4 intentionally retired**. P-087/P-088/P-089/P-112 and independent complete-browser/inventory/native/external/crash acceptance remain open. Ownership-tree collapse retention across leaving/reopening Agents is the next source-audited candidate; a regression is still needed before mapping a concrete repair.
+
+
+### Ownership-tree disclosure retention — acceptance pending (2026-09-26)
+
+- Two shell regressions reproduced loss of explicit ownership collapse when leaving/reopening Agents, and Expand all clearing another group's collapsed branches (`/private/tmp/ownership-collapse-red-20260926.log`). P-366 separates these concrete P-019/P-112 repairs from the still-unresolved group-level collapsed-default Settings audit.
+- Workspace state now owns collapsed agent IDs for the window lifetime. Group-scoped expansion preserves offscreen groups; pointer and keyboard paths share state. Three focused shell tests pass (`/private/tmp/ownership-collapse-focused-20260926.log`). Production browser coverage extends hierarchy/draft navigation and adds a separate group-scoped scenario; the attention fixture also now echoes workspace acknowledgement writer/revision fields.
+- Full UI and browser acceptance are pending. Ledger: **366 mapped / 357 implemented or equivalent / 5 open / 4 intentionally retired**. The three broad Settings audits, P-112 and independent complete-browser/native/external/crash gates remain open. No backend/protocol code changes in this checkpoint.
+
+
+### Ownership-tree disclosure retention — accepted checkpoint (2026-09-26)
+
+- P-366 is implemented. Full `make ui-check` passed lint/typecheck, **109 files / 989 tests**, production build and build verification (`/private/tmp/ownership-collapse-ui-check-20260926.log`). The two reproduced shell failures and existing hierarchy case passed in the focused run.
+- Complete adjacent parity browser file passed **11/11 scenarios** in 11.5 seconds (`/private/tmp/ownership-collapse-browser-20260926.log`). Explicit collapse survived Board/Control navigation with draft/selection intact, keyboard expansion still worked, and expanding another group's branches preserved the first group's state. Chat, actual bounded logs, pipelines, Planning/Area persistence, detached adapter ownership, attention review and settings fixtures also passed. These ownership/detached scenarios use protocol/host fixtures, not native lifecycle or commercial providers.
+- Inspected compact retained-tree screenshot. QA19063/profile `react-ownership-collapse-20260926` used zero PTY sessions; its daemon and exact sidecars were stopped. No backend code changed; full backend suite was not repeated after the accepted **3,270 tests / 82 skips** P-365 checkpoint.
+- Ledger: **366 mapped / 358 implemented or equivalent / 4 open / 4 intentionally retired**. P-087/P-088/P-089/P-112 and independent complete-browser/inventory/native/external/crash acceptance remain open. Next verification is a fresh complete browser run, including the newly accepted recovery scenarios.

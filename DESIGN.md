@@ -3742,3 +3742,12 @@ History renders the persisted contract: role/template, input/output token counts
 - Bind each window lifetime to a random writer ID and each local navigation intent to a positive increasing revision. Exact retries reuse both. Persist the highest accepted revision and its preference atomically with the preference; reject older revisions or changed payloads reusing a revision. An exact replay acknowledges its original result without overriding a later save from another window.
 - Serialize durable saves and publication through a daemon-owned task that survives caller cancellation. Keep unversioned Classic/API callers compatible. Fresh windows restore the current saved preference; active windows retain their local navigation when another window saves. Detached windows continue to own their own navigation.
 - Durable receipts survive daemon restart and full snapshots. They retain one small record per window lifetime, not one per click or retry; do not expire them while arbitrarily delayed requests could still arrive. Window IDs and revision metadata are transport/persistence details, not product controls.
+
+
+### D-209 — Retain ownership-tree disclosure during workspace navigation
+
+- Date: 2026-09-26
+- Scope: P-366; P-019 ownership-tree interaction.
+- Explicit agent-branch collapse belongs to the current window's workspace state, so leaving/reopening Agents and reconnect snapshots retain it along with selection and composer drafts. Keep the state local to the window lifetime, as with Classic's in-memory group disclosure; this does not introduce persisted reload defaults.
+- Expand all affects only agents in the displayed group. Preserve another group's disclosure choices, including while its branch is offscreen. Pointer toggles and Left/Right keyboard expansion share the same state.
+- This decision covers explicit operator disclosure. It does not redefine the separate Classic group-level `collapsed_default` preference as a per-agent default; that field's redesigned equivalent remains under the Settings audit.

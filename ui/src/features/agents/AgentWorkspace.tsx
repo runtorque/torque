@@ -292,7 +292,8 @@ export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable,
   const [organizationTarget, setOrganizationTarget] = useState<AgentViewModel | null>(null);
   const [deletedOpen, setDeletedOpen] = useState(false);
   const [purgeTarget, setPurgeTarget] = useState<AgentViewModel | null>(null);
-  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set());
+  const collapsedIds = useMemo(() => new Set(workspaceUi.collapsedAgentIds), [workspaceUi.collapsedAgentIds]);
+  const setBranchCollapsed = (id: string, collapsed: boolean) => dispatch(workspaceUiActions.setAgentBranchCollapsed({ id, collapsed }));
   const cardsRef = useRef<HTMLDivElement>(null);
   const tree = useMemo(() => buildAgentTree(hierarchy, groupsState.records[group], groupsState.children), [hierarchy, groupsState.records, groupsState.children, group]);
   const visibleRows = useMemo(() => visibleAgentTreeRows(tree, collapsedIds), [tree, collapsedIds]);
@@ -339,7 +340,7 @@ export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable,
   const taskTitle = (agent: AgentViewModel) => text(asRecord(tasks[agent.currentTaskId]).task);
   const renderTreeRow = (row: VisibleAgentTreeRow) => {
     const { agent } = row;
-    return <AgentTreeRow key={agent.id} row={row} collapsed={collapsedIds.has(agent.id)} selected={selected?.id === agent.id} focused={effectiveFocusedId === agent.id} taskTitle={taskTitle(agent)} onToggle={() => setCollapsedIds((current) => { const next = new Set(current); if (next.has(agent.id)) next.delete(agent.id); else next.add(agent.id); return next; })} onSelect={() => selectAgent(agent, focusOnClick)} onActivate={() => selectAgent(agent, true)} onFocus={() => setFocusedId(agent.id)} onRestart={() => { if (!sendCommand({ cmd: 'restart_agent', id: agent.id })) onCommandUnavailable(); }} onRelaunch={() => { if (!sendCommand({ cmd: 'relaunch_agent', id: agent.id })) onCommandUnavailable(); }} onClearContext={() => { if (!sendCommand({ cmd: 'clear_agent_context', id: agent.id })) onCommandUnavailable(); }} onInspectWorktree={() => setWorktreeTarget(agent)} onOrganize={() => setOrganizationTarget(agent)} onCopyId={() => { void navigator.clipboard.writeText(agent.id); }} onCopyName={() => { void navigator.clipboard.writeText(agent.name); }} onRemove={() => setRemoveTarget(agent)} />;
+    return <AgentTreeRow key={agent.id} row={row} collapsed={collapsedIds.has(agent.id)} selected={selected?.id === agent.id} focused={effectiveFocusedId === agent.id} taskTitle={taskTitle(agent)} onToggle={() => setBranchCollapsed(agent.id, !collapsedIds.has(agent.id))} onSelect={() => selectAgent(agent, focusOnClick)} onActivate={() => selectAgent(agent, true)} onFocus={() => setFocusedId(agent.id)} onRestart={() => { if (!sendCommand({ cmd: 'restart_agent', id: agent.id })) onCommandUnavailable(); }} onRelaunch={() => { if (!sendCommand({ cmd: 'relaunch_agent', id: agent.id })) onCommandUnavailable(); }} onClearContext={() => { if (!sendCommand({ cmd: 'clear_agent_context', id: agent.id })) onCommandUnavailable(); }} onInspectWorktree={() => setWorktreeTarget(agent)} onOrganize={() => setOrganizationTarget(agent)} onCopyId={() => { void navigator.clipboard.writeText(agent.id); }} onCopyName={() => { void navigator.clipboard.writeText(agent.name); }} onRemove={() => setRemoveTarget(agent)} />;
   };
 
   const setViewMode = (mode: 'live' | 'activity') => {
@@ -376,13 +377,13 @@ export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable,
             const row = visibleRows.find((item) => item.agent.id === effectiveFocusedId);
             if (event.key === 'ArrowDown') { event.preventDefault(); focusStep(1); }
             if (event.key === 'ArrowUp') { event.preventDefault(); focusStep(-1); }
-            if (event.key === 'ArrowRight' && row?.childCount) { event.preventDefault(); if (collapsedIds.has(row.agent.id)) setCollapsedIds((current) => { const next = new Set(current); next.delete(row.agent.id); return next; }); else focusStep(1); }
-            if (event.key === 'ArrowLeft' && row?.childCount && !collapsedIds.has(row.agent.id)) { event.preventDefault(); setCollapsedIds((current) => new Set(current).add(row.agent.id)); }
+            if (event.key === 'ArrowRight' && row?.childCount) { event.preventDefault(); if (collapsedIds.has(row.agent.id)) setBranchCollapsed(row.agent.id, false); else focusStep(1); }
+            if (event.key === 'ArrowLeft' && row?.childCount && !collapsedIds.has(row.agent.id)) { event.preventDefault(); setBranchCollapsed(row.agent.id, true); }
             if (event.key === 'Enter') { const item = orderedAgents.find((agent) => agent.id === effectiveFocusedId); if (item) { event.preventDefault(); selectAgent(item, true); } }
             if ((event.key === 'Delete' || event.key === 'Backspace') && effectiveFocusedId) { const item = orderedAgents.find((agent) => agent.id === effectiveFocusedId); if (item) { event.preventDefault(); setRemoveTarget(item); } }
           }}
         >
-          <header className={styles.hierarchyHeader}><div><strong>Ownership</strong><span>Architect → Engineer → Worker</span></div><Button tone="quiet" onPress={() => setCollapsedIds(new Set())}>Expand all</Button></header>
+          <header className={styles.hierarchyHeader}><div><strong>Ownership</strong><span>Architect → Engineer → Worker</span></div><Button tone="quiet" onPress={() => dispatch(workspaceUiActions.expandAgentBranches(hierarchy.all.map((agent) => agent.id)))}>Expand all</Button></header>
           <div className={styles.treeRows}>{visibleRows.map(renderTreeRow)}</div>
         </div>
         <div className={styles.detailHost}>

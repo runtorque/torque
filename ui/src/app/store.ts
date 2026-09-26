@@ -59,6 +59,7 @@ export interface WorkspaceUiState {
   focusedTaskId: string | null;
   selectedTaskIds: string[];
   collapsedTaskIds: string[];
+  collapsedAgentIds: string[];
   createLane: string | null;
   createTaskDialogOpen: boolean;
   selectedAgentId: string | null;
@@ -80,6 +81,7 @@ function initialWorkspaceUiState(): WorkspaceUiState {
     focusedTaskId: null,
     selectedTaskIds: [],
     collapsedTaskIds: [],
+    collapsedAgentIds: [],
     createLane: null,
     createTaskDialogOpen: false,
     selectedAgentId: null,
@@ -567,6 +569,15 @@ const workspaceUiSlice = createSlice({
     },
     setCreateTaskDialogOpen(state, action: PayloadAction<boolean>) {
       state.createTaskDialogOpen = action.payload;
+    },
+    setAgentBranchCollapsed(state, action: PayloadAction<{ id: string; collapsed: boolean }>) {
+      const { id, collapsed } = action.payload;
+      if (collapsed && !state.collapsedAgentIds.includes(id)) state.collapsedAgentIds.push(id);
+      else if (!collapsed) state.collapsedAgentIds = state.collapsedAgentIds.filter((agentId) => agentId !== id);
+    },
+    expandAgentBranches(state, action: PayloadAction<string[]>) {
+      const visible = new Set(action.payload);
+      state.collapsedAgentIds = state.collapsedAgentIds.filter((id) => !visible.has(id));
     },
     setSelectedAgent(state, action: PayloadAction<string | null>) {
       state.selectedAgentId = action.payload;

@@ -1198,6 +1198,46 @@ describe('workspace shell', () => {
     expect(screen.getByRole('treeitem', { name: 'Wren, worker, running' })).toBeVisible();
   });
 
+  it('retains ownership collapse and selection across panel navigation and resync, then expands by keyboard', () => {
+    const frame: StateFrame = { ...compactStateFixture, agents: {
+      engineer: { id: 'engineer', name: 'Evan', group: 'Foundation', kind: 'engineer', status: 'idle' },
+      worker: { id: 'worker', name: 'Wren', group: 'Foundation', kind: 'worker', status: 'idle', owner_engineer_id: 'engineer' },
+    } };
+    const { appStore } = renderShell(browserHost, frame);
+    fireEvent.click(screen.getByRole('button', { name: /^⌁ Agents/ }));
+    fireEvent.click(screen.getByRole('treeitem', { name: 'Evan, engineer, idle' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse Evan' }));
+    for (const destination of [/^▦ Board/, /^◎ Control/]) {
+      fireEvent.click(screen.getByRole('button', { name: destination }));
+      act(() => { appStore.dispatch(projectionActions.snapshotReceived({ ...frame, seq: appStore.getState().projection.seq + 1 })); });
+      fireEvent.click(screen.getByRole('button', { name: /^⌁ Agents/ }));
+      expect(screen.queryByRole('treeitem', { name: 'Wren, worker, idle' })).not.toBeInTheDocument();
+      expect(screen.getByRole('treeitem', { name: 'Evan, engineer, idle' })).toHaveAttribute('aria-selected', 'true');
+    }
+    const row = screen.getByRole('treeitem', { name: 'Evan, engineer, idle' });
+    fireEvent.focus(row); fireEvent.keyDown(row, { key: 'ArrowRight' });
+    expect(screen.getByRole('treeitem', { name: 'Wren, worker, idle' })).toBeVisible();
+    fireEvent.keyDown(row, { key: 'ArrowLeft' });
+    expect(screen.queryByRole('treeitem', { name: 'Wren, worker, idle' })).not.toBeInTheDocument();
+  });
+
+  it('expands only the current group without discarding another group ownership collapse', () => {
+    const frame: StateFrame = { ...compactStateFixture, active_group: 'Foundation', groups: { Foundation: ['e1', 'w1'], Other: ['e2', 'w2'] }, agents: {
+      e1: { id: 'e1', name: 'First team', group: 'Foundation', kind: 'engineer', status: 'idle' },
+      w1: { id: 'w1', name: 'First child', group: 'Foundation', kind: 'worker', status: 'idle', owner_engineer_id: 'e1' },
+      e2: { id: 'e2', name: 'Other team', group: 'Other', kind: 'engineer', status: 'idle' },
+      w2: { id: 'w2', name: 'Other child', group: 'Other', kind: 'worker', status: 'idle', owner_engineer_id: 'e2' },
+    } };
+    const { appStore } = renderShell(browserHost, frame);
+    const group = (name: string) => act(() => { appStore.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: appStore.getState().projection.seq + 1, ops: [{ op: 'ui_update', key: 'active_group', value: name }] })); });
+    fireEvent.click(screen.getByRole('button', { name: /^⌁ Agents/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse First team' }));
+    group('Other'); fireEvent.click(screen.getByRole('button', { name: 'Collapse Other team' }));
+    fireEvent.click(within(screen.getByRole('tree', { name: 'Agent ownership hierarchy' })).getByRole('button', { name: 'Expand all' }));
+    expect(screen.getByRole('treeitem', { name: 'Other child, worker, idle' })).toBeVisible();
+    group('Foundation'); expect(screen.queryByRole('treeitem', { name: 'First child, worker, idle' })).not.toBeInTheDocument();
+  });
+
   it('authors full scoped role definitions through the typed React catalog', async () => {
     const commands: TorqueCommand[] = []; let definition: UnknownRecord = { name: 'reviewer', description: 'Review changes', model: 'keep-model', system_prompt: 'Keep full prompt' };
     vi.stubGlobal('fetch', vi.fn((_url: string, options?: RequestInit) => {

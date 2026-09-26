@@ -30,6 +30,7 @@ async function fixtureWorkspace(page: Page, desktop = false, extra: Record<strin
     socket.onMessage((raw) => {
       const payload = JSON.parse(String(raw)) as Record<string, unknown>; sent.push(payload);
       if (payload.cmd === 'ui_set_detached_panels') socket.send(JSON.stringify({ type: 'delta', seq: ++seq, ops: [{ op: 'ui_update', key: 'detached_panels', value: payload.detached_panels }] }));
+      else if (payload.cmd === 'ui_select_group') socket.send(JSON.stringify({ type: 'delta', seq: ++seq, ops: [{ op: 'ui_update', key: 'active_group', value: payload.group }] }));
       else socket.send(JSON.stringify({ type: 'ok' }));
     });
   });
@@ -55,6 +56,37 @@ test('Agents hierarchy, Live/Activity and both resize handles preserve composer 
   await expect(composer).toHaveValue('Keep this draft');
   await page.getByRole('button', { name: 'Collapse Evan' }).click();
   await expect(page.getByRole('treeitem', { name: /Wren, worker/ })).toHaveCount(0);
+  for (const destination of [/▦ Board/, /◎ Control/]) {
+    await page.getByRole('button', { name: destination }).click();
+    await page.getByRole('button', { name: /⌁ Agents/ }).click();
+    await expect(page.getByRole('treeitem', { name: /Wren, worker/ })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Expand Evan', exact: true })).toBeVisible();
+    await expect(composer).toHaveValue('Keep this draft');
+  }
+  const engineer = page.getByRole('treeitem', { name: /Evan, engineer/ });
+  await engineer.focus(); await engineer.press('ArrowRight');
+  await expect(page.getByRole('treeitem', { name: /Wren, worker/ })).toHaveAttribute('aria-selected', 'true');
+  await engineer.press('ArrowLeft'); await expect(page.getByRole('treeitem', { name: /Wren, worker/ })).toHaveCount(0);
+  await page.setViewportSize({ width: 760, height: 720 });
+  await page.getByRole('button', { name: 'Expand Evan', exact: true }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath('retained-ownership-collapse.png'), animations: 'disabled' });
+});
+
+test('ownership Expand all preserves another group collapse through navigation', async ({ page }) => {
+  await fixtureWorkspace(page, false, { groups: { Foundation: ['e', 'w'], Other: ['e2', 'w2'] }, agents: {
+    e: { id: 'e', name: 'Evan', kind: 'engineer', group: 'Foundation', cell_type: 'agent' },
+    w: { id: 'w', name: 'Wren', kind: 'worker', group: 'Foundation', owner_engineer_id: 'e', cell_type: 'agent' },
+    e2: { id: 'e2', name: 'Other team', kind: 'engineer', group: 'Other', cell_type: 'agent' },
+    w2: { id: 'w2', name: 'Other child', kind: 'worker', group: 'Other', owner_engineer_id: 'e2', cell_type: 'agent' },
+  } });
+  await page.getByRole('button', { name: /⌁ Agents/ }).click(); await page.getByRole('button', { name: 'Collapse Evan', exact: true }).click();
+  await page.getByRole('button', { name: 'Other', exact: true }).click(); await page.getByRole('button', { name: 'Collapse Other team', exact: true }).click();
+  await page.getByRole('tree', { name: 'Agent ownership hierarchy' }).getByRole('button', { name: 'Expand all', exact: true }).click();
+  await expect(page.getByRole('treeitem', { name: /Other child, worker/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Foundation', exact: true }).click();
+  await page.getByRole('button', { name: /▦ Board/ }).click(); await page.getByRole('button', { name: /⌁ Agents/ }).click();
+  await expect(page.getByRole('treeitem', { name: /Wren, worker/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Expand Evan', exact: true })).toBeVisible();
 });
 
 test('aggregate Chat includes other groups and progressively reveals message context', async ({ page }) => {
@@ -152,7 +184,7 @@ test('attention review gates approval on a fetched diff and retains a rejected r
   await page.route('**/api/cmd', async (route) => {
     const command = route.request().postDataJSON() as Record<string, unknown>; requests.push(command);
     if (command.cmd === 'resolve_ask') { await route.fulfill({ json: { ok: false, error: 'Synthetic delivery failure' } }); return; }
-    const data = command.cmd === 'ui_set_react_workspace_state' ? { type: 'react_workspace_state', state: command.state }
+    const data = command.cmd === 'ui_set_react_workspace_state' ? { type: 'react_workspace_state', state: command.state, writer_id: command.writer_id, revision: command.revision }
       : command.cmd === 'task_detail' ? { type: 'task_detail', id: command.id, task: command.id === 'ask' ? ask : command.id === 'approval' ? approval : parent }
       : command.cmd === 'behavior_overlay_diff' ? { type: 'behavior_overlay_diff', proposal: { id: 'proposal', status: 'approved', next_actor_kind: 'user', proposed_text_sha256: 'reviewed-hash', base_version_id: 'base', rationale: 'Bounded change' }, diff: '-old rule\n+new rule' }
         : command.cmd === 'behavior_overlay_user_reject' ? { type: 'behavior_overlay_proposal', proposal_id: 'proposal', proposal: { id: 'proposal', status: 'rejected', proposed_text_sha256: 'reviewed-hash', base_version_id: 'base' } } : { type: 'ok' };
