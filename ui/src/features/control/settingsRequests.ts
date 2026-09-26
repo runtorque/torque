@@ -5,7 +5,7 @@ export const settingsSaveTimeout = 30_000;
 
 // Bound observation independently of fetch cancellation: an obsolete adapter or
 // response may still settle after abort, but cannot settle the owned operation.
-export function settingsRequest(command: TorqueCommand, signal: AbortSignal, writing = false): Promise<AuxiliaryFrame> {
+export function settingsRequest(command: TorqueCommand, signal: AbortSignal, writing = false, label = 'Settings'): Promise<AuxiliaryFrame> {
   return new Promise((resolve, reject) => {
     const request = new AbortController(); let settled = false;
     const finish = (frame?: AuxiliaryFrame, error?: Error) => {
@@ -13,10 +13,10 @@ export function settingsRequest(command: TorqueCommand, signal: AbortSignal, wri
       settled = true; clearTimeout(timer); signal.removeEventListener('abort', abort);
       if (error) { request.abort(); reject(error); } else resolve(frame!);
     };
-    const abort = () => finish(undefined, new DOMException('Settings request cancelled', 'AbortError'));
+    const abort = () => finish(undefined, new DOMException(`${label} request cancelled`, 'AbortError'));
     const timer = setTimeout(() => finish(undefined, new Error(writing
-      ? 'Settings save timed out; its outcome is unknown. Review the refreshed values before retrying'
-      : 'Settings refresh timed out. Retry when ready.')), writing ? settingsSaveTimeout : settingsReadTimeout);
+      ? `${label} save timed out; its outcome is unknown. Review the refreshed values before retrying`
+      : `${label} refresh timed out. Retry when ready.`)), writing ? settingsSaveTimeout : settingsReadTimeout);
     if (signal.aborted) { abort(); return; }
     signal.addEventListener('abort', abort, { once: true });
     void readCommand(command, request.signal).then((frame) => finish(frame), (cause: unknown) => finish(undefined, cause instanceof Error ? cause : new Error('Settings request failed')));

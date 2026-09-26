@@ -1,3 +1,4 @@
+import { behaviorSessionSlice } from '../features/behavior/session';
 import { missionSessionSlice } from '../features/mission/missionSession';
 import { aiIndexStartSlice } from '../features/ai/aiIndexStartState';
 import { relayProbeSlice } from '../features/relay/relayProbeState';
@@ -598,6 +599,7 @@ export function createAppStore(initialNavigation?: WorkspaceNavigation | null) {
       relayProbe: relayProbeSlice.reducer,
       aiIndexStart: aiIndexStartSlice.reducer,
       missionSession: missionSessionSlice.reducer,
+      behaviorSession: behaviorSessionSlice.reducer,
     },
     middleware: (getDefaultMiddleware) =>
       getDefaultMiddleware({

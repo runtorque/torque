@@ -7,7 +7,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import {
   selectAgentsState,
-  selectAuxiliaryResponseState,
   selectCatalogState,
   selectConnection,
   selectGroupsState,
@@ -311,7 +310,6 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable, host =
   const dispatch = useAppDispatch();
   const workspaceUi = useAppSelector(selectWorkspaceUi);
   const operations = useAppSelector(selectOperationsState);
-  const auxiliaryResponses = useAppSelector(selectAuxiliaryResponseState);
   const groupState = useAppSelector(selectGroupsState);
   const catalog = useAppSelector(selectCatalogState);
   const agents = useAppSelector(selectAgentsState);
@@ -370,7 +368,7 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable, host =
         <CatalogEditor key={`role:${group}:${baseDir}`} title="Roles" kind="role" group={group} refreshVersion={classRefreshVersion} onMutation={() => setClassRefreshVersion((value) => value + 1)} />
         <CatalogEditor key={`template:${group}:${baseDir}`} title="Templates" kind="template" group={group} refreshVersion={classRefreshVersion} onMutation={() => setClassRefreshVersion((value) => value + 1)} />
         <CatalogEditor key={`specialization:${group}:${baseDir}`} title="Specializations" kind="specialization" group={group} refreshVersion={classRefreshVersion} onMutation={() => setClassRefreshVersion((value) => value + 1)} />
-        <BehaviorOverlayEditor group={group} active={catalog.behaviorOverlays} proposals={operations.behaviorOverlayProposals} responses={auxiliaryResponses} agents={agentItems} send={send} />
+        <BehaviorOverlayEditor group={group} active={catalog.behaviorOverlays} proposals={operations.behaviorOverlayProposals} agents={agentItems} refreshVersion={classRefreshVersion} />
       </div> : null}
       {tab === 'settings' ? <SettingsWorkspace key={group} group={group} /> : null}
       {tab === 'help' ? <HelpPanel refreshVersion={helpRefreshVersion} /> : null}

@@ -1240,3 +1240,8 @@ P-300–P-302 repair false success on unrelated responses and indefinitely pendi
 ### Agent Settings owned requests checkpoint — 2026-09-25
 
 P-303/P-304 now bound per-agent reads and sequential saves to a target-keyed dialog owner. D-176 and the matrix record 18 focused tests, 713 UI tests and two isolated browser scenarios proving timeout recovery, retained drafts, partial acknowledgements and persisted retry results; unmount and target replacement have component coverage. Generic PTY fixtures and isolated QA were cleaned. Further source audit reopens P-098 and maps P-305–P-308 for Behavior Overlay scope ownership, independent drafts, draft diff preview and base-version-guarded submission. Main ledger: **308 behaviors: 294 implemented/equivalent dispositions, 10 open repairs and 4 intentional retirements**. Broad audits and native/external/recovery acceptance keep Phase 4 open.
+
+
+### Behavior Overlay authoring checkpoint — 2026-09-25
+
+P-305–P-308 now provide scope-owned reads/lists, retained explicit drafts, local preview and bounded fresh-base proposal submission with idempotent retry. D-177 and the matrix record 27 focused tests, 728 UI tests and three passing isolated browser scenarios; an unrelated opt-in PTY ask scenario was skipped. Browser acceptance caught and repaired group-wide approval discovery, and verified role/Engineer persistence without implicit application. Screenshots were inspected and isolated QA cleaned. P-309/P-310 map version provenance and guarded rollback; P-098 stays open. Main ledger: **310 behaviors: 298 implemented/equivalent dispositions, 8 open repairs and 4 intentional retirements**. Broad audits and native/external/recovery acceptance keep Phase 4 open.

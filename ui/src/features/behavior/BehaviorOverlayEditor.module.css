@@ -1,0 +1,15 @@
+.root { grid-column: 1 / -1; min-width: 0; border-top: 1px solid var(--border); padding-top: 12px; }
+.root h2 { font-size: 14px; }
+.root h3 { font-size: 12px; }
+.root p { color: var(--text-dim); font-size: 11px; overflow-wrap: anywhere; }
+.root label { display: grid; gap: 5px; font-size: 11px; min-width: 0; margin-bottom: 8px; }
+.scope, .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; font-size: 10px; overflow-wrap: anywhere; }
+.scope label { flex: 1; min-width: 160px; }
+.columns { display: grid; grid-template-columns: minmax(0, 2fr) minmax(220px, 1fr); gap: 12px; }
+.columns > section { min-width: 0; border: 1px solid var(--border); padding: 10px; border-radius: var(--radius); }
+.columns textarea { min-height: 180px; resize: vertical; }
+.columns article { border-bottom: 1px solid var(--border); padding: 8px 0; overflow-wrap: anywhere; font-size: 11px; }
+.columns article:last-child { border-bottom: 0; }
+.diff { white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; background: var(--surface); border: 1px solid var(--border); font-size: 11px; }
+.root [role='alert'] { color: var(--danger); }
+@media (max-width: 950px) { .columns { grid-template-columns: minmax(0, 1fr); } }
