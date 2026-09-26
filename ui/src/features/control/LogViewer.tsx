@@ -3,7 +3,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useAppSelector } from '../../app/hooks';
 import { Button } from '../../design/primitives';
 import { hasHostCapability, type DesktopHost } from '../../host';
-import { matchesLog, type LogLine, type LogPage } from './logModel';
+import { matchesLog, type LogLine } from './logModel';
+import { readLogPage } from './logReadRequest';
 import styles from './ParityPanels.module.css';
 
 
@@ -27,9 +28,7 @@ function LogTail({ target, host }: { target: string; host: DesktopHost }) {
     const poll = async () => {
       try {
         const params = new URLSearchParams({ target, since: String(cursor.current), follow: follow ? '1' : '0', limit: '500' });
-        const response = await fetch(`/logs?${params}`, { signal: controller.signal });
-        if (!response.ok) throw new Error(`Log request failed (${response.status})`);
-        const page = await response.json() as LogPage;
+        const page = await readLogPage(`/logs?${params}`, controller.signal);
         if (controller.signal.aborted) return;
         if (!Array.isArray(page.lines) || (page.target && page.target !== target)) throw new Error('Unexpected log response');
         const rotated = file.current.inode && (page.inode !== file.current.inode || Number(page.size) < file.current.size);

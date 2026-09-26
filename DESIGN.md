@@ -3760,3 +3760,11 @@ History renders the persisted contract: role/template, input/output token counts
 - Cancel that pending intent when the operator focuses another control, the connection closes, the page becomes hidden, or the controller is disposed. A late open must still satisfy visible-pane/session ownership. Reconnect alone does not revive a consumed intent.
 - Returning to a visible page preserves a focused composer or another editor. Refresh terminal geometry and restore terminal ownership only when focus already belongs to that terminal surface.
 - This retains focus intent, not raw input: do not queue commands for replay across connection failures or agent/session changes.
+
+### D-211 — Bound log reads while retaining the accepted tail
+
+- Date: 2026-09-26
+- Scope: P-006 log recovery and the Logs portion of P-112.
+- Bound the entire log refresh, including response-body decoding, to 15 seconds independently of transport cancellation. On timeout, keep the last accepted lines, cursor, target, filters and reading state; expose the existing Refresh logs recovery action. Initial loading becomes an explicit unavailable state instead of lasting indefinitely.
+- Follow retains its existing two-second retry cadence after an error. A paused view remains paused and retries through Refresh logs or an active reconnect refresh.
+- An expired or cancelled response cannot append lines, advance the cursor, clear a newer error or settle a newer read. Switching targets, leaving the surface and reconnecting cancel the old read's transport and timeout. Successful reads clear the timeout and cancellation subscription.

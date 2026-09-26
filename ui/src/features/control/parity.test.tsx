@@ -21,8 +21,8 @@ describe('log viewer', () => {
     expect(matchesLog({ raw: 'failed [task]' }, '', '[task')).toBe(true);
   });
   it('reads real logs, filters locally, switches targets and aborts on close', async () => {
-    const requests: AbortSignal[] = [];
-    const fetcher = vi.fn((url: string, options: RequestInit) => { requests.push(options.signal as AbortSignal); return Promise.resolve({ ok: true, json: () => Promise.resolve({ target: url.includes('supervisor') ? 'supervisor' : 'daemon', cursor: 42, lines: [{ ts: 1, level: 'ERROR', message: url.includes('supervisor') ? 'PTY failed' : 'Daemon failed' }, { ts: 2, level: 'INFO', message: 'Ready' }] }) }); });
+    const requests: AbortSignal[] = []; let hold = false;
+    const fetcher = vi.fn((url: string, options: RequestInit) => { requests.push(options.signal as AbortSignal); if (hold) return new Promise(() => {}); return Promise.resolve({ ok: true, json: () => Promise.resolve({ target: url.includes('supervisor') ? 'supervisor' : 'daemon', cursor: 42, lines: [{ ts: 1, level: 'ERROR', message: url.includes('supervisor') ? 'PTY failed' : 'Daemon failed' }, { ts: 2, level: 'INFO', message: 'Ready' }] }) }); });
     vi.stubGlobal('fetch', fetcher);
     const view = render(<Provider store={createAppStore()}><LogViewer host={browserHost} /></Provider>);
     expect(await screen.findByText('Daemon failed')).toBeVisible();
@@ -31,10 +31,14 @@ describe('log viewer', () => {
     expect(screen.queryByText('Ready')).not.toBeInTheDocument();
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('button', { name: 'Reveal log folder' })).not.toBeInTheDocument();
+    hold = true; fireEvent.click(screen.getByRole('button', { name: 'Refresh logs' }));
+    const pending = requests.at(-1)!; expect(pending.aborted).toBe(false); hold = false;
     fireEvent.change(screen.getByLabelText('Log target'), { target: { value: 'supervisor' } });
     expect(await screen.findByText('PTY failed')).toBeVisible();
     expect(screen.queryByText('Daemon failed')).not.toBeInTheDocument();
-    expect(requests[0]?.aborted).toBe(true);
+    expect(pending.aborted).toBe(true);
+    hold = true; fireEvent.click(screen.getByRole('button', { name: 'Refresh logs' }));
+    expect(requests.at(-1)?.aborted).toBe(false);
     view.unmount(); expect(requests.at(-1)?.aborted).toBe(true);
   });
   it('pauses follow polling and bounds retained lines', async () => {
