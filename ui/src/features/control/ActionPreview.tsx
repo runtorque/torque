@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useAppSelector } from '../../app/hooks';
 import { selectConnection } from '../../app/store';
 import { Button } from '../../design/primitives';
-import { readCommand } from '../../protocol/http';
+import { settingsRequest } from './settingsRequests';
 import type { UnknownRecord } from '../../protocol';
 import { record, text } from './agentClassesModel';
 import { actionDefinition, type ActionDraft } from './actionModel';
@@ -20,7 +20,7 @@ export function ActionPreview({ draft, group, disabled }: { draft: ActionDraft; 
     if (disabled || connection.status !== 'connected') return;
     const controller = new AbortController();
     const timer = setTimeout(() => {
-      void readCommand({ cmd: 'render_action', name: draft.name, scope: draft.scope, group, action: { prompt }, variables_only: true }, controller.signal).then((frame) => {
+      void settingsRequest({ cmd: 'render_action', name: draft.name, scope: draft.scope, group, action: { prompt }, variables_only: true }, controller.signal, false, 'Action preview').then((frame) => {
         if (controller.signal.aborted) return;
         if (frame.type !== 'action_variables' || frame.scope !== draft.scope || frame.name !== draft.name || frame.workspace_group !== group || !Array.isArray(frame.vars)) throw new Error(text(frame.message, 'Variable discovery did not match this draft.'));
         setVariables(frame.vars.map(record)); setDiscoveryError('');
@@ -34,7 +34,7 @@ export function ActionPreview({ draft, group, disabled }: { draft: ActionDraft; 
     request.current?.abort(); const controller = new AbortController(); request.current = controller; setPending(true); setError('');
     const vars = { ...values };
     try {
-      const frame = await readCommand({ cmd: 'render_action', name: draft.name, scope: draft.scope, group, action: definition, vars }, controller.signal);
+      const frame = await settingsRequest({ cmd: 'render_action', name: draft.name, scope: draft.scope, group, action: definition, vars }, controller.signal, false, 'Action preview');
       if (controller.signal.aborted) return;
       if (frame.type !== 'action_rendered' || frame.name !== draft.name || frame.workspace_group !== group || frame.scope !== draft.scope) throw new Error(text(frame.message, 'Preview response did not match this draft.'));
       setResult({ signature, prompt: text(frame.prompt) });

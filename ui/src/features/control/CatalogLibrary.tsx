@@ -3,7 +3,7 @@ import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import { projectionActions, selectConnection } from '../../app/store';
 import { Button, ModalDialog, StateSurface } from '../../design/primitives';
 import type { UnknownRecord } from '../../protocol';
-import { readCommand } from '../../protocol/http';
+import { settingsRequest } from './settingsRequests';
 import { record, text } from './agentClassesModel';
 import { catalogDefinition, catalogDraft, catalogListKey, catalogTargetKey, targetFromRow, type CatalogDraft, type CatalogKind, type CatalogTarget } from './catalogModel';
 import { reconcileSettings, settingsEqual } from './settingsModel';
@@ -21,7 +21,7 @@ export function CatalogEditor({ title, kind, group, refreshVersion = 0, onMutati
   useEffect(() => {
     if (connection.status !== 'connected' || pending) return;
     const controller = new AbortController(); listRead.current = controller;
-    void readCommand({ cmd: `list_${key}`, group }, controller.signal).then((frame) => {
+    void settingsRequest({ cmd: `list_${key}`, group }, controller.signal, false, 'Catalog').then((frame) => {
       if (controller.signal.aborted) return;
       if (frame.type !== key || frame.group !== group || !Array.isArray(frame[key])) throw new Error(text(frame.message, 'Catalog response did not match this group.'));
       setRows((frame[key] as unknown[]).map(record)); setListError(''); dispatch(projectionActions.auxiliaryResourceReceived(frame));
@@ -32,7 +32,7 @@ export function CatalogEditor({ title, kind, group, refreshVersion = 0, onMutati
     if (!selected || connection.status !== 'connected' || pending) return;
     const controller = new AbortController(); detailRead.current = controller;
     const detailKind = kind === 'specialization' ? 'specialization' : 'template';
-    void readCommand({ cmd: `get_${detailKind}`, group, ...selected }, controller.signal).then((frame) => {
+    void settingsRequest({ cmd: `get_${detailKind}`, group, ...selected }, controller.signal, false, 'Catalog').then((frame) => {
       if (controller.signal.aborted) return;
       if (frame.type !== `${detailKind}_detail` || frame.name !== selected.name || !frame[detailKind] || typeof frame[detailKind] !== 'object' || Array.isArray(frame[detailKind])) throw new Error(text(frame.message, 'Definition response did not match the selected entry.'));
       const next = catalogDraft({ ...record(frame[detailKind]), name: selected.name }, selected.scope);
@@ -50,7 +50,7 @@ export function CatalogEditor({ title, kind, group, refreshVersion = 0, onMutati
     const submitted = remove ? editor.draft : { ...editor.draft, name: target.name };
     const controller = new AbortController(); operation.current = controller; listRead.current?.abort(); detailRead.current?.abort(); setPending(true); setError('');
     try {
-      const frame = await readCommand({ cmd: `${remove ? 'delete' : 'save'}_${kind}`, group, ...target, ...(remove ? {} : { data: definition, ...(selected ? { old_name: selected.name, old_scope: selected.scope } : {}) }) }, controller.signal);
+      const frame = await settingsRequest({ cmd: `${remove ? 'delete' : 'save'}_${kind}`, group, ...target, ...(remove ? {} : { data: definition, ...(selected ? { old_name: selected.name, old_scope: selected.scope } : {}) }) }, controller.signal, true, 'Catalog');
       if (controller.signal.aborted) return;
       if (frame.type !== key || frame.group !== group || frame[remove ? 'deleted' : 'saved'] !== target.name || !Array.isArray(frame[key])) throw new Error(text(frame.message, 'Catalog acknowledgement did not match this operation.'));
       setRows((frame[key] as unknown[]).map(record)); dispatch(projectionActions.auxiliaryResourceReceived(frame)); setNotice(`${remove ? 'Deleted' : 'Saved'} ${target.scope} ${target.name}`); setConfirm(false); setDetailError('');

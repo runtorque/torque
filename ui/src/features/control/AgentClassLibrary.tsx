@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 're
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import { selectConnection, projectionActions } from '../../app/store';
 import { Button, ModalDialog, StateSurface } from '../../design/primitives';
-import { readCommand } from '../../protocol/http';
+import { settingsRequest } from './settingsRequests';
 import type { UnknownRecord } from '../../protocol';
 import { reconcileSettings, settingsEqual } from './settingsModel';
 import { record, list, text, strings, classLabel, availableScopes, classDraft, classDefinition, duplicateClass, classError, type ClassDraft } from './agentClassesModel';
@@ -53,7 +53,7 @@ function AgentClassEditor({ item, isNew, capabilities, baseDir, onSaved, onDupli
     validating.current?.abort(); const controller = new AbortController(); validating.current = controller; setError(''); setValidation(null);
     const requested = signature;
     try {
-      const frame = await readCommand({ cmd: 'agent_class_validate', base_dir: baseDir, agent_class: definition() }, controller.signal);
+      const frame = await settingsRequest({ cmd: 'agent_class_validate', base_dir: baseDir, agent_class: definition() }, controller.signal, false, 'Agent Class');
       if (controller.signal.aborted || requested !== signatureRef.current) return;
       if (frame.type !== 'agent_class_validation' || (frame.valid === true && record(frame.agent_class).id !== definition().id)) throw new Error(classError(frame));
       setValidation({ signature: requested, frame });
@@ -63,7 +63,7 @@ function AgentClassEditor({ item, isNew, capabilities, baseDir, onSaved, onDupli
     if (operation.current) return;
     validating.current?.abort(); const controller = new AbortController(); operation.current = controller; setPending(true); setError(''); onBusy(true);
     try {
-      const frame = await readCommand({ cmd, base_dir: baseDir, ...extra }, controller.signal);
+      const frame = await settingsRequest({ cmd, base_dir: baseDir, ...extra }, controller.signal, true, 'Agent Class');
       if (controller.signal.aborted) return;
       const expected = cmd === 'agent_class_delete' ? 'agent_class_delete' : cmd === 'agent_class_archive' ? 'agent_class_archive' : 'agent_class_save';
       const receivedId = cmd === 'agent_class_delete' ? frame.class_id : record(frame.agent_class).id;
@@ -120,10 +120,10 @@ export function AgentClassLibrary({ baseDir, refreshVersion = 0 }: { baseDir: st
   useEffect(() => {
     if (connection.status !== 'connected' || busy) return;
     const controller = new AbortController(); activeRead.current = controller;
-    void readCommand({ cmd: 'agent_class_list', base_dir: baseDir }, controller.signal).then((frame) => {
+    void settingsRequest({ cmd: 'agent_class_list', base_dir: baseDir }, controller.signal, false, 'Agent Class').then((frame) => {
       if (controller.signal.aborted) return;
       if (frame.type !== 'agent_classes' || !Array.isArray(frame.classes)) throw new Error(classError(frame));
-      setCatalog(frame); setError(''); dispatch(projectionActions.auxiliaryResourceReceived(frame));
+      setCatalog(frame); setSelection((current) => current || text(list(frame.classes)[0]?.id)); setError(''); dispatch(projectionActions.auxiliaryResourceReceived(frame));
     }).catch((cause: unknown) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Could not refresh Agent Classes.'); });
     return () => controller.abort();
   }, [baseDir, connection.status, connection.reconnectCount, refreshVersion, retry, busy, dispatch]);
