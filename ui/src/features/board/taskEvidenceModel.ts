@@ -29,13 +29,22 @@ export function mergeEvidenceChanges(before: UnknownRecord[], draft: UnknownReco
 }
 export function evidenceUrl(taskId: string, item: UnknownRecord) {
   const filename = taskText(item.filename);
-  if (filename && (!item.type || !item.path || taskText(item.path).includes('/attachments/')) && (!item.lifecycle || !(item.lifecycle as UnknownRecord).owner || (item.lifecycle as UnknownRecord).owner === 'task' || item.taskId)) return `/attachments/${encodeURIComponent(taskText(item.taskId, taskId))}/${encodeURIComponent(filename)}`;
+  const storage = (item.storage ?? {}) as UnknownRecord;
+  const path = taskText(item.path || storage.path);
   const url = taskText(item.url);
-  return /^https?:\/\//i.test(url) || url.startsWith('/attachments/') ? url : '';
+  const explicitUrl = /^https?:\/\//i.test(url) || url.startsWith('/attachments/') ? url : '';
+  if (storage.kind === 'inline' && !path) return explicitUrl;
+  const externalReference = storage.kind === 'file_ref' && !path.includes('/attachments/');
+  if (!externalReference && filename && (!item.type || !path || path.includes('/attachments/')) && (!item.lifecycle || !(item.lifecycle as UnknownRecord).owner || (item.lifecycle as UnknownRecord).owner === 'task' || item.taskId)) return `/attachments/${encodeURIComponent(taskText(item.taskId, taskId))}/${encodeURIComponent(filename)}`;
+  if (path.startsWith('/attachments/')) return path;
+  return explicitUrl;
 }
 export function evidencePreviewKind(item: UnknownRecord) {
-  const type = taskText(item.type); const mime = taskText(item.mime_type);
-  if (type === 'image' || mime.startsWith('image/')) return 'image';
-  if (item.content || ['snippet', 'log', 'diff', 'test_report', 'generated_doc'].includes(type) || mime.startsWith('text/') || /json|xml|javascript/.test(mime)) return 'text';
+  const type = taskText(item.type).trim().toLowerCase();
+  const mime = taskText(item.mime_type).toLowerCase().split(';')[0]!.trim();
+  const name = taskText(item.filename || item.path || (item.storage as UnknownRecord | undefined)?.path || item.title).toLowerCase();
+  if (type === 'image' || mime.startsWith('image/') || /\.(png|jpe?g|gif|webp|svg)$/.test(name)) return 'image';
+  const content = item.content ?? (item.storage as UnknownRecord | undefined)?.content;
+  if (content || ['snippet', 'log', 'diff', 'test_report', 'generated_doc'].includes(type) || mime.startsWith('text/') || /json|xml|javascript/.test(mime) || /\.(md|markdown|txt|diff|patch|json|log|csv|ya?ml|xml|html?|js|css)$/.test(name)) return 'text';
   return 'file';
 }

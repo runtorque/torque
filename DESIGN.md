@@ -3610,3 +3610,13 @@ History renders the persisted contract: role/template, input/output token counts
 - Validate response type, declared group, container and entry identities before replacing accepted options. Late, cancelled, malformed and unrelated responses cannot replace them. Abort reads when the dialog closes, the target group changes or the Execution tab becomes hidden; hidden authoring surfaces issue no reconnect reads.
 - Keep selected action/role values explicit as unavailable when absent from the current catalog. A refresh or target-group change must not silently substitute a default or erase the authored variable payload.
 - This changes option discovery only. Existing acknowledged creation/edit/link ownership and unknown-outcome evidence retention remain governed by D-191/D-192.
+
+### D-195 — Artifact preview classification and recovery
+
+- Date: 2026-09-26
+- Scope: P-351/P-352; Board creation/edit evidence previews and the P-112 recovery audit. D-106's inline-draft precedence and escaped text remain authoritative.
+- Recognize Classic image/text extensions from filename, path or title and normalize MIME/type casing. Read legacy nested storage content/path. Distinguish inline-only storage and external file references from actual task uploads; uploaded absolute filesystem paths resolve through the attachment endpoint rather than being used as browser URLs. Preserve explicitly supplied safe download URLs on external or inline references.
+- Bound file response/body and image loading observation at 15 seconds. Show an explicit error and retry after failure or timeout. Ignore late results after expiry, target replacement or closure. A visible file preview refreshes after reconnect; hidden previews issue no reads.
+- Keep accepted text mounted and readable through reconnect and failed refresh. Retain text selection/focus and the enclosing task draft. An empty successful file is explicitly empty; do not substitute summary/path metadata for its content. Different preview identities cannot inherit each other's content.
+- Keep refresh/retry controls mounted through loading and success. Their labels may change, but their DOM/focus identity must survive so Escape still dismisses the nested preview and leaves its parent editor open. Image retries replace only the image request, not the focused control.
+- Preserve image decoding, source-task downloads, path copying, line metadata and nested Escape behavior. This checkpoint does not certify large-file performance, external-host availability or native lifecycle acceptance.

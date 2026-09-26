@@ -50,7 +50,8 @@ test('structured evidence stages edits, survives nested preview and persists onl
     await route.continue();
   });
   await dialog.getByRole('button', { name: 'Save task', exact: true }).click();
-  await expect(dialog.getByRole('alert')).toHaveText('Injected save failure');
+  await expect(dialog.getByRole('alert')).toContainText('Injected save failure');
+  await expect(dialog.getByRole('alert')).toContainText('save outcome is unknown');
   await expect(dialog.getByRole('button', { name: 'Edit artifact Reviewed diff', exact: true })).toBeVisible();
   reject = false; await dialog.getByRole('button', { name: 'Save task', exact: true }).click(); await expect(dialog).toHaveCount(0);
   expect(writes).toHaveLength(2);
