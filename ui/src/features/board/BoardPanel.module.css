@@ -208,3 +208,7 @@
 .messageHistory article p { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .taskDetailForm.detailReading { grid-template-rows: minmax(90px, .5fr) auto minmax(180px, 1fr) auto auto; }
+
+.taskDetailHost { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.taskDetailHost > [role="alert"] { flex: none; padding-bottom: 12px; }
+.taskDetailHost > .taskDetailForm { flex: 1; height: auto; min-height: 0; }

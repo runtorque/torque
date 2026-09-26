@@ -13,16 +13,19 @@ function setup(extra: UnknownRecord = {}) {
   store.dispatch(connectionActions.connected({ at: 1, reconnect: false }));
   store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, board_tasks: { task: { id: 'task', task: 'Saved task', description: 'Saved scope', group: 'Foundation', lane: 'Backlog', action_vars: {}, agent_id: 'agent-1', labels: ['original'], ...extra } } }));
   store.dispatch(workspaceUiActions.setDetailTask('task'));
-  const calls: TorqueCommand[] = []; let failure = ''; let deferred: ((command: TorqueCommand) => Promise<unknown>) | null = null;
+  const calls: TorqueCommand[] = []; const detailReads: TorqueCommand[] = []; let failure = ''; let deferred: ((command: TorqueCommand) => Promise<unknown>) | null = null;
   vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => {
     if (_url === '/api/upload') { const file = (options.body as FormData).get('file') as File; return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: [{ filename: file.name, path: `/attachments/task/${file.name}`, mime_type: file.type }] }) }); }
-    const command = JSON.parse(options.body as string) as TorqueCommand; calls.push(command);
+    const command = JSON.parse(options.body as string) as TorqueCommand;
+    // These editor tests inject full detail frames explicitly; mutation counts exclude reads.
+    if (command.cmd === 'task_detail') { detailReads.push(command); return new Promise(() => {}); }
+    calls.push(command);
     if (deferred) return deferred(command);
     return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: command.cmd === failure ? { type: 'error', message: 'Task has active work in its assigned worker. Stop or complete that worker before editing.' } : command.cmd === 'preview_prompt' ? { type: 'prompt_preview', task_id: 'task', prompt: 'Correct draft preview' } : { type: 'state', seq: 10, board_tasks: {} } }) });
   }));
   const send = vi.fn(() => true);
   render(<Provider store={store}><BoardPanel group="Foundation" sendCommand={send} onCommandUnavailable={vi.fn()} /></Provider>);
-  return { calls, store, send, fail: (cmd: string) => { failure = cmd; }, defer: (fn: (command: TorqueCommand) => Promise<unknown>) => { deferred = fn; } };
+  return { calls, detailReads, store, send, fail: (cmd: string) => { failure = cmd; }, defer: (fn: (command: TorqueCommand) => Promise<unknown>) => { deferred = fn; } };
 }
 it('retains rejected edits and saves only changed fields after a retry', async () => {
   const { calls, fail, store } = setup();
@@ -132,12 +135,12 @@ it('keeps files still referenced by another artifact after removing their attach
   expect(calls).toEqual([{ cmd: 'board_update_task', id: 'task', attachments: [], enforce_dispatch_edit_gate: true }]);
 });
 it('opens activity from a compact card after hydration and normal detail returns to Execution', async () => {
-  const { store, send } = setup();
+  const { store, detailReads } = setup();
   fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
   act(() => { store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, board_tasks: { task: { id: 'task', task: 'Compact task', group: 'Foundation', lane: 'Backlog' } } })); });
   fireEvent.click(screen.getByRole('button', { name: 'Actions for Compact task' }));
   fireEvent.click(await screen.findByRole('menuitem', { name: 'Task activity' }));
-  expect(send).toHaveBeenCalledWith({ cmd: 'task_detail', id: 'task' });
+  expect(detailReads.at(-1)).toEqual({ cmd: 'task_detail', id: 'task' });
   expect(screen.getByText('Retrieving complete task fields.')).toBeVisible();
   act(() => { store.dispatch(projectionActions.taskDetailReceived({ type: 'task_detail', id: 'task', task: { description: '', messages: [{ action: 'progress', agent: 'Worker A', timestamp: 1700000000, message: 'Hydrated activity' }] } })); });
   expect(screen.getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'true');

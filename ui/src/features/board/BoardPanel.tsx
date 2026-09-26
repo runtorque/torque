@@ -1,3 +1,4 @@
+import { useBoardTaskDetail } from './useBoardTaskDetail';
 import { StaleDoneArchive } from './StaleDoneArchive';
 import { TaskActivity } from './TaskActivity';
 import { TaskEvidenceEditor } from './TaskEvidenceEditor';
@@ -837,16 +838,16 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPa
   if (detailTask && detailIsHydrated && hydratedDetail !== detailTask) setHydratedDetail(detailTask);
   else if (!detailTask && hydratedDetail) setHydratedDetail(null);
   const editorTask = detailTask && (detailIsHydrated ? detailTask : hydratedDetail?.id === detailTask.id ? hydratedDetail : null);
-  const taskDetailRequest = useRef('');
+  const taskCatalogRequest = useRef('');
   const requestedTaskId = workspaceUi.detailTaskId;
   const requestedTaskGroup = detailTask?.group || group;
+  const taskDetailRead = useBoardTaskDetail(requestedTaskId, requestedTaskGroup, connection.status === 'connected', connection.reconnectCount);
   useEffect(() => {
-    if (!requestedTaskId) { taskDetailRequest.current = ''; return; }
+    if (!requestedTaskId) { taskCatalogRequest.current = ''; return; }
     if (connection.status !== 'connected') return;
     const key = `${requestedTaskId}:${requestedTaskGroup}:${connection.reconnectCount}`;
-    if (taskDetailRequest.current === key) return;
-    taskDetailRequest.current = key;
-    sendOrNotify(sendCommand, { cmd: 'task_detail', id: requestedTaskId }, onCommandUnavailable);
+    if (taskCatalogRequest.current === key) return;
+    taskCatalogRequest.current = key;
     sendOrNotify(sendCommand, { cmd: 'list_actions', group: requestedTaskGroup }, onCommandUnavailable);
     sendOrNotify(sendCommand, { cmd: 'list_roles', group: requestedTaskGroup }, onCommandUnavailable);
   }, [requestedTaskId, requestedTaskGroup, connection.status, connection.reconnectCount, sendCommand, onCommandUnavailable]);
@@ -1170,9 +1171,12 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPa
       </footer>
 
       <ModalDialog title={detailTask?.task ?? 'Task details'} description={detailTask?.id ?? ''} size="wide" bodyLayout="fit" isOpen={Boolean(detailTask)} onOpenChange={(open) => { if (!open && !taskEditBusy.current) { if (taskEditClose.current) taskEditClose.current(); else dispatch(workspaceUiActions.setDetailTask(null)); } }}>
+        <div className={styles.taskDetailHost}>
+        {taskDetailRead.error ? <div role="alert"><p>{taskDetailRead.error}</p><Button onPress={taskDetailRead.retry}>Retry task details</Button></div> : null}
         {editorTask
           ? <TaskDetail key={editorTask.id} busyRef={taskEditBusy} closeRef={taskEditClose} initialTab={initialTaskTab} task={editorTask} tasks={groupTasks} groups={groupsState.records} agents={agents} actions={catalog.actions} roles={catalog.roles} responses={auxiliaryResponses} sendCommand={sendCommand} onCommandUnavailable={onCommandUnavailable} onClose={() => { setInitialTaskTab('execution'); dispatch(workspaceUiActions.setDetailTask(null)); }} onRemove={() => setRemoveTaskId(editorTask.id)} />
-          : detailTask ? <StateSurface title="Loading task" description="Retrieving complete task fields." /> : null}
+          : detailTask ? <StateSurface title={taskDetailRead.error ? "Task details unavailable" : "Loading task"} description={taskDetailRead.error ? "Retry loading or close this task." : "Retrieving complete task fields."} /> : null}
+        </div>
       </ModalDialog>
       {workspaceUi.createTaskDialogOpen ? <TaskCreateDialog group={group} lanes={lanes} actions={catalog.actions} roles={catalog.roles} onClose={() => dispatch(workspaceUiActions.setCreateTaskDialogOpen(false))} /> : null}
       <ModalDialog title="Schedules" description={`Automated task dispatches for ${group}`} size="large" isOpen={schedulesOpen} onOpenChange={setSchedulesOpen}>

@@ -3551,3 +3551,13 @@ History renders the persisted contract: role/template, input/output token counts
 - Scope: Shared ModalDialog, including Board activity/task editing.
 - Decision: The dialog explicitly uses its visible title as its accessible label. A child draft update must not make the dialog unnamed when the component library's generated heading association changes. Keep the visible heading, focus containment and mounted draft unchanged; title changes update the accessible name too.
 - Evidence: The Board activity browser scenario initially found the named dialog, then lost that accessible name immediately after filling Description while the heading, dialog and focused draft remained visible. The trace and snapshot are preserved in `/private/tmp/board-read-browser-initial-evidence-20260926`. Acceptance retains the named-dialog locator through real timeout/retry and draft edits rather than weakening it to an unnamed selector.
+
+### D-190 — Board entry and archive observation have explicit recovery
+
+- Date: 2026-09-26
+- Status: accepted
+- Scope: Initial and reconnect full-task hydration; inactive completed-task batch archive.
+- Decision: Full task details use a correlated 15-second HTTP read, validating type, task ID, group and complete description before projection. Error/timeout exposes Retry task details; an already mounted task editor retains its draft and DOM while reconnect refresh fails. Closing or changing the target cancels observation and rejects late replies. Catalog discovery remains a separate request lifecycle.
+- Archive: Each explicit batch snapshots the currently eligible task IDs and owns a 30-second observation deadline. Unknown outcomes release controls with review guidance and never imply rollback. Explicit retry recalculates eligibility from current Board state; reconnect does not replay the write. Switching groups or unmounting cancels observation and suppresses obsolete success callbacks. The existing success-toast acknowledgement remains the daemon contract.
+- Verification: Reproduce initial-loading hangs, stale target acceptance and unbounded/unowned archive observation. Component and production-browser tests exercise actual deadlines, malformed detail identity, target/group replacement, reconnect with retained input identity/focus/caret, current-eligibility retry, ignored late replies and actual task persistence.
+- Layout: A retained task editor shares the available dialog height with its refresh-error banner. Save/Cancel remain visible at ordinary and compact viewport sizes while the detail sections scroll; recovery feedback must not push the fixed task footer outside the dialog.

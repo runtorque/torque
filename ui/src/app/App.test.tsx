@@ -11,9 +11,11 @@ import { sanitizeClientError } from './clientDiagnostics';
 import { connectionActions, createAppStore, projectionActions, workspaceUiActions } from './store';
 
 function renderShell(host = browserHost, frame: StateFrame = compactStateFixture) {
-  const featureFetch = globalThis.fetch;
+  const featureFetch = globalThis.fetch; const detailReads: TorqueCommand[] = [];
   vi.stubGlobal('fetch', (input: RequestInfo | URL, options?: RequestInit) => {
     const command = JSON.parse(typeof options?.body === 'string' ? options.body : '{}') as TorqueCommand;
+    // Task hydration frames are supplied explicitly by the shell integration tests.
+    if (command.cmd === 'task_detail') { detailReads.push(command); return new Promise<Response>(() => {}); }
     if (command.cmd === 'ui_set_react_workspace_state') return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: 'react_workspace_state', state: command.state } }) });
     return featureFetch(input, options);
   });
@@ -27,7 +29,7 @@ function renderShell(host = browserHost, frame: StateFrame = compactStateFixture
       <WorkspaceShell host={host} sendCommand={sendCommand} />
     </Provider>,
   );
-  return { appStore, sendCommand };
+  return { appStore, sendCommand, detailReads };
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -471,10 +473,10 @@ describe('workspace shell', () => {
         'task-2': { id: 'task-2', task: 'Dependency', group: 'Foundation', lane: 'To Do', position: 0 },
       },
     };
-    const { appStore, sendCommand } = renderShell(browserHost, frame);
+    const { appStore, sendCommand, detailReads } = renderShell(browserHost, frame);
     fireEvent.doubleClick(screen.getByLabelText('Build the foundation, In Progress'));
 
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'task_detail', id: 'task-1' });
+    expect(detailReads.at(-1)).toEqual({ cmd: 'task_detail', id: 'task-1' });
     expect(sendCommand).toHaveBeenCalledWith({ cmd: 'list_actions', group: 'Foundation' });
     expect(screen.getByText('Retrieving complete task fields.')).toBeVisible();
     act(() => { appStore.dispatch(projectionActions.taskDetailReceived({
@@ -983,11 +985,11 @@ describe('workspace shell', () => {
   });
 
   it('hydrates tasks opened outside Board cards and refreshes the selected task after reconnect', async () => {
-    const { appStore, sendCommand } = renderShell();
+    const { appStore, sendCommand, detailReads } = renderShell();
     act(() => { appStore.dispatch(workspaceUiActions.setDetailTask('task-1')); });
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'task_detail', id: 'task-1' });
+    expect(detailReads.at(-1)).toEqual({ cmd: 'task_detail', id: 'task-1' });
     expect(sendCommand).toHaveBeenCalledWith({ cmd: 'list_roles', group: 'Foundation' });
-    const reads = () => sendCommand.mock.calls.filter(([command]) => command.cmd === 'task_detail').length;
+    const reads = () => detailReads.length;
     expect(reads()).toBe(1);
     act(() => { appStore.dispatch(projectionActions.taskDetailReceived({ type: 'task_detail', id: 'task-1', task: { id: 'task-1', task: 'Hydrated linked task', description: 'Full task scope', group: 'Foundation', lane: 'Backlog' } })); });
     const title = await screen.findByRole<HTMLInputElement>('textbox', { name: 'Title' }); expect(title).toHaveValue('Hydrated linked task');
