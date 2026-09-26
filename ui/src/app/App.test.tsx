@@ -56,6 +56,8 @@ function mockSettingsRequests(failSave = false) {
     get_global_settings: { type: 'global_settings', defaults: { xterm_scrollback: 5000, event_ingest_max_days: 14, mcp_call_log_args_capture: 'metadata' }, settings: { xterm_scrollback: 5000, event_ingest_max_days: 14, mcp_call_log_args_capture: 'metadata' } },
     get_group_settings: { type: 'group_settings', group: 'Foundation', defaults: { max_agents: 0, shell: '', env_vars: {}, worktree_symlinks: [] }, engineer_defaults: { default_worker_concurrency: 2 }, architect_defaults: { architect_heartbeat_interval: 300 }, settings: { max_agents: 4, shell: '/bin/zsh', env_vars: {}, worktree_symlinks: [], architect_heartbeat_interval: 300, engineer_agent_id: 'owned' }, engineer_settings: { group: 'Foundation', pending_question: 'Keep this question', default_worker_concurrency: 2, digest_verbosity: 'balanced' }, architect_settings: { group: 'Foundation', architect_heartbeat_interval: 300 } },
     get_ai_settings: { type: 'ai_settings', settings: {} },
+    list_actions: { type: 'actions', actions: [] },
+    list_roles: { type: 'roles', roles: [] },
   };
   const fetcher = vi.fn((_url: string, options?: RequestInit): Promise<{ ok: boolean; json: () => Promise<{ ok: boolean; error?: string; data?: UnknownRecord }> }> => {
     const command = JSON.parse(typeof options?.body === 'string' ? options.body : '{}' ) as TorqueCommand; commands.push(command);
@@ -304,7 +306,9 @@ describe('workspace shell', () => {
   it('opens the full task dialog from the global Board command', async () => {
     const commands: TorqueCommand[] = [];
     vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => {
-      commands.push(JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand);
+      const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand;
+      if (command.cmd === 'list_actions' || command.cmd === 'list_roles') return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: command.cmd === 'list_actions' ? { type: 'actions', group: command.group, actions: [{ name: 'feature/implement' }, { name: 'feature/implement' }, { name: 'oneshot/fix' }] } : { type: 'roles', group: command.group, roles: [] } }) });
+      commands.push(command);
       return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: 'board_task_added', task_id: 'created', title: commands.at(-1)?.task } }) });
     }));
     const { appStore } = renderShell();
@@ -314,7 +318,7 @@ describe('workspace shell', () => {
     })); });
     fireEvent.click(screen.getByRole('button', { name: '＋ New task' }));
     expect(screen.getByRole('dialog', { name: 'Create task' })).toBeVisible();
-    expect(within(screen.getByRole('combobox', { name: 'Action' })).getAllByRole('option', { name: 'feature/implement' })).toHaveLength(1);
+    expect(await within(screen.getByRole('combobox', { name: 'Action' })).findAllByRole('option', { name: 'feature/implement' })).toHaveLength(1);
     fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), {
       target: { value: 'Ship Phase 2' },
     });
@@ -486,7 +490,7 @@ describe('workspace shell', () => {
     fireEvent.doubleClick(screen.getByLabelText('Build the foundation, In Progress'));
 
     expect(detailReads.at(-1)).toEqual({ cmd: 'task_detail', id: 'task-1' });
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'list_actions', group: 'Foundation' });
+    expect(sendCommand).not.toHaveBeenCalledWith(expect.objectContaining({ cmd: 'list_actions' }));
     expect(screen.getByText('Retrieving complete task fields.')).toBeVisible();
     act(() => { appStore.dispatch(projectionActions.taskDetailReceived({
       type: 'task_detail',
@@ -498,6 +502,8 @@ describe('workspace shell', () => {
         attachments: [],
       },
     })); });
+    expect(commands).toContainEqual({ cmd: 'list_actions', group: 'Foundation' });
+    expect(commands).toContainEqual({ cmd: 'list_roles', group: 'Foundation' });
     expect(screen.getByRole('textbox', { name: 'Description' })).toHaveValue('Hydrated task description');
     expect(screen.getByRole('dialog').querySelector('[data-dialog-body-layout="fit"]')).not.toBeNull();
     expect(screen.getByRole('region', { name: 'Primary task fields' })).toBeVisible();
@@ -994,14 +1000,16 @@ describe('workspace shell', () => {
   });
 
   it('hydrates tasks opened outside Board cards and refreshes the selected task after reconnect', async () => {
+    const { commands } = mockSettingsRequests();
     const { appStore, sendCommand, detailReads } = renderShell();
     act(() => { appStore.dispatch(workspaceUiActions.setDetailTask('task-1')); });
     expect(detailReads.at(-1)).toEqual({ cmd: 'task_detail', id: 'task-1' });
-    expect(sendCommand).toHaveBeenCalledWith({ cmd: 'list_roles', group: 'Foundation' });
+    expect(sendCommand).not.toHaveBeenCalledWith(expect.objectContaining({ cmd: 'list_roles' }));
     const reads = () => detailReads.length;
     expect(reads()).toBe(1);
     act(() => { appStore.dispatch(projectionActions.taskDetailReceived({ type: 'task_detail', id: 'task-1', task: { id: 'task-1', task: 'Hydrated linked task', description: 'Full task scope', group: 'Foundation', lane: 'Backlog' } })); });
     const title = await screen.findByRole<HTMLInputElement>('textbox', { name: 'Title' }); expect(title).toHaveValue('Hydrated linked task');
+    expect(commands).toContainEqual({ cmd: 'list_roles', group: 'Foundation' });
     fireEvent.change(title, { target: { value: 'Retained task draft' } }); title.focus(); title.setSelectionRange(2, 6);
     act(() => { appStore.dispatch(projectionActions.snapshotReceived(compactStateFixture)); appStore.dispatch(connectionActions.connected({ at: 3_000, reconnect: true })); }); expect(reads()).toBe(2);
     act(() => { appStore.dispatch(projectionActions.taskDetailReceived({ type: 'task_detail', id: 'task-1', task: { task: 'Remote title' } })); });

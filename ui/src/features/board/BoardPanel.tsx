@@ -1,3 +1,5 @@
+import { useBoardAuthoringCatalog } from './useBoardAuthoringCatalog';
+import { BoardCatalogNotice } from './BoardCatalogNotice';
 import { SchedulesPanel } from './SchedulesPanel';
 import { useBoardTaskDetail } from './useBoardTaskDetail';
 import { StaleDoneArchive } from './StaleDoneArchive';
@@ -39,7 +41,6 @@ import {
   selectAgentsState,
   selectAuxiliaryResponseState,
   selectBoardViewState,
-  selectCatalogState,
   selectConnection,
   selectGroupsState,
   selectTasksState,
@@ -398,8 +399,6 @@ interface TaskDetailProps {
   tasks: BoardTask[];
   groups: Record<string, unknown>;
   agents: Record<string, unknown>;
-  actions: unknown;
-  roles: unknown;
   responses: Record<string, unknown>;
   sendCommand: CommandSender;
   onCommandUnavailable: () => void;
@@ -410,16 +409,18 @@ interface TaskDetailProps {
   initialTab: 'execution' | 'activity';
 }
 
-function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, sendCommand, onCommandUnavailable, onClose, onRemove, busyRef, closeRef, initialTab }: TaskDetailProps) {
+function TaskDetail({ task, tasks, groups, agents, responses, sendCommand, onCommandUnavailable, onClose, onRemove, busyRef, closeRef, initialTab }: TaskDetailProps) {
   const [title, setTitle] = useState(task.task);
   const [description, setDescription] = useState(task.description);
   const [labels, setLabels] = useState(task.labels.join(', '));
   const [scheduledAt, setScheduledAt] = useState(() => localSchedule(task.scheduledAt));
   const [targetGroup, setTargetGroup] = useState(task.group);
+  const [detailTab, setDetailTab] = useState<'execution' | 'verification' | 'integration' | 'evidence' | 'activity'>(initialTab);
+  const taskCatalog = useBoardAuthoringCatalog(targetGroup, detailTab === 'execution');
   const [actionName, setActionName] = useState(task.actionName);
   const [role, setRole] = useState(task.agentTemplate);
   const [actionVars, setActionVars] = useActionVariables(actionName, record(task.raw.action_vars));
-  const definitions = actionVariableDefinitions(actions, actionName);
+  const definitions = actionVariableDefinitions(taskCatalog.actions, actionName);
   const [dependsOn, setDependsOn] = useState(task.dependsOn.join(', '));
   const [agentId, setAgentId] = useState(task.agentId);
   const [provider, setProvider] = useState(task.provider);
@@ -437,12 +438,11 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
   const [externalStatus, setExternalStatus] = useState(task.status || task.lane);
   const [externalComment, setExternalComment] = useState('');
   const [formError, setFormError] = useState('');
-  const [detailTab, setDetailTab] = useState<'execution' | 'verification' | 'integration' | 'evidence' | 'activity'>(initialTab);
   const [activityVisited, setActivityVisited] = useState(initialTab === 'activity');
   const [pullRequested, setPullRequested] = useState(false);
   const [pullBaseline, setPullBaseline] = useState<unknown>(responses[`board_pull_preview:${task.id}`] ?? responses['board_pull_preview:latest']);
-  const actionOptions = actionItems(actions);
-  const roleOptions = roleItems(roles);
+  const actionOptions = actionItems(taskCatalog.actions);
+  const roleOptions = roleItems(taskCatalog.roles);
   const liveAgents = Object.entries(agents).map<Record<string, unknown> & { id: string }>(([id, value]) => ({ id, ...record(value) })).filter((item) => item.group === targetGroup && !Number(item.deleted_at ?? 0));
   const pullResponse = responses[`board_pull_preview:${task.id}`] ?? responses['board_pull_preview:latest'];
   const pullPreview = pullRequested && pullResponse !== pullBaseline ? record(pullResponse) : {};
@@ -617,11 +617,11 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
         {([['execution', 'Execution'], ['verification', 'Verification'], ['integration', 'Integrations'], ['evidence', 'Evidence'], ['activity', 'Activity']] as const).map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={detailTab === id} onClick={() => { setDetailTab(id); if (id === 'activity') setActivityVisited(true); }}>{label}</button>)}
       </nav>
       {detailTab === 'execution' ? <section className={styles.detailSection} role="tabpanel" aria-label="Execution">
-        <header><div><h3>Execution</h3><p>Configure scheduling, dispatch behavior, role, and dependencies.</p></div></header>
+        <BoardCatalogNotice catalog={taskCatalog} /><header><div><h3>Execution</h3><p>Configure scheduling, dispatch behavior, role, and dependencies.</p></div></header>
         <div className={styles.formGrid}>
           <label>Scheduled for<input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} /></label>
-          <label>Action<select title={actionName || 'Group default'} value={actionName} onChange={(event) => setActionName(event.target.value)}><option value="">Group default</option>{actionOptions.map((action) => <option key={textValue(action.name)} value={textValue(action.name)}>{textValue(action.name)}</option>)}</select></label>
-          <label>Worker role<select title={role || 'Action/default role'} value={role} onChange={(event) => setRole(event.target.value)}><option value="">Action/default role</option>{roleOptions.map((item) => <option key={textValue(item.slug, textValue(item.name))} value={textValue(item.slug, textValue(item.name))}>{textValue(item.name, textValue(item.slug))}</option>)}</select></label>
+          <label>Action<select title={actionName || 'Group default'} value={actionName} onChange={(event) => setActionName(event.target.value)}><option value="">Group default</option>{actionName && !actionOptions.some((item) => textValue(item.name) === actionName) ? <option value={actionName}>{actionName} (unavailable)</option> : null}{actionOptions.map((action) => <option key={textValue(action.name)} value={textValue(action.name)}>{textValue(action.name)}</option>)}</select></label>
+          <label>Worker role<select title={role || 'Action/default role'} value={role} onChange={(event) => setRole(event.target.value)}><option value="">Action/default role</option>{role && !roleOptions.some((item) => textValue(item.slug, textValue(item.name)) === role) ? <option value={role}>{role} (unavailable)</option> : null}{roleOptions.map((item) => <option key={textValue(item.slug, textValue(item.name))} value={textValue(item.slug, textValue(item.name))}>{textValue(item.name, textValue(item.slug))}</option>)}</select></label>
           <label>Dependencies<input title={dependsOn} value={dependsOn} onChange={(event) => setDependsOn(event.target.value)} list={`task-dependencies-${task.id}`} placeholder="task IDs, comma separated" /><datalist id={`task-dependencies-${task.id}`}>{tasks.filter((item) => item.id !== task.id).map((item) => <option key={item.id} value={item.id}>{item.task}</option>)}</datalist></label>
         </div>
         <ActionVariableFields definitions={definitions} value={actionVars} onChange={setActionVars} />
@@ -646,10 +646,9 @@ function TaskDetail({ task, tasks, groups, agents, actions, roles, responses, se
   );
 }
 
-function BatchEditPanel({ tasks, agents, actions, sendCommand, onCommandUnavailable, onClose }: {
+function BatchEditPanel({ tasks, agents, sendCommand, onCommandUnavailable, onClose }: {
   tasks: BoardTask[];
   agents: Record<string, unknown>;
-  actions: unknown;
   sendCommand: CommandSender;
   onCommandUnavailable: () => void;
   onClose: () => void;
@@ -661,8 +660,9 @@ function BatchEditPanel({ tasks, agents, actions, sendCommand, onCommandUnavaila
   const [action, setAction] = useState('__unchanged__');
   const [priority, setPriority] = useState('__unchanged__');
   const taskGroup = tasks[0]?.group ?? '';
+  const batchCatalog = useBoardAuthoringCatalog(taskGroup, true, false);
   const liveAgents = Object.entries(agents).map<Record<string, unknown> & { id: string }>(([id, value]) => ({ id, ...record(value) })).filter((item) => item.group === taskGroup && !Number(item.deleted_at ?? 0));
-  const actionOptions = actionItems(actions);
+  const actionOptions = actionItems(batchCatalog.actions);
   const apply = (event: FormEvent) => {
     event.preventDefault();
     tasks.forEach((task) => {
@@ -682,7 +682,7 @@ function BatchEditPanel({ tasks, agents, actions, sendCommand, onCommandUnavaila
     });
     onClose();
   };
-  return <form className={styles.batchEdit} onSubmit={apply}><p>Apply shared metadata to {tasks.length} selected task{tasks.length === 1 ? '' : 's'}.</p><div className={styles.formGrid}><label>Add label<input value={label} onChange={(event) => setLabel(event.target.value)} /></label><label>Priority<select value={priority} onChange={(event) => setPriority(event.target.value)}><option value="__unchanged__">No change</option><option value="">None</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label><label>Assignee<select value={assignee} onChange={(event) => setAssignee(event.target.value)}><option value="__unchanged__">No change</option><option value="">Unassigned</option>{liveAgents.map((agent) => <option key={agent.id} value={agent.id}>{textValue(agent.name, agent.id)}</option>)}</select></label><label>Action<select value={action} onChange={(event) => setAction(event.target.value)}><option value="__unchanged__">No change</option><option value="">None</option>{actionOptions.map((item) => <option key={textValue(item.name)} value={textValue(item.name)}>{textValue(item.name)}</option>)}</select></label><label>Due date<select value={dueMode} onChange={(event) => setDueMode(event.target.value as typeof dueMode)}><option value="unchanged">No change</option><option value="set">Set date</option><option value="clear">Clear date</option></select></label>{dueMode === 'set' ? <label>Date and time<input type="datetime-local" value={due} onChange={(event) => setDue(event.target.value)} required /></label> : null}</div><footer><Button tone="quiet" type="button" onPress={onClose}>Cancel</Button><Button tone="primary" type="submit">Apply changes</Button></footer></form>;
+  return <form className={styles.batchEdit} onSubmit={apply}><BoardCatalogNotice catalog={batchCatalog} /><p>Apply shared metadata to {tasks.length} selected task{tasks.length === 1 ? '' : 's'}.</p><div className={styles.formGrid}><label>Add label<input value={label} onChange={(event) => setLabel(event.target.value)} /></label><label>Priority<select value={priority} onChange={(event) => setPriority(event.target.value)}><option value="__unchanged__">No change</option><option value="">None</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label><label>Assignee<select value={assignee} onChange={(event) => setAssignee(event.target.value)}><option value="__unchanged__">No change</option><option value="">Unassigned</option>{liveAgents.map((agent) => <option key={agent.id} value={agent.id}>{textValue(agent.name, agent.id)}</option>)}</select></label><label>Action<select value={action} onChange={(event) => setAction(event.target.value)}><option value="__unchanged__">No change</option><option value="">None</option>{action && action !== '__unchanged__' && !actionOptions.some((item) => textValue(item.name) === action) ? <option value={action}>{action} (unavailable)</option> : null}{actionOptions.map((item) => <option key={textValue(item.name)} value={textValue(item.name)}>{textValue(item.name)}</option>)}</select></label><label>Due date<select value={dueMode} onChange={(event) => setDueMode(event.target.value as typeof dueMode)}><option value="unchanged">No change</option><option value="set">Set date</option><option value="clear">Clear date</option></select></label>{dueMode === 'set' ? <label>Date and time<input type="datetime-local" value={due} onChange={(event) => setDue(event.target.value)} required /></label> : null}</div><footer><Button tone="quiet" type="button" onPress={onClose}>Cancel</Button><Button tone="primary" type="submit">Apply changes</Button></footer></form>;
 }
 
 function LaneManager({ lanes, sendCommand, onCommandUnavailable, onClose }: { lanes: string[]; sendCommand: CommandSender; onCommandUnavailable: () => void; onClose: () => void }) {
@@ -710,10 +710,10 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPa
   const connection = useAppSelector(selectConnection);
   const { records: agents } = useAppSelector(selectAgentsState);
   const groupsState = useAppSelector(selectGroupsState);
-  const catalog = useAppSelector(selectCatalogState);
   const auxiliaryResponses = useAppSelector(selectAuxiliaryResponseState);
   const persistedView = useAppSelector(selectBoardViewState);
   const workspaceUi = useAppSelector(selectWorkspaceUi);
+  const createCatalog = useBoardAuthoringCatalog(group, workspaceUi.createTaskDialogOpen);
   const [filtersByGroup, setFiltersByGroup] = useState<Record<string, BoardFilterState>>({});
   const [removeTaskId, setRemoveTaskId] = useState<string | null>(null);
   const [schedulesOpen, setSchedulesOpen] = useState(false);
@@ -782,19 +782,9 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPa
   if (detailTask && detailIsHydrated && hydratedDetail !== detailTask) setHydratedDetail(detailTask);
   else if (!detailTask && hydratedDetail) setHydratedDetail(null);
   const editorTask = detailTask && (detailIsHydrated ? detailTask : hydratedDetail?.id === detailTask.id ? hydratedDetail : null);
-  const taskCatalogRequest = useRef('');
   const requestedTaskId = workspaceUi.detailTaskId;
   const requestedTaskGroup = detailTask?.group || group;
   const taskDetailRead = useBoardTaskDetail(requestedTaskId, requestedTaskGroup, connection.status === 'connected', connection.reconnectCount);
-  useEffect(() => {
-    if (!requestedTaskId) { taskCatalogRequest.current = ''; return; }
-    if (connection.status !== 'connected') return;
-    const key = `${requestedTaskId}:${requestedTaskGroup}:${connection.reconnectCount}`;
-    if (taskCatalogRequest.current === key) return;
-    taskCatalogRequest.current = key;
-    sendOrNotify(sendCommand, { cmd: 'list_actions', group: requestedTaskGroup }, onCommandUnavailable);
-    sendOrNotify(sendCommand, { cmd: 'list_roles', group: requestedTaskGroup }, onCommandUnavailable);
-  }, [requestedTaskId, requestedTaskGroup, connection.status, connection.reconnectCount, sendCommand, onCommandUnavailable]);
   const removeTask = removeTaskId ? taskById.get(removeTaskId) ?? null : null;
   const selectedTasks = workspaceUi.selectedTaskIds.map((id) => taskById.get(id)).filter((task): task is BoardTask => Boolean(task));
   const dispatchTarget = dispatchTargetId ? taskById.get(dispatchTargetId) ?? null : null;
@@ -822,12 +812,6 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPa
     window.addEventListener('torque:focus-board-search', focusSearch);
     return () => window.removeEventListener('torque:focus-board-search', focusSearch);
   }, []);
-
-  useEffect(() => {
-    if (!workspaceUi.createTaskDialogOpen) return;
-    sendOrNotify(sendCommand, { cmd: 'list_actions', group }, onCommandUnavailable);
-    sendOrNotify(sendCommand, { cmd: 'list_roles', group }, onCommandUnavailable);
-  }, [group, onCommandUnavailable, sendCommand, workspaceUi.createTaskDialogOpen]);
 
   const setFilters = (next: BoardFilterState) => {
     const nextByGroup = { ...filtersByGroup, [group]: next };
@@ -1118,11 +1102,11 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPa
         <div className={styles.taskDetailHost}>
         {taskDetailRead.error ? <div role="alert"><p>{taskDetailRead.error}</p><Button onPress={taskDetailRead.retry}>Retry task details</Button></div> : null}
         {editorTask
-          ? <TaskDetail key={editorTask.id} busyRef={taskEditBusy} closeRef={taskEditClose} initialTab={initialTaskTab} task={editorTask} tasks={groupTasks} groups={groupsState.records} agents={agents} actions={catalog.actions} roles={catalog.roles} responses={auxiliaryResponses} sendCommand={sendCommand} onCommandUnavailable={onCommandUnavailable} onClose={() => { setInitialTaskTab('execution'); dispatch(workspaceUiActions.setDetailTask(null)); }} onRemove={() => setRemoveTaskId(editorTask.id)} />
+          ? <TaskDetail key={editorTask.id} busyRef={taskEditBusy} closeRef={taskEditClose} initialTab={initialTaskTab} task={editorTask} tasks={groupTasks} groups={groupsState.records} agents={agents} responses={auxiliaryResponses} sendCommand={sendCommand} onCommandUnavailable={onCommandUnavailable} onClose={() => { setInitialTaskTab('execution'); dispatch(workspaceUiActions.setDetailTask(null)); }} onRemove={() => setRemoveTaskId(editorTask.id)} />
           : detailTask ? <StateSurface title={taskDetailRead.error ? "Task details unavailable" : "Loading task"} description={taskDetailRead.error ? "Retry loading or close this task." : "Retrieving complete task fields."} /> : null}
         </div>
       </ModalDialog>
-      {workspaceUi.createTaskDialogOpen ? <TaskCreateDialog key={group} group={group} lanes={lanes} actions={catalog.actions} roles={catalog.roles} onClose={() => dispatch(workspaceUiActions.setCreateTaskDialogOpen(false))} /> : null}
+      {workspaceUi.createTaskDialogOpen ? <TaskCreateDialog key={group} group={group} lanes={lanes} actions={createCatalog.actions} roles={createCatalog.roles} notice={<BoardCatalogNotice catalog={createCatalog} />} onClose={() => dispatch(workspaceUiActions.setCreateTaskDialogOpen(false))} /> : null}
       <ModalDialog title="Schedules" description="Recurring and one-time dispatches across your groups" size="large" isOpen={schedulesOpen} onOpenChange={(open) => { if (open || !schedulesLocked) setSchedulesOpen(open); }}>
         {schedulesOpen ? <SchedulesPanel group={group} onLockChange={setSchedulesLocked} onClose={() => setSchedulesOpen(false)} /> : null}
       </ModalDialog>
@@ -1133,7 +1117,7 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable }: BoardPa
         <div className={styles.viewsPanel}><div className={styles.filterCollections}><section><h3>Labels</h3>{availableLabels.length ? availableLabels.map((value) => <label key={value} title={value}><input type="checkbox" checked={filters.filter_labels.includes(value)} onChange={() => toggleFilterValue('filter_labels', value)} /><span>{value}</span></label>) : <p>No labels</p>}</section><section><h3>Actions</h3>{availableActions.length ? availableActions.map((value) => <label key={value} title={value}><input type="checkbox" checked={filters.filter_actions.includes(value)} onChange={() => toggleFilterValue('filter_actions', value)} /><span>{value}</span></label>) : <p>No actions</p>}</section><section><h3>Agents</h3>{Object.entries(agents).map<Record<string, unknown> & { id: string }>(([id, value]) => ({ id, ...record(value) })).filter((agent) => agent.group === group).map((agent) => <label key={agent.id} title={textValue(agent.name, agent.id)}><input type="checkbox" checked={filters.filter_agents.includes(agent.id)} onChange={() => toggleFilterValue('filter_agents', agent.id)} /><span>{textValue(agent.name, agent.id)}</span></label>)}</section><section><h3>Health</h3>{availableHealth.map((value) => <label key={value} title={value}><input type="checkbox" checked={filters.filter_health.includes(value)} onChange={() => toggleFilterValue('filter_health', value)} /><span>{value}</span></label>)}</section></div><section className={styles.savedViewEditor}><h3>Saved views</h3>{savedViews.map((view) => <article key={textValue(view.name)}><button type="button" title={textValue(view.name)} onClick={() => setFilters(normalizeFilters(view))}>{textValue(view.name)}</button><button type="button" aria-label={`Delete saved view ${textValue(view.name)}`} onClick={() => persistSavedViews(savedViews.filter((item) => textValue(item.name) !== textValue(view.name)))}>Delete</button></article>)}<div><input value={savedViewName} onChange={(event) => setSavedViewName(event.target.value)} placeholder="View name" aria-label="Saved view name" /><Button tone="primary" onPress={saveCurrentView} isDisabled={!savedViewName.trim()}>Save current filters</Button></div></section><footer><Button tone="quiet" onPress={() => setFilters(emptyBoardFilters)}>Clear filters</Button><span /><Button tone="primary" onPress={() => setViewsOpen(false)}>Done</Button></footer></div>
       </ModalDialog>
       <ModalDialog title="Batch edit tasks" description={`${selectedTasks.length} selected in ${group}`} size="medium" isOpen={batchOpen} onOpenChange={setBatchOpen}>
-        {batchOpen ? <BatchEditPanel tasks={selectedTasks} agents={agents} actions={catalog.actions} sendCommand={sendCommand} onCommandUnavailable={onCommandUnavailable} onClose={() => { setBatchOpen(false); clearSelection(); }} /> : null}
+        {batchOpen ? <BatchEditPanel tasks={selectedTasks} agents={agents} sendCommand={sendCommand} onCommandUnavailable={onCommandUnavailable} onClose={() => { setBatchOpen(false); clearSelection(); }} /> : null}
       </ModalDialog>
       <ModalDialog title="Import external task" description="Create a Torque task from a provider reference or URL." size="small" isOpen={importOpen} onOpenChange={setImportOpen}>
         <form className={styles.importForm} onSubmit={(event) => { event.preventDefault(); if (!importRef.trim()) return; sendOrNotify(sendCommand, { cmd: 'external_import_task', ref: importRef.trim(), group, lane: showArchived ? '' : lanes[0] ?? '' }, onCommandUnavailable); setImportRef(''); setImportOpen(false); }}><label>External reference or URL<input autoFocus value={importRef} onChange={(event) => setImportRef(event.target.value)} placeholder="https://github.com/owner/repo/issues/123" /></label><footer><Button tone="quiet" type="button" onPress={() => setImportOpen(false)}>Cancel</Button><Button tone="primary" type="submit" isDisabled={!importRef.trim()}>Import</Button></footer></form>

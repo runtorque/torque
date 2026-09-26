@@ -3600,3 +3600,13 @@ History renders the persisted contract: role/template, input/output token counts
 - Schedule mutations have a retained owner and 30-second observation deadline, validated command-specific acknowledgements, and no reconnect replay. Keep failed edits. Creation freezes its reviewed payload/key on an unknown outcome; explicit retry shares the same pending/completed HTTP operation. Until acknowledged/refused, keep its editor mounted and prevent closing or switching schedules. This does not certify process-crash exactly-once behavior.
 - Removal uses a custom confirmation with captured schedule name/group/ID. Live list updates cannot retarget the confirmation; cancellation sends no write.
 - Run now uses injected dispatch/event callbacks and records the resulting task, timestamp and run count. Validate with an isolated generic worker, not a commercial provider invocation.
+
+### D-194 — Group-owned Board authoring options
+
+- Date: 2026-09-26
+- Scope: P-345; task creation, existing-task Execution, batch editing and Initiative-to-Board creation, sharing the schedule catalog contract from D-193.
+- Each visible authoring surface owns its action/role reads and accepted options. Never derive these choices from the most recent global WebSocket catalog. Existing-task options follow the editable target group; batch editing discovers actions on its first open and does not request unused roles.
+- Bound each catalog read at 15 seconds. Reconnect and explicit retry refresh the current group while preserving accepted options, variable drafts, the editor node, focus and caret. Report loading and errors next to the authoring controls with an explicit Retry task options action.
+- Validate response type, declared group, container and entry identities before replacing accepted options. Late, cancelled, malformed and unrelated responses cannot replace them. Abort reads when the dialog closes, the target group changes or the Execution tab becomes hidden; hidden authoring surfaces issue no reconnect reads.
+- Keep selected action/role values explicit as unavailable when absent from the current catalog. A refresh or target-group change must not silently substitute a default or erase the authored variable payload.
+- This changes option discovery only. Existing acknowledged creation/edit/link ownership and unknown-outcome evidence retention remain governed by D-191/D-192.

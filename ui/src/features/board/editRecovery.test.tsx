@@ -17,6 +17,8 @@ async function setup(write: (command: TorqueCommand, signal: AbortSignal) => Pro
   const writes: TorqueCommand[] = [];
   read.mockImplementation((command, signal) => {
     if (command.cmd === 'task_detail') return Promise.resolve({ type: 'task_detail', id: command.id, task: { ...task, id: command.id } });
+    if (command.cmd === 'list_actions') return Promise.resolve({ type: 'actions', group: command.group, actions: [] });
+    if (command.cmd === 'list_roles') return Promise.resolve({ type: 'roles', group: command.group, roles: [] });
     writes.push(command); return write(command, signal);
   });
   const store = createAppStore(); store.dispatch(connectionActions.connected({ at: 1, reconnect: false })); store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, board_tasks: { task, other: { ...task, id: 'other', task: 'Other task' } } })); store.dispatch(workspaceUiActions.setDetailTask('task'));
@@ -68,6 +70,8 @@ it.each(['close', 'restore draft', 'retry revised draft'])('preserves files from
   const pending = held<AuxiliaryFrame>(); const { writes } = await setup(() => Promise.resolve(ack)); let latest: UnknownRecord = { ...task }; let firstSave: UnknownRecord | undefined;
   read.mockImplementation((command) => {
     if (command.cmd === 'task_detail') return Promise.resolve({ type: 'task_detail', id: 'task', task: latest });
+    if (command.cmd === 'list_actions') return Promise.resolve({ type: 'actions', group: command.group, actions: [] });
+    if (command.cmd === 'list_roles') return Promise.resolve({ type: 'roles', group: command.group, roles: [] });
     writes.push(command);
     if (command.cmd === 'board_update_task') { latest = { ...latest, ...command }; if (!firstSave) { firstSave = latest; return pending.promise; } }
     if (command.cmd === 'remove_attachment') latest = { ...latest, attachments: (latest.attachments as UnknownRecord[]).filter((item) => item.filename !== command.filename) };

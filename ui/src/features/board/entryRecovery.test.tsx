@@ -26,7 +26,7 @@ beforeEach(() => { read.mockReset(); vi.useFakeTimers(); vi.setSystemTime(new Da
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 it('bounds initial hydration, validates the target on retry and ignores the late initial response', async () => {
   const pending = held(); let signal: AbortSignal | undefined;
-  read.mockImplementationOnce((_command, owner) => { signal = owner; return pending.promise; }); read.mockResolvedValueOnce(detail('other')); read.mockResolvedValue(detail());
+  read.mockImplementationOnce((_command, owner) => { signal = owner; return pending.promise; }); read.mockResolvedValueOnce(detail('other')); read.mockImplementation((command) => Promise.resolve(command.cmd === 'list_actions' ? { type: 'actions', actions: [] } : command.cmd === 'list_roles' ? { type: 'roles', roles: [] } : detail()));
   mountBoard(); expect(screen.getByText('Loading task')).toBeVisible(); await advance(15_001);
   expect(screen.getByRole('alert')).toHaveTextContent('timed out'); expect(signal?.aborted).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: 'Retry task details' })); await flush();
@@ -45,9 +45,10 @@ it('cancels replaced and closed targets so old detail cannot hydrate another edi
   const lastSignal = read.mock.calls.at(-1)?.[1]; unmount(); await flush(); expect(lastSignal?.aborted).toBe(true);
 });
 it('retains a mounted draft when reconnect hydration times out and explicitly recovers', async () => {
-  read.mockResolvedValueOnce(detail()); const { store } = mountBoard(); await flush();
+  read.mockImplementation((command) => Promise.resolve(command.cmd === 'list_actions' ? { type: 'actions', actions: [] } : command.cmd === 'list_roles' ? { type: 'roles', roles: [] } : detail())); const { store } = mountBoard(); await flush();
   const draft = screen.getByRole('textbox', { name: 'Description' }); fireEvent.change(draft, { target: { value: 'Retained reconnect draft' } }); draft.focus();
-  read.mockReturnValueOnce(new Promise(() => {})); read.mockResolvedValue(detail());
+  let holdDetail = true;
+  read.mockImplementation((command) => { if (command.cmd === 'task_detail' && holdDetail) { holdDetail = false; return new Promise(() => {}); } return Promise.resolve(command.cmd === 'list_actions' ? { type: 'actions', actions: [] } : command.cmd === 'list_roles' ? { type: 'roles', roles: [] } : detail()); });
   act(() => { store.dispatch(connectionActions.connected({ at: 2, reconnect: true })); store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, board_tasks: { one: task } })); });
   await advance(15_001); expect(screen.getByRole('alert')).toHaveTextContent('timed out'); expect(screen.getByRole('textbox', { name: 'Description' })).toBe(draft); expect(draft).toHaveValue('Retained reconnect draft'); expect(draft).toHaveFocus();
   fireEvent.click(screen.getByRole('button', { name: 'Retry task details' })); await flush(); expect(screen.queryByRole('alert')).not.toBeInTheDocument(); expect(screen.getByRole('textbox', { name: 'Description' })).toBe(draft); expect(draft).toHaveValue('Retained reconnect draft');

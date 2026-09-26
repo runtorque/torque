@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { Provider } from 'react-redux';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createAppStore, projectionActions, selectCatalogState, selectPlanningState } from '../../app/store';
+import { connectionActions, createAppStore, projectionActions, selectCatalogState, selectPlanningState } from '../../app/store';
 import { compactStateFixture } from '../../protocol/fixtures';
 import type { AuxiliaryFrame, TorqueCommand } from '../../protocol';
 import { readCommand } from '../../protocol/http';
@@ -23,7 +23,7 @@ function deferred() {
   return { promise, resolve };
 }
 function mount(children: React.ReactNode) {
-  const store = createAppStore(); store.dispatch(projectionActions.snapshotReceived(compactStateFixture));
+  const store = createAppStore(); store.dispatch(projectionActions.snapshotReceived(compactStateFixture)); store.dispatch(connectionActions.connected({ at: 1, reconnect: false }));
   return { ...render(<Provider store={store}>{children}</Provider>), store };
 }
 function detail(kind: string): AuxiliaryFrame {
@@ -148,7 +148,7 @@ describe('Planning request recovery', () => {
     const { store } = mount(<InitiativeTaskCreator initiative={item} disabled={false} onLinked={vi.fn()} />);
     const before = selectCatalogState(store.getState()).roles;
     fireEvent.click(screen.getByRole('button', { name: 'Create Board task' })); await flush();
-    expect(screen.getByRole('alert')).toHaveTextContent('requested catalog or group');
+    expect(screen.getByRole('alert')).toHaveTextContent('unrelated or invalid response');
     expect(selectCatalogState(store.getState()).roles).toEqual(before);
   });
 

@@ -10,20 +10,21 @@ export function catalogItems(value: unknown): UnknownRecord[] {
 }
 
 /** Catalogs belong to their requesting group, never the last global WS response. */
-export function useBoardAuthoringCatalog(group: string, active = true) {
+export function useBoardAuthoringCatalog(group: string, active = true, includeRoles = true) {
   const connection = useAppSelector(selectConnection);
   const [revision, setRevision] = useState(0);
   const [cache, setCache] = useState<Record<string, { actions?: UnknownRecord[]; roles?: UnknownRecord[] }>>({});
   const [outcome, setOutcome] = useState({ key: '', error: '' });
-  const key = JSON.stringify([group, active, connection.status, connection.reconnectCount, revision]);
+  const key = JSON.stringify([group, active, connection.status, connection.reconnectCount, revision, includeRoles]);
   useEffect(() => {
     if (!active || !group || connection.status !== 'connected') return;
     const owner = new AbortController();
-    void Promise.allSettled((['actions', 'roles'] as const).map(async (kind) => {
+    void Promise.allSettled((includeRoles ? ['actions', 'roles'] as const : ['actions'] as const).map(async (kind) => {
       const frame = await boardReadRequest({ cmd: `list_${kind}`, group }, owner.signal);
       if (owner.signal.aborted) return;
       if (frame.type !== kind || !frame[kind] || typeof frame[kind] !== 'object' || (frame.group !== undefined && frame.group !== group)) throw new Error(`Could not load ${kind} for ${group}: unrelated or invalid response.`);
       const items = catalogItems(frame[kind]);
+      if (items.length !== Object.values(frame[kind]).length || items.some((item) => kind === 'actions' ? typeof item.name !== 'string' || !item.name.trim() : !(typeof item.slug === 'string' && item.slug.trim()) && !(typeof item.name === 'string' && item.name.trim()))) throw new Error(`Could not load ${kind} for ${group}: invalid catalog entries.`);
       setCache((current) => ({ ...current, [group]: { ...current[group], [kind]: items } }));
     })).then((results) => {
       if (owner.signal.aborted) return;
@@ -31,6 +32,6 @@ export function useBoardAuthoringCatalog(group: string, active = true) {
       setOutcome({ key, error: failures.map((result) => result.reason instanceof Error ? result.reason.message : 'Could not load task options.').join(' ') });
     });
     return () => owner.abort();
-  }, [group, active, connection.status, key]);
+  }, [group, active, includeRoles, connection.status, key]);
   return { actions: cache[group]?.actions ?? [], roles: cache[group]?.roles ?? [], error: outcome.key === key ? outcome.error : '', loading: active && connection.status === 'connected' && outcome.key !== key, retry: () => setRevision((value) => value + 1) };
 }

@@ -14,6 +14,7 @@ const tasks = [{ id: 't', task: 'Linked task' }]; const engineers = [{ id: 'e', 
 afterEach(() => vi.unstubAllGlobals());
 function setup(kind: 'initiative' | 'decision') {
   const store = createAppStore(); const calls: TorqueCommand[] = []; const onClose = vi.fn();
+  store.dispatch(connectionActions.connected({ at: 1, reconnect: false }));
   let record: UnknownRecord = structuredClone(kind === 'initiative' ? initiative : decision); let fail = '';
   store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, initiatives: { i: { id: 'i', title: 'Roadmap' } }, decisions: { d: { id: 'd', title: 'Decision', architect_id: 'a' } } }));
   vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => {

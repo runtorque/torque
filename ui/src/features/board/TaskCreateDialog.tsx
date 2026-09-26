@@ -143,8 +143,8 @@ export function TaskCreateDialog({ group, lanes, actions, roles, onClose, initia
         <div className={styles.formGrid}>
           <label>Lane<select value={lane} onChange={(event) => setLane(event.target.value)}><option value="">Group default</option>{lanes.map((name) => <option key={name}>{name}</option>)}</select></label>
           <label>Labels<input value={labels} onChange={(event) => setLabels(event.target.value)} /></label>
-          <label>Action<select value={actionName} onChange={(event) => setActionName(event.target.value)}><option value="">Group default</option>{options(actions).map(([name]) => <option key={name}>{name}</option>)}</select></label>
-          <label>Worker role<select value={role} onChange={(event) => setRole(event.target.value)}><option value="">Action/default role</option>{options(roles, true).map(([name, item]) => <option key={name} value={name}>{taskText(item.name || name)}</option>)}</select></label>
+          <label>Action<select value={actionName} onChange={(event) => setActionName(event.target.value)}><option value="">Group default</option>{actionName && !options(actions).some(([name]) => name === actionName) ? <option value={actionName}>{actionName} (unavailable)</option> : null}{options(actions).map(([name]) => <option key={name}>{name}</option>)}</select></label>
+          <label>Worker role<select value={role} onChange={(event) => setRole(event.target.value)}><option value="">Action/default role</option>{role && !options(roles, true).some(([name]) => name === role) ? <option value={role}>{role} (unavailable)</option> : null}{options(roles, true).map(([name, item]) => <option key={name} value={name}>{taskText(item.name || name)}</option>)}</select></label>
           <label>Schedule<input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} /></label>
         </div>
         <ActionVariableFields definitions={definitions} value={actionVars} onChange={setActionVars} />

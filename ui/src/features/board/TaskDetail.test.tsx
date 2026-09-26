@@ -19,6 +19,7 @@ function setup(extra: UnknownRecord = {}) {
     const command = JSON.parse(options.body as string) as TorqueCommand;
     // These editor tests inject full detail frames explicitly; mutation counts exclude reads.
     if (command.cmd === 'task_detail') { detailReads.push(command); return new Promise(() => {}); }
+    if (command.cmd === 'list_actions' || command.cmd === 'list_roles') { const kind = command.cmd === 'list_actions' ? 'actions' : 'roles'; return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: kind, group: command.group, [kind]: [] } }) }); }
     calls.push(command);
     if (deferred) return deferred(command);
     return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: command.cmd === failure ? { type: 'error', message: 'Task has active work in its assigned worker. Stop or complete that worker before editing.' } : command.cmd === 'preview_prompt' ? { type: 'prompt_preview', task_id: 'task', prompt: 'Correct draft preview' } : { type: 'state', seq: 10, board_tasks: { task: { id: 'task' } } } }) });
