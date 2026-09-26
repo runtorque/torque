@@ -3620,3 +3620,13 @@ History renders the persisted contract: role/template, input/output token counts
 - Keep accepted text mounted and readable through reconnect and failed refresh. Retain text selection/focus and the enclosing task draft. An empty successful file is explicitly empty; do not substitute summary/path metadata for its content. Different preview identities cannot inherit each other's content.
 - Keep refresh/retry controls mounted through loading and success. Their labels may change, but their DOM/focus identity must survive so Escape still dismisses the nested preview and leaves its parent editor open. Image retries replace only the image request, not the focused control.
 - Preserve image decoding, source-task downloads, path copying, line metadata and nested Escape behavior. This checkpoint does not certify large-file performance, external-host availability or native lifecycle acceptance.
+
+### D-196 — Attention question and delivery recovery
+
+- Date: 2026-09-26
+- Scope: P-353/P-354; Attention ask responses within the broad P-112 recovery audit. Classic target selection and acknowledged answer clearing remain required.
+- Visible open questions own question and parent-detail reads with 15-second observation limits. Validate task identity and full question lifecycle state before projecting a response. Closing, removing or replacing the question cancels its reads and delivery observation; hidden closed questions issue no reconnect reads.
+- Keep accepted question/parent prose readable through compact snapshots and failed refreshes. Preserve the answer editor, draft, focus and caret through ordinary refresh/reconnect; retain parent context only for its matching parent identity.
+- Bound answer-delivery observation at 30 seconds and validate command/request correlation, any returned task/recipient IDs, and delivery state. Late or cancelled results cannot clear a draft or affect another question. An ordinary explicit refusal retains an editable draft.
+- An unknown delivery outcome freezes the exact submitted command and reply target. A read started after uncertainty must complete successfully before explicit retry; a read already in flight is insufficient. Reconnect may perform that read but never resends the answer. Retry reuses the reviewed payload; a changed reply target blocks retry and explains that the original delivery needs inspection.
+- The backend serializes resolution by task and rejects already closed questions. The request ID correlates responses; it is not a durable delivery idempotency receipt. Concurrent/replayed live delivery is tested, but process-crash exactly-once delivery is not certified.

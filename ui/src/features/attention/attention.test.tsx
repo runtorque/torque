@@ -133,7 +133,7 @@ describe('attention contracts', () => {
     expect(screen.getByRole('textbox', { name: 'Answer Choose release' })).toHaveValue('Draft while waiting');
   });
   it('routes approval asks to diff review even with no session and never to generic resolution', async () => {
-    const task = { ...ask, labels: ['torque:human', 'behavior-overlay-approval', 'proposal:proposal'] }; const store = setup(task, {});
+    const task = { ...ask, description: 'Review the proposed behavior', labels: ['torque:human', 'behavior-overlay-approval', 'proposal:proposal'] }; const store = setup(task, {});
     const calls = requests((command) => command.cmd === 'task_detail' ? { ...detail(command), task: command.id === 'ask' ? task : parent } : { type: 'behavior_overlay_diff', proposal, diff: '-old\n+new' });
     render(<Provider store={store}><AskResponse taskId="ask" send={vi.fn()} /></Provider>);
     expect(screen.queryByRole('button', { name: 'Resolve ask' })).not.toBeInTheDocument();

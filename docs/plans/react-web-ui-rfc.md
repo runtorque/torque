@@ -1358,3 +1358,8 @@ P-345 now uses bounded, group-owned catalog reads for task creation/editing, fir
 ### Artifact preview checkpoint — 2026-09-26
 
 P-351/P-352 restore Classic extension/MIME classification and legacy storage handling, add owned 15-second file/body/image observation with retry, and preserve accepted text and the enclosing task draft through reconnect. Stable refresh/retry controls preserve keyboard focus and nested Escape after recovery. Final verification passed 916 React tests and four production-browser scenarios after repairing a real uploaded-path regression and a retry-focus defect found by browser QA. D-195 and the parity ledger record the evidence and limits. The ledger is **352 mapped / 344 implemented or equivalent / 4 open / 4 intentionally retired**; P-087/P-088/P-089/P-112 and independent acceptance gates remain open. This does not certify Phase 4 or authorize Classic retirement.
+
+
+### Attention recovery checkpoint — 2026-09-26
+
+P-353/P-354 add bounded, owned question/parent reads and answer delivery. Accepted context and editor state survive refresh; an uncertain answer retains its exact payload and recipient until a fresh read permits explicit retry. Reconnect never resends; changed targets and contradictory acknowledgements cannot silently clear the draft. D-196 and the parity matrix record 927 passing React tests and four production-browser scenarios, including real deadlines, concurrent resolution and one PTY delivery. The isolated runtime was cleaned up. Ledger: **354 mapped / 346 implemented or equivalent / 4 open / 4 intentionally retired**. Broad settings/reconnect audits and complete browser/inventory/Planning/native/external/recovery acceptance remain; Phase 4 and Classic retirement remain open.

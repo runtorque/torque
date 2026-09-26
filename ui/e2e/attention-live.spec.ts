@@ -102,7 +102,10 @@ test('live PTY ask retries retain the draft and deliver once to the explicit tar
     });
     await section.getByRole('button', { name: 'Resolve ask', exact: true }).click();
     await expect(section.getByRole('alert')).toBeVisible();
-    await expect(answer).toHaveValue(marker);
+    await expect(answer).toHaveValue(marker); await expect(answer).toHaveAttribute('readonly', '');
+    await expect(section.getByRole('button', { name: 'Resolve ask', exact: true })).toBeDisabled(); expect(outcomes).toHaveLength(0);
+    await section.getByRole('button', { name: 'Refresh question', exact: true }).click();
+    await expect(section.getByRole('button', { name: 'Resolve ask', exact: true })).toBeEnabled();
     await answer.press('Enter');
     await expect.poll(() => [...outcomes].sort()).toEqual([false, true]);
     await expect.poll(async () => (await readFile(log, 'utf8')).split(marker).length - 1).toBe(1);

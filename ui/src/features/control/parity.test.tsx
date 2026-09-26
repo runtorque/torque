@@ -174,9 +174,10 @@ describe('typed settings and attention workflows', () => {
     const { ActivityPanel } = await import('./OperatorPanels');
     const { compactStateFixture } = await import('../../protocol/fixtures');
     const store = createAppStore(); const send = vi.fn(); const copy = vi.fn().mockResolvedValue(undefined);
+    store.dispatch(connectionActions.connected({ at: 1, reconnect: false }));
     Object.defineProperty(navigator, 'clipboard', { value: { writeText: copy }, configurable: true });
     store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, agents: { worker: { id: 'worker', cell_type: 'agent', session_id: 'live', status: 'running' } }, board_tasks: { ask: { id: 'ask', task: 'Approve review', lane: 'Backlog', labels: ['torque:human'], reply_agent_id: 'worker' } } }));
-    const fetcher = vi.fn((_url: string, options: RequestInit) => { const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as Record<string, unknown>; return Promise.resolve({ ok: true, json: () => Promise.resolve(command.cmd === 'task_detail' ? { ok: true, data: { type: 'task_detail', id: 'ask', task: { id: 'ask', description: 'Complete question' } } } : { ok: false, error: 'Delivery unavailable' }) }); });
+    const fetcher = vi.fn((_url: string, options: RequestInit) => { const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as Record<string, unknown>; return Promise.resolve({ ok: true, json: () => Promise.resolve(command.cmd === 'task_detail' ? { ok: true, data: { type: 'task_detail', id: 'ask', task: { id: 'ask', description: 'Complete question', lane: 'Backlog', labels: ['torque:human'], reply_agent_id: 'worker' } } } : { ok: false, error: 'Delivery unavailable' }) }); });
     vi.stubGlobal('fetch', fetcher);
     const events = [{ id: 42, kind: 'error', message: 'Actual event body' }, { id: 43, kind: 'info', message: 'Informational' }];
     render(<Provider store={store}><ActivityPanel events={events} send={send} /></Provider>);
