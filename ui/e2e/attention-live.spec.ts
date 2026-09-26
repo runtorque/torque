@@ -170,3 +170,27 @@ test('live behavior review preserves notes on reconnect and stale approval, then
   expect(active.text).toBe('Use focused tests before broad checks.');
   await page.screenshot({ path: test.info().outputPath('attention-review.png'), fullPage: true });
 });
+
+test('behavior review recovers from real read and decision deadlines without replaying an applied approval', async ({ page, request }) => {
+  test.setTimeout(90_000);
+  const group = `Review deadlines ${Date.now()}`; await command(request, { cmd: 'add_group', group });
+  const scope = { scope_kind: 'role', scope_group: group, scope_key: 'worker', group };
+  const proposed = await command(request, { cmd: 'behavior_overlay_propose', ...scope, proposed_by_kind: 'user', proposed_by_agent_id: 'user', text: 'Persist one reviewed approval.', rationale: 'Deadline review fixture' });
+  await command(request, { cmd: 'ui_select_group', group }); await command(request, { cmd: 'ui_set_react_workspace_state', state: { version: 1, activePanel: 'control', controlTab: 'catalog' } });
+  const reconnect = await reconnectHarness(page); let firstRead = true; let heldRead = false; let releaseRead = () => {}; let heldDecision = false; let releaseDecision = () => {}; let decisionReads = 0; const writes: Row[] = [];
+  await page.route('**/api/cmd', async (route) => {
+    const data = route.request().postDataJSON() as Row;
+    if (data.cmd === 'behavior_overlay_diff' && data.proposal_id === proposed.proposal_id) { decisionReads++; if (firstRead) { firstRead = false; heldRead = true; await new Promise<void>((resolve) => { releaseRead = resolve; }); } }
+    if (data.cmd === 'behavior_overlay_user_approve') { writes.push(data); const response = await route.fetch(); heldDecision = true; await new Promise<void>((resolve) => { releaseDecision = resolve; }); await route.fulfill({ response }).catch(() => {}); return; }
+    await route.continue().catch(() => {});
+  });
+  try {
+    await page.goto('/'); await page.getByRole('button', { name: 'Refresh proposals', exact: true }).click(); const card = page.locator('article').filter({ hasText: 'Deadline review fixture' }); await expect(card.getByText('Set text', { exact: true })).toBeVisible(); await expect(card.getByText('user', { exact: true })).toBeVisible(); await card.getByRole('button', { name: 'Review behavior diff', exact: true }).click();
+    const modal = page.getByRole('dialog', { name: 'Review behavior diff', exact: true }); const note = modal.getByRole('textbox', { name: 'Review note', exact: true }); const approve = modal.getByRole('button', { name: 'Approve behavior change', exact: true });
+    await expect.poll(() => heldRead).toBe(true); await note.fill('Keep this note through both deadlines'); await selectCaret(note); await expect(modal.getByRole('alert')).toContainText('refresh timed out', { timeout: 20_000 }); await expectCaret(note, 'Keep this note through both deadlines'); await expect(approve).toBeDisabled(); await modal.getByRole('button', { name: 'Reload diff', exact: true }).click(); await expect(approve).toBeEnabled(); releaseRead(); await expect(modal.getByLabel('Behavior diff', { exact: true })).toContainText('+Persist one reviewed approval.');
+    await approve.click(); await expect.poll(() => heldDecision).toBe(true); await expect(note).toBeDisabled(); const count = decisionReads; await reconnect(); expect(decisionReads).toBe(count); expect(writes).toHaveLength(1); expect((await command(request, { cmd: 'behavior_overlay_read', ...scope })).text).toBe('Persist one reviewed approval.');
+    await expect(modal.getByRole('alert')).toContainText('outcome is unknown', { timeout: 35_000 }); await expect(note).toHaveValue('Keep this note through both deadlines'); await expect(note).toBeEnabled(); await expect(approve).toBeDisabled(); await expect(modal.getByLabel('Behavior diff', { exact: true })).toContainText('+Persist one reviewed approval.'); await expect(modal.getByRole('button', { name: 'Close review', exact: true })).toBeEnabled(); releaseDecision(); await expect(modal.getByText('Behavior change approved.', { exact: true })).toHaveCount(0);
+    await page.screenshot({ path: test.info().outputPath('behavior-decision-unknown.png') }); await page.setViewportSize({ width: 390, height: 844 }); await modal.getByRole('button', { name: 'Reload diff', exact: true }).scrollIntoViewIfNeeded(); expect(await modal.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true); await page.screenshot({ path: test.info().outputPath('behavior-decision-unknown-narrow.png') });
+    await modal.getByRole('button', { name: 'Reload diff', exact: true }).click(); await expect(modal.getByText('applied · next none', { exact: true })).toBeVisible(); await expect(modal.getByText('This proposal is not awaiting an operator decision.', { exact: true })).toBeVisible(); await expect(approve).toBeDisabled(); expect(writes).toHaveLength(1); expect((await command(request, { cmd: 'behavior_overlay_diff', proposal_id: proposed.proposal_id })).proposal).toMatchObject({ status: 'applied', resolution_note: 'Keep this note through both deadlines' });
+  } finally { releaseRead(); releaseDecision(); }
+});

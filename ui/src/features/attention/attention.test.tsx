@@ -15,6 +15,7 @@ const parent = { id: 'parent', task: 'Release task', agent_id: 'worker', descrip
 const proposal = { id: 'proposal', scope_kind: 'role', scope_group: 'Foundation', scope_key: 'engineer', status: 'approved', next_actor_kind: 'user', base_version_id: 'base', proposed_text_sha256: 'sha-reviewed', proposed_by_kind: 'engineer', proposed_by_agent_id: 'author', rationale: 'Clarify limits', lint_warnings: [{ code: 'advisory', message: 'Review this rule', excerpt: 'rule text' }] };
 function setup(task: UnknownRecord = ask, agents: UnknownRecord = { worker }) {
   const store = createAppStore();
+  store.dispatch(connectionActions.connected({ at: 1, reconnect: false }));
   store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, board_tasks: { ask: task, parent }, agents }));
   return store;
 }

@@ -11,6 +11,7 @@ import { useBehaviorScope } from './useBehaviorScope';
 import { BehaviorProposalOverview } from './BehaviorProposalOverview';
 import { BehaviorVersionHistory } from './BehaviorVersionHistory';
 import { BehaviorHistoryReview } from './BehaviorHistoryReview';
+import { BehaviorScopeGuidance, BehaviorProposalSummary } from './BehaviorGuidance';
 import styles from './BehaviorOverlayEditor.module.css';
 export function BehaviorOverlayEditor({ group, active, proposals, agents, refreshVersion = 0 }: { group: string; active: unknown; proposals: unknown; agents: UnknownRecord[]; refreshVersion?: number }) {
   const dispatch = useAppDispatch(); const selected = useAppSelector((state) => state.behaviorSession.selections[group]);
@@ -49,6 +50,7 @@ function ScopeEditor({ scope, activeVersion, proposals, refreshVersion }: { scop
   const change = (field: 'text' | 'rationale', value: string) => { dispatch(behaviorActions.edit({ key, field, value })); setError(''); };
   return <>
     <div className={styles.toolbar}><span>{scope.group} / {scope.kind} / {scope.target}</span><Button isDisabled={read.pending || pending} onPress={read.refresh}>Reload behavior scope</Button></div>
+    <BehaviorScopeGuidance scope={scope} />
     {read.pending ? <p role="status">{read.accepted ? 'Refreshing behavior scope…' : 'Loading behavior scope…'}</p> : null}
     {read.error ? <p role="alert">{read.error} <Button onPress={read.refresh}>Retry behavior scope</Button></p> : null}
     {!read.ready && !read.pending && !read.error ? <p role="status">Reconnect to refresh this behavior scope.</p> : null}
@@ -57,7 +59,7 @@ function ScopeEditor({ scope, activeVersion, proposals, refreshVersion }: { scop
       {preview ? <pre className={styles.diff} aria-label="Behavior draft diff">{draftDiff(text(read.accepted.read.text), draft.text) || 'No text changes.'}</pre> : null}
       {error ? <p role="alert">{error}</p> : null}{submitted ? <p role="status">Proposal submitted: {submitted.id}. Required review is still separate.</p> : null}
       <BehaviorVersionHistory versions={read.accepted.versions} activeId={base} ready={read.ready && !pending} onInspect={setSelectedVersion} />
-    </section><section><h3>Approval queue</h3>{openProposals.length ? openProposals.map((proposal) => <article key={text(proposal.id)}><strong>{text(proposal.id)}</strong><p>{text(proposal.status)} · next {text(proposal.next_actor_kind) || 'none'}</p><p>{text(proposal.rationale) || 'No rationale.'}</p><Button onPress={() => setSelectedProposal(text(proposal.id))}>Review behavior diff</Button></article>) : <p>No open proposals for this scope.</p>}</section></div> : null}
+    </section><section><h3>Approval queue</h3>{openProposals.length ? openProposals.map((proposal) => <article key={text(proposal.id)}><strong>{text(proposal.id)}</strong><p>{text(proposal.status)} · next {text(proposal.next_actor_kind) || 'none'}</p><p>{text(proposal.rationale) || 'No rationale.'}</p><BehaviorProposalSummary proposal={proposal} /><Button onPress={() => setSelectedProposal(text(proposal.id))}>Review behavior diff</Button></article>) : <p>No open proposals for this scope.</p>}</section></div> : null}
     {selectedProposal ? <BehaviorReview key={selectedProposal} proposalId={selectedProposal} onClose={() => { setSelectedProposal(''); read.refresh(); }} /> : null}
     {selectedVersion ? <BehaviorHistoryReview key={selectedVersion} scope={scope} base={base} target={selectedVersion} scopeReady={read.ready} refreshScope={read.refresh} onClose={() => setSelectedVersion('')} /> : null}
   </>;

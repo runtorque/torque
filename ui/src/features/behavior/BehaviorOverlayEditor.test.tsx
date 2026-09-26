@@ -89,3 +89,11 @@ it('keeps group proposal discovery errors actionable and never accepts an old gr
   const test = setup(); fireEvent.click(screen.getByRole('button', { name: 'Refresh proposals' })); test.rerender({ group: 'B' }); expect(test.calls[0]!.signal.aborted).toBe(true); await test.respond(0, { type: 'behavior_overlay_proposals', proposals: [{ ...scoped(), id: 'old', status: 'proposed', rationale: 'Old group result' }] }); expect(screen.queryByText('Old group result')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Refresh proposals' })); await test.respond(1, { type: 'ok' }); expect(screen.getByRole('alert')).toHaveTextContent('group proposal list is invalid'); expect(screen.getByRole('button', { name: 'Refresh proposals' })).toBeEnabled();
 });
+
+it('explains role and agent application scope and exposes proposal review metadata', async () => {
+  const test = setup(); test.choose(); await test.batch(); expect(screen.getByText(/next worker dispatch/)).toHaveTextContent('applies group-wide and requires user diff approval');
+  test.choose('role', 'architect'); await test.batch(); expect(screen.getByText(/next launch or relaunch/)).toHaveTextContent('architect role overlay applies group-wide');
+  test.choose('agent', 'a'); await test.batch(); expect(screen.getByText(/only to the selected agent/)).toHaveTextContent('next launch or relaunch');
+  test.rerender({ proposals: { a: { ...scoped('A', 'a', 'agent'), id: 'governed', status: 'proposed', proposal_type: 'rollback', approval_route: 'architect_then_user', proposed_text_bytes: 0, proposed_text_sha256: '<full-review-hash>', lint_warning_count: 2 } } });
+  for (const label of ['Rollback', 'architect_then_user', '0 bytes', '<full-review-hash>', '2 warnings']) expect(screen.getByText(label)).toBeVisible();
+});
