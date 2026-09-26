@@ -1973,7 +1973,7 @@ async def _handle_send_user_message_command(data, state: MatrixState,
         await state.broadcast()
     try:
         if state.agents.get(cell_id) is not cell or cell.session_id != session_id:
-            raise RuntimeError("The terminal session changed before delivery. Review the draft before retrying.")
+            raise TerminalInputUnavailableError("The terminal session changed before delivery. Review the draft before retrying.")
         delivered = await bridge.send_text(session_id, text)
         if delivered is False:
             raise TerminalInputUnavailableError(
@@ -2013,15 +2013,15 @@ async def _handle_user_agent_message_command(data, state: MatrixState,
     if not target or getattr(target, "cell_type", "") != "agent":
         return {
             "type": "error",
-            "message": f"Agent not found: {target_ident}",
+            "message": f"Agent not found: {target_ident}", "delivery_refused": True,
         }
     message_text = str(data.get("message") or data.get("text") or "")
     if not message_text.strip():
-        return {"type": "error", "message": "Message is required"}
+        return {"type": "error", "message": "Message is required", "delivery_refused": True}
     if not getattr(state, "db", None):
         return {
             "type": "error",
-            "message": "Direct message store is unavailable",
+            "message": "Direct message store is unavailable", "delivery_refused": True,
         }
     stripped_message = message_text.strip()
     command = parse_user_dm_command(stripped_message)
@@ -2154,20 +2154,20 @@ async def _handle_user_agent_turn_cancel_command(data, state: MatrixState,
     target_id = _resolve_agent_id(state, str(data.get("agent_id") or "").strip())
     target = state.get_active_agent(target_id) if target_id else None
     if not target or getattr(target, "cell_type", "") != "agent":
-        return {"type": "error", "message": "Agent is no longer available"}
+        return {"type": "error", "message": "Agent is no longer available", "delivery_refused": True}
     session_id = str(data.get("session_id") or "").strip()
     source_key = str(data.get("turn_idempotency_key") or "").strip()
     cancel_key = _user_agent_message_idempotency_key(data)
     message_id = _user_direct_message_id_from_idempotency_key(source_key)
     if not session_id or not message_id or not cancel_key:
-        return {"type": "error", "message": "A current submitted message is required"}
+        return {"type": "error", "message": "A current submitted message is required", "delivery_refused": True}
     source = state.db.load_direct_message(message_id) if getattr(state, "db", None) else None
     if not source or (
             str(source.get("sender_kind", "")) != "user"
             or str(source.get("recipient_id", "")) != target.id
             or str(source.get("idempotency_key", "")) != source_key
             or str(source.get("message_type", "")) not in {"message", "slash_command"}):
-        return {"type": "error", "message": "That submitted message is not cancellable"}
+        return {"type": "error", "message": "That submitted message is not cancellable", "delivery_refused": True}
     audit_id = _user_direct_message_id_from_idempotency_key(cancel_key)
     existing = state.db.load_direct_message(audit_id)
     if existing:
@@ -2175,7 +2175,9 @@ async def _handle_user_agent_turn_cancel_command(data, state: MatrixState,
         if (str(existing.get("sender_kind", "")) != "system"
                 or str(snapshot.get("cancelled_message_id", "")) != message_id
                 or str(snapshot.get("cancel_session_id", "")) != session_id):
-            return {"type": "error", "message": "Cancellation retry key conflicts"}
+            return {"type": "error", "message": "Cancellation retry key conflicts", "delivery_refused": True}
+        if snapshot.get("cancel_outcome") == "interrupt_unknown":
+            return {"type": "error", "message": "Could not confirm interruption. Check the terminal before submitting another cancellation.", "delivery_uncertain": True}
         return {"type": "ok", "outcome": snapshot.get("cancel_outcome", "no_active_turn"),
                 "message_id": audit_id, "deduped": True}
     cancel = getattr(send_prompt, "cancel_user_direct_turn", None)
@@ -2191,6 +2193,7 @@ async def _handle_user_agent_turn_cancel_command(data, state: MatrixState,
         "session_replaced": "The target session changed; no turn was interrupted.",
         "no_active_turn": "No active turn remains for that submitted message.",
         "interrupt_failed": "Could not interrupt the active turn; it was left unchanged.",
+        "interrupt_unknown": "Could not confirm interruption. Check the terminal before submitting another cancellation.",
     }
     if outcome == "cancelled_queued":
         state.update_direct_message_delivery(message_id, "cancelled",
@@ -2204,6 +2207,8 @@ async def _handle_user_agent_turn_cancel_command(data, state: MatrixState,
     )
     if not audit:
         return {"type": "error", "message": "Failed to record cancellation outcome"}
+    if outcome == "interrupt_unknown":
+        return {"type": "error", "message": labels[outcome], "delivery_uncertain": True}
     return {"type": "ok", "outcome": outcome, "message_id": audit_id,
             "deduped": False}
 

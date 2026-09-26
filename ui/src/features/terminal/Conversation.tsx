@@ -1,14 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Button, ModalDialog } from '../../design/primitives';
 import { useAppDispatch, useAppSelector, useAppStore } from '../../app/hooks';
-import type { TorqueCommand } from '../../protocol';
-import { readCommand } from '../../protocol/http';
 import type { CommandSender } from '../board/BoardPanel';
 import type { AgentViewModel } from '../agents/model';
-import { composerActions, composerEditKind, type ComposerEditKind, documentSnapshot, emptyComposerDraft, type ComposerAttachment } from './composerState';
-import { acknowledgedMessage, cancellationLabels, composerCommand, recallMessages, rows, text } from './composerModel';
+import { composerActions, composerDraftLocked, composerEditKind, type ComposerEditKind, documentSnapshot, emptyComposerDraft, type ComposerAttachment } from './composerState';
+import { recallMessages, rows } from './composerModel';
 import { DirectMessages } from './DirectMessages';
 import { AgentMessageLoop } from './AgentMessageLoop';
+import { useComposerDelivery } from './useComposerDelivery';
 import { messageLoopPanel } from './messageLoopModel';
 import { selectMessagesState } from '../../app/store';
 import { useComposerCompletion } from './useComposerCompletion';
@@ -26,6 +25,8 @@ interface ConversationProps {
 }
 export function Conversation({ cell, target, messages, messageHistory, sendCommand, onUnavailable, composeHeight = 0, active = true }: ConversationProps) {
   const dispatch = useAppDispatch(); const store = useAppStore();
+  const { submit, cancelTurn } = useComposerDelivery(cell, target);
+  const [reviewKey, setReviewKey] = useState('');
   const draft = useAppSelector((state) => state.composer.drafts[cell.id] ?? emptyComposerDraft);
   const turn = useAppSelector((state) => target ? state.composer.turns[target.id] : undefined);
   const patch = (changes: Partial<typeof draft>) => dispatch(composerActions.patch({ cellId: cell.id, changes }));
@@ -42,7 +43,7 @@ export function Conversation({ cell, target, messages, messageHistory, sendComma
   const showRich = draft.attachments.length > 0;
   const messageCount = rows(messages).length;
   const history = recallMessages(messageHistory, messages, draft.sent);
-  const pending = draft.pending; const busy = pending || draft.uploading || Boolean(draft.composition);
+  const pending = draft.pending; const locked = composerDraftLocked(draft); const busy = locked || draft.uploading || Boolean(draft.composition);
   const name = target?.name ?? cell.name;
   const hasLoop = useAppSelector((state) => Boolean(messageLoopPanel(selectMessagesState(state).loops, state.composer.loopCancellations, target?.id ?? '')));
   const maximumHeight = Math.max(38, Math.min(240, (conversationHeight || 300) - (hasLoop ? 64 : 0) - 107 - (draft.reply ? 28 : 0) - (draft.error || draft.notice ? 24 : 0)));
@@ -106,7 +107,7 @@ export function Conversation({ cell, target, messages, messageHistory, sendComma
     applyDocument({ text: entry.message, attachments: [], selection: [entry.message.length, entry.message.length] }); patch({ recall: { ...original, index } }); setHistoryOpen(false);
   };
   const uploadFiles = async (files: File[]) => {
-    const current = currentDraft(); if (!files.length || current.uploading || current.pending) return;
+    const current = currentDraft(); if (!files.length || current.uploading || composerDraftLocked(current)) return;
     const node = composer.current; const selection = node ? editorSelection(node, current.attachments, current.selection) : current.selection;
     const key = crypto.randomUUID(); dispatch(composerActions.startUpload({ cellId: cell.id, key, selection }));
     try {
@@ -122,35 +123,8 @@ export function Conversation({ cell, target, messages, messageHistory, sendComma
     } catch (cause) { dispatch(composerActions.failUpload({ cellId: cell.id, key, error: cause instanceof Error ? cause.message : 'Upload failed.' })); }
   };
   const composing = (value: boolean) => { completion.setComposing(value); dispatch(value ? composerActions.startComposition(cell.id) : composerActions.endComposition(cell.id)); if (!value && activeRef.current && document.activeElement === composer.current) requestFocus(); };
-  const submit = async () => {
-    const current = currentDraft(); if (current.pending || current.uploading || current.composition) return;
-    try {
-      const payload = composerCommand(cell, target, current); const fingerprint = JSON.stringify(payload);
-      const key = current.attempt?.fingerprint === fingerprint ? current.attempt.key : `react-message-${crypto.randomUUID()}`;
-      const command: TorqueCommand = { ...payload, idempotency_key: key }; patch({ pending: true, error: '', notice: '', attempt: { fingerprint, key } });
-      const result = acknowledgedMessage(await readCommand(command, new AbortController().signal), command);
-      dispatch(composerActions.submitted({ cellId: cell.id, key, message: { id: result.id, message: text(command.message ?? command.text), at: Date.now() / 1000 }, notice: result.notice }));
-      if (target && result.cancellable && target.sessionId) dispatch(composerActions.turn({ agentId: target.id, turn: { key, sessionId: target.sessionId, pending: false, cancelKey: '', error: '', notice: '' } }));
-    } catch (cause) { patch({ error: cause instanceof Error ? cause.message : 'Message could not be sent. The draft is retained.' }); }
-    finally { patch({ pending: false }); }
-  };
-  const cancelTurn = async () => {
-    if (!target || busy) return; const submitted = store.getState().composer.turns[target.id];
-    if (!submitted || submitted.pending || submitted.sessionId !== target.sessionId || submitted.notice) return;
-    const cancelKey = submitted.cancelKey || `react-cancel-${crypto.randomUUID()}`;
-    const change = (changes: Partial<typeof submitted>) => dispatch(composerActions.patchTurn({ agentId: target.id, key: submitted.key, changes }));
-    change({ pending: true, cancelKey, error: '' });
-    try {
-      const frame = await readCommand({ cmd: 'user_agent_turn_cancel', agent_id: target.id, session_id: submitted.sessionId, turn_idempotency_key: submitted.key, idempotency_key: cancelKey }, new AbortController().signal);
-      if (frame.type === 'error') throw new Error(text(frame.message) || 'Cancellation refused.');
-      const label = cancellationLabels[text(frame.outcome)];
-      if (frame.type !== 'ok' || !text(frame.message_id) || !label) throw new Error('Could not confirm cancellation.');
-      change({ notice: label });
-    } catch (cause) { change({ error: cause instanceof Error ? cause.message : 'Cancellation failed.' }); }
-    finally { change({ pending: false }); }
-  };
   const keyDown = (event: KeyboardEvent<HTMLElement>) => {
-          if (event.nativeEvent.isComposing || currentDraft().composition || currentDraft().pending) return;
+          if (event.nativeEvent.isComposing || currentDraft().composition || composerDraftLocked(currentDraft())) return;
           if (completion.handleKey(event)) return;
           if (!event.altKey && event.metaKey !== event.ctrlKey && event.key.toLowerCase() === 'z') { event.preventDefault(); dispatch(composerActions.undo({ cellId: cell.id, direction: event.shiftKey ? 1 : -1 })); patch({ recall: null }); requestFocus(); return; }
           if (event.key === 'Escape') {
@@ -186,7 +160,7 @@ export function Conversation({ cell, target, messages, messageHistory, sendComma
         const current = store.getState().composer.drafts[cell.id] ?? emptyComposerDraft;
         dispatch(composerActions.patch({ cellId: cell.id, changes: { selection: editorSelection(node, current.attachments, current.selection) } })); return;
       }
-      const current = store.getState().composer.drafts[cell.id]; if (current?.pending || current?.composition) return;
+      const current = store.getState().composer.drafts[cell.id]; if (current && (composerDraftLocked(current) || current.composition)) return;
       event.preventDefault(); dispatch(composerActions.undo({ cellId: cell.id, direction: event.inputType === 'historyRedo' ? 1 : -1 }));
       dispatch(composerActions.patch({ cellId: cell.id, changes: { recall: null } }));
       const next = store.getState().composer.drafts[cell.id] ?? emptyComposerDraft; completionCaret.current = { text: next.text, selection: next.selection };
@@ -195,15 +169,15 @@ export function Conversation({ cell, target, messages, messageHistory, sendComma
   }, [showRich, cell.id, dispatch, store]);
   const sessionChanged = Boolean(turn && turn.sessionId !== target?.sessionId);
   return <section ref={conversation} className={styles.conversation} data-has-loop={hasLoop} aria-label={target ? `Conversation with ${name}` : `Buffered input for ${name}`}>
-    <header><strong>{target ? 'Direct messages' : 'Terminal input'}</strong><span>{target ? messageCount : 'Multiline input'}</span>{target ? <Button tone="quiet" isDisabled={busy || !turn || turn.pending || sessionChanged || Boolean(turn.notice)} onPress={() => { void cancelTurn(); }}>{turn?.pending ? 'Cancelling…' : 'Cancel turn'}</Button> : null}</header>
+    <header><strong>{target ? 'Direct messages' : 'Terminal input'}</strong><span>{target ? messageCount : 'Multiline input'}</span>{target ? <Button tone="quiet" isDisabled={busy || !turn || turn.pending || (sessionChanged && !turn.cancelKey) || Boolean(turn.notice)} onPress={() => { void cancelTurn(); }}>{turn?.pending ? 'Cancelling…' : 'Cancel turn'}</Button> : null}</header>
     {target ? <AgentMessageLoop key={`loop-${target.id}`} agentId={target.id} disabled={busy} /> : null}
-    {target ? <DirectMessages key={target.id} agent={target} messages={messages} pending={pending} active={active} onReply={(id, body) => { patch({ reply: { id, agentId: target.id, preview: body.replace(/\s+/g, ' ').slice(0, 120) } }); focusComposer(); }} /> : <div className={styles.messageList}><p className={styles.noMessages}>{cell.sessionId ? 'Send the composed text to this terminal session.' : 'Relaunch this terminal before sending input.'}</p></div>}
+    {target ? <DirectMessages key={target.id} agent={target} messages={messages} pending={locked} active={active} onReply={(id, body) => { patch({ reply: { id, agentId: target.id, preview: body.replace(/\s+/g, ' ').slice(0, 120) } }); focusComposer(); }} /> : <div className={styles.messageList}><p className={styles.noMessages}>{cell.sessionId ? 'Send the composed text to this terminal session.' : 'Relaunch this terminal before sending input.'}</p></div>}
     <form className={styles.composer} onSubmit={(event) => { event.preventDefault(); void submit(); }}>
       <VerticalResizeHandle className={styles.composerResize ?? ''} label="Resize message text box" value={height} minimum={38} maximum={maximumHeight} onChange={setRequestedHeight} onCommit={(value) => { if (!sendCommand({ cmd: 'ui_set_terminal_compose_height', height: Math.round(value) })) onUnavailable(); }} />
       {draft.error ? <p className={styles.composerFeedback} role="alert">{draft.error}</p> : draft.notice ? <p className={styles.composerFeedback} role="status">{draft.notice}</p> : null}
       {turn?.error ? <p className={styles.composerFeedback} role="alert">{turn.error}</p> : turn?.notice ? <p className={styles.composerFeedback} role="status">{turn.notice}</p> : sessionChanged ? <p className={styles.composerFeedback}>The submitted turn belongs to a previous session.</p> : null}
-      {draft.reply ? <div className={styles.replyContext}><span>Replying to: {draft.reply.preview || draft.reply.id}</span><Button tone="quiet" aria-label="Cancel reply" isDisabled={pending} onPress={() => { patch({ reply: null }); focusComposer(); }}>×</Button></div> : null}
-      {showRich ? <RichComposer inputRef={composer} value={draft} disabled={pending} height={height} name={name} onChange={applyDocument} onSelection={(selection, scrollTop) => patch({ selection, scrollTop })} onKeyDown={keyDown} onFiles={(files) => { void uploadFiles(files); }} onPreview={setPreviewId} onFocus={completion.setFocused} onComposition={composing} aria={{ 'aria-controls': completion.completion ? completion.id : undefined, 'aria-expanded': Boolean(completion.completion), 'aria-activedescendant': completion.completion && completion.index >= 0 ? `${completion.id}-${completion.index}` : undefined }} /> : <textarea ref={(node) => { composer.current = node; }} defaultValue={draft.text} disabled={pending}
+      {draft.reply ? <div className={styles.replyContext}><span>Replying to: {draft.reply.preview || draft.reply.id}</span><Button tone="quiet" aria-label="Cancel reply" isDisabled={locked} onPress={() => { patch({ reply: null }); focusComposer(); }}>×</Button></div> : null}
+      {showRich ? <RichComposer inputRef={composer} value={draft} disabled={locked} height={height} name={name} onChange={applyDocument} onSelection={(selection, scrollTop) => patch({ selection, scrollTop })} onKeyDown={keyDown} onFiles={(files) => { void uploadFiles(files); }} onPreview={setPreviewId} onFocus={completion.setFocused} onComposition={composing} aria={{ 'aria-controls': completion.completion ? completion.id : undefined, 'aria-expanded': Boolean(completion.completion), 'aria-activedescendant': completion.completion && completion.index >= 0 ? `${completion.id}-${completion.index}` : undefined }} /> : <textarea ref={(node) => { composer.current = node; }} defaultValue={draft.text} disabled={pending} readOnly={locked}
         aria-autocomplete="list" aria-haspopup="listbox" aria-controls={completion.completion ? completion.id : undefined} aria-expanded={Boolean(completion.completion)} aria-activedescendant={completion.completion && completion.index >= 0 ? `${completion.id}-${completion.index}` : undefined}
         onFocus={() => completion.setFocused(true)} onCompositionStart={() => composing(true)} onCompositionEnd={(event) => { edit(event.currentTarget.value, editorSelection(event.currentTarget, [])); composing(false); }}
         onChange={(event) => edit(event.target.value, editorSelection(event.target, []), composerEditKind((event.nativeEvent as InputEvent).inputType))}
@@ -215,13 +189,16 @@ export function Conversation({ cell, target, messages, messageHistory, sendComma
         onDrop={(event) => { if (event.dataTransfer.files.length) { event.preventDefault(); void uploadFiles([...event.dataTransfer.files]); } }}
         onKeyDown={keyDown} placeholder={`Message ${name}…`} aria-label={`Message ${name}`} rows={3} style={{ height: `${height}px` }} />}
       <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden onChange={(event) => { void uploadFiles([...(event.target.files ?? [])]); event.target.value = ''; }} />
-      <footer><Button tone="quiet" type="button" onPress={() => fileInput.current?.click()} isDisabled={busy}>{draft.uploading ? 'Uploading…' : 'Attach'}</Button><Button tone="quiet" type="button" aria-label="Message history" isDisabled={busy} onPress={() => setHistoryOpen(true)}>History</Button>{draft.recall ? <Button tone="quiet" type="button" isDisabled={busy} onPress={restoreDraft}>Restore draft</Button> : null}<span>Enter send · Shift+Enter newline</span><Button tone="primary" type="submit" isDisabled={busy || (!draft.text.trim() && !draft.attachments.length) || (!target && !cell.sessionId)}>{pending ? 'Sending…' : 'Send'}</Button></footer>
+      <footer><Button tone="quiet" type="button" onPress={() => fileInput.current?.click()} isDisabled={busy}>{draft.uploading ? 'Uploading…' : 'Attach'}</Button><Button tone="quiet" type="button" aria-label="Message history" isDisabled={busy} onPress={() => setHistoryOpen(true)}>History</Button>{draft.recall ? <Button tone="quiet" type="button" isDisabled={busy} onPress={restoreDraft}>Restore draft</Button> : null}{draft.attempt?.uncertain ? <Button tone="quiet" type="button" isDisabled={pending} onPress={() => setReviewKey(draft.attempt!.key)}>Review delivery</Button> : null}<span>{draft.attempt?.uncertain ? `Recovering the message to ${draft.attempt.targetName || name}` : 'Enter send · Shift+Enter newline'}</span><Button tone="primary" type="submit" isDisabled={pending || draft.uploading || Boolean(draft.composition) || (!draft.attempt?.uncertain && ((!draft.text.trim() && !draft.attachments.length) || (!target && !cell.sessionId)))}>{pending ? 'Sending…' : draft.attempt?.uncertain ? 'Retry delivery' : 'Send'}</Button></footer>
     </form>
     {completion.completion ? <ComposerSuggestions id={completion.id} input={composer} completion={completion.completion} index={completion.index} onPick={completion.pick} onChoose={completion.choose} /> : null}
     <ModalDialog title="Attached image preview" description={preview?.filename ?? ''} isOpen={Boolean(preview)} onOpenChange={(open) => { if (!open) setPreviewId(''); }} size="large"><div className={attachmentStyles.preview}>
       {preview?.previewUrl ? <img src={preview.previewUrl} alt={preview.filename} /> : <p>Preview unavailable for this image in the current session.</p>}
-      {preview ? <><p>{preview.filename}</p><Button isDisabled={pending} onPress={() => { const id = attachmentId(preview); dispatch(composerActions.removeAttachment({ cellId: cell.id, id })); setPreviewId(''); requestFocus(); }}>Remove image</Button></> : null}
+      {preview ? <><p>{preview.filename}</p><Button isDisabled={locked} onPress={() => { const id = attachmentId(preview); dispatch(composerActions.removeAttachment({ cellId: cell.id, id })); setPreviewId(''); requestFocus(); }}>Remove image</Button></> : null}
     </div></ModalDialog>
+    <ModalDialog title="Review uncertain delivery" description={`The message to ${draft.attempt?.targetName || name} may already have been sent. Check that conversation or terminal. Releasing this draft does not undo delivery; sending it again can create a duplicate.`} isOpen={Boolean(reviewKey && draft.attempt?.key === reviewKey)} onOpenChange={(open) => { if (!open) setReviewKey(''); }} size="small">
+      <Button tone="quiet" onPress={() => setReviewKey('')}>Keep recovering</Button><Button isDisabled={pending} onPress={() => { dispatch(composerActions.releaseAttempt({ cellId: cell.id, key: reviewKey })); setReviewKey(''); }}>I checked; keep draft</Button>
+    </ModalDialog>
     <ModalDialog title="Recent messages" description={`Recall a message for ${name}. Your unsent draft remains available.`} isOpen={historyOpen} onOpenChange={setHistoryOpen} size="small"><div className={styles.historyList}>{history.length ? history.map((entry, index) => <button key={entry.id || index} onClick={() => recallAt(index)}>{entry.message}</button>) : <p>No sent messages yet.</p>}</div></ModalDialog>
   </section>;
 }

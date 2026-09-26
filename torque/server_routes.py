@@ -24,6 +24,7 @@ from . import profiling
 from .worktree_requests import ACKNOWLEDGED_WORKTREE_MUTATIONS
 from .pending_requests import PendingCommandWrites, CommandRequestConflict
 from .services.creation_outcomes import AGENT_CREATION_COMMANDS, CreationOutcome
+from .services.delivery_outcomes import DELIVERY_COMMANDS, DeliveryOutcome
 from .attachment_uploads import AttachmentUploadError, save_message_attachment_stream
 from .config import log
 from .state import hot_json_dumps_async
@@ -587,15 +588,13 @@ def build_http_routes(
 
     pending_api_writes = PendingCommandWrites()
     unsettled_creations: dict[str, CreationOutcome] = {}
-    delivery_commands = {'send_user_message', 'user_agent_turn_cancel'}
-    # Preserve a successful handler acknowledgement if saving its receipt fails.
-    # Retry must save that same result, not repeat an already completed effect.
-    # This process-local record does not cover a crash or an uncertain handler error.
-    unsettled_deliveries: dict[str, tuple[str, Any]] = {}
+    # Preserve completed and uncertain outcomes until their receipts are durable.
+    # Only an explicit verified refusal allows the same command to execute again.
+    unsettled_deliveries: dict[str, DeliveryOutcome] = {}
     # Completed receipts alone cannot deduplicate writes during awaited
     # creation, terminal delivery or turn interruption. A disconnected caller must not
     # cancel the shared write before its durable receipt is saved.
-    coordinated_writes = ACKNOWLEDGED_WORKTREE_MUTATIONS | AGENT_CREATION_COMMANDS | delivery_commands | {
+    coordinated_writes = ACKNOWLEDGED_WORKTREE_MUTATIONS | AGENT_CREATION_COMMANDS | DELIVERY_COMMANDS | {
         'board_add_task', 'schedule_create',
     }
 
@@ -652,7 +651,7 @@ def build_http_routes(
             idempotency_key = str(data.get("idempotency_key", "") or "").strip()
             request_hash = api_request_hash(data) if idempotency_key else ""
             delivery = unsettled_deliveries.get(idempotency_key)
-            if delivery and delivery[0] != request_hash:
+            if delivery and delivery.request_hash != request_hash:
                 raise CommandRequestConflict("idempotency key was reused for a different API command")
             if idempotency_key and is_api_write_command(cmd):
                 unsettled = unsettled_creations.get(idempotency_key)
@@ -698,8 +697,13 @@ def build_http_routes(
                 # Keep the completed operation through verification or receipt
                 # failures. A retry resolves it instead of creating a new target.
                 result = creation.resolve(state, db)
-            elif idempotency_key in unsettled_deliveries:
-                result = unsettled_deliveries[idempotency_key][1]
+            elif idempotency_key and cmd in DELIVERY_COMMANDS:
+                delivery = unsettled_deliveries.get(idempotency_key)
+                if delivery is None:
+                    delivery = DeliveryOutcome(cmd, idempotency_key, request_hash)
+                    unsettled_deliveries[idempotency_key] = delivery
+                    await delivery.execute(handle_command, data)
+                result = delivery.resolve()
             else:
                 try:
                     result = await handle_command(data)
@@ -710,6 +714,13 @@ def build_http_routes(
 
             if result and result.get("type") == "error":
                 refusal = {"ok": False, "error": result.get("message", "")}
+                if delivery is not None:
+                    refusal = delivery.refusal_response(result)
+                    if result.get("delivery_refused") is not True:
+                        db.save_mcp_idempotency(
+                            idempotency_key=idempotency_key, surface="api",
+                            tool_name=cmd, request_hash=request_hash, response=refusal)
+                    unsettled_deliveries.pop(idempotency_key, None)
                 if (cmd == "board_add_task" or creation is not None) and result.get("creation_refused") is True:
                     refusal["creation_refused"] = True
                     unsettled_creations.pop(idempotency_key, None)
@@ -746,8 +757,6 @@ def build_http_routes(
                     status=409,
                 )
 
-            if idempotency_key and cmd in delivery_commands and result:
-                unsettled_deliveries[idempotency_key] = (request_hash, result)
             payload = result if result else await _state_payload()
             response_payload = {"ok": True, "data": payload}
             if idempotency_key and is_api_write_command(cmd):

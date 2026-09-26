@@ -992,7 +992,7 @@ def _handle_user_agent_loop_command(
         message_text: str) -> dict:
     parsed = _parse_user_agent_loop_command(message_text)
     if parsed.get("type") == "error":
-        return parsed
+        return {**parsed, "delivery_refused": True}
     action = parsed.get("action")
     if action == "cancel":
         loop = state.active_agent_message_loop_for_agent(target.id)
@@ -1000,12 +1000,12 @@ def _handle_user_agent_loop_command(
         if expected_loop_id and (not loop or loop.id != expected_loop_id):
             return {
                 "type": "error",
-                "message": "The displayed /loop is no longer active. Refresh before cancelling another loop.",
+                "message": "The displayed /loop is no longer active. Refresh before cancelling another loop.", "delivery_refused": True,
             }
         if not loop:
             return {
                 "type": "error",
-                "message": "No active /loop exists for this agent",
+                "message": "No active /loop exists for this agent", "delivery_refused": True,
             }
         stopped = state.agent_message_loop_stop(
             loop.id,
@@ -1022,7 +1022,7 @@ def _handle_user_agent_loop_command(
         )
         return _user_agent_loop_response(stopped, audit_row=audit)
     if action != "create":
-        return {"type": "error", "message": "Unsupported /loop command"}
+        return {"type": "error", "message": "Unsupported /loop command", "delivery_refused": True}
     try:
         loop = state.agent_message_loop_add(
             agent_id=target.id,
@@ -1032,7 +1032,9 @@ def _handle_user_agent_loop_command(
             created_by="user",
         )
     except ValueError as exc:
-        return {"type": "error", "message": str(exc)}
+        return {"type": "error", "message": str(exc), "delivery_refused": str(exc) in {
+            "agent_id is required", "An active /loop already exists for this agent",
+            "interval_seconds must be positive", "loop message is required"}}
     interval_label = _format_user_agent_loop_interval(loop.interval_seconds)
     audit = _save_user_agent_loop_audit_message(
         state,
@@ -1151,6 +1153,8 @@ def _replay_user_agent_restart_result(
     )
     if status == "failed":
         payload["type"] = "error"
+        if snapshot.get("restart_reason") in {"restart_unavailable", "agent_dismissed"}:
+            payload["delivery_refused"] = True
     payload["deduped"] = True
     return payload
 
@@ -1220,6 +1224,7 @@ async def _handle_user_agent_restart_command(
             message="Agent restart is unavailable",
         )
         payload["type"] = "error"
+        payload["delivery_refused"] = True
         return payload
 
     if _agent_dismissed_at(target):
@@ -1246,6 +1251,7 @@ async def _handle_user_agent_restart_command(
             message="Target agent is dismissed",
         )
         payload["type"] = "error"
+        payload["delivery_refused"] = True
         return payload
 
     selected_before = str(getattr(state, "selected_agent_id", "") or "").strip()

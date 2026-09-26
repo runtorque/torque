@@ -1270,9 +1270,11 @@ class AgentLaunchService:
             return {"outcome": "unsupported_provider"}
         try:
             interrupted = await interrupt(session_id)
-        except Exception:
-            log.exception("Active user DM interrupt failed for cell=%s", cell.id)
+        except TerminalInputUnavailableError:
             return {"outcome": "interrupt_failed"}
+        except Exception:
+            log.exception("Active user DM interrupt has an uncertain outcome for cell=%s", cell.id)
+            return {"outcome": "interrupt_unknown"}
         if not interrupted:
             return {"outcome": "unsupported_provider"}
         self._active_user_direct_turn_by_session.pop(session_id, None)

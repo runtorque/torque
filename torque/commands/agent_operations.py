@@ -650,11 +650,11 @@ async def handle_agent_operation_command(
         session_id = str(getattr(cell, "session_id", "") or "")
         expected_session = str(data.get("session_id", "") or "")
         if expected_session and expected_session != session_id:
-            result = {"type": "error", "message": "The terminal session changed. Review the draft before retrying."}
+            result = {"type": "error", "message": "The terminal session changed. Review the draft before retrying.", "delivery_refused": True}
         elif await _handle_send_user_message_command(data, state, bridge):
             result = {"type": "terminal_message_sent", "cell_id": cell_id, "session_id": session_id}
         else:
-            result = {"type": "error", "message": "The message could not be sent to an active terminal."}
+            result = {"type": "error", "message": "The message could not be sent to an active terminal.", "delivery_refused": True}
 
     elif cmd == "user_agent_message":
         result = await _handle_user_agent_message_command(

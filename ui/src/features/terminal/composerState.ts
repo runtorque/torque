@@ -1,5 +1,5 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
-import type { UnknownRecord } from '../../protocol';
+import type { TorqueCommand, UnknownRecord } from '../../protocol';
 import { editorLength, locatedAttachments, moveAttachments, moveUploadAnchor, replaceDocumentRange, sameDocument, type ComposerDocument, type UploadAnchor } from './composerDocument';
 export interface ComposerAttachment { path: string; filename: string; mime_type?: string; size_bytes?: number; id?: string; position?: number; previewUrl?: string }
 export interface ReplyTarget { id: string; agentId: string; preview: string }
@@ -9,16 +9,18 @@ export function composerEditKind(inputType?: string): ComposerEditKind {
   if (inputType?.startsWith('delete')) return 'delete';
   return inputType && ['insertText', 'insertLineBreak', 'insertParagraph'].includes(inputType) ? 'typing' : null;
 }
+export interface ComposerAttempt { fingerprint: string; key: string; command?: TorqueCommand; targetName?: string; sessionId?: string; uncertain?: boolean }
 export interface ComposerDraft {
   text: string; attachments: ComposerAttachment[]; reply: ReplyTarget | null;
   selection: [number, number]; scrollTop: number;
   undo: ComposerDocument[]; undoIndex: number; undoGroup: ComposerEditKind; uploadAnchor: UploadAnchor | null;
   composition: ComposerDocument | null; completedUpload: { key: string; attachments: ComposerAttachment[] } | null;
   pending: boolean; uploading: boolean; error: string; notice: string;
-  attempt: { fingerprint: string; key: string } | null;
+  attempt: ComposerAttempt | null;
   sent: SentMessage[];
   recall: { document: ComposerDocument; index: number } | null;
 }
+export function composerDraftLocked(draft: ComposerDraft): boolean { return draft.pending || draft.attempt?.uncertain === true; }
 export interface MessageReading { count: number; pinned: boolean; anchorId: string; offset: number; scrollTop: number; selectedId: string }
 export interface LoopCancellation { agentId: string; loop: UnknownRecord; key: string; pending: boolean; error: string; notice: string }
 export interface SubmittedTurn { key: string; sessionId: string; pending: boolean; cancelKey: string; error: string; notice: string }
@@ -49,7 +51,7 @@ function finishUpload(draft: ComposerDraft, attachments: ComposerAttachment[]) {
   if (Math.min(...draft.selection) !== anchor.selection[0] || Math.max(...draft.selection) !== anchor.selection[1]) next.selection = moveUploadAnchor({ key: 'caret', selection: draft.selection }, draft, next)!.selection;
   draft.uploadAnchor = null; draft.completedUpload = null; draft.uploading = false; commitDocument(draft, next);
 }
-const initialState: { drafts: Record<string, ComposerDraft>; turns: Record<string, SubmittedTurn>; readings: Record<string, MessageReading>; loopCancellations: Record<string, LoopCancellation> } = { drafts: {}, turns: {}, readings: {}, loopCancellations: {} };
+const initialState: { drafts: Record<string, ComposerDraft>; turns: Record<string, SubmittedTurn>; submissions: Record<string, string>; readings: Record<string, MessageReading>; loopCancellations: Record<string, LoopCancellation> } = { drafts: {}, turns: {}, submissions: {}, readings: {}, loopCancellations: {} };
 export const composerSlice = createSlice({
   name: 'composer', initialState,
   reducers: {
@@ -64,25 +66,29 @@ export const composerSlice = createSlice({
       const draft = state.drafts[payload.cellId] ?? emptyComposerDraft;
       const selection = payload.changes.selection;
       const moved = selection && (selection[0] !== draft.selection[0] || selection[1] !== draft.selection[1]);
-      state.drafts[payload.cellId] = { ...draft, ...payload.changes, ...(moved ? { undoGroup: null } : {}) };
+      const changes = { ...payload.changes };
+      if (composerDraftLocked(draft)) {
+        for (const key of ['text', 'attachments', 'reply', 'undo', 'undoIndex', 'recall'] as const) delete changes[key];
+      }
+      state.drafts[payload.cellId] = { ...draft, ...changes, ...(moved ? { undoGroup: null } : {}) };
     },
     edit(state, { payload }: PayloadAction<{ cellId: string; text: string; selection?: [number, number]; kind?: ComposerEditKind }>) {
       const draft = state.drafts[payload.cellId] ?? { ...emptyComposerDraft };
-      if (draft.pending) return;
+      if (composerDraftLocked(draft)) return;
       const next = { text: payload.text, attachments: moveAttachments(draft.text, payload.text, draft.attachments), selection: payload.selection ?? [payload.text.length, payload.text.length] as [number, number] };
       commitDocument(draft, next, payload.kind); state.drafts[payload.cellId] = draft;
     },
     document(state, { payload }: PayloadAction<{ cellId: string; document: ComposerDocument; kind?: ComposerEditKind }>) {
-      const draft = state.drafts[payload.cellId] ?? { ...emptyComposerDraft }; if (draft.pending) return;
+      const draft = state.drafts[payload.cellId] ?? { ...emptyComposerDraft }; if (composerDraftLocked(draft)) return;
       commitDocument(draft, payload.document, payload.kind); state.drafts[payload.cellId] = draft;
     },
     removeAttachment(state, { payload }: PayloadAction<{ cellId: string; id: string }>) {
-      const draft = state.drafts[payload.cellId]; if (!draft || draft.pending) return;
+      const draft = state.drafts[payload.cellId]; if (!draft || composerDraftLocked(draft)) return;
       const token = locatedAttachments(draft).find(({ entry }) => (entry.id ?? entry.path) === payload.id); if (!token) return;
       commitDocument(draft, replaceDocumentRange(draft, [token.offset, token.offset + 1]));
     },
     startUpload(state, { payload }: PayloadAction<{ cellId: string; key: string; selection: [number, number] }>) {
-      const draft = state.drafts[payload.cellId] ?? { ...emptyComposerDraft }; if (draft.pending || draft.uploading) return;
+      const draft = state.drafts[payload.cellId] ?? { ...emptyComposerDraft }; if (composerDraftLocked(draft) || draft.uploading) return;
       draft.uploading = true; draft.error = ''; draft.uploadAnchor = { key: payload.key, selection: [Math.min(...payload.selection), Math.max(...payload.selection)] }; state.drafts[payload.cellId] = draft;
     },
     finishUpload(state, { payload }: PayloadAction<{ cellId: string; key: string; attachments: ComposerAttachment[] }>) {
@@ -95,7 +101,7 @@ export const composerSlice = createSlice({
       draft.uploadAnchor = null; draft.completedUpload = null; draft.uploading = false; draft.error = payload.error;
     },
     startComposition(state, { payload }: PayloadAction<string>) {
-      const draft = state.drafts[payload] ?? { ...emptyComposerDraft }; if (draft.pending || draft.composition) return;
+      const draft = state.drafts[payload] ?? { ...emptyComposerDraft }; if (composerDraftLocked(draft) || draft.composition) return;
       draft.undoGroup = null; draft.composition = documentSnapshot(draft); state.drafts[payload] = draft;
     },
     endComposition(state, { payload }: PayloadAction<string>) {
@@ -104,18 +110,26 @@ export const composerSlice = createSlice({
       if (draft.completedUpload?.key === draft.uploadAnchor?.key && draft.completedUpload) finishUpload(draft, draft.completedUpload.attachments);
     },
     undo(state, { payload }: PayloadAction<{ cellId: string; direction: number }>) {
-      const draft = state.drafts[payload.cellId]; if (!draft || draft.pending || draft.composition) return;
+      const draft = state.drafts[payload.cellId]; if (!draft || composerDraftLocked(draft) || draft.composition) return;
       draft.undoGroup = null;
       const index = Math.max(0, Math.min(draft.undo.length - 1, draft.undoIndex + payload.direction)); if (index === draft.undoIndex) return;
       draft.undo[draft.undoIndex] = documentSnapshot(draft);
       const next = draft.undo[index]!; draft.uploadAnchor = moveUploadAnchor(draft.uploadAnchor, draft, next);
       draft.undoIndex = index; draft.text = next.text; draft.attachments = next.attachments.map((entry) => ({ ...entry })); draft.selection = [...next.selection];
     },
+    releaseAttempt(state, { payload }: PayloadAction<{ cellId: string; key: string }>) {
+      const draft = state.drafts[payload.cellId]; if (!draft || draft.pending || draft.attempt?.key !== payload.key) return;
+      draft.attempt = null; draft.error = ''; draft.notice = 'Draft retained. Review it before sending another message.';
+    },
     submitted(state, { payload }: PayloadAction<{ cellId: string; key: string; message: SentMessage; notice: string }>) {
       const draft = state.drafts[payload.cellId]; if (!draft || draft.attempt?.key !== payload.key) return;
       state.drafts[payload.cellId] = { ...emptyComposerDraft, notice: payload.notice, sent: [payload.message, ...draft.sent].slice(0, 100) };
     },
-    turn(state, { payload }: PayloadAction<{ agentId: string; turn: SubmittedTurn }>) { state.turns[payload.agentId] = payload.turn; },
+    submission(state, { payload }: PayloadAction<{ agentId: string; key: string }>) { state.submissions[payload.agentId] = payload.key; },
+    turn(state, { payload }: PayloadAction<{ agentId: string; turn: SubmittedTurn }>) {
+      const latest = state.submissions[payload.agentId];
+      if (!latest || latest === payload.turn.key) state.turns[payload.agentId] = payload.turn;
+    },
     patchTurn(state, { payload }: PayloadAction<{ agentId: string; key: string; changes: Partial<SubmittedTurn> }>) {
       const turn = state.turns[payload.agentId]; if (turn?.key === payload.key) Object.assign(turn, payload.changes);
     },

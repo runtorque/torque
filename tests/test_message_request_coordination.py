@@ -21,6 +21,7 @@ from torque.db import TorqueDB
 from torque.state import AgentCell, MatrixState
 from torque.server_agent import AgentLaunchService
 from torque.local_pty import LocalPtyAdapter
+from torque.terminal_adapter import TerminalInputDeliveryError, TerminalInputUnavailableError
 from tests.test_board_creation_requests import Response, json_response
 
 
@@ -40,7 +41,7 @@ class MessageRequestCoordinationTests(unittest.IsolatedAsyncioTestCase):
         self.entered, self.release = asyncio.Event(), asyncio.Event()
         self.effects = []
 
-        async def send_text(session_id, text):
+        async def send_text(session_id, text, **_kwargs):
             self.effects.append(('send', session_id, text))
             self.entered.set()
             await self.release.wait()
@@ -54,7 +55,11 @@ class MessageRequestCoordinationTests(unittest.IsolatedAsyncioTestCase):
         self.bridge = SimpleNamespace(send_text=send_text, interrupt_active_turn=interrupt)
         self.sender = AgentLaunchService(state=self.state, connection=None, bridge=self.bridge,
                                          worktree_mgr=None, template_mgr=None)
-        values = dict(state=self.state, bridge=self.bridge, send_agent_prompt=self.sender,
+        async def send_prompt(cell, prompt, **kwargs):
+            return await self.sender.send_agent_prompt(cell, prompt, **kwargs)
+        send_prompt.cancel_user_direct_turn = self.sender.cancel_user_direct_turn
+        values = dict(state=self.state, bridge=self.bridge, send_agent_prompt=send_prompt,
+                      handle_user_agent_message_command=server._handle_user_agent_message_command,
                       handle_send_user_message_command=server._handle_send_user_message_command,
                       handle_user_agent_turn_cancel_command=server._handle_user_agent_turn_cancel_command)
         runtime = AgentOperationRuntime(**{field.name: values.get(field.name) for field in fields(AgentOperationRuntime)})
@@ -66,6 +71,7 @@ class MessageRequestCoordinationTests(unittest.IsolatedAsyncioTestCase):
         values.update(handle_command=handle, db=self.db, state=self.state,
                       daemon_stop_state=SimpleNamespace(should_reject_api_request=lambda _: False),
                       api_worker_context_guard=lambda *_: None)
+        self.route_values = values
         self.routes = server_routes.build_http_routes(**values)
         web_patch = patch.object(server_routes, 'web', SimpleNamespace(json_response=json_response, Response=Response))
         web_patch.start()
@@ -75,6 +81,8 @@ class MessageRequestCoordinationTests(unittest.IsolatedAsyncioTestCase):
         data = {'cmd': command, 'cell_id': self.cell.id, 'agent_id': self.cell.id,
                 'session_id': self.cell.session_id, 'text': 'Only deliver once',
                 'idempotency_key': command + '-one'}
+        if command == 'user_agent_message':
+            data.update(message='Only deliver once', thread_id='user-agent:user:' + self.cell.id)
         if command == 'user_agent_turn_cancel':
             source_key = 'source-turn'
             self.state.save_direct_message({
@@ -238,3 +246,116 @@ class MessageRequestCoordinationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(self.cell.status, 'idle')
                 self.assertEqual(self.state.agent_message_history_read(self.cell.id), [])
                 self.assertIsNone(self.db.load_mcp_idempotency(data['idempotency_key']))
+
+    async def test_partial_terminal_failure_is_replayed_without_redelivery(self):
+        self.release.set()
+        original = self.bridge.send_text
+        async def partial(session_id, text):
+            await original(session_id, text)
+            raise TerminalInputDeliveryError('Input may have reached the terminal')
+        self.bridge.send_text = partial
+        data = self.payload('send_user_message')
+        first = await self.request(data)
+        result = json.loads(first.body)
+        self.assertFalse(result['ok'])
+        self.assertTrue(result.get('delivery_uncertain'))
+        self.assertEqual(result['idempotency_key'], data['idempotency_key'])
+        self.assertEqual(result['command'], data['cmd'])
+        self.assertNotIn('delivery_refused', result)
+        self.assertEqual((await self.request(data)).body, first.body)
+        self.routes = server_routes.build_http_routes(**self.route_values)
+        self.assertEqual((await self.request(data)).body, first.body)
+        self.assertEqual(len(self.effects), 1)
+
+    async def test_uncertain_receipt_failure_retains_error_without_redelivery(self):
+        self.release.set()
+        original = self.bridge.send_text
+        async def partial(session_id, text):
+            await original(session_id, text)
+            raise RuntimeError('Failure after delivery')
+        self.bridge.send_text = partial
+        data = self.payload('send_user_message')
+        with patch.object(self.db, 'save_mcp_idempotency', side_effect=RuntimeError('Receipt unavailable')):
+            for _ in range(2):
+                with self.assertRaisesRegex(RuntimeError, 'Receipt unavailable'):
+                    await self.request(data)
+            self.assertEqual((await self.request({**data, 'text': 'Changed'})).status, 409)
+        recovered = json.loads((await self.request(data)).body)
+        self.assertTrue(recovered.get('delivery_uncertain'))
+        self.assertEqual(len(self.effects), 1)
+
+    async def test_verified_preflight_refusal_allows_a_safe_identical_retry(self):
+        self.release.set()
+        original = self.bridge.send_text
+        self.bridge.send_text = AsyncMock(side_effect=TerminalInputUnavailableError('No input attempted'))
+        data = self.payload('send_user_message')
+        result = json.loads((await self.request(data)).body)
+        self.assertFalse(result['ok'])
+        self.assertTrue(result.get('delivery_refused'))
+        self.assertNotIn('delivery_uncertain', result)
+        self.assertIsNone(self.db.load_mcp_idempotency(data['idempotency_key']))
+        self.assertEqual(self.effects, [])
+        self.bridge.send_text = original
+        self.assertTrue(json.loads((await self.request(data)).body)['ok'])
+        self.assertEqual(len(self.effects), 1)
+
+    async def test_interrupt_failure_is_truthfully_uncertain_and_never_replayed(self):
+        self.release.set()
+        original = self.bridge.interrupt_active_turn
+        async def partial(session_id):
+            await original(session_id)
+            raise TerminalInputDeliveryError('Interrupt may have been delivered')
+        self.bridge.interrupt_active_turn = partial
+        data = self.payload('user_agent_turn_cancel')
+        first = await self.request(data)
+        result = json.loads(first.body)
+        self.assertFalse(result['ok'])
+        self.assertTrue(result.get('delivery_uncertain'))
+        self.assertNotIn('left unchanged', result['error'])
+        self.assertEqual((await self.request(data)).body, first.body)
+        self.routes = server_routes.build_http_routes(**self.route_values)
+        self.assertEqual((await self.request(data)).body, first.body)
+        self.assertEqual(len(self.effects), 1)
+        audit = self.db.load_direct_message(server._user_direct_message_id_from_idempotency_key(data['idempotency_key']))
+        self.assertEqual(audit['context_snapshot']['cancel_outcome'], 'interrupt_unknown')
+        self.assertNotIn('left unchanged', audit['message'])
+
+    async def test_cancel_audit_failure_cannot_reexecute_the_cancel_handler(self):
+        self.release.set()
+        data = self.payload('user_agent_turn_cancel')
+        with patch.object(server, '_save_user_agent_system_audit_message', return_value=None) as audit:
+            first = await self.request(data)
+            self.assertTrue(json.loads(first.body).get('delivery_uncertain'))
+            self.assertEqual((await self.request(data)).body, first.body)
+            audit.assert_called_once()
+        self.assertEqual(len(self.effects), 1)
+
+    async def test_direct_message_retry_shares_the_final_delivery_response(self):
+        await self.overlapping('user_agent_message')
+
+    async def test_local_loop_command_recovers_its_completed_receipt(self):
+        self.release.set()
+        data = {**self.payload('user_agent_message'), 'message': '/loop every 1h Run checks'}
+        with patch.object(self.db, 'save_mcp_idempotency', side_effect=RuntimeError('Receipt unavailable')):
+            with self.assertRaisesRegex(RuntimeError, 'Receipt unavailable'):
+                await self.request(data)
+        loop = self.state.active_agent_message_loop_for_agent(self.cell.id)
+        self.assertIsNotNone(loop)
+        result = json.loads((await self.request(data)).body)
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['data']['loop']['id'], loop.id)
+        self.assertEqual(len(self.state.agent_message_loops), 1)
+        self.assertEqual(self.effects, [])
+
+    async def test_local_validation_and_unavailable_restart_are_verified_refusals(self):
+        for index, message in enumerate(('/loop nonsense', '/loop cancel', '/restart')):
+            with self.subTest(message=message):
+                data = {**self.payload('user_agent_message'), 'message': message, 'idempotency_key': f'local-refusal-{index}'}
+                for _ in range(2):
+                    result = json.loads((await self.request(data)).body)
+                    self.assertFalse(result['ok'])
+                    self.assertTrue(result.get('delivery_refused'))
+                    self.assertNotIn('delivery_uncertain', result)
+                self.assertIsNone(self.db.load_mcp_idempotency(data['idempotency_key']))
+                self.assertEqual(self.effects, [])
+                self.assertEqual(self.state.agent_message_loops, {})

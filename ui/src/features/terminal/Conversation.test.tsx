@@ -24,7 +24,7 @@ function harness(initialCell = agent, initialTarget: typeof agent | null = agent
   const reply = async (index: number, extra?: UnknownRecord) => { await act(async () => { const call = calls[index]!; call.resolve(extra ?? ack(call.command)); await Promise.resolve(); }); };
   return { store, calls, show, reply, ...view };
 }
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('buffered terminal and agent composition', () => {
   it('waits for matching standalone delivery, preserves failure and uses the same key for identical retry', async () => {
     const { calls, reply } = harness(terminal, null); const input = screen.getByRole('textbox', { name: 'Message Shell' });
@@ -32,7 +32,7 @@ describe('buffered terminal and agent composition', () => {
     expect(calls[0]!.command).toMatchObject({ cmd: 'send_user_message', cell_id: 'shell', session_id: 'shell-session', text: '  first\nsecond  ' });
     expect(input).toHaveValue('  first\nsecond  '); expect(input).toBeDisabled(); fireEvent.submit(input.closest('form')!); expect(calls).toHaveLength(1);
     await reply(0, { type: 'error', message: 'PTY refused input' }); expect(await screen.findByRole('alert')).toHaveTextContent('PTY refused input'); expect(input).toHaveValue('  first\nsecond  '); expect(input).toHaveFocus();
-    fireEvent.click(screen.getByRole('button', { name: 'Send' })); expect(calls[1]!.command).toEqual(calls[0]!.command);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry delivery' })); expect(calls[1]!.command).toEqual(calls[0]!.command);
     await reply(1); expect(input).toHaveValue(''); expect(screen.getByRole('status')).toHaveTextContent('Sent to the terminal');
     fireEvent.change(input, { target: { value: '  first\nsecond  ' } }); fireEvent.click(screen.getByRole('button', { name: 'Send' })); expect(calls[2]!.command.idempotency_key).not.toBe(calls[0]!.command.idempotency_key); await reply(2);
   });
@@ -43,7 +43,7 @@ describe('buffered terminal and agent composition', () => {
     act(() => { store.dispatch(connectionActions.connected({ at: 1, reconnect: true })); }); expect(input).toHaveValue('Use main');
     fireEvent.click(screen.getByRole('button', { name: 'Send' })); expect(calls[0]!.command).toMatchObject({ cmd: 'user_agent_message', agent_id: 'worker', thread_id: 'user-agent:user:worker', reply_to_id: 'question' });
     await reply(0, ack(calls[0]!.command, { reply_to_id: 'other' })); expect(await screen.findByRole('alert')).toHaveTextContent('reply target did not match'); expect(screen.getByText('Replying to: Which branch?')).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: 'Send' })); await reply(1); expect(screen.queryByText('Replying to: Which branch?')).not.toBeInTheDocument(); expect(input).toHaveValue(''); expect(screen.getByRole('status')).toHaveTextContent('waiting for delivery');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry delivery' })); await reply(1); expect(screen.queryByText('Replying to: Which branch?')).not.toBeInTheDocument(); expect(input).toHaveValue(''); expect(screen.getByRole('status')).toHaveTextContent('waiting for delivery');
   });
   it('keeps drafts, attachments and caret isolated across cells and late completion', async () => {
     const { store, show, calls, reply } = harness();
@@ -139,5 +139,98 @@ describe('composer acknowledgement contracts', () => {
     expect(acknowledgedMessage({ type: 'agent_restart', agent_id: agent.id, status: 'succeeded', audit_message_id: 'audit' }, { ...command, message: '/restart' }).notice).toBe('Agent restarted.');
     expect(acknowledgedMessage({ type: 'agent_message_loop', loop: { agent_id: agent.id, status: 'active' }, audit_message_id: 'audit' }, { ...command, message: '/loop 10m check' }).cancellable).toBe(false);
     expect(Object.keys(cancellationLabels)).toEqual(['cancelled_queued', 'interrupted', 'unsupported_provider', 'session_replaced', 'no_active_turn', 'interrupt_failed']);
+  });
+});
+
+describe('owned composer recovery', () => {
+  it('keeps the newer parent turn when an attached composer recovers an older delivery', async () => {
+    vi.useFakeTimers(); const { calls, reply, show, store } = harness(attached, agent);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message Worker' }), { target: { value: 'Older attached message' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    show(agent, agent);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message Worker' }), { target: { value: 'Newer parent message' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' })); await reply(1);
+    const newer = calls[1]!.command.idempotency_key;
+    show(attached, agent); fireEvent.click(screen.getByRole('button', { name: 'Retry delivery' })); await reply(2);
+    expect(store.getState().composer.drafts[attached.id]!.text).toBe('');
+    expect(store.getState().composer.turns[agent.id]?.key).toBe(newer);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel turn' }));
+    expect(calls[3]!.command.turn_idempotency_key).toBe(newer);
+    await reply(3, { type: 'ok', outcome: 'cancelled_queued', message_id: 'newer-cancel' });
+  });
+
+  it('bounds submission, freezes its original target and payload, and ignores an expired reply', async () => {
+    vi.useFakeTimers(); const { calls, reply, show, store } = harness(attached, agent);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message Worker' }), { target: { value: 'Original message' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(screen.getByRole('alert')).toHaveTextContent('outcome is unknown');
+    const input = screen.getByRole('textbox', { name: 'Message Worker' });
+    expect(input).toHaveAttribute('readonly');
+    fireEvent.change(input, { target: { value: 'Changed message' } });
+    act(() => { store.dispatch(composerActions.patch({ cellId: attached.id, changes: { reply: { id: 'changed', agentId: other.id, preview: 'Changed' } } })); });
+    expect(store.getState().composer.drafts[attached.id]!.text).toBe('Original message');
+    expect(store.getState().composer.drafts[attached.id]!.reply).toBeNull();
+    show(attached, other); act(() => { store.dispatch(connectionActions.connected({ at: 2, reconnect: true })); });
+    expect(calls).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry delivery' }));
+    expect(calls[1]!.command).toEqual(calls[0]!.command);
+    await reply(0); expect(screen.getByRole('button', { name: 'Sending…' })).toBeDisabled();
+    expect(store.getState().composer.drafts[attached.id]!.text).toBe('Original message');
+    await reply(1);
+    expect(store.getState().composer.drafts[attached.id]!.text).toBe('');
+    expect(store.getState().composer.turns[agent.id]?.key).toBe(calls[0]!.command.idempotency_key);
+    expect(store.getState().composer.turns[other.id]).toBeUndefined();
+  });
+  it('accepts only a correlated verified refusal before releasing the draft', async () => {
+    harness(terminal, null);
+    const seen: TorqueCommand[] = [];
+    vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => {
+      const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand; seen.push(command);
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ ok: false, error: 'No input was attempted', delivery_refused: true, delivery_uncertain: seen.length === 2, command: command.cmd, idempotency_key: seen.length === 1 ? 'unrelated-key' : command.idempotency_key }) });
+    }));
+    const input = screen.getByRole('textbox', { name: 'Message Shell' });
+    fireEvent.change(input, { target: { value: 'Reviewed message' } }); fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(await screen.findByRole('button', { name: 'Retry delivery' })).toBeEnabled(); expect(input).toHaveAttribute('readonly');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry delivery' }));
+    expect(await screen.findByRole('button', { name: 'Retry delivery' })).toBeEnabled(); expect(input).toHaveAttribute('readonly');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry delivery' }));
+    expect(await screen.findByRole('button', { name: 'Send' })).toBeEnabled(); expect(input).not.toHaveAttribute('readonly');
+    fireEvent.change(input, { target: { value: 'Corrected message' } }); fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await screen.findByRole('button', { name: 'Send' });
+    expect(seen[1]).toEqual(seen[0]); expect(seen[2]).toEqual(seen[0]); expect(seen[3]!.idempotency_key).not.toBe(seen[0]!.idempotency_key);
+  });
+  it('releases an uncertain draft only after explicit review and rejects the old response afterward', async () => {
+    vi.useFakeTimers(); const { calls, reply, store } = harness(terminal, null);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message Shell' }), { target: { value: 'Unknown delivery' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    fireEvent.click(screen.getByRole('button', { name: 'Review delivery' }));
+    expect(screen.getByRole('dialog', { name: 'Review uncertain delivery' })).toHaveTextContent('may already have been sent');
+    fireEvent.click(screen.getByRole('button', { name: 'Keep recovering' }));
+    expect(screen.getByRole('textbox', { name: 'Message Shell' })).toHaveAttribute('readonly');
+    fireEvent.click(screen.getByRole('button', { name: 'Review delivery' }));
+    fireEvent.click(screen.getByRole('button', { name: 'I checked; keep draft' }));
+    const input = screen.getByRole('textbox', { name: 'Message Shell' }); expect(input).not.toHaveAttribute('readonly');
+    fireEvent.change(input, { target: { value: 'New reviewed message' } });
+    await reply(0); expect(store.getState().composer.drafts[terminal.id]!.text).toBe('New reviewed message');
+    fireEvent.click(screen.getByRole('button', { name: 'Send' })); expect(calls[1]!.command.idempotency_key).not.toBe(calls[0]!.command.idempotency_key); await reply(1);
+  });
+  it('bounds cancellation offscreen and recovers the captured turn after session replacement', async () => {
+    vi.useFakeTimers(); const { calls, reply, show, store } = harness();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message Worker' }), { target: { value: 'Run this turn' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' })); await reply(0);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message Worker' }), { target: { value: 'Unrelated draft' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel turn' })); show(other, other);
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(store.getState().composer.turns[agent.id]?.pending).toBe(false);
+    show({ ...agent, sessionId: 'new-session' }, { ...agent, sessionId: 'new-session' });
+    expect(screen.getByRole('alert')).toHaveTextContent('outcome is unknown');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel turn' })); expect(calls[2]!.command).toEqual(calls[1]!.command);
+    await reply(1, { type: 'ok', outcome: 'interrupted', message_id: 'expired-audit' });
+    expect(screen.getByRole('button', { name: 'Cancelling…' })).toBeDisabled();
+    await reply(2, { type: 'ok', outcome: 'cancelled_queued', message_id: 'current-audit' });
+    expect(screen.getByText('Queued message cancelled.')).toBeVisible(); expect(screen.getByRole('textbox', { name: 'Message Worker' })).toHaveValue('Unrelated draft');
   });
 });

@@ -54,7 +54,7 @@ test('composers retain per-cell drafts, acknowledge real terminal delivery and r
     await select(parent.id); const parentInput = page.getByRole('textbox', { name: 'Message Composer parent', exact: true });
     await parentInput.fill('Unsent parent draft'); release!();
     await select(shell.id); await expect(shellInput).toHaveValue(marker); await expect(page.getByRole('alert')).toContainText('Simulated lost delivery acknowledgement');
-    await shellInput.press('Enter'); await expect(shellInput).toHaveValue(''); expect(sends).toHaveLength(2); expect(sends[0]).toEqual(sends[1]);
+    await page.getByRole('button', { name: 'Retry delivery', exact: true }).click(); await expect(shellInput).toHaveValue(''); expect(sends).toHaveLength(2); expect(sends[0]).toEqual(sends[1]);
     expect((await readFile(log, 'utf8')).split(marker).length - 1).toBe(1);
     await shellInput.fill('Unsent shell draft'); await shellInput.evaluate((node: HTMLTextAreaElement) => node.setSelectionRange(2, 8));
     await select(parent.id); await expect(parentInput).toHaveValue('Unsent parent draft'); await select(shell.id); await expect(shellInput).toHaveValue('Unsent shell draft');

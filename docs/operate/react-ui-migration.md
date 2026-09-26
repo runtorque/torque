@@ -255,3 +255,8 @@ The GitHub settings suite also verifies deadline recovery using a browser transp
 
 
 `message-loop-live.spec.ts` now includes a real 30-second cancellation deadline. It uses only generic local targets, holds the response after actual cancellation, changes selection, reconnects, and verifies explicit replay returns the same cancellation record without changing the unrelated composer draft. It also retains the replacement-loop guard scenario. Run against an isolated PTY-enabled daemon after `make ui-check`; inspect the compact timeout screenshot. Created targets are removed, and no commercial-provider loop delivery is exercised.
+
+
+### Composer delivery recovery acceptance
+
+`ui/e2e/composer-recovery-live.spec.ts` requires an isolated PTY-enabled daemon, the production UI build and an absolute `TORQUE_PTY_PYTHON` receiver executable. It holds actual daemon acknowledgements past the real 30-second deadlines, switches cells, reconnects, and explicitly retries the exact send/cancellation commands. It verifies one receiver marker, identical replayed receipts, rejection of expired responses during retry, retained unrelated drafts, correlated no-input refusal and the compact review dialog. Inspect `composer-unknown-compact.png` and `composer-review-compact.png`. Run alongside composer-live, composer-attachments-live, composer-keyboard-live, composer-completion-live and message-loop-live. All created agents and temporary receiver files are removed by the tests; verify zero sessions and stop only the identified QA profile's daemon and sidecars. These tests use generic local providers and do not certify commercial-provider interruption, upload deadlines, forced-page-reload recovery or the daemon-crash window before receipt persistence.
