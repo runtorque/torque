@@ -147,3 +147,18 @@ it('omits the inert terminal fallback from mounted Settings, sparse saves and wh
   const { commands, store } = await setup(7); expect(screen.queryByLabelText('Auto terminals')).not.toBeInTheDocument(); edit('Default directory', '/updated'); fireEvent.click(save()); await screen.findByText('Saved', { exact: true }); expect(commands).toHaveLength(1); expect(commands[0]?.settings).toEqual({ default_directory: '/updated' });
   fireEvent.click(screen.getByRole('button', { name: 'Reset group defaults' })); fireEvent.click(save()); await waitFor(() => expect(save()).toBeDisabled()); expect(commands).toHaveLength(2); expect(commands[1]?.settings).not.toHaveProperty('auto_terminals'); act(() => { store.dispatch(connectionActions.connected({ at: 4000, reconnect: true })); }); await waitFor(() => expect(read.mock.calls.filter(([command]) => command.cmd === 'get_group_settings').length).toBeGreaterThan(2)); expect(screen.queryByLabelText('Auto terminals')).not.toBeInTheDocument();
 });
+
+
+it('normalizes path payloads only on save while retaining the exact draft after a refused write', async () => {
+  const { commands, setHandler } = await setup();
+  const draft = '  /project with spaces  ';
+  edit('Default directory', draft);
+  setHandler(() => Promise.resolve({ type: 'error', message: 'Try again' }));
+  fireEvent.click(save()); await screen.findByRole('alert');
+  expect(screen.getByLabelText('Default directory')).toHaveValue(draft);
+  expect(commands[0]?.settings).toEqual({ default_directory: '/project with spaces' });
+  setHandler(() => Promise.resolve({ type: 'group_settings', group: 'Foundation', settings: { default_directory: '/project with spaces' } }));
+  fireEvent.click(save()); await screen.findByText('Saved', { exact: true });
+  expect(commands[1]?.settings).toEqual({ default_directory: '/project with spaces' });
+  expect(save()).toBeDisabled();
+});

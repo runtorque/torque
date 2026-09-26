@@ -1280,3 +1280,8 @@ P-328 now bounds width persistence and stops queued writes after refusal or unkn
 ### Compatibility-only terminal setting checkpoint — 2026-09-26
 
 P-329 now hides the ignored automatic-terminal fallback and preserves compatibility data through edit/reset/reload. D-184 and the matrix record two reproduced regressions, 32 focused Settings tests, 14 backend guard/persistence tests, 813 UI tests and passing isolated production-browser acceptance. Screenshot inspected and isolated QA cleaned. Main ledger: **329 behaviors: 320 implemented/equivalent dispositions, 5 open audits and 4 intentional retirements**. Broad Settings/lazy-reconnect audits and independent inventory/native/external/recovery gates remain; Phase 4 is open.
+
+
+### Text boundaries and consolidated Settings lifecycle checkpoint — 2026-09-26
+
+P-330 restores Classic's scoped text save rules without altering exact drafts, instruction payloads or arbitrary maps. D-185 and the matrix record the reproduced path regression, 40 focused tests, 821 UI tests and a four-scope production partial-save/reload scenario. Seven additional current-build browser scenarios consolidate appearance, navigation, read/write outcomes, reconnect and validation acceptance; P-090 returns to Required. Screenshots inspected and isolated QA cleaned. Main ledger: **330 behaviors: 322 implemented/equivalent dispositions, 4 open audits and 4 intentional retirements**. Remaining broad rows are P-087/P-088/P-089/P-112; independent inventory, Planning combinations, native/external/recovery gates still apply. Phase 4 remains open.

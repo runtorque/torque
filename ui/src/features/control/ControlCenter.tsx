@@ -22,6 +22,7 @@ import { records, text } from '../planning/model';
 import { AgentClassLibrary } from './AgentClassLibrary';
 import { BehaviorOverlayEditor, CatalogEditor } from './CatalogEditors';
 import { browserHost, type DesktopHost } from '../../host';
+import { normalizeSettingsText } from './settingsText';
 import { settingsRequest, validateSettingsAcknowledgement, validateSettingsRead } from './settingsRequests';
 import { projectionActions } from '../../app/store';
 import { AiSecretSetting } from './AiSecretSetting';
@@ -209,10 +210,10 @@ function SettingsPanel({ group, snapshot, onSavingChange, onDiscard }: { onDisca
     const architectChanges = delta('architect');
     const aiChanges = changedSettings(baseline.ai, next.ai);
     const commands: { scope: keyof typeof next; command: TorqueCommand }[] = [];
-    if (Object.keys(globalChanges).length) commands.push({ scope: 'global', command: { cmd: 'update_global_settings', settings: globalChanges } });
-    if (Object.keys(groupChanges).length) commands.push({ scope: 'group', command: { cmd: 'update_group_settings', group, settings: groupChanges } });
-    if (Object.keys(engineerChanges).length) commands.push({ scope: 'engineer', command: { cmd: 'engineer_update_settings', group, ...engineerChanges } });
-    if (Object.keys(architectChanges).length) commands.push({ scope: 'architect', command: { cmd: 'update_architect_settings', group, settings: architectChanges } });
+    if (Object.keys(globalChanges).length) commands.push({ scope: 'global', command: { cmd: 'update_global_settings', settings: normalizeSettingsText('global', globalChanges) } });
+    if (Object.keys(groupChanges).length) commands.push({ scope: 'group', command: { cmd: 'update_group_settings', group, settings: normalizeSettingsText('group', groupChanges) } });
+    if (Object.keys(engineerChanges).length) commands.push({ scope: 'engineer', command: { cmd: 'engineer_update_settings', group, ...normalizeSettingsText('engineer', engineerChanges) } });
+    if (Object.keys(architectChanges).length) commands.push({ scope: 'architect', command: { cmd: 'update_architect_settings', group, settings: normalizeSettingsText('architect', architectChanges) } });
     if (Object.keys(aiChanges).length || Object.values(aiSecrets).some((value) => value.trim()) || clearAiSecrets.length) commands.push({ scope: 'ai', command: { cmd: 'update_ai_settings', settings: aiChanges, secrets: Object.fromEntries(Object.entries(aiSecrets).filter(([, value]) => value.trim())), clear_secrets: clearAiSecrets, ...(confirmed ? { confirm_embedding_rebuild: true } : {}) } });
     try {
       for (const { scope, command } of commands) {

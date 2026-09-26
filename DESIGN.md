@@ -3502,3 +3502,13 @@ History renders the persisted contract: role/template, input/output token counts
 - Contract: Classic no longer exposes this field and agent launch explicitly ignores it as an implicit companion-terminal fallback. Keep the persisted field for profile compatibility, but exclude it from React's editable settings, search controls, changed-value payloads and section resets. Do not silently reset or migrate its stored value.
 - Explicit companions: Role/template/action launch definitions retain their explicit terminals configuration and supported creation behavior. Removing an inert group control does not retire companion terminals.
 - Verification: Reproduce the exposed field and reset contamination, then verify mounted Settings and helper behavior, sparse save and whole-group reset through the daemon, reload persistence, and the existing backend explicit-companion/no-fallback guard tests.
+
+
+### D-185 — Settings text normalization happens at the save boundary
+
+- Date: 2026-09-26
+- Scope: Classic `_collectGlobalSettingsPayload` / `submitGroupSettings` text contracts; P-330.
+- Contract: Preserve exact local editing buffers. Normalize only explicitly submitted, known fields using Classic's outer-whitespace rules for commands, model/reasoning overrides, paths and task defaults. Keep internal spaces. Empty worktree base directory, dispatch lane and journal frequency use Classic's documented defaults; other empty text retains inheritance semantics. Trim individual task-label and full-capture-tool list entries. Normalize named GitHub text fields without promoting absent defaults.
+- Boundaries: Do not generically trim every string or recurse through arbitrary maps. Instructions, environment values, map keys/values and unknown fields remain exact in client payloads. Existing backend normalizers retain their authority, including Architect instruction normalization.
+- Lifecycle: Refusal preserves the exact authored draft. Sparse writes and partial acknowledgements remain scoped; retry does not replay a previously acknowledged scope. Successful rereads/reload display authoritative stored values.
+- Verification: Mounted regression reproduces the untrimmed path payload. Model tests cover all four scopes, explicit empty defaults, unchanged inputs and protected text/maps; production acceptance exercises four-scope partial failure, payloads, persistence and reload.
