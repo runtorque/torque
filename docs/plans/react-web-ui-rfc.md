@@ -1270,3 +1270,8 @@ P-321 now bounds on-demand/reconnect discovery while preserving ordered selectio
 ### Operational panel recovery checkpoint — 2026-09-26
 
 P-322–P-327 now bound visible Pipeline/History/Help/Context/Supervisor reads and Context mutation observation, preserving accepted state and independent retry without replay. D-182 and the matrix record reproduced stalls, 72 focused tests, 809 UI tests and six passing production browser scenarios with actual deadlines and persisted Context recovery. Screenshots were inspected and isolated QA cleaned. Source audit maps Context pane-width queue recovery as P-328. Main ledger: **328 behaviors: 318 implemented/equivalent dispositions, 6 open repairs and 4 intentional retirements**. Broad audits and independent inventory/native/external/recovery acceptance keep Phase 4 open.
+
+
+### Context pane-width recovery checkpoint — 2026-09-26
+
+P-328 now bounds width persistence and stops queued writes after refusal or unknown outcome while retaining the latest visible ratio for explicit retry. D-183 and the matrix record two reproduced regressions, 20 focused tests, 811 UI tests and live persisted-but-withheld acknowledgement acceptance with compact layout and reload. Screenshots were inspected and isolated QA cleaned. Field audit maps the misleading inert Auto terminals group control as P-329. Main ledger: **329 behaviors: 319 implemented/equivalent dispositions, 6 open repairs and 4 intentional retirements**. Broad audits and independent inventory/native/external/recovery acceptance remain; Phase 4 is open.

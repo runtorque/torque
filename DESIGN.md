@@ -3484,3 +3484,12 @@ History renders the persisted contract: role/template, input/output token counts
 - Polling: A Supervisor timeout is a failed observation, not an empty session list. Retain accepted rows and resume the configured polling cadence after the failure; pausing, replacing or hiding the view cancels pending observation and future polls.
 - Context writes: Bound mutation observation to 30 seconds. An unacknowledged outcome releases busy controls and retains the editor/intent; ordinary scoped refresh may reveal persisted changes. Never replay a mutation on timeout or reconnect, and never let a late response close the editor or erase newer edits. Explicit publication of a new entry after an unknown outcome requires reviewing refreshed entries first; the UI does not claim backend deduplication.
 - Verification: Reproduce stalls before repair, then test initial load, accepted-state retention, independent retries, delayed settlements, polling recovery and cancellation. Isolated production browser acceptance must exercise actual deadlines and persisted Context outcomes alongside existing panel lifecycle regressions.
+
+
+### D-183 — Context pane-width persistence recovers without draining a failed queue
+
+- Date: 2026-09-26
+- Scope: D-115 Context split persistence; P-328.
+- Bound observation: Observe each pane-width write for at most 30 seconds and cancel observation when hidden. A missing acknowledgement means an unknown outcome, not proof that the daemon did not persist it. Release the saving indicator while retaining the latest visible ratio and editor state.
+- Queue: Continue coalescing rapid commits after successful acknowledgements. After refusal or timeout, stop and clear the queued writes while retaining the latest local ratio as dirty. Later snapshots cannot overwrite that intent. Retry pane width or another explicit resize submits the current intent; reconnect and late replies do not replay it or clear the error.
+- Verification: Reproduce stalled saving and queue continuation after refusal. Component/browser acceptance covers current ratio and draft/caret retention, actual persisted-but-withheld acknowledgement, explicit retry, ordinary successful coalescing, compact transitions, reload and hidden cancellation.

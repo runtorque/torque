@@ -5,17 +5,17 @@ async function command(request: APIRequestContext, data: Row) {
   expect(result.ok, result.error).toBe(true); expect(result.data.type).not.toBe('error'); return result.data;
 }
 test('Context panes resize with pointer and keyboard, retry persistence and retain drafts through compact layout and reconnect', async ({ page, request }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(90_000);
   const runtime = (await (await request.get('/api/runtime')).json() as { data: { runtime: { port: number; profile: string } } }).data.runtime;
   expect(runtime.port).not.toBe(18932); expect(runtime.profile).not.toBe('default');
   const group = `Context split ${Date.now()}`; await command(request, { cmd: 'add_group', group }); await command(request, { cmd: 'ui_select_group', group });
   expect(await command(request, { cmd: 'ui_set_context_panel_split', ratio: .36 })).toMatchObject({ type: 'state', context_panel_split_ratio: .36 });
   for (let i = 0; i < 25; i++) await command(request, { cmd: 'memory_publish', scope_kind: 'group', scope_ref: group, entry_type: 'note', title: i === 24 ? 'Resizable note' : `Other note ${i}`, content: `Recorded context ${i}`, source_kind: 'manual' });
-  let socket: WebSocketRoute | undefined; let connections = 0; let refusal = false; const writes: Row[] = [];
+  let socket: WebSocketRoute | undefined; let connections = 0; let refusal = false; const writes: Row[] = []; let hold = false; let held = false; let release = () => {};
   await page.routeWebSocket(/\/ws\?/, (connection) => { connection.connectToServer(); socket = connection; connections += 1; });
   await page.route('**/api/cmd', async (route) => {
     const data = route.request().postDataJSON() as Row;
-    if (data.cmd === 'ui_set_context_panel_split') { writes.push(data); if (refusal) { await route.fulfill({ json: { ok: false, error: 'Injected pane width refusal' } }); return; } }
+    if (data.cmd === 'ui_set_context_panel_split') { writes.push(data); if (hold) { const response = await route.fetch(); held = true; await new Promise<void>((resolve) => { release = resolve; }); await route.fulfill({ response }).catch(() => {}); return; } if (refusal) { await route.fulfill({ json: { ok: false, error: 'Injected pane width refusal' } }); return; } }
     await route.continue();
   });
   const open = async () => { await page.getByRole('button', { name: /◎ Control/ }).click(); await page.getByRole('button', { name: 'Context', exact: true }).click(); };
@@ -35,8 +35,11 @@ test('Context panes resize with pointer and keyboard, retry persistence and reta
   await page.setViewportSize({ width: 760, height: 640 }); await expect(separator).toHaveCount(0); await content.scrollIntoViewIfNeeded(); await expect(content).toHaveAttribute('data-resize-anchor', 'original'); await expect(content).toHaveValue('Unsaved context draft survives pane resize');
   await page.screenshot({ path: test.info().outputPath('context-split-compact.png') });
   await page.setViewportSize({ width: 1280, height: 720 }); await expect(separator).toHaveAttribute('aria-valuenow', '44');
-  refusal = true; await separator.focus(); await separator.press('End'); await expect(page.getByRole('alert')).toContainText('Pane width was not saved'); await expect(separator).toHaveAttribute('aria-valuenow', '62'); await expect(content).toHaveValue('Unsaved context draft survives pane resize');
+  refusal = true; await separator.focus(); await separator.press('End'); await expect(page.getByRole('alert')).toContainText('Pane width save was not acknowledged'); await expect(separator).toHaveAttribute('aria-valuenow', '62'); await expect(content).toHaveValue('Unsaved context draft survives pane resize');
   refusal = false; await page.getByRole('button', { name: 'Retry pane width', exact: true }).click(); await expect(page.getByRole('alert')).toHaveCount(0); await expect(separator).toHaveAttribute('aria-valuetext', '62% list width');
+  hold = true; const beforeHeld = writes.length; await separator.focus(); await separator.press('ArrowLeft'); await expect.poll(() => held).toBe(true); await separator.press('ArrowLeft'); await expect(separator).toHaveAttribute('aria-valuenow', '58');
+  await expect(page.getByRole('alert')).toContainText('outcome is unknown', { timeout: 35_000 }); await expect(separator).toHaveAttribute('aria-valuetext', '58% list width'); expect(writes).toHaveLength(beforeHeld + 1); await expect(content).toHaveValue('Unsaved context draft survives pane resize'); release(); const reconnected = connections; await socket!.close({ code: 1012, reason: 'Unknown pane width outcome' }); await expect.poll(() => connections).toBeGreaterThan(reconnected); await expect(separator).toHaveAttribute('aria-valuenow', '58'); expect(writes).toHaveLength(beforeHeld + 1); await expect(page.getByRole('alert')).toContainText('outcome is unknown'); await page.screenshot({ path: test.info().outputPath('context-split-unknown-outcome.png') });
+  hold = false; await page.getByRole('button', { name: 'Retry pane width', exact: true }).click(); await expect(page.getByRole('alert')).toHaveCount(0); await expect(separator).toHaveAttribute('aria-valuetext', '58% list width'); expect(writes).toHaveLength(beforeHeld + 2); expect(Number(writes.at(-1)?.ratio)).toBeCloseTo(.58);
   await separator.press('Home'); await expect(separator).toHaveAttribute('aria-valuetext', '28% list width'); await separator.press('ArrowRight'); await expect(separator).toHaveAttribute('aria-valuetext', '30% list width');
   await page.getByRole('button', { name: 'Cancel', exact: true }).click(); await page.reload(); await open(); await expect(separator).toHaveAttribute('aria-valuenow', '30');
   await page.screenshot({ path: test.info().outputPath('context-split-restored.png') });

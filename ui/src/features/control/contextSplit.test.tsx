@@ -6,7 +6,7 @@ import { compactStateFixture } from '../../protocol/fixtures';
 import type { TorqueCommand } from '../../protocol';
 import { ContextSplit } from './ContextSplit';
 
-afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 function setup(initial: unknown = .4) {
   let measure = () => {}; let width = 1000; let failure = false; let mismatch = false; let hold = false;
   vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { measure = callback; } observe() {} disconnect() {} });
@@ -21,7 +21,7 @@ function setup(initial: unknown = .4) {
   const store = createAppStore(); store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, context_panel_split_ratio: initial }));
   const view = render(<Provider store={store}><ContextSplit list={<aside aria-label="Context list">Selected entry</aside>} detail={<textarea aria-label="Draft" defaultValue="Local draft" />} /></Provider>);
   const separator = () => screen.getByRole('separator', { name: 'Resize Context panes' });
-  return { ...view, store, separator, requests, fail: (value: boolean) => { failure = value; }, mismatch: (value: boolean) => { mismatch = value; }, hold: () => { hold = true; }, release: async () => { await act(async () => { pending.shift()!(); await Promise.resolve(); }); }, resize: (next: number) => { width = next; act(() => measure()); }, remote: (ratio: number) => { act(() => { store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, context_panel_split_ratio: ratio })); }); } };
+  return { ...view, store, separator, requests, fail: (value: boolean) => { failure = value; }, mismatch: (value: boolean) => { mismatch = value; }, hold: (value = true) => { hold = value; }, release: async () => { await act(async () => { pending.shift()!(); await Promise.resolve(); }); }, resize: (next: number) => { width = next; act(() => measure()); }, remote: (ratio: number) => { act(() => { store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, context_panel_split_ratio: ratio })); }); } };
 }
 
 it('restores saved width, supports bounded keyboard changes and follows external updates after acknowledgement', async () => {
@@ -67,4 +67,17 @@ it('accepts later remote widths after cancelling a preview whose earlier save fi
   await test.release(); expect(separator).toHaveAttribute('aria-valuenow', '55');
   fireEvent.pointerCancel(separator, { pointerId: 2 }); expect(separator).toHaveAttribute('aria-valuenow', '42');
   test.remote(.51); expect(separator).toHaveAttribute('aria-valuenow', '51'); expect(test.requests).toHaveLength(1);
+});
+
+
+it('bounds a lost width acknowledgement, preserves the latest ratio and draft, and retries explicitly', async () => {
+  vi.useFakeTimers(); const test = setup(); test.hold(); const separator = test.separator(); const draft = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Draft' }); draft.focus(); draft.setSelectionRange(2, 7);
+  fireEvent.keyDown(separator, { key: 'ArrowRight' }); fireEvent.keyDown(separator, { key: 'ArrowRight' }); fireEvent.keyDown(separator, { key: 'ArrowRight' }); expect(test.requests).toHaveLength(1);
+  await act(() => vi.advanceTimersByTimeAsync(30_001)); expect(screen.getByRole('alert')).toHaveTextContent('outcome is unknown'); expect(separator).toHaveAttribute('aria-valuetext', '46% list width'); expect(test.requests[0]?.signal.aborted).toBe(true); expect(test.requests).toHaveLength(1); expect(draft).toHaveFocus(); expect([draft.selectionStart, draft.selectionEnd]).toEqual([2, 7]);
+  test.remote(.42); await test.release(); expect(separator).toHaveAttribute('aria-valuenow', '46'); expect(screen.getByRole('alert')).toHaveTextContent('outcome is unknown'); expect(test.requests).toHaveLength(1);
+  test.hold(false); await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Retry pane width' })); await Promise.resolve(); }); expect(test.requests).toHaveLength(2); expect(Number(test.requests[1]?.command.ratio)).toBeCloseTo(.46); expect(screen.queryByRole('alert')).not.toBeInTheDocument(); test.remote(.51); expect(separator).toHaveAttribute('aria-valuenow', '51'); expect(draft).toHaveValue('Local draft');
+});
+it('stops the queued width after a refused acknowledgement and does not replay when hidden', async () => {
+  const test = setup(); test.hold(); test.fail(true); fireEvent.keyDown(test.separator(), { key: 'ArrowRight' }); fireEvent.keyDown(test.separator(), { key: 'End' }); await test.release(); expect(screen.getByRole('alert')).toHaveTextContent('Injected pane refusal'); expect(test.requests).toHaveLength(1); expect(test.separator()).toHaveAttribute('aria-valuetext', '62% list width');
+  test.fail(false); fireEvent.click(screen.getByRole('button', { name: 'Retry pane width' })); expect(test.requests).toHaveLength(2); test.unmount(); expect(test.requests[1]?.signal.aborted).toBe(true); await test.release(); expect(test.requests).toHaveLength(2);
 });

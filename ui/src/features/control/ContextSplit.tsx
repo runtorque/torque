@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useAppSelector } from '../../app/hooks';
 import { selectWorkspaceState } from '../../app/store';
-import { readCommand } from '../../protocol/http';
+import { settingsRequest } from './settingsRequests';
 import { Button } from '../../design/primitives';
 import styles from './ControlCenter.module.css';
 
@@ -37,7 +37,7 @@ export function ContextSplit({ list, detail }: { list: ReactNode; detail: ReactN
       const requested = queued.current; queued.current = null;
       const controller = new AbortController(); active.current = controller;
       try {
-        const frame = await readCommand({ cmd: 'ui_set_context_panel_split', ratio: requested }, controller.signal);
+        const frame = await settingsRequest({ cmd: 'ui_set_context_panel_split', ratio: requested }, controller.signal, true, 'Pane width');
         if (controller.signal.aborted) return;
         if (frame.type !== 'state' || typeof frame.context_panel_split_ratio !== 'number' || Math.abs(frame.context_panel_split_ratio - requested) > 0.000001) throw new Error(typeof frame.message === 'string' ? frame.message : 'The pane width was not acknowledged.');
         acknowledged.current = requested;
@@ -46,13 +46,16 @@ export function ContextSplit({ list, detail }: { list: ReactNode; detail: ReactN
       } catch (cause: unknown) {
         if (controller.signal.aborted) return;
         setError(cause instanceof Error ? cause.message : 'Could not save the pane width.');
+        // Preserve the latest visible ratio, but require an explicit retry after
+        // an unacknowledged write instead of draining queued resize commits.
+        queued.current = null; break;
       } finally { if (active.current === controller) active.current = null; }
     }
     if (alive.current) setSaving(false);
   };
   const cancel = () => { const start = drag.current; if (!start) return; drag.current = null; change(start.ratio); if (!active.current && queued.current === null && start.ratio === acknowledged.current) dirty.current = false; };
   return <div className={styles.contextSplitFrame}>
-    {error ? <p role="alert">Pane width was not saved. {error} <Button onPress={() => { void save(current.current); }}>Retry pane width</Button></p> : null}
+    {error ? <p role="alert">Pane width save was not acknowledged. {error} <Button onPress={() => { void save(current.current); }}>Retry pane width</Button></p> : null}
     <div ref={browser} className={styles.contextSplit} data-compact={compact} style={{ '--context-split': `${ratio}fr`, '--context-detail-split': `${1 - ratio}fr` } as CSSProperties}>
       {list}
       <div className={styles.contextResize} hidden={compact} role="separator" aria-label="Resize Context panes" aria-orientation="vertical" aria-valuemin={28} aria-valuemax={62} aria-valuenow={Math.round(ratio * 100)} aria-valuetext={`${Math.round(ratio * 100)}% list width${saving ? ', saving' : ''}`} tabIndex={0}
