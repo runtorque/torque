@@ -93,6 +93,7 @@ export class TerminalController {
   private appearance: ReturnType<typeof terminalAppearance>;
   private readonly webSocketFactory: (url: string) => WebSocketLike;
   private socket: WebSocketLike | null = null;
+  private pendingFocus: { origin: Element | null } | null = null;
   private resizeFrame = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectCount = 0;
@@ -173,6 +174,7 @@ export class TerminalController {
       attributes: true, attributeFilter: ['style', 'data-torque-contrast'],
     });
     this.targetWindow.document.addEventListener('visibilitychange', this.handleVisibility);
+    this.targetWindow.document.addEventListener('focusin', this.handleFocusChange);
     this.connect();
     this.scheduleFit();
   }
@@ -198,6 +200,13 @@ export class TerminalController {
 
   focus(): void {
     if (!this.canOwnPty()) return;
+    if (this.socket?.readyState !== 1) {
+      // Focus signals that immediate typing can reach this PTY. Retain only the
+      // focus intent while connecting; never buffer/replay raw terminal input.
+      if (this.socket?.readyState === 0) this.pendingFocus = { origin: this.targetWindow.document.activeElement };
+      return;
+    }
+    this.pendingFocus = null;
     this.terminal.focus();
     this.send({ type: 'focus' });
   }
@@ -219,6 +228,8 @@ export class TerminalController {
     this.disposed = true;
     this.options.onStatus?.('disconnected');
     this.targetWindow.document.removeEventListener('visibilitychange', this.handleVisibility);
+    this.targetWindow.document.removeEventListener('focusin', this.handleFocusChange);
+    this.pendingFocus = null;
     this.resizeObserver.disconnect();
     this.appearanceObserver.disconnect();
     this.dataDisposable.dispose();
@@ -239,11 +250,14 @@ export class TerminalController {
   private readonly handleScrollPointerDown = () => { this.scrollPointerDown = true; this.handleScrollIntent(); };
   private readonly handleScrollPointerUp = () => { this.scrollPointerDown = false; };
 
+  private readonly handleFocusChange = (event: FocusEvent) => {
+    if (this.pendingFocus && event.target !== this.pendingFocus.origin) this.pendingFocus = null;
+  };
+
   private readonly handleVisibility = () => {
-    if (this.canOwnPty()) {
-      this.scheduleFit();
-      this.focus();
-    }
+    if (!this.canOwnPty()) { this.pendingFocus = null; return; }
+    this.scheduleFit();
+    if (this.options.surface.contains(this.targetWindow.document.activeElement)) this.focus();
   };
 
   private canOwnPty(): boolean {
@@ -261,6 +275,9 @@ export class TerminalController {
       if (this.socket !== socket || this.disposed) return;
       this.reconnectCount = 0;
       this.options.onStatus?.('connected');
+      const intent = this.pendingFocus;
+      this.pendingFocus = null;
+      if (intent && intent.origin === this.targetWindow.document.activeElement) this.focus();
       this.lastColumns = 0;
       this.lastRows = 0;
       this.scheduleFit();
@@ -294,6 +311,7 @@ export class TerminalController {
     socket.onclose = () => {
       if (this.socket !== socket || this.disposed) return;
       this.socket = null;
+      this.pendingFocus = null;
       this.options.onStatus?.('disconnected');
       const maxReconnects = this.options.maxReconnects ?? 15;
       if (this.reconnectCount >= maxReconnects) return;

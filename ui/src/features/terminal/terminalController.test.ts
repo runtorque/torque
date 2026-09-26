@@ -25,7 +25,8 @@ class FakeTerminal {
   open() {}
   scrolled?: () => void;
   onScroll(callback: () => void) { this.scrolled = callback; return { dispose() {} }; }
-  onData() { return { dispose() {} }; }
+  data?: (value: string) => void;
+  onData(callback: (value: string) => void) { this.data = callback; return { dispose() {} }; }
   wheel?: (event: WheelEvent) => boolean;
   modes = { mouseTrackingMode: 'none' };
   attachCustomWheelEventHandler(callback: (event: WheelEvent) => boolean) { this.wheel = callback; }
@@ -347,4 +348,55 @@ it('sets normalized scrollback only when changed, without resetting output, focu
   Object.defineProperty(FakeTerminal.current.options, 'scrollback', { get: () => current, set });
   controller.setScrollback(4000); controller.setScrollback('4000'); controller.setScrollback(100_001); controller.setScrollback(NaN);
   expect(set.mock.calls).toEqual([[4000], [2000]]); expect(writes).toHaveLength(0); expect(sent).toHaveLength(0); expect(socketCreations).toBe(1); controller.dispose();
+});
+
+function connectingController() {
+  const origin = document.createElement('button'); document.body.append(origin); origin.focus();
+  const target = surface();
+  const controller = new TerminalController({
+    cellId: 'connecting-focus', sessionId: 'session', surface: target, isActive: () => true,
+    reconnectDelayMs: 25,
+    webSocketFactory: () => { const socket = socketFactory(); socket.readyState = 0; return socket; },
+  });
+  const focus = vi.spyOn(FakeTerminal.current, 'focus');
+  return { controller, target, origin, focus };
+}
+
+it('waits for a ready socket before handing explicit keyboard focus to the terminal', () => {
+  const { controller, focus } = connectingController();
+  controller.focus();
+  expect(focus).not.toHaveBeenCalled();
+  const socket = sockets[0]!; socket.readyState = 1; socket.onopen?.();
+  expect(focus).toHaveBeenCalledTimes(1);
+  FakeTerminal.current.data?.('immediate-marker\r');
+  expect(sent.map((frame) => JSON.parse(frame) as { type: string; data?: string })).toContainEqual({ type: 'input', data: 'immediate-marker\r' });
+  socket.onclose?.(); vi.advanceTimersByTime(25);
+  sockets[1]!.readyState = 1; sockets[1]!.onopen?.();
+  expect(focus).toHaveBeenCalledTimes(1);
+  controller.dispose();
+});
+
+it.each(['composer', 'hidden', 'disposed', 'closed'] as const)('cancels delayed terminal focus after %s changes ownership', (change) => {
+  const { controller, target, origin, focus } = connectingController();
+  controller.focus(); focus.mockClear();
+  if (change === 'composer') {
+    const input = document.createElement('input'); document.body.append(input); input.focus();
+    // Moving back does not revive an intent cancelled by another editor.
+    origin.focus();
+  } else if (change === 'hidden') target.remove();
+  else if (change === 'disposed') controller.dispose();
+  else sockets[0]!.onclose?.();
+  const socket = sockets[0]!; socket.readyState = 1; socket.onopen?.();
+  expect(focus).not.toHaveBeenCalled();
+  expect(sent.map((frame) => JSON.parse(frame) as { type: string; data?: string })).not.toContainEqual({ type: 'focus' });
+  controller.dispose();
+});
+
+it('returning to a visible page preserves composer focus instead of moving it into the terminal', () => {
+  const { controller, focus } = connectingController();
+  sockets[0]!.readyState = 1; sockets[0]!.onopen?.();
+  const composer = document.createElement('input'); document.body.append(composer); composer.focus();
+  document.dispatchEvent(new Event('visibilitychange'));
+  expect(focus).not.toHaveBeenCalled(); expect(composer).toHaveFocus();
+  controller.dispose();
 });

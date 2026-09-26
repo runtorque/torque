@@ -3751,3 +3751,12 @@ History renders the persisted contract: role/template, input/output token counts
 - Explicit agent-branch collapse belongs to the current window's workspace state, so leaving/reopening Agents and reconnect snapshots retain it along with selection and composer drafts. Keep the state local to the window lifetime, as with Classic's in-memory group disclosure; this does not introduce persisted reload defaults.
 - Expand all affects only agents in the displayed group. Preserve another group's disclosure choices, including while its branch is offscreen. Pointer toggles and Left/Right keyboard expansion share the same state.
 - This decision covers explicit operator disclosure. It does not redefine the separate Classic group-level `collapsed_default` preference as a per-agent default; that field's redesigned equivalent remains under the Settings audit.
+
+### D-210 — Hand terminal focus over only when input is ready
+
+- Date: 2026-09-26
+- Scope: P-332 terminal activation and P-113 focus continuity.
+- An explicit ownership-row activation transfers keyboard focus only after the visible terminal socket opens. Until then, retain the focus intent against its original DOM focus target. Typing immediately after the handoff must reach the selected PTY.
+- Cancel that pending intent when the operator focuses another control, the connection closes, the page becomes hidden, or the controller is disposed. A late open must still satisfy visible-pane/session ownership. Reconnect alone does not revive a consumed intent.
+- Returning to a visible page preserves a focused composer or another editor. Refresh terminal geometry and restore terminal ownership only when focus already belongs to that terminal surface.
+- This retains focus intent, not raw input: do not queue commands for replay across connection failures or agent/session changes.

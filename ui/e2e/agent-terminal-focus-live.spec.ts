@@ -34,6 +34,33 @@ test('tree activation moves keyboard input into the selected real PTY and honors
     await command({ cmd: 'ui_select_group', group }); await command({ cmd: 'ui_select_agent', id: ids[0] });
     await command({ cmd: 'ui_set_react_workspace_state', state: { version: 1, activePanel: 'agents', controlTab: 'mission' } });
     await page.routeWebSocket(/\/ws\?/, (client) => { socket = client; connections++; const server = client.connectToServer(); client.onMessage((raw) => { commands.push(JSON.parse(String(raw)) as Row); server.send(raw); }); });
+    // Keep the real PTY transport, but expose a slow initial open so focus
+    // readiness cannot pass merely because loopback connected before the click.
+    await page.addInitScript(() => {
+      const NativeSocket = window.WebSocket;
+      window.WebSocket = new Proxy(NativeSocket, {
+        construct(Target, args) {
+          const socket = Reflect.construct(Target, args) as WebSocket;
+          if (!new URL(String(args[0]), location.href).pathname.startsWith('/ws/terminal/')) return socket;
+          let waitingForOpen = true;
+          socket.addEventListener('open', (event) => {
+            event.stopImmediatePropagation();
+            setTimeout(() => {
+              waitingForOpen = false;
+              if (socket.readyState === NativeSocket.OPEN) socket.dispatchEvent(new Event('open'));
+            }, 600);
+          }, { once: true });
+          return new Proxy(socket, {
+            get(target, key) {
+              if (key === 'readyState' && waitingForOpen && target.readyState === NativeSocket.OPEN) return NativeSocket.CONNECTING;
+              const value: unknown = Reflect.get(target, key, target);
+              return typeof value === 'function' ? value.bind(target) as unknown : value;
+            },
+            set(target, key, value) { return Reflect.set(target, key, value, target); },
+          });
+        },
+      });
+    });
     await page.goto('/');
     const first = page.getByRole('treeitem', { name: /^Focus receiver 1,/ }); const second = page.getByRole('treeitem', { name: /^Focus receiver 2,/ });
     const composer = page.getByRole('textbox', { name: 'Message Focus receiver 1', exact: true });
@@ -59,7 +86,7 @@ test('tree activation moves keyboard input into the selected real PTY and honors
     await command({ cmd: 'update_global_settings', settings: { focus_on_click: false } });
     await page.getByRole('tab', { name: 'Activity', exact: true }).click(); const before = commands.filter((row) => row.cmd === 'focus_agent').length;
     await first.click(); await expect(page.getByRole('tab', { name: 'Activity', exact: true })).toHaveAttribute('aria-selected', 'true'); expect(commands.filter((row) => row.cmd === 'focus_agent')).toHaveLength(before);
-    await page.getByRole('tab', { name: 'Live', exact: true }).click(); await expect(composer).toHaveText('Retained operator draft'); await expect(page.locator('.xterm-helper-textarea')).not.toBeFocused();
+    await page.getByRole('tab', { name: 'Live', exact: true }).click(); await expect(composer).toHaveText('Retained operator draft'); await expect(page.getByRole('region', { name: 'Focus receiver 1 terminal', exact: true }).getByText('connected', { exact: true })).toBeVisible(); await expect(page.locator('.xterm-helper-textarea')).not.toBeFocused();
     expect(await page.evaluate(() => (window as unknown as { qaMaximumVisibleTerminals: number }).qaMaximumVisibleTerminals)).toBe(1);
     await page.screenshot({ path: test.info().outputPath('agent-terminal-focus.png') });
   } finally {
