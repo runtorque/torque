@@ -1456,3 +1456,8 @@ Settings compatibility checkpoint (2026-09-26, acceptance pending): D-213 distin
 
 
 D-213 acceptance passed: four red regressions, 29 focused tests, the full 1,005-test UI gate, five functional browser scenarios and three final compatibility/layout scenarios support the Settings repair. All 73 numeric storage-audit cases passed; runtime effects and complete field-by-field/browser/native acceptance remain separate. The three broad Settings rows and P-112 are still open.
+
+
+Terminal Settings evidence checkpoint (2026-09-26): a new real-daemon/browser acceptance test verifies saved terminal launch defaults, explicit creation overrides, group fallbacks, sourced files, merged environment, quoted arguments, actual process-exit policy, and draft/focus/caret continuity through unrelated deltas and seven reconnects. Observed launch values are retained as a test artifact. These existing behaviors passed without production changes; the broader Settings/P-112 and independent completion gates remain open.
+
+Terminal Settings final validation: `make ui-check` passed lint/typecheck, **110 files / 1,005 tests**, production build and verification (`/private/tmp/settings-terminal-ui-check-20260926.log`). Documentation contracts checked 72 Markdown files and `git diff --check` passed. Browser inventory is now **158 tests in 98 files**; the complete suite was not repeated. The isolated profile on port 19068 ended with zero PTY sessions; exact daemon 76884, ingest 76905 and supervisor 76906 were stopped and PID absence/port release verified. No production backend/protocol changes; full `make test` was not repeated. Counts remain 366 mapped / 358 implemented or equivalent / four open / four intentionally retired.

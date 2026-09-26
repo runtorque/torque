@@ -841,17 +841,17 @@ Acceptance for **each field**: hydrate its server value, change it using the lis
 | `context_default_ttl_days` | Group | Number | Shared Context entry lifetime, clamped to 1..60. |
 | `engineer_hint_snoozes` | Group | Runtime record · read-only in this inventory | Managed by group/agent identity, attention or hint workflows; excluded from reset/save. |
 | `terminal_name_prefix` | Group | Text | Server value/default |
-| `terminal_boot_command` | Group | Text | Server value/default |
-| `terminal_command_args` | Group | Text | Server value/default |
-| `terminal_init_script` | Group | Text | Server value/default |
-| `terminal_directory` | Group | Text | Server value/default |
+| `terminal_boot_command` | Group | Text | Real-PTY Settings acceptance verifies inherited boot command without a creation override; see terminal runtime checkpoint below. |
+| `terminal_command_args` | Group | Text | Quoted arguments containing spaces reach the real process; explicit creation arguments override the saved default. |
+| `terminal_init_script` | Group | Text | Existing shell-script path, sourced before the command; paths containing spaces and exported initialization values verified in a real PTY. |
+| `terminal_directory` | Group | Text | Saved terminal directory overrides the group directory; explicit creation directory wins; clearing resumes group inheritance. |
 | `terminal_profile` | Group | Text | Server value/default |
-| `terminal_shell` | Group | Text | Server value/default |
+| `terminal_shell` | Group | Text | Saved shell is inherited by terminal creation; clearing resumes the group shell. Bash initialization behavior verified in a real PTY. |
 | `terminal_tab_color` | Group | Text | Server value/default |
-| `terminal_env_vars` | Group | Nested named fields | Server value/default |
-| `terminal_env_file` | Group | Text | Server value/default |
+| `terminal_env_vars` | Group | Nested named fields | Typed map merges over group environment; explicit creation values take precedence. Saved/reopened controls and real process values verified. |
+| `terminal_env_file` | Group | Text | Saved shell environment-file path is sourced before launch; clearing resumes the group environment file. |
 | `terminal_always_custom_dialog` | Group | Compatibility-only · excluded from edit/reset | No current terminal-dialog consumer. Preserve stored value; D-213. |
-| `terminal_close_on_disconnect` | Group | Enabled/Disabled | remove terminal from Torque when tab closed |
+| `terminal_close_on_disconnect` | Group | Enabled/Disabled | Actual terminal process exit retains the stopped terminal when disabled and removes it when enabled; real-PTY acceptance below. |
 | `board_sync_github` | Group | Nested named fields | GitHub adapter settings |
 | `engineer_agent_id` | Group | Runtime record · read-only in this inventory | Managed by group/agent identity, attention or hint workflows; excluded from reset/save. |
 | `default_engineer_specializations` | Group | One value per line | ordered, applied at engineer creation |
@@ -2391,3 +2391,15 @@ Settings compatibility checkpoint (2026-09-26, acceptance pending): fresh consum
 D-213 acceptance (2026-09-26): four reproduced failures became **29 passing focused tests**. Full UI validation passed **110 files / 1,005 tests**, lint/typecheck and production build/verification. Five real-daemon browser scenarios passed compatibility preservation, search, reconnect/drafts/caret, numeric validation and partial-scope retry. A compact screenshot exposed help text flowing beside reset buttons; the final scoped layout repair passed a new production build and all three compatibility/layout browser scenarios at 1280/960/760px. The final compact screenshot was inspected. Logs: `/private/tmp/settings-compatibility-{red,focused,ui-check,browser,browser-final}-20260926.log`. The isolated profile on port 19067 ended with zero PTY sessions; daemon/children were removed and the port verified free.
 
 Additional numeric storage audit: **73/73 cases across all 20 top-level numeric fields** persisted and reloaded unchanged in disposable SQLite-backed state, covering declared minima/maxima, every offered numeric choice, defaults, and the largest safe integer for unbounded controls (`/private/tmp/settings-numeric-boundary-results-20260926.json`). This is storage evidence, not UI round-trip or live-effect certification for every value. Current canonical field projection was regenerated from actual defaults and `editableSettings`: **142 editable fields** plus the documented compatibility/runtime records. Full backend and complete browser suites were not repeated for this frontend-only change. Ledger remains **366 mapped / 358 implemented or equivalent / four open / four intentional retirements**; P-087/P-088/P-089/P-112 and independent native/external/crash/inventory gates remain open.
+
+
+### Terminal Settings runtime acceptance (2026-09-26)
+
+- `ui/e2e/settings-terminal-runtime-live.spec.ts` edits twelve related group/terminal settings through their real React controls, saves/reloads them, and launches standalone terminals through the React creation dialog. `fixtures/terminal_settings_probe.py` records only QA-owned environment keys, argument vectors and working directories from the actual PTY process.
+- Three launches prove terminal defaults, explicit directory/argument/environment overrides, and fallback to ordinary group directory/shell/environment-file settings after terminal overrides are cleared. Paths and arguments include spaces. Group and terminal environment maps merge with explicit creation values taking precedence. The initialization setting is a sourced script-file path, not inline script content.
+- Every edited launch text field retains its value, DOM focus and caret after an observed unrelated settings delta and a reconnect with fresh scoped reads. The test verifies the untouched field adopts the refreshed value while all accumulated launch drafts survive. Environment-map controls survive save/reload and supply the observed process values.
+- Real xterm input terminates the probe. With close-on-disconnect disabled the selected terminal reaches the stopped state and remains in the tree; with it enabled the actual process exit removes the terminal. Changing the setting later does not remove the already stopped record.
+- The final scenario passed in 27.3 seconds (`/private/tmp/settings-terminal-browser-evidence-20260926.log`); the output directory contains `terminal-launch-evidence.json` with observed values and actual creation payloads, plus the inspected terminal screenshot. Two adjacent creation timeout/incomplete-launch scenarios also passed. Earlier test failures were an incorrect heading selector for a strong stopped-state label, and an unsupported assumption that the form immediately replaces untouched values on every delta; the final test explicitly checks received deltas and the existing reconnect-read contract.
+- No production change was required for these verified launch behaviors. This closes their previous source-only runtime evidence gap under P-088, not the whole Settings audit. Terminal automatic-name-prefix/profile/color and parent-worktree precedence are not certified by these standalone launch scenarios. Remaining broad Settings/P-112, complete-browser, inventory and native/external/crash acceptance remain open.
+
+Terminal Settings final validation: `make ui-check` passed lint/typecheck, **110 files / 1,005 tests**, production build and verification (`/private/tmp/settings-terminal-ui-check-20260926.log`). Documentation contracts checked 72 Markdown files and `git diff --check` passed. Browser inventory is now **158 tests in 98 files**; the complete suite was not repeated. The isolated profile on port 19068 ended with zero PTY sessions; exact daemon 76884, ingest 76905 and supervisor 76906 were stopped and PID absence/port release verified. No production backend/protocol changes; full `make test` was not repeated. Counts remain 366 mapped / 358 implemented or equivalent / four open / four intentionally retired.
