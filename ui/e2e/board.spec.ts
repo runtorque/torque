@@ -1,29 +1,20 @@
 import { expect, test, type Page } from '@playwright/test';
 
-async function sendSetupCommand(page: Page, command: Record<string, unknown>) {
-  await page.evaluate(async (payload) => {
-    await new Promise<void>((resolve, reject) => {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const socket = new WebSocket(`${protocol}//${window.location.host}/ws?compact=1&client_id=e2e-setup`);
-      socket.addEventListener('open', () => socket.send(JSON.stringify(payload)));
-      socket.addEventListener('message', (event) => {
-        const frame = JSON.parse(String(event.data)) as { type?: string };
-        if (frame.type === 'state') return;
-        socket.close();
-        resolve();
-      });
-      socket.addEventListener('error', () => reject(new Error('setup WebSocket failed')));
-      window.setTimeout(() => { socket.close(); resolve(); }, 1_500);
-    });
-  }, command);
-}
-
 async function ensureGroup(page: Page) {
-  await page.getByRole('button', { name: /▦ Board/ }).click();
-  if (await page.getByText('Choose a group').isVisible()) {
-    await sendSetupCommand(page, { cmd: 'add_group', group: 'Phase 2 E2E' });
+  const runtime = await (await page.request.get('/api/runtime')).json() as { data: { runtime: { port: number; profile: string } } };
+  expect(runtime.data.runtime.port).not.toBe(18932);
+  expect(runtime.data.runtime.profile).not.toBe('default');
+  const group = `Board smoke ${Date.now()}`;
+  for (const cmd of ['add_group', 'ui_select_group']) {
+    const response = await page.request.post('/api/cmd', { data: { cmd, group } });
+    expect(response.ok()).toBe(true);
+    const result = await response.json() as { ok: boolean; error?: string; data: { type?: string } };
+    expect(result.ok, result.error).toBe(true);
+    expect(result.data.type).not.toBe('error');
   }
-  await expect(page.getByRole('heading', { name: 'Board' })).toBeVisible();
+  await page.getByRole('button', { name: /▦ Board/ }).click();
+  await page.getByRole('button', { name: group, exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Board', exact: true, level: 1 })).toBeVisible();
 }
 
 test('Board supports a create, edit, and completion workflow against a live daemon', async ({ page }) => {

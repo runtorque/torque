@@ -34,6 +34,11 @@ CATALOG_COMMAND_NAMES = frozenset({
 }) | ROLE_TEMPLATE_COMMAND_NAMES
 
 
+# File-backed catalog writes return their own catalog result. This operation
+# also changes the shared live agent projection and must publish that delta.
+CATALOG_STATE_MUTATION_COMMAND_NAMES = frozenset({'set_engineer_specializations'})
+
+
 @dataclass(frozen=True, slots=True)
 class CatalogCommandRuntime:
     state: Any

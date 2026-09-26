@@ -38,6 +38,12 @@ AGENT_CLASS_COMMAND_NAMES = frozenset({
 })
 
 
+# YAML authoring has no state delta; assignment changes the live agent projection.
+AGENT_CLASS_STATE_MUTATION_COMMAND_NAMES = frozenset({
+    "agent_class_assign", "agent_class_clear",
+})
+
+
 def _agent_class_authoring_payload_from_command(data: dict) -> dict:
     for key in ("agent_class", "definition"):
         value = data.get(key)

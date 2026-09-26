@@ -18,8 +18,8 @@ test('Context publishes optional task, pipeline and agent links, retains failed 
   const agent = String((await command(request, { cmd: 'add_engineer', group, name: 'Context linked Engineer', provider: 'generic', command: '/bin/cat', directory: '/private/tmp' })).id);
   const otherAgent = String((await command(request, { cmd: 'add_engineer', group, name: 'Other Context Engineer', provider: 'generic', command: '/bin/cat', directory: '/private/tmp' })).id);
   try {
-    let socket: WebSocketRoute | undefined; let connections = 0; let detailFrames = 0; let refuse = false; const publications: Row[] = [];
-    await page.routeWebSocket(/\/ws\?/, (connection) => { const server = connection.connectToServer(); server.onMessage((message) => { if (typeof message === 'string' && (JSON.parse(message) as Row).type === 'task_detail') detailFrames += 1; connection.send(message); }); socket = connection; connections += 1; });
+    let socket: WebSocketRoute | undefined; let connections = 0; let refuse = false; const publications: Row[] = [];
+    await page.routeWebSocket(/\/ws\?/, (connection) => { const server = connection.connectToServer(); server.onMessage((message) => connection.send(message)); socket = connection; connections += 1; });
     await page.route('**/api/cmd', async (route) => {
       const data = route.request().postDataJSON() as Row;
       if (data.cmd === 'memory_publish') publications.push(data);
@@ -61,7 +61,15 @@ test('Context publishes optional task, pipeline and agent links, retains failed 
       const dialog = page.getByRole('dialog'); const taskTitle = dialog.getByRole('textbox', { name: 'Title', exact: true }); await expect(taskTitle).toHaveValue(label!);
       if (kind === 'task') {
         await taskTitle.fill('Unsaved linked task title'); await taskTitle.focus(); await taskTitle.evaluate((node: HTMLInputElement) => { node.setSelectionRange(2, 7); node.dataset.taskLinkAnchor = 'retained'; });
-        const beforeDetail = detailFrames; await socket!.close({ code: 1012, reason: 'Open linked task editor reconnect' }); await expect.poll(() => detailFrames).toBeGreaterThan(beforeDetail);
+        const refreshedDetail = page.waitForResponse(async (response) => {
+          if (!response.url().endsWith('/api/cmd') || response.request().method() !== 'POST') return false;
+          const sent = response.request().postDataJSON() as Row;
+          if (sent.cmd !== 'task_detail' || sent.id !== task || !response.ok()) return false;
+          const body = await response.json() as { ok: boolean; data: { type?: string; task?: Row } };
+          return body.ok && body.data.type === 'task_detail' && body.data.task?.id === task;
+        });
+        await socket!.close({ code: 1012, reason: 'Open linked task editor reconnect' });
+        await refreshedDetail;
         await expect(taskTitle).toHaveValue('Unsaved linked task title'); await expect(taskTitle).toHaveAttribute('data-task-link-anchor', 'retained'); await expect(taskTitle).toBeFocused();
         expect(await taskTitle.evaluate((node: HTMLInputElement) => [node.selectionStart, node.selectionEnd])).toEqual([2, 7]);
       }

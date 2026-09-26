@@ -3706,3 +3706,11 @@ History renders the persisted contract: role/template, input/output token counts
 - Retain the captured cancellation session/source turn/key through its deadline. Apply its result only to that turn. An older attached-composer delivery receipt must not replace a newer parent submission's cancellable turn. Successful recovery still clears only the original composer draft.
 - Keyed HTTP delivery errors after possible effects retain an uncertain receipt, including across receipt-save failures. Exact retry recovers the outcome without repeating the handler; persisted receipts survive route reconstruction. Verified no-input preflight failures remain retryable. A partial interrupt reports an unknown outcome instead of claiming the turn was left unchanged.
 - This contract does not establish exactly-once delivery across a daemon crash before receipt persistence, forced-page-reload draft retention, upload recovery or commercial-provider interruption. Those remain separate acceptance work.
+
+
+### D-205 — Publish direct state changes before acknowledging the command
+
+- Date: 2026-09-26
+- Scope: P-054/P-080–P-083/P-112; Planning mutations, Agent Class assignment/clear, Engineer specialization selection and persisted Relay credentials through the direct command path.
+- A successful direct state mutation must publish its queued deltas before returning its acknowledgement. Other open clients and clean editor fields must receive the change without waiting for unrelated agent activity or periodic runtime updates. Preserve dirty fields through the existing editor ownership rules.
+- Keep explicit state-mutation manifests beside their domain commands. Read-only list/show/status commands must not flush unrelated pending changes. File-only catalog authoring does not gain a synthetic state change. Credential storage failures must not emit optimistic settings; class assignment changes desired authority without changing the effective launch snapshot. This restores the existing WebSocket update contract; it does not add durable delta replay or certify process-crash recovery.

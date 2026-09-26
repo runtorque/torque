@@ -420,6 +420,7 @@ class GenerateDaemonCredentialCommandTests(unittest.IsolatedAsyncioTestCase):
         class FakeState:
             def __init__(self):
                 self.global_settings = _settings()
+                self.broadcast = mock.AsyncMock()
 
             async def update_global_settings_durable(self, **fields):
                 updates.append(dict(fields))
@@ -473,6 +474,7 @@ class GenerateDaemonCredentialCommandTests(unittest.IsolatedAsyncioTestCase):
             "relay_private_key_path": "/tmp/profile/relay/daemon-daemon-1.pem",
         }])
         self.assertEqual(restarts, [True])
+        fake_state.broadcast.assert_awaited_once()
         self.assertEqual(fake_state.global_settings.relay_credential_id, "cred-1")
         self.assertEqual(
             fake_state.global_settings.relay_private_key_path,

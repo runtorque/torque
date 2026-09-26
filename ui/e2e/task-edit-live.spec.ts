@@ -96,7 +96,7 @@ test('attachment cleanup follows acknowledged editing and can retry without repe
     else await route.continue();
   });
   await dialog.getByRole('button', { name: 'Save task', exact: true }).click();
-  await expect(dialog.getByRole('alert')).toHaveText('Injected edit failure');
+  await expect(dialog.getByRole('alert')).toHaveText('Injected edit failure Closing preserves uploaded files because the save outcome is unknown.');
   expect(calls).toEqual(['board_update_task']); expect((await request.get(url)).status()).toBe(200);
   expect(((await command(request, { cmd: 'task_detail', id })).task as Row).attachments).toHaveLength(1);
   failure = 'remove_attachment'; await dialog.getByRole('button', { name: 'Save task', exact: true }).click();
