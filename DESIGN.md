@@ -3986,3 +3986,15 @@ Use task/index/timestamp identity for inline entries without server IDs, matchin
 The selected Architect's read-only peer inbox uses its owned logical-thread response; canonical pair-thread deltas invalidate that response only while Peer chat or Messages is visible and the pair includes the selected Architect. Preserve the accepted response, selected thread, focus and mounted reading state during refresh or failure. Unrelated pairs and hidden views make no reads. Discard responses overtaken by a matching live change, within the existing deadline. An explicit empty inbox is authoritative; use snapshot threads only before an inbox has been accepted.
 
 Architect Messages combines the bounded live agent cache with hydrated peer history by persisted message ID, displaying each ID once and favoring the current live version. Keep peer chat read-only and retain the current logical-thread selection even when another thread becomes more recent.
+
+
+## D-236 — Acknowledge external comments and unlink before changing the editor
+
+Post comment and Unlink are immediate task operations with owned, bounded HTTP acknowledgements. Retain the submitted comment or saved link fields during the request and after refusal; show the error in the editor. Prevent duplicate actions and dismissal while the outcome is pending. Clear a comment only after the matching external_comment_posted response, and clear link controls only after matching external_unlinked. Unknown outcomes keep the draft and ask the operator to review before retrying; never replay automatically.
+
+Successful unlink advances only the editor's external-field baseline, so a later unrelated sparse task save cannot repeat the unlink or overwrite another operator's new link. Unrelated task drafts remain unchanged. No raw protocol details belong in the operator flow beyond meaningful failure and pending feedback.
+
+
+## D-237 — Review the exact agent before clearing context
+
+Clear context uses a custom confirmation in browser and desktop, matching Classic's reviewed reset. Name the agent and explain that conversation/task context is reset and full instructions return on the next task. Capture the target ID and displayed name when opening; background renames or selection changes must not redirect the reviewed action. Initially focus Cancel. Cancel, Escape and close send nothing. A disconnected send keeps the review and visible unsent feedback; only an explicit retry may send again. Terminal-only contexts keep this action disabled.

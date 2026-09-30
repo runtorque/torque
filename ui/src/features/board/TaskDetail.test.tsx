@@ -171,3 +171,31 @@ it('preserves the optional external-status note and sends the reviewed trimmed t
     [{ cmd: 'external_push_task_status', id: 'task', status: 'Done', note: 'Checked locally' }],
   ]);
 });
+
+it('retains an external comment after refusal and clears it only after the matching acknowledgement', async () => {
+  const { calls, fail, defer } = setup({ provider: 'github', external_id: 'qa/project#1', external_url: 'https://example.invalid/1' });
+  fireEvent.click(screen.getByRole('tab', { name: 'Integrations' })); const comment = screen.getByRole('textbox', { name: 'Post comment' });
+  fireEvent.change(comment, { target: { value: ' Reviewed external comment ' } }); fail('external_post_task_comment'); fireEvent.click(screen.getByRole('button', { name: 'Post' }));
+  await screen.findByRole('alert'); expect(comment).toHaveValue(' Reviewed external comment '); expect(calls).toEqual([{ cmd: 'external_post_task_comment', id: 'task', comment: 'Reviewed external comment' }]);
+  let release!: (response: unknown) => void; defer(() => new Promise((resolve) => { release = resolve; }));
+  fireEvent.click(screen.getByRole('button', { name: 'Post' })); expect(comment).toHaveValue(' Reviewed external comment '); expect(screen.getByRole('button', { name: 'Post' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Close dialog' })); expect(screen.getByRole('dialog')).toBeVisible();
+  await act(async () => { release({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: 'external_comment_posted', task_id: 'task' } }) }); await Promise.resolve(); });
+  await waitFor(() => expect(comment).toHaveValue('')); expect(calls).toHaveLength(2);
+});
+it('keeps external link fields through refused unlink and does not replay an acknowledged unlink during a later task save', async () => {
+  const { calls, fail, defer, store } = setup({ provider: 'github', external_id: 'qa/project#1', external_url: 'https://example.invalid/1', board_sync: { version: 1, enabled: true, provider: 'github' } });
+  fireEvent.click(screen.getByRole('tab', { name: 'Integrations' })); fail('external_link_task'); fireEvent.click(screen.getByRole('button', { name: 'Unlink' })); await screen.findByRole('alert');
+  expect(screen.getByRole('textbox', { name: 'External ID' })).toHaveValue('qa/project#1'); expect(screen.getByRole('checkbox', { name: 'Track with Board sync' })).toBeChecked();
+  defer((command) => Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: command.cmd === 'external_link_task' ? { type: 'external_unlinked', task_id: 'task', provider: '', external_id: '', external_url: '' } : { type: 'state', seq: 10, board_tasks: { task: { id: 'task' } } } }) }));
+  fireEvent.click(screen.getByRole('button', { name: 'Unlink' })); await waitFor(() => expect(screen.getByRole('textbox', { name: 'External ID' })).toHaveValue('')); expect(screen.getByRole('checkbox', { name: 'Track with Board sync' })).not.toBeChecked();
+  act(() => { store.dispatch(projectionActions.taskDetailReceived({ type: 'task_detail', id: 'task', task: { provider: 'github', external_id: 'qa/project#2', external_url: 'https://example.invalid/2', board_sync: { enabled: true } } })); });
+  fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), { target: { value: 'Unrelated draft' } }); fireEvent.click(screen.getByRole('button', { name: 'Save task' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument()); expect(calls.at(-1)).toEqual({ cmd: 'board_update_task', id: 'task', description: 'Unrelated draft', enforce_dispatch_edit_gate: true });
+});
+it('rejects external acknowledgements for another task without losing the comment', async () => {
+  const { defer } = setup({ provider: 'github', external_id: 'qa/project#1' });
+  defer(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: 'external_comment_posted', task_id: 'other' } }) }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Integrations' })); const comment = screen.getByRole('textbox', { name: 'Post comment' }); fireEvent.change(comment, { target: { value: 'Retained review' } }); fireEvent.click(screen.getByRole('button', { name: 'Post' }));
+  await screen.findByText(/acknowledgement did not match/); expect(comment).toHaveValue('Retained review'); expect(screen.getByRole('button', { name: 'Post' })).not.toBeDisabled();
+});

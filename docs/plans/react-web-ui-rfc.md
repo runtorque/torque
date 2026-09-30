@@ -1601,3 +1601,8 @@ P-399/P-400/D-234 restore compact Worker inline history, recipient scoping after
 ### Selected Architect conversation acceptance
 
 P-401/P-402/D-235 restore live selected-pair inbox refresh, authoritative empty results and unique persisted message IDs. The UI gate passes 119 files / 1,094 tests plus lint/typecheck/build verification. Nine adjacent browser scenarios pass, and the new Architect scenario passes after correcting an exact-text locator; the peer content uses read-only fixtures with real daemon/reconnect handling and sends no agent message. Ledger: 402 mapped / 398 implemented or equivalent / no recorded open repairs / four intentional retirements. Browser inventory is 210 tests; the latest complete baseline remains the separately documented 201-case pass. Phase 4 remains open for final independent acceptance reconciliation.
+
+
+### External action and Clear context acceptance
+
+P-403–P-405/D-236–D-237 retain external comment/link drafts until matching acknowledgements and restore reviewed Clear context. The UI gate passes 119 files / 1,098 tests plus lint/typecheck/build verification; eight production-browser scenarios pass, including actual Inbox/sidebar persistence and local Worker context reset with unchanged PTYs. Hosted comments are intercepted before forwarding. Ledger: 405 mapped / 401 accepted implemented or equivalent / no recorded open repairs / four retirements. Phase 4 remains open for independent command/host reconciliation and the final current-build browser gate.

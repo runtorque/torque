@@ -1868,3 +1868,15 @@ it('uses the same React confirmation for native supervisor menu callbacks', asyn
   expect(sendCommand.mock.calls.filter(([command]) => command.cmd === 'supervisor_restart')).toEqual([[{ cmd: 'supervisor_restart' }]]);
   expect(confirm).not.toHaveBeenCalled();
 });
+
+it('reviews Clear context and retains the exact target when disconnected submission is refused', async () => {
+  const { sendCommand, appStore } = renderShell(); fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Lifecycle actions for Foundation Worker' })); fireEvent.click(screen.getByRole('menuitem', { name: 'Clear context' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Clear agent context?' }); expect(dialog).toHaveTextContent('Foundation Worker'); expect(sendCommand.mock.calls.filter(([cmd]) => cmd.cmd === 'clear_agent_context')).toHaveLength(0);
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' })); expect(screen.queryByRole('dialog', { name: 'Clear agent context?' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Lifecycle actions for Foundation Worker' })); fireEvent.click(screen.getByRole('menuitem', { name: 'Clear context' })); sendCommand.mockReturnValueOnce(false); fireEvent.click(screen.getByRole('button', { name: 'Clear context' }));
+  await screen.findByRole('alert'); expect(screen.getByRole('dialog', { name: 'Clear agent context?' })).toBeVisible();
+  act(() => { appStore.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: 11, ops: [{ op: 'agent_upsert', id: 'agent-1', name: 'Renamed after review' }] })); });
+  expect(screen.getByRole('dialog', { name: 'Clear agent context?' })).toHaveTextContent('Foundation Worker'); fireEvent.click(screen.getByRole('button', { name: 'Clear context' }));
+  expect(sendCommand.mock.calls.filter(([cmd]) => cmd.cmd === 'clear_agent_context').map(([cmd]) => cmd)).toEqual([{ cmd: 'clear_agent_context', id: 'agent-1' }, { cmd: 'clear_agent_context', id: 'agent-1' }]);
+});

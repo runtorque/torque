@@ -192,6 +192,7 @@ interface FocusPanelProps {
 
 function FocusPanel({ agent, terminal, detachedTerminal, messages, messageTarget = null, messageHistory, host, sendCommand, onUnavailable, onDetachAgent, onInspectWorktree, onCreateWorktree, onCheckpoint, worktreeDisabled, onOrganize, onRemove, active = true, terminalOnly = false, directMessagesHeight = 0, composeHeight = 0, focusRequest = 0 }: FocusPanelProps) {
   const [settingsTarget, setSettingsTarget] = useState<AgentViewModel | null>(null);
+  const [clearContext, setClearContext] = useState<{ id: string; name: string; unavailable: boolean } | null>(null);
   const run = (command: Record<string, unknown>) => { if (!sendCommand(command as { cmd: string })) onUnavailable(); };
   const focusDetached = () => {
     const label = text(detachedTerminal?.label);
@@ -206,7 +207,7 @@ function FocusPanel({ agent, terminal, detachedTerminal, messages, messageTarget
           {agent.cellType === 'agent' ? <Button tone="quiet" onPress={() => setSettingsTarget(agent)}>Settings</Button> : null}
           {hasHostCapability(host, 'detach-panel') ? <span className={styles.detachIconWrap} title="Detach selected agent workspace"><Button className={styles.detachIcon ?? ''} tone="quiet" aria-label="Detach selected agent workspace" onPress={onDetachAgent}>↗</Button></span> : null}
           <ActionMenu label={`Lifecycle actions for ${agent.name}`}>
-            <ActionMenuItem onAction={() => run({ cmd: 'clear_agent_context', id: agent.id })} isDisabled={agent.cellType === 'terminal'}>Clear context</ActionMenuItem>
+            <ActionMenuItem onAction={() => setClearContext({ id: agent.id, name: agent.name, unavailable: false })} isDisabled={agent.cellType === 'terminal'}>Clear context</ActionMenuItem>
             <ActionMenuItem onAction={() => run({ cmd: 'restart_agent', id: agent.id })} isDisabled={agent.cellType === 'terminal'}>Restart</ActionMenuItem>
             <ActionMenuItem onAction={() => run({ cmd: 'relaunch_agent', id: agent.id })}>Relaunch</ActionMenuItem>
             <ActionMenuItem onAction={onOrganize}>Move or reorder…</ActionMenuItem>
@@ -239,6 +240,16 @@ function FocusPanel({ agent, terminal, detachedTerminal, messages, messageTarget
           : <TerminalWorkspace agent={agent} terminal={terminal} messages={messages} messageTarget={messageTarget} messageHistory={messageHistory} sendCommand={sendCommand} onUnavailable={onUnavailable} showConversation={!terminalOnly} active={active} focusRequest={focusRequest} directMessagesHeight={directMessagesHeight} composeHeight={composeHeight} />}
       </div>
 
+      <ModalDialog title="Clear agent context?" description={clearContext ? `${clearContext.name}: reset the conversation and task context. Full instructions will be supplied on the next task.` : ''} size="small" isOpen={Boolean(clearContext)} onOpenChange={(open) => { if (!open) setClearContext(null); }}>
+        <div className={styles.removeDialog}>
+          {clearContext?.unavailable ? <p role="alert">Torque is not connected. The context was not cleared. Reconnect before trying again.</p> : null}
+          <footer><Button tone="quiet" autoFocus onPress={() => setClearContext(null)}>Cancel</Button><Button tone="danger" onPress={() => {
+            if (!clearContext) return;
+            if (sendCommand({ cmd: 'clear_agent_context', id: clearContext.id })) setClearContext(null);
+            else setClearContext({ ...clearContext, unavailable: true });
+          }}>Clear context</Button></footer>
+        </div>
+      </ModalDialog>
       {settingsTarget ? <AgentSettingsDialog target={settingsTarget} onClose={() => setSettingsTarget(null)} /> : null}
     </section>
   );

@@ -426,7 +426,7 @@ function TaskDetail({ task, tasks, groups, agents, responses, sendCommand, onCom
   const [provider, setProvider] = useState(task.provider);
   const [externalId, setExternalId] = useState(task.externalId);
   const [externalUrl, setExternalUrl] = useState(task.externalUrl);
-  const [syncBaseline] = useState(task.boardSync);
+  const [syncBaseline, setSyncBaseline] = useState(task.boardSync);
   const [syncEnabled, setSyncEnabled] = useState(task.boardSync.enabled !== false && (Boolean(task.boardSync.enabled) || Boolean(task.boardSync.provider)));
   const [verification, setVerification] = useState<VerificationDraft>({ mode: textValue(task.raw.verification_mode), state: task.verificationState, notes: textValue(task.raw.verification_notes), summary: record(task.raw.verification_summary) });
   const [attachments, setAttachments] = useState(task.attachments);
@@ -437,6 +437,7 @@ function TaskDetail({ task, tasks, groups, agents, responses, sendCommand, onCom
   const uncommittedUploads = useRef(new Set<string>());
   const [externalStatus, setExternalStatus] = useState(task.status || task.lane);
   const [externalComment, setExternalComment] = useState('');
+  const [externalPending, setExternalPending] = useState(false);
   const [externalStatusNote, setExternalStatusNote] = useState('');
   const [formError, setFormError] = useState('');
   const [activityVisited, setActivityVisited] = useState(initialTab === 'activity');
@@ -478,6 +479,29 @@ function TaskDetail({ task, tasks, groups, agents, responses, sendCommand, onCom
     assertOwned(controller); validateBoardEditAcknowledgement(command, frame);
     // Live deltas stay authoritative; do not replace newer state with a write snapshot.
     return frame;
+  };
+
+
+  const externalAction = async (kind: 'comment' | 'unlink') => {
+    if (busyRef.current || discardingUploads || artifactEditing) return;
+    const controller = new AbortController(); activeOperation.current = controller;
+    busyRef.current = true; setExternalPending(true); setFormError('');
+    const command: TorqueCommand = kind === 'comment'
+      ? { cmd: 'external_post_task_comment', id: task.id, comment: externalComment.trim() }
+      : { cmd: 'external_link_task', id: task.id, ref: '', provider: '', external_id: '', external_url: '', board_sync: { version: 1, enabled: false } };
+    try {
+      const frame = await boardWriteRequest(command, controller.signal); assertOwned(controller);
+      if (frame.type === 'error') throw new Error(textValue(frame.message, 'External ticket operation failed.'));
+      if (frame.type !== (kind === 'comment' ? 'external_comment_posted' : 'external_unlinked') || frame.task_id !== task.id) throw new Error('External ticket acknowledgement did not match. The outcome is unknown; check the ticket before retrying.');
+      if (kind === 'comment') setExternalComment('');
+      else {
+        setProvider(''); setExternalId(''); setExternalUrl(''); setSyncEnabled(false); setSyncBaseline({ version: 1, enabled: false });
+        // This immediate operation is already saved. A later sparse task save
+        // must not overwrite a link another operator creates afterward.
+        baseline.current = { ...baseline.current, provider: '', external_id: '', external_url: '', board_sync: { version: 1, enabled: false, provider: 'github' } };
+      }
+    } catch (cause) { if (owns(controller)) setFormError(cause instanceof Error ? cause.message : 'External ticket operation failed.'); }
+    finally { if (owns(controller)) { activeOperation.current = null; busyRef.current = false; setExternalPending(false); } }
   };
 
 
@@ -583,7 +607,7 @@ function TaskDetail({ task, tasks, groups, agents, responses, sendCommand, onCom
 
   return (
     <form className={`${styles.detailForm} ${styles.taskDetailForm} ${detailTab === 'evidence' || detailTab === 'activity' ? styles.detailReading : ''}`} onSubmit={submit} onPaste={(event) => { if (event.clipboardData.files.length) { event.preventDefault(); void upload([...event.clipboardData.files]); } }}>
-      <fieldset className={styles.createFields} disabled={saving || uploading || discardingUploads}>
+      <fieldset className={styles.createFields} disabled={saving || uploading || externalPending || discardingUploads}>
       <div className={styles.detailOverview}>
         <section className={styles.detailPrimary} aria-label="Primary task fields">
           <label>Title<input value={title} onChange={(event) => setTitle(event.target.value)} required /></label>
@@ -629,19 +653,20 @@ function TaskDetail({ task, tasks, groups, agents, responses, sendCommand, onCom
         <TaskPromptPreview disabled={saving || uploading || discardingUploads || artifactEditing} inputsKey={JSON.stringify([title, description, targetGroup, actionName, role, agentId, actionVars, definitions, attachments, artifacts, labels, verification])} command={() => ({ cmd: 'preview_prompt', id: task.id, task: title.trim(), description, group: targetGroup, action_name: actionName, agent_template: role, agent_id: agentId, action_vars: resolveActionVariables(actionVars, definitions), attachments, artifacts, labels: labels.split(',').map((label) => label.trim()).filter(Boolean), verification_mode: verification.mode, verification_state: verification.state, verification_notes: verification.notes, verification_summary: verification.summary })} />
       </section> : null}
       {detailTab === 'verification' ? <section className={styles.detailSection} role="tabpanel" aria-label="Verification"><header><div><h3>Verification</h3><p>Record release gates and human checks for this task.</p></div><Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'board_verify_task', id: task.id, actor_name: 'Operator', verification_state: 'passed', manual_smoke_done: true, human_validation_pending: '', deploy_needed: false }, onCommandUnavailable)}>Mark verified</Button></header><VerificationFields value={verification} onChange={setVerification} />{Object.keys(record(task.raw.completion_evidence)).length ? <details><summary>Completion evidence</summary><pre>{JSON.stringify(task.raw.completion_evidence, null, 2)}</pre></details> : null}</section> : null}
-      {detailTab === 'integration' ? <section className={styles.detailSection} role="tabpanel" aria-label="Integrations"><header><div><h3>External ticket and sync</h3><p>Link, synchronize, or communicate with the provider ticket.</p></div>{task.externalUrl ? <Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'external_open_task', id: task.id }, onCommandUnavailable)}>Open ticket</Button> : null}</header><div className={styles.formGrid}><label>Provider<input value={provider} onChange={(event) => setProvider(event.target.value)} placeholder="github" /></label><label>External ID<input value={externalId} onChange={(event) => setExternalId(event.target.value)} placeholder="owner/repo#123" /></label><label>External URL<input value={externalUrl} onChange={(event) => setExternalUrl(event.target.value)} /></label><label className={styles.checkField}><input type="checkbox" checked={syncEnabled} onChange={(event) => setSyncEnabled(event.target.checked)} />Track with Board sync</label></div><div className={styles.taskActionRow}><Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'board_sync_task', task: task.id }, onCommandUnavailable)} isDisabled={!externalId && !externalUrl}>Sync now</Button><Button tone="quiet" type="button" onPress={() => { setPullBaseline(pullResponse); setPullRequested(true); sendOrNotify(sendCommand, { cmd: 'board_pull_preview', task: task.id }, onCommandUnavailable); }} isDisabled={!externalId && !externalUrl}>Pull preview</Button><Button tone="quiet" type="button" onPress={() => { setProvider(''); setExternalId(''); setExternalUrl(''); setSyncEnabled(false); sendOrNotify(sendCommand, { cmd: 'external_link_task', id: task.id, ref: '', provider: '', external_id: '', external_url: '', board_sync: { version: 1, enabled: false } }, onCommandUnavailable); }} isDisabled={!externalId && !externalUrl}>Unlink</Button></div>{Object.keys(pullChanges).length ? <div className={styles.pullPreview}><h4>Inbound changes</h4>{Object.entries(pullChanges).map(([field, value]) => <div key={field}><strong>{field}</strong><span>Local: {textValue(record(value).local)}</span><span>Remote: {textValue(record(value).remote)}</span></div>)}<Button tone="primary" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'board_pull_apply', task: task.id, fields: Object.keys(pullChanges) }, onCommandUnavailable)}>Apply all changes</Button></div> : null}<div className={styles.externalComposer}><label>Push status<input value={externalStatus} onChange={(event) => setExternalStatus(event.target.value)} /></label><label>Optional status note<input value={externalStatusNote} onChange={(event) => setExternalStatusNote(event.target.value)} /></label><Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'external_push_task_status', id: task.id, status: externalStatus.trim(), note: externalStatusNote.trim() }, onCommandUnavailable)} isDisabled={!externalStatus.trim() || (!externalId && !externalUrl)}>Push</Button><label>Post comment<textarea value={externalComment} onChange={(event) => setExternalComment(event.target.value)} rows={2} /></label><Button tone="quiet" type="button" onPress={() => { sendOrNotify(sendCommand, { cmd: 'external_post_task_comment', id: task.id, comment: externalComment.trim() }, onCommandUnavailable); setExternalComment(''); }} isDisabled={!externalComment.trim() || (!externalId && !externalUrl)}>Post</Button></div></section> : null}
+      {detailTab === 'integration' ? <section className={styles.detailSection} role="tabpanel" aria-label="Integrations"><header><div><h3>External ticket and sync</h3><p>Link, synchronize, or communicate with the provider ticket.</p></div>{task.externalUrl ? <Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'external_open_task', id: task.id }, onCommandUnavailable)}>Open ticket</Button> : null}</header><div className={styles.formGrid}><label>Provider<input value={provider} onChange={(event) => setProvider(event.target.value)} placeholder="github" /></label><label>External ID<input value={externalId} onChange={(event) => setExternalId(event.target.value)} placeholder="owner/repo#123" /></label><label>External URL<input value={externalUrl} onChange={(event) => setExternalUrl(event.target.value)} /></label><label className={styles.checkField}><input type="checkbox" checked={syncEnabled} onChange={(event) => setSyncEnabled(event.target.checked)} />Track with Board sync</label></div><div className={styles.taskActionRow}><Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'board_sync_task', task: task.id }, onCommandUnavailable)} isDisabled={!externalId && !externalUrl}>Sync now</Button><Button tone="quiet" type="button" onPress={() => { setPullBaseline(pullResponse); setPullRequested(true); sendOrNotify(sendCommand, { cmd: 'board_pull_preview', task: task.id }, onCommandUnavailable); }} isDisabled={!externalId && !externalUrl}>Pull preview</Button><Button tone="quiet" type="button" onPress={() => { void externalAction('unlink'); }} isDisabled={!externalId && !externalUrl}>Unlink</Button></div>{Object.keys(pullChanges).length ? <div className={styles.pullPreview}><h4>Inbound changes</h4>{Object.entries(pullChanges).map(([field, value]) => <div key={field}><strong>{field}</strong><span>Local: {textValue(record(value).local)}</span><span>Remote: {textValue(record(value).remote)}</span></div>)}<Button tone="primary" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'board_pull_apply', task: task.id, fields: Object.keys(pullChanges) }, onCommandUnavailable)}>Apply all changes</Button></div> : null}<div className={styles.externalComposer}><label>Push status<input value={externalStatus} onChange={(event) => setExternalStatus(event.target.value)} /></label><label>Optional status note<input value={externalStatusNote} onChange={(event) => setExternalStatusNote(event.target.value)} /></label><Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'external_push_task_status', id: task.id, status: externalStatus.trim(), note: externalStatusNote.trim() }, onCommandUnavailable)} isDisabled={!externalStatus.trim() || (!externalId && !externalUrl)}>Push</Button><label>Post comment<textarea value={externalComment} onChange={(event) => setExternalComment(event.target.value)} rows={2} /></label><Button tone="quiet" type="button" onPress={() => { void externalAction('comment'); }} isDisabled={!externalComment.trim() || (!externalId && !externalUrl)}>Post</Button></div></section> : null}
       {activityVisited ? <section role="tabpanel" aria-label="Activity" hidden={detailTab !== 'activity'}><TaskActivity messages={task.messages} taskId={task.id} active={detailTab === 'activity'} /></section> : null}
       <section className={styles.artifacts} role="tabpanel" aria-label="Evidence" hidden={detailTab !== 'evidence'}>
         <TaskEvidenceEditor artifacts={artifacts} attachments={attachments} draftId={task.id} onChange={setArtifacts} onRemove={removeEvidence} onUpload={(files) => { void upload(files); }} onEditingChange={setArtifactEditing} />
       </section>
       </div>
       </fieldset>
+      {externalPending ? <p role="status">Updating external ticket…</p> : null}
       {formError ? <p className={styles.formError} role="alert">{formError}</p> : artifactEditing ? <p className={styles.formHint} role="status">Save or cancel the artifact edit in Evidence before saving the task.</p> : null}
       <footer className={styles.detailFooter}>
-        <Button tone="danger" type="button" isDisabled={saving || uploading} onPress={onRemove}>Remove…</Button>
+        <Button tone="danger" type="button" isDisabled={saving || uploading || externalPending} onPress={onRemove}>Remove…</Button>
         <span />
-        <Button tone="quiet" type="button" isDisabled={saving || uploading} onPress={close}>{unknownSave ? 'Close' : 'Cancel'}</Button>
-        <Button tone="primary" type="submit" isDisabled={saving || uploading || discardingUploads || artifactEditing}>{saving ? 'Saving task…' : 'Save task'}</Button>
+        <Button tone="quiet" type="button" isDisabled={saving || uploading || externalPending} onPress={close}>{unknownSave ? 'Close' : 'Cancel'}</Button>
+        <Button tone="primary" type="submit" isDisabled={saving || uploading || externalPending || discardingUploads || artifactEditing}>{saving ? 'Saving task…' : 'Save task'}</Button>
       </footer>
     </form>
   );
