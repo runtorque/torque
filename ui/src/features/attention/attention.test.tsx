@@ -178,7 +178,7 @@ describe('behavior review', () => {
     render(<Provider store={store}><BehaviorReview proposalId="proposal" onClose={vi.fn()} /></Provider>);
     expect(await screen.findByRole('alert')).toHaveTextContent('did not contain this proposal');
     expect(screen.getByRole('button', { name: 'Approve behavior change' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Reload diff' })); expect(await screen.findByText('This proposal is not awaiting an operator decision.')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Reload diff' })); expect(await screen.findByText('No available Architect for this proposal’s group and ownership.')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Reject behavior change' })).toBeDisabled();
   });
 });

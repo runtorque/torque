@@ -5,7 +5,7 @@ import type { DesktopHost } from '../../host/types';
 import { readCommand } from '../../protocol/http';
 import { useExternalTicket } from './useExternalTicket';
 vi.mock('../../protocol/http', () => ({ readCommand: vi.fn() }));
-beforeEach(() => vi.mocked(readCommand).mockReset());
+beforeEach(() => { vi.mocked(readCommand).mockReset(); });
 function setup(url = '') {
   const openExternal = vi.fn<DesktopHost['openExternal']>().mockResolvedValue();
   function Harness() { const ticket = useExternalTicket({ ...browserHost, kind: 'tauri', openExternal }); return <><button onClick={() => ticket.open({ id: 'task', task: 'Reviewed task', externalUrl: url })}>Launch</button>{ticket.dialog}</>; }

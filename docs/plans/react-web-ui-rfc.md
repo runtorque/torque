@@ -1611,3 +1611,8 @@ P-403–P-405/D-236–D-237 retain external comment/link drafts until matching a
 ### External ticket opening acceptance
 
 P-406/D-238 repairs inert external-ticket actions, routes saved links through the current host and provides task-correlated provider-ID lookup with a fresh browser gesture. Focused 20/20, UI120files1,105tests, and two production-browser scenarios pass. The independent command audit additionally confirmed missing Architect-stage behavior review (P-407), which remains open. Ledger: 407 mapped / 402 accepted / one repair pending / four retirements; Phase 4 remains open.
+
+
+### Architect-stage behavior acceptance
+
+P-407/D-239 restores explicit Architect approval/rejection with correct identity and saved approval-route handling. The UI gate passes 121 files / 1,111 tests plus lint/typecheck/build verification. Seven production-browser scenarios pass, including actual direct application, Architect endorsement that retains the operator gate, rejection, refusal/reconnect, and adjacent authoring/rollback/deadline cases; one unrelated opt-in PTY ask test was skipped. Ledger: 407 mapped / 403 accepted / no recorded open repairs / four retirements. Phase 4 remains open pending the remaining independent command/host audit and final complete browser gate.

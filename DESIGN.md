@@ -2527,7 +2527,7 @@ scope.
 
 - Date: 2026-09-21
 - Status: accepted
-- Decision: Board and Activity share a hydrated question/parent context and reply composer. Explicit reply target precedes Architect author and parent worker; unavailable targets retain the question and draft. Enter sends, Shift+Enter adds a line. Drafts clear only after the matching delivery acknowledgement. Behavior approvals use a separate diff review with author, rationale, base, hash and advisory lint; operator actions require a proposal awaiting the user.
+- Decision: Board and Activity share a hydrated question/parent context and reply composer. Explicit reply target precedes Architect author and parent worker; unavailable targets retain the question and draft. Enter sends, Shift+Enter adds a line. Drafts clear only after the matching delivery acknowledgement. Behavior approvals use a separate diff review with author, rationale, base, hash and advisory lint; operator-stage actions require a proposal awaiting the user. Explicit Architect-stage review uses the named identity and route contract in D-239.
 - Constraints: Pending actions cannot be submitted twice. Failed or stale decisions retain the note and require a fresh diff. Question choices remain part of the full question text; the server has no separate reply-options field. HTTP acknowledgements and WebSocket state updates remain authoritative.
 - Verification: Attention component regressions plus browser review/rejection and retained-answer scenario.
 
@@ -4004,3 +4004,9 @@ Clear context uses a custom confirmation in browser and desktop, matching Classi
 
 - Decision: Board card and task-detail actions open a saved HTTP(S) URL through the current desktop/browser host during the user's click. A ticket with only a provider ID uses a bounded, task-correlated URL read and presents the resolved URL for a fresh Open click, preserving browser popup activation. Failed lookup or host opening retains a cancelable retry surface; unsolicited, stale or mismatched responses never open windows. Existing task drafts remain mounted.
 - Rationale: A sent command is not a navigation result. Browser and detached desktop Board surfaces must share the same usable action.
+
+
+### D-239 — Behavior review preserves the Architect approval stage
+
+- Decision: The shared behavior diff review exposes both Architect and operator stages. Architect-stage decisions require an explicit eligible Architect identity from the proposal's group, honoring a target Engineer's hiring Architect when present. The reviewed note, text hash, scope, route and target are retained through failure/reconnect. A removed identity disables decisions without substituting another.
+- Routing: An Architect-only route applies on approval; Architect-then-user records endorsement and leaves operator approval pending. Acknowledgements must confirm the expected stage and acting identity. Refusal or an uncertain outcome requires a fresh diff before explicit retry. Backend authorization and proposal routes remain authoritative and unchanged.
