@@ -6716,3 +6716,37 @@ class AgentGroupOrderPersistenceTests(unittest.TestCase):
                 )
             finally:
                 db.close()
+
+    def test_child_terminal_order_survives_database_reload_and_reparenting(self):
+        from torque.db import TorqueDB
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db = TorqueDB(Path(tmp) / "torque.db")
+            db.init()
+            try:
+                state = self.state_mod.MatrixState(db=db)
+                state.groups = {"g": ["owner", "other"]}
+                for aid, parent in (("owner", ""), ("other", ""),
+                                    ("first", "owner"), ("second", "owner"),
+                                    ("third", "owner")):
+                    cell = self.state_mod.AgentCell(
+                        id=aid, name=aid, group="g", parent_id=parent,
+                        kind="terminal" if parent else "worker",
+                        cell_type="terminal" if parent else "agent",
+                    )
+                    state.agents[aid] = cell
+                    state._db_save_agent(cell)
+                state._rebuild_children()
+                state._db_save_groups()
+                state.reorder_child("third", "owner", before="first")
+                state.reparent_terminal("second", "other")
+                self.assertEqual(state._children["owner"], ["third", "first"])
+
+                reloaded = self.state_mod.MatrixState(db=db)
+                reloaded.load()
+                self.assertEqual(reloaded._children["owner"], ["third", "first"])
+                self.assertEqual(reloaded._children["other"], ["second"])
+                self.assertEqual(reloaded.agents["second"].parent_id, "other")
+                self.assertEqual(db.load_all()["children"], reloaded._children)
+            finally:
+                db.close()

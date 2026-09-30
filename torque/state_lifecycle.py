@@ -1151,7 +1151,7 @@ class StateLifecycleMixin:
             children.append(aid)
         # Children order is derived from _children, emit parent for rebuild
         self._emit_agent(self.agents[parent_id])
-        # Children order is in-memory only (_children), group_members tracks it
+        # Root and child order are persisted together by the group writer.
         self._db_save_groups()
 
     def reparent_terminal(self, aid: str, new_parent_id: str):

@@ -22,11 +22,7 @@ test('group creation, rename, arbitrary ordering and reviewed removal persist an
     client.onMessage((raw) => { const data = JSON.parse(String(raw)) as Row; if (['add_group', 'rename_group', 'move_group', 'remove_group'].includes(String(data.cmd))) writes.push(data); server.send(raw); });
     server.onMessage((raw) => client.send(raw));
   });
-  const sessionCount = async () => {
-    const payload = await (await request.get('/api/runtime')).json() as { data: { runtime: { supervisor: { session_count: number } } } };
-    return payload.data.runtime.supervisor.session_count;
-  };
-  const initialSessions = await sessionCount();
+  const sessionIds = async () => ((await command(request, { cmd: 'supervisor_sessions_list' })).sessions as Row[]).map((session) => session.session_id);
   const groupState = async () => (await command(request, { cmd: 'get_state' })).groups as Row;
   const persistedOrder = async () => Object.keys(await groupState()).filter((group) => owned.has(group));
   try {
@@ -66,9 +62,12 @@ test('group creation, rename, arbitrary ordering and reviewed removal persist an
     await command(request, { cmd: 'update_group_settings', group: renamed, settings: { agent_provider: 'generic', agent_boot_command: '/bin/cat', default_agent_template: '', git_worktree: false, notifications: false } });
     const worker = String((await command(request, { cmd: 'add_worker', group: renamed, name: 'Group removal QA' })).id);
     const terminal = String((await command(request, { cmd: 'add_terminal', group: renamed, parent_id: worker, name: 'Group child QA', command: '/bin/cat', directory: '/private/tmp', shell: '/bin/sh' })).id);
-    await expect.poll(sessionCount).toBe(initialSessions + 2);
     const before = await command(request, { cmd: 'get_state' });
     expect((before.agents as Row)[worker]).toBeTruthy(); expect((before.agents as Row)[terminal]).toBeTruthy();
+    const ownedSessions = [worker, terminal].map((id) => ((before.agents as Row)[id] as Row).session_id);
+    expect(ownedSessions.every((id) => typeof id === 'string' && id.length > 0)).toBe(true);
+    // Check exact owned sessions; cleanup of a previous scenario may still be in flight.
+    await expect.poll(async () => { const ids = await sessionIds(); return ownedSessions.every((id) => ids.includes(id)); }).toBe(true);
     await menu(renamed, 'Remove…');
     const remove = page.getByRole('dialog', { name: `Remove ${renamed}?`, exact: true });
     await expect(remove).toContainText('removes its agents and child terminals and closes their sessions');
@@ -86,7 +85,7 @@ test('group creation, rename, arbitrary ordering and reviewed removal persist an
       const state = await command(request, { cmd: 'get_state' });
       return [(state.groups as Row)[renamed], (state.agents as Row)[worker], (state.agents as Row)[terminal]];
     }).toEqual([undefined, undefined, undefined]);
-    await expect.poll(sessionCount).toBe(initialSessions);
+    await expect.poll(async () => { const ids = await sessionIds(); return ownedSessions.some((id) => ids.includes(id)); }).toBe(false);
     expect(writes.filter((item) => item.cmd === 'remove_group')).toEqual([{ cmd: 'remove_group', group: renamed }]);
     await page.reload(); await expect.poll(visualOrder).toEqual([first, third]); expect(errors).toEqual([]);
     await test.info().attach('group-writes.json', { body: JSON.stringify(writes, null, 2), contentType: 'application/json' });

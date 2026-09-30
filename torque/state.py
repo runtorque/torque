@@ -4337,6 +4337,7 @@ class MatrixState(
                 self.db.save_groups_and_members_deferred(
                     self.groups,
                     self.group_slugs,
+                    self._children,
                 )
             except Exception:
                 log.exception("Failed to save groups")

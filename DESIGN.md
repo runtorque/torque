@@ -3936,3 +3936,13 @@ D-217 clarification (2026-09-30): arbitrary map values, including environment va
 - Offer Optional status note next to the existing status action, matching Classic's independent status/note inputs. Trim only outer whitespace at submission and send the exact reviewed task ID, status and note. An empty note remains valid.
 - Keep the status and note as local action drafts through ordinary task updates, reconnect and unsent/refused submissions. These inputs do not mutate the task's persisted description or verification notes. Retain the existing explicit Push action; opening or reconnecting the editor must not send provider writes.
 - Browser tests use a local intercepted provider response; existing backend adapter tests verify note forwarding. Do not contact a hosted ticket provider as part of this acceptance.
+
+
+### D-230 — Persist terminal sibling order with authoritative parent relationships
+
+- Date: 2026-09-30
+- Scope: terminal organization and SQLite/offline state, P-021/P-022/P-387.
+- Persist the terminal child-order index alongside group ordering in the existing SQLite UI-state storage. Snapshot export/import and daemon hydration preserve it; older databases without it retain their derived order. No schema version or public snapshot shape changes.
+- Treat each terminal's saved parent_id as the relationship authority. Saved ranks may only order valid children of that parent: ignore stale IDs, duplicates, malformed entries and references to another parent's children, and append newly discovered children. Never recreate a missing terminal or reparent it from an ordering record.
+- Capture group and child-order arguments before deferred writes. Offline CLI reads use the same reconciliation as daemon snapshots, so stopped-daemon inspection agrees with the UI.
+- Organization continues to preserve owner IDs. A principal group move takes attached terminals with it and leaves owned workers in their existing groups, matching the shared Classic/backend command contract; returning the principal restores the visible ownership hierarchy.

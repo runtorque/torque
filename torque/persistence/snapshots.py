@@ -10,6 +10,7 @@ from torque.db_board import (
     decode_board_task_row,
 )
 from torque import profiling
+from torque.agent_order import ordered_terminal_children
 from torque.ui_preferences import normalize_react_workspace_state
 from torque.persistence.common import (
     GROUP_SETTINGS_BOOL_FIELDS as _GS_BOOL_FIELDS,
@@ -260,6 +261,7 @@ class SnapshotPersistenceMixin:
                 "context_panel_split_ratio",
                 "supervisor_panel_state",
                 "react_workspace_state",
+                "children",
             ):
                 val = state_dict.get(key)
                 if val is not None:
@@ -269,6 +271,7 @@ class SnapshotPersistenceMixin:
                         "window_bounds",
                         "supervisor_panel_state",
                         "react_workspace_state",
+                        "children",
                     }:
                         val = json.dumps(val)
                     c.execute(
@@ -684,6 +687,8 @@ class SnapshotPersistenceMixin:
 
         return {
             "agents": agents,
+            "children": ordered_terminal_children(
+                agents, _json_loads_default(ui.get("children", "{}"), {})),
             "groups": groups,
             "group_slugs": group_slugs,
             "group_settings": group_settings,
