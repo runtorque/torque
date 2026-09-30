@@ -1,3 +1,4 @@
+import { CommandConfirmation, type ConfirmedCommand } from './CommandConfirmation';
 import { SettingsNavigationProvider } from './SettingsNavigationGuard';
 import { useSettingsNavigation } from './settingsNavigation';
 import type { WorkspaceNavigation } from './workspaceNavigation';
@@ -187,6 +188,7 @@ function WorkspaceShellContent({ host, sendCommand }: WorkspaceShellProps) {
   const query = new URLSearchParams(window.location.search);
   const [welcomeOpen, setWelcomeOpen] = useState(query.get('onboarding') === '1');
   const [addGroupOpen, setAddGroupOpen] = useState(false);
+  const [confirmation, setConfirmation] = useState<ConfirmedCommand | null>(null);
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupDirectory, setNewGroupDirectory] = useState('');
   const [reorderGroup, setReorderGroup] = useState('');
@@ -463,12 +465,12 @@ function WorkspaceShellContent({ host, sendCommand }: WorkspaceShellProps) {
         }).catch(commandUnavailable); });
       },
       restartTerminalSupervisor: () => {
-        void host.confirm({
+        setConfirmation({
           title: 'Restart terminal supervisor?',
           message: 'Active terminal sessions will reconnect after the supervisor restarts.',
           confirmLabel: 'Restart',
-          destructive: true,
-        }).then((confirmed) => { if (confirmed) runCommand({ cmd: 'supervisor_restart' }); }).catch(commandUnavailable);
+          command: { cmd: 'supervisor_restart' },
+        });
       },
       torqueMainWindowBoundsChanged: persistBounds,
       torqueDetachedWindowBoundsChanged: persistBounds,
@@ -478,6 +480,8 @@ function WorkspaceShellContent({ host, sendCommand }: WorkspaceShellProps) {
       removeNativeMenus();
     };
   }, [commandUnavailable, detachedPanel, detachedWindowLabel, dispatch, host, navigatePanel, requestNavigation, runCommand, sendCommand, workspace.detachedPanels, workspaceUi.activePanel, workspaceUi.controlTab]);
+
+  const confirmationDialog = confirmation ? <CommandConfirmation key={`${confirmation.command.cmd}:${textValue(confirmation.command.group)}`} request={confirmation} sendCommand={sendCommand} onClose={() => setConfirmation(null)} /> : null;
 
   const closeCommandPalette = () => dispatch(workspaceUiActions.setCommandPaletteOpen(false));
   const openPanel = (panel: 'board' | 'agents' | 'planning' | 'control') => {
@@ -510,6 +514,7 @@ function WorkspaceShellContent({ host, sendCommand }: WorkspaceShellProps) {
           onCommandUnavailable={commandUnavailable}
           terminalOnly={detachedPanel === 'terminal'}
         />
+        {confirmationDialog}
         <div className={styles.toastRegion} role="region" aria-label="Notifications" aria-live="polite">
           {toasts.map((toast) => <div key={toast.id} className={`${styles.toast} ${styles[`toast_${toast.level}`] ?? ''}`}>{toast.message}</div>)}
         </div>
@@ -523,6 +528,8 @@ function WorkspaceShellContent({ host, sendCommand }: WorkspaceShellProps) {
       {detachedPanel === 'planning' ? <Suspense fallback={<StateSurface title="Loading Planning" description="Preparing planning resources." />}><PlanningWorkspace key={activeGroup} group={activeGroup} sendCommand={sendCommand} onCommandUnavailable={commandUnavailable} /></Suspense> : null}
       {retainedGroup && retainedGroup !== activeGroup ? <div role="status">Settings for {retainedGroup} remain open. <Button onPress={() => requestNavigation(() => {})}>Switch to {activeGroup}</Button></div> : null}
       {detachedPanel === 'control' ? <Suspense fallback={<StateSurface title="Loading Control Center" description="Preparing operational resources." />}><ControlCenter host={host} key={controlGroup} group={controlGroup} sendCommand={sendCommand} onCommandUnavailable={commandUnavailable} /></Suspense> : null}
+      {confirmationDialog}
+
       <div className={styles.toastRegion} role="region" aria-label="Notifications" aria-live="polite">{toasts.map((toast) => <div key={toast.id} className={`${styles.toast} ${styles[`toast_${toast.level}`] ?? ''}`}>{toast.message}</div>)}</div>
     </main>;
   }
@@ -546,7 +553,7 @@ function WorkspaceShellContent({ host, sendCommand }: WorkspaceShellProps) {
             {groupNames.map((group, index) => {
               const settings = asRecord(groups[group]);
               const color = typeof settings.color === 'string' ? settings.color : '#6172f3';
-              return <div key={group} className={styles.groupRow} draggable onDragStart={(event) => event.dataTransfer.setData('application/x-torque-group', group)} onDragOver={(event) => { if (event.dataTransfer.types.includes('application/x-torque-group')) event.preventDefault(); }} onDrop={(event) => { const moved = event.dataTransfer.getData('application/x-torque-group'); if (moved && moved !== group && groupNames.includes(moved)) { event.preventDefault(); runCommand({ cmd: 'move_group', group: moved, before: group }); } }}><button className={group === activeGroup ? styles.groupActive : ''} onClick={() => selectGroup(group)}><i style={{ background: color }} />{displayName(groups[group], group)}</button><ActionMenu label={`${group} group options`}><ActionMenuItem onAction={() => { setRenameGroup(group); setRenameGroupName(group); }}>Rename</ActionMenuItem><ActionMenuItem onAction={() => openGroupSettings(group)}>Settings</ActionMenuItem><ActionMenuItem onAction={() => { setReorderGroup(group); setGroupBefore(''); }}>Move group…</ActionMenuItem><ActionMenuItem onAction={() => runCommand({ cmd: 'move_group', group, before: index === 0 ? '' : groupNames[0] })} isDisabled={groupNames.length < 2}>{index === 0 ? 'Move to bottom' : 'Move to top'}</ActionMenuItem><ActionMenuItem onAction={() => { void host.confirm({ title: `Remove ${group}?`, message: 'The group can be removed only when its agents and protected state allow it.', confirmLabel: 'Remove', destructive: true }).then((confirmed) => { if (confirmed) runCommand({ cmd: 'remove_group', group }); }); }}>Remove…</ActionMenuItem></ActionMenu></div>;
+              return <div key={group} className={styles.groupRow} draggable onDragStart={(event) => event.dataTransfer.setData('application/x-torque-group', group)} onDragOver={(event) => { if (event.dataTransfer.types.includes('application/x-torque-group')) event.preventDefault(); }} onDrop={(event) => { const moved = event.dataTransfer.getData('application/x-torque-group'); if (moved && moved !== group && groupNames.includes(moved)) { event.preventDefault(); runCommand({ cmd: 'move_group', group: moved, before: group }); } }}><button className={group === activeGroup ? styles.groupActive : ''} onClick={() => selectGroup(group)}><i style={{ background: color }} />{displayName(groups[group], group)}</button><ActionMenu label={`${group} group options`}><ActionMenuItem onAction={() => { setRenameGroup(group); setRenameGroupName(group); }}>Rename</ActionMenuItem><ActionMenuItem onAction={() => openGroupSettings(group)}>Settings</ActionMenuItem><ActionMenuItem onAction={() => { setReorderGroup(group); setGroupBefore(''); }}>Move group…</ActionMenuItem><ActionMenuItem onAction={() => runCommand({ cmd: 'move_group', group, before: index === 0 ? '' : groupNames[0] })} isDisabled={groupNames.length < 2}>{index === 0 ? 'Move to bottom' : 'Move to top'}</ActionMenuItem><ActionMenuItem onAction={() => { setConfirmation({ title: `Remove ${group}?`, message: `Removing this group also removes its agents and child terminals and closes their sessions. The group's settings are deleted.`, confirmLabel: 'Remove', command: { cmd: 'remove_group', group } }); }}>Remove…</ActionMenuItem></ActionMenu></div>;
             })}
           </div>
         </section>
@@ -563,12 +570,12 @@ function WorkspaceShellContent({ host, sendCommand }: WorkspaceShellProps) {
           <button className={styles.commandTrigger} onClick={() => dispatch(workspaceUiActions.setCommandPaletteOpen(true))}><span>⌕</span> Search commands <kbd>{bindingHint('navigator.open')}</kbd></button>
           <span className={styles.chromeSpacer} />
           <a href={legacyUrl} className={styles.legacyLink} onClick={(event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); requestNavigation(() => window.location.assign(legacyUrl)); } }}>Classic UI</a>
-          <ActionMenu label="Workspace actions" trigger={<Button tone="quiet">•••</Button>}>
+          <ActionMenu label="Workspace actions" trigger={<Button tone="quiet" aria-label="Workspace actions">•••</Button>}>
             <ActionMenuItem onAction={() => (window as NativeMenuWindow).detachActivePanel?.()} isDisabled={!hasHostCapability(host, 'detach-panel')}>Detach current panel</ActionMenuItem>
             <ActionMenuItem onAction={() => navigatePanel('control', 'logs')}>Open logs</ActionMenuItem>
             <ActionMenuItem onAction={() => { if (hasHostCapability(host, 'reveal-log-directory')) void host.revealLogDirectory(); }} isDisabled={!hasHostCapability(host, 'reveal-log-directory')}>Reveal log directory</ActionMenuItem>
-            <ActionMenuItem onAction={() => { void host.confirm({ title: 'Restart Torque daemon?', message: 'Live sessions may briefly reconnect.', confirmLabel: 'Restart', destructive: true }).then((confirmed) => { if (confirmed) runCommand({ cmd: 'restart' }); }); }}>Restart daemon…</ActionMenuItem>
-            <ActionMenuItem onAction={() => { void host.confirm({ title: 'Stop Torque daemon?', message: 'The UI will disconnect until Torque is launched again.', confirmLabel: 'Stop', destructive: true }).then((confirmed) => { if (confirmed) runCommand({ cmd: 'stop' }); }); }}>Stop daemon…</ActionMenuItem>
+            <ActionMenuItem onAction={() => { setConfirmation({ title: 'Restart Torque daemon?', message: 'Live sessions may briefly reconnect.', confirmLabel: 'Restart', command: { cmd: 'restart' } }); }}>Restart daemon…</ActionMenuItem>
+            <ActionMenuItem onAction={() => { setConfirmation({ title: 'Stop Torque daemon?', message: 'The UI will disconnect until Torque is launched again.', confirmLabel: 'Stop', command: { cmd: 'stop' } }); }}>Stop daemon…</ActionMenuItem>
           </ActionMenu>
           <DialogTrigger>
             <Button tone="quiet" aria-label={`Inbox${unread ? `, ${unread} unread` : ''}`} onPress={() => runCommand({ cmd: 'operator_notices_list', notice_type: inboxView, include_archived: inboxArchived, limit: 100, offset: 0 })}>♢{unread ? <span className={styles.unreadBadge}>{unread > 99 ? '99+' : unread}</span> : null}</Button>
@@ -641,6 +648,8 @@ function WorkspaceShellContent({ host, sendCommand }: WorkspaceShellProps) {
         </form>
       </ModalDialog>
 
+
+      {confirmationDialog}
 
       <div className={styles.toastRegion} role="region" aria-label="Notifications" aria-live="polite">
         {toasts.map((toast) => <div key={toast.id} className={`${styles.toast} ${styles[`toast_${toast.level}`] ?? ''}`}>{toast.message}</div>)}

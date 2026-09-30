@@ -318,3 +318,8 @@ file modifies the default daemon; review and stop only the identity-verified QA
 runtime and its own sidecars. Proposal/group records remain in that disposable
 profile. These tests do not certify external provider conversation restoration,
 commercial inference or native window recovery.
+
+
+### Group organization and shell confirmation regression
+
+Run `group-lifecycle-live.spec.ts` against an isolated non-default profile with real local PTYs enabled. It creates, renames, orders and removes only its own groups; the populated removal uses a generic `/bin/cat` Worker and child terminal and verifies both sessions close. It checks keyboard-accessible placement, pointer drop, reload, Cancel/Escape and focus restoration. The companion scenario intercepts daemon restart/stop/supervisor commands at the browser transport and never forwards them. No live daemon lifecycle operation or hosted provider call is required.

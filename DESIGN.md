@@ -3917,3 +3917,13 @@ D-217 clarification (2026-09-30): arbitrary map values, including environment va
 - Reload the complete YAML emitted by role saving, including automatically wrapped commands, descriptions, priorities and environment strings. A long command must reach launch preview and the actual process with every argument intact.
 - Retain existing scalar semantics: unquoted on/off/yes/no remain words, leading-zero numbers remain decimal, dates remain text and quoted strings remain literal. Read valid YAML safely without object construction; malformed or non-mapping role documents are unavailable.
 - Apply the same reader to role discovery and launch resolution so catalog descriptions and priorities agree with the saved definition. Explicit role selection still overrides the group default; clearing the default restores normal shared launch settings.
+
+
+### D-228 — Confirm shell lifecycle actions in the shared React dialog
+
+- Date: 2026-09-30
+- Scope: group removal, daemon restart/stop, and native-menu supervisor restart; P-382–P-385.
+- Use the same nonblocking React confirmation in browser and desktop. These are daemon commands and must not depend on native host confirmation capability. Name the affected group or service; focus Cancel initially and restore the menu trigger on dismissal. Escape, close and Cancel send no command.
+- Explain that removing a group also removes its agents and child terminals, closes their sessions and deletes group settings. Do not claim a protection gate that the actual group-removal handler does not enforce.
+- Submit only the reviewed command and group. A disconnected sender retains the dialog with an explicit unsent error and requires another deliberate confirmation after reconnect; do not replay commands automatically. Closing after a successful send is transport submission, not a claimed server acknowledgement.
+- Label the icon-only workspace menu for assistive technology. Browser acceptance must intercept daemon lifecycle commands so verification cannot stop the live or QA daemon.

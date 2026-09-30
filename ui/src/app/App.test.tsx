@@ -1813,3 +1813,58 @@ it('applies live Focus on click changes without activating a row merely receivin
   sendCommand.mockClear(); fireEvent.focus(row); expect(sendCommand).not.toHaveBeenCalled();
   fireEvent.click(row); expect(sendCommand).toHaveBeenCalledWith({ cmd: 'focus_agent', id: 'agent-1' });
 });
+
+
+it('reviews group removal in React and never invokes native confirmation', async () => {
+  const confirm = vi.fn(() => Promise.resolve(false));
+  const { sendCommand } = renderShell({ ...browserHost, confirm });
+  const open = () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Foundation group options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove…' }));
+  };
+  open();
+  const dialog = await screen.findByRole('dialog', { name: 'Remove Foundation?' });
+  expect(dialog).toHaveTextContent('removes its agents and child terminals and closes their sessions');
+  expect(sendCommand.mock.calls.filter(([command]) => command.cmd === 'remove_group')).toHaveLength(0);
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+  expect(screen.queryByRole('dialog', { name: 'Remove Foundation?' })).not.toBeInTheDocument();
+  open();
+  fireEvent.click(within(await screen.findByRole('dialog', { name: 'Remove Foundation?' })).getByRole('button', { name: 'Remove' }));
+  expect(sendCommand.mock.calls.filter(([command]) => command.cmd === 'remove_group')).toEqual([[{ cmd: 'remove_group', group: 'Foundation' }]]);
+  expect(confirm).not.toHaveBeenCalled();
+});
+
+it.each([
+  ['Restart daemon…', 'Restart Torque daemon?', 'Restart', 'restart'],
+  ['Stop daemon…', 'Stop Torque daemon?', 'Stop', 'stop'],
+])('reviews %s without a native host and retains a disconnected confirmation', async (menu, title, label, cmd) => {
+  const confirm = vi.fn(() => Promise.resolve(false));
+  const { sendCommand } = renderShell({ ...browserHost, confirm });
+  fireEvent.click(screen.getByRole('button', { name: 'Workspace actions' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: menu }));
+  const dialog = await screen.findByRole('dialog', { name: title });
+  expect(sendCommand.mock.calls.filter(([command]) => command.cmd === cmd)).toHaveLength(0);
+  sendCommand.mockReturnValue(false);
+  fireEvent.click(within(dialog).getByRole('button', { name: label }));
+  expect(within(dialog).getByRole('alert')).toHaveTextContent('Your change was not sent');
+  expect(dialog).toBeVisible();
+  sendCommand.mockReturnValue(true);
+  fireEvent.click(within(dialog).getByRole('button', { name: label }));
+  expect(sendCommand.mock.calls.filter(([command]) => command.cmd === cmd)).toEqual([[{ cmd }], [{ cmd }]]);
+  expect(screen.queryByRole('dialog', { name: title })).not.toBeInTheDocument();
+  expect(confirm).not.toHaveBeenCalled();
+});
+
+it('uses the same React confirmation for native supervisor menu callbacks', async () => {
+  const confirm = vi.fn(() => Promise.resolve(true));
+  const { sendCommand } = renderShell({ ...browserHost, kind: 'tauri', confirm });
+  const restart = () => act(() => (window as Window & { restartTerminalSupervisor?: () => void }).restartTerminalSupervisor?.());
+  restart();
+  const dialog = await screen.findByRole('dialog', { name: 'Restart terminal supervisor?' });
+  expect(sendCommand.mock.calls.filter(([command]) => command.cmd === 'supervisor_restart')).toHaveLength(0);
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+  restart();
+  fireEvent.click(within(await screen.findByRole('dialog', { name: 'Restart terminal supervisor?' })).getByRole('button', { name: 'Restart' }));
+  expect(sendCommand.mock.calls.filter(([command]) => command.cmd === 'supervisor_restart')).toEqual([[{ cmd: 'supervisor_restart' }]]);
+  expect(confirm).not.toHaveBeenCalled();
+});
