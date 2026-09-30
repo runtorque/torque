@@ -175,6 +175,34 @@ class AIIndexTests(unittest.IsolatedAsyncioTestCase):
             ["arch-1"],
         )
 
+    async def test_saved_corpus_choices_limit_real_indexed_sources(self):
+        self._seed_all_sources()
+        service = await self._service()
+        choices = {
+            "architect_journals": "architect_journal",
+            "engineer_journals": "engineer_journal",
+            "decisions": "decision",
+            "tasks": "task",
+            "engineer_peer_threads": "engineer_peer_thread",
+        }
+        for selected in [*choices, None]:
+            with self.subTest(selected=selected):
+                configured = {key: key == selected for key in choices}
+                service.state.update_global_settings(ai_index_corpus=configured)
+                await service.start(mode="incremental", confirm=False)
+                await service._job_task
+                indexed = [row for row in self.db.ai_list_embedding_sources()
+                           if row["state"] == "indexed"]
+                self.assertEqual(
+                    {row["source_type"] for row in indexed},
+                    {choices[selected]} if selected else set(),
+                )
+                self.assertEqual(self.db.ai_get_index_state()["corpus_config"],
+                                 configured)
+                if selected is None:
+                    self.assertEqual(self.db.ai_get_index_counts()["chunks"], 0)
+        await service.shutdown()
+
     async def test_incremental_scan_marks_stale_and_deleted_by_content_hash(self):
         self._seed_all_sources()
         service = await self._service()

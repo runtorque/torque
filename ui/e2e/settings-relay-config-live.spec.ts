@@ -45,8 +45,22 @@ test('resolved Relay fields preserve inheritance, focused drafts and sparse writ
     await enabled.selectOption('off'); await save(); expect(writes.at(-1)?.settings).toEqual({ relay_enabled: false }); await expect(enabled).toHaveValue('on');
     await expect(page.getByText('Relay is enabled by the environment.', { exact: false })).toBeVisible();
     await url.fill('wss://retry-local.invalid/ws'); rejectSave = true; await page.getByRole('button', { name: 'Save changes', exact: true }).click(); await expect(page.getByRole('alert')).toContainText('QA Relay save refused'); await expect(url).toHaveValue('wss://retry-local.invalid/ws');
-    await save(); expect(((await command(request, { cmd: 'get_global_settings' })).settings as Row).relay_url).toBe('wss://retry-local.invalid/ws');
+    await save(); expect(((await command(request, { cmd: 'get_global_settings' })).settings as Row).relay_url).toBe('wss://retry-local.invalid/ws'); await page.reload(); await open(); await expect(url).toHaveValue('wss://retry-local.invalid/ws');
     await url.fill(''); await save(); await page.reload(); await open(); await expect(url).toHaveValue(''); await expect(url).toHaveAttribute('placeholder', 'wss://relay-file.invalid/ws'); await expect(enabled).toHaveValue('on');
+    const key = page.getByLabel('Private key path', { exact: true }); const keyPath = `${String(runtime.data_dir)}/keys/QA path.pem`;
+    await key.fill(`  ${keyPath}  `); await key.focus(); await key.evaluate((input: HTMLInputElement) => { input.setSelectionRange(2, 8); input.dataset.retainedKeyPath = 'yes'; });
+    const beforeKeyReconnect = connections; await socket!.close({ code: 1012, reason: 'Private key path draft' }); await expect.poll(() => connections).toBeGreaterThan(beforeKeyReconnect);
+    await expect(key).toHaveValue(`  ${keyPath}  `); await expect(key).toBeFocused(); await expect(key).toHaveAttribute('data-retained-key-path', 'yes'); expect(await key.evaluate((input: HTMLInputElement) => [input.selectionStart, input.selectionEnd])).toEqual([2, 8]);
+    await save(); expect(writes.at(-1)?.settings).toEqual({ relay_private_key_path: keyPath });
+    let savedKey = await command(request, { cmd: 'get_global_settings' }); expect(savedKey.settings).toMatchObject({ relay_private_key_path: keyPath }); expect(savedKey.relay_config).toMatchObject({ config: { private_key_path: keyPath }, sources: { private_key_path: { source: 'settings', value: keyPath } } });
+    await page.reload(); await open(); await expect(key).toHaveValue(keyPath);
+    await key.fill(''); await save(); await page.reload(); await open(); await expect(key).toHaveValue('');
+    savedKey = await command(request, { cmd: 'get_global_settings' }); expect((savedKey.relay_config as Row).config).not.toHaveProperty('private_key_path'); expect((savedKey.relay_config as Row).sources).toMatchObject({ private_key_path: { source: 'ee_connector.json', value: '' } }); expect(JSON.stringify(savedKey)).not.toContain('QA_INLINE_SENTINEL_NOT_A_KEY');
+    await credential.fill('qa-reviewed-credential'); await enabled.selectOption('off'); await enabled.selectOption('on'); await save();
+    expect(writes.at(-1)?.settings).toEqual({ relay_credential_id: 'qa-reviewed-credential', relay_enabled: true });
+    const explicit = await command(request, { cmd: 'get_global_settings' }); expect(explicit.settings).toMatchObject({ relay_credential_id: 'qa-reviewed-credential', relay_enabled: true }); expect(explicit.relay_config).toMatchObject({ sources: { enabled: { source: 'settings', value: true }, credential_id: { source: 'settings', value: 'qa-reviewed-credential' } } });
+    await page.reload(); await open(); await expect(enabled).toHaveValue('on'); await expect(credential).toHaveValue('qa-reviewed-credential'); await expect(daemon).toHaveValue('local-daemon-draft');
+    await credential.fill(''); await enabled.selectOption('off'); await save(); await page.reload(); await open(); await expect(credential).toHaveValue(''); await expect(credential).toHaveAttribute('placeholder', 'qa-env-credential'); await expect(enabled).toHaveValue('on');
     await url.evaluate((input) => input.scrollIntoView({ block: 'center' })); await page.screenshot({ path: test.info().outputPath('resolved-relay-config.png') });
   } finally {
     await command(request, { cmd: 'update_global_settings', settings: Object.fromEntries(['xterm_scrollback', 'relay_enabled', 'relay_url', 'relay_daemon_id', 'relay_credential_id', 'relay_private_key_path'].map((key) => [key, original[key]])) });

@@ -22,6 +22,15 @@ test('tree activation moves keyboard input into the selected real PTY and honors
   const group = `Tree focus ${Date.now()}`; const ids: string[] = []; const logs = [join(directory, 'first.jsonl'), join(directory, 'second.jsonl')];
   let socket: WebSocketRoute | undefined; let connections = 0; const commands: Row[] = [];
   const received = async (index: number, marker: string) => (await readFile(logs[index]!, 'utf8')).split('\n').some((line) => { if (!line) return false; const row = JSON.parse(line) as Row; return row.kind === 'input' && row.text === marker; });
+  const focusPreference = async (enabled: boolean, reload = false) => {
+    await page.getByRole('button', { name: /◎ Control/ }).click(); await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    await page.getByRole('searchbox', { name: 'Search settings' }).fill('Focus on click'); await page.getByRole('button', { name: /^Focus on click — / }).click();
+    const input = page.getByRole('combobox', { name: 'Focus on click', exact: true }); await input.selectOption(String(enabled));
+    await page.getByRole('button', { name: 'Save changes', exact: true }).click(); await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+    expect((await command({ cmd: 'get_global_settings' })).settings).toMatchObject({ focus_on_click: enabled });
+    if (reload) { await page.reload(); await page.getByRole('searchbox', { name: 'Search settings' }).fill('Focus on click'); await page.getByRole('button', { name: /^Focus on click — / }).click(); await expect(input).toHaveValue(String(enabled)); }
+    await page.getByRole('button', { name: /⌁ Agents/ }).click();
+  };
   try {
     await command({ cmd: 'update_global_settings', settings: { focus_on_click: false } });
     await command({ cmd: 'add_group', group });
@@ -62,6 +71,7 @@ test('tree activation moves keyboard input into the selected real PTY and honors
       });
     });
     await page.goto('/');
+    await focusPreference(true, true); await focusPreference(false, true);
     const first = page.getByRole('treeitem', { name: /^Focus receiver 1,/ }); const second = page.getByRole('treeitem', { name: /^Focus receiver 2,/ });
     const composer = page.getByRole('textbox', { name: 'Message Focus receiver 1', exact: true });
     await page.evaluate(() => {
@@ -80,10 +90,10 @@ test('tree activation moves keyboard input into the selected real PTY and honors
     await page.getByRole('tab', { name: 'Activity', exact: true }).click();
     await second.focus(); await second.press('Enter'); await expect(page.locator('.xterm-helper-textarea')).toBeFocused();
     await page.keyboard.type('keyboard-marker'); await page.keyboard.press('Enter'); await expect.poll(() => received(1, 'keyboard-marker')).toBe(true); expect(await received(0, 'keyboard-marker')).toBe(false);
-    await command({ cmd: 'update_global_settings', settings: { focus_on_click: true } });
+    await focusPreference(true);
     await first.click(); await expect(page.locator('.xterm-helper-textarea')).toBeFocused();
     await page.keyboard.type('preference-marker'); await page.keyboard.press('Enter'); await expect.poll(() => received(0, 'preference-marker')).toBe(true);
-    await command({ cmd: 'update_global_settings', settings: { focus_on_click: false } });
+    await focusPreference(false);
     await page.getByRole('tab', { name: 'Activity', exact: true }).click(); const before = commands.filter((row) => row.cmd === 'focus_agent').length;
     await first.click(); await expect(page.getByRole('tab', { name: 'Activity', exact: true })).toHaveAttribute('aria-selected', 'true'); expect(commands.filter((row) => row.cmd === 'focus_agent')).toHaveLength(before);
     await page.getByRole('tab', { name: 'Live', exact: true }).click(); await expect(composer).toHaveText('Retained operator draft'); await expect(page.getByRole('region', { name: 'Focus receiver 1 terminal', exact: true }).getByText('connected', { exact: true })).toBeVisible(); await expect(page.locator('.xterm-helper-textarea')).not.toBeFocused();
