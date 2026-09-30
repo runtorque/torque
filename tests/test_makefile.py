@@ -248,8 +248,12 @@ print(config.LOG_FILE)
                 "TORQUE_DATA_DIR": str(live_log.parent),
                 "TORQUE_PROFILE": "default",
             })
+            # A virtualenv intentionally disables user-site imports. Exercise the
+            # base interpreter here because preserving user-site packages is the
+            # behavior under test, regardless of the suite's chosen interpreter.
+            fixture_python = getattr(sys, "_base_executable", sys.executable)
             user_site = Path(subprocess.check_output(
-                [sys.executable, "-c", "import site; print(site.getusersitepackages())"],
+                [fixture_python, "-c", "import site; print(site.getusersitepackages())"],
                 text=True,
                 env=env,
             ).strip())
@@ -259,14 +263,14 @@ print(config.LOG_FILE)
             )
             fixture_b64 = base64.b64encode(fixture.encode("utf-8")).decode("ascii")
             fixture_command = (
-                f'{sys.executable} -c "import base64; exec(compile('
+                f'{shlex.quote(fixture_python)} -c "import base64; exec(compile('
                 f'base64.b64decode(\'{fixture_b64}\'), \'<fixture>\', \'exec\'))"'
             )
             proc = subprocess.run(
                 [
                     "make",
                     "test",
-                    f"TEST_PYTHON={sys.executable}",
+                    f"TEST_PYTHON={fixture_python}",
                     f"TEST_COMMAND={fixture_command}",
                 ],
                 cwd=ROOT,
@@ -284,7 +288,7 @@ print(config.LOG_FILE)
     def test_test_targets_allocate_disposable_home_and_data_dirs(self):
         for target in ("test", "test-ee"):
             with self.subTest(target=target):
-                proc = self._run_make_dry(target)
+                proc = self._run_make_dry(target, "TEST_PYTHON=python3")
                 self.assertIn('scratch_root=$(mktemp -d "${TMPDIR:-/tmp}/torque-test.XXXXXX")', proc.stdout)
                 self.assertIn('HOME="$scratch_root/home"', proc.stdout)
                 self.assertIn('TORQUE_DATA_DIR="$scratch_root/profile"', proc.stdout)

@@ -2052,6 +2052,8 @@ def _compact_worktree_boundary_summary(boundary) -> dict:
             "repo_root",
             "branch",
             "base_branch",
+            "commit_sha",
+            "recorded_by_agent_id",
             "status",
             "recorded_at",
             "merged_at",

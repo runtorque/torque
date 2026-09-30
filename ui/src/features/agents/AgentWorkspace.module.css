@@ -221,6 +221,7 @@
 .classAssignment label { display: grid; gap: 4px; color: var(--text-dim); font-size: 9px; }
 .inspectorMcp input,
 .inspectorMcp select,
+.mergeControls select,
 .classAssignment select { width: 100%; min-height: 29px; padding: 0 7px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); background: var(--background); }
 .inspectorFeed details { padding: 0; overflow: hidden; }
 .inspectorFeed summary { display: grid; min-height: 35px; grid-template-columns: 18px 1fr auto; align-items: center; gap: 6px; padding: 5px 8px; cursor: pointer; }

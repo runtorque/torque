@@ -646,6 +646,26 @@ def _merge_attribution_task_id(state, cell, data: dict) -> str:
                 or str(getattr(task, "agent_id", "") or "") == str(
                     getattr(cell, "id", "") or "")):
             return task_id
+        # Completion releases the live assignment. An explicit operator choice
+        # may still name this worker's open boundary, but must never adopt a
+        # task reassigned elsewhere or infer attribution from branch recency.
+        if task and explicit_task_id and not getattr(task, "agent_id", ""):
+            boundary = task_boundary(task)
+            expected = {
+                "recorded_by_agent_id": getattr(cell, "id", ""),
+                "repo_root": (getattr(cell, "worktree_repo_root", "")
+                              or getattr(cell, "git_root", "")),
+                "branch": getattr(cell, "worktree_branch", ""),
+                "base_branch": getattr(cell, "worktree_base_branch", ""),
+            }
+            if (
+                getattr(task, "group", "") == getattr(cell, "group", "")
+                and boundary.get("status") == "open"
+                and str(boundary.get("commit_sha") or "").strip()
+                and all(value and boundary.get(key) == value
+                        for key, value in expected.items())
+            ):
+                return task_id
     return ""
 
 
@@ -665,8 +685,9 @@ def _merge_task_attribution_error(
             return None
         return _worktree_merge_error(
             aid,
-            "Selected merge_task_id does not identify a task assigned to "
-            "this worker; select the task whose boundary is being merged.",
+            "Selected merge_task_id does not identify an assigned task or "
+            "an unassigned open boundary recorded by this worker; "
+            "select the task whose boundary is being merged.",
         )
 
     candidates = state.agent_active_tasks(getattr(cell, "id", ""))

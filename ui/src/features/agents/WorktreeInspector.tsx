@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppSelector } from '../../app/hooks';
-import { selectGroupsState } from '../../app/store';
+import { selectGroupsState, selectTasksState } from '../../app/store';
 
 import { Button, ModalDialog, StateSurface } from '../../design/primitives';
 import type { AgentViewModel } from './model';
@@ -43,6 +43,7 @@ export function WorktreeInspector({ agent, responses, onClose, active = true }: 
   const [prReview, setPrReview] = useState<{ id: string; path: string; branch: string; base: string } | null>(null);
   const [clearContext, setClearContext] = useState(false);
   const [forceDirect, setForceDirect] = useState(false);
+  const [mergeTaskSelection, setMergeTaskSelection] = useState({ scope: '', id: '' });
   const [removalTarget, setRemovalTarget] = useState<AgentViewModel | null>(null);
   const [rollbackSha, setRollbackSha] = useState('');
   const confirmationReturnFocus = useRef<HTMLElement | null>(null);
@@ -56,6 +57,24 @@ export function WorktreeInspector({ agent, responses, onClose, active = true }: 
   const [operationAgent, setOperationAgent] = useState<AgentViewModel | null>(null);
   const target = agent ?? operationAgent;
   const groups = useAppSelector(selectGroupsState);
+  const tasks = useAppSelector(selectTasksState);
+  const mergeTaskScope = target ? `${target.id}:${target.worktreePath}:${target.worktreeBranch}` : '';
+  const mergeTaskId = mergeTaskSelection.scope === mergeTaskScope ? mergeTaskSelection.id : '';
+  const mergeTasks = Object.entries({ ...record(tasks.archived[target?.group ?? '']), ...tasks.records })
+    .map(([id, value]) => ({ id, value: record(value) }))
+    .filter(({ value }) => {
+      if (!target || value.group !== target.group) return false;
+      if (value.agent_id === target.id) return true;
+      if (text(value.agent_id)) return false;
+      const boundary = record(value.worktree_boundary);
+      const repoRoot = text(target.raw.worktree_repo_root) || text(target.raw.git_root);
+      const baseBranch = text(target.raw.worktree_base_branch);
+      return Boolean(repoRoot && target.worktreeBranch && baseBranch && text(boundary.commit_sha))
+        && boundary.status === 'open' && boundary.recorded_by_agent_id === target.id
+        && boundary.repo_root === repoRoot && boundary.branch === target.worktreeBranch && boundary.base_branch === baseBranch;
+    })
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const mergeTaskAvailable = !mergeTaskId || mergeTasks.some(({ id }) => id === mergeTaskId);
   const defaults = record(groups.settings[target?.group ?? '']);
   const cleanupMode = text(defaults.worktree_merge_cleanup) || 'keep';
   const closeAgent = mergeEdits.close ?? ['close', 'close_remove', 'auto_sweep'].includes(cleanupMode);
@@ -64,6 +83,7 @@ export function WorktreeInspector({ agent, responses, onClose, active = true }: 
 
   const mutation = useWorktreeMutation();
   const blocked = mutation.pending || mutation.uncertain;
+  const mergeCompleted = mutation.result.type === 'worktree_merge' && mutation.result.ok === true;
   const removalComplete = mutation.result.type === 'worktree_remove' && mutation.result.ok === true;
   const reads = useWorktreeReads(target?.id ?? '', target?.worktreePath ?? '', target?.worktreeBranch ?? '', active && Boolean(agent) && !blocked && !removalComplete);
   const removal = useWorktreeRemovalReview(removalTarget?.id ?? '', removalTarget?.worktreePath ?? '', active && Boolean(removalTarget && agent?.worktreePath) && !blocked && !removalComplete);
@@ -169,6 +189,13 @@ export function WorktreeInspector({ agent, responses, onClose, active = true }: 
 
       <section className={styles.mergeControls}>
         <p>Cleanup options run only after the merge completes, not when a pull request is created.</p>
+        <label>Merge task<select disabled={blocked} value={mergeTaskId} onChange={(event) => setMergeTaskSelection({ scope: mergeTaskScope, id: event.target.value })}>
+          <option value="">Automatic · one active task</option>
+          {!mergeTaskAvailable ? <option value={mergeTaskId} disabled>{mergeTaskId} · {mergeCompleted ? 'merged' : 'unavailable'}</option> : null}
+          {mergeTasks.map(({ id, value }) => <option key={id} value={id}>{id} · {text(value.task) || 'Untitled task'} · {text(value.lane)}</option>)}
+        </select></label>
+        <small>Select the task whose work is being merged, including completed work. Automatic selection requires exactly one active task; the server checks attribution before merging.</small>
+        {!mergeTaskAvailable && !mergeCompleted ? <p role="alert">The selected task no longer belongs to this worktree. Select a current task before merging.</p> : null}
         <label>Merge message<textarea disabled={blocked} rows={2} value={effectiveMessage} onChange={(event) => setMessage(event.target.value)} placeholder="Commit or pull-request message" /></label>
         <div className={styles.checkGrid}>
           <label className={styles.inlineCheck}><input type="checkbox" disabled={blocked} checked={closeAgent} onChange={(event) => setMergeEdits((current) => ({ ...current, close: event.target.checked }))} />Close agent after merge</label>
@@ -185,7 +212,7 @@ export function WorktreeInspector({ agent, responses, onClose, active = true }: 
         <Button tone="quiet" isDisabled={!reads.ready || blocked} onPress={() => run({ cmd: 'worktree_checkpoint', id: target.id })}>Checkpoint</Button>
         {(stale || conflicts.length) ? <Button tone="quiet" isDisabled={!reads.ready || blocked} onPress={() => run({ cmd: 'worktree_rebase', id: target.id })}>Rebase onto base</Button> : null}
         <Button tone="quiet" onPress={(event) => { if (mutation.reset()) { confirmationReturnFocus.current = event.target instanceof HTMLElement ? event.target : null; setPrReview({ id: target.id, path: target.worktreePath, branch, base }); } }} isDisabled={blocked || !prAvailable}>Create PR</Button>
-        <Button tone="primary" onPress={() => run({ cmd: 'worktree_merge', id: target.id, message: effectiveMessage, close_agent_on_merge: closeAgent, remove_worktree_on_merge: removeAfterMerge, preserve_merge_diff: preserveDiff, clear_context: clearContext, ...(forceDirect ? { force_direct: true } : {}) })} isDisabled={blocked || !preflightCurrent || !mergeClean || Boolean(preflight.error)}>Create PR & merge</Button>
+        <Button tone="primary" onPress={() => run({ cmd: 'worktree_merge', id: target.id, message: effectiveMessage, close_agent_on_merge: closeAgent, remove_worktree_on_merge: removeAfterMerge, preserve_merge_diff: preserveDiff, clear_context: clearContext, ...(mergeTaskId ? { merge_task_id: mergeTaskId } : {}), ...(forceDirect ? { force_direct: true } : {}) })} isDisabled={blocked || !mergeTaskAvailable || !preflightCurrent || !mergeClean || Boolean(preflight.error)}>Create PR & merge</Button>
         <Button tone="quiet" isDisabled={blocked} onPress={onClose}>Close</Button>
       </footer>
     </div>

@@ -309,3 +309,53 @@ it('warns about discarded dirty and ignored files and retains the actual branch 
     expect(view.onClose).not.toHaveBeenCalled(); expect(requests.writes()).toHaveLength(1);
   } finally { frames.worktree_remove_preview = prior; }
 });
+
+it('submits an explicitly selected completed merge task and retains it through reconnect', async () => {
+  const requests = mutationApi(); const view = setup();
+  const tasks = { done: { id: 'done', task: 'Completed implementation', lane: 'Done', group: 'qa-group', agent_id: 'qa' }, peer: { id: 'peer', task: 'Peer work', lane: 'Done', group: 'qa-group', agent_id: 'other' } };
+  await act(() => view.store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, board_tasks: tasks })));
+  await screen.findByRole('region'); const selection = screen.getByRole('combobox', { name: 'Merge task' });
+  expect(within(selection).getByRole('option', { name: /Completed implementation/ })).toBeInTheDocument(); expect(within(selection).queryByRole('option', { name: /Peer work/ })).not.toBeInTheDocument();
+  fireEvent.change(selection, { target: { value: 'done' } }); selection.focus();
+  act(() => { view.store.dispatch(connectionActions.connected({ at: 2, reconnect: true })); view.store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, board_tasks: { ...tasks, done: { ...tasks.done, task: 'Renamed implementation' } } })); view.store.dispatch(connectionActions.snapshotAccepted(compactStateFixture)); });
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Create PR & merge' })).toBeEnabled()); expect(selection).toHaveValue('done'); expect(selection).toHaveFocus();
+  fireEvent.click(screen.getByRole('button', { name: 'Create PR & merge' })); expect(requests.writes()[0]).toMatchObject({ id: 'qa', merge_task_id: 'done' }); await screen.findByText('Refused'); expect(selection).toHaveValue('done');
+});
+
+it('blocks a selected merge task after reassignment without silently selecting another task', async () => {
+  const requests = mutationApi(); const view = setup(); const task = { id: 'done', task: 'Completed implementation', lane: 'Done', group: 'qa-group', agent_id: 'qa' };
+  await act(() => view.store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, board_tasks: { done: task } })));
+  await screen.findByRole('region'); const selection = screen.getByRole('combobox', { name: 'Merge task' }); fireEvent.change(selection, { target: { value: 'done' } });
+  await act(() => view.store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, board_tasks: { done: { ...task, agent_id: 'other' } } })));
+  expect(selection).toHaveValue('done'); expect(screen.getByText('The selected task no longer belongs to this worktree. Select a current task before merging.')).toBeVisible(); expect(screen.getByRole('button', { name: 'Create PR & merge' })).toBeDisabled(); expect(requests.writes()).toHaveLength(0);
+  fireEvent.change(selection, { target: { value: '' } }); expect(screen.getByRole('button', { name: 'Create PR & merge' })).toBeEnabled();
+});
+
+it('keeps explicit merge attribution fixed during an uncertain retry', async () => {
+  const requests = mutationApi(); const view = setup();
+  await act(() => view.store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, board_tasks: { done: { id: 'done', task: 'Completed implementation', lane: 'Done', group: 'qa-group', agent_id: 'qa' } } })));
+  await screen.findByRole('region'); const selection = screen.getByRole('combobox', { name: 'Merge task' }); fireEvent.change(selection, { target: { value: 'done' } });
+  requests.outcome(() => Promise.reject(new Error('Lost reply'))); fireEvent.click(screen.getByRole('button', { name: 'Create PR & merge' })); await screen.findByRole('button', { name: 'Retry operation' }); expect(selection).toBeDisabled();
+  requests.outcome(() => Promise.resolve({ ok: true, data: { type: 'worktree_merge', id: 'qa', ok: false, error: 'Refused' } })); fireEvent.click(screen.getByRole('button', { name: 'Retry operation' })); await screen.findByText('Refused'); expect(requests.writes()[1]).toEqual(requests.writes()[0]); expect(requests.writes()[1]).toMatchObject({ merge_task_id: 'done' });
+});
+
+
+it('retains a completed merge selection without a reassignment warning after successful unlink', async () => {
+  const requests = mutationApi(); const view = setup(); const task = { id: 'done', task: 'Completed implementation', lane: 'Done', group: 'qa-group', agent_id: 'qa' };
+  await act(() => view.store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, board_tasks: { done: task } })));
+  await screen.findByRole('region'); fireEvent.change(screen.getByRole('combobox', { name: 'Merge task' }), { target: { value: 'done' } });
+  requests.outcome(() => Promise.resolve({ ok: true, data: { type: 'worktree_merge', id: 'qa', ok: true } })); fireEvent.click(screen.getByRole('button', { name: 'Create PR & merge' })); await screen.findByText('Merge completed.');
+  await act(() => view.store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, board_tasks: { done: { ...task, agent_id: '' } } })));
+  expect(screen.getByRole('combobox', { name: 'Merge task' })).toHaveValue('done'); expect(screen.queryByText('The selected task no longer belongs to this worktree. Select a current task before merging.')).not.toBeInTheDocument();
+});
+
+it('offers released tasks only with a matching open boundary recorded by this worker', async () => {
+  const requests = mutationApi(); const view = setup();
+  const boundary = { status: 'open', recorded_by_agent_id: 'qa', repo_root: '/repo', branch: 'qa', base_branch: 'main', commit_sha: 'head' };
+  const task = { id: 'released', task: 'Reported work', lane: 'In Progress', group: 'qa-group', agent_id: '', worktree_boundary: boundary };
+  const excluded = Object.fromEntries(Object.entries({ wrongWorker: { recorded_by_agent_id: 'peer' }, wrongBranch: { branch: 'peer' }, wrongRepo: { repo_root: '/peer' }, wrongBase: { base_branch: 'peer' }, merged: { status: 'merged' }, noCommit: { commit_sha: '' } }).map(([id, change]) => [id, { ...task, id, task: id, worktree_boundary: { ...boundary, ...change } }]));
+  await act(() => view.store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, board_tasks: { released: task, ...excluded, reassigned: { ...task, id: 'reassigned', agent_id: 'peer' } } })));
+  view.update({}, true, toAgentViewModel('qa', { ...agent.raw, worktree_repo_root: '/repo', worktree_base_branch: 'main' }));
+  await screen.findByRole('region'); const selection = screen.getByRole('combobox', { name: 'Merge task' }); expect(within(selection).getAllByRole('option')).toHaveLength(2);
+  fireEvent.change(selection, { target: { value: 'released' } }); fireEvent.click(screen.getByRole('button', { name: 'Create PR & merge' })); expect(requests.writes()[0]).toMatchObject({ merge_task_id: 'released' }); await screen.findByText('Refused');
+});

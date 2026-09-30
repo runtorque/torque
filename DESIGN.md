@@ -3833,3 +3833,13 @@ D-217 clarification (2026-09-30): arbitrary map values, including environment va
 - Label the `notifications` switch “Desktop notifications” and explain that it adds batched macOS delivery. Turning it off retains Inbox history and does not disable Inbox recording.
 - The finish, error and attention switches independently control which events produce Inbox entries. Keep these controls editable when desktop delivery is disabled; errors appear as Inbox alerts. Their descriptions explain that desktop delivery follows the separate switch.
 - Preserve normal sparse saves, refused drafts, reconnect focus and daemon-backed values. Do not change the existing backend delivery policy.
+
+
+### D-219 — Select merge task attribution explicitly
+
+- Date: 2026-09-30
+- Scope: Worktree inspector merge controls, P-372; extends P-249.
+- Offer a Merge task selector for tasks assigned to the target worker and unassigned tasks with its matching open worktree boundary, including already-loaded archived records. Show task ID, title and lane. Leave automatic attribution available for the existing exactly-one-active-task backend path; never guess from the newest boundary when multiple tasks exist.
+- Send an explicitly selected task as `merge_task_id`. Preserve selection through ordinary deltas, reconnects and refused operations. Scope the selection to the worker, worktree path and branch so another target cannot inherit it. If the selected task is no longer available/assigned, retain its identity visibly and require a new choice before merging.
+- Freeze the selection during a pending or uncertain operation; exact-key retries retain the submitted attribution. For a released assignment, the server requires an explicit selection plus matching group, recording worker, repository, branch, base branch, open status and a recorded commit. Reassigned tasks remain blocked. Include recording-worker and commit provenance in compact boundary snapshots so the selector can apply the same eligibility rules. Existing automatic attribution and all later merge gates remain unchanged.
+- This deliberately completes a workflow that Classic also cannot express: its merge command omits explicit attribution, and completion releases the live assignment, so reported work can otherwise produce a server refusal with no selectable recovery. Do not reopen completed tasks merely to satisfy automatic attribution.
