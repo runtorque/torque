@@ -3927,3 +3927,12 @@ D-217 clarification (2026-09-30): arbitrary map values, including environment va
 - Explain that removing a group also removes its agents and child terminals, closes their sessions and deletes group settings. Do not claim a protection gate that the actual group-removal handler does not enforce.
 - Submit only the reviewed command and group. A disconnected sender retains the dialog with an explicit unsent error and requires another deliberate confirmation after reconnect; do not replay commands automatically. Closing after a successful send is transport submission, not a claimed server acknowledgement.
 - Label the icon-only workspace menu for assistive technology. Browser acceptance must intercept daemon lifecycle commands so verification cannot stop the live or QA daemon.
+
+
+### D-229 — Preserve the optional note when pushing external status
+
+- Date: 2026-09-30
+- Scope: task Integrations external-status action; P-386.
+- Offer Optional status note next to the existing status action, matching Classic's independent status/note inputs. Trim only outer whitespace at submission and send the exact reviewed task ID, status and note. An empty note remains valid.
+- Keep the status and note as local action drafts through ordinary task updates, reconnect and unsent/refused submissions. These inputs do not mutate the task's persisted description or verification notes. Retain the existing explicit Push action; opening or reconnecting the editor must not send provider writes.
+- Browser tests use a local intercepted provider response; existing backend adapter tests verify note forwarding. Do not contact a hosted ticket provider as part of this acceptance.

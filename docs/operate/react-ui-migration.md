@@ -323,3 +323,8 @@ commercial inference or native window recovery.
 ### Group organization and shell confirmation regression
 
 Run `group-lifecycle-live.spec.ts` against an isolated non-default profile with real local PTYs enabled. It creates, renames, orders and removes only its own groups; the populated removal uses a generic `/bin/cat` Worker and child terminal and verifies both sessions close. It checks keyboard-accessible placement, pointer drop, reload, Cancel/Escape and focus restoration. The companion scenario intercepts daemon restart/stop/supervisor commands at the browser transport and never forwards them. No live daemon lifecycle operation or hosted provider call is required.
+
+
+### External-status note regression
+
+Run `external-status-note-live.spec.ts` against the isolated QA profile. It creates a disposable task linked to a local-only provider identity with Board sync disabled. Browser transport intercepts every external command and supplies local refused/accepted responses, checking note/status trimming, empty note, retained caret/drafts and reconnect without any hosted provider writes. `tests.test_external_tickets` separately verifies the shared adapter receives the note.

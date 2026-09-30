@@ -150,3 +150,24 @@ it('opens activity from a compact card after hydration and normal detail returns
   fireEvent.doubleClick(screen.getByLabelText('Compact task, Backlog'));
   expect(screen.getByRole('tab', { name: 'Execution' })).toHaveAttribute('aria-selected', 'true');
 });
+
+it('preserves the optional external-status note and sends the reviewed trimmed task values', () => {
+  const { send, store } = setup({ provider: 'github', external_id: 'qa/project#1', external_url: 'https://example.invalid/1', status: 'In Progress' });
+  fireEvent.click(screen.getByRole('tab', { name: 'Integrations' }));
+  const status = screen.getByRole('textbox', { name: 'Push status' });
+  const note = screen.getByRole('textbox', { name: 'Optional status note' });
+  expect(status).toHaveValue('In Progress');
+  fireEvent.change(status, { target: { value: ' Done ' } });
+  fireEvent.change(note, { target: { value: ' Checked locally ' } });
+  note.focus(); (note as HTMLInputElement).setSelectionRange(2, 8);
+  act(() => { store.dispatch(projectionActions.taskDetailReceived({ type: 'task_detail', id: 'task', task: { labels: ['updated elsewhere'], status: 'Other status' } })); });
+  expect(note).toHaveValue(' Checked locally '); expect(note).toHaveFocus(); expect((note as HTMLInputElement).selectionStart).toBe(2); expect((note as HTMLInputElement).selectionEnd).toBe(8);
+  send.mockReturnValueOnce(false);
+  fireEvent.click(screen.getByRole('button', { name: 'Push' }));
+  expect(status).toHaveValue(' Done '); expect(note).toHaveValue(' Checked locally ');
+  fireEvent.click(screen.getByRole('button', { name: 'Push' }));
+  expect(send.mock.calls).toEqual([
+    [{ cmd: 'external_push_task_status', id: 'task', status: 'Done', note: 'Checked locally' }],
+    [{ cmd: 'external_push_task_status', id: 'task', status: 'Done', note: 'Checked locally' }],
+  ]);
+});
