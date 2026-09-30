@@ -3979,3 +3979,10 @@ Agent Events merges current panel-event deltas with fetched cell history by stab
 Worker Messages loads task threads whose compact summary names the Worker as assignee or recipient, only while the Messages tab is visible. Explicitly addressed messages remain visible after task reassignment; entries without a recipient belong only to the current assignee. Exclude unrelated recipients. Keep owned message-detail responses local to Activity so hydration cannot overwrite Board edits. Refresh changed relevant summaries and reconnects, retain readable history while loading, reject mismatched or obsolete responses, and expose retry failures through the Activity status. Hidden views and unrelated task changes must not trigger reads.
 
 Use task/index/timestamp identity for inline entries without server IDs, matching Classic's stable append identity. Newer messages may sort first, but focus and expanded state stay on the previously selected message. Explicitly empty summaries and task removal clear their messages.
+
+
+## D-235 — Keep selected Architect conversations current and unique
+
+The selected Architect's read-only peer inbox uses its owned logical-thread response; canonical pair-thread deltas invalidate that response only while Peer chat or Messages is visible and the pair includes the selected Architect. Preserve the accepted response, selected thread, focus and mounted reading state during refresh or failure. Unrelated pairs and hidden views make no reads. Discard responses overtaken by a matching live change, within the existing deadline. An explicit empty inbox is authoritative; use snapshot threads only before an inbox has been accepted.
+
+Architect Messages combines the bounded live agent cache with hydrated peer history by persisted message ID, displaying each ID once and favoring the current live version. Keep peer chat read-only and retain the current logical-thread selection even when another thread becomes more recent.

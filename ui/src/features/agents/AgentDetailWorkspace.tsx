@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { shallowEqual } from 'react-redux';
 import { matchesMcpActivity } from './mcpActivity';
+import { architectPeerThreads as scopedArchitectThreads, architectMessageRows } from './architectMessages';
 import { workerMessageReads, workerMessageRevision, workerMessageRows } from './workerMessages';
 import { useAppSelector } from '../../app/hooks';
 import { Button, StateSurface } from '../../design/primitives';
@@ -199,9 +200,11 @@ export function AgentDetailWorkspace({ active = true, agent, group, responses: i
   };
   const classBaseDir = agentClassBaseDir(agent.raw);
   const classRevision = tab === 'class' ? JSON.stringify([assignment.revision, agent.raw.agent_class_id, agent.raw.agent_class_version, agent.raw.agent_class_assigned_at, agent.raw.effective_agent_class_id, agent.raw.effective_agent_class_version, agent.raw.effective_agent_class_applied_at, agent.sessionId]) : '';
+  const snapshotPeerThreads = scopedArchitectThreads(peerThreads, agent.id);
+  const peerRevision = active && agent.kind === 'architect' && (tab === 'chat' || tab === 'messages') ? JSON.stringify(snapshotPeerThreads) : '';
   const messageReads = tab === 'messages' && agent.kind === 'worker' ? workerMessageReads(tasks, agent.id) : [];
   const readPlan = [...activityReads(tab, agent.id, agent.kind, group, limits, appliedMcp, appliedMcp.anchor, classBaseDir), ...messageReads];
-  const reads = useActivityReads(readPlan, active && !(tab === 'class' && assignment.pending), tab === 'events' ? text(agent.raw.last_event_at) : tab === 'messages' && agent.kind === 'worker' ? workerMessageRevision(tasks, messageReads) : classRevision);
+  const reads = useActivityReads(readPlan, active && !(tab === 'class' && assignment.pending), tab === 'events' ? text(agent.raw.last_event_at) : tab === 'messages' && agent.kind === 'worker' ? workerMessageRevision(tasks, messageReads) : peerRevision || classRevision);
   const requestSection = (section: RemoteSection, limit: number) => {
     setLimitState({ agentId: agent.id, values: { ...limits, [section]: limit } });
   };
@@ -249,20 +252,16 @@ export function AgentDetailWorkspace({ active = true, agent, group, responses: i
   const ownedTasks = allTasks.filter((task) => agent.kind === 'worker' ? text(task.agent_id) === agent.id : text(task.assigned_engineer_id) === agent.id).sort((a, b) => itemTimestamp(b) - itemTimestamp(a));
   const queuedTasks = ownedTasks.filter((task) => ['Backlog', 'To Do', 'In Progress'].includes(text(task.lane)));
   const workerMessages = workerMessageRows(tasks, reads.taskDetails, agent.id);
-  const snapshotPeerThreads = list(peerThreads).filter((thread) => {
-    const participantIds = Array.isArray(thread.participant_ids) ? thread.participant_ids.map(String) : [];
-    return participantIds.includes(agent.id) || list(thread.messages).some((message) => [message.sender_id, message.recipient_id].some((value) => text(value) === agent.id));
-  });
   const peerInboxFrame = record(responses[`architect_peer_inbox:${agent.id}`]);
   const inboxPeerThreads = list(peerInboxFrame.threads);
-  const architectPeerThreads = (inboxPeerThreads.length ? inboxPeerThreads : snapshotPeerThreads)
+  const architectPeerThreads = (Array.isArray(peerInboxFrame.threads) ? inboxPeerThreads : snapshotPeerThreads)
     .sort((a, b) => Number(b.last_message_at ?? b.last_activity_at ?? 0) - Number(a.last_message_at ?? a.last_activity_at ?? 0));
   const selectedPeerThreadId = peerSelection.agentId === agent.id && architectPeerThreads.some((thread) => text(thread.thread_id, text(thread.id)) === peerSelection.threadId)
     ? peerSelection.threadId
     : text(architectPeerThreads[0]?.thread_id, text(architectPeerThreads[0]?.id));
   const selectedPeerThread = architectPeerThreads.find((thread) => text(thread.thread_id, text(thread.id)) === selectedPeerThreadId) ?? {};
   const selectedPeerMessages = list(selectedPeerThread.messages);
-  const architectMessages = [...list(agent.raw.mcp_messages), ...architectPeerThreads.flatMap((thread) => list(thread.messages))];
+  const architectMessages = architectMessageRows(agent.raw.mcp_messages, architectPeerThreads);
   const messages = (agent.kind === 'worker' ? workerMessages : agent.kind === 'architect' ? architectMessages : list(directMessages)).sort((a, b) => itemTimestamp(b) - itemTimestamp(a));
   const digestSettings = record(rawDigestSettings);
   const digestBufferStats = record(rawDigestBufferStats);

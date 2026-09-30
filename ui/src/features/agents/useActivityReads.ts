@@ -4,6 +4,7 @@ import { projectionActions } from '../../app/store';
 import type { AuxiliaryFrame, UnknownRecord } from '../../protocol';
 import { readCommand } from '../../protocol/http';
 import { validateActivityRead, type ActivityRead } from './activityReads';
+import { architectPeerThreads } from './architectMessages';
 
 function liveReadSources(data: UnknownRecord, request: ActivityRead): unknown[] {
   const bucket = (key: string, target: unknown) => {
@@ -13,6 +14,7 @@ function liveReadSources(data: UnknownRecord, request: ActivityRead): unknown[] 
   if (request.type === 'engineer_journal_snapshot') return [bucket('engineer_journal', request.command.engineer_id), bucket('engineer_worklog', request.command.group)];
   if (request.type === 'architect_journal_entries') return [bucket('architect_journals', request.command.architect_id)];
   if (request.type === 'decisions_snapshot') return [data.decisions];
+  if (request.type === 'architect_peer_inbox') return architectPeerThreads(data.agent_peer_threads, String(request.command.architect_id));
   if (request.type === 'task_detail') return [bucket('board_tasks', request.command.id)];
   return [];
 }
@@ -44,7 +46,7 @@ export function useActivityReads(requests: ActivityRead[], active: boolean, inva
         if (disposed || controller.signal.aborted) return;
         validateActivityRead(frame, request);
         const after = liveReadSources(store.getState().projection.data, request);
-        if (before.every((value, index) => value === after[index])) break;
+        if (before.length === after.length && before.every((value, index) => value === after[index])) break;
       }
       if (request.type === 'task_detail') {
         const id = String(request.command.id);

@@ -1596,3 +1596,8 @@ P-390–P-398 passed final acceptance: `make ui-check` has 117 files / 1,085 tes
 ### Worker Messages and principal lifecycle acceptance
 
 P-399/P-400/D-234 restore compact Worker inline history, recipient scoping after reassignment and stable disclosure identity. Five focused regressions and seven production-browser scenarios pass; the UI gate passes 118 files / 1,090 tests plus lint/typecheck/build verification. Independent Architect/Engineer lifecycle browser acceptance passes 2/2, covering dismiss/rehire and reviewed delete/restore/relaunch with retained identity and unaffected other sessions. Ledger: 400 mapped / 396 implemented or equivalent / no recorded open repairs / four retirements. Phase 4 remains open for the remaining independent behavioral and applicable native evidence audit; see the parity matrix for scope and provenance.
+
+
+### Selected Architect conversation acceptance
+
+P-401/P-402/D-235 restore live selected-pair inbox refresh, authoritative empty results and unique persisted message IDs. The UI gate passes 119 files / 1,094 tests plus lint/typecheck/build verification. Nine adjacent browser scenarios pass, and the new Architect scenario passes after correcting an exact-text locator; the peer content uses read-only fixtures with real daemon/reconnect handling and sends no agent message. Ledger: 402 mapped / 398 implemented or equivalent / no recorded open repairs / four intentional retirements. Browser inventory is 210 tests; the latest complete baseline remains the separately documented 201-case pass. Phase 4 remains open for final independent acceptance reconciliation.
