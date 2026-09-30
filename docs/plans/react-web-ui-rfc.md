@@ -1571,3 +1571,8 @@ Organization audit (2026-09-30): actual UI root/owned sibling ordering, terminal
 ### Organization persistence acceptance checkpoint
 
 P-387/D-230 is accepted: terminal sibling ordering now persists in SQLite and survives daemon hydration and offline CLI reads, while parent IDs remain authoritative. Actual browser acceptance verifies arbitrary root/owned ordering, attach/reparent/detach, cross-group moves, reconnect cancellation and unchanged session identities. Full regression passed 3,291 tests with 82 skips; the UI gate passed 113 files / 1,062 tests. Board density/filter/saved-view/sort/manual-order and group lifecycle acceptance also passed. The granular ledger is 387 mapped / 383 implemented or equivalent / no recorded open repairs / four intentional retirements. This count does not close the independent behavioral inventory, full browser or applicable native acceptance gates; Phase 4 remains open.
+
+
+### Events attention dismissal acceptance
+
+P-388/P-389 and D-231 restore persisted task/agent attention dismissal, newer-alert resurfacing and nonempty attention-message fallback. Historical events remain readable, and dismissal does not resolve the underlying task or clear an agent flag. Focused tests, the 114-file / 1,064-test UI gate, and live dismissal/reconnect acceptance pass. The ledger is 389 mapped / 385 implemented or equivalent / no recorded open repairs / four intentional retirements. Independent behavioral inventory and complete-browser/applicable-native acceptance remain open.

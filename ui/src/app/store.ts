@@ -716,6 +716,7 @@ const selectAuxiliaryResponses = selectRecord('auxiliary_responses');
 // code. The flat projection remains private protocol-compatibility state.
 export const selectRuntime = selectRecord('runtime');
 export const selectMissionDismissals = selectRecord('mission_control_dismissed_cards');
+export const selectEventDismissals = selectRecord('events_dismissed_attention');
 export const selectSupervisorUiState = selectRecord('supervisor_panel_state');
 export const selectAgentsState = createSelector(
   [selectAgentRecords, selectAgentSettings, selectResolvedAgentSettings, selectAgentDigestSettings, selectDigestBufferStats, selectDigestSentEvents, selectEngineerBufferStats, selectEngineerSentEvents],

@@ -3946,3 +3946,11 @@ D-217 clarification (2026-09-30): arbitrary map values, including environment va
 - Treat each terminal's saved parent_id as the relationship authority. Saved ranks may only order valid children of that parent: ignore stale IDs, duplicates, malformed entries and references to another parent's children, and append newly discovered children. Never recreate a missing terminal or reparent it from an ordering record.
 - Capture group and child-order arguments before deferred writes. Offline CLI reads use the same reconciliation as daemon snapshots, so stopped-daemon inspection agrees with the UI.
 - Organization continues to preserve owner IDs. A principal group move takes attached terminals with it and leaves owned workers in their existing groups, matching the shared Classic/backend command contract; returning the principal restores the visible ownership hierarchy.
+
+## D-231 — Dismiss the reviewed Events attention item
+
+Events dismissal belongs to a task or agent attention card, using that item's ID and source timestamp (task creation or agent last event). Historical log rows remain readable and do not offer attention dismissal. React reads the existing persisted dismissal map and hides only the reviewed item version; a newer agent event makes attention visible again. If the source timestamp is unavailable, React sends zero and the existing command handler substitutes server time, matching Classic's current-time fallback.
+
+Dismissal changes presentation only: it does not resolve a task, clear an agent's attention state, or delete event history. The card remains until the server publishes the saved dismissal, so an unsent/refused write does not falsely hide it. Other cards, event filters and selected history remain intact. Task replies and behavior approval keep their existing shared workflows.
+
+An empty error string is not an error message: agent attention falls back to nonempty activity detail, then the explicit ‘Needs attention’ label, matching Classic. Full blocked-event messages remain available in the historical event list.
