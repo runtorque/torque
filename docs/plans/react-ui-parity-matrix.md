@@ -801,12 +801,12 @@ Acceptance for **each field**: hydrate its server value, change it using the lis
 | `collapsed_default` | Group | Enabled/Disabled; Classic-only scope guidance | Active Classic group disclosure default; distinct from React explicit agent-branch disclosure (D-209/D-213). |
 | `agent_env_vars` | Group | Nested named fields | Overrides group variables; exact values reach Worker/Engineer/Architect processes. Removal restores group fallback; empty values remain literal. |
 | `agent_env_file` | Group | Text | Overrides group environment file; saved/reopened paths and clearing-to-group fallback verified in actual launches. |
-| `git_worktree` | Group | Enabled/Disabled | Server value/default |
-| `worktree_base_dir` | Group | Text | directory for worktrees (relative to repo) |
-| `worktree_base_branch` | Group | Text | branch to fork from (empty = current HEAD) |
-| `worktree_merge_squash` | Group | Enabled/Disabled | squash commits when merging to main |
+| `git_worktree` | Group | Worktrees: Enabled/Disabled | Both values save/reopen; enabled launches an isolated checkout, disabled launches in the actual group repository. |
+| `worktree_base_dir` | Group | Text | Saved repository-relative path (including spaces) controls the actual checkout location; clearing restores `.torque/worktrees`. |
+| `worktree_base_branch` | Group | Text | Saved named branch selects its actual commit; clearing uses current HEAD, verified with divergent fixture commits. |
+| `worktree_merge_squash` | Group | Enabled/Disabled | Both values save/reopen and reach creation controls/persisted workers. Squash execution is a separate acceptance gate. |
 | `worktree_merge_preserve_diff` | Group | Enabled/Disabled | save the pre-merge patch on the latest boundary task |
-| `worktree_symlink_gitignored_paths` | Group | Enabled/Disabled | symlink gitignored files/dirs from repo root into worktrees |
+| `worktree_symlink_gitignored_paths` | Group | Enabled/Disabled | Actual ignored file/directory symlinks appear when enabled and remain absent when disabled unless explicitly listed. |
 | `agent_session_resume` | Group | Enabled/Disabled | resume session on relaunch |
 | `agent_idle_timeout` | Group | Number | minutes before flagging agent as stuck (0=disable); min=0, max=60 |
 | `engineer_behavior_requires_user_approval` | Group | Enabled/Disabled | Server value/default |
@@ -837,11 +837,11 @@ Acceptance for **each field**: hydrate its server value, change it using the lis
 | `auto_terminals` | Group | Compatibility-only; no editable control | Preserved in stored profiles; omitted from search, save and reset. Explicit companion terminals remain supported. |
 | `agent_terminal_profile` | Group | Text | Server value/default |
 | `agent_tab_color` | Group | Text | Server value/default |
-| `worktree_auto_checkpoint` | Group | Enabled/Disabled | auto-checkpoint on agent stop |
-| `checkpoint_on_progress` | Group | Enabled/Disabled | auto-checkpoint on torque ai progress/done |
+| `worktree_auto_checkpoint` | Group | Enabled/Disabled | Both values save/reopen and reach creation controls/persisted workers. Actual stop-triggered checkpoints remain a separate acceptance gate. |
+| `checkpoint_on_progress` | Group | Enabled/Disabled | Both values save/reopen and reach creation controls/persisted workers. Actual report-triggered checkpoints remain a separate acceptance gate. |
 | `worktree_merge_instructions` | Group | Compatibility-only · excluded from edit/reset | No current merge-prompt consumer; Classic save also omits it. Preserve stored text; D-213. |
-| `worktree_symlinks` | Group | One value per line | repo-relative paths or glob patterns to symlink from repo root |
-| `worktree_submodules` | Group | One value per line | repo-relative submodule paths to materialize as nested linked worktrees |
+| `worktree_symlinks` | Group | One value per line | Saved explicit path containing spaces creates a real link to the source directory; clearing persists an empty list. Glob/overlap behavior has focused backend coverage. |
+| `worktree_submodules` | Group | One value per line | Saved submodule path materializes a nested linked worktree at the expected commit/shared Git directory; clearing leaves its files unmaterialized. |
 | `guidance_hint_cadence` | Group | Number | 0=every time; otherwise 1st, then every N |
 | `context_default_ttl_days` | Group | Number | Shared Context entry lifetime, clamped to 1..60. |
 | `engineer_hint_snoozes` | Group | Runtime record · read-only in this inventory | Managed by group/agent identity, attention or hint workflows; excluded from reset/save. |
@@ -2500,3 +2500,12 @@ Final acceptance: **33 focused settings/text tests**, full `make ui-check` **112
 Final production browser **2/2 in 27.7 seconds** passed (`/private/tmp/notification-settings-browser-final-20260930.log`). The notification case verifies four fields through real save/reload, sparse retry, focused reconnect, event processing barriers, three persisted notices visible in Inbox and retained history after disabling all event switches. The initial synthetic completion was correctly rejected for an idle agent; the final fixture sends a real local user message and observes Running before completion. This retains the runtime stale-event guard. The adjacent environment scenario verifies the corrected literal-empty hint and all six process launch cases again. Settings/Inbox screenshots and JSON evidence were inspected.
 
 Final test lint/typecheck and documentation contracts pass. Inventory: **169 browser tests / 105 files** (`/private/tmp/notification-settings-browser-inventory-20260930.txt`); the complete browser suite was not rerun. Full backend tests were not repeated because backend/protocol implementation did not change. Native macOS banner display was not exercised; backend tests verify its batching gate. QA port 19076 ended with zero PTYs, only its exact daemon/sidecars were stopped, and the port was released. Counts remain **371 mapped / 363 implemented or equivalent / four open / four intentional retirements**. P-087/P-088/P-089/P-112 and independent acceptance gates remain open; group worktree settings are the next field-level runtime audit.
+
+
+## Worktree creation settings acceptance (2026-09-30)
+
+`settings-worktree-runtime-live.spec.ts` exercises nine existing group fields through React Settings and three real Worker launches in disposable local repositories. It verifies a named base branch distinct from current HEAD, a custom worktree directory containing spaces, explicit directory symlinks, ignored file/directory symlinks, and a selected submodule materialized as a nested linked worktree sharing the source Git directory. Clearing paths/lists restores the default directory/current HEAD and omits nested materialization. Disabling Worktrees launches directly in the group repository.
+
+The test also checks exact sparse writes, a refused save with identical retry, all saved controls after reload, and four text/list drafts retaining their DOM identity, focus and caret through unrelated settings deltas and reconnects. Both values of checkpoint-on-stop, checkpoint-on-progress and squash reach creation controls and persisted workers; this proves propagation, **not actual checkpoint triggers or squash execution**. Those effects and merge cleanup/mode/preserved-diff Settings acceptance remain open.
+
+The corrected browser scenario passed in **17.6 seconds** (`/private/tmp/worktree-settings-browser-controls-20260930.log`). The first attempt used the wrong test locator (`Git worktree` instead of the actual primary `Worktrees` control); a second fixture run was stopped to correct its `on`/`off` option values. No production behavior changed or acceptance assertion was removed. The resulting screenshot and JSON evidence were inspected. All **105 focused backend tests** passed across worktree lifecycle, Git ignore handling and nested submodules (`/private/tmp/worktree-settings-backend-20260930.log`). Final validation passed `make ui-check`: lint, typecheck, **112 files / 1,019 tests**, production build and build verification (`/private/tmp/worktree-settings-ui-check-20260930.log`). Both final browser scenarios passed in **24.2 seconds**, including the adjacent real merge/review workflow (`/private/tmp/worktree-settings-browser-final-20260930.log`). Documentation contracts checked 72 Markdown files and `git diff --check` passed. Browser inventory is **170 tests / 106 files**; the complete browser suite and full backend suite were not rerun. QA ended with zero PTY sessions and only its exact disposable daemon/sidecars were stopped; port 19077 was released. No new design decision or production implementation change was needed. Counts remain **371 mapped / 363 implemented or equivalent / four open / four intentional retirements**; broad Settings, lazy/reconnect and independent completion gates remain open.
