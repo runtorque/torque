@@ -3889,3 +3889,12 @@ D-217 clarification (2026-09-30): arbitrary map values, including environment va
 - Start the general New task dialog at Group default. Send an empty lane until the operator chooses a lane, so the existing server resolves the saved group default and its normal fallback. Classic's general task modal follows this contract.
 - Keep explicit lane selection stable across snapshots, reconnect and refused creation. Inline creation within a Board lane continues to submit that lane explicitly. Initiative task creation continues to inherit the group default.
 - Keep label/action inheritance and explicit overrides under the existing backend contract. This repairs the general dialog's unintended first-lane override; no backend mutation or default-resolution semantics change.
+
+
+### D-225 — Offer launch-time worktree overrides only for Workers
+
+- Date: 2026-09-30
+- Scope: New Worker/Engineer/Architect and P-379.
+- Show and submit launch-time worktree controls only for Workers. Engineer creation forces a shared directory; Architect creation follows the daemon's internal worktree policy. Their handlers do not honor these creation-form overrides, and Classic principal settings dialogs do not offer them.
+- Keep a Worker's edited worktree name/base/checkpoint options when switching kinds and back, but do not submit those hidden values for a principal. Do not promise a worktree override in the general creation description.
+- Preserve the explicit post-launch Worktree Create flow for both principal kinds, including review of conversation loss, cancellation without mutation, and confirmed creation/relaunch. Removing ignored launch inputs does not retire that supported workflow or change backend policy.

@@ -32,6 +32,39 @@ describe('agent creation', () => {
     await waitFor(() => expect(close).toHaveBeenCalledOnce()); expect(created).toHaveBeenCalledWith('created');
     expect(calls.find((command) => command.cmd !== 'render_template')).toMatchObject({ cmd: `add_${kind}`, group: 'Foundation', name: 'New target', idempotency_key: expect.any(String) as unknown });
   });
+  it.each(['engineer', 'architect'] as const)('omits unsupported worktree controls and hidden worker drafts when creating %s', async (kind) => {
+    const calls: TorqueCommand[] = [];
+    vi.stubGlobal('fetch', mockFetch((_url, options) => {
+      const command = commandFrom(options); calls.push(command);
+      return Promise.resolve(command.cmd === 'render_template' ? rendered('', { worktree: true, worktree_base_branch: 'main' }) : response({ type: 'ok', id: 'principal', name: 'Principal', kind, group: 'Foundation' }));
+    }));
+    const { close } = setup('worker'); await ready();
+    expect(screen.getByLabelText('Create an isolated worktree')).toBeChecked();
+    fireEvent.change(screen.getByLabelText('Worktree name'), { target: { value: 'worker-only' } });
+    fireEvent.change(screen.getByLabelText('Base directory'), { target: { value: '/worker/worktrees' } });
+    fireEvent.change(screen.getByLabelText('Agent kind'), { target: { value: kind } }); await ready();
+    expect(screen.queryByLabelText('Create an isolated worktree')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Base directory')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Checkpoint on stop')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Principal' } });
+    fireEvent.click(screen.getByRole('button', { name: `Create ${kind}` }));
+    await waitFor(() => expect(close).toHaveBeenCalledOnce());
+    const submitted = calls.find((call) => call.cmd === `add_${kind}`)!;
+    expect(submitted).toBeDefined();
+    for (const key of ['worktree', 'worktree_base_dir', 'worktree_base_branch', 'worktree_name', 'worktree_auto_checkpoint', 'checkpoint_on_progress', 'worktree_merge_squash']) expect(submitted).not.toHaveProperty(key);
+  });
+  it('retains worker worktree edits while another creation kind hides them', async () => {
+    vi.stubGlobal('fetch', mockFetch(() => Promise.resolve(rendered('', { worktree: true, worktree_base_branch: 'main' }))));
+    setup('worker'); await ready();
+    fireEvent.change(screen.getByLabelText('Worktree name'), { target: { value: 'retained-worker-tree' } });
+    fireEvent.change(screen.getByLabelText('Base branch'), { target: { value: 'release' } });
+    fireEvent.change(screen.getByLabelText('Agent kind'), { target: { value: 'engineer' } });
+    expect(screen.queryByLabelText('Worktree name')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Agent kind'), { target: { value: 'worker' } }); await ready();
+    expect(screen.getByLabelText('Create an isolated worktree')).toBeChecked();
+    expect(screen.getByLabelText('Worktree name')).toHaveValue('retained-worker-tree');
+    expect(screen.getByLabelText('Base branch')).toHaveValue('release');
+  });
   it('guards pending dismissal and repeats, retains refused drafts and reuses the same retry identity', async () => {
     const calls: TorqueCommand[] = []; let release: (value: UnknownRecord) => void = () => { throw new Error('not pending'); };
     vi.stubGlobal('fetch', mockFetch((_url: string, options: RequestInit) => {

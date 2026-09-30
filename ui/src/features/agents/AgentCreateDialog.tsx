@@ -246,14 +246,16 @@ export function AgentCreateDialog({
     const env = parseEnvironment(environment);
     if (Object.keys(env).length) payload.env_vars = env;
     if (kind === 'engineer') payload.specializations = csv(specializations);
-    payload.worktree = worktree;
-    if (worktree) {
-      if (worktreeBaseDir.trim()) payload.worktree_base_dir = worktreeBaseDir.trim();
-      if (worktreeBaseBranch.trim()) payload.worktree_base_branch = worktreeBaseBranch.trim();
-      if (worktreeName.trim()) payload.worktree_name = worktreeName.trim();
-      payload.worktree_auto_checkpoint = autoCheckpoint;
-      payload.checkpoint_on_progress = checkpointOnProgress;
-      payload.worktree_merge_squash = mergeSquash;
+    if (kind === 'worker') {
+      payload.worktree = worktree;
+      if (worktree) {
+        if (worktreeBaseDir.trim()) payload.worktree_base_dir = worktreeBaseDir.trim();
+        if (worktreeBaseBranch.trim()) payload.worktree_base_branch = worktreeBaseBranch.trim();
+        if (worktreeName.trim()) payload.worktree_name = worktreeName.trim();
+        payload.worktree_auto_checkpoint = autoCheckpoint;
+        payload.checkpoint_on_progress = checkpointOnProgress;
+        payload.worktree_merge_squash = mergeSquash;
+      }
     }
     create(payload);
   };
@@ -261,7 +263,7 @@ export function AgentCreateDialog({
   const principal = kind === 'architect' || kind === 'engineer';
   return <ModalDialog
     title={`New ${kind}`}
-    description={`Create in ${group}. Launch and worktree values override the group defaults.`}
+    description={`Create in ${group}. Launch values override the group defaults.`}
     size="large"
     isOpen={open}
     onOpenChange={(value) => { if (!value) requestClose(); }}
@@ -333,7 +335,7 @@ export function AgentCreateDialog({
         <label>Custom instructions<textarea value={customInstructions} onChange={(event) => setCustomInstructions(event.target.value)} rows={5} /></label>
       </section> : null}
 
-      {kind !== 'terminal' && !(kind === 'engineer' && hiringArchitectId) ? <section>
+      {kind === 'worker' ? <section>
         <h3>Worktree</h3>
         <label className={styles.inlineCheck}><input type="checkbox" checked={worktree} onChange={(event) => setWorktree(event.target.checked)} />Create an isolated worktree</label>
         {worktree ? <>
