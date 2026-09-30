@@ -790,7 +790,7 @@ describe('workspace shell', () => {
       }));
       appStore.dispatch(projectionActions.auxiliaryResourceReceived({
         type: 'mcp_calls', cell_id: 'agent-1', agent_id: 'agent-1',
-        calls: [{ cursor: 'call-1', tool_name: 'mcp__torque__task_progress', appended_at: 101, success: true, duration_ms: 12 }],
+        calls: [{ cursor: 1, cell_id: 'agent-1', hook_event_name: 'PostToolUse', tool_name: 'mcp__torque__task_progress', appended_at: Date.now() / 1000, success: true, duration_ms: 12 }],
       }));
       appStore.dispatch(projectionActions.auxiliaryResourceReceived({
         type: 'agent_history_detail',

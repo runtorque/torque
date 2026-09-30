@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
+import { shallowEqual } from 'react-redux';
+import { matchesMcpActivity } from './mcpActivity';
+import { useAppSelector } from '../../app/hooks';
 import { Button, StateSurface } from '../../design/primitives';
 import type { CommandSender } from '../board/BoardPanel';
 import type { AgentViewModel } from './model';
@@ -108,15 +111,16 @@ interface ProgressiveProps<T> {
   renderItem: (item: T, index: number) => ReactNode;
   requestLimit?: number;
   requestMax?: number;
+  remoteCount?: number;
   onRequestMore?: (limit: number) => void;
 }
-function ProgressiveItems<T>({ items, sectionKey, renderItem, requestLimit, requestMax, onRequestMore }: ProgressiveProps<T>) {
+function ProgressiveItems<T>({ items, sectionKey, renderItem, requestLimit, requestMax, remoteCount, onRequestMore }: ProgressiveProps<T>) {
   const [progress, setProgress] = useState({ sectionKey, visible: PAGE_SIZE });
   const tailRef = useRef<HTMLButtonElement>(null);
   const visible = progress.sectionKey === sectionKey ? progress.visible : PAGE_SIZE;
 
   const hasLocal = visible < items.length;
-  const hasRemote = Boolean(onRequestMore && requestLimit && requestLimit < (requestMax ?? requestLimit) && items.length >= requestLimit);
+  const hasRemote = Boolean(onRequestMore && requestLimit && requestLimit < (requestMax ?? requestLimit) && (remoteCount ?? items.length) >= requestLimit);
   const hasMore = hasLocal || hasRemote;
   const loadMore = () => {
     if (hasLocal) {
@@ -194,7 +198,8 @@ export function AgentDetailWorkspace({ active = true, agent, group, responses: i
   };
   const classBaseDir = agentClassBaseDir(agent.raw);
   const classRevision = tab === 'class' ? JSON.stringify([assignment.revision, agent.raw.agent_class_id, agent.raw.agent_class_version, agent.raw.agent_class_assigned_at, agent.raw.effective_agent_class_id, agent.raw.effective_agent_class_version, agent.raw.effective_agent_class_applied_at, agent.sessionId]) : '';
-  const reads = useActivityReads(activityReads(tab, agent.id, agent.kind, group, limits, appliedMcp, appliedMcp.anchor, classBaseDir), active && !(tab === 'class' && assignment.pending), classRevision);
+  const readPlan = activityReads(tab, agent.id, agent.kind, group, limits, appliedMcp, appliedMcp.anchor, classBaseDir);
+  const reads = useActivityReads(readPlan, active && !(tab === 'class' && assignment.pending), tab === 'events' ? text(agent.raw.last_event_at) : classRevision);
   const requestSection = (section: RemoteSection, limit: number) => {
     setLimitState({ agentId: agent.id, values: { ...limits, [section]: limit } });
   };
@@ -204,8 +209,12 @@ export function AgentDetailWorkspace({ active = true, agent, group, responses: i
   };
 
 
-  const events = list(record(responses[`cell_events:${agent.id}`]).events);
-  const calls = list(responseFor(responses, 'mcp_calls', agent.id).calls ?? responseFor(responses, 'mcp_calls', agent.id).events);
+  const liveEvents = useAppSelector((state) => active && tab === 'events' ? record(state.projection.data.cell_events)[agent.id] : undefined);
+  const liveCalls = useAppSelector((state) => active && tab === 'mcp' ? record(state.projection.data.mcp_calls)[agent.id] : undefined);
+  const events = list(liveEvents ?? record(responses[`cell_events:${agent.id}`]).events);
+  const mcpFrame = responseFor(responses, 'mcp_calls', agent.id);
+  const mcpRemoteCount = !reads.pending && mcpFrame._activity_query_key === JSON.stringify(readPlan.find((request) => request.type === 'mcp_calls')?.command) ? list(mcpFrame.calls ?? mcpFrame.events).length : 0;
+  const calls = list(liveCalls ?? mcpFrame.calls ?? mcpFrame.events).filter((call) => matchesMcpActivity(call, agent.id, appliedMcp, appliedMcp.anchor));
   const historyFrame = responseFor(responses, 'agent_history_detail', agent.id);
   const historyRecord = record(historyFrame.record);
   const historyTasks = list(historyFrame.tasks);
@@ -216,21 +225,27 @@ export function AgentDetailWorkspace({ active = true, agent, group, responses: i
   const classes = useMemo(() => classOptions(availableClasses).filter((item) => !item.kind || item.kind === agent.kind), [agent.kind, availableClasses]);
   const selectedClass = classes.find((item) => item.id === selectedClassId)?.raw ?? {};
   const selectedClassIssue = selectedClassId ? classes.some((item) => item.id === selectedClassId) ? creationClassDisabledReason(selectedClass, agent.kind) : 'The selected Agent Class is unavailable in this project.' : '';
-  const architectJournal = list(record(responses[`architect_journal_entries:${agent.id}`]).entries);
+  const liveArchitectJournal = useAppSelector((state) => active && tab === 'journal' && agent.kind === 'architect' ? record(state.projection.data.architect_journals)[agent.id] : undefined);
+  const architectJournal = list(liveArchitectJournal ?? record(responses[`architect_journal_entries:${agent.id}`]).entries);
   const engineerFrame = record(responses[`engineer_journal_snapshot:${group}`]);
-  const engineerJournal = list(record(engineerFrame.engineer_journal)[agent.id]);
-  const engineerWorklog = list(record(engineerFrame.engineer_worklog)[group]).filter((entry) => !text(entry.engineer_id) || text(entry.engineer_id) === agent.id);
-  const engineerSettings = record(responseFor(responses, 'group_settings', group).engineer_settings);
+  const liveJournal = useAppSelector((state) => active && tab === 'journal' && agent.kind === 'engineer' ? record(state.projection.data.engineer_journal)[agent.id] : undefined);
+  const liveWorklog = useAppSelector((state) => active && (tab === 'journal' || tab === 'worklog') && agent.kind === 'engineer' ? record(state.projection.data.engineer_worklog)[group] : undefined);
+  const liveEngineerSettings = useAppSelector((state) => active && ['journal', 'events', 'worklog'].includes(tab) && agent.kind === 'engineer' ? record(state.projection.data.engineer_settings)[group] : undefined);
+  const engineerJournal = list(liveJournal ?? record(engineerFrame.engineer_journal)[agent.id]);
+  const engineerSettings = record(liveEngineerSettings ?? responseFor(responses, 'group_settings', group).engineer_settings);
+  const engineerWorklog = list(liveWorklog ?? record(engineerFrame.engineer_worklog)[group])
+    .filter((entry) => !bool(engineerSettings.restrict_to_created_agents) || bool(entry.agent_owned))
+    .sort((a, b) => Number(b.started_at ?? 0) - Number(a.started_at ?? 0) || Number(b.id ?? 0) - Number(a.id ?? 0));
   const sessionMap = record(responseFor(responses, 'engineer_session_map', group).session_map);
   const journal = agent.kind === 'architect' ? architectJournal : engineerJournal;
-  const decisions = list(record(responses['decisions_snapshot:_'] ?? responses['decisions_snapshot:latest']).decisions)
+  const liveDecisions = useAppSelector((state) => active && tab === 'decisions' && agent.kind === 'architect' && state.projection.data.decisions !== undefined ? list(state.projection.data.decisions).filter((decision) => decision.architect_id === agent.id) : undefined, shallowEqual);
+  const decisions = (liveDecisions ?? list(record(responses['decisions_snapshot:_'] ?? responses['decisions_snapshot:latest']).decisions))
     .filter((decision) => text(decision.architect_id) === agent.id).sort((a, b) => itemTimestamp(b) - itemTimestamp(a));
   const archivedCount = decisions.filter((decision) => decision.archived === true).length;
   const visibleDecisions = decisions.filter((decision) => showArchived || decision.archived !== true);
   const allTasks: Record<string, unknown>[] = Object.entries(tasks).map(([id, value]) => ({ id, ...record(value) }));
   const ownedTasks = allTasks.filter((task) => agent.kind === 'worker' ? text(task.agent_id) === agent.id : text(task.assigned_engineer_id) === agent.id).sort((a, b) => itemTimestamp(b) - itemTimestamp(a));
   const queuedTasks = ownedTasks.filter((task) => ['Backlog', 'To Do', 'In Progress'].includes(text(task.lane)));
-  const completedTasks = ownedTasks.filter((task) => text(task.lane) === 'Done' || ['complete', 'completed', 'merged'].includes(text(task.status).toLowerCase()));
   const workerMessages = ownedTasks.flatMap((task) => list(task.messages_thread).filter((message) => !text(message.recipient_agent_id) || text(message.recipient_agent_id) === agent.id).map((message) => ({ ...message, task_id: task.id })));
   const snapshotPeerThreads = list(peerThreads).filter((thread) => {
     const participantIds = Array.isArray(thread.participant_ids) ? thread.participant_ids.map(String) : [];
@@ -285,9 +300,18 @@ export function AgentDetailWorkspace({ active = true, agent, group, responses: i
         return <FeedItem key={text(message.id, String(index))} title={text(message.action, text(message.sender_kind, text(message.role, 'message'))).replaceAll('_', ' ')} time={message.timestamp ?? message.created_at} preview={body} footer={<><span>{text(message.task_id)}</span><span>{text(message.direction)}</span></>}><p>{body}</p></FeedItem>;
       }} /> : <Empty title="No messages yet" description={agent.kind === 'worker' ? 'Inline Engineer messages attached to this Worker’s tasks appear here.' : 'Agent coordination messages appear here.'} />}</section> : null}
       {tab === 'queued' ? <TaskRows rows={queuedTasks} empty="No queued tasks" note="Queued tasks" sectionKey={`${agent.id}-queued`} /> : null}
-      {tab === 'worklog' ? <TaskRows rows={agent.kind === 'engineer' ? completedTasks : ownedTasks} empty={agent.kind === 'engineer' ? 'No completed tasks' : 'No task history'} note={agent.kind === 'engineer' ? 'Completed work' : 'Task history'} sectionKey={`${agent.id}-worklog`} /> : null}
+      {tab === 'worklog' ? agent.kind === 'engineer' ? <section className={styles.agentTaskPanel} aria-label="Completed deliveries">
+        <header><div><h3>Completed work</h3><p>{engineerWorklog.length} recorded deliveries</p></div></header>
+        <p>{bool(engineerSettings.restrict_to_created_agents) ? 'Work sent to Engineer-created agents in this group.' : 'Recent work dispatched in this group.'}</p>
+        {engineerWorklog.length ? <ProgressiveItems items={engineerWorklog} sectionKey={`${agent.id}-deliveries`} renderItem={(entry, index) => {
+          const task = record(tasks[text(entry.task_id)]);
+          return <FeedItem key={text(entry.id, String(index))} title={text(task.task, text(entry.task_title, text(entry.task_id, 'Task')))} badge={text(task.lane, 'Not on board')}>
+            <small>{text(entry.task_id)}</small><p>{text(entry.agent_name, text(entry.agent_slug, text(entry.agent_id, 'Agent')))}</p><p>{text(task.status)}</p><time>Dispatched {timestamp(entry.started_at)}</time>
+          </FeedItem>;
+        }} /> : <Empty title="No completed tasks" description="Recorded deliveries remain available here after tasks leave the Board." />}
+      </section> : <TaskRows rows={ownedTasks} empty="No task history" note="Task history" sectionKey={`${agent.id}-worklog`} /> : null}
 
-      {tab === 'mcp' ? <section className={styles.inspectorMcp} aria-label="MCP activity"><form onSubmit={(event) => { event.preventDefault(); setAppliedMcp({ tool: toolFilter, outcome, range, anchor: Date.now() / 1000 }); requestSection('mcp', PAGE_SIZE); }}><label>Tool contains<input value={toolFilter} onChange={(event) => setToolFilter(event.target.value)} placeholder="task_progress" /></label><label>Outcome<select value={outcome} onChange={(event) => setOutcome(event.target.value)}><option value="all">All</option><option value="success">Success</option><option value="error">Error</option></select></label><label>Range<select value={range} onChange={(event) => setRange(event.target.value)}><option value="1h">1 hour</option><option value="6h">6 hours</option><option value="24h">24 hours</option><option value="all">All retained</option></select></label><Button type="submit">Apply</Button></form><div className={styles.inspectorFeed}>{calls.length ? <ProgressiveItems items={calls} sectionKey={`${agent.id}-mcp-${appliedMcp.tool}-${appliedMcp.outcome}-${appliedMcp.range}`} {...progressive('mcp')} renderItem={(call, index) => <details key={text(call.cursor, text(call.idempotency_key, String(index)))}><summary><span className={bool(call.success) ? styles.callSuccess : styles.callError}>{bool(call.success) ? '✓' : '!'}</span><strong>{text(call.tool_name, 'MCP call')}</strong><time>{timestamp(call.appended_at ?? call.timestamp)}</time></summary><dl><div><dt>Duration</dt><dd>{text(call.duration_ms, '—')} ms</dd></div><div><dt>Hook</dt><dd>{text(call.hook_event_name, '—')}</dd></div><div><dt>Session</dt><dd>{text(call.session_id, '—')}</dd></div></dl><h4>Arguments</h4><pre>{json(call.args ?? call.arguments ?? call.args_summary)}</pre><h4>Result</h4><pre>{json(call.result ?? call.result_summary ?? call.error)}</pre></details>} /> : <Empty title="No matching MCP calls" description="Adjust the tool, outcome, or time filters and apply again." />}</div></section> : null}
+      {tab === 'mcp' ? <section className={styles.inspectorMcp} aria-label="MCP activity"><form onSubmit={(event) => { event.preventDefault(); setAppliedMcp({ tool: toolFilter, outcome, range, anchor: Date.now() / 1000 }); requestSection('mcp', PAGE_SIZE); }}><label>Tool contains<input value={toolFilter} onChange={(event) => setToolFilter(event.target.value)} placeholder="task_progress" /></label><label>Outcome<select value={outcome} onChange={(event) => setOutcome(event.target.value)}><option value="all">All</option><option value="success">Success</option><option value="error">Error</option></select></label><label>Range<select value={range} onChange={(event) => setRange(event.target.value)}><option value="1h">1 hour</option><option value="6h">6 hours</option><option value="24h">24 hours</option><option value="all">All retained</option></select></label><Button type="submit">Apply</Button></form><div className={styles.inspectorFeed}>{calls.length || (limits.mcp < REMOTE_MAX.mcp && mcpRemoteCount >= limits.mcp) ? <ProgressiveItems items={calls} sectionKey={`${agent.id}-mcp-${appliedMcp.tool}-${appliedMcp.outcome}-${appliedMcp.range}`} {...progressive('mcp')} remoteCount={mcpRemoteCount} renderItem={(call, index) => <details key={text(call.cursor, text(call.idempotency_key, String(index)))}><summary><span className={bool(call.success) ? styles.callSuccess : styles.callError}>{bool(call.success) ? '✓' : '!'}</span><strong>{text(call.tool_name, 'MCP call')}</strong><time>{timestamp(call.appended_at ?? call.timestamp)}</time></summary><dl><div><dt>Duration</dt><dd>{text(call.duration_ms, '—')} ms</dd></div><div><dt>Hook</dt><dd>{text(call.hook_event_name, '—')}</dd></div><div><dt>Session</dt><dd>{text(call.session_id, '—')}</dd></div></dl><h4>Arguments</h4><pre>{json(call.args ?? call.arguments ?? call.args_summary)}</pre><h4>Result</h4><pre>{json(call.result ?? call.result_summary ?? call.error)}</pre></details>} /> : <Empty title="No matching MCP calls" description="Adjust the tool, outcome, or time filters and apply again." />}</div></section> : null}
 
       {tab === 'history' ? <section className={styles.inspectorHistory} aria-label="Agent history">{Object.keys(historyRecord).length ? <><dl className={styles.inspectorFacts}><div><dt>Status</dt><dd>{text(historyRecord.status, agent.status)}</dd></div><div><dt>Started</dt><dd>{timestamp(historyRecord.created_at ?? historyRecord.started_at)}</dd></div><div><dt>Finished</dt><dd>{timestamp(historyRecord.removed_at ?? historyRecord.completed_at)}</dd></div><div><dt>Provider</dt><dd>{text(historyRecord.provider, agent.provider || '—')}</dd></div><div><dt>Model</dt><dd>{text(historyRecord.model, '—')}</dd></div><div><dt>Tokens</dt><dd>{text(historyRecord.total_tokens ?? historyRecord.token_count, '—')}</dd></div><div><dt>Branch</dt><dd>{text(historyRecord.worktree_branch ?? historyRecord.branch, agent.worktreeBranch || '—')}</dd></div><div><dt>Outcome</dt><dd>{text(historyRecord.outcome, '—')}</dd></div></dl><div className={styles.historyColumns}><section><h3>Tasks <span>{historyTasks.length}</span></h3>{historyTasks.length ? <ProgressiveItems items={historyTasks} sectionKey={`${agent.id}-history-tasks`} renderItem={(task, index) => <FeedItem key={text(task.task_id, text(task.id, String(index)))} title={text(task.task, text(task.title, text(task.task_id, 'Task')))} badge={text(task.lane, text(task.status))}><p>{text(task.result, text(task.summary))}</p></FeedItem>} /> : <p>No recorded tasks.</p>}</section><section><h3>Messages <span>{historyMessages.length}</span></h3>{historyMessages.length ? <ProgressiveItems items={historyMessages} sectionKey={`${agent.id}-history-messages`} {...progressive('history')} renderItem={(message, index) => {
         const body = text(message.message, text(message.content, text(message.text)));

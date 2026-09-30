@@ -3954,3 +3954,21 @@ Events dismissal belongs to a task or agent attention card, using that item's ID
 Dismissal changes presentation only: it does not resolve a task, clear an agent's attention state, or delete event history. The card remains until the server publishes the saved dismissal, so an unsent/refused write does not falsely hide it. Other cards, event filters and selected history remain intact. Task replies and behavior approval keep their existing shared workflows.
 
 An empty error string is not an error message: agent attention falls back to nonempty activity detail, then the explicit ‘Needs attention’ label, matching Classic. Full blocked-event messages remain available in the historical event list.
+
+
+## D-232 — Keep Engineer Activity current without losing the operator's place
+
+Engineer question, note and digest pause controls render the selected group's live settings. Journal lists render the selected author's live entries; successful append/delete and acknowledged banner dismissal appear without a manual refresh or a new network request. Do not remove a banner optimistically when its command is merely sent. Retain unrelated reply drafts, focus/caret and keyed disclosure during updates.
+
+Compact snapshots omit hydrated journal/worklog detail. Retain those collections while the visible section refreshes, so an intervening append/delete applies to the readable collection. An explicitly supplied empty snapshot or scoped read is authoritative. Scoped reads replace only their returned author/group buckets. If live journal/worklog data changes during a pending read, discard that stale response and repeat only the colliding read within the existing deadline; hidden sections remain inactive.
+
+Engineer Completed renders the persisted group delivery log used by Classic, including work whose task has left the current Board. Show the current task title/lane/status when present, otherwise the saved task title and Not on board; retain saved worker identity and dispatch time. Honor the live created-agent restriction, newest-first order and progressive disclosure. Worker task history remains scoped to that Worker's assignments.
+
+
+## D-233 — Reconcile Activity feeds with live scoped data
+
+Architect journals and decisions use canonical live records for the selected author. Retain loaded journal/decision detail when compact snapshots omit it, then refresh the visible section; explicit full values remain authoritative. An in-flight journal/decision read that collides with a live change is discarded and retried within its original deadline. Unrelated deltas do not cause reads.
+
+MCP Activity applies the submitted tool, outcome, hook, cell and time criteria to both historical and live records; the existing backend reader does not implement outcome filtering. Keep edited-but-unapplied controls independent. Merge fetched pages and live calls by cursor, newest first, within the retained 500-call bound. Preserve keyed disclosures and draft focus/caret on append and reconnect. Remote continuation depends on the raw returned page length from the accepted current query, so an empty visible result after outcome filtering does not hide older matches. Changing filters resets the request limit and cannot advance using the previous query's result while the new read is pending. Do not subscribe another agent's Activity to this cell's feed.
+
+Agent Events merges current panel-event deltas with fetched cell history by stable event ID, newest first, bounded to 200 records. A selected agent's changed event timestamp refreshes its visible low-level EventLog; hidden Events and other agents do not trigger those reads. New live events must not erase loaded older records or reset disclosure/focus. This extends D-232's reconciliation discipline without introducing global Activity polling.

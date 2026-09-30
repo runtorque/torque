@@ -1,12 +1,24 @@
 import { useEffect, useState } from 'react';
-import { useAppDispatch, useAppSelector } from '../../app/hooks';
+import { useAppDispatch, useAppSelector, useAppStore } from '../../app/hooks';
 import { projectionActions } from '../../app/store';
-import type { UnknownRecord } from '../../protocol';
+import type { AuxiliaryFrame, UnknownRecord } from '../../protocol';
 import { readCommand } from '../../protocol/http';
 import { validateActivityRead, type ActivityRead } from './activityReads';
 
+function liveReadSources(data: UnknownRecord, request: ActivityRead): unknown[] {
+  const bucket = (key: string, target: unknown) => {
+    const value = data[key];
+    return value && typeof value === 'object' && !Array.isArray(value) ? (value as UnknownRecord)[String(target)] : undefined;
+  };
+  if (request.type === 'engineer_journal_snapshot') return [bucket('engineer_journal', request.command.engineer_id), bucket('engineer_worklog', request.command.group)];
+  if (request.type === 'architect_journal_entries') return [bucket('architect_journals', request.command.architect_id)];
+  if (request.type === 'decisions_snapshot') return [data.decisions];
+  return [];
+}
+
 export function useActivityReads(requests: ActivityRead[], active: boolean, invalidation = '') {
   const dispatch = useAppDispatch();
+  const store = useAppStore();
   const ready = useAppSelector((state) => state.connection.status === 'connected' && state.connection.expectedSeq !== null && !state.connection.awaitingResync) && active;
   const reconnect = useAppSelector((state) => state.connection.reconnectCount);
   const snapshot = useAppSelector((state) => state.projection.snapshotVersion);
@@ -20,9 +32,18 @@ export function useActivityReads(requests: ActivityRead[], active: boolean, inva
     let disposed = false; const controller = new AbortController();
     const timer = window.setTimeout(() => { if (!disposed) { setResult({ key, error: 'Activity read timed out. Retry to refresh.' }); controller.abort(); } }, 30_000);
     void Promise.allSettled(reads.map(async (request) => {
-      const frame = await readCommand(request.command, controller.signal);
-      if (disposed || controller.signal.aborted) return;
-      validateActivityRead(frame, request);
+      let frame: AuxiliaryFrame;
+      // A read started before a live append/delete may return older rows. Retry
+      // only that colliding read within the original deadline; routine deltas
+      // update the displayed collection directly without issuing new reads.
+      for (;;) {
+        const before = liveReadSources(store.getState().projection.data, request);
+        frame = await readCommand(request.command, controller.signal);
+        if (disposed || controller.signal.aborted) return;
+        validateActivityRead(frame, request);
+        const after = liveReadSources(store.getState().projection.data, request);
+        if (before.every((value, index) => value === after[index])) break;
+      }
       if (request.type === 'agent_classes') {
         // The shared Catalog projection may belong to a different project. Keep
         // only this owned response, keyed by its complete requested scope.
@@ -31,14 +52,14 @@ export function useActivityReads(requests: ActivityRead[], active: boolean, inva
       }
       const target = request.target;
       const correlated = target && !target[0].includes('.') && frame[target[0]] === undefined ? { ...frame, [target[0]]: target[1] } : frame;
-      dispatch(projectionActions.auxiliaryResourceReceived(correlated));
+      dispatch(projectionActions.auxiliaryResourceReceived(request.type === 'mcp_calls' ? { ...correlated, _activity_query_key: JSON.stringify(request.command) } : correlated));
     })).then((results) => {
       if (disposed || controller.signal.aborted) return;
       const errors = results.flatMap((entry) => entry.status === 'rejected' ? [entry.reason instanceof Error ? entry.reason.message : 'Activity read failed.'] : []);
       setResult({ key, error: [...new Set(errors)].join(' ') });
     }).finally(() => window.clearTimeout(timer));
     return () => { disposed = true; controller.abort(); window.clearTimeout(timer); };
-  }, [plan, key, ready, dispatch]);
+  }, [plan, key, ready, dispatch, store]);
   const catalogRequest = requests.find((request) => request.type === 'agent_classes');
   const classCatalog = catalog?.key === JSON.stringify(catalogRequest?.command) ? catalog?.frame : undefined;
   return { classCatalog, ready, pending: ready && requests.length > 0 && result.key !== key, error: result.key === key ? result.error : '', refresh: () => setRevision((value) => value + 1) };

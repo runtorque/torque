@@ -1576,3 +1576,18 @@ P-387/D-230 is accepted: terminal sibling ordering now persists in SQLite and su
 ### Events attention dismissal acceptance
 
 P-388/P-389 and D-231 restore persisted task/agent attention dismissal, newer-alert resurfacing and nonempty attention-message fallback. Historical events remain readable, and dismissal does not resolve the underlying task or clear an agent flag. Focused tests, the 114-file / 1,064-test UI gate, and live dismissal/reconnect acceptance pass. The ledger is 389 mapped / 385 implemented or equivalent / no recorded open repairs / four intentional retirements. Independent behavioral inventory and complete-browser/applicable-native acceptance remain open.
+
+
+### Engineer Activity audit reopened
+
+P-390–P-392/D-232 record newly reproduced live settings/journal display failures, a stale in-flight read race and missing persisted delivery history in Completed. Repairs and focused regressions are in progress; production-browser acceptance remains pending. The ledger is 392 mapped / 385 accepted implemented or equivalent / three open repairs / four intentional retirements. The complete 201-case browser run uses frozen `852e7190` assets and cannot certify these later source changes. Phase 4 remains open.
+
+
+### Activity feed reconciliation audit
+
+P-393–P-398/D-233 extend the independent audit to Architect journal/decision deltas, MCP live calls and actual outcome filtering, filtered remote paging, and current selected-cell event history. Each gap was reproduced by focused tests before repair. The pending ledger is 398 mapped / 385 accepted implemented or equivalent / nine repairs awaiting their final checkpoint / four intentional retirements. Separate current-source browser acceptance is in progress while the original complete suite continues against unchanged `852e7190` assets.
+
+
+### Activity acceptance and full browser baseline
+
+P-390–P-398 passed final acceptance: `make ui-check` has 117 files / 1,085 tests plus lint/typecheck/build verification; all six Activity scenarios pass against those verified production assets. The prior frozen `852e7190` baseline separately passed the full 201-case browser suite. The ledger is 398 mapped / 394 implemented or equivalent / no recorded open repairs / four intentional retirements. This does not close Phase 4: the independent remaining message/lifecycle behavior audit and applicable native evidence reconciliation continue. Full backend/native suites were not repeated for the frontend-only Activity checkpoint; detailed evidence and provenance are in the parity matrix.

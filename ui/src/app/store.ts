@@ -1,3 +1,4 @@
+import { mergeCellEvents, mergeMcpCalls } from '../protocol/activityFeeds';
 import { behaviorSessionSlice } from '../features/behavior/session';
 import { missionSessionSlice } from '../features/mission/missionSession';
 import { aiIndexStartSlice } from '../features/ai/aiIndexStartState';
@@ -195,8 +196,14 @@ const projectionSlice = createSlice({
   reducers: {
     snapshotReceived(state, action: PayloadAction<StateFrame>) {
       // Compact snapshots replace hydrated details; consumers can refetch even
-      // when the new snapshot carries the same entity timestamps.
-      return { ...hydrateProjection(action.payload), snapshotVersion: state.snapshotVersion + 1 };
+      // when the new snapshot carries the same entity timestamps. Activity feeds
+      // are also live delta collections: retain omitted detail until its owned read
+      // completes so a delta during reconnect can still append/delete correctly.
+      const next = hydrateProjection(action.payload);
+      for (const key of ['engineer_journal', 'engineer_worklog', 'architect_journals', 'decisions', 'mcp_calls', 'cell_events']) {
+        if (!(key in action.payload) && key in state.data) next.data[key] = state.data[key];
+      }
+      return { ...next, snapshotVersion: state.snapshotVersion + 1 };
     },
     deltaReceived(state, action: PayloadAction<DeltaFrame>) {
       for (const operation of action.payload.ops) applyDeltaOperation(state, operation);
@@ -369,9 +376,15 @@ const projectionSlice = createSlice({
           replaceCollection('schedules', frame.schedules);
           break;
         case 'engineer_journal_snapshot':
-          replace('engineer_journal', frame.engineer_journal);
-          replace('engineer_worklog', frame.engineer_worklog);
-          replace('engineer_streams', frame.engineer_streams);
+          // A scoped read contains only the requested author/group. Keep other
+          // hydrated authors intact, including an explicitly empty result.
+          for (const key of ['engineer_journal', 'engineer_worklog', 'engineer_streams']) {
+            const incoming = frame[key];
+            if (incoming && typeof incoming === 'object' && !Array.isArray(incoming)) {
+              const current = state.data[key];
+              replace(key, { ...(current && typeof current === 'object' && !Array.isArray(current) ? current : {}), ...incoming });
+            }
+          }
           break;
         case 'architect_journal_entries': {
           const architectId = typeof frame.architect_id === 'string' ? frame.architect_id : '';
@@ -384,13 +397,24 @@ const projectionSlice = createSlice({
           }
           break;
         }
+        case 'cell_events': {
+          const cellId = typeof frame.cell_id === 'string' ? frame.cell_id : '';
+          if (cellId) {
+            const current = state.data.cell_events;
+            const cells = current && typeof current === 'object' && !Array.isArray(current) ? current as Record<string, unknown> : {};
+            const panel = Array.isArray(state.data.panel_events) ? state.data.panel_events.filter((row) => row && typeof row === 'object' && (row as Record<string, unknown>).cell_id === cellId) : [];
+            cells[cellId] = mergeCellEvents(mergeCellEvents(cells[cellId], panel), frame.events);
+            state.data.cell_events = cells;
+          }
+          break;
+        }
         case 'mcp_calls': {
           const cellId = typeof frame.cell_id === 'string' ? frame.cell_id : typeof frame.agent_id === 'string' ? frame.agent_id : '';
           if (cellId) {
             const current = state.data.mcp_calls;
             const calls = current && typeof current === 'object' && !Array.isArray(current)
               ? current as Record<string, unknown> : {};
-            calls[cellId] = Array.isArray(frame.calls) ? frame.calls : [];
+            calls[cellId] = mergeMcpCalls(calls[cellId], frame.calls ?? frame.events);
             state.data.mcp_calls = calls;
           }
           break;

@@ -26,6 +26,7 @@ describe('visible Agent Activity reads', () => {
     const expected: Partial<Record<ActivityTab, string[]>> = { decisions: ['decisions_snapshot'], journal: ['architect_journal_read'], messages: ['architect_peer_inbox'], events: ['get_cell_events'], queued: [], worklog: [], mcp: ['mcp_calls'], history: ['get_agent_history_detail'], class: ['agent_class_list', 'agent_class_status', 'agent_class_audit'], chat: ['architect_peer_inbox'] };
     for (const [tab, commands] of Object.entries(expected)) expect(activityReads(tab as ActivityTab, 'a', 'architect', 'G', limits, filter, 100_000).map((item) => item.command.cmd)).toEqual(commands);
     expect(activityReads('journal', 'e', 'engineer', 'G', limits, filter, 100_000).map((item) => item.command.cmd)).toEqual(['engineer_journal_snapshot', 'engineer_session_map_read', 'get_group_settings']);
+    expect(activityReads('worklog', 'e', 'engineer', 'G', limits, filter, 100_000).map((item) => item.command)).toEqual([{ cmd: 'engineer_journal_snapshot', group: 'G', engineer_id: 'e', include_streams: false, limit: 1, worklog_limit: 200 }, { cmd: 'get_group_settings', group: 'G' }]);
     expect(activityReads('messages', 'w', 'worker', 'G', limits, filter, 100_000)).toEqual([]);
     const [mcp] = activityReads('mcp', 'w', 'worker', 'G', { ...limits, mcp: 40 }, { tool: 'progress', outcome: 'error', range: '1h' }, 100_000);
     expect(mcp!.command).toMatchObject({ tool_name_pattern: '*progress*', success_filter: 'error', limit: 40, since: 96400 });

@@ -1,3 +1,4 @@
+import { mergeCellEvents, mergeMcpCalls } from './activityFeeds';
 import { applyAiDelta } from './aiProjection';
 import type { Draft } from '@reduxjs/toolkit';
 
@@ -304,6 +305,11 @@ function applyCommonOperation(
       if (index >= 0) events[index] = event;
       else events.push(event);
       state.data.panel_events = events.slice(-Math.max(500, Math.min(5000, events.length)));
+      const cellId = operationId(event, 'cell_id');
+      if (cellId) {
+        const cells = ensureRecord(state, 'cell_events');
+        cells[cellId] = mergeCellEvents(cells[cellId], [event]);
+      }
       break;
     }
     case 'perceived_empty_episode':
@@ -318,7 +324,11 @@ function applyCommonOperation(
     case 'mcp_call_append': {
       const call = cloneRecord(operation.call);
       if (operationId(call, 'hook_event_name') !== 'PostToolUse') break;
-      prependToBucket(state, 'mcp_calls', operationId(call, 'cell_id'), call, 500);
+      const cellId = operationId(call, 'cell_id');
+      if (cellId) {
+        const calls = ensureRecord(state, 'mcp_calls');
+        calls[cellId] = mergeMcpCalls(calls[cellId], [call]);
+      }
       break;
     }
     case 'agent_message_history_append':

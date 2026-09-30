@@ -11,6 +11,7 @@ export function activityReads(tab: ActivityTab, id: string, kind: string, group:
   const settings = () => read({ cmd: 'get_group_settings', group }, 'group_settings', ['group', group]);
   if (tab === 'events') return [read({ cmd: 'get_cell_events', cell_id: id, limit: limits.events }, 'cell_events', ['cell_id', id]), ...(kind === 'engineer' ? [settings()] : [])];
   if (tab === 'journal') return kind === 'architect' ? [read({ cmd: 'architect_journal_read', architect_id: id, limit: limits.journal }, 'architect_journal_entries', ['architect_id', id])] : kind === 'engineer' ? [read({ cmd: 'engineer_journal_snapshot', group, engineer_id: id, include_streams: true, limit: limits.journal }, 'engineer_journal_snapshot', ['group', group]), read({ cmd: 'engineer_session_map_read', group, engineer_id: id }, 'engineer_session_map', ['group', group]), settings()] : [];
+  if (tab === 'worklog' && kind === 'engineer') return [read({ cmd: 'engineer_journal_snapshot', group, engineer_id: id, include_streams: false, limit: 1, worklog_limit: 200 }, 'engineer_journal_snapshot', ['group', group]), settings()];
   if (tab === 'decisions' && kind === 'architect') return [read({ cmd: 'decisions_snapshot', include_archived: true }, 'decisions_snapshot')];
   if ((tab === 'chat' || tab === 'messages') && kind === 'architect') return [read({ cmd: 'architect_peer_inbox', architect_id: id, detail: true, limit: 100 }, 'architect_peer_inbox', ['architect_id', id])];
   if (tab === 'mcp') {
