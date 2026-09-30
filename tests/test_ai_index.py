@@ -246,14 +246,17 @@ class AIIndexTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_missing_sqlite_vec_is_typed_failure_not_exception(self):
         self._seed_all_sources()
-        # Restore the production virtual-table creator while leaving sqlite_vec
-        # uninstalled in the test environment.  The job should record a typed
-        # dependency_missing status instead of raising through the daemon path.
+        # Exercise the production dependency-error path independently of whether
+        # the optional sqlite_vec package is installed in the test environment.
+        def missing_sqlite_vec(_conn):
+            raise ImportError("sqlite_vec intentionally unavailable")
+
         service = AIIndexService(
             db=self.db,
             state=MatrixState(db=self.db),
             embedding_service=FakeEmbeddingService(dims=3),
             data_dir=self.data_dir,
+            sqlite_vec_loader=missing_sqlite_vec,
         )
         service.state.global_settings = GlobalSettings(
             ai_enabled=True,

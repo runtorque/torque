@@ -3804,3 +3804,11 @@ History renders the persisted contract: role/template, input/output token counts
 - Scope: Control Center header and Mission Control agent/terminal totals; P-078/P-369.
 - Count non-deleted records in the selected group, including stopped agents and terminals that remain in the workspace. Recoverable records with `deleted_at` are excluded from current totals; restoration includes them again. Apply the same distinction after live deltas and snapshots.
 - Keep recoverable records in the projection and historical Context author lookup. A summary count must not purge history, remove Restore targets, or equate stopped processes with deleted workspace members.
+
+
+### D-216 — Match embedding-runtime choices to the daemon contract
+
+- Date: 2026-09-30
+- Scope: AI settings, P-087/P-370.
+- The embedding-runtime control offers Sentence Transformers, the daemon's currently supported runtime. Remove the unsupported FastEmbed choice, which caused valid-looking drafts to fail on save. Add another choice only when the daemon accepts and implements it.
+- Keep provider/model, corpus and boot-summary settings independently editable with AI disabled. Preserve authored drafts on refusal or reconnect; display saved normalized values after reload. Enabling AI remains a persisted master switch, and unavailable local dependencies/models remain a visible recoverable runtime error.

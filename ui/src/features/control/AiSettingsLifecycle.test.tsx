@@ -72,3 +72,12 @@ it('does not duplicate a pending confirmed save or clear a key before acknowledg
   expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled(); expect(screen.getByLabelText('Anthropic key')).toBeDisabled(); save(); expect(commands).toHaveLength(1); expect(screen.getByLabelText('Anthropic key')).toHaveValue('waiting-key');
   await act(async () => { finish({ type: 'ai_settings', settings: {} }); await Promise.resolve(); }); await waitFor(() => expect(screen.getByLabelText('Anthropic key')).toHaveValue(''));
 });
+
+it('offers only the embedding runtime accepted by the daemon', async () => {
+  await setup();
+  const runtime = screen.getByRole('combobox', { name: 'Embedding runtime' });
+  expect(within(runtime).getAllByRole('option').map((option) => [option.getAttribute('value'), option.textContent])).toEqual([
+    ['sentence_transformers', 'Sentence Transformers'],
+  ]);
+  expect(runtime).toHaveValue('sentence_transformers');
+});
