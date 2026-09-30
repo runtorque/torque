@@ -35,6 +35,50 @@ class RoleManagerTests(unittest.TestCase):
         else:
             os.environ["HOME"] = self.prev_home
 
+    def test_saved_long_quoted_commands_and_nested_strings_round_trip(self):
+        command = "'/a long interpreter directory/python' -u '/another long directory/probe.py' '/a very long output directory/role-output.jsonl' default-role"
+        description = "Long role description " * 12
+        priority = "Preserve every word of this priority " * 8
+        environment = {"QA_TEXT": "Literal quoted value with # and : separators " * 7,
+                       "QA_MULTILINE": "first line\nsecond line"}
+        self.mgr.save_role("long-command", {
+            "command": command, "description": description,
+            "priorities": [priority], "env_vars": environment,
+            "provider": "generic", "fast_mode": "off", "worktree": False,
+        }, base_dir=str(self.project))
+        loaded = self.mgr.load_role("long-command", base_dir=str(self.project))
+        self.assertEqual(loaded["command"], command)
+        self.assertEqual(loaded["description"], description.strip())
+        self.assertEqual(loaded["priorities"], [priority.strip()])
+        self.assertEqual(loaded["env_vars"], environment)
+        self.assertEqual(loaded["fast_mode"], "off")
+        self.assertFalse(loaded["worktree"])
+        listed = next(role for role in self.mgr.list_roles(str(self.project))
+                      if role["name"] == "long-command")
+        self.assertEqual(listed["description"], description.strip())
+        self.assertEqual(listed["priorities"], [priority.strip()])
+
+    def test_role_yaml_preserves_legacy_scalar_types(self):
+        (self.project_roles / "scalars.yaml").write_text(
+            "fast_mode: off\nprovider: on\nmax_turns: 010\n"
+            "worktree: false\nsession_resume: true\n"
+            "env_vars:\n  WORD: yes\n  DATE: 2026-09-30\n"
+            "  QUOTED: '0010'\n  BOOL: true\n", encoding="utf-8")
+        loaded = self.mgr.load_role("scalars", base_dir=str(self.project))
+        self.assertEqual(loaded["fast_mode"], "off")
+        self.assertEqual(loaded["provider"], "on")
+        self.assertEqual(loaded["max_turns"], 10)
+        self.assertFalse(loaded["worktree"])
+        self.assertTrue(loaded["session_resume"])
+        self.assertEqual(loaded["env_vars"], {
+            "WORD": "yes", "DATE": "2026-09-30", "QUOTED": "0010", "BOOL": "True"})
+
+    def test_role_yaml_rejects_object_construction_and_non_mapping_documents(self):
+        for raw in ("!!python/object:builtins.object {}", "[one, two]", "command: [unterminated"):
+            with self.subTest(raw=raw):
+                (self.project_roles / "invalid.yaml").write_text(raw, encoding="utf-8")
+                self.assertIsNone(self.mgr.load_role("invalid", base_dir=str(self.project)))
+
     def test_user_role_round_trips_preamble_and_priorities(self):
         path = self.mgr.save_role(
             "demo",

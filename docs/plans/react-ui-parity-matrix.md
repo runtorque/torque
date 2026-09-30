@@ -402,6 +402,8 @@ Sources below are relative to `static/js/`; React owners are under `ui/src/`. Al
 
 | P-380 | Creation: Group agent capacity and deletion recovery | Required | `commands.js::_agentGridNewMenuItems; grid/group-tabs.js` | AgentWorkspace / AgentCreateDialog; state capacity; D-226 | Saved positive limits disable agent choices, preserve an open draft across changing capacity/reconnect, allow terminals/hire proposals and exact recovery; deletion frees creation/reviewer seats; zero removes the limit. |
 
+| P-381 | Catalog: Complete role YAML round-trip and default launch | Required | `templates.js`; shared RoleManager | Role discovery / launch preview and resolver; D-227 | Save long quoted command and nested strings, reload without loss, launch saved default and explicit roles, then clear default and verify shared fallback; preserve legacy scalar types. |
+
 ## Command inventory
 
 Each literal classic transport command is inventoried independently. Dynamic command families and native operations are covered by the behavior rows and the source inventory below. A React occurrence does not establish a discoverable control, correct payload, response handling or parity. These are required verification rows unless a specific retirement decision says otherwise.
@@ -2743,3 +2745,25 @@ P-380/D-226 is accepted. The required full make test passed **3,280 backend test
 The fresh final QA profile on port 19088 ended with zero PTYs; daemon 16302, ingest 16316 and supervisor 16317 are absent and the port is free (/private/tmp/agent-capacity-frozen-runtime-final-20260930.json). Both disposable runtimes are stopped. The full browser inventory/native suites were not rerun.
 
 Ledger: **380 mapped / 373 implemented or equivalent / three broad open / four intentional retirements**. P-087 Global Settings, P-088 Group Settings and P-112 consolidated lazy/reconnect remain open. Capacity now has runtime evidence; Context expiry, guidance cadence, dispatch lane and default-role launch effects remain next checks. Global pipeline/event limits and perceived-empty settings currently have numeric validation evidence that must be reconciled with their runtime consumers. Independent inventory/recovery/native/full-browser gates and Phase 4 remain unproven.
+
+
+### Context lifetime and role launch effects under acceptance (2026-09-30)
+
+The new Context expiry scenario passed against the unchanged production UI: saves/reloads 1, 60 and 7 days, preserves the setting draft/focus across reconnect, publishes actual entries, checks exact created-to-expiry intervals and displayed expiry, and verifies later setting changes, editing and pinning do not extend prior entries. Existing memory tests passed 12/12. This fills runtime evidence for context_default_ttl_days; the final combined browser batch remains pending.
+
+Default-role launch acceptance reproduced P-381: role saving uses PyYAML's normal wrapping, but the minimal reader discarded continuation lines from a long quoted command. The browser preview lost the output path and final argument. A backend save/load regression reproduced the same loss; nested long descriptions/priorities/environment text are covered too. The role reader now uses safe complete-YAML loading while reusing existing scalar conversion for unquoted values. Additional regressions preserve on/off words, decimal leading zeros, dates and quoted literals and reject object/non-mapping/malformed documents.
+
+Focused role/template/memory suites passed **12 + 8 + 12 tests**. The repaired live role scenario passed once (7.2 seconds): saved group default role launches its full command in a real local process, explicit role overrides it, and clearing restores the saved shared command. The old QA runtime on port 19089 ended with zero PTYs; exact PIDs 28106/28122/28123 are absent and the port is free. Runtime identity is /private/tmp/settings-policy-effects-runtime-final-20260930.json. The fresh repaired runtime on port 19090 is still under test. Logs: /private/tmp/role-yaml-roundtrip-red-20260930.log, /private/tmp/role-yaml-roundtrip-green-20260930.log, /private/tmp/settings-default-role-launch-browser-20260930.log and /private/tmp/role-yaml-browser-green-20260930.log. Full backend/UI gates and final frozen browser acceptance remain pending.
+
+Pending ledger: **381 mapped / 373 implemented or equivalent / four open / four intentional retirements**. P-381 joins broad P-087/P-088/P-112 until acceptance. Guidance cadence, dispatch lane and the remaining field-by-field/global/runtime/native/recovery gates remain open.
+
+
+### Context lifetime and role launch final acceptance (2026-09-30)
+
+P-381/D-227 is accepted. Full make test passed **3,283 backend tests in 648.5 seconds, with 82 skips** (/private/tmp/role-yaml-full-test-20260930.log). Final make ui-check passed lint/typecheck, **113 files / 1,057 tests**, production build and verification (/private/tmp/role-yaml-ui-check-20260930.log). After all full-suite rebuilds ended, verify:build passed and the frozen production-browser batch passed **8/8 in 2.2 minutes** (/private/tmp/role-yaml-settings-browser-final-20260930.log): three Catalog kinds, two Context recovery scenarios, Context lifetime, actual default/explicit/shared role launches and default-role catalog discovery/recovery.
+
+Screenshots and actual persisted-entry/process evidence were inspected and preserved in /private/tmp/role-yaml-settings-final-artifacts-20260930. The Context entries have exactly 1-, 60- and 7-day lifetimes; pinned/edited entries retain their expiry after later settings changes. The real Worker processes received complete arguments for the saved default role, an explicit role and shared fallback after clearing. This completes downstream evidence for context_default_ttl_days and default_agent_template, without closing the entire Group Settings audit.
+
+Browser inventory is **186 tests / 119 files** (/private/tmp/role-yaml-browser-inventory-20260930.txt); the complete browser and native suites were not rerun. Documentation contracts checked 72 Markdown files and git diff --check passed. Final QA on port 19090 ended with zero PTYs; exact daemon/ingest/supervisor PIDs 30383/30405/30406 are absent and the port is free (/private/tmp/role-yaml-fixed-runtime-final-20260930.json). All disposable runtimes used in this checkpoint are stopped; the default daemon was untouched.
+
+Ledger: **381 mapped / 374 implemented or equivalent / three broad open / four intentional retirements**. P-087 Global Settings, P-088 Group Settings and P-112 consolidated lazy/reconnect remain open, along with independent inventory/full-browser/native/recovery acceptance and Phase 4. Next Group runtime checks are guidance cadence and dispatch lane; the final 67-field Group and 33-field Global acceptance reconciliation remains required.

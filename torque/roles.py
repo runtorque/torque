@@ -6,8 +6,31 @@ import os
 
 import yaml
 
-from .actions import parse_yaml
+from .actions import _yaml_parse_value
 from .config import log
+
+
+class _RoleLoader(yaml.SafeLoader):
+    """Read complete YAML documents while retaining existing scalar semantics."""
+
+
+def _role_scalar(loader, node):
+    # The former minimal reader keeps on/off/yes/no as words, decimal leading
+    # zeros as decimal, and dates as text. Quoted strings bypass this hook.
+    return _yaml_parse_value(loader.construct_scalar(node))
+
+
+for _scalar_tag in ("bool", "int", "float", "null", "timestamp"):
+    _RoleLoader.add_constructor(f"tag:yaml.org,2002:{_scalar_tag}", _role_scalar)
+
+
+def _parse_role_yaml(raw: str) -> dict:
+    parsed = yaml.load(raw, Loader=_RoleLoader)
+    if parsed is None:
+        return {}
+    if not isinstance(parsed, dict):
+        raise ValueError("Role definition must be a YAML mapping")
+    return parsed
 
 
 class _BlockStr(str):
@@ -402,7 +425,7 @@ class RoleManager:
         try:
             with open(entry["path"], encoding="utf-8") as f:
                 raw = f.read()
-            meta = parse_yaml(raw) or {}
+            meta = _parse_role_yaml(raw)
             meta = _normalize_role_data(meta, name_hint=name)
         except Exception:
             meta = {"name": name}
@@ -460,7 +483,7 @@ class RoleManager:
         if raw is None:
             return None
         try:
-            parsed = parse_yaml(raw) or {}
+            parsed = _parse_role_yaml(raw)
         except Exception:
             return None
         return _normalize_role_data(parsed, name_hint=name)

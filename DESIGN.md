@@ -3908,3 +3908,12 @@ D-217 clarification (2026-09-30): arbitrary map values, including environment va
 - At capacity, explain the count and limit beside disabled new-agent menu choices; keep Terminal available. A creation dialog opened by another entry point or before capacity changes blocks new agent submission while retaining all fields, focus and caret. Explain how to free a seat or change Maximum agents.
 - A pending hire is an approval proposal and remains available; actual allocation still observes the backend limit. Restoring a deleted agent remains permitted even above the limit, while further new creation is blocked.
 - An uncertain creation retains its exact recovery request. Its own saved target may consume the last slot, so capacity feedback must not prevent receipt recovery or suggest making a second creation.
+
+
+### D-227 — Preserve complete saved role launch data
+
+- Date: 2026-09-30
+- Scope: role save/load, catalog metadata and default/explicit Worker launches; P-381.
+- Reload the complete YAML emitted by role saving, including automatically wrapped commands, descriptions, priorities and environment strings. A long command must reach launch preview and the actual process with every argument intact.
+- Retain existing scalar semantics: unquoted on/off/yes/no remain words, leading-zero numbers remain decimal, dates remain text and quoted strings remain literal. Read valid YAML safely without object construction; malformed or non-mapping role documents are unavailable.
+- Apply the same reader to role discovery and launch resolution so catalog descriptions and priorities agree with the saved definition. Explicit role selection still overrides the group default; clearing the default restores normal shared launch settings.
