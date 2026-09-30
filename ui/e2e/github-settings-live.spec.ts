@@ -97,3 +97,53 @@ test('GitHub check deadline retains the reviewed draft and choices and rejects a
     expect((await command(request, { cmd: 'get_group_settings', group })).settings).toMatchObject({ board_sync_provider: 'github', board_sync_enabled: false, board_sync_github: { github_repo: 'reviewed/repository', github_project_number: 7 } });
   } finally { release?.(); }
 });
+
+test('All GitHub settings persist typed edits, exact maps, both switches and cleared defaults', async ({ page, request }) => {
+  test.setTimeout(90_000);
+  test.skip(process.env.TORQUE_GITHUB_SETTINGS_FIXTURE !== '1', 'Requires isolated daemon with deterministic read-only gh fixture.');
+  const runtime = (await (await request.get('/api/runtime')).json() as { data: { runtime: Row } }).data.runtime;
+  expect(runtime.port).not.toBe(18932); expect(runtime.profile).not.toBe('default');
+  const group = `GitHub fields ${Date.now()}`;
+  await command(request, { cmd: 'add_group', group }); await command(request, { cmd: 'ui_select_group', group });
+  await command(request, { cmd: 'ui_set_react_workspace_state', state: { version: 1, activePanel: 'control', controlTab: 'settings' } });
+  const open = async () => { await page.getByText(`${group} execution, worktrees, notifications and sync`, { exact: true }).click(); };
+  const field = (label: string) => page.getByLabel(`Board sync github: ${label}`, { exact: true });
+  const save = async () => { await page.getByRole('button', { name: 'Save changes', exact: true }).click(); await expect(page.getByText('Saved', { exact: true })).toBeVisible(); };
+  const textFields = [['Github repo', 'fixture/edited'], ['Github project owner', 'fixture-team'], ['Github project id', 'PVT_explicit'], ['Github project status field', 'Workflow']] as const;
+  const booleans = ['Github close issues via pr', 'Github create missing labels'];
+  const maps = [['GitHub lane status map', 'In Progress', '  exact status  '], ['GitHub assignee map', 'qa-worker', 'qa-login']] as const;
+  await page.goto('/'); await open();
+  const provider = page.getByRole('combobox', { name: 'Board sync provider', exact: true });
+  const enabled = page.getByRole('combobox', { name: 'Board sync enabled', exact: true });
+  await provider.selectOption('github');
+  for (const [label, value] of textFields) await field(label).fill(`  ${value}  `);
+  await field('GitHub project number').fill('12');
+  for (const label of booleans) await field(label).selectOption('false');
+  for (const [label, key, value] of maps) {
+    const map = page.getByRole('group', { name: `Board sync github: ${label}`, exact: true });
+    await map.getByLabel(`New board sync github: ${label.toLowerCase()} key`, { exact: true }).fill(key);
+    await map.getByRole('button', { name: 'Add entry', exact: true }).click();
+    await field(`${label}: ${key}`).fill(value);
+  }
+  // This disposable group has no tasks; enabling cannot enqueue a remote write.
+  await enabled.selectOption('true'); await save(); await page.reload(); await open();
+  await expect(provider).toHaveValue('github'); await expect(enabled).toHaveValue('true');
+  for (const [label, value] of textFields) await expect(field(label)).toHaveValue(value);
+  await expect(field('GitHub project number')).toHaveValue('12');
+  for (const label of booleans) await expect(field(label)).toHaveValue('false');
+  for (const [label, key, value] of maps) await expect(field(`${label}: ${key}`)).toHaveValue(value);
+  expect((await command(request, { cmd: 'get_group_settings', group })).settings).toMatchObject({ board_sync_provider: 'github', board_sync_enabled: true, board_sync_github: {
+    github_repo: 'fixture/edited', github_project_owner: 'fixture-team', github_project_number: 12, github_project_id: 'PVT_explicit', github_project_status_field: 'Workflow', github_close_issues_via_pr: false, github_create_missing_labels: false,
+    github_lane_status_map: { 'In Progress': '  exact status  ' }, github_assignee_map: { 'qa-worker': 'qa-login' },
+  } });
+  for (const [label] of textFields) await field(label).fill('');
+  await field('GitHub project number').fill('0'); for (const label of booleans) await field(label).selectOption('true');
+  for (const [label, key] of maps) await page.getByRole('button', { name: `Remove Board sync github: ${label}: ${key}`, exact: true }).click();
+  await enabled.selectOption('false'); await provider.selectOption('none'); await save(); await page.reload(); await open();
+  await expect(provider).toHaveValue('none'); await expect(enabled).toHaveValue('false');
+  for (const [label] of textFields) await expect(field(label)).toHaveValue(label === 'Github project status field' ? 'Status' : '');
+  await expect(field('GitHub project number')).toHaveValue('0'); for (const label of booleans) await expect(field(label)).toHaveValue('true');
+  for (const [label, key] of maps) await expect(field(`${label}: ${key}`)).toHaveCount(0);
+  expect((await command(request, { cmd: 'get_group_settings', group })).settings).toMatchObject({ board_sync_provider: 'none', board_sync_enabled: false, board_sync_github: { github_project_number: 0, github_project_status_field: 'Status', github_lane_status_map: {}, github_assignee_map: {}, github_close_issues_via_pr: true, github_create_missing_labels: true } });
+  await field('Github project status field').scrollIntoViewIfNeeded(); await page.screenshot({ animations: 'disabled', path: test.info().outputPath('github-fields-cleared.png') });
+});

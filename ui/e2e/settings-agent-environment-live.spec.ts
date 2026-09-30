@@ -52,7 +52,9 @@ test('Agent environment defaults persist exact maps, reach each agent kind and f
     await page.getByRole('menuitem', { name: `New ${kind[0]!.toUpperCase()}${kind.slice(1)}…` }).click();
     const dialog = page.getByRole('dialog', { name: `New ${kind}`, exact: true }); await dialog.getByLabel('Name', { exact: true }).fill(name);
     await dialog.getByLabel('Provider', { exact: true }).fill('generic'); await dialog.getByLabel('Boot command', { exact: true }).fill([python, '-u', receiver, output].map(quote).join(' '));
-    await dialog.getByLabel('Create an isolated worktree', { exact: true }).uncheck();
+    const isolation = dialog.getByLabel('Create an isolated worktree', { exact: true });
+    if (kind === 'worker') await isolation.uncheck();
+    else await expect(isolation).toHaveCount(0);
     if (override !== undefined) await dialog.getByRole('textbox', { name: 'Environment variables', exact: true }).fill(override);
     await dialog.getByRole('button', { name: `Create ${kind}`, exact: true }).click(); await expect(dialog).toHaveCount(0);
     const read = async () => { try { return JSON.parse((await readFile(output, 'utf8')).split('\n')[0]!) as Row; } catch { return null; } };

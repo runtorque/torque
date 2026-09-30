@@ -150,6 +150,38 @@ class BoardSyncManagerTests(unittest.IsolatedAsyncioTestCase):
         )
         return self.manager
 
+    async def test_saved_group_switches_gate_actual_sync_pushes(self):
+        provider = FakeBoardSyncProvider()
+        state = make_state()
+        task = state.board_add_task(
+            "Tracked", "g", id="switch-policy",
+            provider="github", external_id="owner/repo#1",
+        )
+        manager = self.make_manager(state, provider)
+        manager.start()
+        for enabled, name, expected in [
+            (False, "github", "sync_disabled"),
+            (True, "none", "provider_disabled"),
+            (True, "github", None),
+            (False, "github", "sync_disabled"),
+        ]:
+            with self.subTest(enabled=enabled, provider=name):
+                state.update_group_settings(
+                    "g", board_sync_enabled=enabled, board_sync_provider=name,
+                )
+                before = len(provider.push_calls)
+                result = manager.enqueue_task(task.id, explicit=True)
+                if expected:
+                    self.assertEqual(result["reason"], expected)
+                    self.assertFalse(result["queued"])
+                    await asyncio.wait_for(manager.queue.join(), timeout=1)
+                    self.assertEqual(len(provider.push_calls), before)
+                else:
+                    self.assertTrue(result["queued"])
+                    await asyncio.wait_for(manager.queue.join(), timeout=1)
+                    self.assertEqual(len(provider.push_calls), before + 1)
+                    self.assertEqual(provider.push_calls[-1], task.id)
+
     async def test_enqueue_for_trigger_fields_and_create_auto_track(self):
         provider = FakeBoardSyncProvider()
         state = make_state(auto_track=True)
