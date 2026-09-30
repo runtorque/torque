@@ -1591,3 +1591,8 @@ P-393–P-398/D-233 extend the independent audit to Architect journal/decision d
 ### Activity acceptance and full browser baseline
 
 P-390–P-398 passed final acceptance: `make ui-check` has 117 files / 1,085 tests plus lint/typecheck/build verification; all six Activity scenarios pass against those verified production assets. The prior frozen `852e7190` baseline separately passed the full 201-case browser suite. The ledger is 398 mapped / 394 implemented or equivalent / no recorded open repairs / four intentional retirements. This does not close Phase 4: the independent remaining message/lifecycle behavior audit and applicable native evidence reconciliation continue. Full backend/native suites were not repeated for the frontend-only Activity checkpoint; detailed evidence and provenance are in the parity matrix.
+
+
+### Worker Messages and principal lifecycle acceptance
+
+P-399/P-400/D-234 restore compact Worker inline history, recipient scoping after reassignment and stable disclosure identity. Five focused regressions and seven production-browser scenarios pass; the UI gate passes 118 files / 1,090 tests plus lint/typecheck/build verification. Independent Architect/Engineer lifecycle browser acceptance passes 2/2, covering dismiss/rehire and reviewed delete/restore/relaunch with retained identity and unaffected other sessions. Ledger: 400 mapped / 396 implemented or equivalent / no recorded open repairs / four retirements. Phase 4 remains open for the remaining independent behavioral and applicable native evidence audit; see the parity matrix for scope and provenance.

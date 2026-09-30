@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { shallowEqual } from 'react-redux';
 import { matchesMcpActivity } from './mcpActivity';
+import { workerMessageReads, workerMessageRevision, workerMessageRows } from './workerMessages';
 import { useAppSelector } from '../../app/hooks';
 import { Button, StateSurface } from '../../design/primitives';
 import type { CommandSender } from '../board/BoardPanel';
@@ -198,8 +199,9 @@ export function AgentDetailWorkspace({ active = true, agent, group, responses: i
   };
   const classBaseDir = agentClassBaseDir(agent.raw);
   const classRevision = tab === 'class' ? JSON.stringify([assignment.revision, agent.raw.agent_class_id, agent.raw.agent_class_version, agent.raw.agent_class_assigned_at, agent.raw.effective_agent_class_id, agent.raw.effective_agent_class_version, agent.raw.effective_agent_class_applied_at, agent.sessionId]) : '';
-  const readPlan = activityReads(tab, agent.id, agent.kind, group, limits, appliedMcp, appliedMcp.anchor, classBaseDir);
-  const reads = useActivityReads(readPlan, active && !(tab === 'class' && assignment.pending), tab === 'events' ? text(agent.raw.last_event_at) : classRevision);
+  const messageReads = tab === 'messages' && agent.kind === 'worker' ? workerMessageReads(tasks, agent.id) : [];
+  const readPlan = [...activityReads(tab, agent.id, agent.kind, group, limits, appliedMcp, appliedMcp.anchor, classBaseDir), ...messageReads];
+  const reads = useActivityReads(readPlan, active && !(tab === 'class' && assignment.pending), tab === 'events' ? text(agent.raw.last_event_at) : tab === 'messages' && agent.kind === 'worker' ? workerMessageRevision(tasks, messageReads) : classRevision);
   const requestSection = (section: RemoteSection, limit: number) => {
     setLimitState({ agentId: agent.id, values: { ...limits, [section]: limit } });
   };
@@ -246,7 +248,7 @@ export function AgentDetailWorkspace({ active = true, agent, group, responses: i
   const allTasks: Record<string, unknown>[] = Object.entries(tasks).map(([id, value]) => ({ id, ...record(value) }));
   const ownedTasks = allTasks.filter((task) => agent.kind === 'worker' ? text(task.agent_id) === agent.id : text(task.assigned_engineer_id) === agent.id).sort((a, b) => itemTimestamp(b) - itemTimestamp(a));
   const queuedTasks = ownedTasks.filter((task) => ['Backlog', 'To Do', 'In Progress'].includes(text(task.lane)));
-  const workerMessages = ownedTasks.flatMap((task) => list(task.messages_thread).filter((message) => !text(message.recipient_agent_id) || text(message.recipient_agent_id) === agent.id).map((message) => ({ ...message, task_id: task.id })));
+  const workerMessages = workerMessageRows(tasks, reads.taskDetails, agent.id);
   const snapshotPeerThreads = list(peerThreads).filter((thread) => {
     const participantIds = Array.isArray(thread.participant_ids) ? thread.participant_ids.map(String) : [];
     return participantIds.includes(agent.id) || list(thread.messages).some((message) => [message.sender_id, message.recipient_id].some((value) => text(value) === agent.id));
@@ -298,7 +300,7 @@ export function AgentDetailWorkspace({ active = true, agent, group, responses: i
       {tab === 'messages' ? <section className={styles.agentFeed} aria-label="Agent messages">{messages.length ? <ProgressiveItems items={messages} sectionKey={`${agent.id}-messages`} renderItem={(message, index) => {
         const body = text(message.message, text(message.content, text(message.text)));
         return <FeedItem key={text(message.id, String(index))} title={text(message.action, text(message.sender_kind, text(message.role, 'message'))).replaceAll('_', ' ')} time={message.timestamp ?? message.created_at} preview={body} footer={<><span>{text(message.task_id)}</span><span>{text(message.direction)}</span></>}><p>{body}</p></FeedItem>;
-      }} /> : <Empty title="No messages yet" description={agent.kind === 'worker' ? 'Inline Engineer messages attached to this Worker’s tasks appear here.' : 'Agent coordination messages appear here.'} />}</section> : null}
+      }} /> : <Empty title="No messages yet" description={agent.kind === 'worker' ? 'Inline Engineer messages addressed to this Worker appear here, including reassigned tasks.' : 'Agent coordination messages appear here.'} />}</section> : null}
       {tab === 'queued' ? <TaskRows rows={queuedTasks} empty="No queued tasks" note="Queued tasks" sectionKey={`${agent.id}-queued`} /> : null}
       {tab === 'worklog' ? agent.kind === 'engineer' ? <section className={styles.agentTaskPanel} aria-label="Completed deliveries">
         <header><div><h3>Completed work</h3><p>{engineerWorklog.length} recorded deliveries</p></div></header>

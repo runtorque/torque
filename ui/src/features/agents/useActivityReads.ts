@@ -13,6 +13,7 @@ function liveReadSources(data: UnknownRecord, request: ActivityRead): unknown[] 
   if (request.type === 'engineer_journal_snapshot') return [bucket('engineer_journal', request.command.engineer_id), bucket('engineer_worklog', request.command.group)];
   if (request.type === 'architect_journal_entries') return [bucket('architect_journals', request.command.architect_id)];
   if (request.type === 'decisions_snapshot') return [data.decisions];
+  if (request.type === 'task_detail') return [bucket('board_tasks', request.command.id)];
   return [];
 }
 
@@ -23,6 +24,7 @@ export function useActivityReads(requests: ActivityRead[], active: boolean, inva
   const reconnect = useAppSelector((state) => state.connection.reconnectCount);
   const snapshot = useAppSelector((state) => state.projection.snapshotVersion);
   const [revision, setRevision] = useState(0);
+  const [taskDetails, setTaskDetails] = useState<Record<string, UnknownRecord>>({});
   const [catalog, setCatalog] = useState<{ key: string; frame: UnknownRecord } | null>(null);
   const [result, setResult] = useState({ key: '', error: '' });
   const plan = JSON.stringify(requests); const key = JSON.stringify([plan, ready, reconnect, snapshot, revision, invalidation]);
@@ -44,6 +46,16 @@ export function useActivityReads(requests: ActivityRead[], active: boolean, inva
         const after = liveReadSources(store.getState().projection.data, request);
         if (before.every((value, index) => value === after[index])) break;
       }
+      if (request.type === 'task_detail') {
+        const id = String(request.command.id);
+        const task = frame.task as UnknownRecord | undefined;
+        const current = (store.getState().projection.data.board_tasks as Record<string, UnknownRecord> | undefined)?.[id];
+        if (!task || Array.isArray(task) || task.id !== id || !current || task.group !== current.group || !Array.isArray(task.messages_thread)) throw new Error('Message details did not match the requested task.');
+        // Keep this read scoped to Activity. Do not overwrite Board edits with
+        // a message-only hydration response or make every task delta refetch.
+        setTaskDetails((previous) => ({ ...previous, [id]: task }));
+        return;
+      }
       if (request.type === 'agent_classes') {
         // The shared Catalog projection may belong to a different project. Keep
         // only this owned response, keyed by its complete requested scope.
@@ -62,5 +74,5 @@ export function useActivityReads(requests: ActivityRead[], active: boolean, inva
   }, [plan, key, ready, dispatch, store]);
   const catalogRequest = requests.find((request) => request.type === 'agent_classes');
   const classCatalog = catalog?.key === JSON.stringify(catalogRequest?.command) ? catalog?.frame : undefined;
-  return { classCatalog, ready, pending: ready && requests.length > 0 && result.key !== key, error: result.key === key ? result.error : '', refresh: () => setRevision((value) => value + 1) };
+  return { taskDetails, classCatalog, ready, pending: ready && requests.length > 0 && result.key !== key, error: result.key === key ? result.error : '', refresh: () => setRevision((value) => value + 1) };
 }
